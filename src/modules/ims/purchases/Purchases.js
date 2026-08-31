@@ -9,6 +9,7 @@ import { BS_MONTHS, bsToAd, formatAd, daysInBsMonth, formatBsDay } from '../../.
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { getCf, calcBillTotals, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import ReturnsTab from './ReturnsTab'
@@ -388,7 +389,10 @@ export default function Purchases() {
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Purchases</h1>
-          <p className="page-subtitle">Daily ingredient purchases & returns — {periodLabel}</p>
+          <p className="page-subtitle">Daily ingredient purchases &amp; returns</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>

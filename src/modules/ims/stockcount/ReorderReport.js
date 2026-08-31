@@ -5,6 +5,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
@@ -355,7 +356,10 @@ export default function ReorderReport() {
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Reorder Report</h1>
-          <p className="page-subtitle">Items below par level — auto purchase list — {periodLabel}</p>
+          <p className="page-subtitle">Items below par level — auto purchase list</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

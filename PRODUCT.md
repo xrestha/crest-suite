@@ -28,7 +28,7 @@ Not like legacy Nepali accounting/ERP software: dense, dated, Windows-95-era lay
 
 ## Design Principles
 
-Tool-first, not marketing-first: nearly every screen serves an operational task; GuestMenu.jsx is the one deliberate brand-facing exception, not the norm to extend elsewhere without discussion.
+Tool-first, not marketing-first: nearly every screen serves an operational task. There are two deliberate brand-facing exceptions and they are the SIGNED-OUT surfaces — GuestMenu.jsx, which a paying customer sees, and /login, whose job is that a visitor decides and acts rather than completes a task (it carries a real lighting model as of 2026-08-31/S659; /pricing is the obvious third and has not had it yet). Neither is the norm to extend into the authenticated app without discussion: a dense table under an atmospheric wash is worse than one on a flat ground, which is the whole reason this principle is written down.
 
 Precision over polish: numbers (TDS, SSF, variance, payroll) must read as exact and trustworthy first; approachable framing must never soften or obscure the actual figure.
 

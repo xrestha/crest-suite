@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import Fab from '../../../components/Fab'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -799,7 +800,10 @@ ${text}`, detail })
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Purchase Orders</h1>
-          <p className="page-subtitle">{pos.length} POs · {periodLabel}</p>
+          <p className="page-subtitle">{pos.length} PO{pos.length === 1 ? '' : 's'}</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select aria-label="Period"

@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -185,7 +186,10 @@ export default function MonthlySummary() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Monthly Summary</h1>
-          <p className="page-subtitle">Stock valuation & food cost report — {periodLabel}</p>
+          <p className="page-subtitle">Stock valuation &amp; food cost report</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select aria-label="Period"

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
-import { COGS_FORMULA } from '../../../shared/imsFormulas'
+import PeriodScope from '../../../components/PeriodScope'
+import { COGS_FORMULA, varianceBand, varianceFlagPct } from '../../../shared/imsFormulas'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -17,6 +19,7 @@ export default function TheoreticalVariance() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const { settings } = useSettings()
   // item_id -> yield_pct for EVERY item, unfiltered. A ref rather than state because init() must
   // populate it and then call computeVariance() in the same tick, before a state update lands.
   const yieldMapRef = useRef({})
@@ -239,8 +242,17 @@ export default function TheoreticalVariance() {
   const totalTheorVal    = rows.reduce((s, r) => s + r.theor   * r.rate, 0)
   const totalActualVal   = rows.reduce((s, r) => s + r.actual  * r.rate, 0)
   const totalVarianceVal = rows.reduce((s, r) => s + r.varianceVal, 0)
-  const overCount        = rows.filter(r => r.variance >  0.01).length
-  const underCount       = rows.filter(r => r.variance < -0.01).length
+  // Counted by BAND, not by `variance > 0.01`. At a quantity threshold of a hundredth of a unit
+  // essentially every item in a real month counts as over-used, so the tile below was permanently
+  // red and its number contradicted the rows it sat above — the table flagged a handful, the KPI
+  // claimed hundreds. Both now answer the same question: how many items are outside the client's
+  // configured tolerance and material enough to act on.
+  const overCount        = rows.filter(r => varianceBand(r.variancePct, r.varianceVal, settings, { measured: hasClosing }).key === 'over').length
+  const underCount       = rows.filter(r => varianceBand(r.variancePct, r.varianceVal, settings, { measured: hasClosing }).key === 'under').length
+  // The aggregate the Total Variance tile is judged on — a rupee total alone has no percentage to
+  // band, and `> 0 ? red : green` gave a NPR 40 whole-period variance the same red as NPR 40,000.
+  const totalVariancePct = totalTheorVal > 0 ? (totalVarianceVal / totalTheorVal) * 100 : null
+  const totalBand        = varianceBand(totalVariancePct, totalVarianceVal, settings, { measured: hasClosing })
   const noSales          = rows.length === 0 && !loading && !computing
 
   const periodLabel = selectedPeriod
@@ -251,14 +263,15 @@ export default function TheoreticalVariance() {
   const fmtQty  = v => v === 0 ? '—' : v.toLocaleString('en-NP', { maximumFractionDigits: 3 })
   const fmtPct  = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
 
-  function varianceColor(pct) {
-    // Neutral while the closing count is missing — every figure is an artefact of the gap, not a
-    // finding, and the banner above says so.
-    if (!hasClosing) return 'var(--theme-text2)'
-    if (pct >  5) return 'var(--theme-red-text)'    // over-consumed
-    if (pct < -5) return 'var(--theme-amber-text)'  // under-consumed (possible under-portioning)
-    return 'var(--theme-green-text)'                // within tolerance
-  }
+  // Was a private ladder hardcoding ±5, so the tolerance the client configures in
+  // Settings → Thresholds reached the Variance Report and not this page — two adjacent nav items
+  // measuring the same thing against different numbers, and the client's own setting honoured on
+  // one of them. `varianceBand` is the only source now, and it brings the materiality floor with
+  // it: a 40% swing worth NPR 20 is rounding on a small line, and painting it the loudest red on
+  // the page is how a report stops being read.
+  // `measured: false` while the closing count is missing — every figure is then an artefact of
+  // the gap rather than a finding, and the banner above already says so.
+  const band = (pct, value) => varianceBand(pct, value, settings, { measured: hasClosing })
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="this comparison" />
@@ -269,8 +282,11 @@ export default function TheoreticalVariance() {
         <div>
           <h1 className="page-title">Theoretical vs Actual</h1>
           <p className="page-subtitle">
-            Compare what should have been consumed (recipes × sales) against what was actually used — {periodLabel}
+            Compare what should have been consumed (recipes × sales) against what was actually used
           </p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
+          </div>
         </div>
         <select aria-label="Period"
           style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
@@ -301,7 +317,8 @@ export default function TheoreticalVariance() {
       <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what your recipes say you should have used based on sales.
         Actual = {COGS_FORMULA}. The gap reveals over-portioning, theft, or data entry errors.
-        Red rows need investigation. Green = within ±5% tolerance.
+        Red rows need investigation. Green = within the ±{varianceFlagPct(settings)}% tolerance set in
+        Settings → Thresholds; ≈ marks a gap too small in rupees to be worth chasing.
       </div>
 
       {/* Stat cards */}
@@ -310,8 +327,18 @@ export default function TheoreticalVariance() {
           {[
             { label: 'Theoretical Cost',  value: fmtNPR(totalTheorVal),    sub: 'Based on recipes × sales',      color: 'var(--theme-text3)' },
             { label: 'Actual Cost',        value: fmtNPR(totalActualVal),   sub: 'From stock movements',          color: 'var(--theme-text1)' },
-            { label: 'Total Variance',     value: hasClosing ? fmtNPR(totalVarianceVal) : 'Not measurable yet', sub: !hasClosing ? 'Closing count not entered' : totalVarianceVal >= 0 ? 'Over-consumed' : 'Under-consumed', color: !hasClosing ? 'var(--theme-text2)' : totalVarianceVal > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' },
-            { label: 'Items Over-used',    value: hasClosing ? overCount : '—',           sub: hasClosing ? `${underCount} under-consumed` : 'Needs closing count',  color: !hasClosing ? 'var(--theme-text2)' : overCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' },
+            // The mark rides the figure, not the label: a tile is the one thing on this page read
+            // from across a room, and it was the only severity on it carried by hue alone.
+            { label: 'Total Variance',
+              value: hasClosing ? `${fmtNPR(totalVarianceVal)}${totalBand.mark ? ` ${totalBand.mark}` : ''}` : 'Not measurable yet',
+              sub:   !hasClosing ? 'Closing count not entered'
+                     : totalBand.key === 'immaterial' ? 'Within rounding for the period'
+                     : totalVarianceVal >= 0 ? 'Over-consumed' : 'Under-consumed',
+              color: totalBand.color },
+            { label: 'Items Over Tolerance',
+              value: hasClosing ? overCount : '—',
+              sub:   hasClosing ? `${underCount} under tolerance` : 'Needs closing count',
+              color: !hasClosing ? 'var(--theme-text2)' : overCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' },
           ].map(card => (
             <div key={card.label} className="card" style={{ padding: '16px 20px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{card.label}</div>
@@ -399,8 +426,7 @@ export default function TheoreticalVariance() {
               </thead>
               <tbody>
                 {visible.map(({ item, theor, actual, variance, variancePct, varianceVal }) => {
-                  const color = varianceColor(variancePct)
-                  const isOver = variancePct > 5
+                  const b = band(variancePct, varianceVal)
                   return (
                     <tr key={item.id}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.name}</td>
@@ -408,18 +434,20 @@ export default function TheoreticalVariance() {
                       <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtQty(theor)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtQty(actual)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: color }}>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: b.color }}>
                         {variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toLocaleString('en-NP', { maximumFractionDigits: 3 })}`}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: color }}>
-                        {Math.abs(variancePct) < 0.1 ? '✓' : fmtPct(variancePct)}
+                      {/* The mark rides the PERCENTAGE, which is the figure the eye lands on when
+                          scanning this column — it used to sit only on the rupee value, so the
+                          band a row was in was a hue and nothing else on the two columns before
+                          it. `title` carries the band's own sentence for hover and assistive tech;
+                          it is not a substitute for the glyph, which is what a sighted
+                          colour-blind reader actually gets. */}
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: b.color }} title={b.label !== '—' ? b.label : undefined}>
+                        {b.mark ? `${fmtPct(variancePct)} ${b.mark}` : fmtPct(variancePct)}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: color }}>
-                        {varianceVal === 0 ? '—' : (
-                          <span>
-                            {isOver ? '▲ ' : variancePct < -5 ? '▼ ' : ''}{fmtNPR(varianceVal)}
-                          </span>
-                        )}
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: b.color }}>
+                        {varianceVal === 0 ? '—' : fmtNPR(varianceVal)}
                       </td>
                     </tr>
                   )
@@ -438,9 +466,19 @@ export default function TheoreticalVariance() {
                       {fmtNPR(visible.reduce((s, r) => s + r.actual * r.rate, 0))}
                     </td>
                     <td colSpan={2} />
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: visible.reduce((s, r) => s + r.varianceVal, 0) > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                      {fmtNPR(visible.reduce((s, r) => s + r.varianceVal, 0))}
-                    </td>
+                    {(() => {
+                      // Was `> 0 ? red : green` on the filtered subtotal — no threshold at all, so
+                      // a NPR 3 total wore the same red as NPR 30,000. Banded against the same
+                      // tolerance as every row above it.
+                      const vVal   = visible.reduce((s, r) => s + r.varianceVal, 0)
+                      const vTheor = visible.reduce((s, r) => s + r.theor * r.rate, 0)
+                      const vb     = band(vTheor > 0 ? (vVal / vTheor) * 100 : null, vVal)
+                      return (
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: vb.color }} title={vb.label !== '—' ? vb.label : undefined}>
+                          {fmtNPR(vVal)}{vb.mark ? ` ${vb.mark}` : ''}
+                        </td>
+                      )
+                    })()}
                   </tr>
                 </tfoot>
               )}

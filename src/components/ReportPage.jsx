@@ -27,6 +27,7 @@ import ReportLoadError from './ReportLoadError'
 export default function ReportPage({
   title,
   subtitle,
+  scope = null,
   actions,
   noPeriod = false,
   noPeriodWhat = 'this report',
@@ -54,6 +55,12 @@ export default function ReportPage({
         <div>
           <h1 className="page-title">{title}</h1>
           {subtitle && <p className="page-subtitle">{subtitle}</p>}
+          {/* `scope` — normally a <PeriodScope>. Deliberately NOT gated on `figuresAreReal` the
+              way `stats`/`note`/`filters` are: those are figures, and a figure the page has not
+              computed must not be shown. Which period the reader ASKED for is true regardless of
+              whether the read succeeded, and on the error card it is the single most useful thing
+              on screen — "this failed" is far less actionable than "this failed for Bhadra 2082". */}
+          {scope && <div className="page-scope-row">{scope}</div>}
         </div>
         {actions && (
           <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>

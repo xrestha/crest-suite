@@ -25,6 +25,7 @@ import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import Tip from '../../../components/Tip'
 import ReportPage from '../../../components/ReportPage'
+import PeriodScope from '../../../components/PeriodScope'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
@@ -340,7 +341,8 @@ export default function SupplierContribution() {
   return (
     <ReportPage
       title="Supplier Contribution"
-      subtitle={`Which suppliers this period's sales actually depended on — ${periodLabel}`}
+      subtitle="Which suppliers this period's sales actually depended on"
+      scope={<PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />}
       actions={actions}
       noPeriod={!loading && !loadError && periods.length === 0}
       noPeriodWhat="supplier contribution"

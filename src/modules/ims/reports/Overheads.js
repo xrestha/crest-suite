@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
@@ -359,7 +360,10 @@ export default function Overheads() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Overheads & Cost Breakdown</h1>
-          <p className="page-subtitle">Fixed costs · Labor · Tax & Fees · True P&L — {period?.label || '—'}</p>
+          <p className="page-subtitle">Fixed costs · Labor · Tax &amp; Fees · True P&amp;L</p>
+          <div className="page-scope-row">
+            <PeriodScope label={period?.label} status={period?.status} provisionalWhenOpen />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select aria-label="Period"

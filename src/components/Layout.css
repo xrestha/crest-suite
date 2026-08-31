@@ -920,6 +920,79 @@ textarea,
   margin: 0;
 }
 
+/* ── The period a report covers ──────────────────────────────────────────────────────────────
+   Rendered by `PeriodScope.jsx`. Sits under the title, beside or in place of the prose subtitle.
+   The chip is the accent at the same low tint `.badge-yellow` uses for a categorical tag, because
+   a period IS a categorical tag — this introduces no colour to the product, it moves an existing
+   one onto the fact that most needed it. See the component for why the scope stopped being prose.
+
+   The two halves are deliberately different weights: the LABEL is the answer to "which month",
+   the STATE qualifies it. A single-weight chip made the reader parse both to find one. */
+.period-scope {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--theme-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 28%, transparent);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.period-scope-label {
+  font-weight: 600;
+  color: var(--theme-accent-ink);
+  letter-spacing: 0.01em;
+}
+
+/* The state reads as a qualifier, so it takes the quieter tier — but `--theme-text3` measured
+   under 4.5:1 against the accent tint on Light, and this is 12px body text. text2 clears it. */
+.period-scope-state {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--theme-text2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Open, on a report whose figures are incomplete until the month closes.
+   THE OBVIOUS VERSION OF THIS DOES NOT WORK, and it was measured rather than reasoned. Tinting
+   the chip amber and setting its label to `--theme-amber-text` put that label at **4.19:1 on
+   Light** — under AA, on 12px text. `--theme-amber-text` is tuned to clear 4.5:1 against the card
+   and the page ground; a warm tint of amber is neither, and it is the one surface it was never
+   measured on. Every tint from 6% to 12% lands between 4.19 and 4.54, so there is no amber fill
+   that is both visible and safe here.
+   Worse, the tint was not doing the job anyway: measured against the closed chip it separated by
+   **ΔE 6.0 on Dark and 2.6 on Light**, both under the ΔE 8 floor — on Dark the accent and amber
+   are two warm yellows, exactly as DESIGN.md's chart-palette rule warns. So the fill was carrying
+   a distinction nobody could see, at the cost of a contrast failure.
+
+   The state is therefore structural, not hue. A DASHED edge reads as "not settled" — it is shape,
+   so it survives greyscale, every form of colour blindness and a monochrome print, and it cannot
+   fail a contrast check because it is not text. It joins the word OPEN and the `△` the component
+   adds: three non-colour cues. The amber border is reinforcement on top, and a border is a
+   non-text element (3:1 floor), which is the one place amber is safe on this chip. */
+.period-scope--provisional {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--theme-amber) 55%, transparent);
+}
+
+/* A header that carries a chip needs the title block to stack, not to run the chip inline with
+   28px of prose. `.page-header` is only a bottom margin, so this is the row the chip lives in. */
+.page-scope-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 6px;
+}
+
+.page-scope-row .page-subtitle {
+  margin: 0;
+}
+
 .card {
   background: var(--theme-card);
   border: 1px solid var(--theme-border);

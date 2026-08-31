@@ -7,6 +7,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getCf } from './purchasesHelpers'
 import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
@@ -303,6 +304,14 @@ export default function SupplierPriceTracker() {
         <div>
           <h1 className="page-title">Price Tracker</h1>
           <p className="page-subtitle">Purchase price history by vendor</p>
+          <div className="page-scope-row">
+            {/* This page defaults to every month and can be narrowed to one, so the chip answers a
+                question the others do not: am I looking at the whole history or a single month?
+                That changes what a price trend on this page means. `periodLabel` already resolves
+                to "All Months" unfiltered, and there is no open/closed state to report in that
+                case — `status` is undefined, so the chip correctly shows the label alone. */}
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }} className="no-print">
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => printWithTitle(`Supplier Price Tracker - ${selectedVendorId === 'all' ? 'All Vendors' : (vendorMap[selectedVendorId]?.name || 'Vendor')}${selectedPeriod ? ` - ${periodLabel}` : ''}`)}>

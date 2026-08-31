@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -143,7 +144,10 @@ export default function PaymentReport() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Payment Summary</h1>
-          <p className="page-subtitle">Purchase spend by payment method (net of returns) — {periodLabel}</p>
+          <p className="page-subtitle">Purchase spend by payment method (net of returns)</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>

@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
@@ -190,7 +191,12 @@ export default function AnnualSummary() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Annual Summary</h1>
-          <p className="page-subtitle">Full-year rollup — {selectedLabel}</p>
+          <p className="page-subtitle">Full-year rollup</p>
+          <div className="page-scope-row">
+            {/* No `status`: this is a fiscal year, not a monthly period, and a year has no
+                open/closed state of its own to report. */}
+            <PeriodScope label={selectedLabel} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>

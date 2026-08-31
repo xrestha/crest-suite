@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand } from '../../../shared/imsFormulas'
@@ -157,6 +158,9 @@ export default function RecipeMargin() {
         <div>
           <h1 className="page-title">Recipe Contribution Margin</h1>
           <p className="page-subtitle">(Selling Price − Food Cost) × Qty Sold — total NPR profit contribution per recipe</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>

@@ -5,6 +5,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { BS_MONTHS, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
@@ -287,9 +288,12 @@ export default function StockMovements() {
           <h1 className="page-title">Stock Movements</h1>
           <p className="page-subtitle">
             {tab === 'subs'
-              ? `Prep-level view — which sub-recipes this period's sales consumed, and how many batches — ${periodLabel}`
-              : `Ledger of every stock depletion from POS sales/comps and manual Sales Entry — ${periodLabel}`}
+              ? "Prep-level view — which sub-recipes this period's sales consumed, and how many batches"
+              : 'Ledger of every stock depletion from POS sales/comps and manual Sales Entry'}
           </p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <Tip text="Prints exactly what's on screen — the active tab, with the current search, source and sort filters applied, including the totals row." width={280}>

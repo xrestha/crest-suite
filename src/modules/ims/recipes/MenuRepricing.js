@@ -6,6 +6,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { getSuggestedPrice, computeRecipeCosts } from '../../../utils/recipeCost'
 import { firstError } from '../../../shared/queryError'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand } from '../../../shared/imsFormulas'
@@ -169,6 +170,9 @@ export default function MenuRepricing() {
         <div>
           <h1 className="page-title">Menu Repricing</h1>
           <p className="page-subtitle">Dishes priced below their target food-cost % — and the price to charge to fix it</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>

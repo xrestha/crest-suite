@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
@@ -161,7 +162,10 @@ export default function NonVatReport() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Non-VAT Report</h1>
-          <p className="page-subtitle">Purchases without VAT this period — {periodLabel(selectedPeriod)}</p>
+          <p className="page-subtitle">Purchases without VAT this period</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel(selectedPeriod)} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>

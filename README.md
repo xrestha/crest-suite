@@ -159,6 +159,172 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S659 — 2026-08-31 — the login page gets a light source, and IMS stops painting three thresholds as one
+
+Service worker `crest-v175`. No migration. `/impeccable colorize login page` then
+`/impeccable colorize ims module`. Two new shared pieces (`PeriodScope`, and `varianceBand` in
+`imsFormulas.js`), one new test file, one new `scope` slot on `ReportPage`. **One user-visible
+figure changed** — see "Items Over Tolerance" below; nothing else needs Help or the module guides.
+
+---
+
+#### Part 1 — `/login` is a Persuade surface and was lit like an Operate one
+
+The page was two flat greys with a single gold accent: charcoal ground, charcoal card, charcoal
+band, everything at the same distance from the viewer. It now carries a **lighting model** — a key
+light breaking over the sign-in card's top-right shoulder, a rim grazing the right edge, a weak
+bounce lifting the pitch column out of flat black.
+
+**Every value is `color-mix(… var(--theme-accent) N%, …)`, so no second hue is introduced
+anywhere.** That is the One Accent Rule taken literally: more and less of the one colour that was
+already there, re-toning with the preset. Surfaces then behave like objects under that light — the
+card face is a gradient rather than a flat fill, the header warms to the right, and its bottom rule
+runs neutral on the left and brightens to brass under the light. Six scattered brass bullets became
+beads on one lit spine: the accent spent as a *region* rather than sprinkled as chips.
+
+Two corrections came from measurement, not from looking:
+
+- **A radial light's Y offset is a position, not a direction.** The key was first placed at
+  `84% -10%`, putting its bright core above the element entirely — almost nothing landed on screen.
+- **A fourth "shade" layer mixing toward `--theme-sidebar` was inert on Dark** (`#0e1117` over
+  `#0f1117`) while reading correctly on Light, so half the depth budget bought nothing. Deleted.
+  Unlit ground *is* the shadow.
+
+**Radii are percentages of the box, not pixels.** In px the rim light was 680px wide — on a 390px
+phone nearly two screens across, so it flooded the lower half and took the eyebrow pill to 4.87:1,
+the tightest reading on the page. As percentages the rig reproduces at every viewport; that
+recovered to 5.99:1.
+
+**`/reset-password` had been rendering as bare text on the body background, and nobody knew.** It
+imports `Login.css` and renders `.login-root` / `.login-split` / `.login-right` / `.login-brand` —
+four classes that ceased to exist when S553 turned `/login` from a card into a page. **A class name
+that does not exist is silent in CSS**, so the screen a user lands on straight out of a
+password-reset email had no ground, no card, no border and no centring. Restored in the same
+stylesheet, in the same light, so the two cannot drift apart again.
+
+Also fixed: three drifted `var()` fallbacks still carrying the pre-S620 `text2`/`text3` assignment,
+and an accent glow leaking onto the neutral **Pricing** link and Start Free Trial's hover —
+`.login-btn:hover` lives further down the file than the variants, matches at equal specificity and
+therefore won on order, so the glow was suppressed at rest and came back on hover. Excluded by name
+now, which is order-independent.
+
+Verified against the real build at 1440×900, 1536×864, 1366×613 and 390×780: **0px overflow at
+every documented tier** (the S553/S560 fit budget is intact), and every text/ground pair clears AA
+on both presets — worst real readings 4.62:1 (band subline, Dark) and 4.77:1 (footer, Light),
+sampled from rendered pixels rather than computed by compositing arithmetic.
+
+---
+
+#### Part 2 — the audit that changed the brief: IMS was already colorized
+
+`/impeccable colorize ims module` started with a measurement rather than an edit, and the
+measurement said the request's premise was wrong. IMS is **not** monochromatic — the
+S549/S551/S594/S608 sweeps did that work, and the documented recurring defect classes are clean:
+
+| Check | Result across 45 IMS pages |
+| --- | --- |
+| Hardcoded/undocumented hex | 4 hits, all legitimate (3 Recharts SVG props, 1 print block) |
+| String-concatenated alpha tints | 0 — only a comment describing the old bug |
+| Signal token as text without `*-text` | 0 — `Overheads.js` already carries the `color`/`textColor` split |
+| The apparently colourless pages | Already on `badge-green`/`-gray`/`-red`/`-amber` — a token grep misses them because they correctly use the classes |
+
+Heaviest users are `Overheads` (40 signal-colour sites), `VendorReport` (35), `Stock` (35),
+`Recipes` (34), `VatReport` (32). **Adding colour to a surface already at the right dosage would
+have been the defect**, not the fix — on an Operate surface rarity is what gives the accent force.
+So the work became fixing where colour *lies*.
+
+#### Three thresholds for one concept, on two adjacent nav items
+
+- **`Variance.js` flagged rows at the client's `variance_flag_pct` (default 10) but *coloured* them
+  at `variance > 0`** — no threshold at all. A +0.4% row was painted red across three columns while
+  the flag badge in its own last column read **"OK"**. Two verdicts on one row, four columns apart.
+- **`TheoreticalVariance.js` hardcoded ±5** in a private `varianceColor()`, so the number a client
+  sets in Settings → Thresholds reached one of the two pages that measure the same thing.
+
+`varianceBand(pct, value, settings)` / `varianceFigure(...)` in `src/shared/imsFormulas.js` is now
+the only source — the sibling `fcBand()` already was for food cost. It adds what none of the three
+copies had:
+
+- **A materiality floor** (`VARIANCE_MATERIALITY_NPR`, 500 — a constant, not a settings field, since
+  a field with no reader is worse than no field). A spice line at +40% worth NPR 20 was the loudest
+  red on the page; it now reads `≈` in the quietest tier, **with its number still printed** —
+  showing what you are calling immaterial is more honest than hiding it. This is S644's dead zone.
+- **Shape marks** (`✓ ▲ ▼ ≈`). Light collapses red/amber to ΔE 3.1 under deuteranopia, so over-used
+  and under-used — the two states the report exists to separate — were one colour for roughly 1 in
+  12 men, on every row. Per S634 the marks state direction literally; the colour carries the verdict.
+- `measured: false` for "no closing count yet", so an unmeasured period is never painted as a
+  finding. 13 tests in `src/shared/imsVarianceBand.test.js`.
+
+#### Four more places colour was saying something untrue
+
+- **Wastage was permanently red and closing stock permanently green** in `Variance.js`. Neither is a
+  verdict — a closing count is not good news and 0.05 kg of wastage is not bad news. Every row with
+  any wastage at all wore the same red as a genuinely flagged variance three columns along, which is
+  how the danger colour stops reading as danger anywhere.
+- **`overCount` counted `variance > 0.01`** — a quantity threshold of a hundredth of a unit, so on a
+  real month nearly every item qualified. That tile was permanently red and its number contradicted
+  the table beneath it: the table flagged a handful, the KPI claimed hundreds. Both now count by
+  band, and the tile is relabelled **"Items Over Tolerance"** so the changed figure is
+  self-documenting rather than silently different. *(This is the one user-visible figure change.)*
+- **Two totals used `> 0 ? red : green`** with no threshold — a NPR 3 subtotal wore the same red as
+  NPR 30,000. Banded against the same tolerance as the rows above them.
+- A row tint hardcoded `rgba(248,113,113,0.03)`, the **Dark** preset's red, so it was the wrong red
+  on Light; and `.stat-value gold` carried a dead class an inline `color` had been overriding since
+  the day it was written.
+
+Stock Ageing's stale/fresh figures took marks too — amber vs green with nothing else was the same
+1-in-12 problem. The 90+ **band** cell deliberately did *not* get one: it is already carried by the
+column it sits in and its bold weight, and a third cue there is noise.
+
+#### The period was the tail of a sentence on twelve pages
+
+`"Stock valuation & food cost report — Bhadra 2082"`. The one fact a reader must verify before
+trusting any figure, in 13px `--theme-text2`, styled identically to the description in front of it.
+Three pages named no period **at all** — `BestSellers` said "for the period", `DeadStock` and
+`WastageReport` nothing — on reports whose entire claim is period-relative.
+
+`src/components/PeriodScope.jsx` is the chip that replaced it, now on **29 IMS pages**, with a
+`scope` slot added to `ReportPage`. It introduces no colour: the accent at the tint `.badge-yellow`
+already uses, because a period *is* a categorical tag.
+
+**"Open" is structural, not a hue, and that was measured rather than chosen.** The obvious version —
+amber fill, amber label — put that label at **4.19:1 on Light**, under AA, because
+`--theme-amber-text` is tuned against the card and the page ground and a warm tint of amber is
+neither; no tint from 6–12% both clears AA and stays visible. The fill was not working anyway:
+**ΔE 6.0 on Dark, 2.6 on Light** against the closed chip, both under the ΔE 8 floor, because on Dark
+the accent and amber are two warm yellows. So open is a **dashed border** + the word OPEN + `△` —
+three non-colour cues — with amber surviving only as a border, where the floor is 3:1.
+
+`provisionalWhenOpen` is opt-in: on a data-entry screen an open period is the normal working state
+and flagging it is noise; on a report deriving COGS or variance it is the most important caveat on
+the page. `PeriodComparison` (its scope *is* every period) and `OutstandingPayables` (unbounded)
+are deliberately excluded and carry a comment saying so.
+
+#### Two corrections to this session's own earlier reading, both worth the shape
+
+- **`grep -l "ReportPage"` matched a *comment*** in `Variance.js` mentioning the component, not an
+  import — so it was briefly counted as an adopter. The project's own rule ("a bare substring match
+  is not proof of an import") applying to itself. Only two IMS pages actually render the shell.
+- **`SupplierPriceTracker` was written off as multi-period** and should not have been: it defaults
+  to "All Months" and narrows to one, which *is* a scope — and it is the one page where the chip
+  answers a question the others do not, since whether you are seeing all history or a single month
+  changes what a price trend means.
+
+#### The "it is wired now" lesson
+
+`.claude/rules/ims-figures.md` has carried the line *"`variance_flag_pct` … is wired now"* for
+months. It was wired to **one** of its three consumers. A setting is wired when every surface that
+bands the same figure reads it — and when declaring one fixed, grep again. The rule now says so.
+
+**Verified:** build clean, eslint clean (the one remaining error, `persistSalesDay.test.js`
+`import/first`, is pre-existing and confirmed untouched), **489 tests pass across 40 suites**. The
+chip measured at 390px inside a split header with an action group: **0px overflow** on document and
+header, and its left edge lands at 76px — identical to the title's — so it inherits the mobile
+hamburger clearance rather than sitting under it (the S655 trap). **Caveat worth carrying:** IMS
+sits behind auth, so unlike `/login` these pages could not be screenshotted; the chip was verified
+against the real built CSS in a harness and the variance logic by build, lint and tests. A
+click-through on Variance and Theoretical vs Actual is still owed.
+
 ### S658 — 2026-08-30 — IMS stops handing Postgres to the owner, and a failed write stops reading as a no-op
 
 Service worker `crest-v173`. No migration. `/impeccable clarify ims module`. No feature changed;

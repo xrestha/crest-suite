@@ -6,6 +6,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
@@ -206,7 +207,10 @@ export default function FifoReport() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title"><Tip text="First In, First Out — tracks which stock batches expire soonest so you use older stock before newer stock." width={240}>FIFO</Tip> / Expiry Report</h1>
-          <p className="page-subtitle">Stock expiry tracking — net of returns, sales usage, wastage and staff meals (allocated oldest-batch-first) — {periodLabel}</p>
+          <p className="page-subtitle">Stock expiry tracking — net of returns, sales usage, wastage and staff meals (allocated oldest-batch-first)</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>

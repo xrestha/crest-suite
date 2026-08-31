@@ -4,6 +4,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
@@ -199,7 +200,10 @@ export default function StockReport() {
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Stock Report</h1>
-          <p className="page-subtitle">Current inventory on hand & valuation — {periodLabel}</p>
+          <p className="page-subtitle">Current inventory on hand &amp; valuation</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button className="btn btn-ghost" onClick={() => printWithTitle(`Stock Report - ${periodLabel}`)} style={{ fontSize: 12 }}>🖶 Print</button>

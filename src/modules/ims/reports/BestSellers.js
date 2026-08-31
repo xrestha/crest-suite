@@ -7,6 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ChartCard from '../../../components/ChartCard'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
@@ -141,7 +142,10 @@ export default function BestSellers() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Best &amp; Worst Sellers</h1>
-          <p className="page-subtitle">Rank menu items by revenue, volume, or margin for the period</p>
+          <p className="page-subtitle">Rank menu items by revenue, volume, or margin</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel(selectedPeriod)} status={selectedPeriod?.status} />
+          </div>
         </div>
       </div>
 

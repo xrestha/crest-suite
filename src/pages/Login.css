@@ -28,10 +28,78 @@
   height: 100dvh;
   overflow-y: auto;
   overscroll-behavior-y: contain;
-  background: var(--theme-bg, #0f1117);
   color: var(--theme-text1, #e8e0d0);
   display: flex;
   flex-direction: column;
+
+  /* ── Brass as a range, not one value ──────────────────────────────────────────────────────
+     Every colour on this page is derived from `--theme-accent` by mixing, so the whole surface
+     re-tones with the preset instead of carrying a second, hardcoded hue. That is the One Accent
+     Rule taken literally: there is no second brand colour anywhere below, only more and less of
+     the one there already was. The steps are roles, not swatches — a wash sits under content, a
+     tint is a fill you can read on, a rule is a hairline, an edge is a lit border. ── */
+  --lp-wash: color-mix(in srgb, var(--theme-accent, #c9a84c) 6%, transparent);
+  --lp-tint: color-mix(in srgb, var(--theme-accent, #c9a84c) 12%, transparent);
+  --lp-rule: color-mix(in srgb, var(--theme-accent, #c9a84c) 24%, transparent);
+  --lp-edge: color-mix(in srgb, var(--theme-accent, #c9a84c) 80%, transparent);
+
+  /* The three lights. Key breaks over the sign-in card's top-right shoulder; a rim grazes the
+     right edge below it; a weak bounce lifts the pitch column out of flat black so the left half
+     of the hero is a dim part of the same room rather than a dead field.
+
+     Two things were measured and corrected here rather than guessed. The key was first placed at
+     `84% -10%`, which put its bright core above the element entirely and left almost nothing on
+     screen — a radial light's Y offset is a position, not a direction, and the visible fraction
+     is what you are actually choosing. And there was a fourth layer, a linear "shade" mixing
+     toward `--theme-sidebar`: on the Light preset it read correctly as a warm shadowed corner,
+     and on Dark it was mathematically inert (#0e1117 over #0f1117), so half the depth budget was
+     being spent on nothing. It is gone. Unlit ground IS the shadow here; the depth comes from
+     the contrast between lit and unlit, which is why the lights carry the whole budget. */
+  --lp-key:    color-mix(in srgb, var(--theme-accent, #c9a84c) 34%, transparent);
+  --lp-rim:    color-mix(in srgb, var(--theme-accent, #c9a84c) 17%, transparent);
+  --lp-bounce: color-mix(in srgb, var(--theme-accent, #c9a84c) 11%, transparent);
+
+  /* Painted on the scrollport itself: `background-attachment: scroll` on an element with its own
+     overflow means the background is fixed to the element's box and does NOT travel with its
+     contents, so the light stays where the light is while the page moves through it. */
+  background-color: var(--theme-bg, #0f1117);
+  /* Radii are PERCENTAGES of the box, not pixels — a lighting rig has to keep its proportions at
+     every viewport. Measured in px (1180×860 etc.) the rim light was 680px wide, which on a 390px
+     phone is nearly two screens across: it stopped being a rim and flooded the whole lower half,
+     taking the eyebrow pill's contrast down to its tightest reading anywhere on the page. The
+     percentages below reproduce the desktop rig exactly and shrink with the viewport. */
+  background-image:
+    radial-gradient(82% 96% at 78% 20%, var(--lp-key)    0%, transparent 63%),
+    radial-gradient(47% 69% at 103% 56%, var(--lp-rim)    0%, transparent 66%),
+    radial-gradient(62% 80% at -6% 86%,  var(--lp-bounce) 0%, transparent 68%);
+}
+
+/* ── Browser surfaces ─────────────────────────────────────────────────────────────────────────
+   Selection, caret and scrollbar ship in colours that belong to no design system, and on a page
+   whose whole subject is one warm hue a blue selection highlight is the loudest wrong colour on
+   screen. Scoped to `.login-page` so nothing here escapes into the app shell. ── */
+.login-page ::selection {
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 32%, transparent);
+  color: var(--theme-text1, #e8e0d0);
+}
+
+.login-page input {
+  caret-color: var(--theme-accent, #c9a84c);
+}
+
+.login-page {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--theme-accent, #c9a84c) 38%, var(--theme-border, #2a2f3d)) transparent;
+}
+
+.login-page::-webkit-scrollbar { width: 10px; }
+.login-page::-webkit-scrollbar-track { background: transparent; }
+.login-page::-webkit-scrollbar-thumb {
+  border-radius: var(--radius-full, 999px);
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 30%, var(--theme-border, #2a2f3d));
+}
+.login-page::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 55%, var(--theme-border, #2a2f3d));
 }
 
 @supports not (height: 100dvh) {
@@ -43,8 +111,31 @@
   position: sticky;
   top: 0;
   z-index: 100;
-  background: var(--theme-card, #181c27);
-  border-bottom: 1px solid var(--theme-border, #2a2f3d);
+  background:
+    linear-gradient(90deg, transparent 30%, color-mix(in srgb, var(--theme-accent, #c9a84c) 9%, transparent) 100%),
+    color-mix(in srgb, var(--theme-accent, #c9a84c) 3%, var(--theme-card, #181c27));
+  border-bottom: none;
+}
+
+/* The header's bottom rule is the first thing the key light touches, so it is not a flat border:
+   it runs neutral on the left, where the room is dark, and brightens to brass under the light on
+   the right. A plain 1px border here would have been the one element on the page that did not
+   admit where the light was coming from. */
+.login-nav::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    var(--theme-border, #2a2f3d) 0%,
+    var(--theme-border, #2a2f3d) 22%,
+    var(--lp-edge) 74%,
+    var(--lp-rule) 100%
+  );
 }
 
 .login-nav-inner {
@@ -125,8 +216,8 @@
    paid/approved/healthy everywhere else in the product (see the CTA-hierarchy note below). */
 .login-eyebrow {
   align-self: flex-start;
-  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 28%, transparent);
+  background: var(--lp-tint);
+  border: 1px solid var(--lp-rule);
   border-radius: var(--radius-full, 999px);
   padding: 6px 16px;
   font-size: 13px;
@@ -153,6 +244,12 @@
 }
 
 /* ── Highlights ── */
+/* Six identical brass dots down the left was the accent scattered rather than spent: each one
+   too small to register, and collectively enough gold to stop the accent reading as rationed.
+   They are now beads on a single lit spine — one region the colour owns, brightest at the top
+   where the list starts and fading out under the last item, so the fade doubles as the list's
+   own terminator and no overshoot needs measuring. The spine sits at the dots' existing centre
+   line (7px bullet, so centre x = 3.5px), which is why this costs the layout nothing. */
 .login-highlights {
   list-style: none;
   padding: 0;
@@ -160,6 +257,23 @@
   display: flex;
   flex-direction: column;
   gap: clamp(8px, 1.2vh, 12px);
+  position: relative;
+}
+
+.login-highlights::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 11px;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    var(--lp-edge) 0%,
+    var(--lp-rule) 62%,
+    transparent 100%
+  );
 }
 
 .login-highlights li {
@@ -176,19 +290,67 @@
   height: 7px;
   border-radius: 50%;
   background: var(--theme-accent, #c9a84c);
+  /* A soft halo, not a hard second ring: the bead reads as sitting in the light rather than as a
+     dot with an outline, and it keeps the spine visually passing behind it. */
+  box-shadow: 0 0 0 3px var(--lp-wash);
   flex-shrink: 0;
   margin-top: 8px;
+  position: relative;
 }
 
 /* ── Sign-in card ── */
+/* The card sits directly under the key light, so it is the one surface that is genuinely warmer
+   than its ground, carries a catch-light along its top edge, and casts a warm shadow rather than
+   a neutral black one. The lift is what separates it from the trial band below — the two are
+   close in tone on purpose; it is the lighting, not a lightness step, that says which is nearer. */
+/* The face carries the same light as the room: warm at the shoulder nearest the source, cooling
+   as it runs away from it. A flat fill was the single largest surface on the page refusing to
+   admit there was a light. */
 .login-card {
-  background: var(--theme-card, #181c27);
-  border: 1px solid var(--theme-border, #2a2f3d);
+  position: relative;
+  background:
+    linear-gradient(152deg, color-mix(in srgb, var(--theme-accent, #c9a84c) 9%, transparent) 0%, transparent 58%),
+    color-mix(in srgb, var(--theme-accent, #c9a84c) 2.5%, var(--theme-card, #181c27));
+  border: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 14%, var(--theme-border, #2a2f3d));
   border-radius: var(--radius-xl, 24px);
-  box-shadow: var(--theme-card-shadow, 0 4px 40px rgba(0,0,0,0.35));
+  box-shadow:
+    var(--theme-card-shadow, 0 4px 40px rgba(0,0,0,0.35)),
+    0 28px 64px -34px color-mix(in srgb, var(--theme-accent, #c9a84c) 34%, transparent);
   padding: clamp(20px, 3.2vh, 34px) 32px clamp(20px, 3vh, 32px);
   display: flex;
   flex-direction: column;
+}
+
+/* The one authored moment on this page, and it is a state rather than an entrance: engage with
+   the form and the card catches more of the light — the highlight runs wider and brighter. It
+   fires on :focus-within, so it tracks the thing the user is actually doing (typing) instead of
+   playing once on load and never meaning anything again. */
+.login-card::before {
+  content: '';
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  top: 0;
+  height: 1px;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--lp-edge) 50%,
+    transparent
+  );
+  opacity: 0.6;
+  transition:
+    opacity var(--motion-slow, 260ms) var(--ease-entrance, cubic-bezier(0.16, 1, 0.3, 1)),
+    left var(--motion-slow, 260ms) var(--ease-entrance, cubic-bezier(0.16, 1, 0.3, 1)),
+    right var(--motion-slow, 260ms) var(--ease-entrance, cubic-bezier(0.16, 1, 0.3, 1));
+}
+
+.login-card:focus-within::before {
+  opacity: 1;
+  left: 4%;
+  right: 4%;
 }
 
 .login-heading {
@@ -205,9 +367,18 @@
 }
 
 /* ── Trial signup band ── */
+/* The band and the sign-in card were the SAME colour — `--theme-card` both — so the page's two
+   most important regions were one material at two depths, and nothing but a border said where one
+   ended. The band is now the region the accent owns outright: a brass bloom breaking over its top
+   edge, behind its heading, warming as it rises. That is the dosage decision — one hue spent on
+   one whole region rather than sprinkled as chips — and it reads as "this is where you act"
+   without a single extra fill. Its top rule is brass-tinted (lit, nearest the hero) and its bottom
+   rule stays neutral (in shadow, running out under the footer). */
 .login-trial-band {
-  background: var(--theme-card, #181c27);
-  border-top: 1px solid var(--theme-border, #2a2f3d);
+  background:
+    radial-gradient(150% 190% at 50% 0%, color-mix(in srgb, var(--theme-accent, #c9a84c) 17%, transparent) 0%, transparent 70%),
+    color-mix(in srgb, var(--theme-accent, #c9a84c) 5%, var(--theme-card, #181c27));
+  border-top: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 30%, var(--theme-border, #2a2f3d));
   border-bottom: 1px solid var(--theme-border, #2a2f3d);
   /* The header's "Start free trial →" jumps here, and the header is sticky — without this the
      band's heading lands underneath it. */
@@ -318,24 +489,40 @@
   gap: 6px;
 }
 
+/* Fallbacks corrected: S620 swapped the dark preset's text2/text3 into the roles they already had
+   contrast for, and these three fallbacks were left carrying the pre-swap assignment — the drifted
+   `var()` fallback shape DESIGN.md names, where the token reference reads as correct and the wrong
+   value only paints in the window before ThemeContext sets the custom property. text2 is #9ca3af
+   (Fog, secondary), text3 is #8a92a3 (Slate, quietest). */
 .login-field label {
   font-size: 13px;
   font-weight: 500;
-  color: var(--theme-text2, #8a92a3);
+  color: var(--theme-text2, #9ca3af);
   letter-spacing: 0.02em;
 }
 
+/* The wells sit a hair warm of the raw input ground so a field on the brass-washed trial band
+   still reads as a recess rather than as a cold rectangle dropped onto a warm surface. */
 .login-field input {
-  background: var(--theme-input-bg, #0f1117);
-  border: 1px solid var(--theme-border, #2a2f3d);
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 2.5%, var(--theme-input-bg, #0f1117));
+  border: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 11%, var(--theme-border, #2a2f3d));
   border-radius: var(--radius-md, 12px);
   padding: 11px 14px;
   font-size: 15px;
   color: var(--theme-text1, #e8e0d0);
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--motion-fast, 160ms) var(--ease-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+              box-shadow var(--motion-fast, 160ms) var(--ease-standard, cubic-bezier(0.4, 0, 0.2, 1));
   width: 100%;
   box-sizing: border-box;
+}
+
+/* A field warms toward the accent before it is focused, so the ladder is
+   resting → hover → focus rather than nothing → everything. Excluded on an invalid field: the
+   `[aria-invalid]` rule below is the lower-specificity one, and hover must not paint over the
+   colour that is telling someone their entry was rejected. */
+.login-field input:hover:not(:focus):not([aria-invalid="true"]) {
+  border-color: color-mix(in srgb, var(--theme-accent, #c9a84c) 32%, var(--theme-border, #2a2f3d));
 }
 
 .login-field input:focus {
@@ -344,7 +531,7 @@
 }
 
 .login-field input::placeholder {
-  color: var(--theme-text3, #9ca3af);
+  color: var(--theme-text3, #8a92a3);
 }
 
 .login-optional {
@@ -360,7 +547,7 @@
   min-height: 26px;
   align-self: flex-start;
   font-size: 13px;
-  color: var(--theme-text2, #8a92a3);
+  color: var(--theme-text2, #9ca3af);
   cursor: pointer;
   user-select: none;
 }
@@ -380,12 +567,17 @@
    tuned for fills and charts and fail AA as text on the five light presets — measured on Latte
    before this change: the Caps Lock hint 2.62:1, the confirmation panel and both green CTAs
    3.34:1. See the block comment above PRESETS in ThemeContext.js. */
+/* The border is what makes this a panel rather than a tinted paragraph — and the confirmation
+   panel below already had one, so without it the page's failure state was quieter than its success
+   state. Semantics unchanged: red still means red, and the fill stays the base token while the
+   text takes the `*-text` variant. */
 .login-error {
   font-size: 14px;
   color: var(--theme-red-text, #f87171);
   margin: 0;
   padding: 10px 14px;
   background: color-mix(in srgb, var(--theme-red, #f87171) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-red, #f87171) 25%, transparent);
   border-radius: var(--radius-md, 12px);
 }
 
@@ -427,7 +619,9 @@
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--motion-fast, 160ms) var(--ease-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+              box-shadow var(--motion-fast, 160ms) var(--ease-standard, cubic-bezier(0.4, 0, 0.2, 1)),
+              filter var(--motion-fast, 160ms) var(--ease-standard, cubic-bezier(0.4, 0, 0.2, 1));
   letter-spacing: 0.02em;
   margin-top: 4px;
 }
@@ -444,14 +638,20 @@
    the accent-tinted second-strongest control — it is the conversion action and previously
    rendered at 163px against Sign in's 400px. Pricing and Staff Login are neutral, which is what
    a navigation link should look like. ── */
+/* Stepped up from 12%/45% because the ground under it changed: on the brass-washed band a 12% tint
+   over the input ground was within a few points of the band itself and the control lost its edges.
+   It stays the SECOND-strongest CTA by construction — a tint the accent reads on, not a fill — so
+   the hierarchy the 2026-08-12 pass set (solid Sign in, tinted Start Free Trial, neutral
+   navigation) is unchanged. Measured on the band: 6.07:1 on Dark, 5.21:1 on Light. */
 .login-btn--trial {
-  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 12%, var(--theme-input-bg, #0f1117));
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 18%, var(--theme-input-bg, #0f1117));
   color: var(--theme-accent-ink, #c9a84c);
-  border: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 55%, transparent);
 }
 
 .login-btn--trial:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 20%, var(--theme-input-bg, #0f1117));
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 27%, var(--theme-input-bg, #0f1117));
+  border-color: var(--theme-accent, #c9a84c);
 }
 
 /* Pricing is a secondary link-weight action sitting in the header, not a form CTA — it keeps its
@@ -503,6 +703,23 @@
   filter: brightness(1.1);
 }
 
+/* ── The cast shadow belongs to the SOLID accent button and nothing else ─────────────────────
+   Written first as a plain `box-shadow` on `.login-btn`, which put an accent glow under the
+   header's neutral **Pricing** link and under the accent-*tinted* Start Free Trial — the two
+   controls the 2026-08-12 CTA-hierarchy pass exists to keep quieter than Sign in. The variants'
+   own `box-shadow: none` did not save it either: `.login-btn:hover:not(:disabled)` lives further
+   down this file than `.login-btn--trial:hover`, matches at the same specificity, and therefore
+   won on order — so the glow was suppressed at rest and came back on hover.
+   Excluding the variants by name is order-independent and says what it means. `--nav` and
+   `--inline` are always worn alongside `--trial`, so those two exclusions cover all four. ── */
+.login-btn:not(.login-btn--trial):not(.login-btn--pricing) {
+  box-shadow: 0 8px 20px -12px color-mix(in srgb, var(--theme-accent, #c9a84c) 75%, transparent);
+}
+
+.login-btn:not(.login-btn--trial):not(.login-btn--pricing):hover:not(:disabled) {
+  box-shadow: 0 12px 26px -12px color-mix(in srgb, var(--theme-accent, #c9a84c) 85%, transparent);
+}
+
 .login-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -520,7 +737,7 @@
    than solid (2026-07-14 audit) — same One Accent Rule reasoning as .login-btn--trial above;
    purple is the rationed 4th-color token, not a second general-purpose CTA fill. ── */
 .login-staff-btn {
-  background: var(--theme-input-bg, #0f1117);
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 2.5%, var(--theme-input-bg, #0f1117));
   color: var(--theme-text2);
   border: 1px solid var(--theme-border-lt);
   border-radius: var(--radius-md, 12px);
@@ -715,5 +932,91 @@
     padding-top: 12px;
     padding-bottom: 12px;
     row-gap: 10px;
+  }
+}
+
+/* ── /reset-password ─────────────────────────────────────────────────────────────────────────
+   `ResetPassword.js` imports this stylesheet and renders `.login-root` > `.login-split` >
+   `.login-right` > `.login-brand` — four classes that had ceased to exist here when `/login`
+   became a page (S553) and the old split-card shell was replaced. Nothing failed: a class name
+   that does not exist is silent in CSS, so the page a user lands on straight out of a
+   password-reset email had no ground, no card, no border and no centring, and was rendering as
+   bare text on the body background. Restored here rather than in a second stylesheet so the two
+   surfaces cannot drift again — and built in the same light: the same key falling from the upper
+   right, the same catch-light along the card's top edge. ── */
+.login-root {
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding: clamp(24px, 6vh, 72px) 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--theme-text1, #e8e0d0);
+  background-color: var(--theme-bg, #0f1117);
+  background-image:
+    radial-gradient(80% 70% at 82% 6%, color-mix(in srgb, var(--theme-accent, #c9a84c) 26%, transparent) 0%, transparent 66%),
+    radial-gradient(60% 60% at -8% 96%, color-mix(in srgb, var(--theme-accent, #c9a84c) 10%, transparent) 0%, transparent 70%);
+}
+
+@supports not (min-height: 100dvh) {
+  .login-root { min-height: 100vh; }
+}
+
+.login-split {
+  width: 100%;
+}
+
+.login-right {
+  position: relative;
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 2.5%, var(--theme-card, #181c27));
+  border: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 14%, var(--theme-border, #2a2f3d));
+  border-radius: var(--radius-xl, 24px);
+  box-shadow:
+    var(--theme-card-shadow, 0 4px 40px rgba(0,0,0,0.35)),
+    0 28px 64px -34px color-mix(in srgb, var(--theme-accent, #c9a84c) 34%, transparent);
+}
+
+.login-right::before {
+  content: '';
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  top: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--theme-accent, #c9a84c) 80%, transparent),
+    transparent
+  );
+  opacity: 0.6;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.login-root ::selection {
+  background: color-mix(in srgb, var(--theme-accent, #c9a84c) 32%, transparent);
+  color: var(--theme-text1, #e8e0d0);
+}
+
+.login-root input {
+  caret-color: var(--theme-accent, #c9a84c);
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────────────────────────
+   The card's catch-light still brightens on :focus-within — that is a state the user needs to
+   see — it simply arrives instantly instead of easing in. Same for the control transitions:
+   the end states are all colour, so removing the tween costs no information. ── */
+@media (prefers-reduced-motion: reduce) {
+  .login-card::before,
+  .login-field input,
+  .login-btn {
+    transition: none;
   }
 }

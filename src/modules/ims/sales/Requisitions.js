@@ -8,6 +8,7 @@ import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { BS_MONTHS, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -383,7 +384,10 @@ ${text}`, detail })
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Requisitions</h1>
-          <p className="page-subtitle">Internal store-to-department stock transfers — {periodLabel}</p>
+          <p className="page-subtitle">Internal store-to-department stock transfers</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <select aria-label="Period"

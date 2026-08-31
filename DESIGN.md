@@ -570,6 +570,41 @@ Shadow was already in real use before this change beyond the two cases previousl
 ### Named Rules
 **Shadow tells you what surface you're on, not that a page is "polished."** Card elevation is now uniform policy (every preset, every card), so it no longer functions as a special signal the way the floating-action and live-pulse shadows still do — don't invent a *third* meaning for it (e.g. a stronger shadow to mean "important"). If something needs to stand out, that's a job for the accent color or position, same as always.
 
+### The signed-out surfaces carry a light source; the app does not (added 2026-08-31/S659)
+
+The elevation model above governs **Operate** surfaces, where depth is a lightness step plus a
+per-preset shadow and nothing else. `/login` is not one of those. It is the product's second
+deliberate **Persuade** surface (GuestMenu is the first, per PRODUCT.md) — the one screen whose job
+is that a visitor decides and acts — and it now carries a real lighting model rather than a flat
+ground.
+
+**Three lights, all one hue.** A key breaking over the sign-in card's top-right shoulder, a rim
+grazing the right edge, a weak bounce lifting the pitch column out of flat black. Every value is
+`color-mix(… var(--theme-accent) N%, …)`, so the whole surface re-tones with the preset and **no
+second brand colour is introduced anywhere** — the One Accent Rule taken literally: more and less of
+the one hue that was already there. Surfaces then behave like objects under that light: the card
+face is a gradient rather than a flat fill, the header warms toward the right, and the header's
+bottom rule runs neutral on the left and brightens to brass under the light.
+
+Two things were corrected by measurement, and both generalise:
+
+- **A radial light's Y offset is a position, not a direction.** The key was first placed at
+  `84% -10%`, which put its bright core above the element entirely and left almost nothing on
+  screen. The visible fraction is what you are actually choosing.
+- **A "shade" layer mixing toward `--theme-sidebar` read correctly on Light and was mathematically
+  inert on Dark** (`#0e1117` over `#0f1117`), so half the depth budget was being spent on nothing.
+  Deleted. Unlit ground *is* the shadow; the depth comes from the lit-versus-unlit contrast, which
+  is why the lights carry the whole budget.
+
+**Radii are percentages of the box, not pixels.** Measured in px the rim light was 680px wide,
+which on a 390px phone is nearly two screens across: it stopped being a rim and flooded the lower
+half, taking the eyebrow pill's contrast to its tightest reading anywhere on the page (4.87:1).
+As percentages the rig reproduces on every viewport and that reading recovered to 5.99:1.
+
+**Do not carry this into the app.** A dense table under an atmospheric wash is worse than one on a
+flat ground, and PRODUCT.md's tool-first principle is the reason. If a third signed-out surface
+appears, it belongs to this treatment; `/pricing` is the obvious candidate and has not had it yet.
+
 ## Shapes
 
 *Section added 2026-08-12. The radius scale itself was already in the frontmatter and the per-component values were already in Components; what was missing was the rule tying a step to a size class, which is the part that actually prevents drift.*
@@ -744,6 +779,46 @@ Every IMS/Suite report renders inside one component that owns the **six states a
 **The could-not-load state is deliberately not the empty state.** `.report-error` is a red-bordered card with `role="alert"` that says the figures are not real, where `.empty-state` says there is nothing to show — different facts, and only one of them means the page can be trusted. A failed read rendering as a clean zero is worse than a crash: a crash gets reported, a zero gets believed.
 
 **What "every report renders inside it" actually means, measured (2026-08-26/S613).** Three pages render the full `ReportPage` shell; ~30 report pages render its *grammar* by hand — the shared `ReportLoadError` card (extracted from this component in S612 precisely so a pre-shell page could adopt the failed≠empty rule without a structural rewrite), `firstError`, `NoPeriodState`, and the strip/note/filter gating. **That is the supported state, not a migration debt**: the doctrine is mandatory, the wrapper is optional. A page that renders the grammar by hand must gate its own `stats`/`note`/`filters` on `!loading && !error` — a rule the wrapper enforces for free and a hand-rolled page can forget, which is why a new report page should still start from `ReportPage` unless it has a shape the shell cannot express.
+
+### The period a report covers is a chip, not the tail of a sentence (added 2026-08-31/S659)
+
+`PeriodScope` states the scope of a report in the page header, under the subtitle, on **29 IMS
+pages**. Before it, the scope was prose — `"Stock valuation & food cost report — Bhadra 2082"` —
+so the one fact a reader must verify before trusting any figure on the page was the last few words
+of a 13px `--theme-text2` sentence, styled identically to the description in front of it, on twelve
+pages in one shape. Three pages named no period at all: `BestSellers` said "for the period",
+`DeadStock` and `WastageReport` nothing, on reports whose entire claim is period-relative.
+
+**It introduces no colour.** The chip is the accent at the same low tint `.badge-yellow` already
+uses for a categorical tag, because a period *is* a categorical tag. Wayfinding is one of the jobs
+colour exists to do on an Operate surface; a second brand hue is not. The two halves take different
+weights on purpose — the label is the answer to "which month", the state qualifies it, and a
+single-weight chip made the reader parse both to find one.
+
+**"Open" is structural, not a hue, and that was measured rather than chosen.** The obvious version —
+amber fill, `--theme-amber-text` label — put that label at **4.19:1 on Light**, under AA on 12px
+text, because `--theme-amber-text` is tuned to clear 4.5:1 against the *card* and the *page ground*
+and a warm tint of amber is neither. No tint from 6% to 12% both clears AA and stays visible. And
+the fill was not doing the job anyway: measured against the closed chip it separated by **ΔE 6.0 on
+Dark and 2.6 on Light**, both under the ΔE 8 floor — on Dark the accent and amber are two warm
+yellows, exactly as the Chart Palette Rule warns. So the state is a **dashed border** plus the word
+OPEN plus a `△`: three non-colour cues, immune to greyscale, colour blindness and a monochrome
+print, with amber surviving only as a *border*, where the floor is 3:1 rather than 4.5:1. This is
+the "a paired token is only correct while it is actually measured" rule recurring — reach for the
+token, then verify the token **on the surface you are actually putting it on**.
+
+**`provisionalWhenOpen` is opt-in, because open is not always a warning.** On a data-entry screen
+(Purchases, Stock Count, Sales) an open period is the normal working state and flagging it is noise.
+On a report whose figures are incomplete until the closing count lands — anything deriving COGS or
+variance — it is the single most important caveat on the page. Two pages are deliberately excluded
+and carry a comment saying so: `PeriodComparison` (its scope *is* every period, so a chip naming one
+would contradict the table under it) and `OutstandingPayables` (unbounded — payables carry forward).
+
+`ReportPage` exposes it as a `scope` slot, **deliberately not gated on `figuresAreReal`** the way
+`stats`/`note`/`filters` are. Those are figures, and a figure the page has not computed must not be
+shown. Which period the reader *asked for* is true whether or not the read succeeded, and on the
+error card it is the most useful thing on screen: "this failed for Bhadra 2082" is actionable in a
+way "this failed" is not.
 
 ### Page-state banners: red says you cannot, amber says you can but this is not the usual case (added 2026-08-30/S651)
 

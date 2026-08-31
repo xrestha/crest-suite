@@ -10,6 +10,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import { Navigate } from 'react-router-dom'
 import ReportPage from '../../../components/ReportPage'
+import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
@@ -311,14 +312,20 @@ export default function StockAgeing() {
         <div className="stat-label">
           <Tip width={320} text={`Money tied up in stock that had been sitting ${STALE_FROM_DAYS}+ days as at ${asOfLabel}. This is the working capital the report exists to surface — it is not yet a loss, but it is cash on a shelf.`}>Capital in 90+ Day Stock</Tip>
         </div>
+        {/* Stale vs clean was amber vs green and nothing else. Under deuteranopia those two sit
+            ΔE 3.1 apart on Light, so the one distinction these tiles exist to draw was invisible
+            to roughly 1 in 12 men. ▲ / ✓ differ by shape and fill, so they survive greyscale, a
+            monochrome print and every form of colour blindness — same reasoning as fcBand's. */}
         <div className="stat-value" style={{ fontSize: 18, color: staleValue > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>
-          {npr(staleValue)}
+          {npr(staleValue)} {staleValue > 0 ? '▲' : '✓'}
         </div>
         <div className="stat-sub">{stalePct.toFixed(1)}% of stock value</div>
       </div>
       <div className="stat-card">
         <div className="stat-label">Items 90+ Days Old</div>
-        <div className="stat-value" style={{ color: staleItems > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{staleItems}</div>
+        <div className="stat-value" style={{ color: staleItems > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>
+          {staleItems} {staleItems > 0 ? '▲' : '✓'}
+        </div>
         <div className="stat-sub">worth reviewing first</div>
       </div>
       <div className="stat-card">
@@ -389,7 +396,8 @@ export default function StockAgeing() {
   return (
     <ReportPage
       title="Stock Ageing"
-      subtitle={`How long the stock you are still holding has been sitting — FY ${selectedFy || '—'} · aged as at ${asOfLabel}`}
+      subtitle="How long the stock you are still holding has been sitting"
+      scope={<PeriodScope label={`FY ${selectedFy || '—'} · as at ${asOfLabel}`} />}
       actions={actions}
       noPeriod={!loading && !loadError && periods.length === 0}
       noPeriodWhat="the stock ageing report"
@@ -456,8 +464,13 @@ export default function StockAgeing() {
                         </td>
                       )
                     })}
-                    <td style={{ textAlign: 'right', color: r.oldestDays >= STALE_FROM_DAYS ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
-                      {r.oldestDays}d
+                    {/* The 90+ BAND cell above is already carried by two non-colour cues — the
+                        column it sits in, and its bold weight — so it needs no glyph and would
+                        only be noisier for one. This cell has neither, and it is the column the
+                        table sorts on. */}
+                    <td style={{ textAlign: 'right', color: r.oldestDays >= STALE_FROM_DAYS ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}
+                        title={r.oldestDays >= STALE_FROM_DAYS ? `Sitting ${STALE_FROM_DAYS}+ days` : undefined}>
+                      {r.oldestDays}d{r.oldestDays >= STALE_FROM_DAYS ? ' ▲' : ''}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{npr(r.value)}</td>
                   </tr>

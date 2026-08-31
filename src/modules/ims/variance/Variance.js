@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { COGS_FORMULA, computeUsed, varianceFlagPct } from '../../../shared/imsFormulas'
+import { COGS_FORMULA, computeUsed, varianceFlagPct, varianceBand } from '../../../shared/imsFormulas'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { Navigate } from 'react-router-dom'
@@ -43,6 +44,15 @@ export default function Variance() {
   // Variance is only meaningful once the period's closing stock has been counted — see the
   // comment on the period default below.
   const [hasClosing, setHasClosing] = useState(true)
+
+  // The period total needs a PERCENTAGE to be banded against the same tolerance the rows use — a
+  // rupee figure on its own has no scale, which is why the tile below used to compare it to zero.
+  // Null-safe: `summary` is null until the first load resolves, and this sits above that guard.
+  const totalBand = varianceBand(
+    summary?.totalTheoretical > 0 ? (summary.totalVarianceValue / summary.totalTheoretical) * 100 : null,
+    summary?.totalVarianceValue, settings, { measured: hasClosing },
+  )
+
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -251,7 +261,10 @@ export default function Variance() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Variance Report</h1>
-          <p className="page-subtitle">Theoretical vs actual usage — the money report — {periodLabel}</p>
+          <p className="page-subtitle">Theoretical vs actual usage — the money report</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select aria-label="Period"
@@ -292,8 +305,10 @@ export default function Variance() {
             <div className="stat-label">
               <Tip text={`Items where actual usage differs from theoretical by more than ${flagPct}%. These need investigation. Change the threshold in Settings → Thresholds.`} width={240}>Flagged Items</Tip>
             </div>
+            {/* A tile is read from further away than a table cell, and these two were the only
+                severity on the page carried by hue alone. ✓ / ▲ are distinguished by shape. */}
             <div className="stat-value" style={{ color: !hasClosing ? 'var(--theme-text2)' : summary.flaggedCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-              {hasClosing ? summary.flaggedCount : '—'}
+              {hasClosing ? `${summary.flaggedCount} ${summary.flaggedCount > 0 ? '▲' : '✓'}` : '—'}
             </div>
             <div className="stat-sub">{hasClosing ? `>${flagPct}% variance` : 'Needs closing count'}</div>
           </div>
@@ -301,12 +316,21 @@ export default function Variance() {
             <div className="stat-label">
               <Tip text="Sum of (over-used qty × item rate) across all items. This is the NPR value of stock you can't account for." width={240}>Total Variance Value</Tip>
             </div>
-            <div className="stat-value gold" style={{ fontSize: 18, color: !hasClosing ? 'var(--theme-text2)' : summary.totalVarianceValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+            {/* `.gold` was inert here — an inline `color` beats the class, so the tile had carried
+                a dead class since it was written. Dropped rather than left to read as intent.
+                The band replaces `> 0 ? red : green`, which had no threshold: a NPR 20 whole-period
+                variance wore the identical red to NPR 20,000, and on a real month it was always
+                one or the other, so the tile's colour never actually told anyone anything. */}
+            <div className="stat-value" style={{ fontSize: 18, color: totalBand.color }} title={totalBand.label !== '—' ? totalBand.label : undefined}>
               {hasClosing
-                ? `NPR ${Math.abs(summary.totalVarianceValue).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`
+                ? `NPR ${Math.abs(summary.totalVarianceValue).toLocaleString('en-NP', { maximumFractionDigits: 0 })}${totalBand.mark ? ` ${totalBand.mark}` : ''}`
                 : 'Not measurable yet'}
             </div>
-            <div className="stat-sub">{!hasClosing ? 'Closing count not entered' : summary.totalVarianceValue > 0 ? 'Over-used (potential loss)' : 'Under-used'}</div>
+            <div className="stat-sub">
+              {!hasClosing ? 'Closing count not entered'
+                : totalBand.key === 'immaterial' ? 'Within rounding for the period'
+                : summary.totalVarianceValue > 0 ? 'Over-used (potential loss)' : 'Under-used'}
+            </div>
           </div>
           <div className="stat-card">
             <div className="stat-label">
@@ -386,26 +410,42 @@ export default function Variance() {
                   // Without a closing count every variance figure is an artefact of the missing
                   // count, so it is shown in neutral type and left unflagged rather than painted
                   // red — the banner above says why.
-                  const varColor = !hasClosing ? 'var(--theme-text2)'
-                    : row.variance > 0 ? 'var(--theme-red-text)' : row.variance < 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)'
+                  // Was `row.variance > 0 ? red : amber` — the raw quantity, with no threshold.
+                  // So a +0.4% row was painted red across three columns while the flag badge in
+                  // its own last column, which HAS always used the client's tolerance, read "OK".
+                  // Two verdicts on one row, four columns apart. One band drives both now.
+                  const b = varianceBand(row.variancePct, row.value, settings, { measured: hasClosing })
                   return (
-                    <tr key={row.item.id} style={{ background: hasClosing && row.flag === 'over' ? 'rgba(248,113,113,0.03)' : 'transparent' }}>
+                    <tr key={row.item.id} style={{ background: hasClosing && row.flag === 'over' ? 'color-mix(in srgb, var(--theme-red) 5%, transparent)' : 'transparent' }}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</td>
                       <td><span className="badge badge-yellow">{row.category}</span></td>
                       <td style={{ color: 'var(--theme-text2)' }}>{row.item.uom}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.openQty > 0 ? row.openQty.toLocaleString() : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{row.purchQty !== 0 ? dispPurch(row.purchQty, row.item) : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{row.wasteQty > 0 ? row.wasteQty.toLocaleString() : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{row.closeQty > 0 ? row.closeQty.toLocaleString() : '—'}</td>
+                      {/* These two were permanently red and permanently green. Neither is a
+                          verdict: a closing count is not good news and 0.05 kg of wastage is not
+                          bad news — they are quantities, and every row that had any wastage at all
+                          carried the same red as a genuinely flagged variance three columns along.
+                          Spending the danger colour on a whole column is what makes it stop
+                          reading as danger anywhere. Wastage keeps a quiet accent tie to the
+                          Purchases column it is measured against; both are now ordinary figures. */}
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.wasteQty > 0 ? row.wasteQty.toLocaleString() : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.closeQty > 0 ? row.closeQty.toLocaleString() : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{row.actualUsed !== 0 ? Number(row.actualUsed.toFixed(3)).toLocaleString() : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.theoreticalUsed > 0 ? Number(row.theoreticalUsed.toFixed(3)).toLocaleString() : '—'}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: varColor }}>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: b.color }}>
                         {row.variance !== 0 ? (row.variance > 0 ? '+' : '') + Number(row.variance.toFixed(3)).toLocaleString() : '—'}
                       </td>
-                      <td style={{ textAlign: 'right', color: varColor }}>
-                        {row.variancePct != null ? `${row.variancePct > 0 ? '+' : ''}${row.variancePct.toFixed(1)}%` : '—'}
+                      {/* The mark is the non-colour half of the band. Light collapses red/amber to
+                          ΔE 3.1 under deuteranopia, so over-used and under-used — the two states
+                          this report exists to tell apart — were one colour for roughly 1 in 12
+                          men, on every row. */}
+                      <td style={{ textAlign: 'right', color: b.color }} title={b.label !== '—' ? b.label : undefined}>
+                        {row.variancePct != null
+                          ? `${row.variancePct > 0 ? '+' : ''}${row.variancePct.toFixed(1)}%${b.mark ? ` ${b.mark}` : ''}`
+                          : '—'}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: varColor }}>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: b.color }}>
                         {row.value !== 0 ? `${row.value > 0 ? '+' : ''}${Number(row.value.toFixed(0)).toLocaleString()}` : '—'}
                       </td>
                       <td>{hasClosing ? flagBadge(row.flag) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>

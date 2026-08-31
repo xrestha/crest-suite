@@ -110,9 +110,12 @@ Two rules fall out of it, both of which had already been broken:
 See `.claude/rules/ims-figures.md` (auto-loads when editing `imsFormulas.js`, stock count, or the
 IMS report/summary modules). Headline rules: import `COGS_FORMULA` wherever the formula is PRINTED
 and `computeUsed()` wherever it is COMPUTED (staff meals are in COGS); food-cost banding goes through
-`fcBand(pct, settings)`, never a hardcoded copy; a settings field with no reader is worse than no
-field; Stock Count's Summary holds two tables built from different loops that must be kept tying out;
-and a variance-style report must default to a CLOSED period.
+`fcBand(pct, settings)` and variance banding through `varianceBand(pct, value, settings)`, never a
+hardcoded copy; a settings field with no reader is worse than no field — and "it is wired now" is a
+claim worth re-checking, since `variance_flag_pct` was declared wired while reaching one of its three
+consumers; Stock Count's Summary holds two tables built from different loops that must be kept tying
+out; a variance-style report must default to a CLOSED period, and must STATE which period it is on
+(`PeriodScope`) rather than trailing it off the end of a sentence.
 ### Multi-outlet: one login, several clients (S548)
 
 A group of outlets is several `clients` rows joined by `clients.group_id → client_groups`. An Owner switches between them from the sidebar; the Group Console (`/group-dashboard`, Suite Pro) rolls them up.

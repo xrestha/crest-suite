@@ -313,6 +313,9 @@ export default function PeriodComparison() {
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Period-over-Period Comparison</h1>
+          {/* No <PeriodScope> here, deliberately: this report's scope IS every period, so a chip
+              naming one would contradict the table under it. Left as prose so the next sweep does
+              not churn it. Same for OutstandingPayables, which is unbounded by period. */}
           <p className="page-subtitle">Net Purchases, Wastage, COGS, Revenue and FC% across all BS periods</p>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>

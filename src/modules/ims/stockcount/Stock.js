@@ -7,6 +7,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import SearchableSelect from '../../../components/SearchableSelect'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -677,7 +678,10 @@ export default function Stock() {
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Stock Count</h1>
-          <p className="page-subtitle">Opening stock, physical closing count & wastage — {periodLabel}</p>
+          <p className="page-subtitle">Opening stock, physical closing count &amp; wastage</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select aria-label="Period"

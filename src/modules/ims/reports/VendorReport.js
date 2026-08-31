@@ -6,6 +6,7 @@ import { firstError } from '../../../shared/queryError'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Modal from '../../../components/Modal'
 import { BS_MONTHS, bsToAd, formatBsDay } from '../../../utils/bsCalendar'
@@ -386,7 +387,10 @@ export default function VendorReport() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Vendor Purchase Report</h1>
-          <p className="page-subtitle">Net spend by supplier (gross purchases − returns) — {periodLabel}</p>
+          <p className="page-subtitle">Net spend by supplier (gross purchases − returns)</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>

@@ -7,6 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import Tip from '../../../components/Tip'
+import PeriodScope from '../../../components/PeriodScope'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -543,7 +544,10 @@ export default function Sales() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Sales Entry</h1>
-          <p className="page-subtitle">Period total sales per menu item — {periodLabel}</p>
+          <p className="page-subtitle">Total sales per menu item</p>
+          <div className="page-scope-row">
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+          </div>
           <p className="page-subtitle print-only" style={{ marginTop: 2 }}>{tabPrintLabel}</p>
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>

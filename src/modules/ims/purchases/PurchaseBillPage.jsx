@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { printWithTitle } from '../../../utils/printTitle'
+import PeriodScope from '../../../components/PeriodScope'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { getCf, fmtRate } from './purchasesHelpers'
 import PurchaseBillForm from './PurchaseBillForm'
@@ -229,9 +230,15 @@ export default function PurchaseBillPage() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">{isEdit ? 'Edit Purchase Bill' : 'Add Purchase Bill'}</h1>
-          <p className="page-subtitle">
-            {periodLabel ? `${periodLabel} — one vendor bill, any number of line items` : 'One vendor bill, any number of line items'}
-          </p>
+          <p className="page-subtitle">One vendor bill, any number of line items</p>
+          {periodLabel && (
+            <div className="page-scope-row">
+              {/* A bill BELONGS to a period rather than reporting on one, so the chip states which
+                  month it posts into — the thing easiest to get wrong when this form is reached by
+                  URL from a closed month (see the closed-period banner this page already carries). */}
+              <PeriodScope label={periodLabel} status={period?.status} />
+            </div>
+          )}
         </div>
         <button className="btn btn-ghost" onClick={backToList}>← Purchases</button>
       </div>
