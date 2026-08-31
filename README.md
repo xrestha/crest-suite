@@ -9,8 +9,13 @@
 ## Quick Start
 
 ```bash
-npm start        # Dev server → http://localhost:3000
-npm run build    # Production build
+npm start           # Dev server → http://localhost:3000
+npm run build       # Production build (this is what Vercel runs)
+npm run build:verify  # Same build, for checking a change locally: clears the stale
+                      # ESLint cache first and treats warnings as errors. Use this
+                      # while `npm start` is running — the two share
+                      # node_modules/.cache, and a dev server writing stale entries
+                      # back is what produces build errors that are not in the code.
 ```
 
 **Env vars required:**
