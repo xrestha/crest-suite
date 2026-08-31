@@ -46,7 +46,7 @@ export default function PosOrders() {
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { colors } = useTheme()
   // Solid-amber badges (offline-pending dot, pending-items count, writeoff button) were hardcoded
-  // to black text — passes on 9 of 10 presets but computes to 4.18:1 (fails WCAG AA) on Light's
+  // to black text — passes on Dark but computes to 4.18:1 (fails WCAG AA) on Light's
   // amber (#b45309), a genuinely dark burnt-orange. Same contrast-pick approach avatarColorFor()
   // already uses, so this stays correct if a future preset's amber ever needs white too.
   const amberBadgeText = contrastRatio(colors.amber, '#ffffff') >= contrastRatio(colors.amber, '#000000') ? '#ffffff' : '#000000'

@@ -37,7 +37,7 @@ const fmtNpr = n => n == null ? '—' : `NPR ${Math.round(n).toLocaleString('en-
 const fmtPct = n => n == null || !isFinite(n) ? '—' : `${n.toFixed(1)}%`
 
 // Every percentage on this page is TEXT, so these are the -text variants, not the base tokens.
-// The base signal colours are tuned as fills and dots; used as type on the five light presets
+// The base signal colours are tuned as fills and dots; used as type on a light preset
 // they measure as low as 2.05:1, well under AA.
 function pctColor(v, good, warn) {
   if (v == null || !isFinite(v)) return 'var(--theme-text3)'

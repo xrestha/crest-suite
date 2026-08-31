@@ -15,7 +15,7 @@ import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 const METHODS = ['Cash', 'Credit', 'FonePay']
 // Two roles, two values: the base token is the FILL (split bar, legend swatch), the -text variant
 // is the TEXT (the KPI figure). One value cannot do both — the base tokens fail AA as text on all
-// five light presets. Note these are semantic here, not a series palette: Cash/Credit/FonePay
+// a light preset. Note these are semantic here, not a series palette: Cash/Credit/FonePay
 // genuinely mean paid / owed / digital.
 const METHOD_COLORS = { Cash: 'var(--theme-green)', Credit: 'var(--theme-red)', FonePay: 'var(--theme-purple)' }
 const METHOD_TEXT   = { Cash: 'var(--theme-green-text)', Credit: 'var(--theme-red-text)', FonePay: 'var(--theme-purple-text)' }
@@ -207,7 +207,7 @@ export default function PaymentReport() {
               }} title={`${s.method}: ${((s.net / grandNet) * 100).toFixed(1)}%`}>
                 {/* The percentage moved to the legend below: on the fill it was --theme-bg on a
                     signal colour, 3.14:1 on Rosé Dawn, and there is no one foreground that works
-                    on green, red and purple across ten presets. */}
+                    on green, red and purple across both presets. */}
               </div>
             ))}
           </div>

@@ -55,8 +55,8 @@ export default function SubscriptionLock() {
         padding: '32px 34px', textAlign: 'center',
       }}>
         {/* Alpha tint + full-opacity signal text — --theme-red has no paired foreground token
-            and ranges from light to dark across the ten presets, so a solid fill is unreadable
-            on roughly half of them (DESIGN.md). */}
+            and ranges from light to dark across the two presets, so a solid fill is unreadable
+            on one of them (DESIGN.md). */}
         <div style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           width: 52, height: 52, borderRadius: 'var(--radius-full)',

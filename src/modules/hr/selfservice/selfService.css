@@ -124,7 +124,7 @@
 
 /* Active state is two-channel — ink AND the icon's stroke weight (set in JSX) — plus
    aria-current. Colour alone is never the only signal. accent-ink, not accent: the accent used
-   AS text needs the ink variant, which is what makes it legible on the five light presets. */
+   AS text needs the ink variant, which is what makes it legible on the light preset. */
 .ss-tab--active {
   color: var(--theme-accent-ink);
 }

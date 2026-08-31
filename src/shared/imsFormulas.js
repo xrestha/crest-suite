@@ -50,7 +50,8 @@ export function fcThresholds(settings) {
 /**
  * Band a food cost % against the client's own thresholds.
  * Returns the `*-text` contrast variants, never the base tokens — these are always used as text,
- * and the base signal tokens fail WCAG AA on all five light presets (worst 2.05:1 on Rosé Dawn).
+ * and the base signal tokens fail WCAG AA on a light preset (worst 2.05:1, measured on Rosé Dawn
+ * before S607 cut it; Light is the one light preset that remains).
  *
  * `mark` exists because **the band must not be carried by colour alone** (S608). Every colour call
  * site was doing `fcBand(pct, settings).color` and throwing `label` away, so which band a dish sat

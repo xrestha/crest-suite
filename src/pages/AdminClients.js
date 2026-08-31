@@ -542,7 +542,7 @@ export default function AdminClients() {
                       // look like something the client had bought.
                       // These are pill TEXT on a transparent fill, so they take the -text/-ink
                       // variants, not the base tokens (S549/S551 — the base tokens fail AA on the
-                      // five light presets).
+                      // light preset).
                       { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan, color: 'var(--theme-accent-ink)', borderRgba: 'var(--theme-focus-ring)' },
                       { key: 'HR',  enabled: !!c.hr_enabled,          plan: null,   color: 'var(--theme-green-text)', borderRgba: 'rgba(52,211,153,0.35)' },
                       { key: 'POS', enabled: !!c.pos_enabled,         plan: null,   color: 'var(--theme-purple-text)', borderRgba: 'rgba(167,139,250,0.35)' },

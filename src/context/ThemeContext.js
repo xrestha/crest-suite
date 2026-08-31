@@ -243,7 +243,7 @@ export function ThemeProvider({ children }) {
     switchPreset(key || (themeKey === 'dark' ? 'dark' : 'light'))
   }
 
-  // The -text/-ink variants exist only on the five light presets — a dark preset's base signal
+  // The -text/-ink variants exist only on the light preset — a dark preset's base signal
   // colour is already legible as type, so there was nothing to darken. applyTheme() resolves that
   // asymmetry for CSS; this resolves it for JS.
   //

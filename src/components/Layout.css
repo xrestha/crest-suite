@@ -244,8 +244,8 @@ textarea,
   --theme-border-lt:    #1e2330;
   --theme-sidebar:      #0e1117;
   --theme-text1:        #e8e0d0;
-  --theme-text2:        #8a92a3;
-  --theme-text3:        #9ca3af;
+  --theme-text2:        #9ca3af;
+  --theme-text3:        #8a92a3;
   --theme-accent:       #c9a84c;
   --theme-accent-hover: #d4b96a;
   --theme-accent-text:  #0f1117;
@@ -1295,7 +1295,7 @@ tr.interactive-row:focus-visible {
 /* The escalated step of the same variant, for the one action in a destructive group that is
    irreversible in a way the others are not (Danger Zone's "Delete Client" beside the reversible
    Clear/Archive actions). Deliberately still a tint rather than a solid red fill: --theme-red
-   ranges from light to dark across the ten presets, so no single foreground contrasts on all of
+   ranges from light to dark across the two presets, so no single foreground contrasts on both of
    them, and there is no --theme-red-text token to pair with a fill. */
 .btn-danger--strong {
   background: rgba(248,113,113,0.16);

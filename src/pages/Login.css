@@ -564,7 +564,7 @@
 }
 
 /* Signal colours here are TEXT on a card, so they take the *-text variants. The base tokens are
-   tuned for fills and charts and fail AA as text on the five light presets — measured on Latte
+   tuned for fills and charts and fail AA as text on a light preset — measured on Latte
    before this change: the Caps Lock hint 2.62:1, the confirmation panel and both green CTAs
    3.34:1. See the block comment above PRESETS in ThemeContext.js. */
 /* The border is what makes this a panel rather than a tinted paragraph — and the confirmation

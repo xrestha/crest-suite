@@ -7,8 +7,8 @@ function fmt(days) {
 }
 
 // `color` is the full-opacity SIGNAL TEXT and must be a theme token, never a literal: it is
-// rendered as text on the card/sidebar surface, and the ten presets move that surface from
-// #0f1117 to #e6e9ef. Hardcoding the Dark preset's own #34d399 here put the subscription badge
+// rendered as text on the card/sidebar surface, and the two presets move that surface from
+// #0f1117 to #ffffff. Hardcoding the Dark preset's own #34d399 here put the subscription badge
 // at 1.58:1 on Latte — every light preset failed AA on the one line that says how long a client
 // has left. The `bg`/`border` alpha tints stay literal rgba: that is the codebase's documented
 // convention (DESIGN.md's tint pattern is "alpha fill + full-opacity signal text"), and a faint
