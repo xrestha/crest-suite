@@ -1,10 +1,9 @@
 ---
 paths:
-  - "src/pages/Recipes.js"
   - "src/utils/recipeCost.js"
   - "src/modules/ims/recipes/**"
   - "src/modules/ims/stockcount/**"
-  - "src/shared/salesDepletion.js"
+  - "src/modules/ims/sales/salesDepletion.js"
 ---
 
 # Sub-recipe mirror items, nesting, and the two cost engines

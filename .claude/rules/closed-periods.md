@@ -71,3 +71,18 @@ Snapshot** — deliberately *not* automatic, because that button is an explicit 
 artifact and stays an admin decision. A closing-count correction has a second follow-up,
 **Resync Opening Stock**, which pushes the corrected count into the next period; a purchase bill
 does not need it, since carry-forward is built from physical counts, not purchases.
+
+## Closing a period: the preflight and the one-open-period index
+
+Migrated from the root `CLAUDE.md` (S663).
+
+- **Closing a period is preflighted on the closing count (S613).** The close locks the month *and*
+  mints the frozen Monthly Report, and COGS subtracts closing stock — so an uncounted month freezes
+  "closing = 0 for every item" into an artifact nothing recomputes. All three close paths in
+  `Periods.js` now run `closingCountPreflight()` and state what it found inside the ConfirmModal,
+  red when nothing is counted. It **informs and never blocks** (an admin correcting history
+  legitimately closes uncounted months), a failed preflight says it could not check rather than
+  blocking, and it counts the same `physical_qty IS NOT NULL` rows `carryForwardOpeningStock` uses
+  so the sentence and the carry-forward cannot disagree. Full reasoning in
+  `.claude/rules/owner-report.md`.
+- **`monthly_periods` allows at most one `open` period per client** (`monthly_periods_one_open_per_client`, a partial unique index `WHERE status='open'`, added 2026-07-13) — virtually every IMS/HR/Owner Dashboard page assumes this via a plain `.eq('status','open').limit(1).single()` read. Practical consequence: `Periods.js`'s "Reopen" action on a *past* closed period will always fail once a more recent period is open — which is the only realistic time anyone reopens a past period, so always check the update's `error` before treating a reopen as successful (S432, 2026-07-21, found an unhandled case that silently did nothing and gave no indication why). Separately, **admin doesn't need to reopen a period to edit it** — `Stock.js`'s `isLocked = !isAdmin && status==='closed'` (mirrored on every other period-scoped entry page) exempts admin from the read-only lock entirely regardless of status. Reopening only matters for handing edit access back to the *client's own* login; if admin is making the correction personally, editing in place and then re-propagating forward (`Periods.js`'s `carryForwardOpeningStock`, safe to call standalone — it's an idempotent upsert, exposed via the "Resync Opening Stock" action) is the simpler, unblocked path. **That write-through went unreachable for a year and read as a missing feature** (S651): `Purchases.js` opens on the OPEN period, so a closed month could not be got to, and the only button on a closed row was the one that cannot work. "Add missing bills →" now links to `/purchases?period=<id>`, and both purchase screens carry an amber "you are editing a closed month" banner — the `!isAdmin` carve-out had been suppressing the closed-period notice along with the lock. See `.claude/rules/closed-periods.md` before touching any `isLocked` line.

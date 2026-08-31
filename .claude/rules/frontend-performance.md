@@ -7,6 +7,10 @@ paths:
   - "src/modules/hr/**"
   - "src/modules/pos/**"
   - "src/shared/setIfChanged.js"
+  - "src/supabaseClient.js"
+  - "src/utils/withTimeout.js"
+  - "src/utils/authFetchTimeout.js"
+  - "src/context/AuthContext.js"
 ---
 
 # Round trips and keystrokes: the two shapes that make a page feel slow
@@ -245,3 +249,101 @@ Two independent tests, and a page must pass **both**:
 Items and Vendors pass both (their saves write only the record being edited, and the list *is* the
 page). Purchase Orders and Variance fail both and are deliberately unwired, with the reasoning left
 in a comment at the state declarations so the next sweep doesn't re-attempt it.
+
+## Page-revisit caching (`src/shared/sessionDataCache.js`, added S460)
+
+Migrated from the root `CLAUDE.md` (S663).
+
+Route-level pages unmount on navigation, wiping local `useState` — so revisiting a page (Dashboard → Stock → Dashboard) re-fetches everything from scratch by default, which is a real chunk of the app's felt slowness on top of the usual network latency. `sessionDataCache.js` is a deliberately dumb `sessionStorage` key-value cache (`readPageCache(page, section, clientId)` / `writePageCache(...)`, 10-minute max age, keys namespaced per page so two pages can each have their own `items` section without colliding) — it does no calculation of its own, just storage, so adopting it never touches a page's actual data-fetching or math. The pattern: seed each relevant `useState`'s initial value from the cache (`useState(() => readPageCache(...) ?? fallback)`) so a revisit paints instantly, and wrap the existing setter calls in a small local `setAndCache(setter, section, value)` helper that also persists to the cache — no other change to the load function.
+
+**Before adding this to a new page, check whether anything on it batch-saves "every visible row" trusting current on-screen state as the baseline** — that's the one shape where this pattern is actively dangerous, not just ineffective. `Stock.js`'s "Save All" (writes every visible item's currently-shown count, not just user-edited ones) and `Sales.js`'s per-mode save (merges typed edits against "the current saved value" as a fallback for every *other* item) both have this shape, and for a POS-enabled client `sales_entries` keeps changing in the background all day as bills close — so a stale cached number reaching one of these saves could silently overwrite a real figure. `Sales.js` only caches `periods`/`recipes` (the menu/period list, never a save-time baseline) for exactly this reason; `Stock.js` was left with no caching at all, since on that page essentially everything load-bearing is save-sensitive. Pages where saving only ever writes the one record being edited (`Purchases.js`, `Recipes.js`, `Items.js`, `Vendors.js`, `ClientDashboard.jsx` which never saves at all) are safe for the full treatment — confirm which shape a new page has before wiring this in, don't assume.
+
+**A second test, added S626: the cached sections must be able to shorten the SKELETON.** Caching a page's reference lists while its *core content* still blocks on a fresh read buys nothing visible — the user waits for the core read either way — so it is dead code carrying a staleness risk. `PurchaseOrders.js` fails both tests (its PO list is the page, and `confirmReceive` writes `qty_received + receiving` off that state, so a stale row double-counts a delivery) and `Variance.js` fails the same way; both were wired up, measured as pointless, and reverted with the reasoning left in a comment at their state declarations so the next sweep doesn't re-attempt it. The round-trip and per-keystroke rules this came out of are in `.claude/rules/frontend-performance.md`.
+
+`AuthContext.js`'s own `fetchProfile()` waterfall (`profiles` → `clients` → `feature_flags`) was also part of this same pass — `clients` and `feature_flags` only depend on `client_id`, not on each other, so they now run as `Promise.all` instead of two sequential round trips.
+
+---
+
+## An overlapping load must not win the page (S601)
+
+Migrated from the root `CLAUDE.md` (S663).
+
+Every period-scoped page had the same handler: `setSelectedPeriod(…)` → `setLoading(true)` →
+`await buildReport(id)` → `setLoading(false)`, with the load setting its data whenever it resolved.
+Nothing identified which load was current. A closed native `<select>` fires `change` on every arrow
+keypress, so arrowing a 12-period list starts twelve concurrent loads — each a `Promise.all` of eight
+to eleven queries — and **the last response to land wins the figures while `selectedPeriod` is
+whatever was clicked last**. On Consolidated P&L that label drives the subtitle, the print title, the
+Excel `scopeLine` AND the downloaded filename, so one month's figures could leave the building inside
+another month's workbook.
+
+`src/shared/hooks/useLatestRequest.js` is the one guard, now on **22 pages (measured by grep,
+2026-08-30)** — the S601 sweep claimed 19 while never wiring `ConsolidatedPnl.jsx` or
+`StockAgeing.js`, the two pages this rule's own text is about; both were caught by the S612
+critique re-run and wired then. `GroupDashboard.jsx` was the 22nd (S657): it appeared in neither
+the swept list nor the not-swept one, and its loader is a `useCallback` keyed on `(bsYear,
+bsMonth)`, so arrowing either `<select>` starts one `get_group_summary` per keypress on the page
+that compares outlets' money across months. Call `periodReq.begin(id)`
+synchronously in `handlePeriodChange` before any await, and
+`if (!periodReq.isCurrent(periodId)) return` after the last await and before the first setter.
+
+Two properties worth not re-deriving. **The key is the period id, not a counter** — these loaders are
+also called after a save, after a period close, on a manual refresh, and none of those go through
+`handlePeriodChange`; a counter would treat every one as stale and silently discard a legitimate
+reload. And **it fails open**: before any `begin()` the ref is null and `isCurrent()` returns true, so
+a page that adopts the check and forgets the claim degrades to the old racy behaviour rather than
+rendering permanently blank. Of the two possible mistakes only one is recoverable by the user — which
+is also why a page's own `init()` needs no `begin()`: once the handler claims, init's stale load is
+correctly rejected on its own.
+
+**Not swept:** `AttendanceSheet.jsx` and `Overtime.jsx`, and
+`SupplierPriceTracker.js`/`MonthlyOwnerReport.jsx`, which select an id and derive rather than load.
+The first two were skipped because their loaders take `(bsYear, bsMonth)` rather than one id and
+"would need a composite key" — S657 built exactly that on `GroupDashboard` (a `bsYear-bsMonth` key),
+so the stated reason no longer holds and the pair is simply unswept.
+
+## The 1000-row truncation sweeps: S528, S529, S613, S628
+
+The RULE (and `fetchAllRowsChunked`) stays in the root `CLAUDE.md`. These are the sweep histories behind it, migrated S663 — read them before starting another sweep.
+
+Found live (S528) on Stock Movements: the page reported "1000 movements / NPR 49,241 depleted" for a period that actually had 1753 / NPR 87,043. The round number was the only tell, and it had been wrong in production for as long as that client had been busy enough to cross the cap. `ReorderReport.js` had the same shape on the same table, so **Book Stock — a figure people place purchase orders against — was silently low too.**
+
+S529 swept the rest: **61 call sites across 42 files**. Row-count thresholds worth knowing, since they decide whether a table needs this at all — `hr_attendance` is one row per employee **per day**, so it crosses 1000 at ~34 staff (that one silently zeroed daily/hourly pay and removed absence deductions for monthly staff, since employees past the cutoff simply appeared to have no attendance); `pos_order_items` is one row per line per bill, so a month of ordinary service is thousands; `purchase_entries` is fine for one period but not for the fiscal-year and all-time reports (Annual Summary, VAT/Non-VAT, One Lakh Above, Vendor Balance Confirmation, Supplier Price Tracker, and Outstanding Payables — that last one unbounded by period, so it gets worse the longer the system is used).
+
+**S613 (2026-08-26) swept the tail S529 left, and its shape is the lesson: a sweep that works
+table-by-table finishes the table it was named after and leaves its neighbours.** S529 wrapped
+`purchase_entries` almost everywhere and `wastages` almost nowhere — 10 of 12 `wastages` reads were
+still bare, including the multi-period windows in `AnnualSummary`, `PeriodComparison` and
+`ShrinkageReport`, while `sales_entries` split 9 wrapped / 9 not. 35 more sites across 25 files are
+now paged. Two worth knowing: `Sales.js`'s `loadAllDaySums` doubles as the **save-time fallback
+baseline** for every item the user did not type into, so a truncated read there could be *written
+back*, not merely displayed; and `Items.js`'s `checkAllUsage` feeds the force-delete guard, so its
+truncation reported a used item as unused. **Deliberately not wrapped**, so the next sweep does not
+churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
+`persistSalesDay`'s legacy three-call fallback.
+
+**S628 found four more of that exact shape in HR** — `HrReports`' YTD TDS, Festival Allowance's and
+Incentive Run's YTD gross, and `fetchSsfStartMap` — every one on a tax or gratuity figure, all
+sitting a file or two from the `payrollData.js` helpers S620 had just fixed. It also found
+**`hr_roster` unpaged while `hr_attendance` beside it was paged**, on the same page, ten lines
+apart, at the same cardinality. **Decide by rows-per-what, not by table name:** per-employee-per-day
+and per-anything-per-month both cross 1000 inside one real client-year. And note the guard problem
+— truncation returns **no error**, so every `if (error)` check written against a failed read passes
+happily over a short one. Details and the HR-specific consequences are in
+`.claude/rules/frontend-performance.md`.
+
+**Two traps when doing a sweep like this**, both hit live: (1) if the original chain continued past the line you're editing, the closing paren lands too early and the trailing `.order(...)` gets applied to fetchAllRows' *result* — a plain `{data,error}`, not a builder — which is a runtime `TypeError`, not a build error, so only actually loading the page catches it (`Purchases.js`, found exactly this way). (2) A CRA dev server left running shares `node_modules/.cache` with `npm run build` and will keep rewriting stale ESLint entries underneath it, producing phantom errors on files where the import and the usage are both plainly present — `'fetchAllRows' is defined but never used`, and equally `'X' is not defined` on an import sitting at the top of the file. **The one file that matters is `node_modules/.cache/.eslintcache`** (deleting the whole `.cache` directory fails while the dev server holds `babel-loader` open, which reads as the fix not working). **`npm run build:verify` is the packaged answer** — `scripts/build-verify.mjs` removes that one file and then runs the build with `CI=true`, without disturbing a running dev server; if it still reports the error, the error is real. Zero dependencies and Node-based on purpose: `rimraf` is present only transitively here and would vanish on an install, and `rm -f` plus a `VAR=value` prefix is POSIX-only on a Windows machine. `npm run build` stays a plain `react-scripts build` because that is what Vercel runs. Verify the import really is present with a grep before assuming a phantom — the two look identical in the build output.
+
+## The `xlsx` dynamic-import sweep (S522)
+
+Migrated from the root `CLAUDE.md` (S663). The rule — `xlsx` is always `import('xlsx')` inside the click handler — stays resident there; this is the sweep that applied it across all 37 pages, including the three files that needed a different shape.
+
+- **`xlsx` is always `import('xlsx')` inside the click handler, never a top-level `import * as XLSX from 'xlsx'` (S522).** Route-level lazy-loading (S440 above) only defers a *page's own* code — it does nothing about a library that page statically imports, which webpack still must fetch as a parallel chunk the moment the route itself loads. `xlsx` (SheetJS) is genuinely huge (138 kB gzipped, the single largest chunk in the app after `main.js`) and is only ever touched by an explicit "Export Excel"/"Import Excel" click, never by simply viewing a page — so a static import was paying that 138 kB on every visit to any of the 37 pages that have an Excel button, whether or not the button was ever clicked. Fixed across all 37 by making the export/import handler function `async` and adding `const XLSX = await import('xlsx')` as its first line; verified in the built output (`r.e(1238).then(r.bind(r,1238))` now sits inside the button's `onClick`, not at module top level). Two files needed a different shape rather than a flat per-function fix: `SalesReport.jsx`/`CoversReport.jsx` share one `withLetterhead(title, ...)` helper across every tab's export branch, so `XLSX` is now its first parameter instead, passed down from the one `await import('xlsx')` in `exportExcel`; `MonthlyOwnerReport.jsx`'s `monthlyReportExcel.js` uses `XLSX` throughout a whole dedicated helper file, so instead of touching every internal function, the *page* now dynamically imports the whole module at click time (`const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')`) and that file's own top-level `import * as XLSX from 'xlsx'` was left untouched. `recharts` (102 kB gzipped, the other large chunk) was deliberately left as a static import everywhere it's used — charts are core above-the-fold content on those pages, not a deferred click action, so eagerly loading it is correct per `/impeccable optimize`'s own rule against lazy-loading above-fold content.
+
+## Why a supabase-js call hangs: the auth-stall diagnosis (S449–S455)
+
+Migrated from the root `CLAUDE.md` (S663). The rules — guard user-gating awaits with `withTimeout()`, and only `/auth/v1/` is bounded at the client level — stay resident there. This is the mechanism, which is what makes the rules make sense.
+
+- **A supabase-js call can hang forever — and `.abortSignal()` does not save you.** Every call goes through `fetchWithAuth` (`@supabase/supabase-js/src/lib/fetch.ts`), which does `await getAccessToken()` on **line 43** and only reaches `fetch(...)` on **line 70**. `getAccessToken()` calls `auth.getSession()`, which can itself stall (a token refresh that never settles, or one of the known GoTrue init/lock deadlocks — the reason `supabaseClient.js` already installs a no-op `lock`). When it stalls, `fetch` is never invoked, so the AbortController passed via `.abortSignal()` is attached to nothing and firing it does *nothing*: the promise never resolves **and** never rejects, so a `try/finally` that resets a `saving` flag never runs and the button stays disabled forever. Guard any user-gating await with `withTimeout()` (`src/utils/withTimeout.js`) — a `Promise.race` against a wall clock is the only thing immune to where the hang is. Keep `.abortSignal()` alongside it (that's still what cancels a genuinely in-flight request); it's a complement, not a substitute. S449→S454 burned four rounds on this exact bug in `Sales.js` because each fix only covered the layer above the real one.
+
+- **Why `getSession()` stalls in the first place, and the client-level fix (S455).** auth-js sets **no timeout on its own network calls**. An expired access token makes the next `getSession()` call `_callRefreshToken()` → `fetch('/auth/v1/token')`; if that stalls, the auth client wedges *permanently*, not just for that call — `_acquireLock` drains via `while (this.pendingInLock.length) { await Promise.all(waitOn) }` (`GoTrueClient.ts` ~2803), so one never-settling promise means the loop never exits, `lockAcquired` is never reset, and every later `_acquireLock` chains `await last` onto the dead promise. Because supabase-js awaits `getAccessToken()` before *every* DB request, one stalled refresh silently freezes every query/insert/update app-wide with no error anywhere until the tab is closed. `src/supabaseClient.js` now passes `global.fetch` (handed straight to the auth client by supabase-js, `SupabaseClient.ts:340-344`) through `makeAuthTimeoutFetch()` (`src/utils/authFetchTimeout.js`), which bounds **only** `/auth/v1/` requests at 15s so the promise settles, the drain loop completes and the client self-heals. PostgREST and Storage traffic is deliberately left unbounded there so a slow report or a large upload is never cut off — bound those per-call with `withTimeout()` instead.

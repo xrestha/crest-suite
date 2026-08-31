@@ -402,8 +402,8 @@ per-cell inline padding leaves one row taller than its neighbours the first time
 column, and inline beats the class silently.
 
 **Day columns say the month.** `formatBsDay(day, bsMonth)` → "1st Bhadra", not a bare `1` that only
-reads correctly while the page header is on screen. Full rule in `DESIGN.md` and `CLAUDE.md`'s BS
-calendar section; Excel exports keep the numeric column.
+reads correctly while the page header is on screen. Full rule in `DESIGN.md` and
+`.claude/rules/bs-calendar.md`; Excel exports keep the numeric column.
 
 ### A table where every column is `nowrap` can only overflow (S646)
 

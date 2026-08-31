@@ -79,3 +79,23 @@ published in plain text to every visitor on the next `npm run build` — full re
 tenant, readable from View Source. The script accepts the prefixed name so an existing `.env.local`
 keeps working, but warns. `scripts/backfill-credit-note-reversals.mjs` still reads only the prefixed
 name and carries the same hazard.
+
+## `formatBsDay` and the one definition of `BS_MONTHS` (S614)
+
+Migrated from the root `CLAUDE.md` (S663).
+
+**A day inside a chosen period renders as `formatBsDay(day, bsMonth)` — "1st Bhadra" (S614).** Every
+period-scoped Day column in IMS printed a bare number and leaned on the page header to say which month
+it was; that stops working the moment the sheet is printed, scrolled past, or read back later. Two
+properties are load-bearing: an absent or out-of-range month **degrades to the bare ordinal rather
+than naming the wrong month**, and day 0 (Sales' Bulk-entry sentinel) returns `''` so each caller
+keeps its own dash. It is deliberately NOT the full-date form (`1 Bhadra 2083`, what DemandForecast
+and the pickers render) — this one names a day inside the period you already chose, so it carries no
+year. Use `bsDayOrdinal(day)` alone where the month is already stated beside it. **Excel exports keep
+the numeric Day column** — text breaks a spreadsheet's sorting and filtering.
+
+**`BS_MONTHS` has exactly one definition and it lives here.** It was copy-pasted into 31 files until
+S614 (all byte-identical, so nothing rendered wrong — it was simply a list that only had to be edited
+once to disagree with itself). Three of those 31 hid from a `^const BS_MONTHS =` grep: one held the
+same twelve strings under a different name (`BS_MONTH_NAMES`), one wrapped the array across two lines,
+and one declared it inside a component body. Import it; never retype it.

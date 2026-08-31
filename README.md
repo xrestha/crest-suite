@@ -164,6 +164,74 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S663 — 2026-08-31 — CLAUDE.md is halved, and four `.claude/rules` files turn out never to have loaded
+
+**No app code changed — service worker stays `crest-v178`, no migration, nothing ships to users.**
+`/doctor`. Root `CLAUDE.md` 109,946 → 51,745 chars (~27,486 → ~12,936 est. tokens paid on *every*
+request of *every* session): twelve sections migrated into six new `.claude/rules/*.md` files and
+eleven existing ones, three compressed, two derivable lines cut. Permission allow-rules 418 → 298,
+`additionalDirectories` 11 → 4. This is the fourth `/doctor` pass to migrate content out of the root
+file, and the counter in "Where a new rule goes" now says so.
+
+**The find that mattered was not the size — it was that a `paths:` glob had rotted.**
+`accounts-and-logins.md` scoped itself to `src/contexts/AuthContext.js`. The directory is `context`,
+singular. That rule had **never once loaded for the file it is most about**, and nothing anywhere
+says so: a scoped rule whose glob matches nothing simply does not appear, and looks identical to a
+session where the rule did not apply. Three more pointed at pages that had moved out of `src/pages/`
+into `src/modules/` (`Items.js`, `Recipes.js`, `salesDepletion.js`), and `ims-figures.md` pointed at
+`src/modules/ims/summary/`, which does not exist at all. All five repointed; the four survivors were
+each covered by a sibling glob, so only the AuthContext one was actually losing coverage. **After
+moving or renaming a file, grep `.claude/rules/*.md` for its old path** — that rule is now in "Where
+a new rule goes", next to the "never embed a value that moves" one it rhymes with.
+
+**Placement was by reachability, not by convenience.** The `## Supabase / DB notes` block was the
+largest single section (14,143 chars) and the tempting move was to push all of it into
+`supabase-sql.md`. That file is about SQL *authoring* — RLS policy shape, migrations, `log_audit()`
+— and is scoped to `supabase/**`, so `per_uom_rate` and the `order_no` trigger would have landed in
+a file that never loads when you are editing the item master or a POS bill. Each bullet went to the
+file whose `paths:` actually covers where it is reachable from instead: `per_uom_rate` →
+`item-master-rates.md`, the server-assigned numbers and offline queue → `pos-billing.md`, the
+period-close preflight → `closed-periods.md`, session/profile reads → `accounts-and-logins.md`.
+The CSP and header rationale became its own `security-headers.md` scoped to `vercel.json` and the
+service worker.
+
+**What stayed resident is the part that has to be present before someone thinks to ask.** The four
+S531 privilege invariants, multi-tenant isolation, the route-guard rule, `try/catch` catching
+nothing, the 1000-row truncation rule, and the supabase-js hang. Where those were compressed, every
+sentence containing *never* / *must not* / *do not* / *always* was kept verbatim and only the
+retelling of the incident was shortened — 114 of 125 such sentences survive byte-identical, and the
+eleven rewrites were each checked individually against their destination file.
+
+**Three of the new pointer stubs were lying, and only the verification caught it.** The stubs for
+the `xlsx` S522 sweep, the auth-stall diagnosis and the `is_premium` retirement each said "…is in
+`.claude/rules/<file>`" while the content had never actually been moved there — the stub was written
+in the same pass that was supposed to do the move. A stub that names a destination is worse than no
+stub, because it reads as available. The check that found them was mechanical and worth reusing:
+take every sentence of the pre-change file, normalise it, and assert it still appears somewhere in
+`CLAUDE.md` + all of `.claude/rules/*.md`; anything that does not is either a deliberate rewrite you
+can name or a silent loss.
+
+**Windows PowerShell 5.1 destroyed every em-dash on the first attempt.** `Get-Content` reads as ANSI
+by default and `Set-Content -Encoding utf8` writes a BOM, so extracting a section and writing it back
+turned `—` into mojibake and prefixed the file with `EF BB BF`. Caught by a byte-level comparison
+before anything was installed and redone with `[System.IO.File]::ReadAllText/WriteAllText` and
+`UTF8Encoding($false)`. Related: with `core.autocrlf=true` and no `.gitattributes`, writing LF into a
+tracked file leaves `git status` marking it modified while `git diff` shows nothing — `git checkout --`
+on the file clears it.
+
+**Corpus arithmetic, since the point is where the tokens sit and not how much text exists.**
+`.claude/rules/` grew 339,154 → 417,711 chars across 19 → 25 files, and the whole corpus grew ~17,700
+chars net (stubs and headings). None of that is resident: every rules file carries `paths:` and loads
+only when a matching file is opened. The resident figure is the only one that changed for the worse
+or better, and it halved.
+
+**It did not reach 40,000, deliberately.** That is the threshold where Claude Code warns about a
+memory file, and it was the stated target. After migration the largest remaining sections are the
+privilege invariants (5,702), access control (4,019), multi-tenant isolation (2,891), the Supabase
+hang rules (2,862) and the 1000-row rule (2,462) — rules rather than narrative, where further cutting
+means deleting a rule, not tightening prose. 51,745 is 1.29× the threshold, down from 2.75×, and that
+is the honest floor without weakening what the file exists to protect.
+
 ### S662 — 2026-08-31 — DESIGN.md is rewritten from the code, and the pre-hydration tokens stop disagreeing with the preset
 
 Service worker `crest-v178`. No migration. `/impeccable document`, **full rewrite** — deliberately

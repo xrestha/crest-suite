@@ -3,7 +3,6 @@ paths:
   - "src/shared/imsFormulas.js"
   - "src/modules/ims/stockcount/**"
   - "src/modules/ims/reports/**"
-  - "src/modules/ims/summary/**"
   - "src/pages/Settings.js"
   - "src/modules/ownerReport/computeMenuEngineeringSection.js"
 ---

@@ -146,3 +146,23 @@ grep -n "stat-grid" <file>          # then read the five lines above it
 
 The same applies to any slot `ReportPage` would have gated — `note`, `filters`, `footnote`. A page
 that hand-rolls the shell inherits the whole rule, not the error card alone.
+
+## A gating wrapper cannot protect an eagerly-evaluated children expression (S601)
+
+Migrated from the root `CLAUDE.md` (S663).
+
+`ConsolidatedPnl.jsx` passed its whole table as `ReportPage`'s `children`. `ReportPage` renders
+`children` only once the page has loaded — but **JSX children are an ARGUMENT**: the expression is
+fully evaluated by the parent and handed over as a finished element tree, so the gate inside the
+wrapper never gets a say. `pnl` is `useState(null)` and `loading` is `useState(true)`, so
+`LINES.map(l => … pnl[l.key] …)` ran on the first render and threw on `revenue`. It crashed on
+**every** visit for a single-outlet client, before `SuiteGate` even rendered — so the entitlement
+gate could not stop it either. Only an early return, a guard at the call site (`{!stmt ? null : …}`),
+or a render prop can protect it. The same applies to `banners`/`stats`/`note`/`filters`/`footnote`:
+`ReportPage` suppresses them while loading or after an error, but the caller still *evaluates* them.
+
+Related, from the same audit: **`banners` is no longer rendered over the error card.** A banner is
+derived from state the caller set before the read, so ConsolidatedPnl's "Provisional — this period is
+still open… the statement is reliable once the period is closed" printed directly above ReportPage's
+own "Nothing here is a real figure — this is a failed read". Two contradictory sentences, one of them
+asserting a statement exists.

@@ -86,7 +86,7 @@ virtue of the page guard above.
   lock a person out of their own branch.
 - **Push master data** (`MasterPushPanel.jsx`) previews before it writes, always. The dry run
   returns exactly the rows the write pass applies, so the preview cannot drift from the outcome.
-  Three refusals are load-bearing and documented in CLAUDE.md: branch purchase rates are never
+  Three refusals are load-bearing and documented in `.claude/rules/multi-outlet.md`: branch purchase rates are never
   overwritten, selling price is a separate opt-in, and an unmappable ingredient is reported
   rather than dropped.
 
@@ -121,7 +121,7 @@ tiles carry a red/amber/green verdict.
 (`clientMRR` / `clientMrrBreakdown`, pure over `(client, planPrices)`) because Admin → Clients needs
 the same per-client figure — that page activates modules, extends dates and toggles Suite, so it
 changes MRR and used to show none of it. `clientMrr.test.js` pins every rule; the reasoning for each
-is in CLAUDE.md's billed-axis section. **Never re-derive a client's monthly value here.**
+is in `.claude/rules/access-control.md` (the billed-axis section); the root `CLAUDE.md` keeps only the "do not write a second copy" rule. **Never re-derive a client's monthly value here.**
 
 ### The Owner Dashboard's four KPI ratios have one definition, and it is not this file (S660)
 
