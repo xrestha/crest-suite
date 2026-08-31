@@ -122,3 +122,24 @@ tiles carry a red/amber/green verdict.
 the same per-client figure — that page activates modules, extends dates and toggles Suite, so it
 changes MRR and used to show none of it. `clientMrr.test.js` pins every rule; the reasoning for each
 is in CLAUDE.md's billed-axis section. **Never re-derive a client's monthly value here.**
+
+### The Owner Dashboard's four KPI ratios have one definition, and it is not this file (S660)
+
+`fcBand(pct, settings)` (`shared/imsFormulas.js`) bands Food Cost %; `lcBand` / `pcBand` / `nmBand`
+(`shared/operatingBands.js`) band Labour, Prime and True Net Margin. **None of the four is an inline
+ternary any more**, and the reason is that three of them were: the same 30/37, 60/65 and ≥20/≥10
+thresholds the Monthly Owner Report already had, written out a second time here — and **without the
+✓/△/▲ marks**, sitting immediately beside a Food Cost tile that had them. One KPI row, one metric
+banded accessibly and the three next to it not.
+
+Two things to preserve when touching them:
+
+- **Render `bandFigure(pct, bander).text`, not `bander(pct).color`.** The helper appends the mark to
+  the number precisely so a call site cannot take the colour and drop the shape, which is exactly
+  what happened here.
+- **`canOverheads` gates the FIGURE, not just its colour.** Without Overheads there is no margin, so
+  True Net Margin stays unbanded and unmarked rather than painting a verdict on a number the page
+  cannot compute — the same rule as "don't let a page show a number it has not computed".
+
+`Roster.jsx`'s Labor Forecast tab reads `lcBand` too, so a day that reads healthy on the roster
+board reads healthy here. It used to carry its own `> 35 ? amber`, which agreed with neither.

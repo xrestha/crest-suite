@@ -317,7 +317,12 @@ export default function HolidayCalendar() {
                     <td style={{ textAlign: 'center', color: 'var(--theme-text3)' }}>{h.bs_day}</td>
                     <td style={{ textAlign: 'center', color: 'var(--theme-text3)', fontSize: 12 }}>{h.bs_year}</td>
                     <td>
-                      <span className={h.holiday_type === 'public' ? 'badge-amber' : 'badge-gray'} style={{ fontSize: 11 }}>
+                      {/* Brass / purple, matching this page's own two stat cards above (Public =
+                          accent-ink, Optional = purple-text). They used to be amber / grey down
+                          here, so the same two categories were coloured twice, differently, on one
+                          screen — and amber additionally means "waiting on you" throughout HR,
+                          which a gazetted holiday is not. */}
+                      <span className={h.holiday_type === 'public' ? 'badge-yellow' : 'badge-purple'} style={{ fontSize: 11 }}>
                         {h.holiday_type === 'public' ? 'Public' : 'Optional'}
                       </span>
                     </td>

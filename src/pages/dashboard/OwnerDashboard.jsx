@@ -13,6 +13,7 @@ import { fetchAllRows } from '../../shared/fetchAllRows'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { useSettings } from '../../context/SettingsContext'
 import { fcBand } from '../../shared/imsFormulas'
+import { lcBand, pcBand, nmBand, bandFigure } from '../../shared/operatingBands'
 import Tip from '../../components/Tip'
 import SuiteGate from '../../components/SuiteGate'
 import ChartCard from '../../components/ChartCard'
@@ -517,8 +518,13 @@ export default function OwnerDashboard() {
             <div style={kpiLabelStyle}>
               <Tip text="Prorated estimate: gross + overtime + employer SSF, scaled to days elapsed this month. Refines to the exact figure once Payroll Run is finalized. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
             </div>
-            <div style={{ ...kpiValueStyle(24), color: laborPct == null ? 'var(--theme-text2)' : laborPct <= 30 ? 'var(--theme-green-text)' : laborPct <= 37 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : laborPct != null ? `${laborPct.toFixed(1)}%` : '—'}
+            {/* Banded through `lcBand`, not an inline ternary. The thresholds were already the
+                Monthly Owner Report's 30/37 — but written out a second time here, and WITHOUT the
+                ✓/△/▲ mark, so this tile carried its verdict in hue alone while the Food Cost tile
+                immediately to its left carried `fcBand`'s mark. Same for Prime Cost and Net Margin
+                below (S660). */}
+            <div style={{ ...kpiValueStyle(24), color: lcBand(laborPct).color }} title={laborPct != null ? lcBand(laborPct).label : undefined}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : bandFigure(laborPct, lcBand).text}
             </div>
             <div style={kpiSubtextStyle}>Target 25-30% · estimate →</div>
           </div>
@@ -527,8 +533,8 @@ export default function OwnerDashboard() {
             <div style={kpiLabelStyle}>
               <Tip text="Food Cost % + Labor Cost % — the two controllable costs combined, the number operators actually benchmark against. Industry standard: 60-65% of revenue." width={280}>Prime Cost % (MTD)</Tip>
             </div>
-            <div style={{ ...kpiValueStyle(24), color: primeCostPct == null ? 'var(--theme-text2)' : primeCostPct <= 60 ? 'var(--theme-green-text)' : primeCostPct <= 65 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : primeCostPct != null ? `${primeCostPct.toFixed(1)}%` : '—'}
+            <div style={{ ...kpiValueStyle(24), color: pcBand(primeCostPct).color }} title={primeCostPct != null ? pcBand(primeCostPct).label : undefined}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : bandFigure(primeCostPct, pcBand).text}
             </div>
             {/* Prime and True Net Margin both CONTAIN the prorated labour estimate, and both used
                 to present themselves as exact — only the Labor card said "Estimate", and only in
@@ -546,8 +552,12 @@ export default function OwnerDashboard() {
             <div style={kpiLabelStyle}>
               <Tip text="Revenue minus food cost, labor cost, and overheads, as a % of revenue. This is what the business actually keeps." width={260}>True Net Margin % (MTD)</Tip>
             </div>
-            <div style={{ ...kpiValueStyle(24), color: !canOverheads || netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 20 ? 'var(--theme-green-text)' : netMarginPct >= 10 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
+            {/* `canOverheads` gates the FIGURE, not just its colour: without Overheads this is not
+                a margin at all, so it must stay unbanded and unmarked rather than being painted a
+                verdict on a number the page cannot compute. */}
+            <div style={{ ...kpiValueStyle(24), color: canOverheads ? nmBand(netMarginPct).color : 'var(--theme-text2)' }}
+              title={canOverheads && netMarginPct != null ? nmBand(netMarginPct).label : undefined}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : bandFigure(netMarginPct, nmBand).text}
             </div>
             <div style={kpiSubtextStyle}>
               {!canOverheads ? 'Requires Overheads (Pro) →' : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered' : 'After food, labour & overhead · includes labour estimate'}

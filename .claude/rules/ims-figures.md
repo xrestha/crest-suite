@@ -34,6 +34,16 @@ paths:
   literally and the colour carries the verdict. `measured: false` is how a caller says "no closing
   count yet"; every figure is then an artefact of the gap, not a finding.
 - **Food cost % banding.** `fcBand(pct, settings)` reads the client's `fc_warning_pct`/`fc_critical_pct` and returns the `*-text` contrast variants. Five files each carried their own hardcoded `≤30 : ≤38 : else` copy, which disagreed with the very filter pills the user had just clicked. **`MenuEngineering.js`'s `FC_CUTOFF = 35` classification is deliberately NOT routed through this** — `computeMenuEngineeringSection.js` mirrors `classify()` verbatim for the frozen Monthly Owner Report, so changing it would silently desync a snapshot from the live page it must agree with. Its colours use `fcBand`; its maths does not.
+- **The other three operating ratios band in `src/shared/operatingBands.js`, not here (S660).**
+  `lcBand` (labour, 30/37), `pcBand` (prime, 60/65), `nmBand` (net margin, **inverted**, ≥20/≥10)
+  and the `descendingBand` primitive. They are deliberately a separate module: labour is an HR
+  figure and prime cost is food + labour, so neither belongs in a file named for IMS — and their
+  middle step is `accent-ink`, not `fcBand`'s amber, because the four owner-altitude metrics read
+  as one set (amber is spoken for by HR's status ladder; see `hr-payroll.md`). The Monthly Owner
+  Report bands **food** cost through `descendingBand` with `fcThresholds()`'s numbers for exactly
+  that reason. Reach for `bandFigure(pct, bander)` rather than `bander(pct).color`: it appends the
+  ✓/△/▲ to the number, which is what stops a call site taking the colour and dropping the shape —
+  the Owner Dashboard's hand-written copy of the labour band had done precisely that.
 
 **A settings field with no reader is worse than no field — and "it is wired now" is a claim worth
 re-checking.** `variance_flag_pct` shipped with a hint saying the Variance Report used it while the

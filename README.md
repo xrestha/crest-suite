@@ -159,6 +159,78 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S660 — 2026-08-31 — HR agrees with itself about what amber means, and labour cost stops being banded three ways
+
+Service worker `crest-v176`. No migration. `/impeccable colorize hr module`. One new shared module
+(`src/shared/operatingBands.js`) plus its test file, and one new shared status vocabulary
+(`HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` in `payrollConstants.js`). **No figure changed** —
+this pass changed only what colours mean. Help, both module guides and DESIGN.md updated.
+
+**The mechanical layer was already clean.** The detector reports three findings on the HR module and
+all three are the documented categorical leave-type hexes in `leaveConstants.js`, which are meant to
+stay. So this was a strategic pass: not "which literal is off-palette" but "where does the same
+colour mean two things, and where does grey hide a state that needs acting on".
+
+**1 — One status vocabulary across five approval queues and the employee app.** HR runs five
+parallel approvals — Leave, Overtime, TADA, Advances, Shift Swaps — and Self-Service shows the same
+rows back to the person who filed them. Measured across those surfaces, "Pending" was **brass** on
+Leave and Overtime, **grey** on TADA, and **amber** on the HR Dashboard and in the employee app.
+Grey is this module's withdrawn/void colour, so TADA's live queue — the one column actually waiting
+on a decision — read as the most inert thing on the page. Worse, amber meant "waiting on you" on the
+dashboard and "already approved" on TADA: one hue, opposite verdicts, on two screens a manager works
+in one sitting. The HR module guide had *already written the rule down* ("Amber means a queue is
+waiting") and TADA contradicted it.
+
+Self-Service was the one internally-consistent surface, so its ladder was adopted rather than a new
+one invented, and now lives in `payrollConstants.js` where all six surfaces read it:
+
+| | meaning |
+|---|---|
+| **amber** | open — something is still required of someone |
+| **brass** | decided, but the money has not moved (TADA approved-unpaid; FinalSettlement already used it exactly this way) |
+| **green** | closed, good |
+| **red** | closed, refused |
+| **grey** | closed, void — withdrawn or cancelled |
+
+TADA's two open states (awaiting a decision vs awaiting payment) are separated by the amber/brass
+split and the label, not by a sixth hue.
+
+**2 — Labour Cost % was banded three ways, and only one carried the shape marks.** `MonthlyOwnerReport`
+banded at 30/37 with ✓/△/▲; `OwnerDashboard` restated the same 30/37 inline **without the marks** —
+sitting immediately beside a Food Cost tile that had `fcBand`'s; and Roster's Labor Forecast used a
+lone `costPct > 35 ? amber : inherit`: a different threshold, no healthy state, no too-high state,
+and hue-only on a row that already spent amber on a staffing shortfall and a holiday tag. So a day
+at 34% read fine on the roster board and "watch" on both dashboards, and a day at 45% read the same
+as one at 36%. Prime Cost % and Net Margin % had the identical report-has-marks /
+dashboard-does-not split.
+
+`src/shared/operatingBands.js` is now the one definition — `lcBand` (30/37), `pcBand` (60/65),
+`nmBand` (inverted, ≥20/≥10), the `descendingBand` primitive the owner report bands food cost with,
+and `bandFigure()`, which **appends the mark to the number** so a call site cannot take the colour
+and drop the shape. That is exactly how the Owner Dashboard's copy lost it. Asserted by
+`operatingBands.test.js` (18 tests). The middle step stays `accent-ink` rather than `fcBand`'s
+amber — those four metrics read as one set on the owner surfaces, and amber is spoken for by finding 1.
+
+**3 — Categories gave amber back.** Public-vs-optional holidays and holiday-vs-weekday OT rates were
+amber-vs-grey, so a gazetted holiday wore the same colour as an overdue approval. Both are brass now
+— and Holiday Calendar's table finally agrees with its own two stat cards, which had been rendering
+those same two categories in brass and purple all along. The freed amber immediately did real work:
+a demand-forecast holiday badge (Roster's Labor Forecast and IMS Demand Forecast) is **brass when a
+multiplier is set** and **amber `⚠` when it is not** — two states that had been painted identically
+while only one of them needed anyone to act.
+
+**Measured, both presets.** Every band colour clears 5.79:1 as text on the card; every badge label
+clears 4.59:1 on its own tint. Worst band pair is ΔE 9.2 under protanopia (floor 8), and the marks
+carry it regardless. Brass vs purple as the holiday categories: ΔE 92–131.
+
+**Files:** new `src/shared/operatingBands.js` + test; `payrollConstants.js` (`STATUS_TINT.amber`,
+`HR_REQUEST_STATUS`, `TADA_REQUEST_STATUS`); `leaveConstants.js`, `Overtime.jsx`, `TadaClaims.jsx`,
+`SwapRequestsPanel.jsx`, `SelfServiceHome.jsx`, `HrDashboard.jsx`, `HolidayCalendar.jsx`,
+`Roster.jsx`, `OwnerDashboard.jsx`, `MonthlyOwnerReport.jsx`, `DemandForecast.js`; `Help.js`,
+`hrGuideData.js`, `suiteGuideData.js`, `DESIGN.md`, `service-worker.js`.
+
+---
+
 ### S659 — 2026-08-31 — the login page gets a light source, and IMS stops painting three thresholds as one
 
 Service worker `crest-v175`. No migration. `/impeccable colorize login page` then

@@ -392,6 +392,49 @@ make it silently while fixing something else.**
 
 **The Signal Polarity Rule.** A signal colour is a **verdict**, so a figure compared against a target must be coloured by whether it moved in the *good* direction for that metric — not by which side of the line it landed on. Green and red are never neutral to an owner reading between services; there is no reading of a red ▼ that isn't "something went wrong here". The Daily Purchases vs Sales tooltip coloured both actual rows ▲ green / ▼ red literally, and reported live (S634) it painted `Purchases : NPR 2,295` against a NPR 3,112 target red — for running *under* the spending pace, which is the outcome you wanted. **Shape is the fact, colour is the verdict**: keep ▲/▼ literal so it agrees with the line the reader can see, and invert the colour per metric (`GOOD_DIRECTION` — sales `+1`, purchases `-1`). Applies wherever a cost sits beside a revenue: variance, budget-vs-actual, wastage, food-cost trend. Two consequences: shape stops being redundant with colour (a green ▼ and a red ▼ now both exist), so the magnitude must appear as **text** — the gap as a percentage of target, not a second currency figure — and any legend explaining the two series has to say the polarity out loud, because nothing else on screen admits that they are coloured by opposite conventions.
 
+**The One Signal Meaning Rule** (added 2026-08-31/S660, from the HR module). A signal colour may
+carry exactly one meaning inside a module, and a *category* never takes a signal colour at all.
+HR runs five parallel approval queues — Leave, Overtime, TADA, Advances, Shift Swaps — plus an
+employee-facing app showing the *same rows* to the person who filed them. Measured across those
+surfaces, "Pending" was **brass** on Leave and Overtime, **grey** on TADA (grey being the module's
+own withdrawn/void colour, so the one queue actually waiting on a decision read as the most inert
+thing on screen), and **amber** on the HR Dashboard and in the employee app. Amber meanwhile meant
+"waiting on you" on the dashboard and "already approved" on TADA — one hue, opposite verdicts, on
+two screens a manager works in one sitting. `HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` in
+`payrollConstants.js` are now the one vocabulary all six surfaces read: **amber = open, brass =
+decided but the money has not moved, green = closed good, red = refused, grey = void.**
+
+Three things generalise beyond HR. **The already-consistent surface is the spec** — Self-Service
+was internally correct, so it was adopted rather than a new scheme invented; a colour decision made
+twice is a colour decision that will be made a third way. **Where two open states share a page**
+(TADA's pending vs approved-unpaid) the difference goes in the LABEL and the brass/amber split, not
+a sixth hue — an extra colour to separate two states of one verdict is how a five-token palette
+becomes eight. And **a category that borrowed a signal colour must give it back**: public-vs-optional
+holidays and holiday-vs-weekday OT rates were amber-vs-grey, so a gazetted holiday wore the same
+colour as an overdue approval; both are brass now, and Holiday Calendar's table finally agrees with
+its own two stat cards, which had been brass and purple for those same two categories all along. The
+freed amber immediately did real work: a demand-forecast holiday badge is brass when a multiplier is
+set and amber `⚠` when it is not — two states that had been painted identically while only one of
+them needed anyone to act.
+
+**A banded ratio has one definition, marks included** (added 2026-08-31/S660). `fcBand()` settled
+food cost in S551/S608; the other three operating ratios had not been settled and drifted the same
+way. Labour Cost % was banded **three** ways at once: the Monthly Owner Report at 30/37 with
+✓/△/▲, the Owner Dashboard restating the same 30/37 inline **without the marks** — beside a Food
+Cost tile that had them — and the Roster board's Labor Forecast at a lone `costPct > 35 ? amber`,
+a different threshold, no healthy state, no too-high state, and the same amber the row already
+spent on a staffing shortfall and a holiday tag. Prime Cost % and Net Margin % had the identical
+report-has-marks / dashboard-does-not split. `src/shared/operatingBands.js` (`lcBand`, `pcBand`,
+`nmBand`, `descendingBand`, `bandFigure`) is the one definition, asserted by a test.
+
+Two properties are load-bearing. **The middle step is `accent-ink`, not `fcBand`'s amber** — those
+four metrics read as one set on the owner surfaces, and amber is spoken for by the rule above. And
+**`bandFigure()` appends the mark to the number**, so a call site cannot take the colour and drop
+the shape, which is exactly how the Owner Dashboard's copy lost it. Measured on both presets, every
+band colour clears 5.79:1 as text on the card and the worst band pair sits at ΔE 9.2 under
+protanopia — above the floor, and the marks carry it regardless.
+
+
 **The Accent-Text Pairing Rule.** Any element with an accent-colored background uses the theme's paired `accent-text` token for its foreground (`#0f1117` in the Dark preset, `#241a08` in Light), never a hardcoded white or black. Because the accent color changes per theme preset, a hardcoded foreground color will silently fail contrast on at least one of the two presets. This is a real bug the codebase shipped and fixed once already (a floating action button used a hardcoded white label) - treat it as the standing rule, not a one-off fix. A 2026-07-12 audit found the same class of bug in four more shared components (`SearchableSelect.js`, `BsCalendarPicker.js`, `PremiumGate.js`, `ProtectedRoute.js`) that had been hardcoding the Dark preset's exact hex values since before the theme system existed - fixed to read theme tokens, so they now actually respect every preset instead of only working by coincidence on Dark. **It recurred once more** (2026-08-05, `AdminClients.js`'s "Annual" badge, hardcoded `#000` on `var(--theme-accent)`) - fixed to `var(--theme-accent-text)`. Given it's now shipped-and-fixed twice, treat any hardcoded `#000`/`#fff`/`white`/`black` sitting next to `var(--theme-accent)` as a near-certain instance of this bug on sight, not just a style-review nit.
 
 ## Typography

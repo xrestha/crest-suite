@@ -500,7 +500,9 @@ export default function HrDashboard() {
                       </td>
                       <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green-text)', fontSize: 12 }}>{e.ot_hours}h</td>
                       <td>
-                        <span className={e.ot_type === 'holiday' ? 'badge-amber' : 'badge-gray'} style={{ fontSize: 10 }}>
+                        {/* Which multiplier applies is a CATEGORY, not a status — brass, so amber can keep
+                            meaning "this is waiting on you" in the Status column beside it. */}
+                        <span className={e.ot_type === 'holiday' ? 'badge-yellow' : 'badge-gray'} style={{ fontSize: 10 }}>
                           {e.ot_type === 'holiday' ? 'Holiday 2×' : 'Weekday 1.5×'}
                         </span>
                       </td>

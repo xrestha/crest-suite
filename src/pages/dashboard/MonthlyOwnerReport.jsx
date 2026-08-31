@@ -6,6 +6,7 @@ import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useSettings } from '../../context/SettingsContext'
 import { fcThresholds } from '../../shared/imsFormulas'
+import { descendingBand, lcBand, pcBand, nmBand } from '../../shared/operatingBands'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 import SuiteGate from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
@@ -262,25 +263,22 @@ export default function MonthlyOwnerReport() {
   // saw the same month banded two different ways on two pages. Labour, prime cost and net margin
   // keep their literal bands: those have no Settings equivalent, and the accent-ink middle step
   // is this table's own four-metric language, deliberately not fcBand's amber (see above).
-  const GOOD = { color: 'var(--theme-green-text)', mark: '✓' }
-  const WATCH = { color: 'var(--theme-accent-ink)', mark: '△' }
-  const HIGH = { color: 'var(--theme-red-text)', mark: '▲' }
+  // S660: labour, prime and net margin now come from `operatingBands.js`, which the Owner
+  // Dashboard and the Roster board read too. The thresholds and the ✓/△/▲ vocabulary were correct
+  // here and this page was the model — but they were LITERALS here, restated inline on the Owner
+  // Dashboard without the marks, and contradicted outright by the Roster board's own `>35 ? amber`.
+  // Food cost keeps this page's accent-ink middle step (see the note above) while still reading
+  // the client's own `fcThresholds()`, via the same shared primitive.
   const NONE = { color: undefined, mark: '', title: undefined }
-  const mkBand = (good, watch, band) => v => {
-    if (v == null) return NONE
-    if (v <= good) return { ...GOOD, title: `Healthy (≤${good}%${band})` }
-    if (v <= watch) return { ...WATCH, title: `Watch (${good}–${watch}%${band})` }
-    return { ...HIGH, title: `Needs attention (>${watch}%${band})` }
-  }
+  const asTitled = b => ({ color: b.color, mark: b.mark, title: b.key === 'none' ? undefined : b.label })
   const fcT = fcThresholds(settings)
-  const fcBandOf = mkBand(fcT.warn, fcT.critical, ' — your Settings thresholds')
-  const lcBandOf = mkBand(30, 37, '')
-  const pcBandOf = mkBand(60, 65, '')
-  // Net margin is the one inverted band on this page: higher is better.
-  const nmBandOf = v => (!canOverheads || v == null) ? NONE
-    : v >= 20 ? { ...GOOD, title: 'Healthy (≥20%)' }
-    : v >= 10 ? { ...WATCH, title: 'Watch (10–20%)' }
-    : { ...HIGH, title: 'Needs attention (<10%)' }
+  const fcBandOf = v => v == null ? NONE
+    : asTitled(descendingBand(v, fcT.warn, fcT.critical, ' — your Settings thresholds'))
+  const lcBandOf = v => v == null ? NONE : asTitled(lcBand(v))
+  const pcBandOf = v => v == null ? NONE : asTitled(pcBand(v))
+  // Net margin is the one inverted band on this page: higher is better. Still gated on
+  // `canOverheads` — without it there is no margin to band.
+  const nmBandOf = v => (!canOverheads || v == null) ? NONE : asTitled(nmBand(v))
   return (
     <div>
       <div className="page-header owner-report-page-header">

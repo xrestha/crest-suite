@@ -296,3 +296,40 @@ filtered out — fetch the unknown ids once, tracked in a ref so an id that reso
 not re-query forever. Related: `rejected_by_target` and `cancelled` never reach a manager, so
 `admin_decided_by` is null on both; name the coworker who declined or the requester who withdrew
 instead of printing a dash.
+
+### One status vocabulary, and one labour band (S660)
+
+**`HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` in `payrollConstants.js` are the module's only status
+colours.** HR runs five parallel approval queues — Leave, Overtime, TADA, Advances, Shift Swaps —
+and Self-Service shows the *same rows* back to the employee who filed them. Before this, "Pending"
+was brass on Leave and Overtime, **grey** on TADA (grey being this module's withdrawn/void colour,
+so the one queue actually awaiting a decision read as the most inert thing on screen), and amber on
+the HR Dashboard and in the employee app. Amber simultaneously meant "waiting on you" on the
+dashboard and "already approved" on TADA — one hue, opposite verdicts, on two screens a manager
+works in one sitting. The HR module guide had already written the rule down and TADA contradicted it.
+
+    amber = open, something is still required of someone
+    brass = decided, but the money has not moved   (badge-yellow)
+    green = closed, good
+    red   = closed, refused
+    grey  = closed, void — withdrawn or cancelled
+
+Self-Service was the one internally consistent surface, so its ladder was adopted rather than a new
+one invented. Three things follow. **Take `.badge` for a chip and `.tint` for a hand-drawn one** —
+the tint already carries S549's fill-vs-text split (base token for the 10%/20% bg/border, `*-text`
+variant for the label). **A ladder with a payment step extends the map, it does not restate it** —
+`TADA_REQUEST_STATUS` spreads the base and overrides only `approved` (brass: owed, not yet paid) and
+`paid` (green). **Two open states on one page separate by LABEL and the amber/brass split, never a
+sixth hue** — an extra colour to distinguish two states of one verdict is how a five-token palette
+becomes eight.
+
+Corollary that costs nothing to hold: **a category never takes a signal colour.** Public-vs-optional
+holidays and holiday-vs-weekday OT rates were amber-vs-grey, so a gazetted holiday wore the same
+colour as an overdue approval. Both are brass; Holiday Calendar's table now also agrees with its own
+two stat cards, which had been brass and purple for those same categories all along.
+
+**Labour Cost % bands through `lcBand` in `src/shared/operatingBands.js`** — never a local
+threshold. Roster's Labor Forecast had `costPct > 35 ? amber : inherit`: a different threshold from
+both dashboards, no healthy state, no too-high state, and hue-only on a row already spending amber
+on a staffing shortfall and a holiday tag. Use `bandFigure(pct, lcBand, { decimals: 0 })` and render
+its `text`, which carries the ✓/△/▲ — see `ims-figures.md` for why the marks are not optional.

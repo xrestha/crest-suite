@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { errorText } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
+import { HR_REQUEST_STATUS } from '../payrollConstants'
 
 // The Shift Swaps tab: the queue of swaps waiting on a manager's sign-off, and the permanent
 // record of every one already decided.
@@ -28,8 +29,12 @@ import Tip from '../../../components/Tip'
 // move the target's row onto the requester's old identity, then bring the requester's row back
 // onto the target's old identity. Each step only ever collides with itself.
 const HISTORY_STATUSES = ['approved', 'rejected_by_target', 'rejected_by_admin', 'cancelled']
+// Same ladder as every other HR queue and as the employee's own view of this swap — the labels
+// below, not a second hue, are what separate "declined by coworker" from "rejected".
 const STATUS_BADGE = {
-  approved: 'badge-green', rejected_by_target: 'badge-red', rejected_by_admin: 'badge-red', cancelled: 'badge-gray',
+  approved: HR_REQUEST_STATUS.approved.badge,
+  rejected_by_target: HR_REQUEST_STATUS.rejected.badge, rejected_by_admin: HR_REQUEST_STATUS.rejected.badge,
+  cancelled: HR_REQUEST_STATUS.cancelled.badge,
 }
 const STATUS_LABEL = {
   approved: 'Approved', rejected_by_target: 'Declined by coworker', rejected_by_admin: 'Rejected', cancelled: 'Cancelled',

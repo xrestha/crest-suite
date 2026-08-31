@@ -16,6 +16,7 @@ import { todayView, nextShift, pendingSwapsForMe } from './todayView'
 import { employeeErrorText } from './employeeError'
 import { useStaffAppManifest } from './useStaffApp'
 import { rememberedStaffClient } from './staffClient'
+import { HR_REQUEST_STATUS, TADA_REQUEST_STATUS } from '../payrollConstants'
 import './selfService.css'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -74,11 +75,20 @@ const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)',
   padding: '11px 12px', fontSize: 16, color: 'var(--theme-text1)', outline: 'none', width: '100%', fontFamily: 'inherit',
 }
-const STATUS_BADGE = { pending: 'badge-amber', approved: 'badge-green', rejected: 'badge-red', cancelled: 'badge-gray' }
-const TADA_STATUS_BADGE = { pending: 'badge-amber', approved: 'badge-yellow', rejected: 'badge-red', paid: 'badge-green' }
+// These three were the module's only internally-consistent status vocabulary, so S660 adopted them
+// as HR_REQUEST_STATUS / TADA_REQUEST_STATUS for the manager pages too — and they now READ from
+// there rather than keeping a fourth copy. An employee and their manager look at the same request;
+// they used to see two different colours for it.
+const badgeMap = m => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.badge]))
+const STATUS_BADGE = badgeMap(HR_REQUEST_STATUS)
+const TADA_STATUS_BADGE = badgeMap(TADA_REQUEST_STATUS)
+// A swap has two pending states (waiting on the coworker, then on the manager) and two rejected
+// ones; both pairs share their verdict, and the LABEL beside the chip is what separates them.
 const SWAP_STATUS_BADGE = {
-  pending_target: 'badge-amber', pending_admin: 'badge-amber', approved: 'badge-green',
-  rejected_by_target: 'badge-red', rejected_by_admin: 'badge-red', cancelled: 'badge-gray',
+  pending_target: HR_REQUEST_STATUS.pending.badge, pending_admin: HR_REQUEST_STATUS.pending.badge,
+  approved: HR_REQUEST_STATUS.approved.badge,
+  rejected_by_target: HR_REQUEST_STATUS.rejected.badge, rejected_by_admin: HR_REQUEST_STATUS.rejected.badge,
+  cancelled: HR_REQUEST_STATUS.cancelled.badge,
 }
 
 function emptyTadaForm() {

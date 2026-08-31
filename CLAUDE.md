@@ -111,7 +111,9 @@ See `.claude/rules/ims-figures.md` (auto-loads when editing `imsFormulas.js`, st
 IMS report/summary modules). Headline rules: import `COGS_FORMULA` wherever the formula is PRINTED
 and `computeUsed()` wherever it is COMPUTED (staff meals are in COGS); food-cost banding goes through
 `fcBand(pct, settings)` and variance banding through `varianceBand(pct, value, settings)`, never a
-hardcoded copy; a settings field with no reader is worse than no field — and "it is wired now" is a
+hardcoded copy — and the OTHER three operating ratios (labour, prime, net margin) band in
+`src/shared/operatingBands.js`, whose `bandFigure()` is what stops a call site taking the colour and
+dropping the ✓/△/▲; a settings field with no reader is worse than no field — and "it is wired now" is a
 claim worth re-checking, since `variance_flag_pct` was declared wired while reaching one of its three
 consumers; Stock Count's Summary holds two tables built from different loops that must be kept tying
 out; a variance-style report must default to a CLOSED period, and must STATE which period it is on
@@ -307,7 +309,7 @@ and one declared it inside a component body. Import it; never retype it.
 
 ### HR payroll engine
 
-See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; monthly pay prorates for `join_date`; `payrollData.js` helpers must be robust to what Finalize changes (S565 Stale-badge trap); `hr_tada_claims` has no period columns. As of S570: SSF needs enrolment flag **and** `ssf_no` (three call sites must agree); approved OT supersedes attendance OT per `bs_day` (so OT queries must select `bs_day`); Payroll Run blocks Finalize on a stale draft. As of S600: Final Settlement WRITES (draft-first, then advances/employee/login, then finalize) and `computePayslip` prorates for `end_date` as well as `join_date` — so any query feeding it must select `end_date`; gratuity is one shared module whose SSF offset counts only the months contributions were actually made. As of S628: four payslip-history reads that narrow in JS are now paged (`fetchSsfStartMap` included — a truncated one shrinks a leaver's gratuity offset), and the per-employee slicing both payroll pages do goes through `groupByEmployee`/`sliceFor`, whose slice-equivalence is asserted by a test because it feeds a path that WRITES payslips.
+See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; monthly pay prorates for `join_date`; `payrollData.js` helpers must be robust to what Finalize changes (S565 Stale-badge trap); `hr_tada_claims` has no period columns. As of S570: SSF needs enrolment flag **and** `ssf_no` (three call sites must agree); approved OT supersedes attendance OT per `bs_day` (so OT queries must select `bs_day`); Payroll Run blocks Finalize on a stale draft. As of S600: Final Settlement WRITES (draft-first, then advances/employee/login, then finalize) and `computePayslip` prorates for `end_date` as well as `join_date` — so any query feeding it must select `end_date`; gratuity is one shared module whose SSF offset counts only the months contributions were actually made. As of S628: four payslip-history reads that narrow in JS are now paged (`fetchSsfStartMap` included — a truncated one shrinks a leaver's gratuity offset), and the per-employee slicing both payroll pages do goes through `groupByEmployee`/`sliceFor`, whose slice-equivalence is asserted by a test because it feeds a path that WRITES payslips. As of S660: HR's five approval queues and the employee app share ONE status vocabulary (`HR_REQUEST_STATUS`/`TADA_REQUEST_STATUS` in `payrollConstants.js`) — amber means open, brass means decided-but-unpaid, and a category never takes a signal colour; Labour Cost % bands through `lcBand`, never a local threshold.
 
 ### Page-revisit caching (`src/shared/sessionDataCache.js`, added S460)
 

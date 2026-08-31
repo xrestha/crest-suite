@@ -1,6 +1,7 @@
 // Leave Management constants & helpers — Crest HR (S116).
 // See memory: nepal-payroll-law (Labour Act 2074 leave entitlements).
 import { adToBs } from '../../../utils/bsCalendar'
+import { HR_REQUEST_STATUS } from '../payrollConstants'
 
 // Nepal Labour Act 2074 default leave types. Seeded once per client (when they
 // have none). annual_quota 0 = uncapped (e.g. unpaid). Maternity/paternity are
@@ -34,11 +35,15 @@ export const DAY_TYPES = [
 // Status ladder, not a categorical palette — and its only consumer (LeaveManagement's Status
 // column) renders `color` as TEXT, never as a fill, so these carry the contrast-safe `*-text`
 // variants. Unlike DEFAULT_LEAVE_TYPES above, nothing here is written to the DB.
+//
+// The colours are HR_REQUEST_STATUS's, not a local set: Pending used to be brass here and on
+// Overtime, grey on TADA and amber in the employee app — three colours for one word across pages a
+// manager reads in one sitting (S660). Only the `.tint.color` is taken, since this ladder is text.
 export const LEAVE_STATUSES = {
-  pending:   { label: 'Pending',   color: 'var(--theme-accent-ink)' },
-  approved:  { label: 'Approved',  color: 'var(--theme-green-text)' },
-  rejected:  { label: 'Rejected',  color: 'var(--theme-red-text)' },
-  cancelled: { label: 'Cancelled', color: 'var(--theme-text2)' },
+  pending:   { label: 'Pending',   color: HR_REQUEST_STATUS.pending.tint.color },
+  approved:  { label: 'Approved',  color: HR_REQUEST_STATUS.approved.tint.color },
+  rejected:  { label: 'Rejected',  color: HR_REQUEST_STATUS.rejected.tint.color },
+  cancelled: { label: 'Cancelled', color: HR_REQUEST_STATUS.cancelled.tint.color },
 }
 
 // Every day in an inclusive AD date range — no day is assumed off automatically (there's no

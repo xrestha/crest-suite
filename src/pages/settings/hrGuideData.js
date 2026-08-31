@@ -57,7 +57,7 @@ export const HR_GUIDE_GROUPS = [
           'SSF deposit deadline = 15th of the month after the payroll month, from the last finalized run.',
         ],
         gotchas: [
-          'Amber means "a queue is waiting", red is reserved for genuinely overdue — a pending approval pile is normal operations, not an error state.',
+          'Amber means "a queue is waiting", red is reserved for genuinely overdue — a pending approval pile is normal operations, not an error state. This is now the rule across all five HR queues and the employee app, not just this page: amber = open, brass = decided but the money has not moved, green = closed and good, red = refused, grey = withdrawn.',
           'The SSF card only alarms when the deposit amount is above zero — a client with no SSF-enrolled staff never sees a red "missed deadline" for NPR 0.',
         ],
         connections: 'Counts come from the same shared approval-count hook the client Dashboard\'s HR column uses, so the two can never disagree. Cards link to Leave, Overtime, TADA Claims, Roster (swaps), Advances and Payroll Run.',
@@ -441,7 +441,7 @@ export const HR_GUIDE_GROUPS = [
         ],
         fields: [
           { label: 'Per-vehicle km rates', desc: 'Three fixed vehicle categories — 2-wheeler, 4-wheeler, EV — each with its own NPR/km rate set in the settings modal. Only the rates are editable, not the categories.' },
-          { label: 'Status ladder', desc: 'pending → approved (money owed, not yet disbursed — amber) → paid. It is a ladder, not tags: a claim never skips approved.' },
+          { label: 'Status ladder', desc: 'pending (amber — waiting on a decision) → approved (brass — money owed, not yet disbursed) → paid (green). It is a ladder, not tags: a claim never skips approved. Pending used to be grey here and approved amber, which read as the opposite of every other HR queue.' },
         ],
         formulas: [
           'Travel line = km × the vehicle type\'s rate; claim total = travel lines + other expense lines.',

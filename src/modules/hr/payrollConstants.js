@@ -14,6 +14,7 @@ export const STATUS_TINT = {
   green:  { color: 'var(--theme-green)',  bg: 'color-mix(in srgb, var(--theme-green) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-green) 20%, transparent)' },
   accent: { color: 'var(--theme-accent)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' },
   red:    { color: 'var(--theme-red)',    bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)',    border: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' },
+  amber:  { color: 'var(--theme-amber)',  bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-amber) 20%, transparent)' },
   gray:   { color: 'var(--theme-text2)',  bg: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-text2) 20%, transparent)' },
 }
 
@@ -25,6 +26,49 @@ export const EMPLOYEE_STATUS_COLORS = {
   resigned:   STATUS_TINT.red,
   terminated: STATUS_TINT.red,
   inactive:   STATUS_TINT.gray,
+}
+
+// ── The one HR request-status vocabulary ──────────────────────────────────────
+//
+// HR runs five parallel approval workflows — Leave, Overtime, TADA, Advances and Shift Swaps —
+// and until S660 each page picked its own colours for the same four words. Measured across the
+// module, "Pending" was brass on Leave and Overtime, GREY on TADA (grey being this module's
+// void/cancelled colour, so the one queue actually waiting on a decision read as the most inert
+// thing on the page), and amber on the HR Dashboard's queue counts and in the employee app. Worse,
+// amber meant "waiting on you" on the dashboard and "already approved" on TADA — the same hue
+// carrying opposite verdicts on two screens a manager works in one sitting.
+//
+// The employee-facing Self-Service app was already internally consistent, so its ladder is the one
+// adopted here rather than a new invention; the two halves of HR now agree about the same row.
+//
+//   amber  = OPEN. Something is still required of someone. (Matches HrDashboard's own stated rule:
+//            "`alert` means needs attention, which in this design system is AMBER — red means
+//            overdue or failed.")
+//   brass  = DECIDED, but the money has not moved. Committed liability, not a caution.
+//            (`badge-yellow` is the accent tint. FinalSettlement already used it exactly this way
+//            for "Finalized" vs green "Paid".)
+//   green  = CLOSED, good.
+//   red    = CLOSED, refused.
+//   grey   = CLOSED, void — withdrawn or cancelled, never a live state.
+//
+// `badge` is the class; `tint` is for the few call sites that draw the chip themselves from a
+// bg/border pair (Overtime's table) rather than using the class.
+export const HR_REQUEST_STATUS = {
+  pending:   { label: 'Pending',   badge: 'badge-amber', tint: { ...STATUS_TINT.amber,  color: 'var(--theme-amber-text)' } },
+  approved:  { label: 'Approved',  badge: 'badge-green', tint: { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' } },
+  rejected:  { label: 'Rejected',  badge: 'badge-red',   tint: { ...STATUS_TINT.red,    color: 'var(--theme-red-text)' } },
+  cancelled: { label: 'Cancelled', badge: 'badge-gray',  tint: { ...STATUS_TINT.gray,   color: 'var(--theme-text2)' } },
+}
+
+// TADA is the one ladder with a payment step after the decision, so `approved` there does NOT mean
+// finished — it means the claim is owed and the cash has not left. That is the brass slot above,
+// and `paid` takes the green that `approved` holds on every other queue. Keeping this derived from
+// HR_REQUEST_STATUS rather than written out again is the point: only the two states that genuinely
+// differ are restated.
+export const TADA_REQUEST_STATUS = {
+  ...HR_REQUEST_STATUS,
+  approved: { label: 'Approved', badge: 'badge-yellow', tint: { ...STATUS_TINT.accent, color: 'var(--theme-accent-ink)' } },
+  paid:     { label: 'Paid',     badge: 'badge-green',  tint: { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' } },
 }
 
 // SSF: 11% employee + 20% employer, computed on basic salary capped at NPR 100,000/month.

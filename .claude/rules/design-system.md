@@ -509,3 +509,37 @@ array is extracted more broadly than the `**The X Rule.**` pattern (51 entries a
 named ones), so a naive re-extract silently drops the other 43 — compare and append instead. And
 **verify `colorMeta` against `ThemeContext` by hand while you are there**, because that is the one
 check the staleness hint cannot perform and the S627 finding above is exactly what it misses.
+
+## A signal colour carries one meaning per module, and a category carries none (S660)
+
+Found in HR, where five approval queues and the employee Self-Service app show the same rows.
+"Pending" was **brass** on Leave and Overtime, **grey** on TADA — grey being that module's
+withdrawn/void colour, so the one queue actually awaiting a decision read as the most inert thing on
+the page — and **amber** on the HR Dashboard and in the employee app. Amber meanwhile meant "waiting
+on you" on the dashboard and "already approved" on TADA: one hue, opposite verdicts, on two screens
+a manager works in one sitting.
+
+Three transferable moves came out of the fix (full rule in `DESIGN.md` → **The One Signal Meaning
+Rule**; the HR map itself is in `hr-payroll.md`):
+
+- **The already-consistent surface is the spec.** Self-Service was internally correct, so its ladder
+  was adopted rather than a sixth scheme invented. A colour decision made twice will be made a third
+  way.
+- **Two open states on one page separate by LABEL plus a shade of the same verdict**, never a new
+  hue. TADA's pending-vs-approved-unpaid is amber-vs-brass; adding a colour to split two states of
+  one verdict is how a five-token palette becomes eight.
+- **A category that borrowed a signal colour gives it back.** Public-vs-optional holidays and
+  holiday-vs-weekday OT rates were amber-vs-grey — a gazetted holiday in the same colour as an
+  overdue approval. Both are brass now (`badge-yellow`, the accent-tinted categorical tag), which
+  also made Holiday Calendar's table agree with its own two stat cards for the first time. The freed
+  amber immediately did real work: a demand-forecast holiday badge is brass when a multiplier is set
+  and amber `⚠` when it is not — two states that had been painted identically while only one of them
+  needed anyone to act.
+
+**A banded ratio has one definition, marks included.** `fcBand()` settled food cost in S551/S608 and
+the other three operating ratios were left to drift the same way — Labour Cost % was banded three
+ways at once (30/37 with marks in the Monthly Owner Report, the same 30/37 inline and mark-less on
+the Owner Dashboard, and `costPct > 35 ? amber` on the Roster board). `src/shared/operatingBands.js`
+is the one definition. **Reach for `bandFigure(pct, bander)` and render its `text`**, never
+`bander(pct).color`: the helper appends the ✓/△/▲, which is the mechanism that stops a call site
+taking the colour and dropping the shape — exactly how the dashboard's copy lost it.

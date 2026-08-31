@@ -18,6 +18,7 @@ import ShiftPicker from './ShiftPicker'
 import SuggestPopover from './SuggestPopover'
 import ShiftSettingsPanel from './ShiftSettingsPanel'
 import SwapRequestsPanel from './SwapRequestsPanel'
+import { lcBand, bandFigure, LABOR_WARN, LABOR_CRITICAL } from '../../../shared/operatingBands'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1331,7 +1332,9 @@ export default function Roster() {
                   <th style={{ textAlign: 'right' }}>Scheduled Hours</th>
                   <th style={{ textAlign: 'right' }}>Forecast Revenue</th>
                   <th style={{ textAlign: 'right' }}>Planned Labor Cost</th>
-                  <th style={{ textAlign: 'right' }}>Cost %</th>
+                  <th style={{ textAlign: 'right' }}>
+                    <Tip text={`Planned labor cost as a share of forecast revenue. Healthy ≤${LABOR_WARN}% ✓ · watch ${LABOR_WARN}–${LABOR_CRITICAL}% △ · too high >${LABOR_CRITICAL}% ▲ — the same band the Owner Dashboard uses.`} width={260}>Cost %</Tip>
+                  </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Ceil(forecasted covers ÷ Covers/Staff target)" width={200}>Recommended Staff</Tip>
                   </th>
@@ -1349,20 +1352,31 @@ export default function Roster() {
                         {weekday} {r.col.bsDay} {BS_MONTHS_SHORT[r.col.bsMonth - 1]}
                         {r.holiday && (
                           r.holiday.multiplier != null
+                            /* Both cases were amber. They are not the same state: an ADJUSTED
+                               holiday is information (brass, the category tone), an UNADJUSTED one
+                               is a forecast this row silently under-reports until someone sets a
+                               multiplier — which is precisely what amber means everywhere else in
+                               HR. Colour now separates them; it used to hide the difference. */
                             ? <Tip text={`Forecast Revenue/Covers on this row are adjusted ×${r.holiday.multiplier} for ${r.holiday.name} (set in Holiday Calendar).`} width={260}>
-                                <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>{r.holiday.name} ×{r.holiday.multiplier}</span>
+                                <span className="badge-yellow" style={{ fontSize: 9, marginLeft: 6 }}>{r.holiday.name} ×{r.holiday.multiplier}</span>
                               </Tip>
                             : <Tip text={`${r.holiday.name} — no demand multiplier set in Holiday Calendar, so Forecast Revenue/Covers on this row are NOT adjusted for it.`} width={260}>
-                                <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>{r.holiday.name}</span>
+                                <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>⚠ {r.holiday.name}</span>
                               </Tip>
                         )}
                       </td>
                       <td style={{ textAlign: 'right' }}>{r.scheduledHrs > 0 ? `${r.scheduledHrs}h` : '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.forecastRevenue != null ? fmtNpr(r.forecastRevenue) : '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.plannedCost > 0 ? fmtNpr(r.plannedCost) : '—'}</td>
-                      <td style={{ textAlign: 'right', color: r.costPct != null && r.costPct > 35 ? 'var(--theme-amber-text)' : 'inherit' }}>
-                        {r.costPct != null ? `${r.costPct.toFixed(0)}%` : '—'}
-                      </td>
+                      {/* The same band the Owner Dashboard and the Monthly Owner Report put on
+                          this metric. It used to be a lone `> 35 ? amber` here: a different
+                          threshold from both of those, no healthy state, no "too high" state, and
+                          carried by hue alone on a row that already spends amber on a staffing
+                          shortfall and a holiday tag. */}
+                      {(() => {
+                        const f = bandFigure(r.costPct, lcBand, { decimals: 0 })
+                        return <td style={{ textAlign: 'right', ...f.style }} title={f.title}>{f.text}</td>
+                      })()}
                       <td style={{ textAlign: 'right' }}>{r.recommended ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.scheduledCount}</td>
                       <td>

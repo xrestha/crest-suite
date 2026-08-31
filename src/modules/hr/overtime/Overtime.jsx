@@ -6,16 +6,16 @@ import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
-import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STATUS_TINT } from '../payrollConstants'
+import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, HR_REQUEST_STATUS } from '../payrollConstants'
 
-// STATUS_TINT's `color` is the base signal token — right for the 10%/20% fill and border it also
-// carries, but this badge prints the status as 11px/700 TEXT on that tint, so the label takes the
-// contrast-safe `*-text` variant instead (S549's fill-vs-text split). Overridden here rather than
-// in payrollConstants so the shared tint keeps working as a fill everywhere else it's used.
+// One ladder for all five HR approval queues (S660) — Pending was brass here and on Leave, grey on
+// TADA and amber on the dashboard and in the employee app, for the same word. `tint` already
+// carries the S549 fill-vs-text split: the 10%/20% bg/border stay the base signal token, while
+// `color` is the contrast-safe `*-text` variant this badge needs for its 11px/700 label.
 const STATUS_COLORS = {
-  pending:  { ...STATUS_TINT.accent, color: 'var(--theme-accent-ink)' },
-  approved: { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' },
-  rejected: { ...STATUS_TINT.red,    color: 'var(--theme-red-text)' },
+  pending:  HR_REQUEST_STATUS.pending.tint,
+  approved: HR_REQUEST_STATUS.approved.tint,
+  rejected: HR_REQUEST_STATUS.rejected.tint,
 }
 
 const lbl = {
@@ -339,7 +339,9 @@ export default function Overtime() {
                         {(() => { const a = otAmt(e, emp); return a !== null ? `NPR ${a.toLocaleString('en-NP')}` : <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>—</span> })()}
                       </td>
                       <td>
-                        <span className={e.ot_type === 'holiday' ? 'badge-amber' : 'badge-gray'} style={{ fontSize: 11 }}>
+                        {/* Which multiplier applies is a CATEGORY, not a status — brass, so amber can keep
+                            meaning "this is waiting on you" in the Status column beside it. */}
+                        <span className={e.ot_type === 'holiday' ? 'badge-yellow' : 'badge-gray'} style={{ fontSize: 11 }}>
                           {e.ot_type === 'holiday' ? 'Holiday 2×' : 'Weekday 1.5×'}
                         </span>
                       </td>

@@ -10,6 +10,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import TadaSettingsModal from './TadaSettingsModal'
 import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount } from './tadaShared'
+import { TADA_REQUEST_STATUS } from '../payrollConstants'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtD = iso => {
@@ -24,11 +25,14 @@ const inp = {
 }
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
 
-// Status ladder, not categorical tags: pending = awaiting a decision (neutral), approved =
-// in progress, money owed but not yet disbursed (amber, the real caution colour), rejected,
-// paid. `badge-yellow` is the accent-tinted CATEGORICAL tag (see Advances' Advance/Loan type
-// column) and deliberately isn't used for any of these.
-const STATUS_BADGE = { pending: 'badge-gray', approved: 'badge-amber', rejected: 'badge-red', paid: 'badge-green' }
+// Status ladder, shared with every other HR queue and with the employee app — see
+// TADA_REQUEST_STATUS. This page used to invert the module's two loudest signals: Pending was GREY
+// (the colour that means cancelled/void everywhere else, so the one column actually waiting on a
+// decision read as the most inert thing on screen) and Approved was AMBER (the colour that means
+// "waiting on you" on the HR Dashboard and in the employee's own copy of this same claim). Approved
+// here is brass — decided, but the cash has not left — and paid takes green.
+const STATUS_BADGE = Object.fromEntries(
+  Object.entries(TADA_REQUEST_STATUS).map(([k, v]) => [k, v.badge]))
 function emptyAddForm() {
   const today = formatAd(new Date())
   return {
