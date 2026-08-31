@@ -2,164 +2,90 @@
 name: Crest Suite
 description: Cost intelligence and HR for Nepal's F&B operators, in one instrument
 colors:
+  # The DEFAULT (Dark) preset, which is what `:root` in Layout.css paints before ThemeContext
+  # hydrates. The product ships exactly two presets — Dark and Light — plus a `system` mode that
+  # resolves to one of them. Where a token's Light value differs materially it is named in the
+  # Colors prose below. Never resolve one of these to a literal in a component; read the token.
   aged-brass: "#c9a84c"
   aged-brass-hover: "#d4b96a"
+  accent-text: "#0f1117"
+  accent-ink: "#c9a84c"
   ink-bg: "#0f1117"
   ink-card: "#181c27"
+  ink-sidebar: "#0e1117"
   ink-border: "#2a2f3d"
   ink-border-lt: "#1e2330"
-  ink-sidebar: "#0e1117"
+  input-bg: "#0f1117"
+  table-hover: "rgba(255,255,255,0.03)"
+  focus-ring: "rgba(201,168,76,0.15)"
+  focus-outline: "#c9a84c"
   text-primary: "#e8e0d0"
-  # Corrected 2026-08-29: these two were still carrying their PRE-S620 assignment. S620 swapped
-  # the roles in ThemeContext (`text2: '#9ca3af', text3: '#8a92a3'`) and updated the Colors prose
-  # below, but never this block — so the normative token layer disagreed with both the code it
-  # describes and its own prose, and the sidecar's colorMeta inherited the inversion. Fog is the
-  # secondary tier (6.70:1), Slate the quietest (5.45:1); read the Neutral section for why the
-  # swap was hierarchy rather than accessibility, which is exactly why no contrast audit caught it.
   text-secondary: "#9ca3af"
   text-tertiary: "#8a92a3"
   signal-success: "#34d399"
   signal-danger: "#f87171"
   signal-warning: "#fbbf24"
   signal-categorical: "#a78bfa"
-  # The paired foregrounds and the two state tints, added to the frontmatter 2026-08-19 (S594).
-  # They were missing here for as long as they have existed in ThemeContext, which meant two of
-  # this file's own Named Rules — the Accent-Text Pairing Rule, and the whole "Signal colors used
-  # as TEXT" section — pointed at tokens the normative layer never declared, and the sidecar's
-  # colorMeta carried five entries keyed to nothing.
-  #
-  # READ THE VALUES BELOW WITH ONE CAVEAT: the frontmatter carries the DEFAULT (Dark) preset, and
-  # on a dark preset every *-text variant deliberately resolves to its own base colour —
-  # applyTheme does `t.greenText || t.green`. So `signal-success` and `signal-success-text` being
-  # the same hex here is correct and is not a redundancy to clean up. They diverge only on the
-  # five light presets, which is the entire reason the variants exist (measured: 23 of 25
-  # signal/surface combinations failed AA before they did). Same for accent-ink, which equals the
-  # accent on Dark and is a darkened hue-match on Light. Never resolve one of these to a literal
-  # from this file — read the token.
-  accent-text: "#0f1117"          # foreground ON an accent fill. Per-preset; #241a08 on Light
-  accent-ink: "#c9a84c"           # the accent used AS text (a link, an active nav item)
+  # On a dark preset every *-text variant resolves to its own base colour (`applyTheme` does
+  # `t.greenText || t.green`), so these repeating is correct and not a redundancy to clean up.
+  # They diverge only on Light, which is the entire reason the variants exist.
   signal-success-text: "#34d399"
   signal-danger-text: "#f87171"
   signal-warning-text: "#fbbf24"
   signal-categorical-text: "#a78bfa"
-  # Two state tints and the input ground. focus-ring is a TINT and its alpha must stay low — it
-  # doubles as the active-state background for rail buttons, module tabs and sidebar links, and
-  # measured alone on Rosé Dawn it composited to 1.15:1, 2.6x below WCAG 2.2's 3:1 focus floor.
-  # focus-outline is the actual keyboard indicator that fixed it (S574): a 2px solid, resolved
-  # per preset as accentInk on light and the accent on dark. A new focusable control pairs the
-  # two; the ring alone is not a focus indicator.
-  focus-ring: "rgba(201,168,76,0.15)"
-  focus-outline: "#c9a84c"
-  input-bg: "#0f1117"
-  table-hover: "rgba(255,255,255,0.03)"
-  # Print-only, documented 2026-07-20, expanded 2026-07-28. Print is a real surface here (stock
-  # count sheets, payslips, purchase bills, KOTs, gate passes, recipe cost cards, POs), but the
-  # palette above is all theme-token driven and none of it survives onto paper — @media print
-  # forces white bg / black-ish text. The letterhead-style print templates (GatePassPrint.jsx,
-  # PurchaseBillPrint.jsx, RecipeCostCardPrint.jsx, PurchaseOrders.js's print block, and their
-  # HR/POS equivalents) share one literal grayscale ramp for ink/rule/label hierarchy instead of
-  # theme tokens — CSS var() still resolves fine in a print stylesheet, but these are print-only
-  # documents that were never meant to shift with the active theme preset (a purchase order
-  # printed on Dark must read identically to one printed on Light). Valid ONLY inside a
-  # print-only component or `.print-only`/`@media print` block; do not use these on-screen.
-  print-ink: "#000000"      # heading text, rule dividers, PurchaseOrders.js's own #111 is the same role
-  print-text: "#333333"     # body copy needing more weight than a label
-  print-label: "#555555"    # secondary meta lines (dates, addresses, PAN/VAT)
-  print-label-lt: "#777777" # field labels, table body secondary text
-  print-notes: "#444444"    # notes/callout box text (PurchaseOrders.js print block)
-  print-muted: "#888888"    # uppercase section eyebrows, footer/index columns
-  print-faint: "#aaaaaa"    # generated-by footers, least emphasis
-  print-rule: "#cccccc"     # table header/footer rule lines
-  print-rule-strong: "#999999" # bordered chips (e.g. status pill outline)
-  print-rule-lt: "#dddddd"  # notes-box border
-  print-rule-xlt: "#eeeeee" # table row divider
-  print-fill: "#f3f3f3"     # table header row background
-  # ImsGuideTab.jsx's buildGuidePrintHtml() (the "Print Guide" export under Admin → Settings →
-  # Guides) is a step further removed than the templates above: it's a fully standalone
-  # `<!doctype html>` string opened in its own print window, with no connection at all to the
-  # React app's stylesheet or :root CSS custom properties — var(--radius-sm) etc. would not
-  # resolve there even inside an on-screen component. Documented 2026-08-05 rather than edited:
-  # its border-radius (3px/4px on .meta chips) and grayscale (#666/#555/#ccc/#f5f5f5/#96700a-as-a
-  # print-safe darkened accent) are a legitimate, structurally-necessary variance from both the
-  # on-screen shape scale and this print ramp, not drift to fix.
-  # On-screen exceptions where a CSS var() token genuinely can't be used, documented 2026-07-28
-  # instead of left as silent drift.
-  chart-tick: "#6b7280"     # Recharts axis tick/label/reference-line fill — var() does not
-                             # resolve inside SVG presentation attributes (see Do's and Don'ts)
-  toggle-knob: "#ffffff"    # the sliding thumb inside a toggle switch (e.g. PurchaseBillModal's
-                             # per-line VAT toggle) — a literal white dot regardless of theme is
-                             # the near-universal toggle convention; it sits on a colored track,
-                             # never directly on the page background, so contrast holds on both
-                             # both presets
-  # GUEST MENU ONLY — the bone-and-pine printed-card palette, scoped to .guest-menu in
-  # src/modules/pos/guestmenu/guestMenu.css. Documented here rather than left as drift, on the
-  # same reasoning as the print ramp above: a deliberate, structurally-necessary variance from
-  # the two presets, not a fourth accent leaking into the product.
-  #
-  # WHY IT IS EXEMPT FROM THE PRESET SYSTEM AT ALL: /pos/menu/:tableId is the one surface a
-  # paying customer sees, and PRODUCT.md already names it the deliberate brand-facing exception.
-  # Reading --theme-* there meant a guest got whichever preset the SCANNING PHONE had saved in
-  # localStorage (an owner or manager device rendered the public menu in whichever preset it had),
-  # falling back
-  # to Crest back-office charcoal for everyone else. A public page cannot inherit a private
-  # staff setting, so this set is fixed and theme-independent by design.
-  #
-  # The two anchors are the client-specified pair and measure 9.17:1 against each other — AAA
-  # both ways. Every value below was measured on guest-paper; the ratios also sit in guestMenu.css.
-  # Pine is RATIONED exactly as Aged Brass is elsewhere (brand, price, category, active chip,
-  # call to action) and body copy is warm ink, so the One Accent Rule holds on this surface too.
-  # Do not reach for any of these from a staff screen.
-  guest-paper: "#F0EDE5"      # card/input ground — the dish is read on this
-  guest-ground: "#E7E3D8"     # page, one step behind the paper so a card can lift off it
-  guest-pine: "#004643"       # the accent: brand, price, category heading, active chip, CTA fill
-  guest-pine-deep: "#00312F"  # pressed/hover state of a pine fill
-  guest-ink: "#1C1B17"        # 14.8:1 — dish names and body-strength text
-  guest-sage: "#4A5C58"       #  6.1:1 — dish descriptions
-  guest-sage-lt: "#566762"    #  4.7:1 on guest-ground (the tighter of the two surfaces; this
-                              #  role lands on both), 5.1:1 on guest-paper — nutrition tags,
-                              #  covers line, table name, smallest meta
-  guest-rule: "#D3CCBC"       # structural hairline; recedes on purpose
-  guest-control: "#4A7A75"    #  4.1:1 — outlines a tappable control, clearing WCAG 1.4.11
-  guest-veg: "#4C7A2E"        #  4.3:1 — veg mark (a market convention, not a palette choice)
-  guest-nonveg: "#A63A2B"     #  5.5:1 — non-veg mark
-  guest-success: "#2F6B2A"    #  5.5:1 — ready to serve
-  guest-warn: "#8A5A17"       #  5.1:1 — allergens; a safety line, so never faint
-  guest-danger: "#A03328"     #  6.0:1 — order dismissed, submit failed
+  # ── Print. None of the palette above survives onto paper (@media print forces white on black),
+  # so the letterhead templates share one literal grayscale ramp for their ink/rule/label
+  # hierarchy. It is a real, reused scale rather than per-file drift, and it has to be declared
+  # here or every print template reads as a page of undocumented literals.
+  print-ink: "#000000"          # headings, rule dividers (PurchaseOrders.js's #111 is this role)
+  print-text: "#333333"         # body copy needing more weight than a label
+  print-notes: "#444444"        # notes/callout box text
+  print-label: "#555555"        # secondary meta lines (dates, addresses, PAN/VAT)
+  print-label-lt: "#777777"     # field labels, table body secondary text
+  print-muted: "#888888"        # uppercase section eyebrows, footer columns
+  print-rule-strong: "#999999"  # bordered chips, e.g. a status pill outline
+  print-faint: "#aaaaaa"        # generated-by footers, least emphasis
+  print-rule: "#cccccc"         # table header/footer rules
+  print-rule-lt: "#dddddd"      # notes-box border
+  print-rule-xlt: "#eeeeee"     # table row divider
+  print-fill: "#f3f3f3"         # table header row background
+  # Recharts axis ticks, labels and reference lines. A literal because var() does not resolve in
+  # an SVG presentation attribute — the same exemption the chart series palette relies on.
+  chart-tick: "#6b7280"
+  # ── The guest menu: bone and pine, the one surface a paying customer sees ────────────────────
+  # A scoped token set, not a preset. `.guest-menu` re-declares the --theme-* properties for its
+  # own subtree, so every shared class the page borrows re-skins from these. Nothing here may be
+  # reached for from a staff screen. See the Colors prose for why it exists at all.
+  guest-paper: "#F0EDE5"
+  guest-ground: "#E7E3D8"
+  guest-pine: "#004643"
+  guest-pine-deep: "#00312F"
+  guest-ink: "#1C1B17"
+  guest-sage: "#4A5C58"
+  guest-sage-lt: "#566762"
+  guest-rule: "#D3CCBC"
+  guest-control: "#4A7A75"
+  guest-veg: "#4C7A2E"
+  guest-nonveg: "#A63A2B"
+  guest-success: "#2F6B2A"
+  guest-warn: "#8A5A17"
+  guest-danger: "#A03328"
 typography:
-  wordmark:
-    fontFamily: "Georgia, serif"
-    fontSize: "16px"
-    fontWeight: 700
-    lineHeight: 1.2
-    letterSpacing: "0.04em"
-  body:
-    fontFamily: "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif"
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.5
-    letterSpacing: "normal"
-  label:
-    fontFamily: "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif"
-    fontSize: "11px"
-    fontWeight: 500
-    lineHeight: 1.4
-    letterSpacing: "0.08em"
-  # The three roles above are the system's semantic anchors. The steps below complete the ramp
-  # the product actually ships (added 2026-07-20) — previously the frontmatter captured only
-  # 16/13/11px while the prose already described a 14-15px title tier and a 16-20px display
-  # tier, so every other real size read as undocumented drift. The named sidebar sizes mirror
-  # the --font-size-* custom properties defined at the top of Layout.css; page-level sizes are
-  # inline. Sizes are a closed set: if a new one is genuinely needed, add it here first.
-  stat-value-lg:
+  # The prose Hierarchy below names the nine roles a designer reasons in. This block is the
+  # COMPLETE ramp, because it is also what tooling checks a literal against — measured across the
+  # source, the scale in use is 9/10/11/12/13/14/15/16/17/18/20/22/24/32 and a size off it is
+  # drift. Documenting only the readable subset is what turns a real tokenised size (the sidebar's
+  # own --font-size-micro, --font-size-chevron) into a false "outside the type ramp" finding.
+  display:
+    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "clamp(24px, 3.4vw, 32px)"
+    fontWeight: 800
+    lineHeight: 1.1
+    letterSpacing: "-0.025em"
+  figure-lg:
     fontSize: "32px"
     fontWeight: 700
-  stat-value:
-    fontSize: "24px"
-    fontWeight: 700
-  numeral:
-    fontSize: "22px"
-    fontWeight: 700
-  page-title:
+  page-heading:
     fontSize: "20px"
     fontWeight: 700
   section-heading:
@@ -167,856 +93,903 @@ typography:
     fontWeight: 700
   rail-icon:
     fontSize: "17px"
-  # Touch text-input only, added 2026-08-22 for the Crest Staff employee app. This is not a taste
-  # step and must not be used as one: 16px is the threshold below which iOS Safari zooms the
-  # viewport on focus and never zooms back out, so every field an employee types into on a phone
-  # has to sit at or above it. The alternative fix — pinning the viewport with
-  # maximum-scale/user-scalable=no — blocks pinch-zoom for everyone and is an accessibility
-  # failure, which is why it is deliberately not used. Scoped to .self-service in
-  # selfService.css; the admin app's 13px `body` step is still correct on a mouse-driven screen.
   touch-input:
     fontSize: "16px"
     fontWeight: 400
   card-heading:
     fontSize: "15px"
     fontWeight: 600
-  title:
+  subtitle:
     fontSize: "14px"
     fontWeight: 600
-  meta:
-    fontSize: "12px"
-    fontWeight: 400
   micro:
     fontSize: "10px"
     fontWeight: 700
     letterSpacing: "0.08em"
   chevron:
     fontSize: "9px"
-  # Print-only, documented 2026-08-05 alongside the print-color-ramp note below — same reasoning:
-  # a thermal-printer receipt needs fixed-width columns to stay aligned, which Poppins can't give.
-  # Used in creditNoteHtml.js, posOrderPrintHtml.js, parkingSlipHtml.js, PosShifts.jsx's print
-  # block — never inside the live app UI.
-  print-monospace:
-    fontFamily: "'Courier New', monospace"
+  wordmark:
+    fontFamily: "Georgia, serif"
+    fontSize: "16px"
+    fontWeight: 700
+    lineHeight: 1.2
+    letterSpacing: "0.04em"
+  title:
+    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "22px"
+    fontWeight: 600
+    lineHeight: 1.3
+  figure:
+    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "24px"
+    fontWeight: 600
+    lineHeight: 1.15
+    fontFeature: "tabular-nums"
+  body:
+    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.5
+  label:
+    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "12px"
+    fontWeight: 500
+    letterSpacing: "0.04em"
+  column-header:
+    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "11px"
+    fontWeight: 500
+    letterSpacing: "0.08em"
+  mono:
+    fontFamily: "source-code-pro, Menlo, Monaco, Consolas, Courier New, monospace"
+    fontSize: "11px"
+    lineHeight: 1.4
 rounded:
-  # Micro-elements only — legend swatches, colour dots, thin progress-bar fills — added
-  # 2026-08-13 (S551). It is a real step the scale was missing rather than a licence to go
-  # tighter: the 2026-07-12 step-up rounded every micro-element up to sm along with everything
-  # else, and 38 sites across IMS had quietly reverted to a 2-4px literal because an 8px corner
-  # on a 10x10 swatch is a circle. Anything with a label, a border and padding is sm or larger.
   xs: "4px"
   sm: "8px"
   md: "12px"
   lg: "18px"
   xl: "24px"
-  # Fully-rounded. Documented 2026-07-20 — the sidebar module switcher's pill signature (see
-  # Navigation) already shipped this shape, it just wasn't in the scale. Reserved for that
-  # switcher and for shapes whose radius is simply half their own height (the 6px scrollbar
-  # thumb). Not a general-purpose step: see the Tabs note on why .tab-btn stays at md.
   full: "999px"
 spacing:
   xs: "4px"
   sm: "8px"
   md: "16px"
   lg: "24px"
-# Motion tokens are NOT in this frontmatter, and their absence is deliberate rather than an
-# omission: the DESIGN.md schema accepts only colors / typography / rounded / spacing /
-# components at the top level, so a `motion:` group here is invalid and gets dropped by any
-# DESIGN.md-aware tool that validates the file. They lived here from 2026-08-11 until the
-# 2026-08-12 refresh, which relocated them to `.impeccable/design.json`'s extensions.motion —
-# the layer built to hold exactly what this schema can't. The Motion section below is still the
-# normative prose; nothing about the token values changed, only where the machine-readable copy
-# lives. Same reason shadows and breakpoints are not up here either.
+  xl: "32px"
 components:
   button-primary:
     backgroundColor: "{colors.aged-brass}"
-    textColor: "{colors.ink-bg}"
+    textColor: "{colors.accent-text}"
     rounded: "{rounded.md}"
     padding: "8px 16px"
+    typography: "{typography.body}"
   button-primary-hover:
     backgroundColor: "{colors.aged-brass-hover}"
+    textColor: "{colors.accent-text}"
   button-ghost:
-    backgroundColor: "{colors.ink-bg}"
+    backgroundColor: "{colors.input-bg}"
     textColor: "{colors.text-primary}"
     rounded: "{rounded.md}"
     padding: "8px 16px"
   button-danger:
-    backgroundColor: "{colors.ink-bg}"
-    textColor: "{colors.signal-danger}"
+    backgroundColor: "{colors.input-bg}"
+    textColor: "{colors.signal-danger-text}"
     rounded: "{rounded.md}"
     padding: "8px 16px"
-  card:
-    backgroundColor: "{colors.ink-card}"
-    rounded: "{rounded.lg}"
-    padding: "{spacing.lg}"
-  # One step tighter than .card's 24px. Not drift: a stat tile is a label-plus-numeral pair with
-  # no internal composition to breathe around, and a row of them reads better slightly denser.
-  stat-card:
-    backgroundColor: "{colors.ink-card}"
-    rounded: "{rounded.lg}"
-    padding: "20px"
-  # Badges carry an alpha tint of their own signal color as background, which this schema's
-  # 8-prop set cannot express as a token ref — the literal per-variant values live in the
-  # sidecar's component snippets. textColor is the honest half of the pair.
   badge:
     textColor: "{colors.text-secondary}"
     rounded: "{rounded.sm}"
     padding: "2px 8px"
+  card:
+    backgroundColor: "{colors.ink-card}"
+    textColor: "{colors.text-primary}"
+    rounded: "{rounded.lg}"
+    padding: "24px"
+  stat-card:
+    backgroundColor: "{colors.ink-card}"
+    textColor: "{colors.text-primary}"
+    rounded: "{rounded.lg}"
+    padding: "20px"
   input:
-    backgroundColor: "{colors.ink-bg}"
+    backgroundColor: "{colors.input-bg}"
+    textColor: "{colors.text-primary}"
+    rounded: "{rounded.md}"
+    padding: "9px 12px"
+  select:
+    backgroundColor: "{colors.input-bg}"
     textColor: "{colors.text-primary}"
     rounded: "{rounded.md}"
     padding: "8px 12px"
-  tab-btn:
+  tab-pill:
     backgroundColor: "{colors.ink-card}"
     textColor: "{colors.text-secondary}"
     rounded: "{rounded.md}"
     padding: "4px 12px"
-  tab-btn-active:
-    textColor: "{colors.aged-brass}"
-  # The failed-action message (S658). No fill and no border on purpose — it sits under a form the
-  # reader is still looking at, and a panel there reads as a second section rather than as a
-  # consequence of the click, so the only tokens it carries are the two text tiers. The pairing is
-  # the point: the sentence at the body step in red-text (6.15:1 dark / 6.47:1 light) over the
-  # quoted `code · message` at the meta step in the quietest neutral (5.45:1) — findable, and not
-  # mistakable for the message.
-  action-error-text:
-    textColor: "{colors.signal-danger-text}"
-    fontSize: "{typography.body.fontSize}"
-  action-error-detail:
-    textColor: "{colors.text-tertiary}"
-    fontSize: "{typography.meta.fontSize}"
+  tab-pill-active:
+    backgroundColor: "{colors.focus-ring}"
+    textColor: "{colors.accent-ink}"
+    rounded: "{rounded.md}"
+    padding: "4px 12px"
+  period-scope:
+    backgroundColor: "{colors.focus-ring}"
+    textColor: "{colors.accent-ink}"
+    rounded: "{rounded.full}"
+    padding: "4px 10px"
+  nav-link:
+    textColor: "{colors.text-secondary}"
+    rounded: "{rounded.md}"
+    padding: "4px 12px"
+  nav-link-active:
+    backgroundColor: "{colors.focus-ring}"
+    textColor: "{colors.accent-ink}"
+    rounded: "{rounded.md}"
+    padding: "4px 12px"
 ---
 
 # Design System: Crest Suite
 
 ## Overview
 
-**Creative North Star: "The Back-of-House Command Center"**
+**Creative North Star: "The Lit Instrument"**
 
-Crest Suite is operated, not visited. An owner is checking margin between service rushes; an accountant is reconciling TDS figures before a filing deadline. Neither has time for the interface to perform. The system is built around **legibility under pressure**: dense tables that stay scannable, a single restrained accent, and status communicated through color and position rather than decoration.
+Crest Suite is an instrument a restaurant is run from, and it is lit by exactly one source. Aged
+Brass is that light: it falls on the thing you are working in — the active route, the live table,
+the period this report covers, the button that commits — and everything else sits in an unlit,
+even charcoal. Depth here is not a stack of shadows; it is the difference between what the light
+reaches and what it does not. On the signed-out pages that metaphor is literal (three warm radial
+lights over an otherwise dead ground); inside the app it is disciplined down to a single accent
+that never spends itself twice on one screen.
 
-This deliberately rejects two things named in PRODUCT.md: the dated, hierarchy-less density of legacy Nepali ERP software, and the templated purple-gradient look of generic AI-generated SaaS. The system solves density the same problem legacy ERPs were trying to solve, but with real typographic hierarchy, a single accent used sparingly, and consistent spacing instead of cramming.
+The instrument half is the constraint on all of it. Two people read the same figure: an owner
+deciding between services, and an accountant who has to file on it. So a number is never dressed
+up, never approximated for effect, and never coloured unless the colour is a verdict the product
+is prepared to defend. Signal green, red and amber are reserved for that verdict and spent
+nowhere else — a category, a rank, a delivery partner and a close type are facts, not judgments,
+and they take brass or grey. Where a verdict is shown it carries a shape mark as well as a hue,
+because roughly one man in twelve cannot separate the hues and every one of these screens gets
+printed in monochrome eventually.
 
-The product runs across **two** interchangeable theme presets — **Dark** (charcoal-and-gold, the shipped default) and **Light** (warm white, the same design in a light scheme). Eight others (Tokyo Night, Dracula, Nord, Catppuccin, Latte, Rosé Dawn, Solarized, Bright) were retired on 2026-08-24/S607: every theme is an independent surface that must be re-verified for every signal colour, badge and focus style, and a measured audit found 30 contrast failures concentrated in the four dark presets nobody had checked. Dark and Light both measured clean, and they are the pair `system` mode resolves between for the employee app — so they are also the two that cannot be removed. Both are built from the same token set. Every rule below is written against the default preset's values, but the *relationships* between tokens (accent used sparingly, borders and lightness-shift carrying hierarchy, alpha-blended status tints) hold across both, even where the literal shape values (radius, shadow) no longer do — see Elevation.
+Density is deliberate and non-negotiable: 13px body, 11px column headers, tight table rows, 32px
+page padding, no reading measure anywhere. This is a working surface, not a document. The softness
+that keeps it from reading as legacy Nepali ERP comes from the radius scale (8/12/18/24px) and the
+warm neutral ground, not from whitespace the data cannot spare.
 
 **Key Characteristics:**
-- Depth comes primarily from a one-step background-lightness shift, with a per-preset shadow as a secondary cue (added 2026-07-12 — see Elevation; previously flat-only, see that section's history note)
-- One accent color per screen, applied sparingly (buttons, active states, focus rings) never as a wash — no exceptions remain (Bright carried the only scoped one; retired with that preset in S607)
-- A serif wordmark is the one deliberate ornamental choice in an otherwise all-sans, all-functional system
-- Status (paid / pending / overdue, veg / non-veg, stock health) is color-coded consistently: green success, red danger, amber caution, gray neutral, with a rationed 4th color (purple) reserved for a genuine fourth or fifth category when green/red/amber aren't enough
+
+- One accent (Aged Brass), one rationed fourth-category hue (violet), four semantic signals.
+- Two presets — Dark (default) and Light — plus a `system` mode that follows the device.
+- Colour is never the only carrier: a band ships a `✓`/`△`/`▲` mark, a state ships a word.
+- Flat, tinted chips over solid fills; a card's elevation is uniform policy, not a highlight.
+- Five surfaces, one system: the app shell, the signed-out pages, the Crest Staff phone app, the
+  guest menu and paper. They do not share a density or, in two cases, a palette — and they must
+  not leak into each other.
+- Every value is a `--theme-*` custom property, so the whole product re-tones from one place.
 
 ## Colors
 
-The palette is a dark charcoal neutral scale with a single warm accent; every other color is a semantic signal, not a decorative choice.
+Warm metal on cold ink. The palette is one brass accent over a near-neutral charcoal (Dark) or
+warm white (Light), with four semantic signals held in reserve.
 
 ### Primary
-- **Aged Brass** (#c9a84c): The one accent. Primary buttons, active tab/nav states, focus rings (at low alpha), links, and any "this is the interactive, on-brand element" signal. Used on a small minority of any given screen; its rarity is what makes it read as intentional rather than default-theme blue.
+
+- **Aged Brass** (`#c9a84c` Dark / `#b07d2b` Light): the product's only brand colour. It marks the
+  active route, the live/occupied state, the primary action, a categorical tag and the period
+  chip. Hover steps to `#d4b96a` / `#946720`.
+- **Brass Ink** (`accent-ink`, `#c9a84c` Dark / `#7a561e` Light): the accent used **as text** — a
+  link, an active nav item, a `.stat-value.gold`, a `.btn-linklike` in a table cell. On Light the
+  base accent measured 4.45:1 as an active nav label: below AA, and *less* legible than the
+  inactive items around it, which inverts the one signal that state exists to send.
+- **Brass on Brass** (`accent-text`, `#0f1117` Dark / `#241a08` Light): the foreground that sits
+  **on** an accent fill. Not interchangeable with `accent-ink` — this one pairs with a filled
+  surface, that one is type on a normal ground.
+
+### Secondary
+
+- **Violet** (`#a78bfa` Dark / `#7c3aed` Light): the rationed fourth category, for the cases where
+  green, red and amber are all spoken for and a fourth is genuinely needed — an "Updated" audit
+  row beside Added and Deleted, the KOT station chip, the loyalty surfaces. It is not a second
+  brand colour and never appears beside brass as a peer.
 
 ### Neutral
-- **Ink** (#0f1117): App background and input fields.
-- **Ink Card** (#181c27): Cards, stat tiles, table containers - one step lighter than the page so surfaces read as raised without a shadow.
-- **Ink Border** (#2a2f3d): Structural borders (card edges, table header rule).
-- **Ink Border Light** (#1e2330): Secondary/internal borders (table row dividers, input borders) - quieter than the structural border.
-- **Ink Sidebar** (#0e1117): Sidebar rail, theme-matched to background.
-- **Parchment Text** (#e8e0d0): Primary text - warm off-white, not pure white.
-- **Fog Text** (#9ca3af): Secondary text - labels, metadata, table headers. 6.70:1 on the card.
-- **Slate Text** (#8a92a3): Tertiary text - the quietest tier, timestamps and disabled-adjacent copy. 5.45:1.
 
-These two **swapped roles in S620**, and the swap is the whole fix: the values were always in
-the palette, just assigned the wrong way round, so every "quietest tier" hint was rendering
-*louder* than every secondary label on the dark preset. Light was ordered correctly the whole
-time (7.33 > 5.76), which is why nothing looked wrong. Both tiers cleared AA before and after —
-this was hierarchy, not accessibility, which is exactly why no contrast audit had caught it.
+- **Ink** (`#0f1117` Dark / `#f6f3ef` Light): the page ground, and also the input well — a field
+  is a recess in the card, not a raised object on it.
+- **Card** (`#181c27` Dark / `#ffffff` Light): every surface that holds content. One tone lifted
+  off the page on Dark; a distinct warm-white plane on Light.
+- **Sidebar** (`#0e1117` Dark / `#ece6dd` Light): one step *darker* than the page on Dark, so the
+  shell recedes behind the work rather than framing it.
+- **Border** (`#2a2f3d` / `#ddd6cf`) is structural — card edges, the table header rule, input
+  outlines. **Border Light** (`#1e2330` / `#ece6df`) is internal — row dividers, ghost button
+  edges. They are not interchangeable (see Shapes).
+- **Parchment** (`text1`, `#e8e0d0` / `#1c1917`): every figure, every table cell, every value.
+- **Fog** (`text2`, `#9ca3af` / `#5c554e`): the secondary tier — labels, column headers,
+  subtitles, `badge-gray`'s foreground. Measured 6.70:1 on the Dark card.
+- **Slate** (`text3`, `#8a92a3` / `#6b655e`): the quietest tier — placeholders, stat labels,
+  micro-captions, the empty state. Measured 5.45:1 on the Dark card.
+
+  The ladder is parchment > fog > slate. Both lower tiers clear AA, so the ordering is *hierarchy*
+  rather than accessibility — which is exactly why an inversion between them once survived every
+  contrast audit unnoticed, with each quietest-tier hint outranking every secondary label.
 
 ### Signal colors
-- **Success Green** (#34d399): Paid, approved, healthy stock, positive variance.
-- **Danger Red** (#f87171): Overdue, rejected, negative variance, destructive actions.
-- **Warning Amber** (#fbbf24): Pending, low stock, needs-attention.
-- **Categorical Purple** (#a78bfa): A rationed 4th/5th categorical color for when green/red/amber genuinely aren't enough (e.g. Staff Meals as a distinct expense category, a sub-recipe tab underline). Not a general-purpose accent - reach for it only when a page needs one more distinct hue than the semantic three provide.
-- **Roster shift-type swatches** (`Roster.jsx`'s `DEFAULT_SHIFTS`, seeded into the per-client-customizable `hr_shift_types` table) are a deliberate exception to the token system entirely, not an extension of it - six fixed hex swatches (`#3B82F6`/`#F59E0B`/`#8B5CF6`/`#64748B`/`#10B981`/`#EC4899`/`#6B7280`) so a roster board's color-coding stays legible and consistent regardless of which of the ten theme presets is active, the same reasoning `FoodBeverageSplit.jsx`'s categorical fallback rotation already uses. Admin can further customize these per client via Shift Settings, so they were never meant to track the theme anyway. (A second, drifted copy of this same palette in `shared/constants/shiftTypes.js` was found unused - zero real imports anywhere in the codebase - and deleted 2026-08-05 rather than reconciled.)
 
-### Signal colors used as TEXT — the `*-text` variants (added 2026-08-12/S549)
+Four hues, each with a paired `*-text` variant. The base token is a **fill** (chart series, badge
+tint, border, dot, a floor-tile strip); the `*-text` variant is **type**. On Dark they resolve to
+the same value; on Light they diverge, and that divergence is the entire reason the pair exists.
 
-A signal color does two different jobs and, on a light preset, one value cannot do both. It **fills** things (chart series, badge tints, borders, status dots) and it **is text** (a badge's label, a KPI figure, a variance number). On a dark preset one value serves both, because a bright green on a near-black card clears AA easily. On a light preset it does not: measured against their own surfaces, **23 of the 25 signal-color/preset combinations across the five light presets failed AA** — Latte's amber at 2.15:1, Rosé Dawn's at 1.87:1, its accent at 2.37:1, and the subscription badge on Latte at 1.58:1.
+- **Green** (fill `#34d399`; text `#137538` on Light): finished, and finished right.
+- **Red** (fill `#f87171`; text `#8f2440` on Light): wrong, and it costs money or breaks a rule.
+- **Amber** (fill `#fbbf24`; text `#a85200` on Light): open — something is still required of
+  someone, right now.
+- **Violet** (fill `#a78bfa`; text `#7c3aed` on Light): the rationed category, as above.
 
-So each light preset additionally declares a darkened, hue-preserving text variant, clearing 4.5:1 against that preset's worst surface (its own sidebar). Dark presets declare none — `applyTheme` falls back to the base color, so a dark preset resolves `--theme-green-text` to `--theme-green` exactly:
+Two more colour-shaped tokens. `focus-ring` (`rgba(201,168,76,0.15)`) is a **tint** that doubles as
+the active-state background for nav links, module tabs and rail buttons, so its alpha must stay
+low — measured alone it composited to 1.15:1, 2.6x below WCAG 2.2's 3:1 floor for a focus
+indicator. `focus-outline` is the solid 2px indicator that actually satisfies that floor. A new
+focusable control pairs the two; the ring alone is not a focus indicator.
 
-- `--theme-green-text` · `--theme-red-text` · `--theme-amber-text` · `--theme-purple-text`
-- `--theme-accent-ink` — the accent used **as** text.
+### The guest menu — a scoped palette, not a preset
 
-**`--theme-accent-ink` is not `--theme-accent-text`, and the two are easy to confuse.** `accent-text` is the foreground that sits **on** an accent-colored fill (the Accent-Text Pairing Rule below). `accent-ink` is the accent itself used as text on a normal surface — a link, an active nav item, a plan label.
+The QR menu is the only surface in the product a paying customer ever sees, and it is the one
+deliberate brand-facing exception in the system: **bone and pine**, a printed menu card rather than
+a back-office instrument. It had to stop reading the global tokens for two reasons, and the second
+is the sharp one — the theme is read from `localStorage` *before* the per-surface default applies,
+so a phone that had ever opened the admin app rendered a restaurant's public menu in whatever
+preset that staff member had picked. A restaurant's customer-facing surface was inheriting a
+private staff setting.
 
-**The rule: if the color is text, use the `*-text` variant; if it fills, use the base token.** `.badge-green`/`-red`/`-amber`/`-purple`/`-yellow` in `Layout.css` already do this, so anything using those classes gets it for free — the alpha-tint *fill* stays the base color, only the foreground changes. The palettes themselves were deliberately left untouched: Latte, Rosé Dawn and Solarized are faithful reproductions that people choose *because* they recognise those exact values, and the same tokens paint charts and tints where the lighter value is correct.
-
-The **neutral ramp was corrected in place** rather than given variants, because `text1`/`text2`/`text3` are only ever text — there is no fill use to preserve. `text3` had failed on all five light presets (3.72–4.02:1). The new values keep three distinct tiers (~6.5 / ~5.6 / ~4.6) instead of flattening them all onto the 4.5 floor.
-
-**History (2026-08-13/S550): Rosé Dawn and Solarized were the floor, not Latte** — measured failing signal-colour/surface combinations per preset were Rosé Dawn 10/10, Solarized 10/10, Bright 6/10, Latte 4/10, Warm Light 3/10; worst single measurement `--theme-amber` at **2.05:1** on Rosé Dawn. All four of those presets were retired in S607 and **Light is now the only light preset**, so spot-check colour work there. The finding is kept because it is *why* the `*-text` variants exist: the base signal tokens are tuned for fills, and a light surface exposes that the moment one is used as type.
-
-**It recurred again on 2026-08-19 (S594), in the file the hook could not see.** `ModuleGuideTab.jsx` rendered the entire "Watch out for" list — the highest-value content in a 1,000-line admin reference, and the thing that stops a consultant teaching a client a bug — in `var(--theme-amber)` as 12px body text, i.e. **2.05:1 on Rosé Dawn**, the single worst measurement in this whole section. Its route chip repeated the error twice over: `var(--theme-accent)` as text (should be `accent-ink`) on `rgba(0,0,0,0.15)`, a black wash that is a grey smear over a light preset's white card. The reason it survived is the S521 lesson restated: only `GuidesTab.jsx` was in the changed-file set, so the hook never ran on the component it renders. **A wrapper being new does not put the thing it wraps in scope** — when a critique or audit targets a page, include the components it composes, not just the files git reports.
-
-**Three things the variants must NOT be applied to**, each of which will look like a missed site to a future sweep:
-
-1. **A legend swatch.** It must equal the series it labels. Darkening the `●` while its line stays on the series colour desynchronises them, which is worse than the contrast it fixes. The adjacent label text carries the readable contrast, and the series identity is conveyed by that text — not by the swatch alone.
-2. **Anything a caller passes as a *series* colour.** `StatPill`'s `color` prop drives its dot and is legitimately handed a chart hex; it used to drive the value text too, which made a fill hex into 13px/700 type at about 1.9:1 on a light card. The prop is now split — `color` for the dot, `textColor` for the value.
-3. **A `color:` in a ternary is still a `color:`.** Roughly half the real sites are `fcPct <= 35 ? green : amber : red`, which a property-level regex does not match. A sweep that only catches `color: 'var(--theme-x)'` will report itself complete having found less than half.
-
-For JS consumers, `useTheme()`'s `colors` object resolves the variants with base-colour fallbacks (`colors.greenText`, `colors.accentInk`, …) so they are always defined — the dark presets declare none, and Recharts reads plain values, not CSS variables.
-
-**Never build a multi-series chart palette from the semantic tokens** (restated here because it recurred, 2026-08-13/S550). `--theme-accent` and `--theme-purple` are the *same hex* on Dracula, Catppuccin Mocha and Latte. Owner Dashboard's Cost & Margin trend drew Food Cost and Labor Cost from those two tokens, so on three of ten presets they were one indistinguishable line — on the chart whose entire purpose is telling those two apart. **Those three presets were retired in S607, and the rule survives them on fresh evidence:** measured on the two remaining presets, Dark is clean on all ten signal pairs, but **Light** collapses `red`/`amber` to ΔE 3.1 and `accent`/`red` to ΔE 5.6 under deuteranopia (floor 8). The tokens are five *roles*, not five distinguishable hues — that was always the actual reason. Chart series take fixed literal hex (`var()` does not resolve in SVG presentation attributes anyway); reuse the validated `COST_BREAKDOWN_COLORS` set rather than picking new hues. And prefer **encoding a relationship over adding a hue**: a metric's projection shares its metric's colour and is distinguished by a dash, and a derived total (Prime Cost = Food + Labor) reads as a dashed composite rather than a fifth peer. **Updated 2026-08-24/S608:** both of the concrete measurements this rule has leaned on are now gone — the same-hex presets were retired, and Light's `red`/`amber` collapse was fixed by retuning `redText`/`amberText`. The rule does not depend on either. Semantic tokens change to serve legibility and branding; series separation is a different constraint that nothing checks for them. The dedicated palettes are the answer, and they need measuring too: `CHART_COLORS` had carried a **ΔE 0.4** deuteranopia collision between its blue and violet slots since it was written — `#a78bfa` → `#8b5cf6` and `#fb923c` → `#ea580c` now clear all 28 pairs for deuteranopia and protanopia. Tritanopia is deliberately not chased: separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%.
+`.guest-menu` re-declares the `--theme-*` properties for its own subtree, which wins over
+`applyTheme`'s inline style on `<html>` (specificity only contests declarations on the *same*
+element), so every shared class the page borrows re-skins with no change to `Layout.css` and no
+possible leak into the admin app. Bone (`#F0EDE5`) is the paper the dish is read on and the ground
+sits one step behind it, so a card lifts off the page the way a menu card lifts off a table; pine
+(`#004643`) is rationed to brand, price, category and every call to action, at 9.17:1 against bone
+— AAA in both directions. Body copy is a warm ink, not pine: **the ink does the reading, the colour
+does the pointing**, which is how a printed menu actually works. Veg/non-veg stay green and red
+because that is a market convention rather than a palette choice, retuned to sit on bone. Contrast
+is measured on the **ground**, not the paper — the ground is the tighter of the two surfaces, and
+measuring only the paper is how one role shipped at 4.39:1 reading as if it passed everywhere it
+was checked. One inversion is deliberate and scoped: `--theme-border-lt` is the *stronger* rule
+here, because it is what `.btn-ghost` borders with and every ghost button on this page is a control
+a thumb must find. Do not carry that anywhere else.
 
 ### Named Rules
-**The One Accent Rule.** Aged Brass (or the active preset's own accent) is the only non-semantic color on any screen. If a second "brand" color shows up anywhere outside the rationed purple exception, it's a mistake, not a design choice. **Bright's `ClientDashboard.jsx` KPI badges are the one named, scoped exception** (see Badges / Status Chips) - everywhere else, on every preset including Bright itself, the rule holds as written. A 2026-08-05 audit found a second undocumented accent (an indigo/blue, `#60a5fa`/`#818cf8`) had spread into `AdminClients.js` (module pills, a "Features" button) and `SuiteGate.js` (the Suite-upsell card) - fixed to `var(--theme-accent)`/`var(--theme-focus-ring)`, matching the identical upsell card in `PremiumGate.js` which never had the bug. The same `#60a5fa` turned up a third time the same day, in `AuditLog.js`'s `ACTION_STYLE.UPDATE` (an Added/Updated/Deleted status badge) - fixed to `var(--theme-purple)` rather than `var(--theme-accent)` this time, since this is a genuine 4th-category case (Added and Deleted already claim green/red, and "Updated" doesn't fit amber's caution/pending semantic) - exactly the rationed-purple exception this rule already carves out, not a second violation of it. **It recurred a fourth and fifth time** (S523, found during a full-app `/impeccable layout` pass, not a color audit): `AdminDashboardOverview.jsx`'s IMS/HR/POS module-count pills (KPI card and table rows, both hardcoding `#60a5fa`/`#a78bfa` for IMS/POS) and `HolidayCalendar.jsx`'s "Optional Holidays" stat (`#818cf8`, sitting directly next to "Public Holidays" which already correctly used `var(--theme-accent)`) - both fixed to `var(--theme-accent)`/`var(--theme-purple)` per the same mapping already established in `AdminClients.js`'s module pills (IMS=accent, HR=green, POS=purple). Five occurrences of the identical undocumented-indigo pattern across five files is no longer a one-off - any new categorical badge/pill work should grep for `#60a5fa`, `#818cf8`, and `#a78bfa` specifically before shipping. **A sixth occurrence turned up 2026-08-05 during an `/impeccable colorize` pass on the IMS module**, and it was the inverse of the usual shape: `MenuEngineering.js`'s `Q_HEX` (a hex lookup for the Menu Engineering scatter chart's SVG dot fill, since `var()` can't resolve inside SVG presentation attributes) had `Plowhorse: '#60a5fa'` while that same quadrant's legend/badge color (`QUADRANTS.Plowhorse.color`) was already correctly `var(--theme-purple)` - so the scatter-chart dot for a Plowhorse recipe visually disagreed with its own legend swatch. Fixed by changing the hex to `#a78bfa` (theme-purple's actual value) so the two representations of the same quadrant match. Distinct from the prior five in that this one didn't need a semantic remap (purple was already the intended color); the hex literal had simply drifted to a different blue than the token it was supposed to mirror. **A seventh occurrence, 2026-08-12 (S534), is a sub-shape worth naming separately: a drifted `var()` *fallback*.** `Login.css` wrote `var(--theme-purple, #8b5cf6)` in four places - the token reference is correct, so the rule reads as satisfied at a glance and every audit that greps for bare hex assignments walks straight past it, but `#8b5cf6` is a violet that exists in no preset (`--theme-purple` is `#a78bfa`). A fallback only paints in the window before `ThemeContext` sets the custom property, which is precisely when a wrong value is visible; corrected to `#a78bfa`. When checking a file for color drift, **check the fallback halves of `var()` calls too, not just standalone literals** - and note the fallback is the one place a hex is legitimately expected to appear next to a token, which is exactly why a wrong one survives there.
 
-**A paired token is only correct while it is actually measured.** `--theme-accent-text` was plain `#ffffff` on all five light presets, and on three of them that failed: measured live 2026-08-13 (S551) at **2.84:1 on Rosé Dawn, 3.61:1 on Light and 3.68:1 on Solarized** — i.e. every `.btn-primary` in the product, on those three themes, for as long as they have existed. Fixed by giving those presets a dark hue-matched ink rather than darkening the accent itself, since the accent is a brand value that also serves as a tint, border and dot colour where it was already correct. The same pass found the inverse on the dark side: `--theme-accent-ink` now exists on **Tokyo Night, Dracula and Nord**, because a light accent on a dark card is not automatically safe once that card is tinted with the accent itself (see Tabs). Reach for the token, and then verify the token.
+**The One Accent Rule.** Aged Brass is the only non-semantic colour on any screen. A second
+"brand" hue is a mistake, not a design choice. This has been violated seven times by the same
+undocumented indigo (`#60a5fa` / `#818cf8`), most instructively as a drifted `var()` **fallback** —
+`var(--theme-purple, #8b5cf6)` reads as correct because the token name beside it is correct, and it
+only paints in the instant before hydration, which is precisely when nobody is looking. Check the
+fallback half of a `var()` as carefully as a standalone literal.
 
-**The Chart Palette Rule.** Chart series come from the validated fixed-hex sets (`CHART_COLORS` /
-`VENDOR_SPLIT_COLORS`, `COST_BREAKDOWN_COLORS`), never the semantic tokens — and the sets themselves
-get re-measured whenever a slot moves. As shipped 2026-08-24/S609 the 8-series set is
-`#c9a84c #34d399 #60a5fa #f87171 #8b5cf6 #ea580c #22d3ee #f472b6`, worst pair ΔE 37.9 normal /
-**15.8 deuteranopia / 21.0 protanopia** — all 28 pairs clear. It reached that only by moving two
-slots: blue and violet had sat at **ΔE 0.4** under deuteranopia since the array was written, drawing
-two indistinguishable lines on any chart with five or more series.
+**The Text-vs-Fill Rule.** If the colour is text, use the `*-text` variant; if it fills, use the
+base token. The `.badge-*` classes already do this, so anything using them gets it free — the
+alpha tint stays the base colour and only the foreground changes. Three things the variants must
+**not** be applied to: a fill, a chart series, and a border.
 
-Two limits are accepted rather than hidden, and both rest on the same mitigation — these charts
-carry **secondary encoding**: paddingAngle gaps, on-slice percent labels, and name+value legends, so
-colour reinforces rather than carries. **Tritanopia is not satisfied** (worst pair ΔE 0.9);
-separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%.
-And the palette is **tuned for the dark card** — on Light, six of eight slots fall under the 3:1
-non-text floor (worst `#22d3ee` at 1.81). Closing that means re-picking six hues that clear 3:1 on
-both surfaces *and* still separate under both red-green axes: a mid-tone set with a different
-character from today's vivid-on-charcoal one. **That is a design decision, not a correction — do not
-make it silently while fixing something else.**
+**The Accent-Text Pairing Rule.** Any element with an accent-coloured background takes
+`accent-text` as its foreground, never a hardcoded `#fff` or `#000` — a hardcoded foreground
+silently fails contrast on one of the two presets. Treat any `#000`/`#fff`/`white`/`black` sitting
+next to `var(--theme-accent)` as a near-certain instance of this bug on sight.
 
-**The Signal Separation Rule.** Two signal colours that a reader compares must stay distinguishable *without hue*. Measured under deuteranopia (~6% of men) and protanopia (~2%), not by eye. Light's `redText`/`amberText` shipped at **ΔE 3.2** — danger and warning were one colour for a red-green colour-blind reader — and were retuned in S608 to `#8f2440`/`#a85200`, the only pair of 120 searched that clears both axes while every variant holds ≥4.5:1. Where a band is a *scale* rather than a status (food cost healthy/watch/too-high), colour is not enough on its own at all: `fcBand()` also returns a `✓`/`△`/`▲` shape mark, distinguished by fill rather than hue, so the band survives greyscale and a monochrome print. **A figure a person reads and acts on carries the mark; a chart axis or sparkline may take colour alone.**
+**The Signal Separation Rule.** Two signal colours a reader compares must stay distinguishable
+**without hue**, measured under deuteranopia (~6% of men) and protanopia (~2%), not judged by eye.
+Light's danger and warning text shipped at ΔE 3.2 — one colour for a red-green colour-blind
+reader — and were retuned to `#8f2440` / `#a85200`, the only pair of 120 searched that clears both
+axes while every variant still holds 4.5:1 on card and page. Tritanopia is deliberately not
+chased: separating on the blue-yellow axis fights separating on red-green, and it is ~0.01%
+against ~8%.
 
-**The Signal Polarity Rule.** A signal colour is a **verdict**, so a figure compared against a target must be coloured by whether it moved in the *good* direction for that metric — not by which side of the line it landed on. Green and red are never neutral to an owner reading between services; there is no reading of a red ▼ that isn't "something went wrong here". The Daily Purchases vs Sales tooltip coloured both actual rows ▲ green / ▼ red literally, and reported live (S634) it painted `Purchases : NPR 2,295` against a NPR 3,112 target red — for running *under* the spending pace, which is the outcome you wanted. **Shape is the fact, colour is the verdict**: keep ▲/▼ literal so it agrees with the line the reader can see, and invert the colour per metric (`GOOD_DIRECTION` — sales `+1`, purchases `-1`). Applies wherever a cost sits beside a revenue: variance, budget-vs-actual, wastage, food-cost trend. Two consequences: shape stops being redundant with colour (a green ▼ and a red ▼ now both exist), so the magnitude must appear as **text** — the gap as a percentage of target, not a second currency figure — and any legend explaining the two series has to say the polarity out loud, because nothing else on screen admits that they are coloured by opposite conventions.
+**The One Signal Meaning Rule.** A signal colour carries exactly one meaning across a module, and
+a category never takes a signal colour at all. The vocabulary is written down twice — HR's
+`HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` (`payrollConstants.js`) and POS's `posSignals.js` — and
+both say the same thing: **amber** = open, waiting on a person; **brass** = decided but the money
+has not moved, plus every plain category (a rank, a close type, a table state, a period);
+**green** = closed and good; **red** = closed and refused, or wrong and expensive; **grey** = inert
+or a plain identity. Before this was one file, "Pending" was brass on two HR queues, grey on a
+third and amber in the employee app, and amber alone carried eight distinct meanings across POS —
+including "Foodmandu" and "supervisor". A button is exempt: it is an instruction, not a verdict, so
+the Void button stays red while the *record* it writes reads as a close type in brass.
 
-**The One Signal Meaning Rule** (added 2026-08-31/S660, from the HR module). A signal colour may
-carry exactly one meaning inside a module, and a *category* never takes a signal colour at all.
-HR runs five parallel approval queues — Leave, Overtime, TADA, Advances, Shift Swaps — plus an
-employee-facing app showing the *same rows* to the person who filed them. Measured across those
-surfaces, "Pending" was **brass** on Leave and Overtime, **grey** on TADA (grey being the module's
-own withdrawn/void colour, so the one queue actually waiting on a decision read as the most inert
-thing on screen), and **amber** on the HR Dashboard and in the employee app. Amber meanwhile meant
-"waiting on you" on the dashboard and "already approved" on TADA — one hue, opposite verdicts, on
-two screens a manager works in one sitting. `HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` in
-`payrollConstants.js` are now the one vocabulary all six surfaces read: **amber = open, brass =
-decided but the money has not moved, green = closed good, red = refused, grey = void.**
+**Loudness tracks demand for action, not importance.** The loudest mark on a POS floor tile used to
+be "Occupied" — a full table, the outcome you want — while "you have not fired these three dishes"
+was a thin pill. A tile's 6px strip now answers the one question a waiter crossing the room cannot
+answer with their own eyes (`tableStripColor`), and a kitchen card's strip carries lateness rather
+than the stage it is already sorted into (`ticketStripColor`).
 
-Three things generalise beyond HR. **The already-consistent surface is the spec** — Self-Service
-was internally correct, so it was adopted rather than a new scheme invented; a colour decision made
-twice is a colour decision that will be made a third way. **Where two open states share a page**
-(TADA's pending vs approved-unpaid) the difference goes in the LABEL and the brass/amber split, not
-a sixth hue — an extra colour to separate two states of one verdict is how a five-token palette
-becomes eight. And **a category that borrowed a signal colour must give it back**: public-vs-optional
-holidays and holiday-vs-weekday OT rates were amber-vs-grey, so a gazetted holiday wore the same
-colour as an overdue approval; both are brass now, and Holiday Calendar's table finally agrees with
-its own two stat cards, which had been brass and purple for those same two categories all along. The
-freed amber immediately did real work: a demand-forecast holiday badge is brass when a multiplier is
-set and amber `⚠` when it is not — two states that had been painted identically while only one of
-them needed anyone to act.
+**The Chart Palette Rule.** Chart series never come from the semantic tokens — they are five
+*roles*, not five validated hues, and nothing measures them as a series set. Use the fixed literal
+palettes (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`; `var()` does not resolve in SVG presentation
+attributes anyway) and re-measure when you touch them: `CHART_COLORS` carried a **ΔE 0.4**
+deuteranopia collision between two of its eight slots — two identical lines on any chart with five
+or more series — from the day it was written until it was measured. Prefer **encoding a
+relationship over adding a hue**: a projection shares its metric's colour and is distinguished by a
+dash; a derived total reads as a dashed composite, not a fifth peer.
 
-**Loudness tracks demand for action, not importance** (added 2026-08-31/S661, from the POS
-module). The POS counterpart to the rule above — `src/modules/pos/posSignals.js` is its
-vocabulary — but the finding was a different shape, and it is the more transferable one. POS was
-not merely inconsistent; on its two busiest screens the **loudest mark carried the least
-information**, and it was spending the hue the urgent thing needed.
+**A banded ratio has one definition, marks included.** Food Cost % bands through `fcBand(pct,
+settings)` and variance through `varianceBand()` (`shared/imsFormulas.js`); Labour Cost %, Prime
+Cost % and Net Margin % through `lcBand` / `pcBand` / `nmBand` (`shared/operatingBands.js`); staff
+rank through `STAFF_LEVEL_BADGE` (`shared/staffLevelBadge.js`). Never a local threshold — Labour
+Cost was banded three ways at once, so a day at 34% read "fine" on the roster board and "watch" on
+both dashboards. `fcFigure()` / `bandFigure()` return the number **with its mark already
+appended**, specifically so a call site cannot take the colour and drop the `✓`/`△`/`▲`. Those
+marks separate by fill rather than hue, so they survive greyscale and a monochrome print. A figure
+a person reads and acts on carries the mark; a chart axis or a sparkline may take colour alone.
 
-- **The floor plan painted an empty table green and a full one red.** Occupancy is a category, not
-  a verdict — and for an owner a full room is the outcome you want, so this was the Signal
-  Polarity Rule inverted, at 6px of full-tile width, on a busy Friday wall of red that trains the
-  eye straight past the red that matters. It was also the thing a waiter crossing the room can
-  already see with their own eyes. The strip now answers **does this table need me?** —
-  amber for items typed but not fired / a guest QR order waiting / an order unsynced, green for
-  food ready in the pass, brass for live-and-in-hand, quiet for available or held — while status
-  keeps the labelled badge it was always read from. Every strip colour is also carried by a
-  labelled chip on the same tile, so nothing is conveyed by colour alone.
-- **The kitchen board's stage strip was pure redundancy.** Red/amber/green for New/In Progress/
-  Ready, on a board that already sorts every ticket into a labelled column by that exact stage and
-  puts the next action on its own button — three non-colour encodings of the fact the loudest
-  element was repeating. So an on-time New ticket and a twenty-minute-late one wore the same red
-  band and differed by a 2px border. The strip carries **lateness** now and is quiet otherwise.
-- **Same shape one level in:** the cart's `✓ KOT` chip was a solid green fill (sent is not done —
-  the kitchen has not touched it) sitting beside the amber `+2` chip that actually needs a press,
-  and the KOT/BOT count badge was **red** for "three dishes waiting to be fired", which is the
-  normal state of every order ever taken. The `✓ KOT` chip is a quiet brass tint and the count is
-  amber, matching the floor tile's own `⚠ N`.
+**Signal polarity is per metric.** A figure compared against a target is coloured by whether it
+moved in the *good* direction for that metric, not by which side of the line it landed on.
+Purchases running under the spending pace is the outcome you wanted; painting it red because the
+arrow points down is a lie told in the one colour the owner trusts most. Keep `▲`/`▼` literal so
+shape agrees with the line on screen, and invert the colour per metric.
 
-Three smaller ones worth naming. **Green is not a button colour in this system** — the Payment
-button was the only green fill in the product (`.btn-primary`/`-ghost`/`-danger`/`-danger--strong`
-is the whole vocabulary), and green is this palette's *done* verdict while the bill has not been
-paid yet; it is the accent now, which also makes the money button the most brand-forward control
-in the product. **A comp is a close type, not a caution** — it was amber on five surfaces, i.e. the
-same colour as an unfired dish; brass, the same reading HR gives an approved-but-unpaid claim, with
-only Void staying red. And **a delivery platform's name is an identity**: "Foodmandu" was an amber
-chip *in the same table as* the outstanding figure that legitimately needed amber.
-
-**Measured, and one real defect fell out of the measurement.** Every new pairing clears AA (worst
-4.74:1, the accent button on Light) and all twelve floor-strip pairs clear ΔE 8 under both
-red-green axes (worst 8.2, amber vs brass on Light — the two warm yellows this file already warns
-about, and each amber state carries its own labelled chip). But the kitchen board's **late vs
-going-late** sat at **ΔE 3.1 under deuteranopia on Light**: `--theme-red` and `--theme-amber` are
-the exact collision S608 retuned `redText`/`amberText` out of, still present in the *base* tokens
-the strip and border are filled from — and that card had no labelled chip, so colour was the sole
-carrier of an escalating warning. Fixed the way this file fixes every such pair: a **shape**, not a
-sixth hue. The elapsed-time readout now carries `fcBand()`'s own `△`/`▲` vocabulary, so the
-distinction survives greyscale, a printout of the board, and both red-green axes. **A signal pair
-that a person compares needs its non-colour cue on the element they READ, not on the element that
-is merely loudest.**
-
-**A banded ratio has one definition, marks included** (added 2026-08-31/S660). `fcBand()` settled
-food cost in S551/S608; the other three operating ratios had not been settled and drifted the same
-way. Labour Cost % was banded **three** ways at once: the Monthly Owner Report at 30/37 with
-✓/△/▲, the Owner Dashboard restating the same 30/37 inline **without the marks** — beside a Food
-Cost tile that had them — and the Roster board's Labor Forecast at a lone `costPct > 35 ? amber`,
-a different threshold, no healthy state, no too-high state, and the same amber the row already
-spent on a staffing shortfall and a holiday tag. Prime Cost % and Net Margin % had the identical
-report-has-marks / dashboard-does-not split. `src/shared/operatingBands.js` (`lcBand`, `pcBand`,
-`nmBand`, `descendingBand`, `bandFigure`) is the one definition, asserted by a test.
-
-Two properties are load-bearing. **The middle step is `accent-ink`, not `fcBand`'s amber** — those
-four metrics read as one set on the owner surfaces, and amber is spoken for by the rule above. And
-**`bandFigure()` appends the mark to the number**, so a call site cannot take the colour and drop
-the shape, which is exactly how the Owner Dashboard's copy lost it. Measured on both presets, every
-band colour clears 5.79:1 as text on the card and the worst band pair sits at ΔE 9.2 under
-protanopia — above the floor, and the marks carry it regardless.
-
-
-**The Accent-Text Pairing Rule.** Any element with an accent-colored background uses the theme's paired `accent-text` token for its foreground (`#0f1117` in the Dark preset, `#241a08` in Light), never a hardcoded white or black. Because the accent color changes per theme preset, a hardcoded foreground color will silently fail contrast on at least one of the two presets. This is a real bug the codebase shipped and fixed once already (a floating action button used a hardcoded white label) - treat it as the standing rule, not a one-off fix. A 2026-07-12 audit found the same class of bug in four more shared components (`SearchableSelect.js`, `BsCalendarPicker.js`, `PremiumGate.js`, `ProtectedRoute.js`) that had been hardcoding the Dark preset's exact hex values since before the theme system existed - fixed to read theme tokens, so they now actually respect every preset instead of only working by coincidence on Dark. **It recurred once more** (2026-08-05, `AdminClients.js`'s "Annual" badge, hardcoded `#000` on `var(--theme-accent)`) - fixed to `var(--theme-accent-text)`. Given it's now shipped-and-fixed twice, treat any hardcoded `#000`/`#fff`/`white`/`black` sitting next to `var(--theme-accent)` as a near-certain instance of this bug on sight, not just a style-review nit.
+**Brass is a range, not one value, on the signed-out pages.** `Login.css` derives every colour on
+the page from `--theme-accent` by `color-mix` — a wash (6%), a tint (12%), a rule (24%), an edge
+(80%), and the three light layers at 34/17/11%. That is the One Accent Rule taken literally: no
+second hue anywhere, only more and less of the one that was already there.
 
 ## Typography
 
-**Display Font:** Georgia, serif (fallback: serif) - reserved for the wordmark only.
-**Body Font:** Poppins (Google Font, weights 400/500/600/700 + italic 400), falling back to -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, sans-serif if the webfont fails to load.
-**Label Font:** none distinct; labels use the body stack at a smaller size and wider tracking instead of a separate typeface.
+**Body Font:** Poppins (Google Font, 400/500/600/700 + italic 400), falling back to
+`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`.
+**Signature Font:** Georgia, serif — the wordmark, the two full-page interstitials (`PremiumGate`,
+`SubscriptionLock`), the guest menu's brand line, and every print letterhead (gate pass, purchase
+bill, PO, recipe cost card, vendor balance confirmation).
+**Mono:** `source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace` — scoped to `<code>`
+and to `.action-error-detail`. Monospace is for code, data and measurement here; it is not
+available as a "technical-looking" costume.
 
-**Mono:** `source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace`, scoped to the `<code>` element in `index.css` and used in exactly four places, all of them genuine machine strings a user may need to read or copy verbatim — a payment reference, a `you+name@` email pattern, a source file path, and a config snippet. This line previously read "none distinct", which was never true. Monospace is for code, data and measurement here; it is not available as a "technical-looking" costume.
-
-**Form controls do not inherit `font-family`, and must be told to** (added 2026-08-12/S549). `body` sets Poppins, but every browser substitutes its own UA default into `<input>`, `<button>`, `<select>` and `<textarea>`. Measured before this was fixed: all 14 controls on the login page, all 13 pricing CTAs and **every `.btn` in the product** rendered in Arial — the product's own typeface reached its prose and none of its controls. `Layout.css` had accumulated 10 per-class `font-family: inherit` patches (none of them on `.btn` or `.form-field input`), which is the tell that inheritance was always the intent. One rule in `index.css` now covers `input, button, select, textarea, optgroup` — `optgroup` included because Firefox styles it separately from `select`. **Do not re-add per-class patches.**
-
-**Character:** A restrained geometric sans for every working surface, broken exactly once by a serif wordmark. The serif is a signature, not a typographic system - it never appears on a second element.
+**Character:** A restrained geometric sans for every working surface, interrupted by a serif that
+only ever appears where the product is speaking as itself rather than showing you your data.
 
 ### Hierarchy
-- **Display** (700, 16-20px depending on placement, line-height 1.2, letter-spacing 0.04em, Georgia serif): the "Crest" wordmark only - sidebar brand mark and the login screen. Nowhere else.
-- **Title** (700, 14-15px, line-height 1.4): card headings, section titles ("Submit Leave Request", stat card values).
-- **Body** (400-500, 13px, line-height 1.5): table cells, form values, the default size for nearly everything a user reads.
-- **Label** (500, 11px, letter-spacing 0.08-0.1em, uppercase, Slate Text or Fog Text): table column headers, stat card labels, section eyebrows. Sparse by necessity - this is a data-dense product, not a marketing page, so uppercase labels earn their place as literal column headers rather than decorative kickers.
+
+- **Display** (800, `clamp(24px, 3.4vw, 32px)`, 1.1, `-0.025em`): the signed-out hero headline.
+  The only place in the product with a fluid type size.
+- **Wordmark** (Georgia 700, 16px sidebar / 20px signed-out, 1.2, `0.04em`): the client's own
+  white-labelled brand name. This is the customer's identity, not ours.
+- **Title** (600, 22px): `.page-title`, one per route.
+- **Figure** (600, 24px, 1.15, tabular): `.stat-value` — the headline number on a KPI card. The
+  line-height is explicit because inheriting body's 1.5 puts a 24px numeral in a 36px box, so the
+  8px and 4px margins the class declares are never the intervals that render.
+- **Body** (400, 13px, 1.5): table cells, buttons, inputs, selects, `.page-subtitle`, prose.
+- **Label** (500, 12px, `0.04em`): field labels, `.tab-btn`.
+- **Column header** (500, 11px, `0.08em`, uppercase): `.data-table th`. Also the badge size.
+- **Stat label** (11px, `0.1em`, uppercase, slate): the caption over a KPI figure.
+- **Micro** (10px): non-interactive captions only — the brand subline, a sidebar group label.
 
 ### Named Rules
-**The One Serif Rule.** Georgia appears exactly once per screen (the wordmark, if visible at all). It is never used for a heading, a callout, or emphasis - that would dilute it from signature to affectation.
+
+**The Signature Serif Rule.** Georgia never sets a heading, a callout or emphasis inside a working
+screen. It appears where the product speaks in its own voice — a wordmark, a gate that has taken
+the whole viewport, a document printed on letterhead — and nowhere else. One serif on a screen is
+a signature; two make it an affectation.
+
+**Form controls do not inherit `font-family` and must be told to.** Every browser substitutes its
+own UA default into `<input>`, `<button>`, `<select>` and `<textarea>`. Measured before the single
+rule in `index.css` existed: all 14 controls on the login page, all 13 pricing CTAs and **every
+`.btn` in the product** rendered in Arial — the product's typeface reached its prose and none of
+its controls. `optgroup` is in that selector list because Firefox styles it separately from
+`select`. Do not re-add per-class `font-family: inherit` patches.
+
+**Numbers are tabular.** Poppins' default figures are proportional, so a right-aligned currency
+column does not line up digit for digit and a page of money reads ragged. Every
+`.data-table` cell, every `tfoot` cell and `.stat-value` carry `font-variant-numeric: tabular-nums`
+from one rule. Only digits are affected; text cells are unchanged.
+
+**No interactive control below 12px.** Chips and buttons in dense list rows sit at 12–12.5px with
+5–7px of vertical padding. 10px is for genuinely non-interactive micro-labels.
 
 ## Layout
 
-*Section added 2026-08-12. The spatial model was always real in the code but had never been written down in one place — radius and density notes were scattered across Components, and the responsive behavior was documented nowhere at all.*
+**The shell is a fixed sidebar plus a flowing content column.** `.sidebar-wrap` is
+`position: fixed` at 240px (56px collapsed) and `.main-content` reserves that space with a matching
+`margin-left` on the same two values; the two animate in lockstep. Content padding is 32px on every
+page and nothing is centred in a reading measure — every screen here is a working surface rather
+than a document.
 
-**The shell is a fixed sidebar plus a flowing content column.** `.sidebar-wrap` is `position: fixed` at 240px (56px collapsed), and `.main-content` reserves that space with a matching `margin-left` on the same two values — the two animate in lockstep (see Navigation for why this is a layout-property animation and stays one). Content padding is 32px on every page; nothing is centred in a max-width reading measure, because every screen here is a working surface rather than a document.
+**Spacing rhythm is a 4/8/16/24 scale, applied by convention rather than by token.** There are no
+`--spacing-*` custom properties, so the scale lives in the frontmatter and in usage. 16px is the
+default gap between peers (grid gaps, button rows, field stacks); 24px is `.card`'s internal
+padding and the gap between major sections; 28px is the standing bottom margin under a
+`.page-header` and a `.stat-grid`; 8px and 4px are chip-level and intra-control. A value off this
+scale in new work is drift, the same way an off-ramp font size is.
 
-**Spacing rhythm is a 4/8/16/24 scale**, applied by convention rather than by token — there are no `--spacing-*` custom properties, so the scale lives in the frontmatter and in usage, not in CSS. 16px is the default gap between peers (grid gaps, button rows, form field stacks); 24px is `.card`'s internal padding and the gap between major sections; 8px and 4px are for chip-level and intra-control spacing. A value off this scale in new work is drift, the same way an off-ramp font size is.
+**The page root takes no padding of its own, and the header is `.page-header`.** `.main-content`
+already owns the 32px; a page that adds its own doubles it. `.page-header--split` is the
+title-block-left / actions-right shape that ~50 of the 78 header sites were hand-rolling inline,
+and it carries two properties neither hand-rolled version had complete: `flex-wrap` and the mobile
+hamburger clearance. Measured at 390px, an unclassed header put 40x33px of the fixed hamburger
+*over* the title — `elementFromPoint` at the title's first character returned the button — while a
+no-wrap header squeezed that title from 298px to 154px and one carrying a period `<select>`
+overflowed its container by 29.7px into the clip from `html { overflow-x: hidden }`.
 
-**KPI rows are auto-fitting grids, not fixed columns.** `.stat-grid` is `repeat(auto-fit, minmax(200px, 1fr))` with a 16px gap and 28px bottom margin, so a row of 4 stat cards reflows to 2×2 and then to a single column without a media query. Prefer this over hand-declared column counts — the dashboards that do declare columns (`.dash-3col-*`, for the IMS/HR/POS split) do it because the *content grouping* is meaningful, not because the widths needed pinning, and each of those collapses to `1fr` at the breakpoint.
+**KPI rows are auto-fitting grids, not fixed columns.** `.stat-grid` is
+`repeat(auto-fit, minmax(200px, 1fr))` with a 16px gap, so four cards reflow to 2x2 and then to one
+column without a media query. The 200px floor is set by what a card *holds*, not by taste: at 24px
+/700, a Nepali-grouped `NPR 12,48,650` is 13 characters and wraps below ~200px — measured wrapping
+at 1280px, 900px, 414px and 430px, i.e. on an ordinary laptop, a tablet and the two commonest large
+phones. Shrinking the figure to 20px also fixes it and was rejected: it de-emphasises the headline
+number on every KPI in the product to solve a grid problem. Raise the floor, never let the value
+wrap.
 
-**One breakpoint: 768px.** There is no tablet tier and no desktop max-width. Below 768px the sidebar leaves the flow entirely (`transform: translateX(-100%)` plus a hamburger and a 55%-black overlay), `.main-content` drops its reserved margin, and the multi-column dashboard grids go single-column. Touch sizing is handled separately and deliberately by `@media (pointer: coarse)` rather than by width — see Inputs / Fields for why that distinction matters.
+**One breakpoint: 768px.** No tablet tier and no desktop max-width. Below it the sidebar leaves the
+flow entirely (`translateX(-100%)` plus a 44px fixed hamburger and a 55%-black overlay),
+`.main-content` drops its reserved margin and takes 16px padding, and every multi-column dashboard
+grid collapses to one column.
 
-**Wide tables scroll, they do not compress.** `.table-wrap` is `overflow-x: auto` around every wide table; the data keeps its native column widths and the container takes the scrollbar. Pair it with `.table-wrap--fab-clear` (88px bottom **margin**) on any page that also renders a `Fab` — the Fab is `position: fixed` with no reserved space, so without the modifier it sits on top of the last row's action buttons. That was found live on 11 pages at once; treat the pairing as mandatory rather than a polish step.
+**Touch sizing is scoped to the input method, not to a width.** `@media (pointer: coarse)` gives
+`.btn` 44px and tunes every control down from there — `.sidebar-link` and `.module-tab` 44,
+`.btn-sm` / `.tab-btn` / an in-table `.btn` 32, the chart controls 44x44 — plus the shell controls a
+finger actually hits, which were in no coarse rule at all until they were measured (the outlet
+switcher, the control that re-scopes the whole tenant session, at 95x20px; sidebar search at
+27x25). A narrow desktop window keeps its own density, which a width breakpoint could not express.
 
-**A scroll container's clearance is margin, never padding** (corrected 2026-08-30/S646). `.table-wrap--fab-clear` reserved its 88px with `padding-bottom` from the day it was added (2026-07-23) — inside the scroll container, so the horizontal scrollbar rendered 88px *below* the last row: off the fold on any table long enough to scroll the page, and with Windows' overlay scrollbars, not on screen at all. The rule above therefore stopped being true in practice — a too-wide table did not read as scrollable, it read as content sliced off at the right edge, and that is how it was eventually reported. Margin gives byte-identical clearance (a margin on the last child of a padded `.card` cannot collapse out of it) and puts the scrollbar directly under the table. Generalise it: **any padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**
+**Under a coarse pointer every text field goes to 16px, with `!important`, and that is load
+bearing.** Below 16px iOS Safari zooms the viewport on focus and never zooms back, so tapping any
+field turned "enter the quantity" into "now pan sideways to find Save" — and the POS till and the
+stock count are tablet surfaces by design. The `!important` is not laziness: 266 form controls
+across 46 files set their font-size in an inline `style` object, and no selector beats an inline
+style, so without it the rule would close the gap for the controls that least needed it and skip
+every one that did. Checkbox, radio, range, colour, file and the button-shaped input types are
+deliberately excluded. A control on a class is still the better answer — it also wins the
+`[aria-invalid]` and `:disabled` hooks — but the floor must not wait on that sweep.
+
+**Wide tables scroll; they do not compress.** `.table-wrap` is `overflow-x: auto` around every wide
+table and the data keeps its native column widths. Pair it with `.table-wrap--fab-clear` on any
+page that also renders a `Fab` — the Fab is fixed with no reserved space, so without it the button
+sits on top of the last row's actions.
+
+**A page that renders into the body flow needs its own scrollport.** `index.css` sets
+`html, body { overflow-x: hidden }` as an app-wide horizontal guard; because html's overflow is
+then not `visible`, body becomes its own scroll container sized to its content and a
+`position: sticky` child of the body has a scrollport that never scrolls. Every screen inside the
+app shell is immune because the shell scrolls its own div — the exceptions are the pages that
+render directly into the body (`/login`, `/pricing`, the guest menu), and all three had a sticky
+bar that had never once stuck. Measured at 390x780, `.login-nav`'s viewport `top` went
+0 → −250 → −600, moving 1:1 with the content. The fix is per page: `height: 100dvh; overflow-y:
+auto; overscroll-behavior: contain` on the page root, **and delete the `min-height: 100vh` it was
+carrying**. Use `dvh`, not `vh` — on a phone `100vh` is the tallest the viewport ever gets, so the
+fold lands under the URL bar.
+
+### The Crest Staff phone app
+
+`/hr/self-service` is a second, installable PWA at a different altitude: a phone held one-handed by
+someone checking whether they work tomorrow. Everything is scoped under `.self-service` and
+**nothing may leak into the admin app**, whose ~36px table rows would be inflated by these floors.
+
+- 44px minimum on every `.btn`, `.tab-btn`, input, select and textarea — a flat floor, where the
+  app shell tiers its controls and leaves `.tab-btn` at 32px. This surface is 100% touch.
+- 16px on every field here too, and **an inline `fontSize` beats this rule** (it carries no
+  `!important`, unlike the app-wide floor), so any control that sets its own size must set 16 too.
+  Pinning the viewport with `maximum-scale` is the wrong fix and is deliberately absent from
+  `index.html` — it blocks pinch-zoom for everyone.
+- Its own type scale, not the desktop scale with bigger buttons: an 11px badge that reads fine in a
+  desktop table is a squint at arm's length.
+- It defaults to `system` (the device's own light/dark setting), because a self-service account is
+  bounced away from every admin route and can never reach Settings → Appearance.
+
+### Print
+
+Paper is a real output here — stock count sheets, payslips, purchase bills, KOTs, gate passes,
+recipe cost cards, POs — and none of the palette survives onto it. `@media print` forces a white
+ground and black text, strips the sidebar and every `button`, flattens `.card` and `.stat-card` to
+a 1px `#ccc` rectangle with no radius and no shadow, and normalises every cell to 12px with a
+`#ccc` rule. Two print-only affordances: `.print-blank-input` prints the box and neither its value
+nor its placeholder (Chrome prints placeholders as if they were values), so a sheet can be handed
+over and filled in with a pen; `.print-hide-row` prints only the rows a user checked. Letterhead
+documents set Georgia and their own grayscale ink ramp rather than reading theme tokens.
 
 ### Named Rules
 
-**A page that renders into the body flow needs its own scrollport** (added 2026-08-23/S604). `src/index.css` sets `html, body { overflow-x: hidden }` as an app-wide horizontal guard; because html's overflow is then not `visible` it stops propagating to the viewport, **body becomes its own scroll container sized to its content, and a `position: sticky` child of the body has a scrollport that never scrolls.** Every screen in IMS/HR/POS is immune because the app shell scrolls its own div — the exceptions are the three pages that render directly into the body, and all three had a sticky bar that had never once stuck: the guest menu's category bar (its only navigation), `/login`'s header and `/pricing`'s nav. Measured on the built pages at 390×780, each nav's viewport `top` went `0 → −250 → −600`, i.e. moving 1:1 with the content. The fix is per-page — `height: 100dvh; overflow-y: auto; overscroll-behavior: contain` on the page root, **and delete the `min-height: 100vh` it was carrying**, since 100vh ≥ 100dvh pushes the root taller than its own scrollport and hands the scroll straight back to the body. Relaxing the shared rule instead was measured and rejected: `html { overflow-x: hidden }` alone restores sticky and loses the guard entirely (1610px of horizontal overflow on a probe page, identical to no rule at all). Use `dvh`, not `vh` — on a phone `100vh` is the tallest the viewport ever gets, so the fold, where a cart button or primary CTA lives, sits under the URL bar. **This one is invisible to review**: it looks correct in the code and computes to `sticky` in devtools; only `getBoundingClientRect().top` read across real scroll positions catches it.
+**The Auto-Fit-First Rule.** Reach for `repeat(auto-fit, minmax(<floor>, 1fr))` before declaring a
+column count. A fixed count is a claim that the grouping matters at every width; if it does not,
+the fixed count is just a media query you now have to maintain.
 
-**The Auto-Fit-First Rule.** Reach for `repeat(auto-fit, minmax(<floor>, 1fr))` before declaring a column count. A fixed count is a claim that the grouping matters at every width; if it doesn't, the fixed count is just a media query you now have to maintain.
+**The Measured-Floor Rule.** When a row of chips or badges repeats down a list, give each a
+`minWidth` taken from the **measured** widest real label plus `textAlign: 'center'`. Content-width
+chips vary on incidental things — `IMS · Starter` is wider than `IMS · Pro` — so every column
+anchored after them slides from row to row. Measure with `getBoundingClientRect().width` rather
+than guessing.
 
-**The Measured-Floor Rule** (added 2026-08-12, from the Admin → Clients list). When a row of chips or badges repeats down a list, give each a `minWidth` taken from the **measured** widest real label, plus `textAlign: 'center'`. Content-width chips vary on incidental things — `IMS · Starter` is wider than `IMS · Pro` — so the columns, and everything anchored after them, slide from row to row for no meaningful reason and the list reads ragged. Measure in the browser (`getBoundingClientRect().width`) rather than guessing a number: the client cards' pill floor is 100px against a measured 96px, and the subscription badge's is 112px against 108px.
+**A scroll container's clearance is margin, never padding.** `.table-wrap--fab-clear` reserved its
+88px with `padding-bottom` for a year: inside the scroll container, so the horizontal scrollbar
+rendered 88px *below* the last row — off the fold on any table long enough to scroll the page, and
+with Windows' overlay scrollbars not on screen at all. A too-wide table therefore did not read as
+scrollable, it read as content sliced off at the right edge. Generalise it: **any padding on an
+`overflow: auto` element pushes its scrollbar away from the content it scrolls.**
 
-**`space-between` on two controls in a wide container is an anti-pattern.** It does not distribute, it *banishes* — the two items end up at opposite edges of however wide the container happens to be, with the entire remainder as dead space. The client cards had a full-width action bar holding exactly two 10px buttons flung to either end of a ~1000px card. Group related controls with a `gap` and let the container's own alignment place the group.
-
-**No interactive control below 12px.** The same bar's buttons were 10px with 2px vertical padding — legible in a mockup, a squint in use, and a poor hit target. Chips and buttons in dense list rows sit at 12–12.5px with roughly 5–7px vertical padding; 10px is for genuinely non-interactive micro-labels only.
-
-**The page root takes no padding of its own, and the header is `.page-header`** (added 2026-08-30,
-from the POS module). `.main-content` already pads every page — 32px, dropping to `16px !important`
-under 768px — and the mobile rule that clears the fixed hamburger is written against that: the
-hamburger is `position: fixed` at `12px/12px`, 44px square, z-index 150, and `.page-header` earns
-`padding-left: 60px` at the breakpoint to sit clear of it. **A page that re-pads its own root
-silently moves out from under that arithmetic.** Eleven of thirteen POS pages opened
-`<div style={{ padding: '24px 28px', maxWidth: … }}>`, and both branches broke, in opposite
-directions. The eight that also hand-rolled `<h2 style={{ fontSize: 20 }}>` instead of
-`.page-title` inherited no clearance at all: measured at 390px, the title box landed at
-`left: 44, top: 40` against a hamburger occupying `12–56 × 12–56` — **12×16px of overlap, the
-first character of every POS page title under an opaque button**. The four report pages that did
-use `.page-header` got the 60px on top of their own 28px, indenting the title to `left: 104` while
-the table beneath it started at `44`. Neither is visible above 768px, where the hamburger is
-`display: none`, which is why both survived every desktop review.
-
-Three things follow. **Let the shell pad the page** — the root is a bare `<div>`, as it is on the
-67 pages that already do this. **Use `.page-header` / `.page-title` / `.page-subtitle`**, which also
-makes the page title an `<h1>` rather than an `<h2>` with no `<h1>` above it. And **a `maxWidth` on
-a page root is a claim about a reading measure**, which a working surface does not have: POS carried
-six different caps (520 / 1000 / 1100 / 1150 / 1350, plus a `40px 28px` variant) with nothing in the
-content to explain any of them. They are gone; the one that stayed is `Pos.js`'s 520, which is a
-genuine single-column form. Full-screen surfaces that deliberately escape the shell — the order
-screen and the KDS, both `position: fixed; inset: 0` — own their padding and are not covered by
-this. *(Noted while measuring, not repaired: this file's frontmatter carries `page-title: 20px/700`
-while `.page-title` ships 22px/600. 22px is on the ramp — it is the `numeral` step — so this is a
-mislabelled entry rather than an off-ramp size. It wants a `/impeccable document` pass, not an edit
-here.)*
-
-**A fractional width is a claim that a sibling exists.** The order screen's cart action bar was a
-`display: flex; gap: 8` holding buttons hard-coded to `width: '48%'` — which is already wrong when
-both render (48 + 48 + 8px leaves a ragged ≈3.7px gutter on a 292px panel, since `gap` and the
-percentages are both paying for the same separation), and badly wrong when one does not. The
-Payment button is `hasPosAccess('supervisor')`, so on a **staff-rank** account — the ordinary
-waiter's login, and the most-pressed button in the product — `Send Order` rendered at 48% with 52%
-of the bar empty beside it. `flex: 1` states the relationship instead of guessing at it, and holds
-however many siblings survive their permission checks. Same family as the `space-between` rule
-above: both are a fixed answer standing in for a relationship the container already knows.
-
-**Half a class is worse than no class, because it looks adopted** (added 2026-08-30, from the HR
-module). `.page-header` carried one property — a 28px bottom margin — plus, under 768px, the 60px
-left padding that clears the fixed hamburger. It did not carry the row. So all 78 sites in the
-product hand-rolled the row, and the hand-rolls split into two shapes that each held exactly the
-half the other was missing. HR had ten pages writing
-`className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems:
-'flex-start' }}` — clearance, no wrap — and eight writing the same flex object with `flexWrap` and
-a `gap` on a bare `<div>` — wrap, no clearance. Measured on the built CSS at 768 and 390px, an
-unclassed header put **40×33px of the hamburger over the `<h1>`**, with `elementFromPoint` at the
-title's first character returning the button rather than the text; a no-wrap header squeezed that
-same title from 298px to **154px** while its action group grew a ragged internal stack beside it,
-and one carrying a period `<select>` **overflowed its own container by 29.7px** — clipped, not
-scrollable, because `html { overflow-x: hidden }`. `.page-header--split` now owns
-`display: flex` + `space-between` + `flex-wrap` + `gap: 12px 16px`, and all 19 HR pages use it.
-
-Two things generalise. **A class that half a page still has to hand-roll will be hand-rolled
-inconsistently** — the giveaway is an identical inline style object appearing on the class itself
-at more than a couple of sites (`.panel-tab-bar` and `.stat-grid--compact` were both found this
-exact way). And **the split modifier stays separate from the base**: 28 of the 78 sites are a
-title block with no actions, and making the base `display: flex` would put their `<h1>` and `<p>`
-side by side. The sweep finished 2026-08-30: **all 40 remaining sites now use it**, `ReportPage.jsx` included,
-which covers every report page through one component. Twenty-four of the forty had the no-wrap
-variant. Eight more files had no `.page-header` at all — the hamburger-overlap shape — and two
-of those (`PurchaseOrders`' Receive and PO-form sub-views) led with a **Back button** rather
-than a title, so a real control sat under the hamburger; both now fold the button and the title
-into one `.page-header` so both get the clearance, and both dropped the `padding: 32px 24px`
-they were re-adding to a root the shell already pads. *(S656 corrected "finished": five IMS
-surfaces had neither a `.page-header` nor a greppable hand-rolled row — `ComboBuilder`,
-`PurchaseOneLakhAboveReport`, `ImsStaff`, `DemandForecast` and `PurchaseOrders`' list view — each
-carrying the full S652 cluster of re-padded root + `maxWidth` cap + 18px `<h2>`. A sweep keyed on
-the class name cannot find the pages that never adopted any of it; the cluster itself is the
-better grep — `padding: '24px 28px'` on a return-statement root. All five closed S656.)*
-
-**A wrapping row whose children are themselves rows is only half-wrapped.** Verifying the sweep
-at 360px found a header with three controls still overflowing its own container by 15.7px: the
-class wraps the title block against the action group, but each page hand-rolls the action group
-as its own `display: flex` with a gap and no wrap. `.page-header--split > *` now sets
-`flex-wrap: wrap` (inert on the title block, which is not a flex container) **and**
-`min-width: 0`, which undoes the `min-width: auto` a flex item defaults to and is what actually
-held the group wider than its share. Neither property is sufficient alone.
-
-**One value repeated is not a rhythm.** Thirteen HR pages overrode `.stat-grid`'s own 28px bottom
-margin with an inline `marginBottom: 20`, and the HR Dashboard then nudged the block after them
-with a `marginTop: 4` to compensate. Nothing chose 20; it propagated. Removed, the page reads
-8px from a section label to the group it names and 28px from one group to the next — a 3.5×
-contrast, which is the thing that actually makes the groups separate under a squint. Related: a
-filter row's own `gap` must clear `.tab-bar`'s internal 6px, or a group of pills reads as four
-adjacent controls rather than one control with four states. Three HR rows sat at `gap: 8`, and
-Advances had additionally patched the feeling with a `marginLeft: 8` on the second group — the
-gap and the margin paying for the same separation, the same shape as the `48%` rule above. 16px.
-
-**A hand-rolled copy of a shared component keeps only the rules the class had on the day it was
-copied** (added 2026-08-30/S657, from the Suite). The three dashboards build their KPI tiles from
-an inline `kpiCard()` instead of `.stat-card`, for a real reason — a denser padding tier the class
-does not offer. But the *grid* around them was hand-rolled too, and there was no reason for that:
-the Owner Dashboard declared `repeat(auto-fit, minmax(160px, 1fr))` with `gap: 14`, a fourth floor
-value beside `.stat-grid`'s 200 and `.stat-grid--compact`'s 140, and a group break identical to its
-own peer gap. Meanwhile the class had gained `tabular-nums` (S594) and `line-height` (S657) that the
-copy could not receive. **Separate the two decisions before copying anything**: take the class for
-everything it still describes correctly, and hand-roll only the one property that genuinely differs.
-The tell that a copy has gone stale is a value on it that exists nowhere else in the product.
-
-**Nine equal cards in two groups read as one field of nine.** The Owner Dashboard split
-Profitability from Operations with `sr-only` headings and nothing else — the grouping was real, was
-announced to a screen reader, and was invisible to everyone else, because the interval between the
-two rows was the same 14px as the interval between two cards inside either one. Proximity is the
-only grouping signal a card row has; an accessible-name-only group is not grouped. 16px inside,
-28px between.
+**`space-between` on two controls in a wide container is an anti-pattern.** It does not distribute,
+it banishes — two 10px buttons at opposite ends of a 1000px card with dead space between. Group
+related controls with a `gap` and let the container's alignment place the group.
 
 ## Elevation & Depth
 
-**History note (2026-07-12):** this section previously documented a strict "Flat-By-Default Rule" — no card shadows anywhere, depth from background-lightness and borders only. That rule is retired as of the Bright theme + sidebar redesign session: every preset now gets a real `box-shadow` on cards via a per-preset `--theme-card-shadow` token, at the user's explicit request. What's below is the model that replaced it — read this section as current, not the old rule plus an exception list.
+Depth is carried primarily by **background lightness**, with shadow as a secondary, per-preset
+layer on top. A card is one tone lighter than the page (Dark) or a distinct surface tone from it
+(Light) — that is the main cue, especially on Dark where a literal black shadow would be nearly
+invisible against an already near-black ground. Every preset then adds a real `box-shadow` through
+its own `--theme-card-shadow`, generated from that preset's `bg`/`text1` rather than a flat black:
+Dark layers an inset top highlight with two soft drops, Light uses a tight contact shadow plus one
+diffuse drop.
 
-**The model: background-lightness stays primary, shadow is a secondary, per-preset-tuned layer — not inverted, not uniform.** A card is still one tone lighter than the page (dark presets) or a distinct surface tone from the page (light presets) — that hasn't changed and is still the main depth cue, especially on dark presets where a literal black shadow would be nearly invisible against an already-near-black page. Shadow is layered on top, generated by formula from each preset's own `bg`/`text1` values rather than a flat black:
-
-- **Dark-leaning preset** (Dark): `inset 0 1px 0 0 rgba({text1}, 0.06), 0 10px 24px -8px rgba({bg}, 0.55), 0 3px 8px -3px rgba({bg}, 0.4)` — a faint light-tinted rim highlight plus a deep, theme-colored (not neutral-black) shadow, so e.g. Tokyo Night's indigo cast or Dracula's purple cast survives instead of flattening to generic black.
-- **Light-leaning preset** (Light): `0 1px 2px rgba({text1}, 0.06), 0 10px 24px -8px rgba({text1}, 0.1)` — a classic soft shadow, tinted from the preset's own ink color rather than pure black.
-- *(Retired 2026-08-24/S607: **Bright** had broken the light-preset formula once more, tinting its shadow's outer layer from the accent blue `rgba(58,109,240,0.16)` rather than neutral ink — it was the one preset where the accent was allowed to show up more than "sparingly". Removed with the preset.)*
-
-Shadow was already in real use before this change beyond the two cases previously documented here (a floating cart button, live-status pulse rings) — `.sidebar-dropdown-panel`'s popover, `RailTip`'s hover tooltip, and `ChartCard`'s expand-modal all had their own shadows already. Those are unchanged; the new per-preset `--theme-card-shadow` token is additionally applied to `.card`, `.stat-card`, and the three main dashboards' inline `kpiCard()` panels.
+Card elevation is **uniform policy** — every preset, every card — so it is not a budget to spend
+more of on something important. Only two shadows still carry extra meaning: the `Fab`'s
+`0 6px 20px rgba(0,0,0,0.45)`, which lifts a fixed control off scrolling content, and the guest-order
+pulse, which is an alarm rather than a depth cue.
 
 ### Shadow Vocabulary
-- **Card elevation** (`box-shadow: var(--theme-card-shadow)`): the default for `.card`/`.stat-card` and equivalent panels, per-preset-tuned per the model above.
-- **Floating action** (`box-shadow: 0 4px 16px rgba(0,0,0,0.3)`): unchanged — a fixed/floating element genuinely above the page (e.g. the bottom-anchored cart button, `Fab.js`).
-- **Live pulse (status)** (`box-shadow: 0 0 0 0 rgba(<signal-color>, 0.5)` animating to `0 0 0 6px rgba(<signal-color>, 0.18)`): unchanged — a breathing ring on elements needing real-time attention, using the relevant signal color's own alpha.
+
+- **Card** (`var(--theme-card-shadow)`): every `.card` and `.stat-card`. Per preset, never
+  hand-written.
+- **Floating action** (`0 6px 20px rgba(0,0,0,0.45)`): the `Fab` only.
+- **Focus** (`0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring)`): a solid
+  indicator inside a soft ring. This is the standing pair for every focusable control.
+- **Live pulse** (`0 0 0 0 → 0 0 0 6px rgba(251,191,36,0.5→0.18)`): a guest QR order waiting to be
+  accepted. Amber, because a submitted guest order is waiting on a person.
 
 ### Named Rules
-**Shadow tells you what surface you're on, not that a page is "polished."** Card elevation is now uniform policy (every preset, every card), so it no longer functions as a special signal the way the floating-action and live-pulse shadows still do — don't invent a *third* meaning for it (e.g. a stronger shadow to mean "important"). If something needs to stand out, that's a job for the accent color or position, same as always.
 
-### The signed-out surfaces carry a light source; the app does not (added 2026-08-31/S659)
+**Shadow tells you what surface you are on, not that a page is polished.** Do not invent a third
+meaning — a stronger shadow for "important" or "premium". If something needs to stand out, that is
+a job for the accent colour or for position.
 
-The elevation model above governs **Operate** surfaces, where depth is a lightness step plus a
-per-preset shadow and nothing else. `/login` is not one of those. It is the product's second
-deliberate **Persuade** surface (GuestMenu is the first, per PRODUCT.md) — the one screen whose job
-is that a visitor decides and acts — and it now carries a real lighting model rather than a flat
-ground.
+**The signed-out surfaces carry a light source; the app does not.** `/login` and `/pricing` are lit
+by three brass radial layers on the scrollport itself — a key breaking over the sign-in card's
+top-right shoulder, a rim grazing the right edge, a weak bounce lifting the pitch column out of
+flat black. Two things there were measured rather than guessed. **Radii are percentages of the box,
+not pixels**: in px the rim was 680px wide, which on a 390px phone is nearly two screens across —
+it stopped being a rim and flooded the lower half of the page. And a fourth "shade" layer mixing
+toward `--theme-sidebar` was removed because on Dark it was mathematically inert (`#0e1117` over
+`#0f1117`), spending half the depth budget on nothing. **Unlit ground is the shadow here.** Do not
+carry any of this into the app: a dense table under an atmospheric wash is worse than one on a flat
+card.
 
-**Three lights, all one hue.** A key breaking over the sign-in card's top-right shoulder, a rim
-grazing the right edge, a weak bounce lifting the pitch column out of flat black. Every value is
-`color-mix(… var(--theme-accent) N%, …)`, so the whole surface re-tones with the preset and **no
-second brand colour is introduced anywhere** — the One Accent Rule taken literally: more and less of
-the one hue that was already there. Surfaces then behave like objects under that light: the card
-face is a gradient rather than a flat fill, the header warms toward the right, and the header's
-bottom rule runs neutral on the left and brightens to brass under the light.
-
-Two things were corrected by measurement, and both generalise:
-
-- **A radial light's Y offset is a position, not a direction.** The key was first placed at
-  `84% -10%`, which put its bright core above the element entirely and left almost nothing on
-  screen. The visible fraction is what you are actually choosing.
-- **A "shade" layer mixing toward `--theme-sidebar` read correctly on Light and was mathematically
-  inert on Dark** (`#0e1117` over `#0f1117`), so half the depth budget was being spent on nothing.
-  Deleted. Unlit ground *is* the shadow; the depth comes from the lit-versus-unlit contrast, which
-  is why the lights carry the whole budget.
-
-**Radii are percentages of the box, not pixels.** Measured in px the rim light was 680px wide,
-which on a 390px phone is nearly two screens across: it stopped being a rim and flooded the lower
-half, taking the eyebrow pill's contrast to its tightest reading anywhere on the page (4.87:1).
-As percentages the rig reproduces on every viewport and that reading recovered to 5.99:1.
-
-**Do not carry this into the app.** A dense table under an atmospheric wash is worse than one on a
-flat ground, and PRODUCT.md's tool-first principle is the reason. If a third signed-out surface
-appears, it belongs to this treatment; `/pricing` is the obvious candidate and has not had it yet.
+**The one authored moment on the login page is a state, not an entrance.** The card's top edge
+highlight widens and brightens on `:focus-within`, so it tracks what the user is actually doing
+instead of playing once on load and never meaning anything again.
 
 ## Shapes
 
-*Section added 2026-08-12. The radius scale itself was already in the frontmatter and the per-component values were already in Components; what was missing was the rule tying a step to a size class, which is the part that actually prevents drift.*
+**Six radius steps, and they are a closed set:** 4px (`--radius-xs`, micro-elements only), 8px
+(`--radius-sm`), 12px (`--radius-md`), 18px (`--radius-lg`), 24px (`--radius-xl`), 999px
+(`--radius-full`). Radius does not vary per preset — the shape scale is theme-invariant while
+colour and shadow are not.
 
-**Six radius steps, and they are a closed set:** 4px (`--radius-xs`, micro-elements only — added 2026-08-13), 8px (`--radius-sm`), 12px (`--radius-md`), 18px (`--radius-lg`), 24px (`--radius-xl`), 999px (`--radius-full`). The whole scale was stepped up on 2026-07-12 from a much tighter one (4/5/6/10px) — the product reads noticeably softer than it did, and that was a deliberate move away from the hard-cornered legacy-ERP look PRODUCT.md names as an anti-reference.
+**Radius tracks the element's size class, not its importance.** Chip-sized things take `sm` (badges,
+small icon buttons); control-sized things take `md` (buttons, inputs, selects, tab pills, nav
+links); surface-sized things take `lg` (cards, stat cards, table containers); `xl` is for the
+largest panels only (the sign-in card, the chart expand modal). This is why a badge and a card do
+not share a radius even though both are "containers": the corner has to stay proportional to the
+box, or a small chip reads as a lozenge and a large card reads as a rectangle.
 
-**Radius tracks the element's size class, not its importance.** Chip-sized things take `sm` (badges, small icon buttons); control-sized things take `md` (buttons, inputs, selects, tab pills, nav links); surface-sized things take `lg` (cards, stat cards, table containers); `xl` is for the largest panels only. This is why a badge and a card don't share a radius even though both are "containers" — the corner has to stay proportional to the box, or a small chip reads as a lozenge and a large card reads as a rectangle.
+**`full` (999px) is reserved, not available.** It belongs to the sidebar module switcher's pill
+signature, the period chip, and shapes whose radius is genuinely half their own height (the 6px
+scrollbar thumb). `.tab-btn` deliberately stays at `md` — two pill treatments on one screen would
+dilute the switcher from a signature into a pattern.
 
-**`full` (999px) is reserved, not available.** It belongs to the sidebar module switcher's pill signature and to shapes whose radius is genuinely half their own height (the 6px scrollbar thumb). `.tab-btn` deliberately stays at `md` rather than going full-pill — two pill treatments on one screen would dilute the switcher from a signature into a pattern. See Tabs.
+**Borders carry structure, and the two weights are not interchangeable.** `--theme-border` is
+structural (card edges, the table header rule, input outlines); `--theme-border-lt` is internal
+(row dividers, ghost button edges). Using the structural weight for a row divider makes a dense
+table read as a grid of boxes, which is precisely the legacy-ERP failure mode.
 
-**Borders carry structure; there are two weights and they are not interchangeable.** `--theme-border` is structural (card edges, the table header rule, input outlines); `--theme-border-lt` is internal (table row dividers, ghost button edges). Using the structural weight for a row divider makes a dense table read as a grid of boxes, which is precisely the legacy-ERP failure mode.
-
-**No clipping, no masks, no non-rectangular silhouettes anywhere in the product.** Every surface is a rounded rectangle. The one recurring non-rectangular shape is the circular status dot / pulse ring, which is a signal rather than a container.
+**No clipping, no masks, no non-rectangular silhouettes.** Every surface is a rounded rectangle.
+The only recurring non-rectangular shape is the circular status dot and its pulse ring, which is a
+signal rather than a container.
 
 ### Named Rules
 
-**The Proportional Corner Rule.** If a new element needs a radius, pick the step by asking how big the box is, not how important it is. An "important" card does not get a larger corner; it gets the accent color or a better position.
+**The Proportional Corner Rule.** If a new element needs a radius, pick the step by asking how big
+the box is, not how important it is. An important card does not get a larger corner; it gets the
+accent colour or a better position.
+
+**The Closed-Scale Rule.** A radius, a type size or a spacing value that is not on its scale is
+drift. When the system is genuinely missing a step, add it to the scale and to this file — that is
+how `--radius-xs` arrived, after 38 sites had independently reached for a 2–4px literal because a
+10x10 legend swatch reads as a circle at 8px.
 
 ## Components
 
-> This section is the **visual spec** — shape, colour, state, focus. For the *inventory* — which
-> reusable component to reach for and why each exists — see `.claude/rules/component-library.md`
-> (moved out of `CLAUDE.md` in the 2026-08-27 /doctor pass; it auto-loads when editing
-> `src/components/**`, `src/pages/**` or `src/modules/**`).
+Reach for a global class before an inline style. An inline-styled control escapes the `:disabled`
+treatment, the `[aria-invalid]` hook, the coarse-pointer touch floor and the focus pairing — all
+four of which live on the class and none of which announce their absence.
 
 ### Buttons
-- **Shape:** 12px radius (`--radius-md`; bumped from 6px 2026-07-12), no exceptions across variants.
-- **Primary:** Aged Brass background, `accent-text` foreground (never hardcoded), 700 weight, 8px 16px padding, 13px label.
-- **Hover:** background steps to the theme's `accent-hover` token; no scale/transform, no color-only state changes on interactive elements otherwise.
-- **Ghost:** input-bg background, primary text color, 1px `border-lt`; hover shifts to `table-hover` tint with the border color stepping to accent - a quiet way of saying "this became interactive."
-- **Danger:** input-bg background, red text, red border at low alpha; hover fills to a red tint. Reserved for destructive actions only (delete, void), never for "important" as a stand-in for danger.
-- Feel: tactile and confident. Transitions are short (0.13s) background/color fades, no bounce, no elastic easing, no scale-on-press - firmness comes from color contrast and weight, not physics.
-- **Danger, escalated** (`.btn-danger--strong`, added 2026-08-12/S546): the same variant one step up, for the single irreversible action inside a group of otherwise-recoverable destructive ones — Danger Zone's "Delete Client" beside Clear/Archive. Deeper red tint (0.16 fill, 0.55 border) and 700 weight, and deliberately **still a tint rather than a solid red fill**: `--theme-red` ranges from light (`#f87171` Dark) to dark (`#dc2626` Light) across both presets, so no single foreground contrasts on both. At most one escalated button per group, or the escalation means nothing. *(Corrected 2026-08-12/S549: this previously read "and there is no `--theme-red-text` token to pair with a fill." There is one now — but it does not change the conclusion, because `--theme-red-text` is the **red used as text**, i.e. a darkened red for a light surface, not a foreground to sit **on** a red fill. `--theme-accent-text` is still the only paired-foreground token in the system, and only the accent has one.)*
-- **Disabled** (`.btn:disabled`, formalized 2026-08-12/S546): 0.55 opacity, `cursor: not-allowed`, and every variant's `:hover` is scoped `:not(:disabled)` so a dead button does not still light up under the pointer. This closes a real gap rather than adding polish — every call site had been writing its own inline `opacity: busy ? 0.6 : 1`, so a button that reached for the class alone had **no disabled state at all**: it stopped responding while looking exactly as it had. If a button can be busy or blocked, it now gets this for free; do not re-add a per-site opacity.
-- **Focus:** `.btn` and `.tab-btn` had **no `:focus-visible` rule at all** until 2026-08-13/S551 — the two classes nearly every page in the product is built from. Measured on Outstanding Payables, 11 of 16 focusable elements fell back to the browser's default outline, which on a dark card is close to invisible. Both now take the same 3px `focus-ring` the inputs use, as does `Tip`'s trigger (keyboard-reachable since S465, but with nothing to see). Same page afterwards: 15 of 17.
-- **Never hand-roll a button's inline style when a variant exists.** The 2026-08-12 audit of `ClientDrawer.js` found six Danger Zone buttons each carrying a near-identical eight-property inline style object, with three different red alphas serving as an ad-hoc severity ladder, all at an off-scale 6px radius and none inheriting the hover transition. `.btn-danger` had existed the whole time. Drift concentrates almost perfectly in controls that opted out of a class — that is the single most reliable place to look for it.
+
+- **Shape:** control-sized corners (12px, `--radius-md`), `8px 16px` padding, 13px/500, a 6px gap
+  for an icon. Transitions background and colour at 0.13s.
+- **Primary:** accent fill with `accent-text` at 700. The one filled control in the system.
+- **Ghost:** the input ground with a `border-lt` edge; on hover it takes the table-hover tint and
+  an accent border. This is the default for anything that is not the page's single commit action.
+- **Danger:** the input ground, `red-text` foreground, a 45%-alpha red border, and a 12% red tint
+  on hover. Deliberately **not** a solid red fill — there is no paired foreground token for red.
+- **Danger (escalated):** `--strong` raises the tint to 16%/24% and the weight to 700, for the one
+  action in a destructive group that is irreversible in a way its neighbours are not.
+- **Link-like:** a `<td>` control that reads as a link and behaves as a button, for where the row's
+  identity *is* the action (an outlet name that switches to that outlet). Accent-ink, underlined at
+  1px, thickening to 2px on hover.
+- **Disabled:** one treatment for every variant — `opacity: 0.55` plus `not-allowed`. Before this
+  lived on the class, each call site carried its own inline `opacity`, so a button that used the
+  class alone had no disabled state at all: it simply stopped responding while looking unchanged.
+- **Focus:** `0 0 0 2px` solid outline inside a `0 0 0 5px` ring, shared with `.tab-btn` and
+  `.tip-trigger`. Before this existed, 11 of 16 focusable elements on a measured page fell back to
+  the browser's own outline, which on a dark card is close to invisible.
 
 ### Badges / Status Chips
-- **Shape:** 8px radius (`--radius-sm`; bumped from 4px 2026-07-12), 2px 8px padding, 11px label, capitalized.
-- **Style:** each semantic color renders as a ~10-12% alpha tint of itself as background, full-opacity as text - never a solid fill with white text. This keeps a table full of status badges calm even when every row has one.
-- **Roles:** green (paid/approved/healthy), red (overdue/rejected), amber (pending/low), gray (neutral/cancelled).
-- *(Retired 2026-08-24/S607: a **Bright-only exception** had given `ClientDashboard.jsx`'s five headline KPI cards a colourful per-category icon badge — the One Accent Rule's only sanctioned breach. Its hues were hardcoded from Bright's own accent blue, so it had no coherent home once that preset was cut; `kpiIcon()` and its five call sites were removed rather than re-tinted for another theme.)*
-- A 2026-08-05 audit found `AdminClients.js`'s Trial Accounts panel had drifted onto a solid `background:'#f87171'`/`color:'#fff'` fill for its count pill and "Wants to Subscribe" badge — fixed to the standard `.badge`/`.badge-red` alpha-tint classes.
-- **`.badge-yellow` (`Layout.css`) resolves to `var(--theme-accent)`, not amber — it is the categorical-tag badge (item/recipe category chips), a legitimate accent use, and a genuinely different class from `.badge-amber` (`var(--theme-amber)`, the real warning color).** An `/impeccable colorize` pass on the IMS module (2026-08-05) found six call sites across `Variance.js`, `StockReport.js`, and `Requisitions.js` that reused `badge-yellow`/`theme-accent` for an actual warning/caution state — "Under" variance, "No sales data," "Low" stock (badge + two matching numeric-cell colors), and a requisition's "Draft" status — none of which are category tags. This diluted the warning below the "needs-attention" semantic the Colors section already assigns to amber, and doubled as a soft One Accent Rule violation (accent standing in for a status meaning, not an interactive/brand one). All six fixed to `badge-amber`/`var(--theme-amber)`. When adding a new status badge, check what it actually represents before reaching for `badge-yellow` by pattern-matching nearby code — a categorical tag and a warning state are not interchangeable just because they render a similar gold-ish color on the Dark preset (they diverge sharply on presets like Bright, where accent is blue).
 
-- **A tier or add-on above the module set takes the accent plus a mark, not a fourth hue** (2026-08-13/S552). The admin client list carries IMS/HR/POS pills in accent/green/purple; Crest Suite Pro had no pill at all, and adding a fourth colour would have been the exact One Accent Rule drift documented above. It renders as `★ SUITE` in the accent at a heavier fill (0.20 vs the module pills' 0.10) and 700 weight — the glyph and the weight carry the distinction, the hue stays inside the system. A lapsed one greys to `text3` on a plain border rather than disappearing, because an add-on that vanishes reads as one that was never bought.
+- **Shape:** 8px radius, `2px 8px`, 11px/500, capitalized.
+- **Style:** each colour renders as a ~10–12% alpha tint of itself as the background with the
+  `*-text` variant as the foreground — never a solid fill with white text. This keeps a table full
+  of status badges calm even when every row carries one.
+- **The box lives on every variant, not just `.badge`.** `badge-green` written alone had been used
+  103 times across 22 files; without the box declarations it rendered as bare inherited-size text
+  with no padding, radius or weight, and nothing in the markup said the class pair was incomplete.
+  CSS has no error for a class that does half a job — which is also why there is **no
+  `badge-gold`**, and never was.
+- **Roles:** green (paid/approved/ready), red (overdue/rejected/void), amber (pending/open), grey
+  (inert/cancelled/a plain identity), violet (the rationed fourth category), and **`badge-yellow`,
+  which is the accent tint, not amber** — the categorical tag. A category, an item type, a staff
+  rank, a period, a close type and a delivery partner all live here. It is a genuinely different
+  class from `.badge-amber`, and confusing the two is how "Foodmandu" came to be the same colour as
+  an unfired dish.
+- A tier or add-on above the module set takes the accent at a heavier fill plus a mark
+  (`★ SUITE` at 0.20 against the module pills' 0.10), never a fourth hue.
 
 ### Cards / Containers
-- **Corner style:** 18px radius (`--radius-lg`; bumped from 10px 2026-07-12) - noticeably rounded, still not pill-shaped.
-- **Background:** one step lighter than the page background; no gradient, no tint toward the accent. A 2026-08-05 audit found `AdminClients.js`'s Trial Accounts panel header using a `linear-gradient()` — the one confirmed instance of this rule being broken found so far. Fixed to a flat `rgba(248,113,113,0.10)` wash (the same literal `.badge-red` background tint, scaled up for a section header rather than an inline chip).
-- **Shadow strategy:** `var(--theme-card-shadow)` (added 2026-07-12 - see Elevation). Depth is background-shift + border + a per-preset-tuned shadow, no longer border-only.
-- **Border:** 1px, structural border color.
-- **Internal intervals in a stat tile are 8px label→value and 4px value→sub — and until 2026-08-30 (S657) those were never the numbers on screen.** `.stat-value` set a size and a weight but no `line-height`, so a 24px numeral inherited body's 1.5 and sat in a 36px line box carrying 6px of half-leading on each side; what actually rendered was 14px and 10px, at all 323 sites that use the class. It now carries `line-height: 1.15`, matching the 1.1 the dashboards' hand-rolled KPI values had independently arrived at. **Corollary worth stating once: a class that sets font-size on a large numeral must set its line-height too**, or the class's own margins are advisory.
-- **Build a stat tile out of `<div>`s, never `<p>`s.** There is no global `p { margin: 0 }` in this project, so a `<p class="stat-label">` carries a UA `1em` top margin and a `<p class="stat-value">` carries `1em` (=24px) top and bottom. Measured on the Group Console, which was the only place in the product doing it (8 sites against 323): the card stood **153.6px instead of 102.6px**, the label sat **24px from its figure instead of 8** — `.stat-label`'s own bottom margin collapsed away by the value's inherited top margin — and 49px of dead space sat under the value. Nothing about it looks wrong in the source; it is only visible in a computed box.
-- **Internal padding:** 24px on `.card`; 20px on `.stat-card`. Corrected 2026-08-12 — this line previously read "24px, consistent regardless of card content density," which was never true of the stat tile. The tighter step is deliberate and worth keeping: a stat card is a label-plus-numeral pair with no internal composition to breathe around, and a row of them reads better slightly denser. Anything with real content inside it takes 24px.
+
+- **Corner:** 18px (`--radius-lg`). **Background:** `--theme-card`. **Border:** 1px
+  `--theme-border`. **Shadow:** `--theme-card-shadow`, uniform policy. **Padding:** 24px.
+- **Stat card:** the same surface at 20px padding, holding an 11px uppercase slate label, a 24px
+  figure and an optional 12px sub-line.
+- **`.interactive-card`** adds the focus outline to a card or row that is clickable but is not a
+  real `<button>`.
+- **Report error** (`.report-error`) is a card tinted 8% red with a red border: deliberately *not*
+  the empty state, because "nothing to show" and "could not load" are different facts and only one
+  of them means the figures on screen are real.
 
 ### Inputs / Fields
-- **Style:** input-bg background (typically matches or nears the page background, one step darker than card), 1px border, 12px radius (`--radius-md`; bumped from 6px 2026-07-12), 13px text, label sits above the field (never a placeholder standing in for a label).
-- **Focus:** border steps to accent color, plus a soft 3px ring in the theme's own `focus-ring` token (an alpha-blended version of the accent, not a generic browser-blue ring). This focus ring is themed - it changes hue with every preset.
-- **Error:** a field failing validation carries `aria-invalid="true"`, which is also the styling hook - the border steps to `--theme-red` and a `.field-error` message renders directly below the field, carrying `role="alert"` so it is announced rather than merely shown. Formalized 2026-08-12 (S534) on the login/reset surface, and **extended to the app 2026-08-23 (S603)**: `.field-error` moved to `index.css` (global, so both surfaces share one rule rather than the signed-out pages owning the only copy), the `[aria-invalid="true"]` border hook covers `.form-input`/`.form-select`/`.form-field input|select|textarea` in `Layout.css`, and `src/components/FieldError.jsx` supplies the message plus `fieldAria(id, message)`. **The two halves are one thing on purpose:** `aria-invalid` is both the assistive-tech signal and the styling hook, so a field cannot be *shown* as failing without also being *announced* as failing — which a `.is-invalid` class alongside a separate aria attribute permits, and which is how a form comes to look validated and read as unlabelled. The border is never the message: colour alone conveys nothing to a screen reader or a red-blind reader (WCAG 1.4.1).
 
-  Three things the extension had to settle, worth not re-deriving. **A form-level error and a field-level one are different channels, not the same one placed differently** — a rejected write, or a rule spanning several boxes (Items' conversion trio, Recipes' "add at least one ingredient", Purchase Bill's line table) has no field to sit under and correctly stays form-level; a message naming one box belongs under that box. `EmployeeForm.jsx` is the case that names the gap: it switched **tab** to reveal the offending field and then reported the failure as prose the box itself never carried, so the information was computed and thrown away. **Editing a field clears its own error** — a border still red under a box the user has just corrected teaches them these messages are stale and worth ignoring, which is how a real one gets scrolled past. And **invalid outranks every other border state**: focus, an unsaved-edit amber (`MenuPricing`), an open picker. Focusing the field the user has to fix is exactly when the signal must not disappear.
+- **Style:** the input well (`--theme-input-bg`) inside a 1px `--theme-border`, 12px radius,
+  `9px 12px`, 13px. `.form-field` stacks a 12px/500 label over the control with a 6px gap.
+- **`.form-input` vs `.form-select`:** a text input takes `.form-input`. `.form-select` carries
+  `cursor: pointer`, so a text field wearing it announces itself as a menu — 60 inputs across 22
+  files had done exactly that. `.form-input--auto` is the width escape hatch for a filter toolbar,
+  because width is layout, not control identity.
+- **Focus:** accent border plus the soft ring on `:focus`, and the solid indicator layered on top
+  for `:focus-visible`. Both are needed: the `:focus` rule's specificity would otherwise shadow the
+  bare backstop and leave a keyboard user with only the 1.15:1 tint.
+- **Invalid:** `aria-invalid="true"` is **both** the assistive-tech signal and the styling hook, so
+  a field cannot be shown as failing without also being announced as failing. The rule sits *after*
+  the `:focus` rules deliberately — same specificity, so source order decides, and the border must
+  stay red while focused: that is precisely when the signal must not disappear. Pair it with a
+  `.field-error` message carrying `role="alert"`; the border is reinforcement, never the message.
+- **Disabled and read-only render identically, and the state is carried by the SURFACE, never by
+  the value.** The well flattens to transparent and the border steps down to `border-lt`; the text
+  stays exactly as readable as it was. This is deliberately not `.btn:disabled`'s dimming: a
+  button's label is a verb you may not press, while a field's content is data, and a locked period
+  still shows a real month of real figures that have to stay legible precisely because they can no
+  longer be corrected. WebKit needs `-webkit-text-fill-color` and `opacity: 1` explicitly or the UA
+  stylesheet greys the value anyway.
 
-  Two shared controls needed a prop rather than a class, for the same reason `touch` is a prop: every colour in `BsCalendarPicker` and `SearchableSelect` is an inline style, and an attribute selector has no path to one. Both now take `invalid={message}`. Both point `aria-describedby` at the `<FieldError>` and deliberately do **not** set `aria-invalid` — their trigger is a `<button>`, and `aria-invalid` is unsupported on the button role, so assistive tech ignores it (jsx-a11y flags it). Earning it properly would mean making the trigger a real combobox, the way `SearchableSelect`'s *panel* became one in S521.
-- **The failed ACTION is a third channel, above the other two** (added 2026-08-30/S658). `.field-error` speaks for one control; `.report-error` speaks for a whole report that could not be read and has to outweigh a page of figures. Neither answers the button the user just pressed, and that case was hand-rolled at ~20 sites in IMS alone as `{error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>{error}</p>}`. `.action-error` / `.action-error-text` / `.action-error-detail` (index.css, rendered by `src/components/ActionError.jsx`) now own it. **Deliberately not a card:** it appears under a form the reader is still looking at, where a filled, bordered panel reads as a second section rather than as a consequence of the click. `.action-error--top` places it above the content instead of below, for a panel whose message must be read before the fields.
+### The error family — three channels, three scopes
 
-  **Two parts, because the failure has two readers at different moments.** The sentence is `--theme-red-text` at the 13px body step — measured 6.15:1 on the dark card and 6.47:1 on white. Under it, when there is one, sits `code · message` at the 11px `meta` step in `--theme-text3` (5.45:1) — **the one place monospace is earned in this product**, because it is quoting data rather than dressing prose up as technical. It is toned to be *findable, not readable*: whoever eventually diagnoses the failure will look for it, and the owner it sits in front of must never mistake it for the message. Verified at 390px with a full Postgres constraint string — `word-break: break-word` holds it inside the panel — and `white-space: pre-line` on the text carries the paragraph break between the consequence and its cause.
+- **`FieldError`** speaks for one control, under the input it belongs to.
+- **`ActionError`** speaks for the thing the user just pressed. Deliberately not a card: it sits
+  under a form the reader is still looking at, where a filled panel reads as a second section
+  rather than as a consequence of the click. Two parts, because the failure has two readers — a
+  13px sentence the owner can act on, and an 11px monospace `detail` line holding the code and raw
+  message for whoever eventually diagnoses it. `.action-error--top` places it above the fields
+  where the message must be read first.
+- **`ReportLoadError`** speaks for a whole report that could not be read and has to outweigh a page
+  of figures.
 
-  **What the sentence says is part of the rule, not a copy preference.** The sites this replaced are mostly two-write sequences where the first write has already committed, so the record is now in a state the user cannot see: a purchase bill holding both versions of its lines and double-counted in every purchase figure, a requisition header with no items, an item whose references were cleared before the delete failed. The consequence and the recovery lead; the technical sentence follows. See `shared/errorText.js` for the audience split behind it.
+Convert an error to a sentence at the **call site**, via `shared/errorText.js`, which has two
+audiences: `staff` (someone who can only escalate) and `operator` (the person who fixes it).
+`error.message` is not a message — supabase-js renders every dropped connection as
+`TypeError: Failed to fetch`, which names a JavaScript type where the reader needed to know
+whether their bill saved.
 
-- **Disabled / read-only: the surface carries the state, never the value** (added 2026-08-23/S603, closing the last "unformalized" note in this section). Until this rule existed there was **no** disabled treatment for a field at all — and because `.form-field input` sets its own `background`, `border` and `color`, those declarations overrode the UA's own disabled styling, so a disabled field rendered **identical to an editable one**. Sales and Overheads disable their entire grid on a closed period, so the two pages where a locked month most needs to be obvious were the two where nothing said so: the boxes simply stopped responding. The well now flattens to `transparent` and the border steps to `--theme-border-lt`; the cursor is `not-allowed` when disabled and stays a text caret when read-only, because read-only is not refusal — the value is real and meant to be selected and copied.
+### Tabs — two families that do not mix
 
-  **This is deliberately not `.btn:disabled`'s `opacity: 0.55`, and the difference is not stylistic.** A button's label is a verb you may not press; a field's content is *data*. A locked period still shows a real month of real figures, and those have to stay legible precisely because they can no longer be corrected — dimming them is the opacity mistake this file's own Don't-list already names. Two UA behaviours have to be overridden explicitly or the treatment is defeated anyway: WebKit paints a disabled control's text with **`-webkit-text-fill-color`**, which plain `color` does not override, and iOS Safari layers **its own opacity** on top. Disabled and read-only render identically because the message to the reader is identical — not editable here; what differs is the tab order and selectability, which is the browser's job and not the palette's.
-
-  A control still styled **inline** escapes all of this, exactly as it escapes the `[aria-invalid]` hook and the touch-sizing media query — and the period-lock inputs are inline, i.e. the sites that need it most. `disabledStyle(base, isDisabled)` in `src/shared/inlineFieldState.js` composes the same treatment into an inline object so there is one definition rather than a grey per call site; it sits beside `invalidStyle(base, message)` because both exist for that one reason. The real fix is still the control moving onto a class.
-
-- **Every field needs `id` + `htmlFor`** (added 2026-08-12/S546; **swept complete 2026-08-23/S603 records it**). A `<label>` that is merely a *sibling* of its input, which is what `.form-field` renders by default, names nothing: screen readers announce an unnamed edit box and clicking the label focuses nothing. `ClientDrawer.js` shipped 22 such fields, and when this rule was written only `Login.js`, `ResetPassword.js` and `SelfServiceHome.jsx` associated theirs — so it read as "the pattern to extend". It has since been extended and the sweep is finished: **S546** did `ClientDrawer.js`, **S551** the whole IMS module (96 pairs across 23 files), **S569** the remaining app including Settings/Periods/AdminClients — and a real duplicate-id bug in `NutritionEditorModal.jsx`, where all six nutrient inputs shared one id — and **S576** closed POS, which S569 had missed entirely (52 bare labels → 0). Measured 2026-08-23: **all 27 files using `.form-field` associate their labels, 345 `htmlFor` pairs across 61 files, and of 189 real `<select>` elements none is unnamed.** Write new fields with the pair from the start; this is now a rule to keep rather than one to roll out.
-
-  Two things learned doing it, both still live. Custom controls take ids too — `SearchableSelect` had to be given an `id` prop, because a custom widget with no id is an unnamed button to a screen reader no matter what sits beside it, and `BsCalendarPicker` and `QtyInput` forward one for the same reason. And a warning about doing it in bulk: **a regex whose label-inner group can match across `</label>` will backtrack past a custom control** and bind a label to the *next* field's input, which looks entirely correct in a diff. Assert afterwards that every `htmlFor` resolves to exactly one `id` in its file.
-
-- **A `<label>` that names nothing is worse than no label** (added 2026-08-19/S576). The corollary to the rule above, and the shape that survives every `htmlFor` sweep because it *looks* correct: a `<label>` sitting over a **button group** (toggle chips, tab-bars, radio-style pills), over a **read-only figure** (POS Orders' "Short by / Change", a parking slip's date), or over a **repeating row's column** is announced as a name the browser will never bind to a control. Those become a `<span class="field-label">` — `.form-field .field-label` in `Layout.css` carries the same typography a `<label>` had, so the fix never costs a visual change — with `role="group"`/`role="radiogroup"` + `aria-labelledby` on the container and `aria-pressed` on the buttons. A column heading over a repeating row is a `<span>` too, and each row's controls carry their own `aria-label` naming the column *and* the row. **A `<button>` can never be named by a `<label>` at all**, however adjacent; it takes `aria-label`, and `aria-pressed` (which accepts `"mixed"` — Purchase Bill's all-lines VAT toggle has a real tri-state).
-- **A `<select>` needs an accessible name even where the design gives it no visible caption** (added 2026-08-19/S576, closed in the same pass). Filter toolbars *were* the product's blind spot: 86 unnamed `<select>`s across 43 files — period pickers, category/status/vendor filters, day ranges, sort orders — each announcing only its current option, with nothing to say what it selects. All named; re-measured 2026-08-23 at zero remaining out of 189. `aria-label` where there is no visible text, `id`/`htmlFor` where there is. Inside a `.map()`, use a **template** `aria-label` naming the row (`Permission level for ${r.label}`), never a constant that repeats identically down the list.
-- **A control the user must reach cannot be `display: none`.** Hiding a real input behind a styled stand-in is fine; hiding it with `display: none` (or `visibility: hidden`) removes it from the tab order, so there is no keyboard path to it at all. Use `.visually-hidden` (clip-based, `Layout.css`) when the input itself must stay reachable, or forward a real `<button>`'s click to it. `ClientDrawer.js`'s logo upload had the broken shape — `display:none` input behind a `<span>` carrying `pointerEvents:'none'` — and was unusable without a mouse.
-- **A standalone input takes `.form-input`; only a `.form-field` child is styled for free** (added 2026-08-19/S593). Until this class existed the *only* themed input rule was the descendant selector `.form-field input`, so an input placed in a plain flex row — the natural shape whenever a field sits inline beside a button — received **no** treatment at all and rendered as the browser's native white box. On the five dark presets that is unmissable; on the light ones it is nearly invisible, which is how ClientDrawer's "or create a new group…" box sat next to a properly themed `<select>` through several reviews. The tell that the gap was real rather than incidental is what the sites which *did* notice reached for: one hand-copied all six declarations inline, and two borrowed **`.form-select`** — which carries `cursor: pointer`, so a text field announced itself as a menu. `.form-input` shares one rule with `.form-field input` so the two can never drift, and the same edit gave both the `:focus-visible` solid-outline pairing S574 established (`.form-field` inputs had only ever had the soft 1.15:1 ring, since the `:focus` rule's specificity shadowed the bare `input:focus-visible` backstop). **Reach for a class before styling an input inline** — an inline style also escapes the `[aria-invalid]` hook, the `:disabled` treatment and the touch-sizing media query below.
-
-  **The scale of it, measured 2026-08-23/S603: 62 text controls across 22 files were wearing `.form-select`** — `<input>`s and `QtyInput`s announcing themselves as menus, because that is the class that was there to copy when `.form-input` did not yet exist. All swapped. The swap was not a rename, and the reason is worth keeping: **`.form-input` sets `width: 100%` and `.form-select` does not**, so a blind substitution would have stretched every toolbar search box and filter field that had never pinned its own width, and in a flex row a `flex-basis` of 100% wraps its neighbours. `.form-input--auto` is the difference — 14 of the 62 take it. **Width is layout, not control identity**; reach for that modifier rather than an inline `width: auto`.
-- **A native `<input type="file">` is never shippable UI.** Its "Choose File / No file chosen" chrome is drawn by the browser: no token reaches it, it ignores the type scale, and it renders in the *OS* language rather than the app's. The pattern is a `.visually-hidden` input (not `display:none`, per the rule above) with a real `.btn` forwarding the click — which four of the app's five file inputs already used; ClientDrawer's Restore box was the last raw one, fixed 2026-08-19/S593.
-- **Touch sizing:** under `@media (pointer: coarse)` inputs go to 16px text and buttons to a 44px minimum height. 16px is the threshold below which iOS Safari zooms the viewport on focus and never zooms back out - a 14px field turns "tap the email box" into "now pan the page sideways to find the password box". Scoped to the pointer type rather than a width breakpoint on purpose: the trigger is the input method, not the screen size, so a desktop layout tuned at a specific density is left untouched. WCAG 2.2 SC 2.5.8's 24x24 floor is the hard minimum everywhere (a bare unpadded text button will fail it - the login page's "Forgot password?" was a 96x14px target); 44x44 is the target on touch. **Corrected twice.** S546 found this block lived only in `Login.css` and so covered only the signed-out pages, and gave `Layout.css` the `.btn` (44px) and `.panel-tab` equivalents. **S603 then found the 16px half had never been ported at all** — it existed as `.login-field input` and nowhere else, so every field in IMS, HR and POS stayed 13px on a tablet, on a product whose till and stock count *are* tablet surfaces. `Layout.css`'s coarse block now carries an element-level rule for `input`/`select`/`textarea` (checkbox, radio, range, color, file and the button-shaped types excluded) plus `min-height: 44px` for `button:not([class])`.
-
-  **That rule uses `!important`, and it is load-bearing rather than defensive** — the same justification the reduced-motion block in the same file already carries. 370 form controls across ~46 files set their font-size in an inline `style` object, and no selector beats an inline style; without it the floor would reach the controls that least needed it and skip every one that did. The 44px button rule is scoped to `:not([class])` instead, because every classed button already has a tuned value here (`.btn` 44, `.btn-sm`/`.tab-btn` 32, `.sidebar-link` 40) and a bare `button` selector would quietly re-decide the ones that merely have no rule yet; `min-height` only, since `min-width` on a narrow icon button squeezes its neighbours while extra height just makes the row taller, which on a tablet is the point.
-
-  **This does not retire "reach for a class."** A control on a class also gets the `[aria-invalid]` hook, the `:disabled` treatment and the shape scale — none of which an `!important` floor can supply, and none of which an inline style can receive. The floor exists so the zoom trap does not wait on a 370-site sweep.
-
-### Browser surfaces (added 2026-08-30)
-
-The parts of the page nobody drew still ship with the design. The scrollbar has been themed
-since the beginning; **text selection and the caret had not been**, so on a product where every
-other pixel is tokenised, dragging across a figure produced the browser's stock blue and typing
-into a field produced a black bar — two colours belonging to no design system, on the two
-gestures an accountant performs most.
-
-- **`::selection` is `--theme-accent` on `--theme-accent-text`.** That pair is *defined* as "the
-  foreground that sits on an accent fill", resolved per preset, so the contrast is correct on all
-  ten by construction rather than by a measurement that a new preset would invalidate.
-- **It is a solid fill, not a tint.** A wash at some alpha has as many contrast outcomes as there
-  are text colours underneath it, and a payslip has about ten; a fill has one.
-- **The caret takes `--theme-accent-ink`, not `--theme-accent`** — it sits on the input ground
-  rather than on a fill, which is exactly the distinction those two tokens exist to draw.
-  Measured: `#c9a84c` on Dark, `#8a6d1f` on Light.
-- **The guest menu re-states both in its own tokens.** Its palette is deliberately
-  theme-independent, but `--theme-*` still resolves on that route, so without a `.guest-menu`
-  override a guest would have been handed whichever preset the scanning phone had saved — the
-  same leak the Colors section documents for the rest of that surface. Pine on paper there.
-
-Anything else in this family — the focus ring, `text-underline-offset`, tabular numerals in data
-cells — is already themed. If a new one appears, it belongs here rather than at a call site.
-
-### Tabs (pill filters)
-- **Style:** 12px radius (`--radius-md`; bumped from 5px 2026-07-12 - see the pill-shape note below), 1px border, 4px 12px padding, 12px label, secondary text color at rest.
-- **Active state:** accent-colored text, accent border at 50% alpha, `focus-ring` token as background fill, weight steps up to 600. The active tab looks "selected," not "pressed" - it's a persistent state, not a momentary one. **The label takes `--theme-accent-ink`, not `--theme-accent`** (corrected 2026-08-13/S551): this is the accent used as *text*, on a tint of that same accent, and the base token failed AA on **7 of the 10 presets** — worst 2.27:1 on Rosé Dawn, on a rule that renders on 19 IMS routes alone. The underline keeps the base token, where it is a fill.
-- **Not pill-shaped, on purpose:** the sidebar's module switcher (see Navigation) is true pill-shaped (`border-radius: 999px`) as its own deliberate, singular signature. `.tab-btn` deliberately stays at the standard `--radius-md` rather than also going full pill - two different pill treatments on the same screen would dilute the switcher from "one special treatment" to "just another pill row," the same restraint problem the One Serif Rule guards against for the wordmark.
-
-**Underline tabs are a second, distinct tab family** (`.panel-tab`, added 2026-08-12/S546) — sections *within* one surface, typically a modal panel (`ClientDrawer`'s eight), as opposed to `.tab-btn`'s filter/sort pills which change what a single view shows. Bordered pill for a filter, underline for a section; do not mix the two in one row. Rest is `text2`; active is accent text plus a 2px accent underline and 600 weight; a danger section keeps `--theme-red` in both states and takes the underline in red. The row wraps rather than overflowing — an overflowing tab bar silently hides its **last** tab, which is how `ClientDrawer`'s `⚠ Danger` went missing for a release.
-
-**Use `.panel-tab-bar` for the row itself** (added 2026-08-13/S551). It carries `display:flex` + `gap` + `flex-wrap` + the bottom rule, so the wrap behaviour above is a property of the class rather than something each page has to remember. Seven IMS pages had hand-rolled the row inline; Stock Count's had **seven tabs and no `flexWrap`** — the exact shape that hid `ClientDrawer`'s Danger tab, with "Print Sheet" the one at risk.
-
-**Any tab row needs real tablist semantics**, not just buttons that look selected: `role="tablist"` on the row, `role="tab"` + `aria-selected` + `aria-controls` per tab, `role="tabpanel"` + `aria-labelledby` on the body, and a **roving `tabIndex`** so the whole row is one stop in the page's tab order with the arrow keys (plus Home/End) moving inside it. Without the roving index, reaching the eighth tab by keyboard costs eight Tab presses — and the eighth tab is where the destructive actions live.
-
-**A filter row's options come from the DATA, not from the enum** (added 2026-08-30/S650). Purchases
-carries five filters on one row — day pills, Item, Vendor, a Bill no. search and Payment — and the
-day pills had always been built from the days that have bills, never 1..32. The Payment select now
-follows: it lists the methods the selected period actually used, in the source enum's order, with
-any unrecognised value **appended rather than dropped**, and it hides entirely when a period used
-only one method. The two failures it avoids are not symmetric — an option that returns nothing is
-noise, but a value present in the data with no option is a row nothing can reach.
-
-**And a column with a display fallback must have that fallback applied in every predicate that
-filters on it.** `payment_method` is NULL on bills written before the column existed; every screen
-renders `|| 'Cash'`, so filtering the raw column would have hidden rows the page itself labels
-Cash. One helper (`methodOf`) now resolves it for the filter, the option list and the row badge
-alike. Generally: **if a value is displayed through a fallback, it must be filtered, grouped and
-counted through the same fallback** — the same shape as the `.neq drops NULL rows` trap, and as
-S648's `purchase_group_id || id`.
-
-**Every filter must reach the totals.** Purchases' entry count and *both* footer figures (goods
-value ex-VAT, payable incl. VAT) derive from the one filtered set, so a filter can never leave a
-total describing rows that are no longer on screen. Changing period clears all five.
+- **`.tab-btn` (pill):** a filter or sort control that changes what one view shows. Card ground, a
+  border, 12px radius, `4px 12px`. Hover takes a 25% accent border; active takes a 50% border, the
+  focus-ring tint as its fill and `accent-ink` as its text (the base accent failed AA here on most
+  presets). Hover and active read as a progression, not two unrelated states.
+- **`.panel-tab` (underline):** a *section* within one surface, typically a modal panel. Rest is
+  fog; active is accent text plus a 2px accent underline at 600; a danger section keeps red in both
+  states.
+- **`.panel-tab-bar` and `.tab-bar` own the wrap.** An overflowing tab row silently hides its
+  **last** tab, which is how a `⚠ Danger` section went missing for a release, and how a seven-tab
+  hand-rolled row put "Print Sheet" at risk. Wrapping belongs to the class so no page has to
+  remember it. `.tab-bar--scroll` is the deliberate single-row exception for a category strip.
+- **Any tab row needs real tablist semantics**: `role="tablist"` on the row, `role="tab"` +
+  `aria-selected` + `aria-controls` per tab, `role="tabpanel"` + `aria-labelledby` on the body, and
+  a **roving `tabIndex`** so the row is one stop with arrows (plus Home/End) moving inside it.
+  Without the roving index, reaching the eighth tab costs eight Tab presses — and the eighth tab is
+  where the destructive actions live.
 
 ### Navigation
-**Rewritten 2026-07-12** — the sidebar was restructured from a 56px icon rail + separate 220px flyout panel into one unified column.
-- **Structure:** `.sidebar-shell`, one column, 240px expanded / 56px collapsed (`--main-content` margin-left tracks the same two values). Top to bottom: brand (logo + wordmark, Georgia serif per the One Serif Rule + Ctrl-K search trigger) → module switcher (see below) → scrollable nav content (client badge, nav groups, footer) → a fixed bottom row (Help / collapse toggle / Sign out), always visible regardless of collapsed state.
-- **Module switcher:** a horizontal pill row (`.module-switcher`/`.module-tab`, `border-radius: 999px`-adjacent full-pill shape) when expanded, one tab per module the user can see (Admin/IMS/HR/POS - 1 to 4 tabs depending on role and what the client has enabled). Collapses to a vertical icon-only column (same buttons, `flex-direction` flip) when the sidebar is collapsed - visually equivalent to the pre-2026-07-12 icon rail. **Hidden entirely when only one module is visible** - a one-pill switcher reads as broken UI, not a real choice.
-- **Collapsed state:** a CSS class toggle (`.sidebar-wrap--collapsed`), not a JSX unmount - the nav content stays mounted and is hidden via `display:none`, so scroll position and any open dropdown state survive a collapse/expand toggle instead of resetting.
-- **Style:** sidebar background matched to the active theme (dark sidebar on dark themes, light on light themes) so it never reads as a fixed dark strip on a light theme. Nav items use the accent color for active/hover state, using the `--motion-fast`/`--ease-standard` pairing from the Motion section below (this sidebar is where those two tokens originated) rather than a timing invented per-component.
-- **Row density (revised 2026-08-26/S611):** `.sidebar-link` is `padding: 4px 12px` with no vertical margin — a ~28px row for a 13px label — with `.sidebar-divider` at `4px` top margin and `.sidebar-section-label` at `2px` vertical padding, so group gaps stay proportional to the rows they separate. **Density and touch target are separate controls here and must stay that way:** the `@media (pointer: coarse)` block holds `.sidebar-link` at `min-height: 40px`, which is what a finger actually hits, so this padding only decides desktop density. Tighten it further and the next 4px has to come from the 18px `.sidebar-icon` box or the 10px section label — *not* the 13px `--font-size-nav-item`, which is the bottom of the closed type scale.
-- **Accepted exception:** `.sidebar-shell`'s collapse toggle animates `width`, and `.main-content`'s tracks it by animating `margin-left` (`Layout.css`, both `transition: ... 0.22s ease`) rather than `transform`/`opacity`. Normally a layout-property animation, flagged as such. Kept as-is (confirmed 2026-07-12, reasoning unchanged from the original single-rail version): `.sidebar-wrap` is `position: fixed`, so real space must be reserved for whichever width the sidebar currently is - a `transform`-only fix would mean restructuring the sidebar's positioning strategy app-wide, and the animation only fires on a rare, manual, user-triggered toggle, not a continuous or scroll-linked one, so the real jank risk is low. Revisit only if the sidebar's positioning mechanism changes for other reasons.
 
-### Skip link + context bar (shell chrome, added 2026-08-12/S549)
+- **The shell** is one fixed column: wordmark, module switcher, nav, footer. It collapses to a 56px
+  icon rail where labels are hidden (not truncated — clipped labels rendered "IM / HR / PO") and
+  `RailTip` supplies the name on hover.
+- **The module switcher** is the signature: a horizontal pill row expanded, an icon column
+  collapsed, same buttons and data. Active takes `accent-ink` on the focus-ring tint with a 1px
+  ring of the same tint.
+- **Nav links** are 13px fog at `4px 12px` with a 12px radius; active takes `accent-ink` on the
+  focus-ring tint at 600. Hover is the table-hover tint. A pin-to-favourites star appears on
+  `:hover` **and `:focus-within`**, since it is keyboard-reachable.
+- **The skip link** is WCAG 2.4.1 and not optional here: 41 focusable controls sit inside the
+  sidebar before the main content.
+- **The context bar** answers "which tenant, which period" on every route as a hairline and a row
+  of text, not a card.
+- **Collapse is a class toggle, not an unmount.** `.sidebar-wrap--collapsed` hides the nav content
+  with `display: none`, so scroll position and any open dropdown survive a collapse/expand instead
+  of resetting.
 
-**`.skip-link`** is the first focusable element in `.layout-root`, hidden until focused, then a real 132×40 target. It exists because **41 focusable controls sit inside the sidebar before the first control in `<main>`, on every one of ~86 routes** — WCAG 2.4.1 Bypass Blocks (Level A). `<main>` carries `id="main-content"` and `tabIndex={-1}` as its target. The sidebar also now has three labelled landmarks (`Modules`, `<panel> pages`, `Help and account`); before this the module switcher and the bottom rail sat in no landmark at all.
-
-**`.context-bar`** renders above the `<Outlet />` on every route: client · active BS period · Open/Closed · plan, plus a "Viewing as admin" tag. A hairline and a row of text, never a card — it must not compete with the page's own H1 directly beneath it, and it wraps rather than truncating because on a phone it is the *only* place this information appears (the sidebar that otherwise carries it is off-canvas). The period is the emphasised token because it is the one that silently changes underneath you. It deliberately does not hide on the dashboard that happens to repeat the same facts in its own subtitle: a self-locating chrome element that is present on 85 routes and absent on one is worse than one that is always there.
-
-The reasoning is product-specific rather than generic: every IMS figure is period-scoped, an admin can be "viewing as" another tenant, and an Owner can switch outlets — three independent ways to read a real number off the wrong books, on a product whose whole thesis is trusting the number enough to act on it.
-
-### Report shell (`ReportPage`, added 2026-08-19/S594)
-
-Every IMS/Suite report renders inside one component that owns the **six states a report can be in**: no period, loading, could-not-load, empty, filtered-to-nothing, and content. It exists because this design system governs colour and shape rigorously and governed *report grammar* — which is what this product almost entirely consists of — not at all: three report pages shipped in three days and each invented its own empty state, its own totals row, and (for two of the three) no error state whatever.
-
-**Its one load-bearing rule is that the KPI strip does not render while loading or after a failure.** Both pages painted four stat cards *above* their `loading` guard, so a multi-second fiscal-year read showed "Capital in 90+ Day Stock: NPR 0" in green until the real number arrived, and on a failed read it stayed there. A number the page has not computed yet is not a number, and on a light-preset green it reads as a healthy one. `stats`, `note`, `filters` and `footnote` are all gated on `!loading && !error`. `banners` survives loading and the empty state — a provisional/period warning qualifies the whole page including its absence of data — but **not** a failed read, which is a correction made 2026-08-22/S601 after the first version of this rule shipped the other way. A banner is derived from state the caller set *before* the read, so ConsolidatedPnl's "Provisional — this period is still open… the statement is reliable once the period is closed" printed directly above this component's own "Nothing here is a real figure — this is a failed read": two contradictory sentences on one screen, one of them asserting a statement exists.
-
-**The could-not-load state is deliberately not the empty state.** `.report-error` is a red-bordered card with `role="alert"` that says the figures are not real, where `.empty-state` says there is nothing to show — different facts, and only one of them means the page can be trusted. A failed read rendering as a clean zero is worse than a crash: a crash gets reported, a zero gets believed.
-
-**What "every report renders inside it" actually means, measured (2026-08-26/S613).** Three pages render the full `ReportPage` shell; ~30 report pages render its *grammar* by hand — the shared `ReportLoadError` card (extracted from this component in S612 precisely so a pre-shell page could adopt the failed≠empty rule without a structural rewrite), `firstError`, `NoPeriodState`, and the strip/note/filter gating. **That is the supported state, not a migration debt**: the doctrine is mandatory, the wrapper is optional. A page that renders the grammar by hand must gate its own `stats`/`note`/`filters` on `!loading && !error` — a rule the wrapper enforces for free and a hand-rolled page can forget, which is why a new report page should still start from `ReportPage` unless it has a shape the shell cannot express.
-
-### The period a report covers is a chip, not the tail of a sentence (added 2026-08-31/S659)
-
-`PeriodScope` states the scope of a report in the page header, under the subtitle, on **29 IMS
-pages**. Before it, the scope was prose — `"Stock valuation & food cost report — Bhadra 2082"` —
-so the one fact a reader must verify before trusting any figure on the page was the last few words
-of a 13px `--theme-text2` sentence, styled identically to the description in front of it, on twelve
-pages in one shape. Three pages named no period at all: `BestSellers` said "for the period",
-`DeadStock` and `WastageReport` nothing, on reports whose entire claim is period-relative.
-
-**It introduces no colour.** The chip is the accent at the same low tint `.badge-yellow` already
-uses for a categorical tag, because a period *is* a categorical tag. Wayfinding is one of the jobs
-colour exists to do on an Operate surface; a second brand hue is not. The two halves take different
-weights on purpose — the label is the answer to "which month", the state qualifies it, and a
-single-weight chip made the reader parse both to find one.
-
-**"Open" is structural, not a hue, and that was measured rather than chosen.** The obvious version —
-amber fill, `--theme-amber-text` label — put that label at **4.19:1 on Light**, under AA on 12px
-text, because `--theme-amber-text` is tuned to clear 4.5:1 against the *card* and the *page ground*
-and a warm tint of amber is neither. No tint from 6% to 12% both clears AA and stays visible. And
-the fill was not doing the job anyway: measured against the closed chip it separated by **ΔE 6.0 on
-Dark and 2.6 on Light**, both under the ΔE 8 floor — on Dark the accent and amber are two warm
-yellows, exactly as the Chart Palette Rule warns. So the state is a **dashed border** plus the word
-OPEN plus a `△`: three non-colour cues, immune to greyscale, colour blindness and a monochrome
-print, with amber surviving only as a *border*, where the floor is 3:1 rather than 4.5:1. This is
-the "a paired token is only correct while it is actually measured" rule recurring — reach for the
-token, then verify the token **on the surface you are actually putting it on**.
-
-**`provisionalWhenOpen` is opt-in, because open is not always a warning.** On a data-entry screen
-(Purchases, Stock Count, Sales) an open period is the normal working state and flagging it is noise.
-On a report whose figures are incomplete until the closing count lands — anything deriving COGS or
-variance — it is the single most important caveat on the page. Two pages are deliberately excluded
-and carry a comment saying so: `PeriodComparison` (its scope *is* every period, so a chip naming one
-would contradict the table under it) and `OutstandingPayables` (unbounded — payables carry forward).
-
-`ReportPage` exposes it as a `scope` slot, **deliberately not gated on `figuresAreReal`** the way
-`stats`/`note`/`filters` are. Those are figures, and a figure the page has not computed must not be
-shown. Which period the reader *asked for* is true whether or not the read succeeded, and on the
-error card it is the most useful thing on screen: "this failed for Bhadra 2082" is actionable in a
-way "this failed" is not.
-
-### Page-state banners: red says you cannot, amber says you can but this is not the usual case (added 2026-08-30/S651)
-
-An entry page's full-width banner is a **statement about who the reader is**, not decoration, and the two colours are not interchangeable. Red (`--theme-red-text` on an 8% fill) means *this screen will not accept your writes* — a client on a closed period. Amber (`--theme-amber-text`, same 8%/25% fill-and-border recipe as `StockMovements.js`) means *your writes will land, and you should know why this is unusual* — an admin on that same closed period, editing history deliberately.
-
-The pair exists because they are the same fact rendered for two audiences, and for a year only one of them was drawn. `isLocked = !isAdmin && status === 'closed'` suppressed the red banner for admin along with the lock, so the one person who *could* rewrite a closed month saw a screen identical to the open one. A permission that changes what a control does must change what the page says, or the two most consequential states in the product are pixel-identical.
-
-An amber banner earns its space by naming the follow-up the action does not perform on its own — here, that the month's Monthly Report was frozen at close and needs **Regenerate Snapshot**. A banner that only restates what the reader can already see from the period dropdown is noise.
-
-### Report pages are one dialect, till screens are another (settled 2026-08-26/S613)
-
-POS's four **report** pages (`SalesReport`, `CoversReport`, `KotLog`, `PosExceptionReport`) had grown their own grammar — an inline-styled `h2` where every other page opens with `page-title`, hand-rolled KPI tiles instead of `stat-grid`, a third tab family, and mouse-only `<tr onClick>` drill-downs. That was drift, not a decision, and it is now converged: a report is a report whichever module it belongs to, because the person reading it is the same owner or accountant, arriving with the same expectations, often on the same afternoon.
-
-**The till screens are the deliberate exception.** `PosOrders` and `KitchenDisplay` are `position: fixed` full-screen layers with their own idiom — big touch targets, no sidebar, no page header — because they are operated on a busy floor at arm's length, not read at a desk. Their `Modal` usage needs its own `zIndex` for exactly this reason (see Components). Do not "converge" them.
-
-### The phone is a supported reporting surface (settled 2026-08-26/S613)
-
-`.stat-grid` is `repeat(auto-fit, minmax(180px, 1fr))` and reflows on its own. Twenty-five report pages had been overriding it inline with `repeat(N, 1fr)` up to N=6 — **an inline style outranks every media query**, so a phone rendered six crushed KPI columns on precisely the pages an owner checks between services. All removed; the desktop rendering is unchanged because auto-fit lands on the same column count at desktop widths.
-
-The rule that follows: **never pin a fixed column count on a KPI strip.** If a row genuinely needs a different density, add a named variant to `Layout.css` (as `.stat-grid--compact` and `.dash-3col-*` already are) so it carries its own breakpoint, rather than an inline override that has none. Entry surfaces (Stock Count, POS) were already phone/tablet-first; this settles the reporting half.
+**The one accepted layout-property animation.** `.sidebar-shell` animates `width` and
+`.main-content` tracks it with `margin-left`, both at `0.22s ease` — normally an anti-pattern, and
+correctly flagged as one by any detector. It stays, and the reasoning has held through two
+sidebar rewrites: `.sidebar-wrap` is `position: fixed`, so **real space has to be reserved** for
+whichever width the sidebar currently is. A `transform`-only version would slide the sidebar over
+the content rather than resizing the column, so avoiding it means restructuring the shell's
+positioning strategy app-wide. The animation also fires only on a rare, manual, user-triggered
+toggle — never continuously and never scroll-linked — so the actual jank risk is low. Revisit only
+if the positioning mechanism changes for other reasons. Both values are recorded in
+`.impeccable/config.json`'s `ignoreValues`; this paragraph is why.
 
 ### Data Tables (signature component)
-Dense, functional, and the component most of the product's screens are actually built around. Column headers are 11px uppercase labels at wide tracking; rows are 13px body text with a light bottom border between them (no border on the last row); row hover applies a barely-there tint (`table-hover`, 2-8% alpha depending on theme) rather than a solid highlight. Wide tables always live inside a horizontal-scroll wrapper rather than compressing columns to fit - the data stays legible at native width instead of getting cramped to avoid a scrollbar.
 
-**Row actions belong on the row.** A table whose rows can be acted on carries a right-aligned, `white-space: nowrap` Actions column of `.btn-ghost` buttons at 11px, tinted with the semantic color of what they do (green approve, red reject/delete) rather than filled. `LeaveManagement.jsx` is the reference implementation. The failure mode this prevents is real and shipped twice: putting the only actions inside a detail panel rendered *below* the table means the distance between "the row I decided about" and "the button that acts on it" grows with the list, so a 20-row approval queue becomes 20 round trips to the bottom of the page.
+- **Header:** 11px/500 fog, uppercase, `0.08em`, left-aligned, `10px 5px`, a structural bottom
+  rule, `nowrap`.
+- **Body:** 13px parchment on `11px 5px` with `border-lt` dividers; the last row drops its
+  divider; `tr:hover td` takes the table-hover tint.
+- **Totals:** `tfoot td` gets a 2px top rule at 700 and never takes the hover tint — it is not a
+  data row. Before this rule existed, three report pages written in one week produced three
+  different totals treatments.
+- **`.data-table--sticky-first`** pins the first column for a matrix whose first column is the row
+  label (one column per outlet), so scrolling right does not leave the reader matching numbers to
+  remembered row order.
+- **Row actions belong on the row**, and the disclosure control is a real `<button>` inside a
+  `<td>` (`RowDisclosure`). **Never `role="button"` on a `<tr>`** — that overrides the row's
+  implicit `row` role, which takes the row out of the table's structure and stops a screen reader
+  associating its cells with their column headers. On tables that are almost entirely currency
+  columns, that is the whole content. This was copied forward four times, most recently by an
+  accessibility fix reaching for the incumbent shape in good faith.
 
-**The totals row and lining figures are the table's own, not the call site's** (added 2026-08-19/S594). `.data-table tfoot td` carries a 2px top rule, 700 weight and no bottom border, and suppresses the row-hover tint — a totals row is not a data row. Until S594 `tfoot` had **no rule at all**, so every totals row in the product was hand-styled where it was written, and three report pages built in the same week produced three different treatments. `font-variant-numeric: tabular-nums` now sits on every `.data-table td` and on `.stat-value` for the same reason: Poppins' default figures are **proportional**, so a right-aligned currency column does not line up digit-for-digit, and one page had independently discovered the fix inline while every other currency column in the product stayed ragged. Only digits are affected; text cells are unchanged. **The rule reaches a card only through the class, though** (added 2026-08-30/S657): the three dashboards build their KPI tiles from an inline `kpiCard()` rather than `.stat-card`, so their figures had proportional numerals while every other figure in the product was lining — on the Owner Dashboard, a row of five percentages built to be compared against each other. Its `kpiValueStyle` now sets `fontVariantNumeric` itself; `ClientDashboard.jsx`'s copy still does not.
+**Which column absorbs the squeeze is a decision, and text is the only honest candidate.**
+`white-space: nowrap` goes on the unbreakable atom — a date, a figure, a unit, an invoice ref, an
+action button — never on the whole cell, and never on every column: a table where everything is
+`nowrap` can only overflow, which is not the same thing as scrolling. The purchases bill list is
+the worked example, rewritten three times before it settled: pinning the item cell made the table
+overflow at every ordinary desktop width (min-content 1134px against 1086px of room at 1440px), and
+the reader saw a sliced Edit button rather than a scrollbar. Now the two name columns wrap and
+everything else holds, with no horizontal scroll from 1152px up.
 
-**`.data-table--sticky-first` is opt-in, for a matrix whose first column is the row label.** Consolidated P&L with one column per outlet is the case it was built for: inside `.table-wrap`, scrolling right to reach the last column scrolls the labels away, leaving the reader matching numbers to remembered row order. A sticky cell needs an opaque background (`var(--theme-card)`) or the scrolling columns show through underneath it — the same requirement `Stock.js`'s Summary tab already documents.
+### Report shell
 
-**Never put `role="button"` on a `<tr>`.** The role *overrides* the row's implicit `row` role, which takes it out of the table's structure: a screen reader stops associating that row's cells with their column headers, so every figure in it loses the label that gave it meaning. On a table of currency columns that is the entire content.
+`ReportPage` is the frame every report renders inside: title, scope, optional banners, a KPI strip,
+filters, body, footnote. Its load-bearing rules: **the KPI strip does not render while loading or
+after a failure** (a figure painted during load is a claim the page cannot yet support, and on a
+green token it reads as a healthy one), and a failed read renders `ReportLoadError` rather than a
+page of zeros.
 
-The control belongs **in a cell**, as a real `<button>` — the row keeps its header associations, the button is natively focusable and operable, and no `onKeyDown` has to re-implement Enter/Space. `RowDisclosure` (`src/components/RowDisclosure.jsx`, added 2026-08-19/S595) is that button: it takes `expanded`/`onToggle`/`label` and an optional `controls`, sets `aria-expanded`, and `stopPropagation()`s so the row's own `onClick` — which every one of these tables already had, and which still works — cannot double-fire against it. `controls` is deliberately optional: `aria-controls` needs exactly one element id, and Supplier Price Tracker's detail is *many* sibling `<tr>`s, so pointing it at the first would assert something untrue about the rest.
+**JSX children are an argument, not a gate.** `ReportPage` renders `children` only once loaded, but
+the expression is fully evaluated by the *parent* before it is handed over — so a table built from
+`useState(null)` data throws on the first render, before any wrapper or entitlement gate can
+intervene. Only an early return, a guard at the call site, or a render prop protects it. The same
+applies to `banners`, `stats`, `note`, `filters` and `footnote`.
 
-**A row that ACTS is the same rule with a different control** (added 2026-08-30, from POS). `RowDisclosure` answers the row that *expands*; six POS rows instead *open a bill* or *apply a filter*, and those had no keyboard path at all — the whole affordance was `cursor: 'pointer'` on the `<tr>`, which is also why a sighted mouse user could not tell the rows were clickable either. The control is **`.btn-linklike` on the cell that carries the row's identity** — the invoice number, the order number, the payment method — which is what that class was written for ("a table cell that navigates… the affordance has to sit on the name itself rather than in a trailing Actions column"). It `stopPropagation()`s, exactly as `RowDisclosure` does, and the row's `onClick` stays as the mouse convenience. A row that toggles a filter rather than navigating takes `aria-pressed` instead, and suppresses the underline when its content is a badge: `btn-linklike`'s underline lands *inside* the pill, and no chip in this product is underlined.
+### The period a report covers
 
-**A CARD grid cannot always take the container role, and the tell is whether the card holds controls** (added 2026-08-30, from POS). Order Taking's floor grid puts `role="button" + tabIndex + onKeyDown` on the card, which is correct — its cards hold no interactive children. Table Management's grid *looks identical* and had none of it, so the entire floor plan was mouse-only: a keyboard user could neither open a table nor cycle its status. It cannot be fixed by copying the sibling, because these cards hold three controls (name, status badge, QR), and interactive content inside a `button` role is invalid and unfocusable. The affordance goes on the children instead — the same "a real control inside, never a role on the container" move as the `<tr>` rule above. Two things fall out of it. A badge that is a control becomes a real `<button>` wearing the badge class, which needs `border: none` and `fontFamily: 'inherit'` because the badge styles assume a `<span>`. And the identity control keeps `btn-linklike`'s **semantics and focus ring** while overriding its colour and underline back to the card title's own treatment: a floor runs to 40 tables, and gold-underlining all 40 names would spend the rationed accent forty times on one screen. **The visible result of that fix is nothing at all**, which is the correct outcome for a keyboard repair on a screen whose visual design was already right.
+`PeriodScope` is a chip in the page header, not the tail of a sentence. Across the IMS report
+family the scope had been written into `.page-subtitle` as prose, so the one fact an operator must
+verify before trusting any figure — which month is this? — was the last few words of a 13px fog
+sentence styled identically to the description in front of it.
 
-**The history is the reason this paragraph exists at all.** The rule was carried in `.impeccable/design.json`'s don't-list and **only** there — it had never been written into this file. So nothing a human or an agent actually reads said it, and it was copied forward into four tables: `SupplierPriceTracker.js`, `OutstandingPayables.js`, `VendorReport.js`, and then `SupplierContribution.js` on 2026-08-19/S594, by an accessibility fix reaching for the incumbent shape in good faith — trading a mouse-only row for one that no longer announced its own columns. All four moved to `RowDisclosure` in S595. **A rule that lives only in the machine-readable sidecar is a rule nobody reads**; if it belongs to the system, it belongs in this file's prose.
+It introduces **no colour**: the chip is the accent at the same low tint `.badge-yellow` uses for a
+categorical tag, because a period is exactly that. The label is 600 `accent-ink`, the state is 11px
+uppercase fog — two weights, because a single-weight chip made the reader parse both halves to find
+one.
 
-**A cell holding two things collapses first, and the auto layout decides that, not you** (added 2026-08-27/S614). `table-layout` is `auto`, so a column's width is bid for against its neighbours — and a neighbour carrying `white-space: nowrap` always wins. The Purchases bill list is the reference case: its Item cell holds the item name *and* its category badge, the Vendor cell beside it is `nowrap`, so the Item column was the one squeezed — a two-word name broke over two lines with the badge dropping onto a third, and the row stood three lines tall to show one line of figures. **The fix is `nowrap` on the unbreakable ATOM, not a width — and not the whole cell** (corrected 2026-08-30/S646). Same failure with no second element at all — a Day cell holding `2026-08-17` collapsed to the widest *unbreakable fragment*, `2026-`, and broke the date at every hyphen. But a cell holding a name *and* a badge takes the nowrap on the name only; pinning the cell makes the badge unbreakable too, for no reason.
+**Open is structural, not a hue, and that was measured rather than chosen.** Tinting the chip amber
+put its label at **4.19:1 on Light** on 12px text, and every tint from 6% to 12% lands between 4.19
+and 4.54 — there is no amber fill here that is both visible and safe. Worse, it was not working
+anyway: against the closed chip it separated by ΔE 6.0 on Dark and 2.6 on Light, both under the
+floor. So the provisional state is a **dashed edge** — shape, which survives greyscale, every form
+of colour blindness and a monochrome print, and cannot fail a contrast check because it is not
+text — joined by the word OPEN and a `△`. `provisionalWhenOpen` is opt-in, because on a data-entry
+screen an open period is the normal working state and flagging it would be noise.
 
-**Which column absorbs the squeeze is a decision, and text is the only honest candidate** (added 2026-08-30/S649). S646 elected the Item column because its category badge could drop to a second line, and the reported screen still sliced the Del button: with the badge removed the *names* were the wall — a real "BHAT BHATENI CHICKEN SAUSAGE" is 239px of unbreakable text, "Bhat Bhateni Super Market" 186px. Sample data taken from a screenshot measured 1030px min-content where invented data had measured 912, which is the lesson on its own: **measure with the longest values the client actually has.** Both names now wrap and everything else in the row stays `nowrap` — a day, a figure, a unit, an invoice ref, an expiry and a button are each things a line break corrupts or cuts, and a name is not. A word stays atomic, so a name never breaks mid-word. No horizontal scroll from 1152px up, the Actions column holds its full width at every size, and nothing wraps at all at 1440+.
+### Page-state banners
 
-**A table where every column is `nowrap` can only overflow** (added 2026-08-30/S646, the fix above is what caused it). Each nowrap is individually right, but they accumulate — and `.data-table th` is `nowrap` **globally**, so every header is load-bearing width too. The same Purchases bill list reached nine columns with not one able to give width back: min-content **1134px against 1086px of room at a 1440px window**, so it had been overflowing at every ordinary desktop size and needed 1382px before it fit at all. Three rules come out of it. **A table needs at least one column that can absorb the squeeze**, chosen rather than discovered — the widest text column, with the nowrap pushed down onto the fragment that genuinely cannot break (Item went `nowrap` → `normal` with the name in a nowrap span: the name never breaks, the badge drops to a second line only when there is no room). **A long header is a column width, and it may be two lines** — `Bill Total (incl. VAT)` cost 150px to label 75px figures; a `display: block` child inside the `th` breaks the line despite the inherited nowrap, so nothing has to be deleted to halve the column. The same trick moves supporting detail off a body cell's single line (`#3066 · 5 items` under a vendor name rather than trailing it: 223px → 122px). And **measure it** — every figure here came from the real `Layout.css` and a representative row rendered headless and queried for `scrollWidth` vs `clientWidth` per viewport. A table that fits on the machine it was built on says nothing about the one it was reported from. Result: min-content 912px, rows unchanged at 52–56px.
+Red says you cannot; amber says you can, but this is not the usual case. An amber banner is what an
+admin editing a closed month gets — the action is permitted and the notice must not read as a
+block.
 
-**Row density is a table-level decision, made once.** The global `td` padding is 11px vertical; a table read as a dense ledger rather than a report of a dozen rows opts down through its own scoped class (`table.purchases-table`, 7px) rather than by hand per cell — a per-cell inline padding is the shape that leaves one row taller than its neighbours the first time someone adds a column.
+### Empty states
 
-### Day labels in a period-scoped table (added 2026-08-27/S614)
-A Day column showing a bare `1` is legible only while the page header that names the month is on screen. Print the sheet, scroll past the header, or read it back a month later and the number says nothing. Every period-scoped Day column renders `formatBsDay(day, bsMonth)` from `src/utils/bsCalendar.js` — **"1st Bhadra"** — and `bsDayOrdinal(day)` alone where the month is already stated beside it.
+`.empty-state` is centred slate at `48px 24px` with a 32px glyph. It must never stand in for a
+failed read. And it must not name a control that is not on the page: eighteen IMS pages defaulted
+to the open period, and with no periods at all rendered a `<select>` containing zero options with
+either no empty state or one naming a button that was gated off — which is the first ten minutes of
+every new customer. `NoPeriodState` is what they render instead, and it links to `/periods`.
 
-It is deliberately **not** the full-date form (`1 Bhadra 2083`, what `DemandForecast` and the pickers render): this one names a day *inside the period you already chose*, so it carries no year, and the ordinal is what marks it as a day rather than a count. Two behaviours are load-bearing: an absent or out-of-range month **degrades to the bare ordinal rather than naming the wrong month**, and day 0 (Sales' Bulk-entry sentinel) returns `''` so each caller keeps its own dash. Excel exports keep the **numeric** Day column — text breaks a spreadsheet's sorting and filtering, and the letterhead already states the period.
+### Motion
 
-**Expanding a row shows detail in place, directly beneath it** — a `<tr className="detail-row">` with a full-width `colSpan` cell, never a panel appended after the table (added 2026-08-12, `TadaClaims.jsx`). Two cascade notes, because both bit on the first implementation: `table.data-table tr:hover td` is a *descendant* selector, so without the two `.detail-row` overrides in `Layout.css` hovering an expanded detail tints its own cell **and** every cell of any table nested inside it, lighting the whole panel up as though it were one hoverable row. And if the parent row toggles the expansion on click, every control inside the row must call `stopPropagation()` or acting on the record also collapses the panel you were reading.
+Four tokens, and they are the whole vocabulary: `--motion-fast` (160ms) and `--motion-slow` (260ms),
+`--ease-standard` (`cubic-bezier(0.4, 0, 0.2, 1)`) for a state changing in place, and
+`--ease-entrance` (`cubic-bezier(0.16, 1, 0.3, 1)`) for something arriving that was not on screen
+before, where the near-flat tail reads as settling rather than stopping. Anything longer than
+`--motion-slow` on a working surface is latency, not motion.
 
-## Motion
-
-Motion is functional here, not expressive: this is an Operate surface, so it acknowledges an action, explains a state change, or preserves continuity — and otherwise stays out of the way. There is no page-load choreography anywhere in the app, and adding some to a data screen would be a regression, not a polish pass.
-
-### Tokens
-
-A closed set of four, defined in `Layout.css`'s `:root` (added to the system in stages — `--motion-fast`/`--ease-standard` with the 2026-07-12 sidebar rewrite, `--motion-slow`/`--ease-entrance` on 2026-08-11 when `ChartCard`'s expand sequence needed a second, genuinely different role):
-
-- **`--motion-fast` (160ms) + `--ease-standard` (`cubic-bezier(0.4, 0, 0.2, 1)`)** — a state change *in place*: hover, active, focus, a nav item lighting up. Symmetrical curve, because nothing is arriving or leaving.
-- **`--motion-slow` (260ms) + `--ease-entrance` (`cubic-bezier(0.16, 1, 0.3, 1)`)** — something *arriving* that wasn't on screen: a modal panel, a stat pill resolving in. The near-flat tail reads as settling rather than stopping.
-
-Anything longer than `--motion-slow` on a working screen reads as latency, not motion. Exit faster than entrance, or instantly — a dismissal that makes you wait is worse than one that just happens.
-
-*This prose is the normative source for motion. The machine-readable copy lives in `.impeccable/design.json` under `extensions.motion`, not in this file's frontmatter — the DESIGN.md schema has no top-level `motion:` group, so a copy up there is silently invalid. See the note above the `components:` key.*
-
-### Named Rules
-
-**Every animation must be switch-off-able by `prefers-reduced-motion`, which means it cannot be an inline style.** Inline `style={{ animation }}` beats any stylesheet rule, so a media query cannot reach it — the animation is then unconditional for every user regardless of their OS preference. `ChartCard`'s expand sequence shipped this way and went unguarded until 2026-08-11. Put animations in a class; put the class in the reduced-motion block at the foot of its section in `Layout.css`.
-
-**Recharts is a second motion system that shares none of these tokens, on purpose.** It interpolates SVG attributes in JavaScript, so no CSS rule — including the reduced-motion guard above — reaches a chart series. Every series goes through `src/shared/chartMotion.js` instead, which is the *only* place the reduced-motion gate for charts can live. It cannot use `--ease-entrance`: Recharts accepts only `ease|ease-in|ease-out|ease-in-out|linear`, and a `cubic-bezier()` there is invalid. The two systems are aligned on duration band (450ms series vs 260ms shell) and deliberately not on curve.
-
-**Stagger describes a list, or it is decoration.** The only staggered sequence in the app is `ChartCard`'s expanded stat strip (`.chart-stat-strip`, three steps at 60/105/150ms) — a row of peers that genuinely appears as a row. Cap the total delay; a stagger that outlasts the container it rides in on reads as the UI being slow. Do not reinterpret scrolled sections, table rows, or card grids as staggered lists.
-
-**One accepted exception, unchanged:** the sidebar collapse animates `width`/`margin-left` (layout properties) rather than `transform`. See Navigation for why — `.sidebar-wrap` is `position: fixed`, so real space has to be reserved, and the animation fires only on a rare manual toggle. The `/impeccable` hook flags both lines on every edit to `Layout.css`; they are correct as written.
+- **Every animation must be switchable off by `prefers-reduced-motion`, which means it cannot be an
+  inline style.** A `style={{ animation }}` cannot be reached by the media query. Use a class.
+- **Recharts is a second motion system that shares none of these tokens, on purpose.** It
+  interpolates SVG attributes in JavaScript, so no stylesheet rule reaches it — a user who asked
+  their OS for less motion still got the full 1500ms default on every chart. `chartMotion()`
+  (`shared/chartMotion.js`) is the only place that gate can live; spread it onto every series.
+  450ms and `ease-out`, because Recharts accepts only five easing keywords and a `cubic-bezier()`
+  string is not valid there.
+- **Stagger describes a list, or it is decoration.** The chart expand sequence steps its three
+  stat pills at 60/105/150ms because they arrive as peers; nothing else in the product staggers.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** use the theme's `accent-text` token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the two presets.
-- **Do** keep tonal alpha-tints (`table-hover`, `focus-ring`, badge backgrounds) at 2-18% opacity - enough to register as a state, never opaque enough to compete with real content.
-- **Do** wrap every wide table in the horizontal-scroll container rather than shrinking columns.
-- **Do** reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need, not as a second accent.
-- **Do** put labels above form fields, always - never a placeholder standing in for a label.
-- **Do** give every status message a live region - `role="alert"` for errors, `role="status"` for confirmations. A message that is only *shown* announces nothing, and on a destructive surface that means no confirmation an action ran at all.
-- **Do** use the `*-text` variant whenever a signal colour is set as `color:` — and check the ternaries, which is where about half the real sites are.
-- **Do** keep a legend swatch identical to the series it labels, and let the adjacent label text carry the readable contrast.
-- **Do** give any modal the full dialog contract: role, `aria-modal`, a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger.
-- **Do** disclose an estimate where it is read, inline and visible, not in a hover tooltip — a figure carrying a red/amber/green verdict has to say what it is built from.
-- **Do** render a report's could-not-load state as its own thing, never as the empty state, and never above a KPI strip that is still showing zeros (added 2026-08-19/S594 — see Report shell).
-- **Do** put a validation message under the box it names, with `aria-invalid` on the control and `aria-describedby` pointing at the message — one string for the whole form tells a screen-reader user that a save failed and never which control to fix (added 2026-08-23/S603 — see Inputs / Fields).
+
+- **Do** read every colour from a `--theme-*` token, and check the fallback half of a `var()` as
+  carefully as a standalone literal — a drifted fallback paints in the one instant nobody is
+  watching and reads as correct in review.
+- **Do** take the `*-text` variant when a signal colour is type, and the base token when it fills.
+- **Do** band a ratio through its shared function (`fcBand`, `varianceBand`, `lcBand`, `pcBand`,
+  `nmBand`, `STAFF_LEVEL_BADGE`) and render it through `fcFigure` / `bandFigure`, so the mark
+  cannot be dropped.
+- **Do** pair the soft focus ring with the solid `--theme-focus-outline` on every new focusable
+  control. The ring alone measures 1.15:1 and is not an indicator.
+- **Do** reach for a global class (`.btn`, `.badge-*`, `.card`, `.form-input`, `.form-select`,
+  `.page-header--split`, `.tab-btn`, `.panel-tab-bar`, `.data-table`) before an inline style.
+- **Do** use `aria-invalid="true"` as both the styling hook and the announcement, and pair it with
+  a `role="alert"` message.
+- **Do** put `white-space: nowrap` on the unbreakable atom and let a text column absorb the squeeze.
+- **Do** state a scope everywhere the report goes — the `PeriodScope` chip, the print header, the
+  workbook and the filename.
+- **Do** give a page that renders into the body flow its own `100dvh` scrollport, and delete the
+  `min-height: 100vh` it was carrying.
+- **Do** measure a chip's floor width in the browser before pinning it.
+- **Do** treat print as a real surface: check that a new report prints as a flat document, not as a
+  screenshot of cards.
+- **Do** keep the Crest Staff app's floors (44px controls, 16px fields) scoped under
+  `.self-service`, and set 16px inline too on any control that sets its own size.
 
 ### Don't:
-- **Don't** build dense, hierarchy-less layouts in the name of "fitting more in" - that's the legacy-ERP failure mode this product is explicitly positioned against.
-- **Don't** reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout - the generic-AI-SaaS look PRODUCT.md names directly as an anti-reference.
-- **Don't** invent a stronger/different shadow to mean "important" or "premium." Card elevation (`--theme-card-shadow`) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).
-- **Don't** hardcode white or black as text on an accent background - use the paired `accent-text` token.
-- **Don't** use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (No exceptions remain; Bright's colorful KPI badges were the only named one, retired with that preset in S607.)
-- **Don't** build a multi-series chart palette from the semantic tokens — they are five *roles*, not five validated hues, and nothing measures them as a series set. Both earlier justifications have now expired (accent/purple being one hex died with those presets in S607; Light's `red`/`amber` ΔE 3.1 was fixed in S608), which is itself the argument: the tokens move for reasons that have nothing to do with series separation. Use the validated fixed-hex sets (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`) and re-measure when you touch them — S608 found `CHART_COLORS` slots 3 and 5 at **ΔE 0.4** under deuteranopia, i.e. two identical lines on any chart with five or more series, and nobody had noticed.
-- **Don't** dim a row with `opacity` to de-emphasise it; opacity multiplies through the text colour and takes it below AA. Label the state instead.
-- **Don't** put `role="button"` on a `<tr>`. It removes the row from the table's structure, so the cells stop being associated with their column headers. Put a real `<button>` in the first cell (see Data Tables).
-- **Don't** paint a verdict colour on a figure that has not settled yet — early in a period a lumpy-numerator ratio is arithmetic, not signal.
-- **Don't** let a page compute a number it then shows before the read has returned. A KPI painted during load is a claim the page cannot yet support, and on a green token it reads as a healthy one.
-- **Don't** signal a failing field with colour alone, and don't give it a styling hook separate from `aria-invalid` — the two drift, and a form that looks validated then reads as unlabelled.
-- **Don't** put a `position: sticky` element in the body flow and assume it sticks — `index.css`'s `html, body { overflow-x: hidden }` makes body its own scrollport, and it had silently killed three of them. Give the page root its own scroll container and measure it (see Layout).
-- **Don't** dim a disabled *field* the way a disabled button is dimmed. A button's label is a verb; a field's content is data, and a locked period's figures have to stay legible precisely because they can no longer be corrected — flatten the surface instead (see Inputs / Fields).
+
+- **Don't** introduce a second brand colour. If a fourth category is genuinely needed, that is what
+  the rationed violet is for.
+- **Don't** build a multi-series chart palette from the semantic tokens. They are five roles, not
+  five validated hues, and they move for reasons that have nothing to do with series separation.
+- **Don't** paint a signal colour on a category — a rank, a close type, a delivery partner, a
+  payment method and a table state are facts, not verdicts.
+- **Don't** paint a verdict colour on a figure that has not settled yet: early in a period a
+  lumpy-numerator ratio is arithmetic, not signal.
+- **Don't** let a page show a number it has not computed. A KPI painted during load is a claim the
+  page cannot support, and on a green token it reads as a healthy one.
+- **Don't** render a failed read as an empty state. They are different facts, and only one of them
+  means the figures on screen are real.
+- **Don't** hardcode white or black as text on an accent background — use `accent-text`.
+- **Don't** invent a stronger shadow to mean "important". Card elevation is uniform policy.
+- **Don't** dim a row with `opacity` to de-emphasise it: opacity multiplies through the text colour
+  and takes it below AA. Label the state instead.
+- **Don't** dim a disabled *field* the way a disabled button is dimmed. Flatten the surface and
+  leave the value legible.
+- **Don't** put `role="button"` on a `<tr>` — it removes the row from the table's structure and its
+  cells lose their column headers. Put a real `<button>` in a cell.
+- **Don't** write an animation as an inline style; `prefers-reduced-motion` cannot reach it.
+- **Don't** assume a `position: sticky` element in the body flow sticks. Measure
+  `getBoundingClientRect().top` across real scroll positions — it computes as `sticky` in devtools
+  either way.
+- **Don't** put padding on an `overflow: auto` element to clear a fixed control. Use margin, or the
+  scrollbar ends up somewhere the reader will never find it.
+- **Don't** show a user `error.message`. Convert at the call site through `errorText.js`, and never
+  claim a failed write did not land — a dropped connection does not prove that.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-29T14:16:35.108Z",
+  "generatedAt": "2026-08-31T12:23:21.258Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -8,832 +8,909 @@
         "role": "primary",
         "displayName": "Aged Brass",
         "canonical": "#c9a84c",
-        "purpose": "The one accent. Primary buttons, active nav and tab states, focus rings at low alpha, links. Deliberately rare: its scarcity is what makes it read as intentional rather than a default theme blue.",
         "tonalRamp": [
-          "#3b3012",
-          "#66531f",
-          "#91762c",
-          "#bc9939",
-          "#cfb15e",
-          "#dcc689",
-          "#eaddb8",
-          "#f9f5eb"
-        ]
+          "oklch(15.0% 0.091 89.5)",
+          "oklch(26.0% 0.098 89.5)",
+          "oklch(37.0% 0.105 89.5)",
+          "oklch(48.0% 0.113 89.5)",
+          "oklch(59.0% 0.114 89.5)",
+          "oklch(70.0% 0.107 89.5)",
+          "oklch(82.0% 0.100 89.5)",
+          "oklch(95.0% 0.091 89.5)"
+        ],
+        "lightPreset": "#b07d2b"
       },
       "aged-brass-hover": {
         "role": "primary",
-        "displayName": "Aged Brass Light",
+        "displayName": "Aged Brass (hover)",
         "canonical": "#d4b96a",
-        "purpose": "Hover step for any accent-filled surface. The only state change a primary button makes — no scale, no transform.",
         "tonalRamp": [
-          "#3b3111",
-          "#67541e",
-          "#92782a",
-          "#be9c37",
-          "#d0b35d",
-          "#ddc788",
-          "#eadeb8",
-          "#f9f6eb"
-        ]
+          "oklch(15.0% 0.081 91.1)",
+          "oklch(26.0% 0.087 91.1)",
+          "oklch(37.0% 0.093 91.1)",
+          "oklch(48.0% 0.100 91.1)",
+          "oklch(59.0% 0.101 91.1)",
+          "oklch(70.0% 0.095 91.1)",
+          "oklch(82.0% 0.088 91.1)",
+          "oklch(95.0% 0.081 91.1)"
+        ],
+        "lightPreset": "#946720"
+      },
+      "accent-text": {
+        "role": "primary",
+        "displayName": "Brass on Brass",
+        "canonical": "#0f1117",
+        "tonalRamp": [
+          "oklch(15.0% 0.010 270.6)",
+          "oklch(26.0% 0.011 270.6)",
+          "oklch(37.0% 0.012 270.6)",
+          "oklch(48.0% 0.012 270.6)",
+          "oklch(59.0% 0.013 270.6)",
+          "oklch(70.0% 0.012 270.6)",
+          "oklch(82.0% 0.011 270.6)",
+          "oklch(95.0% 0.010 270.6)"
+        ],
+        "lightPreset": "#241a08"
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Brass Ink",
+        "canonical": "#c9a84c",
+        "tonalRamp": [
+          "oklch(15.0% 0.091 89.5)",
+          "oklch(26.0% 0.098 89.5)",
+          "oklch(37.0% 0.105 89.5)",
+          "oklch(48.0% 0.113 89.5)",
+          "oklch(59.0% 0.114 89.5)",
+          "oklch(70.0% 0.107 89.5)",
+          "oklch(82.0% 0.100 89.5)",
+          "oklch(95.0% 0.091 89.5)"
+        ],
+        "lightPreset": "#7a561e"
       },
       "ink-bg": {
         "role": "neutral",
         "displayName": "Ink",
         "canonical": "#0f1117",
-        "purpose": "App background, and the fill for input fields so a field reads as recessed from the card it sits on.",
         "tonalRamp": [
-          "#1e222e",
-          "#343b50",
-          "#4a5472",
-          "#616e94",
-          "#808bac",
-          "#a2aac3",
-          "#c7ccdb",
-          "#f0f1f5"
-        ]
+          "oklch(15.0% 0.010 270.6)",
+          "oklch(26.0% 0.011 270.6)",
+          "oklch(37.0% 0.012 270.6)",
+          "oklch(48.0% 0.012 270.6)",
+          "oklch(59.0% 0.013 270.6)",
+          "oklch(70.0% 0.012 270.6)",
+          "oklch(82.0% 0.011 270.6)",
+          "oklch(95.0% 0.010 270.6)"
+        ],
+        "lightPreset": "#f6f3ef"
       },
       "ink-card": {
         "role": "neutral",
-        "displayName": "Ink Card",
+        "displayName": "Card",
         "canonical": "#181c27",
-        "purpose": "Cards, stat tiles, table containers. One step lighter than the page — the primary depth cue, with shadow layered on as secondary.",
         "tonalRamp": [
-          "#1d222f",
-          "#333b52",
-          "#485475",
-          "#5d6d98",
-          "#7e8baf",
-          "#a0aac5",
-          "#c6ccdc",
-          "#eff1f5"
-        ]
-      },
-      "ink-border": {
-        "role": "neutral",
-        "displayName": "Ink Border",
-        "canonical": "#2a2f3d",
-        "purpose": "Structural borders: card edges, the table header rule, input outlines.",
-        "tonalRamp": [
-          "#1f232d",
-          "#363d4f",
-          "#4d5670",
-          "#647091",
-          "#838daa",
-          "#a4acc1",
-          "#c9cdda",
-          "#f0f1f5"
-        ]
-      },
-      "ink-border-lt": {
-        "role": "neutral",
-        "displayName": "Ink Border Light",
-        "canonical": "#1e2330",
-        "purpose": "Internal borders: table row dividers, ghost button edges. Using the structural weight here makes a dense table read as a grid of boxes.",
-        "tonalRamp": [
-          "#1d222f",
-          "#333c52",
-          "#495574",
-          "#5e6e97",
-          "#7e8caf",
-          "#a1abc4",
-          "#c7ccdc",
-          "#eff1f5"
-        ]
+          "oklch(15.0% 0.017 269.1)",
+          "oklch(26.0% 0.019 269.1)",
+          "oklch(37.0% 0.020 269.1)",
+          "oklch(48.0% 0.021 269.1)",
+          "oklch(59.0% 0.022 269.1)",
+          "oklch(70.0% 0.020 269.1)",
+          "oklch(82.0% 0.019 269.1)",
+          "oklch(95.0% 0.017 269.1)"
+        ],
+        "lightPreset": "#ffffff"
       },
       "ink-sidebar": {
         "role": "neutral",
-        "displayName": "Ink Sidebar",
+        "displayName": "Sidebar Ink",
         "canonical": "#0e1117",
-        "purpose": "The sidebar column, theme-matched so it never reads as a fixed dark strip on a light preset.",
         "tonalRamp": [
-          "#1d2330",
-          "#323d52",
-          "#475775",
-          "#5d7098",
-          "#7d8eb0",
-          "#a0acc5",
-          "#c6cddc",
-          "#eff1f5"
-        ]
+          "oklch(15.0% 0.010 264.1)",
+          "oklch(26.0% 0.011 264.1)",
+          "oklch(37.0% 0.012 264.1)",
+          "oklch(48.0% 0.013 264.1)",
+          "oklch(59.0% 0.013 264.1)",
+          "oklch(70.0% 0.012 264.1)",
+          "oklch(82.0% 0.011 264.1)",
+          "oklch(95.0% 0.010 264.1)"
+        ],
+        "lightPreset": "#ece6dd"
       },
-      "text-primary": {
+      "ink-border": {
         "role": "neutral",
-        "displayName": "Parchment Text",
-        "canonical": "#e8e0d0",
-        "purpose": "Primary text — a warm off-white, deliberately not pure white.",
+        "displayName": "Structural Border",
+        "canonical": "#2a2f3d",
         "tonalRamp": [
-          "#332b19",
-          "#594a2c",
-          "#7f693e",
-          "#a48850",
-          "#baa273",
-          "#cdbb98",
-          "#e1d6c1",
-          "#f7f4ee"
-        ]
+          "oklch(15.0% 0.020 269.5)",
+          "oklch(26.0% 0.022 269.5)",
+          "oklch(37.0% 0.024 269.5)",
+          "oklch(48.0% 0.025 269.5)",
+          "oklch(59.0% 0.026 269.5)",
+          "oklch(70.0% 0.024 269.5)",
+          "oklch(82.0% 0.022 269.5)",
+          "oklch(95.0% 0.020 269.5)"
+        ],
+        "lightPreset": "#ddd6cf"
       },
-      "text-secondary": {
+      "ink-border-lt": {
         "role": "neutral",
-        "displayName": "Fog Text",
-        "canonical": "#9ca3af",
-        "purpose": "Secondary text: labels, metadata, table column headers. 6.70:1 on the card. Swapped with the tertiary tier in S620 — the values were always in the palette, just assigned the wrong way round, so every \"quietest tier\" hint rendered louder than every secondary label on Dark.",
+        "displayName": "Internal Border",
+        "canonical": "#1e2330",
         "tonalRamp": [
-          "#22252a",
-          "#3b4049",
-          "#545c68",
-          "#6d7787",
-          "#8b94a2",
-          "#aab0bb",
-          "#ccd0d6",
-          "#f1f2f4"
-        ]
+          "oklch(15.0% 0.020 268.2)",
+          "oklch(26.0% 0.022 268.2)",
+          "oklch(37.0% 0.023 268.2)",
+          "oklch(48.0% 0.025 268.2)",
+          "oklch(59.0% 0.025 268.2)",
+          "oklch(70.0% 0.024 268.2)",
+          "oklch(82.0% 0.022 268.2)",
+          "oklch(95.0% 0.020 268.2)"
+        ],
+        "lightPreset": "#ece6df"
       },
-      "text-tertiary": {
+      "input-bg": {
         "role": "neutral",
-        "displayName": "Slate Text",
-        "canonical": "#8a92a3",
-        "purpose": "The quietest tier: timestamps, disabled-adjacent copy, icon buttons at rest. 5.45:1. Both tiers cleared AA before and after the S620 swap — this was hierarchy, not accessibility, which is why no contrast audit caught it.",
-        "tonalRamp": [
-          "#22252b",
-          "#3a3f4a",
-          "#535a6a",
-          "#6c7589",
-          "#8a92a3",
-          "#a9afbc",
-          "#cccfd7",
-          "#f1f2f4"
-        ]
-      },
-      "signal-success": {
-        "role": "tertiary",
-        "displayName": "Success Green",
-        "canonical": "#34d399",
-        "purpose": "Paid, approved, healthy stock, positive variance.",
-        "tonalRamp": [
-          "#0e3f2d",
-          "#186d4e",
-          "#229b6f",
-          "#2cc990",
-          "#53daa9",
-          "#81e4c0",
-          "#b4efd9",
-          "#eafaf4"
-        ]
-      },
-      "signal-danger": {
-        "role": "tertiary",
-        "displayName": "Danger Red",
-        "canonical": "#f87171",
-        "purpose": "Overdue, rejected, negative variance, destructive actions.",
-        "tonalRamp": [
-          "#490404",
-          "#7e0606",
-          "#b40909",
-          "#e90c0c",
-          "#f53838",
-          "#f86d6d",
-          "#fba8a8",
-          "#fee7e7"
-        ]
-      },
-      "signal-warning": {
-        "role": "tertiary",
-        "displayName": "Warning Amber",
-        "canonical": "#fbbf24",
-        "purpose": "Pending, low stock, needs-attention. Distinct from the accent, which is never a status color.",
-        "tonalRamp": [
-          "#4b3701",
-          "#825f02",
-          "#b98703",
-          "#f0af04",
-          "#fbc332",
-          "#fcd369",
-          "#fde5a5",
-          "#fff8e6"
-        ]
-      },
-      "signal-categorical": {
-        "role": "secondary",
-        "displayName": "Categorical Purple",
-        "canonical": "#a78bfa",
-        "purpose": "The rationed 4th/5th categorical color, for when green/red/amber genuinely run out. Not a second accent.",
-        "tonalRamp": [
-          "#150349",
-          "#24057f",
-          "#3308b5",
-          "#430aeb",
-          "#6737f6",
-          "#906cf9",
-          "#bca7fb",
-          "#ece7fe"
-        ]
-      },
-      "chart-tick": {
-        "role": "exception",
-        "displayName": "Chart Tick",
-        "canonical": "#6b7280",
-        "purpose": "Recharts axis tick, label and reference-line fill. CSS var() does not resolve inside SVG presentation attributes, so this one is a literal by necessity, not by drift."
-      },
-      "toggle-knob": {
-        "role": "exception",
-        "displayName": "Toggle Knob",
-        "canonical": "#ffffff",
-        "purpose": "The sliding thumb inside a toggle switch. Always sits on a colored track, never directly on the page, so a fixed white holds contrast across all ten presets."
-      },
-      "print-ink": {
-        "role": "print",
-        "displayName": "Print Ink",
-        "canonical": "#000000",
-        "purpose": "Heading text and rule dividers on printed documents. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-text": {
-        "role": "print",
-        "displayName": "Print Text",
-        "canonical": "#333333",
-        "purpose": "Body copy needing more weight than a label. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-label": {
-        "role": "print",
-        "displayName": "Print Label",
-        "canonical": "#555555",
-        "purpose": "Secondary meta lines: dates, addresses, PAN/VAT. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-label-lt": {
-        "role": "print",
-        "displayName": "Print Label Light",
-        "canonical": "#777777",
-        "purpose": "Field labels and table body secondary text. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-notes": {
-        "role": "print",
-        "displayName": "Print Notes",
-        "canonical": "#444444",
-        "purpose": "Notes and callout box text. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-muted": {
-        "role": "print",
-        "displayName": "Print Muted",
-        "canonical": "#888888",
-        "purpose": "Uppercase section eyebrows, footer and index columns. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-faint": {
-        "role": "print",
-        "displayName": "Print Faint",
-        "canonical": "#aaaaaa",
-        "purpose": "Generated-by footers; the least emphasis on the page. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-rule": {
-        "role": "print",
-        "displayName": "Print Rule",
-        "canonical": "#cccccc",
-        "purpose": "Table header and footer rule lines. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-rule-strong": {
-        "role": "print",
-        "displayName": "Print Rule Strong",
-        "canonical": "#999999",
-        "purpose": "Bordered chips, e.g. a status pill outline. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-rule-lt": {
-        "role": "print",
-        "displayName": "Print Rule Light",
-        "canonical": "#dddddd",
-        "purpose": "Notes-box border. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-rule-xlt": {
-        "role": "print",
-        "displayName": "Print Rule Extra Light",
-        "canonical": "#eeeeee",
-        "purpose": "Table row divider. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "print-fill": {
-        "role": "print",
-        "displayName": "Print Fill",
-        "canonical": "#f3f3f3",
-        "purpose": "Table header row background. Valid only inside a print-only component or an @media print block; never on screen."
-      },
-      "signal-success-text": {
-        "role": "text-variant",
-        "displayName": "Success Green (as text)",
-        "canonical": "#34d399",
-        "purpose": "Success green used as text. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#137538). Never resolve one of these to a literal — read the token.",
-        "tonalRamp": [
-          "#0e3f2d",
-          "#186d4e",
-          "#229b6f",
-          "#2cc990",
-          "#53daa9",
-          "#81e4c0",
-          "#b4efd9",
-          "#e6faf2"
-        ]
-      },
-      "signal-danger-text": {
-        "role": "text-variant",
-        "displayName": "Danger Red (as text)",
-        "canonical": "#f87171",
-        "purpose": "Danger red used as text. Retuned S608: with amber-text it is the only pair of 120 searched that clears both deuteranopia and protanopia while every variant still holds 4.5:1. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#8f2440). Never resolve one of these to a literal — read the token.",
-        "tonalRamp": [
-          "#490404",
-          "#7e0606",
-          "#b40909",
-          "#e90c0c",
-          "#f53838",
-          "#f86d6d",
-          "#fba8a8",
-          "#fee2e2"
-        ]
-      },
-      "signal-warning-text": {
-        "role": "text-variant",
-        "displayName": "Warning Amber (as text)",
-        "canonical": "#fbbf24",
-        "purpose": "Warning amber used as text. Retuned S608 alongside danger-text — at the previous values the two sat at ΔE 3.2 under deuteranopia, i.e. one colour for ~6% of men. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#a85200). Never resolve one of these to a literal — read the token.",
-        "tonalRamp": [
-          "#4b3701",
-          "#825f02",
-          "#b98703",
-          "#f0af04",
-          "#fbc332",
-          "#fcd369",
-          "#fde5a5",
-          "#fef6e1"
-        ]
-      },
-      "signal-categorical-text": {
-        "role": "text-variant",
-        "displayName": "Categorical Violet (as text)",
-        "canonical": "#a78bfa",
-        "purpose": "The rationed categorical purple used as text. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#7c3aed). Never resolve one of these to a literal — read the token.",
-        "tonalRamp": [
-          "#150349",
-          "#24057f",
-          "#3308b5",
-          "#430aeb",
-          "#6737f6",
-          "#906cf9",
-          "#bca7fb",
-          "#e9e2fe"
-        ]
-      },
-      "accent-ink": {
-        "role": "text-variant",
-        "displayName": "Aged Brass Ink",
-        "canonical": "#c9a84c",
-        "purpose": "The accent used AS text (a link, an active nav item, a plan label) — not accent-text, which is the foreground that sits ON an accent fill. Value shown is the DEFAULT (Dark) preset, where the variant deliberately resolves to its own base colour; Light declares its own darkened, hue-preserving value (#7a561e). Never resolve one of these to a literal — read the token.",
-        "tonalRamp": [
-          "#3b3012",
-          "#66531f",
-          "#91762c",
-          "#bc9939",
-          "#cfb15e",
-          "#dcc689",
-          "#eaddb8",
-          "#f8f4e7"
-        ]
-      },
-      "accent-text": {
-        "role": "primary",
-        "displayName": "Accent Ink (on-fill)",
+        "displayName": "Input Well",
         "canonical": "#0f1117",
-        "purpose": "The foreground that sits ON an accent-coloured fill — the label of a primary button, an active pill. Per preset: near-black on Dark, #241a08 on Light, (Latte/Rose Dawn/Solarized, retired S607, each needed a dark hue-match where plain white measured 2.84-3.68:1 and failed AA on every .btn-primary in the product — which is why this token exists at all.) Never hardcode a white or black here; reach for the token, then verify the token.",
         "tonalRamp": [
-          "#05060a",
-          "#0a0c11",
-          "#0f1117",
-          "#1a1d26",
-          "#2a2f3d",
-          "#4a5163",
-          "#8a92a3",
-          "#e8e0d0"
-        ]
+          "oklch(15.0% 0.010 270.6)",
+          "oklch(26.0% 0.011 270.6)",
+          "oklch(37.0% 0.012 270.6)",
+          "oklch(48.0% 0.012 270.6)",
+          "oklch(59.0% 0.013 270.6)",
+          "oklch(70.0% 0.012 270.6)",
+          "oklch(82.0% 0.011 270.6)",
+          "oklch(95.0% 0.010 270.6)"
+        ],
+        "lightPreset": "#fbf9f6"
+      },
+      "table-hover": {
+        "role": "neutral",
+        "displayName": "Row Hover",
+        "canonical": "rgba(255,255,255,0.03)",
+        "lightPreset": "#f3ede6"
       },
       "focus-ring": {
         "role": "neutral",
         "displayName": "Focus Ring (tint)",
         "canonical": "rgba(201,168,76,0.15)",
-        "purpose": "A TINT, not a focus indicator. It doubles as the active-state background for rail buttons, module tabs and sidebar links, so its alpha must stay low — measured alone on Rose Dawn (retired S607) it composited to 1.15:1, 2.6x below WCAG 2.2's 3:1 focus floor. Always paired with focus-outline; the ring by itself is decoration."
+        "lightPreset": "rgba(176,125,43,0.14)"
       },
       "focus-outline": {
-        "role": "primary",
-        "displayName": "Focus Outline",
-        "canonical": "#c9a84c",
-        "purpose": "The actual keyboard-focus indicator (added S574): a 2px solid, resolved per preset as accentInk on light presets and the accent on dark. Every :focus-visible rule pairs this with the soft ring. A new focusable control that takes only the ring has no visible focus state on a light theme."
-      },
-      "input-bg": {
         "role": "neutral",
-        "displayName": "Input Ground",
-        "canonical": "#0f1117",
-        "purpose": "The recessed ground behind a form control — equal to the page background on the dark presets, so a field reads as cut INTO the card rather than raised off it. Reached through .form-field input or .form-input; an input that gets neither renders as the browser's native white box (S593).",
+        "displayName": "Focus Outline (solid)",
+        "canonical": "#c9a84c",
         "tonalRamp": [
-          "#05060a",
-          "#0a0c11",
-          "#0f1117",
-          "#181c27",
-          "#232838",
-          "#2a2f3d",
-          "#4a5163",
-          "#8a92a3"
+          "oklch(15.0% 0.091 89.5)",
+          "oklch(26.0% 0.098 89.5)",
+          "oklch(37.0% 0.105 89.5)",
+          "oklch(48.0% 0.113 89.5)",
+          "oklch(59.0% 0.114 89.5)",
+          "oklch(70.0% 0.107 89.5)",
+          "oklch(82.0% 0.100 89.5)",
+          "oklch(95.0% 0.091 89.5)"
+        ],
+        "lightPreset": "#7a561e"
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Parchment",
+        "canonical": "#e8e0d0",
+        "tonalRamp": [
+          "oklch(15.0% 0.018 84.6)",
+          "oklch(26.0% 0.019 84.6)",
+          "oklch(37.0% 0.021 84.6)",
+          "oklch(48.0% 0.022 84.6)",
+          "oklch(59.0% 0.023 84.6)",
+          "oklch(70.0% 0.021 84.6)",
+          "oklch(82.0% 0.020 84.6)",
+          "oklch(95.0% 0.018 84.6)"
+        ],
+        "lightPreset": "#1c1917"
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Fog",
+        "canonical": "#9ca3af",
+        "tonalRamp": [
+          "oklch(15.0% 0.015 261.3)",
+          "oklch(26.0% 0.016 261.3)",
+          "oklch(37.0% 0.017 261.3)",
+          "oklch(48.0% 0.018 261.3)",
+          "oklch(59.0% 0.019 261.3)",
+          "oklch(70.0% 0.018 261.3)",
+          "oklch(82.0% 0.016 261.3)",
+          "oklch(95.0% 0.015 261.3)"
+        ],
+        "lightPreset": "#5c554e"
+      },
+      "text-tertiary": {
+        "role": "neutral",
+        "displayName": "Slate",
+        "canonical": "#8a92a3",
+        "tonalRamp": [
+          "oklch(15.0% 0.021 265.5)",
+          "oklch(26.0% 0.023 265.5)",
+          "oklch(37.0% 0.024 265.5)",
+          "oklch(48.0% 0.026 265.5)",
+          "oklch(59.0% 0.026 265.5)",
+          "oklch(70.0% 0.025 265.5)",
+          "oklch(82.0% 0.023 265.5)",
+          "oklch(95.0% 0.021 265.5)"
+        ],
+        "lightPreset": "#6b655e"
+      },
+      "signal-success": {
+        "role": "tertiary",
+        "displayName": "Signal Green",
+        "canonical": "#34d399",
+        "tonalRamp": [
+          "oklch(15.0% 0.120 163.2)",
+          "oklch(26.0% 0.129 163.2)",
+          "oklch(37.0% 0.138 163.2)",
+          "oklch(48.0% 0.148 163.2)",
+          "oklch(59.0% 0.150 163.2)",
+          "oklch(70.0% 0.141 163.2)",
+          "oklch(82.0% 0.131 163.2)",
+          "oklch(95.0% 0.120 163.2)"
+        ],
+        "lightPreset": "#15803d"
+      },
+      "signal-danger": {
+        "role": "tertiary",
+        "displayName": "Signal Red",
+        "canonical": "#f87171",
+        "tonalRamp": [
+          "oklch(15.0% 0.130 22.2)",
+          "oklch(26.0% 0.140 22.2)",
+          "oklch(37.0% 0.150 22.2)",
+          "oklch(48.0% 0.160 22.2)",
+          "oklch(59.0% 0.162 22.2)",
+          "oklch(70.0% 0.152 22.2)",
+          "oklch(82.0% 0.141 22.2)",
+          "oklch(95.0% 0.130 22.2)"
+        ],
+        "lightPreset": "#dc2626"
+      },
+      "signal-warning": {
+        "role": "tertiary",
+        "displayName": "Signal Amber",
+        "canonical": "#fbbf24",
+        "tonalRamp": [
+          "oklch(15.0% 0.128 84.4)",
+          "oklch(26.0% 0.138 84.4)",
+          "oklch(37.0% 0.148 84.4)",
+          "oklch(48.0% 0.158 84.4)",
+          "oklch(59.0% 0.161 84.4)",
+          "oklch(70.0% 0.151 84.4)",
+          "oklch(82.0% 0.140 84.4)",
+          "oklch(95.0% 0.128 84.4)"
+        ],
+        "lightPreset": "#b45309"
+      },
+      "signal-categorical": {
+        "role": "secondary",
+        "displayName": "Rationed Violet",
+        "canonical": "#a78bfa",
+        "tonalRamp": [
+          "oklch(15.0% 0.124 293.5)",
+          "oklch(26.0% 0.134 293.5)",
+          "oklch(37.0% 0.143 293.5)",
+          "oklch(48.0% 0.153 293.5)",
+          "oklch(59.0% 0.156 293.5)",
+          "oklch(70.0% 0.146 293.5)",
+          "oklch(82.0% 0.136 293.5)",
+          "oklch(95.0% 0.124 293.5)"
+        ],
+        "lightPreset": "#7c3aed"
+      },
+      "signal-success-text": {
+        "role": "tertiary",
+        "displayName": "Signal Green (text)",
+        "canonical": "#34d399",
+        "tonalRamp": [
+          "oklch(15.0% 0.120 163.2)",
+          "oklch(26.0% 0.129 163.2)",
+          "oklch(37.0% 0.138 163.2)",
+          "oklch(48.0% 0.148 163.2)",
+          "oklch(59.0% 0.150 163.2)",
+          "oklch(70.0% 0.141 163.2)",
+          "oklch(82.0% 0.131 163.2)",
+          "oklch(95.0% 0.120 163.2)"
+        ],
+        "lightPreset": "#137538"
+      },
+      "signal-danger-text": {
+        "role": "tertiary",
+        "displayName": "Signal Red (text)",
+        "canonical": "#f87171",
+        "tonalRamp": [
+          "oklch(15.0% 0.130 22.2)",
+          "oklch(26.0% 0.140 22.2)",
+          "oklch(37.0% 0.150 22.2)",
+          "oklch(48.0% 0.160 22.2)",
+          "oklch(59.0% 0.162 22.2)",
+          "oklch(70.0% 0.152 22.2)",
+          "oklch(82.0% 0.141 22.2)",
+          "oklch(95.0% 0.130 22.2)"
+        ],
+        "lightPreset": "#8f2440"
+      },
+      "signal-warning-text": {
+        "role": "tertiary",
+        "displayName": "Signal Amber (text)",
+        "canonical": "#fbbf24",
+        "tonalRamp": [
+          "oklch(15.0% 0.128 84.4)",
+          "oklch(26.0% 0.138 84.4)",
+          "oklch(37.0% 0.148 84.4)",
+          "oklch(48.0% 0.158 84.4)",
+          "oklch(59.0% 0.161 84.4)",
+          "oklch(70.0% 0.151 84.4)",
+          "oklch(82.0% 0.140 84.4)",
+          "oklch(95.0% 0.128 84.4)"
+        ],
+        "lightPreset": "#a85200"
+      },
+      "signal-categorical-text": {
+        "role": "secondary",
+        "displayName": "Rationed Violet (text)",
+        "canonical": "#a78bfa",
+        "tonalRamp": [
+          "oklch(15.0% 0.124 293.5)",
+          "oklch(26.0% 0.134 293.5)",
+          "oklch(37.0% 0.143 293.5)",
+          "oklch(48.0% 0.153 293.5)",
+          "oklch(59.0% 0.156 293.5)",
+          "oklch(70.0% 0.146 293.5)",
+          "oklch(82.0% 0.136 293.5)",
+          "oklch(95.0% 0.124 293.5)"
+        ],
+        "lightPreset": "#7c3aed"
+      },
+      "print-ink": {
+        "role": "neutral",
+        "displayName": "print-ink",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 0.0)",
+          "oklch(26.0% 0.000 0.0)",
+          "oklch(37.0% 0.000 0.0)",
+          "oklch(48.0% 0.000 0.0)",
+          "oklch(59.0% 0.000 0.0)",
+          "oklch(70.0% 0.000 0.0)",
+          "oklch(82.0% 0.000 0.0)",
+          "oklch(95.0% 0.000 0.0)"
         ]
       },
-      "table-hover": {
+      "print-text": {
         "role": "neutral",
-        "displayName": "Row Hover Tint",
-        "canonical": "rgba(255,255,255,0.03)",
-        "purpose": "The barely-there row-hover wash — 2-8% depending on preset. It is a pointer cue, not a selection state, and it must never be opaque enough to compete with the figures in the row. It is also what a sticky first column has to paint over, which is why .data-table--sticky-first sets an opaque card background."
+        "displayName": "print-text",
+        "canonical": "#333333",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-notes": {
+        "role": "neutral",
+        "displayName": "print-notes",
+        "canonical": "#444444",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-label": {
+        "role": "neutral",
+        "displayName": "print-label",
+        "canonical": "#555555",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-label-lt": {
+        "role": "neutral",
+        "displayName": "print-label-lt",
+        "canonical": "#777777",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-muted": {
+        "role": "neutral",
+        "displayName": "print-muted",
+        "canonical": "#888888",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-rule-strong": {
+        "role": "neutral",
+        "displayName": "print-rule-strong",
+        "canonical": "#999999",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-faint": {
+        "role": "neutral",
+        "displayName": "print-faint",
+        "canonical": "#aaaaaa",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-rule": {
+        "role": "neutral",
+        "displayName": "print-rule",
+        "canonical": "#cccccc",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-rule-lt": {
+        "role": "neutral",
+        "displayName": "print-rule-lt",
+        "canonical": "#dddddd",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-rule-xlt": {
+        "role": "neutral",
+        "displayName": "print-rule-xlt",
+        "canonical": "#eeeeee",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "print-fill": {
+        "role": "neutral",
+        "displayName": "print-fill",
+        "canonical": "#f3f3f3",
+        "tonalRamp": [
+          "oklch(15.0% 0.000 89.9)",
+          "oklch(26.0% 0.000 89.9)",
+          "oklch(37.0% 0.000 89.9)",
+          "oklch(48.0% 0.000 89.9)",
+          "oklch(59.0% 0.000 89.9)",
+          "oklch(70.0% 0.000 89.9)",
+          "oklch(82.0% 0.000 89.9)",
+          "oklch(95.0% 0.000 89.9)"
+        ]
+      },
+      "chart-tick": {
+        "role": "neutral",
+        "displayName": "chart-tick",
+        "canonical": "#6b7280",
+        "tonalRamp": [
+          "oklch(15.0% 0.018 264.4)",
+          "oklch(26.0% 0.020 264.4)",
+          "oklch(37.0% 0.021 264.4)",
+          "oklch(48.0% 0.022 264.4)",
+          "oklch(59.0% 0.023 264.4)",
+          "oklch(70.0% 0.021 264.4)",
+          "oklch(82.0% 0.020 264.4)",
+          "oklch(95.0% 0.018 264.4)"
+        ]
       },
       "guest-paper": {
         "role": "neutral",
-        "displayName": "Guest Paper",
+        "displayName": "guest-paper",
         "canonical": "#F0EDE5",
-        "purpose": "Card and input ground on the public menu — the dish is read on this. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#312b1c",
-          "#544a31",
-          "#786a45",
-          "#9b895a",
-          "#b3a37a",
-          "#c7bc9e",
-          "#ddd7c5",
-          "#f4f2ec"
+          "oklch(15.0% 0.009 89.7)",
+          "oklch(26.0% 0.009 89.7)",
+          "oklch(37.0% 0.010 89.7)",
+          "oklch(48.0% 0.011 89.7)",
+          "oklch(59.0% 0.011 89.7)",
+          "oklch(70.0% 0.010 89.7)",
+          "oklch(82.0% 0.009 89.7)",
+          "oklch(95.0% 0.009 89.7)"
         ]
       },
       "guest-ground": {
         "role": "neutral",
-        "displayName": "Guest Ground",
+        "displayName": "guest-ground",
         "canonical": "#E7E3D8",
-        "purpose": "Page behind the paper, one step back so a card can lift off it. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#2f2a1d",
-          "#524a33",
-          "#756948",
-          "#98885d",
-          "#afa27e",
-          "#c5bba0",
-          "#dcd6c6",
-          "#f3f1ec"
+          "oklch(15.0% 0.012 90.2)",
+          "oklch(26.0% 0.013 90.2)",
+          "oklch(37.0% 0.014 90.2)",
+          "oklch(48.0% 0.015 90.2)",
+          "oklch(59.0% 0.015 90.2)",
+          "oklch(70.0% 0.014 90.2)",
+          "oklch(82.0% 0.013 90.2)",
+          "oklch(95.0% 0.012 90.2)"
         ]
       },
       "guest-pine": {
-        "role": "primary",
-        "displayName": "Pine",
+        "role": "neutral",
+        "displayName": "guest-pine",
         "canonical": "#004643",
-        "purpose": "The guest surface’s single accent: brand, price, category heading, active chip, CTA fill. Rationed exactly as Aged Brass is elsewhere. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#004d49",
-          "#00857f",
-          "#00bdb5",
-          "#00f5ea",
-          "#2efff6",
-          "#66fff8",
-          "#a3fffb",
-          "#e0fffe"
+          "oklch(15.0% 0.048 189.9)",
+          "oklch(26.0% 0.052 189.9)",
+          "oklch(37.0% 0.055 189.9)",
+          "oklch(48.0% 0.059 189.9)",
+          "oklch(59.0% 0.060 189.9)",
+          "oklch(70.0% 0.056 189.9)",
+          "oklch(82.0% 0.052 189.9)",
+          "oklch(95.0% 0.048 189.9)"
         ]
       },
       "guest-pine-deep": {
-        "role": "primary",
-        "displayName": "Pine Deep",
+        "role": "neutral",
+        "displayName": "guest-pine-deep",
         "canonical": "#00312F",
-        "purpose": "Pressed/hover state of a pine fill. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#004d49",
-          "#00857f",
-          "#00bdb5",
-          "#00f5eb",
-          "#2efff6",
-          "#66fff9",
-          "#a3fffb",
-          "#e0fffe"
+          "oklch(15.0% 0.038 190.4)",
+          "oklch(26.0% 0.041 190.4)",
+          "oklch(37.0% 0.044 190.4)",
+          "oklch(48.0% 0.047 190.4)",
+          "oklch(59.0% 0.048 190.4)",
+          "oklch(70.0% 0.045 190.4)",
+          "oklch(82.0% 0.042 190.4)",
+          "oklch(95.0% 0.038 190.4)"
         ]
       },
       "guest-ink": {
         "role": "neutral",
-        "displayName": "Guest Ink",
+        "displayName": "guest-ink",
         "canonical": "#1C1B17",
-        "purpose": "Dish names and body-strength text. 14.8:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#2a2923",
-          "#49463c",
-          "#686455",
-          "#86826e",
-          "#a19d8c",
-          "#bab7ab",
-          "#d6d4cd",
-          "#f1f1ee"
+          "oklch(15.0% 0.006 95.4)",
+          "oklch(26.0% 0.006 95.4)",
+          "oklch(37.0% 0.007 95.4)",
+          "oklch(48.0% 0.007 95.4)",
+          "oklch(59.0% 0.008 95.4)",
+          "oklch(70.0% 0.007 95.4)",
+          "oklch(82.0% 0.007 95.4)",
+          "oklch(95.0% 0.006 95.4)"
         ]
       },
       "guest-sage": {
         "role": "neutral",
-        "displayName": "Sage",
+        "displayName": "guest-sage",
         "canonical": "#4A5C58",
-        "purpose": "Dish descriptions. 6.1:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#222a29",
-          "#3b4946",
-          "#546964",
-          "#6d8882",
-          "#8ba29d",
-          "#aabbb7",
-          "#ccd6d4",
-          "#eef1f1"
+          "oklch(15.0% 0.018 180.2)",
+          "oklch(26.0% 0.019 180.2)",
+          "oklch(37.0% 0.021 180.2)",
+          "oklch(48.0% 0.022 180.2)",
+          "oklch(59.0% 0.023 180.2)",
+          "oklch(70.0% 0.021 180.2)",
+          "oklch(82.0% 0.020 180.2)",
+          "oklch(95.0% 0.018 180.2)"
         ]
       },
       "guest-sage-lt": {
         "role": "neutral",
-        "displayName": "Sage Light",
+        "displayName": "guest-sage-lt",
         "canonical": "#566762",
-        "purpose": "Nutrition tags, covers line, table name, smallest meta. 4.7:1 on ground, 5.1:1 on paper. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#232a28",
-          "#3c4845",
-          "#566762",
-          "#6f857f",
-          "#8da09a",
-          "#acb9b5",
-          "#cdd5d3",
-          "#eef1f0"
+          "oklch(15.0% 0.017 175.7)",
+          "oklch(26.0% 0.019 175.7)",
+          "oklch(37.0% 0.020 175.7)",
+          "oklch(48.0% 0.021 175.7)",
+          "oklch(59.0% 0.022 175.7)",
+          "oklch(70.0% 0.020 175.7)",
+          "oklch(82.0% 0.019 175.7)",
+          "oklch(95.0% 0.017 175.7)"
         ]
       },
       "guest-rule": {
         "role": "neutral",
-        "displayName": "Guest Rule",
+        "displayName": "guest-rule",
         "canonical": "#D3CCBC",
-        "purpose": "Structural hairline; recedes on purpose. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#2e291e",
-          "#504835",
-          "#72664b",
-          "#948461",
-          "#ac9f81",
-          "#c2b9a3",
-          "#dbd5c8",
-          "#f3f1ed"
+          "oklch(15.0% 0.018 87.2)",
+          "oklch(26.0% 0.019 87.2)",
+          "oklch(37.0% 0.021 87.2)",
+          "oklch(48.0% 0.022 87.2)",
+          "oklch(59.0% 0.023 87.2)",
+          "oklch(70.0% 0.021 87.2)",
+          "oklch(82.0% 0.020 87.2)",
+          "oklch(95.0% 0.018 87.2)"
         ]
       },
       "guest-control": {
-        "role": "primary",
-        "displayName": "Guest Control",
+        "role": "neutral",
+        "displayName": "guest-control",
         "canonical": "#4A7A75",
-        "purpose": "Outlines a tappable control, clearing WCAG 1.4.11. 4.1:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#1d302e",
-          "#32534f",
-          "#477571",
-          "#5c9892",
-          "#7db0ab",
-          "#a0c5c1",
-          "#c6dcda",
-          "#ecf3f3"
+          "oklch(15.0% 0.041 187.3)",
+          "oklch(26.0% 0.045 187.3)",
+          "oklch(37.0% 0.048 187.3)",
+          "oklch(48.0% 0.051 187.3)",
+          "oklch(59.0% 0.052 187.3)",
+          "oklch(70.0% 0.049 187.3)",
+          "oklch(82.0% 0.045 187.3)",
+          "oklch(95.0% 0.041 187.3)"
         ]
       },
       "guest-veg": {
-        "role": "tertiary",
-        "displayName": "Veg Mark",
+        "role": "neutral",
+        "displayName": "guest-veg",
         "canonical": "#4C7A2E",
-        "purpose": "Veg mark — a market convention, not a palette choice. 4.3:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#233815",
-          "#3c6024",
-          "#558934",
-          "#6fb243",
-          "#8cc667",
-          "#abd590",
-          "#cde6bc",
-          "#eef7e9"
+          "oklch(15.0% 0.092 134.9)",
+          "oklch(26.0% 0.099 134.9)",
+          "oklch(37.0% 0.107 134.9)",
+          "oklch(48.0% 0.114 134.9)",
+          "oklch(59.0% 0.116 134.9)",
+          "oklch(70.0% 0.108 134.9)",
+          "oklch(82.0% 0.101 134.9)",
+          "oklch(95.0% 0.092 134.9)"
         ]
       },
       "guest-nonveg": {
-        "role": "tertiary",
-        "displayName": "Non-Veg Mark",
+        "role": "neutral",
+        "displayName": "guest-nonveg",
         "canonical": "#A63A2B",
-        "purpose": "Non-veg mark. 5.5:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#3d1510",
-          "#69251b",
-          "#963427",
-          "#c24432",
-          "#d46859",
-          "#e09085",
-          "#ecbdb6",
-          "#f9e9e7"
+          "oklch(15.0% 0.113 30.7)",
+          "oklch(26.0% 0.122 30.7)",
+          "oklch(37.0% 0.131 30.7)",
+          "oklch(48.0% 0.140 30.7)",
+          "oklch(59.0% 0.142 30.7)",
+          "oklch(70.0% 0.133 30.7)",
+          "oklch(82.0% 0.124 30.7)",
+          "oklch(95.0% 0.113 30.7)"
         ]
       },
       "guest-success": {
-        "role": "tertiary",
-        "displayName": "Guest Success",
+        "role": "neutral",
+        "displayName": "guest-success",
         "canonical": "#2F6B2A",
-        "purpose": "Ready to serve. 5.5:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#183716",
-          "#2a5f25",
-          "#3c8835",
-          "#4db045",
-          "#70c469",
-          "#96d491",
-          "#c0e5bd",
-          "#eaf6e9"
+          "oklch(15.0% 0.090 142.1)",
+          "oklch(26.0% 0.097 142.1)",
+          "oklch(37.0% 0.104 142.1)",
+          "oklch(48.0% 0.111 142.1)",
+          "oklch(59.0% 0.113 142.1)",
+          "oklch(70.0% 0.106 142.1)",
+          "oklch(82.0% 0.099 142.1)",
+          "oklch(95.0% 0.090 142.1)"
         ]
       },
       "guest-warn": {
-        "role": "tertiary",
-        "displayName": "Guest Warning",
+        "role": "neutral",
+        "displayName": "guest-warn",
         "canonical": "#8A5A17",
-        "purpose": "Allergens — a safety line, so never faint. 5.1:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#422b0b",
-          "#724a13",
-          "#a2691b",
-          "#d28923",
-          "#e1a34c",
-          "#e9bc7c",
-          "#f2d7b0",
-          "#fbf2e5"
+          "oklch(15.0% 0.078 69.8)",
+          "oklch(26.0% 0.084 69.8)",
+          "oklch(37.0% 0.090 69.8)",
+          "oklch(48.0% 0.097 69.8)",
+          "oklch(59.0% 0.098 69.8)",
+          "oklch(70.0% 0.092 69.8)",
+          "oklch(82.0% 0.086 69.8)",
+          "oklch(95.0% 0.078 69.8)"
         ]
       },
       "guest-danger": {
-        "role": "tertiary",
-        "displayName": "Guest Danger",
+        "role": "neutral",
+        "displayName": "guest-danger",
         "canonical": "#A03328",
-        "purpose": "Order dismissed, submit failed. 6.0:1. Guest menu only (.guest-menu); theme-independent by design — a public page cannot inherit whichever preset the scanning phone had saved.",
         "tonalRamp": [
-          "#3d140f",
-          "#6a221b",
-          "#973026",
-          "#c43e31",
-          "#d56358",
-          "#e08d85",
-          "#edbbb6",
-          "#f9e8e7"
+          "oklch(15.0% 0.114 29.3)",
+          "oklch(26.0% 0.123 29.3)",
+          "oklch(37.0% 0.132 29.3)",
+          "oklch(48.0% 0.141 29.3)",
+          "oklch(59.0% 0.143 29.3)",
+          "oklch(70.0% 0.134 29.3)",
+          "oklch(82.0% 0.125 29.3)",
+          "oklch(95.0% 0.114 29.3)"
         ]
       }
     },
     "typographyMeta": {
-      "wordmark": {
-        "displayName": "Wordmark",
-        "purpose": "The \"Crest\" wordmark only — sidebar brand mark and the login screen. The one serif in an otherwise all-sans system, and it never appears on a second element."
+      "display": {
+        "displayName": "Display",
+        "purpose": "The signed-out hero headline. The only fluid type size in the product."
       },
-      "body": {
-        "displayName": "Body",
-        "purpose": "Table cells, form values, and the default size for nearly everything a user reads."
+      "figure-lg": {
+        "displayName": "Figure (large)",
+        "purpose": "The largest headline number, on a full-width KPI."
       },
-      "label": {
-        "displayName": "Label",
-        "purpose": "Table column headers, stat card labels, section eyebrows. Uppercase at wide tracking, earning its place as a literal column header rather than a decorative kicker."
-      },
-      "stat-value-lg": {
-        "displayName": "Stat Value Large",
-        "purpose": "The single headline numeral on a dashboard hero tile."
-      },
-      "stat-value": {
-        "displayName": "Stat Value",
-        "purpose": "The numeral in a standard KPI card."
-      },
-      "numeral": {
-        "displayName": "Numeral",
-        "purpose": "Inline figures that need to outweigh their surrounding body text."
-      },
-      "page-title": {
-        "displayName": "Page Title",
-        "purpose": "The h1 at the top of a page."
+      "page-heading": {
+        "displayName": "Page Heading",
+        "purpose": "A full-viewport gate or modal heading (PremiumGate, SubscriptionLock)."
       },
       "section-heading": {
         "displayName": "Section Heading",
-        "purpose": "A major division inside a page."
+        "purpose": "A heading inside a card or panel."
       },
       "rail-icon": {
         "displayName": "Rail Icon",
-        "purpose": "Sidebar module-switcher icons in the collapsed rail."
-      },
-      "card-heading": {
-        "displayName": "Card Heading",
-        "purpose": "The title bar of a card or modal."
-      },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Card headings and section titles inside dense layouts."
-      },
-      "meta": {
-        "displayName": "Meta",
-        "purpose": "Timestamps, secondary row detail, helper text under a field."
-      },
-      "micro": {
-        "displayName": "Micro",
-        "purpose": "The smallest tier — badge text and uppercase micro-labels, at 700 weight so it stays legible at 10px."
-      },
-      "chevron": {
-        "displayName": "Chevron",
-        "purpose": "Disclosure arrows in nav groups. Sized as an icon, not as text."
-      },
-      "print-monospace": {
-        "displayName": "Print Monospace",
-        "purpose": "Thermal-printer receipts and KOTs, where fixed-width columns must stay aligned. Never inside the live app UI."
+        "purpose": "The sidebar glyph size (--font-size-rail-icon), expanded and collapsed."
       },
       "touch-input": {
         "displayName": "Touch Input",
-        "purpose": "Text-input only, scoped to .self-service. 16px is the threshold below which iOS Safari zooms the viewport on focus and never zooms back — not a taste step, and never usable as one. Pinning the viewport instead blocks pinch-zoom for everyone, which is why it is deliberately not done."
+        "purpose": "The coarse-pointer field floor. Below 16px iOS Safari zooms on focus and never zooms back."
+      },
+      "card-heading": {
+        "displayName": "Card Heading",
+        "purpose": "The title line inside a .card."
+      },
+      "subtitle": {
+        "displayName": "Subtitle",
+        "purpose": "A secondary line under a title, and the nav-icon size."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "Non-interactive captions only (--font-size-micro). The floor for real text; no interactive control goes below 12px."
+      },
+      "chevron": {
+        "displayName": "Chevron",
+        "purpose": "A glyph, not a label (--font-size-chevron). Never used for text."
+      },
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "Georgia. The client’s own white-labelled brand name, in the sidebar and on the signed-out pages."
+      },
+      "title": {
+        "displayName": "Page Title",
+        "purpose": "One .page-title per route."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "The headline number on a KPI card. Tabular, explicit 1.15 line-height."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Table cells, buttons, inputs, selects, subtitles, prose."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels and filter pills."
+      },
+      "column-header": {
+        "displayName": "Column Header",
+        "purpose": "Uppercase table headers, and the badge size."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Code, and the technical detail line under a failed action. Never a costume."
       }
     },
     "shadows": [
       {
-        "name": "card-elevation",
+        "name": "card-dark",
         "value": "inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4)",
-        "purpose": "The default for .card / .stat-card, exposed as --theme-card-shadow. Generated per preset from that preset's own bg and text1 rather than a flat black, so a theme's color cast survives into its shadow. Dark presets get this rim-highlight-plus-deep-shadow form; light presets get a simpler 0 1px 2px + 0 10px 24px -8px pair tinted from their own ink."
+        "purpose": "Every .card and .stat-card on the Dark preset. Uniform policy, never hand-written."
+      },
+      {
+        "name": "card-light",
+        "value": "0 1px 2px rgba(28,25,23,0.06), 0 10px 24px -8px rgba(28,25,23,0.1)",
+        "purpose": "The same role on Light: a tight contact shadow plus one diffuse drop."
+      },
+      {
+        "name": "focus",
+        "value": "0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring)",
+        "purpose": "The standing focus pair: a solid indicator inside a soft ring. The ring alone measures 1.15:1 and is not an indicator."
       },
       {
         "name": "floating-action",
-        "value": "0 4px 16px rgba(0,0,0,0.3)",
-        "purpose": "An element genuinely floating above the page: the Fab, the bottom-anchored guest cart button. One of only two shadows that still carry a distinct meaning now that card elevation is uniform policy."
+        "value": "0 6px 20px rgba(0,0,0,0.45)",
+        "purpose": "The Fab only. Lifts a fixed control off scrolling content."
       },
       {
-        "name": "live-pulse-ring",
-        "value": "0 0 0 0 rgba(<signal>,0.5) -> 0 0 0 6px rgba(<signal>,0.18)",
-        "purpose": "An animated breathing ring on something needing real-time attention (a new guest order, a live status dot), using the relevant signal color's own alpha. The second meaning-carrying shadow."
-      },
-      {
-        "name": "focus-ring",
-        "value": "0 0 0 3px var(--theme-focus-ring)",
-        "purpose": "Themed focus indicator on inputs, selects and icon buttons. An alpha-blended version of the active preset's accent, so it changes hue with the theme instead of falling back to browser blue."
+        "name": "live-pulse",
+        "value": "0 0 0 0 rgba(251,191,36,0.5) -> 0 0 0 6px rgba(251,191,36,0.18)",
+        "purpose": "A guest QR order waiting to be accepted. An alarm, not a depth cue."
       }
     ],
     "motion": [
       {
         "name": "motion-fast",
         "value": "160ms",
-        "purpose": "Duration for a state change in place: hover, active, focus, a nav item lighting up."
-      },
-      {
-        "name": "ease-standard",
-        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
-        "purpose": "Paired with motion-fast. Symmetrical, because nothing is arriving or leaving."
+        "purpose": "A state changing in place: hover, active, a nav link."
       },
       {
         "name": "motion-slow",
         "value": "260ms",
-        "purpose": "Duration for something arriving that was not on screen: a modal panel, a stat pill resolving in."
+        "purpose": "The ceiling on a working surface. Longer than this is latency, not motion."
+      },
+      {
+        "name": "ease-standard",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Default easing for a state transition."
       },
       {
         "name": "ease-entrance",
         "value": "cubic-bezier(0.16, 1, 0.3, 1)",
-        "purpose": "Paired with motion-slow. The near-flat tail reads as settling rather than stopping."
-      },
-      {
-        "name": "button-transition",
-        "value": "0.13s linear (background, color)",
-        "purpose": "Predates the token pair and is deliberately quicker — a button should feel immediate. No scale, no bounce, no elastic easing anywhere in the product."
-      },
-      {
-        "name": "sidebar-collapse",
-        "value": "0.22s ease (width, margin-left)",
-        "purpose": "The one accepted layout-property animation. .sidebar-wrap is position:fixed so real space must be reserved; a transform-only version would slide the sidebar over the content instead of resizing the column. Fires only on a rare manual toggle."
+        "purpose": "Something arriving that was not on screen before; the near-flat tail reads as settling."
       },
       {
         "name": "chart-series",
-        "value": "450ms ease-out (Recharts, via src/shared/chartMotion.js)",
-        "purpose": "A second motion system that shares none of the CSS tokens on purpose. Recharts interpolates SVG attributes in JavaScript, so no CSS rule — including the prefers-reduced-motion guard — reaches a chart series; chartMotion.js is the only place that gate can live. It cannot express ease-entrance, since Recharts accepts only ease|ease-in|ease-out|ease-in-out|linear. Aligned with the shell on duration band, deliberately not on curve."
+        "value": "450ms ease-out",
+        "purpose": "Recharts only, via chartMotion(). Recharts interpolates SVG attributes in JS, so no CSS rule and no prefers-reduced-motion media query reaches it."
       }
     ],
     "breakpoints": [
       {
         "name": "mobile",
         "value": "768px"
+      },
+      {
+        "name": "touch",
+        "value": "(pointer: coarse)"
       }
     ],
     "chartPalette": {
-      "purpose": "Chart series are fixed literal hex on purpose and are NOT theme tokens. Two independent reasons: CSS var() does not resolve inside SVG presentation attributes, and the five semantic tokens are five ROLES rather than five distinguishable hues — a constraint nothing measures for them, since they move to serve legibility and branding instead. Both concrete justifications this rule once cited have expired (accent/purple being one hex died with those presets in S607; Light's red/amber collapse was fixed in S609), which is the argument rather than a weakening of it. A hex appearing in a chart palette is not an accent-drift violation; the One Accent Rule governs UI chrome.",
-      "validatedAgainst": "Re-measured 2026-08-24/S609 over the two surviving presets. Worst pair: normal vision ΔE 37.9, deuteranopia 15.8, protanopia 21.0 — all 28 pairs clear the ΔE 8 CVD floor on both axes. Slots 5 and 6 were changed to get there: #a78bfa → #8b5cf6 (blue/violet had sat at ΔE 0.4 under deuteranopia, i.e. two indistinguishable lines on any chart with five or more series) and #fb923c → #ea580c (gold/orange 4.2 under protanopia). TRITANOPIA is deliberately not satisfied — worst pair #f87171/#f472b6 at ΔE 0.9 — because separating on the blue-yellow axis fights separating on red-green, and tritanopia is ~0.01% and not sex-linked against ~8% of men for red-green. Acceptable only because these charts carry secondary encoding: paddingAngle gaps, on-slice percent labels, and name+value legends.",
-      "slots": [
-        {
-          "name": "Food Cost",
-          "value": "#c9a84c",
-          "note": "Gold. Kept identical across the cost pie, the FC% trend line and the Owner trend so one measure has one identity everywhere."
-        },
-        {
-          "name": "Labor",
-          "value": "#60a5fa",
-          "note": "Blue."
-        },
-        {
-          "name": "Overheads / Prime",
-          "value": "#8b5cf6",
-          "note": "Violet. Prime Cost draws it DASHED because it is the sum of the two lines above it, not a fifth peer."
-        },
-        {
-          "name": "Tax & Fees",
-          "value": "#ec4899",
-          "note": "Pink."
-        },
-        {
-          "name": "Net Margin",
-          "value": "#34d399",
-          "note": "Green — the one slice that stays semantic, because profit reading as good is not a coincidence worth breaking."
-        }
-      ],
-      "rules": [
-        "A legend swatch must equal the series it labels. Darkening the swatch for contrast while the line keeps the series colour desynchronises them, which is worse than the contrast it fixes; the adjacent label text carries the readable contrast.",
-        "Prefer encoding a relationship over adding a hue. A metric's month-end projection repeats its metric's colour and is distinguished by a dash; a derived total reads as a dashed composite.",
-        "Red is not spent on a merely-categorical slice. On these dashboards red means \"over threshold\", so using it for \"Overheads\" or for the Prime Cost line made a neutral fact read as an alarm."
-      ],
-      "values": [
+      "note": "Fixed literal hex, never the semantic tokens: var() does not resolve in SVG presentation attributes, and the tokens are five roles rather than five validated hues. Re-measure under deuteranopia and protanopia when touching either set.",
+      "series": [
         "#c9a84c",
         "#34d399",
         "#60a5fa",
@@ -843,7 +920,13 @@
         "#22d3ee",
         "#f472b6"
       ],
-      "knownConstraint": "The palette is tuned for the DARK card (#181c27), where every slot clears 4:1. On the Light card (#FCFAF6) six of eight fall below the WCAG 1.4.11 3:1 non-text floor — #22d3ee 1.81, #34d399 1.92, #c9a84c 2.29, #60a5fa 2.54, #f472b6 2.65, #f87171 2.77. Only #8b5cf6 (4.23) and #ea580c (3.56) clear it. This is survivable only because of the same secondary encoding above: the series are named and valued in the legend and labelled on-slice, so colour is reinforcement rather than the sole carrier. Fixing it properly means re-picking six hues that clear 3:1 on BOTH surfaces while still separating under deuteranopia and protanopia — a mid-tone palette with a different character from today's vivid-on-charcoal set. That is a design decision, not a correction."
+      "costBreakdown": {
+        "Food Cost": "#c9a84c",
+        "Labor": "#60a5fa",
+        "Overheads": "#8b5cf6",
+        "Tax & Fees": "#ec4899",
+        "Net Margin": "#34d399"
+      }
     }
   },
   "components": [
@@ -851,473 +934,347 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The single accent-filled action on a screen. Foreground is always the paired accent-text token, never a hardcoded white or black.",
+      "description": "The single commit action on a page. The one filled control in the system.",
       "html": "<button class=\"ds-btn ds-btn-primary\">Save Changes</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn:disabled { opacity: 0.55; cursor: not-allowed; }\n.ds-btn-primary { background: var(--theme-accent, #c9a84c); color: var(--theme-accent-text, #0f1117); font-weight: 700; }\n.ds-btn-primary:hover:not(:disabled) { background: var(--theme-accent-hover, #d4b96a); }\n.ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-md, 12px); font-size: 13px; font-weight: 500; border: none; cursor: pointer; font-family: inherit; transition: background 0.13s, color 0.13s; } .ds-btn:disabled { opacity: 0.55; cursor: not-allowed; } .ds-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--theme-focus-outline, #c9a84c), 0 0 0 5px var(--theme-focus-ring, rgba(201,168,76,0.15)); } .ds-btn-primary { background: var(--theme-accent, #c9a84c); color: var(--theme-accent-text, #0f1117); font-weight: 700; } .ds-btn-primary:hover:not(:disabled) { background: var(--theme-accent-hover, #d4b96a); }"
     },
     {
       "name": "Ghost Button",
       "kind": "button",
       "refersTo": "button-ghost",
-      "description": "The default button. Sits at page-background fill with a quiet internal border; hover steps the border to the accent — a restrained way of saying \"this became interactive.\"",
-      "html": "<button class=\"ds-btn ds-btn-ghost\">Export Excel</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn:disabled { opacity: 0.55; cursor: not-allowed; }\n.ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-btn-ghost:hover:not(:disabled) { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); }\n.ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
+      "description": "The default for anything that is not the page’s commit action.",
+      "html": "<button class=\"ds-btn ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); } .ds-btn-ghost:hover:not(:disabled) { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); }"
     },
     {
       "name": "Danger Button",
       "kind": "button",
       "refersTo": "button-danger",
-      "description": "Destructive actions only — delete, void. Never used to mean \"important\". Red text on a tinted fill rather than a solid red fill, because --theme-red ranges from light to dark across the ten presets and no single foreground contrasts on all of them.",
-      "html": "<button class=\"ds-btn ds-btn-danger\">Void Bill</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn:disabled { opacity: 0.55; cursor: not-allowed; }\n.ds-btn-danger { background: var(--theme-input-bg, #0f1117); color: var(--theme-red, #f87171); border: 1px solid rgba(248,113,113,0.45); }\n.ds-btn-danger:hover:not(:disabled) { background: rgba(248,113,113,0.12); border-color: var(--theme-red, #f87171); }"
-    },
-    {
-      "name": "Danger Button (Escalated)",
-      "kind": "button",
-      "refersTo": "button-danger-strong",
-      "description": "One step up from the danger variant, for the single irreversible action inside a group of otherwise-recoverable destructive ones — Danger Zone's \"Delete Client\" beside Clear and Archive. Still a tint rather than a solid red fill, for the same reason the base variant is: --theme-red ranges light-to-dark across the ten presets and there is no --theme-red-text to pair with a fill. At most one per group, or the escalation means nothing.",
-      "html": "<div class=\"ds-danger-row\"><button class=\"ds-btn ds-btn-danger\">Clear Client Data</button><button class=\"ds-btn ds-btn-danger ds-btn-danger-strong\">Delete Client</button></div>",
-      "css": ".ds-danger-row { display: flex; gap: 10px; flex-wrap: wrap; }\n.ds-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; cursor: pointer; border: none; transition: background 0.13s, color 0.13s; }\n.ds-btn:disabled { opacity: 0.55; cursor: not-allowed; }\n.ds-btn-danger { background: var(--theme-input-bg, #0f1117); color: var(--theme-red, #f87171); border: 1px solid rgba(248,113,113,0.45); }\n.ds-btn-danger:hover:not(:disabled) { background: rgba(248,113,113,0.12); border-color: var(--theme-red, #f87171); }\n.ds-btn-danger-strong { background: rgba(248,113,113,0.16); border-color: rgba(248,113,113,0.55); font-weight: 700; }\n.ds-btn-danger-strong:hover:not(:disabled) { background: rgba(248,113,113,0.24); border-color: var(--theme-red, #f87171); }"
+      "description": "A destructive action. A red tint and a red border, never a solid red fill — there is no paired foreground token for red.",
+      "html": "<button class=\"ds-btn ds-btn-danger\">Delete Vendor</button>",
+      "css": ".ds-btn-danger { background: var(--theme-input-bg, #0f1117); color: var(--theme-red-text, #f87171); border: 1px solid rgba(248,113,113,0.45); } .ds-btn-danger:hover:not(:disabled) { background: rgba(248,113,113,0.12); border-color: var(--theme-red, #f87171); } .ds-btn-danger--strong { background: rgba(248,113,113,0.16); border-color: rgba(248,113,113,0.55); font-weight: 700; }"
     },
     {
       "name": "Status Badge",
       "kind": "chip",
       "refersTo": "badge",
-      "description": "Every semantic color renders as a ~10-12% alpha tint of itself with full-opacity text — never a solid fill with white text. That is what keeps a table calm when every row carries one.",
-      "html": "<span class=\"ds-badge ds-badge-green\">Paid</span> <span class=\"ds-badge ds-badge-amber\">Pending</span> <span class=\"ds-badge ds-badge-red\">Overdue</span> <span class=\"ds-badge ds-badge-gray\">Cancelled</span>",
-      "css": ".ds-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; text-transform: capitalize; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green, #34d399); }\n.ds-badge-amber { background: rgba(251,191,36,0.12); color: var(--theme-amber, #fbbf24); }\n.ds-badge-red { background: rgba(248,113,113,0.10); color: var(--theme-red, #f87171); }\n.ds-badge-gray { background: rgba(138,146,163,0.10); color: var(--theme-text2, #8a92a3); }"
+      "description": "An alpha tint of its own colour with the contrast-safe *-text variant as foreground. The box lives on every colour variant, so badge-green written alone still renders as a chip.",
+      "html": "<span class=\"ds-badge ds-badge-green\">paid</span> <span class=\"ds-badge ds-badge-amber\">pending</span> <span class=\"ds-badge ds-badge-red\">overdue</span> <span class=\"ds-badge ds-badge-yellow\">Dairy</span> <span class=\"ds-badge ds-badge-gray\">cancelled</span>",
+      "css": ".ds-badge, .ds-badge-green, .ds-badge-amber, .ds-badge-red, .ds-badge-yellow, .ds-badge-gray { display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm, 8px); font-size: 11px; font-weight: 500; text-transform: capitalize; font-family: inherit; } .ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green-text, #34d399); } .ds-badge-amber { background: rgba(251,191,36,0.12); color: var(--theme-amber-text, #fbbf24); } .ds-badge-red { background: rgba(248,113,113,0.10); color: var(--theme-red-text, #f87171); } .ds-badge-yellow { background: rgba(201,168,76,0.12); color: var(--theme-accent-ink, #c9a84c); } .ds-badge-gray { background: rgba(138,146,163,0.10); color: var(--theme-text2, #9ca3af); }"
     },
     {
       "name": "Card",
       "kind": "card",
       "refersTo": "card",
-      "description": "The standard surface. One tone lighter than the page as the primary depth cue, with a per-preset shadow layered on top. No gradient, no tint toward the accent.",
-      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">Period Summary</div><p class=\"ds-card-body\">Net purchases, revenue and food cost for the open period.</p></div>",
-      "css": ".ds-card { background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 18px; box-shadow: inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4); padding: 24px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-card-title { font-size: 15px; font-weight: 600; color: var(--theme-text1, #e8e0d0); margin-bottom: 8px; }\n.ds-card-body { font-size: 13px; line-height: 1.5; color: var(--theme-text3, #9ca3af); margin: 0; }"
+      "description": "Every surface that holds content. Uniform elevation, never a stronger shadow to mean important.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">Purchase Summary</h3><p class=\"ds-card-body\">Bhadra 2082 &middot; 34 bills</p></div>",
+      "css": ".ds-card { background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: var(--radius-lg, 18px); box-shadow: var(--theme-card-shadow, inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55)); padding: 24px; } .ds-card-title { font-size: 15px; font-weight: 600; color: var(--theme-text1, #e8e0d0); margin: 0 0 6px; } .ds-card-body { font-size: 13px; color: var(--theme-text2, #9ca3af); margin: 0; }"
     },
     {
       "name": "Stat Card",
       "kind": "card",
       "refersTo": "stat-card",
-      "description": "A KPI tile: uppercase micro-label over a large numeral. Padding is 20px rather than the card default 24px — a label-and-numeral pair has no internal composition to breathe around, and a row of them reads better slightly denser.",
-      "html": "<div class=\"ds-stat-card\"><div class=\"ds-stat-label\">Food Cost %</div><div class=\"ds-stat-value\">32.4%</div></div>",
-      "css": ".ds-stat-card { background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 18px; box-shadow: inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4); padding: 20px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-stat-label { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--theme-text3, #9ca3af); margin-bottom: 6px; }\n.ds-stat-value { font-size: 24px; font-weight: 700; color: var(--theme-text1, #e8e0d0); }"
+      "description": "A KPI tile: uppercase slate label, a 24px tabular figure with an explicit 1.15 line-height, an optional sub-line. The grid floor is 200px because NPR 12,48,650 wraps below it.",
+      "html": "<div class=\"ds-stat-card\"><div class=\"ds-stat-label\">Food Cost</div><div class=\"ds-stat-value\">31.4% &#9744;</div><div class=\"ds-stat-sub\">Target &le; 32%</div></div>",
+      "css": ".ds-stat-card { background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: var(--radius-lg, 18px); box-shadow: var(--theme-card-shadow, 0 10px 24px -8px rgba(15,17,23,0.55)); padding: 20px; } .ds-stat-label { font-size: 11px; color: var(--theme-text3, #8a92a3); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; } .ds-stat-value { font-size: 24px; font-weight: 600; line-height: 1.15; color: var(--theme-green-text, #34d399); font-variant-numeric: tabular-nums; } .ds-stat-sub { font-size: 12px; color: var(--theme-text2, #9ca3af); margin-top: 4px; }"
     },
     {
       "name": "Text Input",
       "kind": "input",
       "refersTo": "input",
-      "description": "Label always sits above the field — a placeholder never stands in for a label. Focus steps the border to the accent and adds a themed 3px ring, not a browser-blue outline.",
-      "html": "<div class=\"ds-field\"><label class=\"ds-label\" for=\"ds-vendor\">Vendor</label><input class=\"ds-input\" id=\"ds-vendor\" type=\"text\" placeholder=\"e.g. Big Mart\" /></div>",
-      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-label { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--theme-text3, #9ca3af); }\n.ds-input { background: var(--theme-input-bg, #0f1117); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 8px 12px; font-size: 13px; font-family: inherit; color: var(--theme-text1, #e8e0d0); outline: none; }\n.ds-input::placeholder { color: var(--theme-text2, #8a92a3); }\n.ds-input:focus { border-color: var(--theme-accent, #c9a84c); box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }\n.ds-input[aria-invalid=\"true\"] { border-color: var(--theme-red, #f87171); }"
+      "description": "The input well recessed into the card. Focus pairs a soft ring with the solid indicator; aria-invalid is both the styling hook and the announcement.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-field-label\" for=\"ds-inp\">Invoice ref</label><input class=\"ds-input\" id=\"ds-inp\" placeholder=\"e.g. INV-2082-114\"></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; max-width: 320px; } .ds-field-label { font-size: 12px; font-weight: 500; color: var(--theme-text2, #9ca3af); letter-spacing: 0.04em; } .ds-input { background: var(--theme-input-bg, #0f1117); border: 1px solid var(--theme-border, #2a2f3d); border-radius: var(--radius-md, 12px); padding: 9px 12px; font-size: 13px; font-family: inherit; color: var(--theme-text1, #e8e0d0); outline: none; transition: border-color 0.14s; width: 100%; } .ds-input::placeholder { color: var(--theme-text3, #8a92a3); } .ds-input:focus { border-color: var(--theme-accent, #c9a84c); box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); } .ds-input:focus-visible { box-shadow: 0 0 0 2px var(--theme-focus-outline, #c9a84c), 0 0 0 5px var(--theme-focus-ring, rgba(201,168,76,0.15)); } .ds-input[aria-invalid=\"true\"] { border-color: var(--theme-red, #f87171); } .ds-input:disabled { background: transparent; border-color: var(--theme-border-lt, #1e2330); -webkit-text-fill-color: var(--theme-text1, #e8e0d0); opacity: 1; cursor: not-allowed; }"
     },
     {
-      "name": "Tab Pill",
+      "name": "Filter Pill",
       "kind": "chip",
-      "refersTo": "tab-btn",
-      "description": "The filter/sort control on nearly every list page. Active reads as selected, not pressed — accent text, accent border at 50% alpha, focus-ring token as fill. Deliberately at the standard 12px radius rather than full-pill, which is reserved for the sidebar module switcher.",
-      "html": "<div class=\"ds-tab-bar\"><button class=\"ds-tab\">All</button><button class=\"ds-tab ds-tab-active\">Pending</button><button class=\"ds-tab\">Paid</button></div>",
-      "css": ".ds-tab-bar { display: flex; gap: 8px; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-tab { appearance: none; background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 4px 12px; font-size: 12px; font-weight: 500; font-family: inherit; color: var(--theme-text2, #8a92a3); cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; }\n.ds-tab:hover { color: var(--theme-text1, #e8e0d0); border-color: rgba(201,168,76,0.25); }\n.ds-tab-active { color: var(--theme-accent, #c9a84c); border-color: rgba(201,168,76,0.5); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); font-weight: 600; }"
+      "refersTo": "tab-pill",
+      "description": "Changes what one view shows. Hover and active read as a progression: a 25% accent border, then a 50% border on the focus-ring tint with accent-ink text.",
+      "html": "<div class=\"ds-tab-bar\"><button class=\"ds-tab-btn ds-tab-btn--active\">All</button><button class=\"ds-tab-btn\">Unpaid</button><button class=\"ds-tab-btn\">Overdue</button></div>",
+      "css": ".ds-tab-bar { display: flex; gap: 6px; flex-wrap: wrap; } .ds-tab-btn { appearance: none; background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: var(--radius-md, 12px); padding: 4px 12px; font-size: 12px; font-weight: 500; font-family: inherit; color: var(--theme-text2, #9ca3af); cursor: pointer; transition: color 0.12s, border-color 0.12s, background 0.12s; } .ds-tab-btn:hover { color: var(--theme-text1, #e8e0d0); border-color: rgba(201,168,76,0.25); } .ds-tab-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--theme-focus-outline, #c9a84c), 0 0 0 5px var(--theme-focus-ring, rgba(201,168,76,0.15)); } .ds-tab-btn--active { color: var(--theme-accent-ink, #c9a84c); border-color: rgba(201,168,76,0.5); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); font-weight: 600; }"
     },
     {
-      "name": "Panel Tab (underline)",
-      "kind": "nav",
-      "refersTo": "panel-tab",
-      "description": "The second, distinct tab family: sections within one surface, typically a modal panel (ClientDrawer's eight), as opposed to Tab Pill's filter/sort controls which change what a single view shows. Bordered pill for a filter, underline for a section; never both in one row. A danger section keeps --theme-red in both states and takes its underline in red. The row wraps rather than overflowing — an overflowing tab bar silently hides its last tab, which is how ClientDrawer's Danger tab went missing for a release.",
-      "html": "<div class=\"ds-panel-tabs\" role=\"tablist\" aria-label=\"Sections\"><button class=\"ds-panel-tab ds-panel-tab-active\" role=\"tab\" aria-selected=\"true\" tabindex=\"0\">Users</button><button class=\"ds-panel-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Billing</button><button class=\"ds-panel-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Settings</button><button class=\"ds-panel-tab ds-panel-tab-danger\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">⚠ Danger</button></div>",
-      "css": ".ds-panel-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 18px; border-bottom: 1px solid var(--theme-border, #2a2f3d); font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-panel-tab { background: none; border: none; cursor: pointer; padding: 11px 14px; min-height: 40px; font-size: 13px; font-weight: 400; font-family: inherit; white-space: nowrap; color: var(--theme-text2, #8a92a3); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 160ms cubic-bezier(0.4,0,0.2,1), border-color 160ms cubic-bezier(0.4,0,0.2,1); }\n.ds-panel-tab:hover { color: var(--theme-text1, #e8e0d0); }\n.ds-panel-tab:focus-visible { outline: none; color: var(--theme-accent, #c9a84c); box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }\n.ds-panel-tab-active { color: var(--theme-accent, #c9a84c); border-bottom-color: var(--theme-accent, #c9a84c); font-weight: 600; }\n.ds-panel-tab-danger, .ds-panel-tab-danger:hover { color: var(--theme-red, #f87171); }\n.ds-panel-tab-danger.ds-panel-tab-active { border-bottom-color: var(--theme-red, #f87171); }"
+      "name": "Period Scope Chip",
+      "kind": "custom",
+      "refersTo": "period-scope",
+      "description": "Which month a report covers, in the page header. The accent at the categorical tint; an open period is marked by a DASHED edge rather than a hue, because no amber fill here clears AA on Light.",
+      "html": "<span class=\"ds-scope\"><span class=\"ds-scope-label\">Bhadra 2082</span><span class=\"ds-scope-state\">Closed</span></span> <span class=\"ds-scope ds-scope--provisional\"><span class=\"ds-scope-label\">Ashwin 2082</span><span class=\"ds-scope-state\">&#9651; Open</span></span>",
+      "css": ".ds-scope { display: inline-flex; align-items: baseline; gap: 8px; padding: 4px 10px; border-radius: var(--radius-full, 999px); background: color-mix(in srgb, var(--theme-accent, #c9a84c) 12%, transparent); border: 1px solid color-mix(in srgb, var(--theme-accent, #c9a84c) 28%, transparent); font-size: 12px; line-height: 1.4; white-space: nowrap; font-family: inherit; } .ds-scope-label { font-weight: 600; color: var(--theme-accent-ink, #c9a84c); letter-spacing: 0.01em; } .ds-scope-state { font-size: 11px; font-weight: 500; color: var(--theme-text2, #9ca3af); text-transform: uppercase; letter-spacing: 0.06em; } .ds-scope--provisional { border-style: dashed; border-color: color-mix(in srgb, var(--theme-amber, #fbbf24) 55%, transparent); }"
     },
     {
       "name": "Data Table",
       "kind": "custom",
       "refersTo": null,
-      "description": "The signature component — most of the product is built around it. 11px uppercase headers at wide tracking, 13px rows, light dividers, and a barely-there hover tint rather than a solid highlight. Actionable rows carry a right-aligned Actions column so a long queue never has to be scrolled to act on. Per S614: a cell holding two things is the one the auto layout collapses, so put nowrap on the cell (never a fixed width) and let .table-wrap scroll; row density is opted down through a table-level scoped class, never per cell.",
-      "html": "<div class=\"ds-table-wrap\"><table class=\"ds-table\"><thead><tr><th>Employee</th><th>Trip</th><th class=\"ds-num\">Total</th><th>Status</th><th class=\"ds-num\">Actions</th></tr></thead><tbody><tr><td>Ronish Dangol</td><td>Cafe &rarr; Big Mart</td><td class=\"ds-num\">15</td><td><span class=\"ds-badge ds-badge-amber\">Pending</span></td><td class=\"ds-num\"><button class=\"ds-row-btn ds-row-approve\">Approve</button><button class=\"ds-row-btn ds-row-reject\">Reject</button></td></tr><tr><td>Sujan Rai</td><td>Cafe &rarr; Bhatbhateni</td><td class=\"ds-num\">240</td><td><span class=\"ds-badge ds-badge-green\">Paid</span></td><td class=\"ds-num\">&mdash;</td></tr></tbody></table></div>",
-      "css": ".ds-table-wrap { overflow-x: auto; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }\n.ds-table th { text-align: left; padding: 10px 5px; color: var(--theme-text2, #8a92a3); font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--theme-border, #2a2f3d); white-space: nowrap; }\n.ds-table td { padding: 11px 5px; color: var(--theme-text1, #e8e0d0); border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-table tr:last-child td { border-bottom: none; }\n.ds-table tbody tr:hover td { background: var(--theme-table-hover, rgba(255,255,255,0.03)); }\n.ds-num { text-align: right; white-space: nowrap; }\n.ds-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; }\n.ds-badge-amber { background: rgba(251,191,36,0.12); color: var(--theme-amber, #fbbf24); }\n.ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green, #34d399); }\n.ds-row-btn { background: var(--theme-input-bg, #0f1117); border: 1px solid var(--theme-border-lt, #1e2330); border-radius: 12px; padding: 4px 10px; margin-left: 6px; font-size: 11px; font-family: inherit; cursor: pointer; transition: background 0.13s, border-color 0.13s; }\n.ds-row-approve { color: var(--theme-green, #34d399); }\n.ds-row-reject { color: var(--theme-red, #f87171); }\n.ds-row-btn:hover { border-color: currentColor; }"
+      "description": "The signature component. 11px uppercase headers over 13px tabular cells, internal-weight row dividers, a 2px-ruled totals row that never takes the hover tint.",
+      "html": "<div class=\"ds-table-wrap\"><table class=\"ds-table\"><thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead><tbody><tr><td>Chicken Sausage</td><td>12 kg</td><td>4,860</td></tr><tr><td>Coconut Water</td><td>48 pcs</td><td>7,104</td></tr></tbody><tfoot><tr><td>Total</td><td></td><td>11,964</td></tr></tfoot></table></div>",
+      "css": ".ds-table-wrap { overflow-x: auto; } .ds-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: inherit; } .ds-table th { text-align: left; padding: 10px 5px; color: var(--theme-text2, #9ca3af); font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--theme-border, #2a2f3d); white-space: nowrap; } .ds-table td { padding: 11px 5px; color: var(--theme-text1, #e8e0d0); border-bottom: 1px solid var(--theme-border-lt, #1e2330); font-variant-numeric: tabular-nums; } .ds-table tbody tr:hover td { background: var(--theme-table-hover, rgba(255,255,255,0.03)); } .ds-table tfoot td { border-top: 2px solid var(--theme-border, #2a2f3d); border-bottom: none; font-weight: 700; padding-top: 12px; } .ds-table tfoot tr:hover td { background: transparent; }"
     },
     {
       "name": "Sidebar Nav Link",
       "kind": "nav",
-      "refersTo": null,
-      "description": "A nav row in the unified 240px sidebar column. Active state is accent text on the focus-ring tint at weight 600 — the same treatment the active tab pill uses, so \"selected\" reads identically everywhere.",
-      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-link\" href=\"#\">Purchases</a><a class=\"ds-nav-link ds-nav-link-active\" href=\"#\">Stock Count</a><a class=\"ds-nav-link\" href=\"#\">Recipes</a></nav>",
-      "css": ".ds-nav { display: flex; flex-direction: column; background: var(--theme-sidebar, #0e1117); padding: 8px 0; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-nav-link { display: flex; align-items: center; gap: 10px; margin: 1px 10px; padding: 8px 12px; border-radius: 12px; font-size: 13px; color: var(--theme-text2, #8a92a3); text-decoration: none; white-space: nowrap; transition: color 160ms cubic-bezier(0.4,0,0.2,1), background 160ms cubic-bezier(0.4,0,0.2,1); }\n.ds-nav-link:hover { color: var(--theme-text1, #e8e0d0); background: var(--theme-table-hover, rgba(255,255,255,0.03)); }\n.ds-nav-link-active { color: var(--theme-accent, #c9a84c); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); font-weight: 600; }"
+      "refersTo": "nav-link",
+      "description": "Active takes accent-ink on the focus-ring tint — the base accent measured 4.45:1 here on Light, less legible than the inactive items around it.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-link ds-nav-link--active\" href=\"#\"><span class=\"ds-nav-icon\">&#9632;</span>Dashboard</a><a class=\"ds-nav-link\" href=\"#\"><span class=\"ds-nav-icon\">&#9633;</span>Purchases</a><a class=\"ds-nav-link\" href=\"#\"><span class=\"ds-nav-icon\">&#9633;</span>Stock Count</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; background: var(--theme-sidebar, #0e1117); padding: 10px 0; border-radius: var(--radius-lg, 18px); width: 220px; } .ds-nav-link { display: flex; align-items: center; gap: 10px; margin: 0 10px; padding: 4px 12px; border-radius: var(--radius-md, 12px); font-size: 13px; font-family: inherit; color: var(--theme-text2, #9ca3af); text-decoration: none; white-space: nowrap; transition: color 160ms cubic-bezier(0.4,0,0.2,1), background 160ms cubic-bezier(0.4,0,0.2,1); } .ds-nav-link:hover { color: var(--theme-text1, #e8e0d0); background: var(--theme-table-hover, rgba(255,255,255,0.03)); } .ds-nav-link:focus-visible { outline: 2px solid var(--theme-focus-outline, #c9a84c); outline-offset: 2px; } .ds-nav-link--active { color: var(--theme-accent-ink, #c9a84c); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); font-weight: 600; } .ds-nav-icon { width: 18px; display: flex; justify-content: center; flex-shrink: 0; }"
     },
     {
-      "name": "Chart Expand Button",
-      "kind": "button",
-      "refersTo": "chart-icon-btn",
-      "description": "The only affordance saying a chart card opens. Sits in the quietest text tier, so it must acknowledge pointer and keyboard or it reads as an icon rather than a control. Holds a 24px minimum target (44px on coarse pointers) around a 12px glyph.",
-      "html": "<button class=\"ds-chart-icon-btn\" aria-label=\"Expand chart: Spend by Category\" aria-haspopup=\"dialog\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" aria-hidden=\"true\"><path d=\"M1 4.5V1h3.5M7.5 1H11v3.5M11 7.5V11H7.5M4.5 11H1V7.5\"/></svg></button>",
-      "css": ".ds-chart-icon-btn { color: var(--theme-text3); background: transparent; border: none; border-radius: var(--radius-sm); cursor: pointer; min-width: 24px; min-height: 24px; padding: 0; display: inline-grid; place-items: center; transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard); } .ds-chart-icon-btn:hover { color: var(--theme-accent); background: var(--theme-table-hover); } .ds-chart-icon-btn:focus-visible { outline: none; color: var(--theme-accent); box-shadow: 0 0 0 3px var(--theme-focus-ring); }"
-    },
-    {
-      "name": "Stat Pill",
-      "kind": "chip",
-      "refersTo": "stat-pill",
-      "description": "A compact KPI callout for a ChartCard's expanded-only stat strip. The dot carries the SERIES colour (legitimately a chart hex); the value is text and defaults to text1, because a fill hex set as 13px/700 type measured about 1.9:1 on a light card.",
-      "html": "<div class=\"ds-stat-pill\"><span class=\"ds-stat-pill-label\"><span class=\"ds-stat-pill-dot\"></span>Purchases so far</span><span class=\"ds-stat-pill-value\">NPR 248,300</span></div>",
-      "css": ".ds-stat-pill { display: flex; flex-direction: column; gap: 2px; padding: 7px 14px; background: var(--theme-input-bg); border: 1px solid var(--theme-border); border-radius: var(--radius-md); } .ds-stat-pill-label { font-size: 9px; color: var(--theme-text3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 5px; } .ds-stat-pill-dot { width: 6px; height: 6px; border-radius: 50%; background: #c9a84c; flex-shrink: 0; } .ds-stat-pill-value { font-size: 13px; font-weight: 700; color: var(--theme-text1); }"
-    },
-    {
-      "name": "Link-like Button",
-      "kind": "button",
-      "refersTo": "btn-linklike",
-      "description": "A table cell that navigates, or an inline action in a sentence. Reads as a link, behaves as a button — used where the row's identity IS the action (an outlet name that switches to that outlet), so the affordance sits on the name rather than in a trailing Actions column.",
-      "html": "<button class=\"ds-btn-linklike\">Thamel Branch</button>",
-      "css": ".ds-btn-linklike { background: none; border: none; padding: 0; font: inherit; color: var(--theme-accent-ink); text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; border-radius: var(--radius-sm); transition: color var(--motion-fast) var(--ease-standard); } .ds-btn-linklike:hover:not(:disabled) { text-decoration-thickness: 2px; } .ds-btn-linklike:disabled { color: var(--theme-text3); cursor: default; text-decoration: none; } .ds-btn-linklike:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 2px; }"
-    },
-    {
-      "name": "Chart Modal Panel",
-      "kind": "custom",
-      "refersTo": "chart-modal-panel",
-      "description": "The expanded chart view. Keeps its own look (blurred backdrop, wide panel, legend inline in the header) but carries the full dialog contract: role/aria-modal/labelled title, initial focus on the panel rather than its Close button, a Tab trap, Escape, and focus restored to the trigger.",
-      "html": "<div class=\"ds-chart-modal-panel\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"ds-cm-title\" tabindex=\"-1\"><div class=\"ds-chart-modal-head\"><div id=\"ds-cm-title\" class=\"ds-chart-modal-title\">Spend by Category</div><button class=\"ds-chart-close-btn\">✕ Close</button></div><div class=\"ds-chart-modal-body\">chart</div></div>",
-      "css": ".ds-chart-modal-panel { background: var(--theme-card); border: 1px solid var(--theme-border); border-radius: var(--radius-xl); padding: 20px 28px; max-width: 1100px; box-shadow: 0 8px 60px rgba(0,0,0,0.5); outline: none; } .ds-chart-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--theme-border); } .ds-chart-modal-title { font-size: 13px; font-weight: 700; color: var(--theme-text1); } .ds-chart-modal-body { color: var(--theme-text2); font-size: 12px; } .ds-chart-close-btn { color: var(--theme-text2); background: transparent; border: 1px solid var(--theme-border); border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px; cursor: pointer; transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard); } .ds-chart-close-btn:hover { color: var(--theme-text1); background: var(--theme-table-hover); border-color: var(--theme-accent); } .ds-chart-close-btn:focus-visible { outline: none; border-color: var(--theme-accent); box-shadow: 0 0 0 3px var(--theme-focus-ring); }"
-    },
-    {
-      "name": "Report Error State",
+      "name": "Action Error",
       "kind": "custom",
       "refersTo": null,
-      "description": "What a report renders INSTEAD of its KPI strip and table when a read fails. Deliberately not the empty state: 'nothing to show' and 'could not load' are different facts, and only one of them means the zeros on screen are real. Carries role=\"alert\".",
-      "html": "<div class=\"ds-report-error\" role=\"alert\"><div class=\"ds-report-error-title\">Could not load this report</div><p class=\"ds-report-error-body\">permission denied for table purchase_entries</p><p class=\"ds-report-error-hint\">Nothing here is a real figure &mdash; this is a failed read, not an empty period. Reload the page, and if it keeps happening send this message to support.</p></div>",
-      "css": ".ds-report-error { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; padding: 20px 24px; border-radius: 18px; border: 1px solid var(--theme-red, #f87171); background: color-mix(in srgb, var(--theme-red, #f87171) 8%, var(--theme-card, #181c27)); }\n.ds-report-error-title { font-size: 15px; font-weight: 600; color: var(--theme-red-text, #f87171); margin-bottom: 6px; }\n.ds-report-error-body { font-size: 13px; color: var(--theme-text1, #e8e0d0); margin: 0 0 8px; }\n.ds-report-error-hint { font-size: 12px; color: var(--theme-text2, #8a92a3); margin: 0; line-height: 1.6; }"
-    },
-    {
-      "name": "Standalone Input",
-      "kind": "input",
-      "refersTo": "input",
-      "description": "An input OUTSIDE a .form-field wrapper — the natural shape whenever a field sits inline beside a button. Until .form-input existed (S593) the only themed rule was the descendant selector .form-field input, so these rendered as the browser's native white box: unmissable on dark presets, nearly invisible on light ones. Shares one declaration block with .form-field input so the two cannot drift.",
-      "html": "<input class=\"ds-form-input\" type=\"text\" placeholder=\"or create a new group…\" />",
-      "css": ".ds-form-input { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; width: 100%; box-sizing: border-box; background: var(--theme-input-bg, #0f1117); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--theme-text1, #e8e0d0); }\n.ds-form-input::placeholder { color: var(--theme-text3, #9ca3af); }\n.ds-form-input:focus { outline: none; border-color: var(--theme-accent, #c9a84c); box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15)); }\n.ds-form-input:focus-visible { outline: 2px solid var(--theme-focus-outline, #c9a84c); outline-offset: 1px; }"
-    },
-    {
-      "name": "Table Totals Row",
-      "kind": "custom",
-      "refersTo": null,
-      "description": "A table's tfoot. Until S594 .data-table tfoot had NO rule at all, so every totals row in the product was hand-styled at its call site and three report pages built in one week produced three different treatments. The row-hover tint is suppressed: a totals row is not a data row.",
-      "html": "<table class=\"ds-table\"><tbody><tr><td>Basmati Rice</td><td class=\"ds-num\">12,400</td></tr><tr><td>Sunflower Oil</td><td class=\"ds-num\">8,150</td></tr></tbody><tfoot><tr><td>TOTAL (all items)</td><td class=\"ds-num\">NPR 20,550</td></tr></tfoot></table>",
-      "css": ".ds-table { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--theme-text1, #e8e0d0); }\n.ds-table td { padding: 11px 5px; border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-num { text-align: right; }\n.ds-table tfoot td { border-top: 2px solid var(--theme-border, #2a2f3d); border-bottom: none; font-weight: 700; padding-top: 12px; }\n.ds-table tfoot tr:hover td { background: transparent; }"
-    },
-    {
-      "name": "Field Caption (non-label)",
-      "kind": "custom",
-      "refersTo": null,
-      "description": "A caption that looks like a <label> but is a <span>, used over a button group, a read-only figure, or a repeating row's column. A <label> referencing no labelable element announces a name the browser never binds to anything — worse than no label. .form-field .field-label carries the same typography, so the fix costs no visual change.",
-      "html": "<div class=\"ds-field\"><span class=\"ds-field-label\" id=\"ds-axis-label\">Group by</span><div class=\"ds-chips\" role=\"radiogroup\" aria-labelledby=\"ds-axis-label\"><button class=\"ds-chip ds-chip-on\" aria-pressed=\"true\">Veg / Non-Veg</button><button class=\"ds-chip\" aria-pressed=\"false\">VAT Mode</button></div></div>",
-      "css": ".ds-field { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-field-label { display: block; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--theme-text2, #8a92a3); margin-bottom: 6px; }\n.ds-chips { display: flex; gap: 6px; flex-wrap: wrap; }\n.ds-chip { font-family: inherit; background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: 12px; padding: 6px 12px; font-size: 12px; color: var(--theme-text2, #8a92a3); cursor: pointer; }\n.ds-chip-on { color: var(--theme-accent-ink, #c9a84c); font-weight: 600; border-color: color-mix(in srgb, var(--theme-accent, #c9a84c) 50%, transparent); background: var(--theme-focus-ring, rgba(201,168,76,0.15)); }\n.ds-chip:focus-visible { outline: 2px solid var(--theme-focus-outline, #c9a84c); outline-offset: 2px; }"
-    },
-    {
-      "name": "Sticky-First Matrix",
-      "kind": "custom",
-      "refersTo": null,
-      "description": "Opt-in .data-table--sticky-first, for a wide matrix whose first column is the row label — Consolidated P&L with one column per outlet is the case it was built for. Without it, scrolling right to reach the last column scrolls the labels away and the reader matches numbers to remembered row order. The sticky cell needs an opaque background or the scrolling columns show through underneath.",
-      "html": "<div class=\"ds-wrap\"><table class=\"ds-mtx\"><thead><tr><th>Line</th><th class=\"ds-num\">Thamel</th><th class=\"ds-num\">Patan</th><th class=\"ds-num\">Consolidated</th></tr></thead><tbody><tr><td>Revenue</td><td class=\"ds-num\">1,840,000</td><td class=\"ds-num\">1,210,000</td><td class=\"ds-num\">3,050,000</td></tr><tr><td>Cost of Goods Sold</td><td class=\"ds-num\">(612,000)</td><td class=\"ds-num\">(402,000)</td><td class=\"ds-num\">(1,014,000)</td></tr></tbody></table></div>",
-      "css": ".ds-wrap { overflow-x: auto; font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; }\n.ds-mtx { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--theme-text1, #e8e0d0); }\n.ds-mtx th { text-align: left; padding: 10px 5px; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--theme-text2, #8a92a3); border-bottom: 1px solid var(--theme-border, #2a2f3d); white-space: nowrap; }\n.ds-mtx td { padding: 11px 5px; border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-mtx .ds-num { text-align: right; }\n.ds-mtx th:first-child, .ds-mtx td:first-child { position: sticky; left: 0; z-index: 1; background: var(--theme-card, #181c27); }"
-    },
-    {
-      "name": "Row Disclosure Button",
-      "kind": "button",
-      "refersTo": null,
-      "description": "The control that expands a table row's detail. It lives INSIDE a <td> so the <tr> keeps its implicit row role and its cells keep their column-header associations. The row's own onClick still toggles for mouse users; this button stops propagation so the two cannot cancel each other out.",
-      "html": "<table class=\"ds-disc-tbl\"><tbody><tr><td><button type=\"button\" class=\"ds-row-disclosure\" aria-expanded=\"false\" aria-label=\"Big Mart — show the 14 ingredients traced to this supplier\"><span aria-hidden=\"true\">&#9656;</span></button> Big Mart</td><td class=\"ds-disc-num\">NPR 248,900</td></tr><tr><td><button type=\"button\" class=\"ds-row-disclosure\" aria-expanded=\"true\" aria-label=\"Sunrise Foods — hide the 9 ingredients traced to this supplier\"><span aria-hidden=\"true\">&#9662;</span></button> Sunrise Foods</td><td class=\"ds-disc-num\">NPR 131,400</td></tr></tbody></table>",
-      "css": ".ds-disc-tbl { font-family: Poppins, -apple-system, \"Segoe UI\", Roboto, sans-serif; width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--theme-text1, #e8e0d0); }\n.ds-disc-tbl td { padding: 11px 5px; border-bottom: 1px solid var(--theme-border-lt, #1e2330); }\n.ds-disc-num { text-align: right; }\n.ds-row-disclosure { -webkit-appearance: none; appearance: none; background: none; border: none; padding: 2px 4px; margin: -2px -4px; font: inherit; color: inherit; line-height: 1; cursor: pointer; border-radius: 4px; }\n.ds-row-disclosure:hover { color: var(--theme-accent-ink, #c9a84c); }\n.ds-row-disclosure:focus-visible { outline: 2px solid var(--theme-focus-outline, #c9a84c); outline-offset: 1px; background: var(--theme-focus-ring, rgba(201,168,76,0.15)); }"
+      "description": "The message for the thing the user just pressed. Deliberately not a card: a filled panel under a live form reads as a second section rather than as a consequence of the click. The monospace detail is findable, not readable.",
+      "html": "<div class=\"ds-action-error\"><p class=\"ds-action-error-text\">The bill saved but its lines did not — it is holding both versions and will double-count. Reopen the bill and re-enter its lines before closing the period.</p><p class=\"ds-action-error-detail\">23505 &middot; duplicate key value violates unique constraint</p></div>",
+      "css": ".ds-action-error { margin: 12px 0 0; max-width: 520px; } .ds-action-error-text { font-size: 13px; color: var(--theme-red-text, #f87171); line-height: 1.5; margin: 0; white-space: pre-line; } .ds-action-error-detail { font-size: 11px; color: var(--theme-text3, #8a92a3); font-family: source-code-pro, Menlo, Monaco, Consolas, monospace; line-height: 1.4; margin: 4px 0 0; word-break: break-word; }"
     }
   ],
   "narrative": {
-    "northStar": "The Back-of-House Command Center",
-    "overview": "Crest Suite is operated, not visited. An owner is checking margin between service rushes; an accountant is reconciling TDS figures before a filing deadline. Neither has time for the interface to perform. The system is built around legibility under pressure: dense tables that stay scannable, a single restrained accent, and status communicated through color and position rather than decoration.\n\nThis deliberately rejects two things named in PRODUCT.md: the dated, hierarchy-less density of legacy Nepali ERP software, and the templated purple-gradient look of generic AI-generated SaaS. The system solves density the same problem legacy ERPs were trying to solve, but with real typographic hierarchy, a single accent used sparingly, and consistent spacing instead of cramming.\n\nThe product runs across two interchangeable theme presets — Dark (charcoal-and-gold, the shipped default) and Light (warm white, the same design in a light scheme). Eight others (Tokyo Night, Dracula, Nord, Catppuccin, Latte, Rosé Dawn, Solarized, Bright) were retired on 2026-08-24/S607: every theme is an independent surface needing re-verification for every signal colour, badge and focus style, and a measured audit found 30 contrast failures concentrated in the four dark presets nobody had checked. Dark and Light both measured clean, and they are the pair system mode resolves between for the employee app — so they are also the two that cannot be removed. Both are built from the same token set. Every rule is written against the default preset's values, but the relationships between tokens hold across all ten, even where the literal shape values (radius, shadow) no longer do.",
+    "northStar": "The Lit Instrument",
+    "overview": "Crest Suite is an instrument a restaurant is run from, and it is lit by exactly one source. Aged Brass is that light: it falls on the thing you are working in — the active route, the live table, the period this report covers, the button that commits — and everything else sits in an unlit, even charcoal. Depth here is not a stack of shadows; it is the difference between what the light reaches and what it does not. On the signed-out pages that metaphor is literal (three warm radial lights over an otherwise dead ground); inside the app it is disciplined down to a single accent that never spends itself twice on one screen.\n The instrument half is the constraint on all of it. Two people read the same figure: an owner deciding between services, and an accountant who has to file on it. So a number is never dressed up, never approximated for effect, and never coloured unless the colour is a verdict the product is prepared to defend. Signal green, red and amber are reserved for that verdict and spent nowhere else — a category, a rank, a delivery partner and a close type are facts, not judgments, and they take brass or grey. Where a verdict is shown it carries a shape mark as well as a hue, because roughly one man in twelve cannot separate the hues and every one of these screens gets printed in monochrome eventually.\n Density is deliberate and non-negotiable: 13px body, 11px column headers, tight table rows, 32px page padding, no reading measure anywhere. This is a working surface, not a document. The softness that keeps it from reading as legacy Nepali ERP comes from the radius scale (8/12/18/24px) and the warm neutral ground, not from whitespace the data cannot spare.",
     "keyCharacteristics": [
-      "Depth comes primarily from a one-step background-lightness shift, with a per-preset shadow as a secondary cue (added 2026-07-12 — see Elevation; previously flat-only, see that section's history note)",
-      "One accent color per screen, applied sparingly (buttons, active states, focus rings) never as a wash — no exceptions remain (Bright carried the only scoped one; retired with that preset in S607)",
-      "A serif wordmark is the one deliberate ornamental choice in an otherwise all-sans, all-functional system",
-      "Status (paid / pending / overdue, veg / non-veg, stock health) is color-coded consistently: green success, red danger, amber caution, gray neutral, with a rationed 4th color (purple) reserved for a genuine fourth or fifth category when green/red/amber aren't enough"
+      "One accent (Aged Brass), one rationed fourth-category hue (violet), four semantic signals.",
+      "Two presets — Dark (default) and Light — plus a `system` mode that follows the device.",
+      "Colour is never the only carrier: a band ships a `✓`/`△`/`▲` mark, a state ships a word.",
+      "Flat, tinted chips over solid fills; a card's elevation is uniform policy, not a highlight.",
+      "Five surfaces, one system: the app shell, the signed-out pages, the Crest Staff phone app, the",
+      "Every value is a `--theme-*` custom property, so the whole product re-tones from one place."
     ],
     "rules": [
       {
         "name": "The One Accent Rule",
-        "section": "colors",
-        "body": "Aged Brass (or the active preset's own accent) is the only non-semantic color on any screen. If a second \"brand\" color shows up anywhere outside the rationed purple exception, it's a mistake, not a design choice. Seven separate recurrences of an undocumented indigo (#60a5fa / #818cf8 / a drifted #8b5cf6 var() fallback) have been found and fixed across AdminClients.js, SuiteGate.js, AuditLog.js, AdminDashboardOverview.jsx, HolidayCalendar.jsx, MenuEngineering.js and Login.css — grep for those literals before shipping any new categorical badge or pill, and check the fallback halves of var() calls, not just standalone literals."
-      },
-      {
-        "name": "The Accent-Text Pairing Rule",
-        "section": "colors",
-        "body": "Any element with an accent-colored background uses the theme's paired accent-text token for its foreground, never a hardcoded white or black. Because the accent changes per preset, a hardcoded foreground will silently fail contrast on at least one of the ten. Shipped and fixed twice — treat any hardcoded #000/#fff sitting next to var(--theme-accent) as a near-certain instance on sight."
-      },
-      {
-        "name": "The One Serif Rule",
-        "section": "typography",
-        "body": "Georgia appears exactly once per screen (the wordmark, if visible at all). It is never used for a heading, a callout, or emphasis — that would dilute it from signature to affectation."
-      },
-      {
-        "name": "The Auto-Fit-First Rule",
-        "section": "layout",
-        "body": "Reach for repeat(auto-fit, minmax(<floor>, 1fr)) before declaring a column count. A fixed count is a claim that the grouping matters at every width; if it doesn't, the fixed count is just a media query you now have to maintain."
-      },
-      {
-        "name": "Shadow tells you what surface you're on, not that a page is \"polished\"",
-        "section": "elevation",
-        "body": "Card elevation is uniform policy (every preset, every card), so it no longer functions as a special signal the way the floating-action and live-pulse shadows still do. Don't invent a third meaning for it. If something needs to stand out, that's a job for the accent color or position."
-      },
-      {
-        "name": "The Proportional Corner Rule",
-        "section": "shapes",
-        "body": "If a new element needs a radius, pick the step by asking how big the box is, not how important it is. An \"important\" card does not get a larger corner; it gets the accent color or a better position."
-      },
-      {
-        "name": "Badges are alpha-tint, never solid fill",
-        "section": "components",
-        "body": "Each semantic color renders as a ~10-12% alpha tint of itself as background with full-opacity text. A solid signal fill needs a paired foreground token and only --theme-accent has one, so red/amber/green must use the tint pattern. This keeps a table full of status badges calm even when every row has one."
-      },
-      {
-        "name": "Row actions belong on the row",
-        "section": "components",
-        "body": "A table whose rows can be acted on carries a right-aligned Actions column of ghost buttons tinted with the semantic color of what they do. Putting the only actions in a detail panel below the table means the distance between the row you decided about and the button that acts on it grows with the list."
-      },
-      {
-        "name": "Every animation must be switch-off-able by prefers-reduced-motion, which means it cannot be an inline style",
-        "section": "motion",
-        "body": "Inline style={{ animation }} beats any stylesheet rule, so a media query cannot reach it — the animation is then unconditional for every user regardless of their OS preference. Put animations in a class; put the class in the reduced-motion block at the foot of its section in Layout.css."
-      },
-      {
-        "name": "Recharts is a second motion system that shares none of these tokens, on purpose",
-        "section": "motion",
-        "body": "It interpolates SVG attributes in JavaScript, so no CSS rule — including the reduced-motion guard — reaches a chart series. Every series goes through src/shared/chartMotion.js, the only place that gate can live. It cannot use ease-entrance: Recharts accepts only ease|ease-in|ease-out|ease-in-out|linear. The two systems align on duration band and deliberately not on curve."
-      },
-      {
-        "name": "Stagger describes a list, or it is decoration",
-        "section": "motion",
-        "body": "The only staggered sequence in the app is ChartCard's expanded stat strip (three steps at 60/105/150ms) — a row of peers that genuinely appears as a row. Cap the total delay. Do not reinterpret scrolled sections, table rows, or card grids as staggered lists."
-      },
-      {
-        "name": "The Measured-Floor Rule",
-        "body": "When a row of chips or badges repeats down a list, give each a minWidth taken from the measured widest real label, plus textAlign:center. Content-width chips vary on incidental things — \"IMS · Starter\" is wider than \"IMS · Pro\" — so the columns, and everything anchored after them, slide from row to row for no meaningful reason and the list reads ragged. Measure in the browser rather than guessing a number.",
-        "section": "layout"
-      },
-      {
-        "name": "space-between on two controls in a wide container is an anti-pattern",
-        "body": "It does not distribute, it banishes — the two items end up at opposite edges of however wide the container happens to be, with the entire remainder as dead space. Group related controls with a gap and let the container's own alignment place the group.",
-        "section": "layout"
-      },
-      {
-        "name": "No interactive control below 12px",
-        "body": "Chips and buttons in dense list rows sit at 12–12.5px with roughly 5–7px vertical padding; 10px is for genuinely non-interactive micro-labels only. 10px with 2px vertical padding is legible in a mockup, a squint in use, and a poor hit target.",
-        "section": "layout"
-      },
-      {
-        "name": "Never hand-roll a button's inline style when a variant exists",
-        "body": "The 2026-08-12 audit of ClientDrawer.js found six Danger Zone buttons each carrying a near-identical eight-property inline style object, with three different red alphas serving as an ad-hoc severity ladder, all at an off-scale 6px radius and none inheriting the hover transition. .btn-danger had existed the whole time. Drift concentrates almost perfectly in controls that opted out of a class — that is the single most reliable place to look for it.",
-        "section": "components"
-      },
-      {
-        "name": "Every field needs id + htmlFor",
-        "body": "A label that is merely a sibling of its input, which is what .form-field renders by default, names nothing: screen readers announce an unnamed edit box and clicking the label focuses nothing. This is a systemic gap — 22 files use .form-field and only Login.js, ResetPassword.js and SelfServiceHome.jsx associate their labels — so treat it as the pattern to extend, and write new fields with the pair from the start.",
-        "section": "components"
-      },
-      {
-        "name": "A control the user must reach cannot be display:none",
-        "body": "Hiding a real input behind a styled stand-in is fine; hiding it with display:none (or visibility:hidden) removes it from the tab order, so there is no keyboard path to it at all. Use the clip-based .visually-hidden utility when the input itself must stay reachable, or forward a real button's click to it.",
-        "section": "components"
-      },
-      {
-        "name": "Any tab row needs real tablist semantics",
-        "body": "Not just buttons that look selected: role=tablist on the row, role=tab + aria-selected + aria-controls per tab, role=tabpanel + aria-labelledby on the body, and a roving tabIndex so the whole row is one stop in the page's tab order with the arrow keys (plus Home/End) moving inside it. Without the roving index, reaching the eighth tab by keyboard costs eight Tab presses — and the eighth tab is where the destructive actions live.",
-        "section": "components"
+        "body": "Aged Brass is the only non-semantic colour on any screen. A second \"brand\" hue is a mistake, not a design choice. This has been violated seven times by the same undocumented indigo (`#60a5fa` / `#818cf8`), most instructively as a drifted `var()` **fallback** — `var(--theme-purple, #8b5cf6)` reads as correct because the token name beside it is correct, and it only paints in the instant before hydration, which is precisely when nobody is looking. Check the fallback half of a `var()` as carefully as a standalone literal.",
+        "section": "colors"
       },
       {
         "name": "The Text-vs-Fill Rule",
-        "section": "colors",
-        "body": "A signal colour used as TEXT takes the *-text variant; used as a FILL it takes the base token. One value cannot do both jobs on a light preset. Three exceptions, each found by applying the rule too broadly: a legend swatch keeps the series colour, a prop that receives a series colour keeps it, and a colour: inside a ternary is still a colour: — about half the real sites are ternaries a property-level regex silently skips."
+        "body": "If the colour is text, use the `*-text` variant; if it fills, use the base token. The `.badge-*` classes already do this, so anything using them gets it free — the alpha tint stays the base colour and only the foreground changes. Three things the variants must **not** be applied to: a fill, a chart series, and a border.",
+        "section": "colors"
       },
       {
-        "name": "Rosé Dawn and Solarized were the floor, not Latte (history; Light is now the only light preset)",
-        "section": "colors",
-        "body": "History (all four light presets named here were retired in S607; Light is now the only light preset, so spot-check there). Failing signal-colour/surface combinations per light preset were: Rosé Dawn 10/10, Solarized 10/10, Bright 6/10, Latte 4/10, Warm Light 3/10. Spot-check colour work on Rosé Dawn, not on the preset that is easiest to recall."
-      },
-      {
-        "name": "Never build a multi-series chart palette from the semantic tokens",
-        "section": "colors",
-        "body": "They are five roles, not five hues. accent and purple are the same hex on three of ten presets, which drew Food Cost and Labor Cost as one indistinguishable line on the chart whose entire purpose is telling them apart."
-      },
-      {
-        "name": "Form controls do not inherit font-family, and must be told to",
-        "section": "typography",
-        "body": "Every browser substitutes its own UA default into input, button, select and textarea. One rule in index.css covers all four plus optgroup, which Firefox styles separately. Do not re-add per-class patches."
-      },
-      {
-        "name": "A modal is a dialog or it is a trap",
-        "section": "components",
-        "body": "role=\"dialog\" + aria-modal + a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger. A second modal implementation that skips these is only visually a modal: the page behind it stays fully focusable and Escape does nothing."
-      },
-      {
-        "name": "Never .toISOString() a Date built from BS components",
-        "section": "components",
-        "body": "bsToAd returns local midnight; at Nepal's UTC+05:45 .toISOString() lands at 18:15Z on the previous day, so slicing the first ten characters yields the wrong date for every user in the country. Use formatAd for a bare date string, bsDayBoundaryIso where the value meets a real timestamptz."
-      },
-      {
-        "name": "A verdict colour on an unsettled figure is a lie",
-        "section": "colors",
-        "body": "A ratio whose numerator arrives in lumps and whose denominator accrues daily is arithmetic, not signal, early in a period. Render it neutral with an explicit \"Day N of M · settles at month end\" rather than painting it red and telling the reader to investigate immediately."
-      },
-      {
-        "name": "Opacity is not de-emphasis on text",
-        "section": "colors",
-        "body": "It multiplies straight through the text colour — text2 at 0.45 measured well under AA. If a row is inactive, say so with a label; do not dim it."
-      },
-      {
-        "name": "A paired token is only correct while it is actually measured",
-        "section": "colors",
-        "body": "--theme-accent-text was plain #ffffff on all five light presets of the time (four retired in S607) and failed on three of them: 2.84:1 on Rose Dawn, 3.61:1 on Light, 3.68:1 on Solarized — i.e. every .btn-primary in the product on those themes, for as long as they have existed. Fixed by giving those presets a dark hue-matched ink rather than darkening the accent, which also serves as a tint, border and dot where it was already correct. Reach for the token, then verify the token."
-      },
-      {
-        "name": "A wrapper being new does not put the thing it wraps in scope",
-        "section": "colors",
-        "body": "ModuleGuideTab.jsx rendered its whole 'Watch out for' list in --theme-amber as body text — 2.05:1 on Rose Dawn (preset retired S607; the measurement is why the *-text variants exist), the worst measurement in the system — and survived because only its wrapper GuidesTab.jsx was in the changed-file set, so the hook never ran on it. When a critique or audit targets a page, include the components it composes, not just the files git reports (S594; the S521 stale-file lesson restated)."
-      },
-      {
-        "name": "A tier or add-on above the module set takes the accent plus a mark, not a fourth hue",
-        "section": "components",
-        "body": "The admin client list carries IMS/HR/POS pills in accent/green/purple; Crest Suite Pro had none, and a fourth colour would have been exactly the One Accent Rule drift. It renders as ★ SUITE in the accent at a heavier fill (0.20 vs the modules' 0.10) and 700 weight — the glyph and the weight carry the distinction, the hue stays inside the system. A lapsed one greys to text3 rather than disappearing: an add-on that vanishes reads as one never bought."
-      },
-      {
-        "name": "A <label> that names nothing is worse than no label",
-        "section": "components",
-        "body": "The shape that survives every htmlFor sweep because it looks correct: a <label> over a button group, a read-only figure, or a repeating row's column is announced as a name the browser will never bind to a control. Those become a <span class=\"field-label\"> with role=\"group\"/\"radiogroup\" + aria-labelledby on the container and aria-pressed on the buttons. A <button> can never be named by a <label> at all, however adjacent."
-      },
-      {
-        "name": "A <select> needs an accessible name even where the design gives it no visible caption",
-        "section": "components",
-        "body": "Filter toolbars are the product's blind spot: 86 unnamed selects across 43 files — period pickers, category/status/vendor filters, sort orders — each announcing only its current option. aria-label where there is no visible text, id/htmlFor where there is. Inside a .map(), use a template aria-label naming the row, never a constant that repeats down the list."
-      },
-      {
-        "name": "A standalone input takes .form-input; only a .form-field child is styled for free",
-        "section": "components",
-        "body": "Until that class existed the only themed input rule was the descendant selector .form-field input, so an input in a plain flex row got no treatment and rendered as the browser's native white box — unmissable on dark presets, nearly invisible on light ones. The tell that the gap was real: sites that noticed either hand-copied all six declarations inline or borrowed .form-select, which carries cursor:pointer, so a text field announced itself as a menu."
-      },
-      {
-        "name": "A native <input type=\"file\"> is never shippable UI",
-        "section": "components",
-        "body": "Its 'Choose File / No file chosen' chrome is drawn by the browser: no token reaches it, it ignores the type scale, and it renders in the OS language rather than the app's. The pattern is a .visually-hidden input (not display:none) with a real .btn forwarding the click."
-      },
-      {
-        "name": "Use .panel-tab-bar for the row itself",
-        "section": "components",
-        "body": "It carries display:flex + gap + flex-wrap + the bottom rule, so wrap behaviour is a property of the class rather than something each page has to remember. Seven IMS pages had hand-rolled the row inline; Stock Count's had seven tabs and no flexWrap — the exact shape that hid ClientDrawer's Danger tab."
-      },
-      {
-        "name": "A report page must not show a number it has not computed",
-        "section": "components",
-        "body": "The KPI strip does not render while loading or after a failure. Two report pages painted four stat cards ABOVE their own loading guard, so a multi-second fiscal-year read showed 'Capital in 90+ Day Stock: NPR 0' in green until the real number arrived, and on a failed read it stayed there. ReportPage gates stats/note/filters/footnote on !loading && !error; banners are not gated, because a period warning qualifies the page including its absence of data."
-      },
-      {
-        "name": "A failed read is not an empty period",
-        "section": "components",
-        "body": "'Nothing to show' and 'could not load' are different facts and only one of them means the zeros on screen are real. Every read on two report pages destructured { data } and dropped error, then ran it through || [] — so an RLS rejection or a stalled token produced a complete, confident report of NPR 0. Strictly worse than a crash: a crash gets reported, a zero gets believed. firstError(results) is the one place a Promise.all batch is checked."
-      },
-      {
-        "name": "The totals row and lining figures are the table's own, not the call site's",
-        "section": "components",
-        "body": ".data-table tfoot had NO rule at all until S594, so every totals row in the product was hand-styled where it was written and three report pages built in one week produced three different treatments. font-variant-numeric: tabular-nums now sits on every .data-table td and .stat-value: Poppins' default figures are proportional, so a right-aligned currency column does not line up digit-for-digit."
-      },
-      {
-        "name": "Never put role=\"button\" on a <tr>",
-        "section": "components",
-        "body": "The role overrides the row's implicit row role, taking it out of the table's structure — a screen reader stops associating that row's cells with their column headers, which on a table of currency columns is the entire content. The control belongs in a cell, as a real <button>: RowDisclosure (src/components/RowDisclosure.jsx) sets aria-expanded and stopPropagation()s so the row's own onClick cannot double-fire. This rule lived ONLY in this sidecar for months and was therefore copied forward into four tables; all four were fixed in S595 and the rule now also lives in DESIGN.md's prose, where someone reads it."
-      },
-      {
-        "name": "A report that states a scope must state it everywhere the report goes",
-        "section": "components",
-        "body": "Stock Ageing aged every fiscal year against new Date() while its selector accepted any past year, pushing every surviving batch into the 90+ band and reporting the whole stock value as stale — silently, in the alarming direction. It had no as-of date in the subtitle, the print title or the workbook, and its filter bar is no-print so a printed sheet showed a filtered table with no record of the filter. One scopeLine now feeds all four."
+        "name": "The Accent-Text Pairing Rule",
+        "body": "Any element with an accent-coloured background takes `accent-text` as its foreground, never a hardcoded `#fff` or `#000` — a hardcoded foreground silently fails contrast on one of the two presets. Treat any `#000`/`#fff`/`white`/`black` sitting next to `var(--theme-accent)` as a near-certain instance of this bug on sight.",
+        "section": "colors"
       },
       {
         "name": "The Signal Separation Rule",
-        "section": "colors",
-        "body": "Two signal colours that a reader compares must stay distinguishable *without hue*. Measured under deuteranopia (~6% of men) and protanopia (~2%), not by eye. Light's `redText`/`amberText` shipped at ΔE 3.2 — danger and warning were one colour for a red-green colour-blind reader — and were retuned in S608 to `#8f2440`/`#a85200`, the only pair of 120 searched that clears both axes while every variant holds ≥4.5:1. Where a band is a *scale* rather than a status (food cost healthy/watch/too-high), colour is not enough on its own at all: `fcBand()` also returns a `✓`/`△`/`▲` shape mark, distinguished by fill rather than hue, so the band survives greyscale and a monochrome print. A figure a person reads and acts on carries the mark; a chart axis or sparkline may take colour alone."
+        "body": "Two signal colours a reader compares must stay distinguishable **without hue**, measured under deuteranopia (~6% of men) and protanopia (~2%), not judged by eye. Light's danger and warning text shipped at ΔE 3.2 — one colour for a red-green colour-blind reader — and were retuned to `#8f2440` / `#a85200`, the only pair of 120 searched that clears both axes while every variant still holds 4.5:1 on card and page. Tritanopia is deliberately not chased: separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%.",
+        "section": "colors"
       },
       {
-        "name": "The Signal Polarity Rule",
-        "body": "A signal colour is a **verdict**, so a figure compared against a target must be coloured by whether it moved in the *good* direction for that metric — not by which side of the line it landed on. Green and red are never neutral to an owner reading between services; there is no reading of a red ▼ that isn't \"something went wrong here\". The Daily Purchases vs Sales tooltip coloured both actual rows ▲ green / ▼ red literally, and reported live (S634) it painted `Purchases : NPR 2,295` against a NPR 3,112 target red — for running *under* the spending pace, which is the outcome you wanted. **Shape is the fact, colour is the verdict**: keep ▲/▼ literal so it agrees with the line the reader can see, and invert the colour per metric (`GOOD_DIRECTION` — sales `+1`, purchases `-1`). Applies wherever a cost sits beside a revenue: variance, budget-vs-actual, wastage, food-cost trend. Two consequences: shape stops being redundant with colour (a green ▼ and a red ▼ now both exist), so the magnitude must appear as **text** — the gap as a percentage of target, not a second currency figure — and any legend explaining the two series has to say the polarity out loud, because nothing else on screen admits that they are coloured by opposite conventions.",
+        "name": "The One Signal Meaning Rule",
+        "body": "A signal colour carries exactly one meaning across a module, and a category never takes a signal colour at all. The vocabulary is written down twice — HR's `HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` (`payrollConstants.js`) and POS's `posSignals.js` — and both say the same thing: **amber** = open, waiting on a person; **brass** = decided but the money has not moved, plus every plain category (a rank, a close type, a table state, a period); **green** = closed and good; **red** = closed and refused, or wrong and expensive; **grey** = inert or a plain identity. Before this was one file, \"Pending\" was brass on two HR queues, grey on a third and amber in the employee app, and amber alone carried eight distinct meanings across POS — including \"Foodmandu\" and \"supervisor\". A button is exempt: it is an instruction, not a verdict, so the Void button stays red while the *record* it writes reads as a close type in brass.",
+        "section": "colors"
+      },
+      {
+        "name": "Loudness tracks demand for action, not importance",
+        "body": "The loudest mark on a POS floor tile used to be \"Occupied\" — a full table, the outcome you want — while \"you have not fired these three dishes\" was a thin pill. A tile's 6px strip now answers the one question a waiter crossing the room cannot answer with their own eyes (`tableStripColor`), and a kitchen card's strip carries lateness rather than the stage it is already sorted into (`ticketStripColor`).",
         "section": "colors"
       },
       {
         "name": "The Chart Palette Rule",
-        "section": "colors",
-        "body": "Chart series come from the validated fixed-hex sets (`CHART_COLORS` / `VENDOR_SPLIT_COLORS`, `COST_BREAKDOWN_COLORS`), never the semantic tokens — and the sets themselves get re-measured whenever a slot moves. As shipped 2026-08-24/S609 the 8-series set is `#c9a84c #34d399 #60a5fa #f87171 #8b5cf6 #ea580c #22d3ee #f472b6`, worst pair ΔE 37.9 normal / 15.8 deuteranopia / 21.0 protanopia — all 28 pairs clear. It reached that only by moving two slots: blue and violet had sat at ΔE 0.4 under deuteranopia since the array was written, drawing two indistinguishable lines on any chart with five or more series. Two limits are accepted rather than hidden, and both rest on the same mitigation — these charts carry secondary encoding: paddingAngle gaps, on-slice percent labels, and name+value legends, so colour reinforces rather than carries. Tritanopia is not satisfied (worst pair ΔE 0.9); separating on the blue-yellow axis fights separating on red-green, and it is ~0.01% against ~8%. And the palette is tuned for the dark card — on Light, six of eight slots fall under the 3:1 non-text floor (worst `#22d3ee` at 1.81). Closing that means re-picking six hues that clear 3:1 on both surfaces *and* still separate under both red-green axes: a mid-tone set with a different character from today's vivid-on-charcoal one. That is a design decision, not a correction — do not make it silently while fixing something else."
+        "body": "Chart series never come from the semantic tokens — they are five *roles*, not five validated hues, and nothing measures them as a series set. Use the fixed literal palettes (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`; `var()` does not resolve in SVG presentation attributes anyway) and re-measure when you touch them: `CHART_COLORS` carried a **ΔE 0.4** deuteranopia collision between two of its eight slots — two identical lines on any chart with five or more series — from the day it was written until it was measured. Prefer **encoding a relationship over adding a hue**: a projection shares its metric's colour and is distinguished by a dash; a derived total reads as a dashed composite, not a fifth peer.",
+        "section": "colors"
+      },
+      {
+        "name": "A banded ratio has one definition, marks included",
+        "body": "Food Cost % bands through `fcBand(pct, settings)` and variance through `varianceBand()` (`shared/imsFormulas.js`); Labour Cost %, Prime Cost % and Net Margin % through `lcBand` / `pcBand` / `nmBand` (`shared/operatingBands.js`); staff rank through `STAFF_LEVEL_BADGE` (`shared/staffLevelBadge.js`). Never a local threshold — Labour Cost was banded three ways at once, so a day at 34% read \"fine\" on the roster board and \"watch\" on both dashboards. `fcFigure()` / `bandFigure()` return the number **with its mark already appended**, specifically so a call site cannot take the colour and drop the `✓`/`△`/`▲`. Those marks separate by fill rather than hue, so they survive greyscale and a monochrome print. A figure a person reads and acts on carries the mark; a chart axis or a sparkline may take colour alone.",
+        "section": "colors"
+      },
+      {
+        "name": "Signal polarity is per metric",
+        "body": "A figure compared against a target is coloured by whether it moved in the *good* direction for that metric, not by which side of the line it landed on. Purchases running under the spending pace is the outcome you wanted; painting it red because the arrow points down is a lie told in the one colour the owner trusts most. Keep `▲`/`▼` literal so shape agrees with the line on screen, and invert the colour per metric.",
+        "section": "colors"
+      },
+      {
+        "name": "Brass is a range, not one value, on the signed-out pages",
+        "body": "`Login.css` derives every colour on the page from `--theme-accent` by `color-mix` — a wash (6%), a tint (12%), a rule (24%), an edge (80%), and the three light layers at 34/17/11%. That is the One Accent Rule taken literally: no second hue anywhere, only more and less of the one that was already there.",
+        "section": "colors"
+      },
+      {
+        "name": "The Signature Serif Rule",
+        "body": "Georgia never sets a heading, a callout or emphasis inside a working screen. It appears where the product speaks in its own voice — a wordmark, a gate that has taken the whole viewport, a document printed on letterhead — and nowhere else. One serif on a screen is a signature; two make it an affectation.",
+        "section": "typography"
+      },
+      {
+        "name": "Form controls do not inherit `font-family` and must be told to",
+        "body": "Every browser substitutes its own UA default into `<input>`, `<button>`, `<select>` and `<textarea>`. Measured before the single rule in `index.css` existed: all 14 controls on the login page, all 13 pricing CTAs and **every `.btn` in the product** rendered in Arial — the product's typeface reached its prose and none of its controls. `optgroup` is in that selector list because Firefox styles it separately from `select`. Do not re-add per-class `font-family: inherit` patches.",
+        "section": "typography"
+      },
+      {
+        "name": "Numbers are tabular",
+        "body": "Poppins' default figures are proportional, so a right-aligned currency column does not line up digit for digit and a page of money reads ragged. Every `.data-table` cell, every `tfoot` cell and `.stat-value` carry `font-variant-numeric: tabular-nums` from one rule. Only digits are affected; text cells are unchanged.",
+        "section": "typography"
+      },
+      {
+        "name": "No interactive control below 12px",
+        "body": "Chips and buttons in dense list rows sit at 12–12.5px with 5–7px of vertical padding. 10px is for genuinely non-interactive micro-labels.",
+        "section": "typography"
+      },
+      {
+        "name": "The shell is a fixed sidebar plus a flowing content column",
+        "body": "`.sidebar-wrap` is `position: fixed` at 240px (56px collapsed) and `.main-content` reserves that space with a matching `margin-left` on the same two values; the two animate in lockstep. Content padding is 32px on every page and nothing is centred in a reading measure — every screen here is a working surface rather than a document.",
+        "section": "layout"
+      },
+      {
+        "name": "Spacing rhythm is a 4/8/16/24 scale, applied by convention rather than by token",
+        "body": "There are no `--spacing-*` custom properties, so the scale lives in the frontmatter and in usage. 16px is the default gap between peers (grid gaps, button rows, field stacks); 24px is `.card`'s internal padding and the gap between major sections; 28px is the standing bottom margin under a `.page-header` and a `.stat-grid`; 8px and 4px are chip-level and intra-control. A value off this scale in new work is drift, the same way an off-ramp font size is.",
+        "section": "layout"
+      },
+      {
+        "name": "The page root takes no padding of its own, and the header is `.page-header`",
+        "body": "`.main-content` already owns the 32px; a page that adds its own doubles it. `.page-header--split` is the title-block-left / actions-right shape that ~50 of the 78 header sites were hand-rolling inline, and it carries two properties neither hand-rolled version had complete: `flex-wrap` and the mobile hamburger clearance. Measured at 390px, an unclassed header put 40x33px of the fixed hamburger *over* the title — `elementFromPoint` at the title's first character returned the button — while a no-wrap header squeezed that title from 298px to 154px and one carrying a period `<select>` overflowed its container by 29.7px into the clip from `html { overflow-x: hidden }`.",
+        "section": "layout"
+      },
+      {
+        "name": "KPI rows are auto-fitting grids, not fixed columns",
+        "body": "`.stat-grid` is `repeat(auto-fit, minmax(200px, 1fr))` with a 16px gap, so four cards reflow to 2x2 and then to one column without a media query. The 200px floor is set by what a card *holds*, not by taste: at 24px /700, a Nepali-grouped `NPR 12,48,650` is 13 characters and wraps below ~200px — measured wrapping at 1280px, 900px, 414px and 430px, i.e. on an ordinary laptop, a tablet and the two commonest large phones. Shrinking the figure to 20px also fixes it and was rejected: it de-emphasises the headline number on every KPI in the product to solve a grid problem. Raise the floor, never let the value wrap.",
+        "section": "layout"
+      },
+      {
+        "name": "One breakpoint: 768px",
+        "body": "No tablet tier and no desktop max-width. Below it the sidebar leaves the flow entirely (`translateX(-100%)` plus a 44px fixed hamburger and a 55%-black overlay), `.main-content` drops its reserved margin and takes 16px padding, and every multi-column dashboard grid collapses to one column.",
+        "section": "layout"
+      },
+      {
+        "name": "Touch sizing is scoped to the input method, not to a width",
+        "body": "`@media (pointer: coarse)` gives `.btn` 44px and tunes every control down from there — `.sidebar-link` and `.module-tab` 44, `.btn-sm` / `.tab-btn` / an in-table `.btn` 32, the chart controls 44x44 — plus the shell controls a finger actually hits, which were in no coarse rule at all until they were measured (the outlet switcher, the control that re-scopes the whole tenant session, at 95x20px; sidebar search at 27x25). A narrow desktop window keeps its own density, which a width breakpoint could not express.",
+        "section": "layout"
+      },
+      {
+        "name": "Under a coarse pointer every text field goes to 16px, with `!important`, and that is load bearing",
+        "body": "Below 16px iOS Safari zooms the viewport on focus and never zooms back, so tapping any field turned \"enter the quantity\" into \"now pan sideways to find Save\" — and the POS till and the stock count are tablet surfaces by design. The `!important` is not laziness: 266 form controls across 46 files set their font-size in an inline `style` object, and no selector beats an inline style, so without it the rule would close the gap for the controls that least needed it and skip every one that did. Checkbox, radio, range, colour, file and the button-shaped input types are deliberately excluded. A control on a class is still the better answer — it also wins the `[aria-invalid]` and `:disabled` hooks — but the floor must not wait on that sweep.",
+        "section": "layout"
+      },
+      {
+        "name": "Wide tables scroll; they do not compress",
+        "body": "`.table-wrap` is `overflow-x: auto` around every wide table and the data keeps its native column widths. Pair it with `.table-wrap--fab-clear` on any page that also renders a `Fab` — the Fab is fixed with no reserved space, so without it the button sits on top of the last row's actions.",
+        "section": "layout"
       },
       {
         "name": "A page that renders into the body flow needs its own scrollport",
-        "section": "layout",
-        "body": "index.css sets `html, body { overflow-x: hidden }`, so body becomes its own scroll container sized to its content and a `position: sticky` child of the body has a scrollport that never scrolls. Every IMS/HR/POS screen is immune (the app shell scrolls its own div); the three pages that render into the body — guest menu, /login, /pricing — each had a sticky bar that had never once stuck, measured at 390x780 going top 0 to -250 to -600. Fix per page: `height: 100dvh; overflow-y: auto; overscroll-behavior: contain` on the page root, and delete any `min-height: 100vh` it carried, since 100vh >= 100dvh hands the scroll straight back to the body. Relaxing the shared rule was measured and rejected — it loses the guard entirely (1610px of overflow on a probe page). Invisible to review: it computes to sticky in devtools, and only getBoundingClientRect().top across real scroll positions catches it."
+        "body": "`index.css` sets `html, body { overflow-x: hidden }` as an app-wide horizontal guard; because html's overflow is then not `visible`, body becomes its own scroll container sized to its content and a `position: sticky` child of the body has a scrollport that never scrolls. Every screen inside the app shell is immune because the shell scrolls its own div — the exceptions are the pages that render directly into the body (`/login`, `/pricing`, the guest menu), and all three had a sticky bar that had never once stuck. Measured at 390x780, `.login-nav`'s viewport `top` went 0 → −250 → −600, moving 1:1 with the content. The fix is per page: `height: 100dvh; overflow-y: auto; overscroll-behavior: contain` on the page root, **and delete the `min-height: 100vh` it was carrying**. Use `dvh`, not `vh` — on a phone `100vh` is the tallest the viewport ever gets, so the fold lands under the URL bar.",
+        "section": "layout"
       },
       {
-        "name": "Disabled and read-only: the surface carries the state, never the value",
-        "section": "components",
-        "body": "Because `.form-field input` sets its own background, border and color, it overrode the UA's disabled styling — so until S603 a disabled field rendered identical to an editable one, on Sales and Overheads, the two pages where a locked period most needs to be obvious. The well flattens to transparent and the border steps to --theme-border-lt; the value's colour is left alone. Deliberately NOT `.btn:disabled`'s opacity 0.55 — a button's label is a verb you may not press, a field's content is data, and a locked period's figures must stay legible precisely because they can no longer be corrected. Two UA behaviours must be overridden explicitly or the treatment is defeated: WebKit paints disabled text with -webkit-text-fill-color, and iOS Safari layers its own opacity on top. An inline-styled control escapes all of it — that is what `disabledStyle()` in shared/inlineFieldState.js exists for."
+        "name": "The Auto-Fit-First Rule",
+        "body": "Reach for `repeat(auto-fit, minmax(<floor>, 1fr))` before declaring a column count. A fixed count is a claim that the grouping matters at every width; if it does not, the fixed count is just a media query you now have to maintain.",
+        "section": "layout"
       },
       {
-        "name": "The 16px touch floor is a zoom trap, not a taste step",
-        "section": "components",
-        "body": "Under @media (pointer: coarse) inputs go to 16px and bare buttons to a 44px minimum height. Below 16px iOS Safari zooms the viewport on focus and never zooms back, which on a product whose till and stock count are tablet surfaces turns 'enter the quantity' into 'now pan sideways to find Save'. Scoped to pointer type rather than a width breakpoint because the trigger is the input method, not the screen size. The rule carries `!important` and that is load-bearing: 370 controls across ~46 files set font-size inline, and no selector beats an inline style. The button half is `:not([class])` so it cannot silently re-decide the classed buttons that already have tuned values. It does not retire 'reach for a class' — a class also brings the [aria-invalid] hook, the :disabled treatment and the shape scale."
+        "name": "The Measured-Floor Rule",
+        "body": "When a row of chips or badges repeats down a list, give each a `minWidth` taken from the **measured** widest real label plus `textAlign: 'center'`. Content-width chips vary on incidental things — `IMS · Starter` is wider than `IMS · Pro` — so every column anchored after them slides from row to row. Measure with `getBoundingClientRect().width` rather than guessing.",
+        "section": "layout"
       },
       {
-        "name": "The phone is a supported reporting surface",
-        "section": "layout",
-        "body": "`.stat-grid` is repeat(auto-fit, minmax(180px, 1fr)) and reflows on its own. Twenty-five report pages had overridden it inline with repeat(N, 1fr) up to N=6 — an inline style outranks every media query — so a phone rendered six crushed KPI columns on precisely the pages an owner checks between services. All removed; desktop is unchanged because auto-fit lands on the same count at desktop widths. Never pin a fixed column count on a KPI strip: if a row genuinely needs a different density, add a named variant in Layout.css that carries its own breakpoint."
+        "name": "A scroll container's clearance is margin, never padding",
+        "body": "`.table-wrap--fab-clear` reserved its 88px with `padding-bottom` for a year: inside the scroll container, so the horizontal scrollbar rendered 88px *below* the last row — off the fold on any table long enough to scroll the page, and with Windows' overlay scrollbars not on screen at all. A too-wide table therefore did not read as scrollable, it read as content sliced off at the right edge. Generalise it: **any padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**",
+        "section": "layout"
       },
       {
-        "name": "Report pages are one dialect, till screens are another",
-        "section": "components",
-        "body": "A report is a report whichever module it belongs to — the person reading it is the same owner or accountant, arriving with the same expectations, often on the same afternoon. POS's four report pages had grown their own grammar (an inline-styled h2 where every other page opens with page-title, hand-rolled KPI tiles, a third tab family, mouse-only row drill-downs); that was drift, not a decision, and it is converged. The deliberate exception is the till: PosOrders and KitchenDisplay are position: fixed full-screen layers operated at arm's length on a busy floor, which is why their Modal usage needs its own zIndex. Do not converge those."
+        "name": "`space-between` on two controls in a wide container is an anti-pattern",
+        "body": "It does not distribute, it banishes — two 10px buttons at opposite ends of a 1000px card with dead space between. Group related controls with a `gap` and let the container's alignment place the group.",
+        "section": "layout"
       },
       {
-        "name": "A cell holding two things collapses first, and the auto layout decides that, not you",
-        "section": "components",
-        "body": "table-layout is auto, so a column's width is bid for against its neighbours and a neighbour carrying white-space: nowrap always wins. The Purchases bill list is the reference case: its Item cell holds a name plus a category badge with a nowrap Vendor cell beside it, so a two-word name broke over two lines with the badge on a third and the row stood three lines tall to show one line of figures. The fix is nowrap on the cell, never a fixed width — .table-wrap's horizontal scroll exists to carry exactly this, and a width just moves the wrap somewhere else at the next screen size. Same failure with no second element at all: a Day cell holding 2026-08-17 collapses to its widest unbreakable fragment, 2026-, and breaks the date at every hyphen. Dates, codes, invoice refs and phone numbers all need nowrap for this reason."
+        "name": "Shadow tells you what surface you are on, not that a page is polished",
+        "body": "Do not invent a third meaning — a stronger shadow for \"important\" or \"premium\". If something needs to stand out, that is a job for the accent colour or for position.",
+        "section": "elevation"
       },
       {
-        "name": "Row density is a table-level decision, made once",
-        "section": "components",
-        "body": "The global td padding is 11px vertical. A table read as a dense ledger rather than a report of a dozen rows opts down through its own scoped class (table.purchases-table, 7px), never per cell — a per-cell inline padding is the shape that leaves one row taller than its neighbours the first time someone adds a column, and inline beats the class silently."
+        "name": "The signed-out surfaces carry a light source; the app does not",
+        "body": "`/login` and `/pricing` are lit by three brass radial layers on the scrollport itself — a key breaking over the sign-in card's top-right shoulder, a rim grazing the right edge, a weak bounce lifting the pitch column out of flat black. Two things there were measured rather than guessed. **Radii are percentages of the box, not pixels**: in px the rim was 680px wide, which on a 390px phone is nearly two screens across — it stopped being a rim and flooded the lower half of the page. And a fourth \"shade\" layer mixing toward `--theme-sidebar` was removed because on Dark it was mathematically inert (`#0e1117` over `#0f1117`), spending half the depth budget on nothing. **Unlit ground is the shadow here.** Do not carry any of this into the app: a dense table under an atmospheric wash is worse than one on a flat card.",
+        "section": "elevation"
       },
       {
-        "name": "Day columns say the month",
-        "section": "components",
-        "body": "A Day column showing a bare 1 is legible only while the page header naming the month is on screen; print the sheet or read it back a month later and the number says nothing. Every period-scoped Day column renders formatBsDay(day, bsMonth) — '1st Bhadra' — and bsDayOrdinal(day) alone where the month is already stated beside it. Deliberately not the full-date form: this names a day inside the period already chosen, so it carries no year. Two behaviours are load-bearing: an absent or out-of-range month degrades to the bare ordinal rather than naming the wrong month, and day 0 (Sales' bulk sentinel) returns '' so each caller keeps its own dash. Excel exports keep the numeric column — text breaks a spreadsheet's sorting and filtering."
+        "name": "The one authored moment on the login page is a state, not an entrance",
+        "body": "The card's top edge highlight widens and brightens on `:focus-within`, so it tracks what the user is actually doing instead of playing once on load and never meaning anything again.",
+        "section": "elevation"
       },
       {
-        "name": "Expanding a row shows detail in place, directly beneath it",
-        "section": "components",
-        "body": "A `<tr className=\"detail-row\">` with a full-width colSpan cell, never a panel appended after the table. Two cascade notes, both of which bit on the first implementation: `table.data-table tr:hover td` is a descendant selector, so without the .detail-row overrides in Layout.css hovering an expanded detail tints its own cell and every cell of any table nested inside it, lighting the whole panel up as one hoverable row. And if the parent row toggles the expansion on click, every control inside it must stopPropagation() or acting on the record also collapses the panel you were reading."
+        "name": "Six radius steps, and they are a closed set",
+        "body": "4px (`--radius-xs`, micro-elements only), 8px (`--radius-sm`), 12px (`--radius-md`), 18px (`--radius-lg`), 24px (`--radius-xl`), 999px (`--radius-full`). Radius does not vary per preset — the shape scale is theme-invariant while colour and shadow are not.",
+        "section": "shapes"
+      },
+      {
+        "name": "Radius tracks the element's size class, not its importance",
+        "body": "Chip-sized things take `sm` (badges, small icon buttons); control-sized things take `md` (buttons, inputs, selects, tab pills, nav links); surface-sized things take `lg` (cards, stat cards, table containers); `xl` is for the largest panels only (the sign-in card, the chart expand modal). This is why a badge and a card do not share a radius even though both are \"containers\": the corner has to stay proportional to the box, or a small chip reads as a lozenge and a large card reads as a rectangle.",
+        "section": "shapes"
+      },
+      {
+        "name": "`full` (999px) is reserved, not available",
+        "body": "It belongs to the sidebar module switcher's pill signature, the period chip, and shapes whose radius is genuinely half their own height (the 6px scrollbar thumb). `.tab-btn` deliberately stays at `md` — two pill treatments on one screen would dilute the switcher from a signature into a pattern.",
+        "section": "shapes"
+      },
+      {
+        "name": "Borders carry structure, and the two weights are not interchangeable",
+        "body": "`--theme-border` is structural (card edges, the table header rule, input outlines); `--theme-border-lt` is internal (row dividers, ghost button edges). Using the structural weight for a row divider makes a dense table read as a grid of boxes, which is precisely the legacy-ERP failure mode.",
+        "section": "shapes"
+      },
+      {
+        "name": "No clipping, no masks, no non-rectangular silhouettes",
+        "body": "Every surface is a rounded rectangle. The only recurring non-rectangular shape is the circular status dot and its pulse ring, which is a signal rather than a container.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Proportional Corner Rule",
+        "body": "If a new element needs a radius, pick the step by asking how big the box is, not how important it is. An important card does not get a larger corner; it gets the accent colour or a better position.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Closed-Scale Rule",
+        "body": "A radius, a type size or a spacing value that is not on its scale is drift. When the system is genuinely missing a step, add it to the scale and to this file — that is how `--radius-xs` arrived, after 38 sites had independently reached for a 2–4px literal because a 10x10 legend swatch reads as a circle at 8px.",
+        "section": "shapes"
+      },
+      {
+        "name": "The one accepted layout-property animation",
+        "body": "`.sidebar-shell` animates `width` and `.main-content` tracks it with `margin-left`, both at `0.22s ease` — normally an anti-pattern, and correctly flagged as one by any detector. It stays, and the reasoning has held through two sidebar rewrites: `.sidebar-wrap` is `position: fixed`, so **real space has to be reserved** for whichever width the sidebar currently is. A `transform`-only version would slide the sidebar over the content rather than resizing the column, so avoiding it means restructuring the shell's positioning strategy app-wide. The animation also fires only on a rare, manual, user-triggered toggle — never continuously and never scroll-linked — so the actual jank risk is low. Revisit only if the positioning mechanism changes for other reasons. Both values are recorded in `.impeccable/config.json`'s `ignoreValues`; this paragraph is why.",
+        "section": "components"
+      },
+      {
+        "name": "Which column absorbs the squeeze is a decision, and text is the only honest candidate",
+        "body": "`white-space: nowrap` goes on the unbreakable atom — a date, a figure, a unit, an invoice ref, an action button — never on the whole cell, and never on every column: a table where everything is `nowrap` can only overflow, which is not the same thing as scrolling. The purchases bill list is the worked example, rewritten three times before it settled: pinning the item cell made the table overflow at every ordinary desktop width (min-content 1134px against 1086px of room at 1440px), and the reader saw a sliced Edit button rather than a scrollbar. Now the two name columns wrap and everything else holds, with no horizontal scroll from 1152px up.",
+        "section": "components"
+      },
+      {
+        "name": "JSX children are an argument, not a gate",
+        "body": "`ReportPage` renders `children` only once loaded, but the expression is fully evaluated by the *parent* before it is handed over — so a table built from `useState(null)` data throws on the first render, before any wrapper or entitlement gate can intervene. Only an early return, a guard at the call site, or a render prop protects it. The same applies to `banners`, `stats`, `note`, `filters` and `footnote`.",
+        "section": "components"
+      },
+      {
+        "name": "Open is structural, not a hue, and that was measured rather than chosen",
+        "body": "Tinting the chip amber put its label at **4.19:1 on Light** on 12px text, and every tint from 6% to 12% lands between 4.19 and 4.54 — there is no amber fill here that is both visible and safe. Worse, it was not working anyway: against the closed chip it separated by ΔE 6.0 on Dark and 2.6 on Light, both under the floor. So the provisional state is a **dashed edge** — shape, which survives greyscale, every form of colour blindness and a monochrome print, and cannot fail a contrast check because it is not text — joined by the word OPEN and a `△`. `provisionalWhenOpen` is opt-in, because on a data-entry screen an open period is the normal working state and flagging it would be noise.",
+        "section": "components"
       }
     ],
     "dos": [
-      "Do use the theme's `accent-text` token as the foreground on any accent-colored background - it changes per preset and a hardcoded color will fail contrast on at least one of the two presets.",
-      "Do keep tonal alpha-tints (`table-hover`, `focus-ring`, badge backgrounds) at 2-18% opacity - enough to register as a state, never opaque enough to compete with real content.",
-      "Do wrap every wide table in the horizontal-scroll container rather than shrinking columns.",
-      "Do reserve the rationed 4th color (purple) for a genuine 4th/5th categorical need, not as a second accent.",
-      "Do put labels above form fields, always - never a placeholder standing in for a label.",
-      "Do give every status message a live region - `role=\"alert\"` for errors, `role=\"status\"` for confirmations. A message that is only *shown* announces nothing, and on a destructive surface that means no confirmation an action ran at all.",
-      "Do use the `*-text` variant whenever a signal colour is set as `color:` — and check the ternaries, which is where about half the real sites are.",
-      "Do keep a legend swatch identical to the series it labels, and let the adjacent label text carry the readable contrast.",
-      "Do give any modal the full dialog contract: role, `aria-modal`, a labelled title, initial focus, a Tab trap, Escape, and focus restored to the trigger.",
-      "Do disclose an estimate where it is read, inline and visible, not in a hover tooltip — a figure carrying a red/amber/green verdict has to say what it is built from.",
-      "Do render a report's could-not-load state as its own thing, never as the empty state, and never above a KPI strip that is still showing zeros (added 2026-08-19/S594 — see Report shell).",
-      "Do put a validation message under the box it names, with `aria-invalid` on the control and `aria-describedby` pointing at the message — one string for the whole form tells a screen-reader user that a save failed and never which control to fix (added 2026-08-23/S603 — see Inputs / Fields)."
+      "**Do** read every colour from a `--theme-*` token, and check the fallback half of a `var()` as carefully as a standalone literal — a drifted fallback paints in the one instant nobody is watching and reads as correct in review.",
+      "**Do** take the `*-text` variant when a signal colour is type, and the base token when it fills.",
+      "**Do** band a ratio through its shared function (`fcBand`, `varianceBand`, `lcBand`, `pcBand`, `nmBand`, `STAFF_LEVEL_BADGE`) and render it through `fcFigure` / `bandFigure`, so the mark cannot be dropped.",
+      "**Do** pair the soft focus ring with the solid `--theme-focus-outline` on every new focusable control. The ring alone measures 1.15:1 and is not an indicator.",
+      "**Do** reach for a global class (`.btn`, `.badge-*`, `.card`, `.form-input`, `.form-select`, `.page-header--split`, `.tab-btn`, `.panel-tab-bar`, `.data-table`) before an inline style.",
+      "**Do** use `aria-invalid=\"true\"` as both the styling hook and the announcement, and pair it with a `role=\"alert\"` message.",
+      "**Do** put `white-space: nowrap` on the unbreakable atom and let a text column absorb the squeeze.",
+      "**Do** state a scope everywhere the report goes — the `PeriodScope` chip, the print header, the workbook and the filename.",
+      "**Do** give a page that renders into the body flow its own `100dvh` scrollport, and delete the `min-height: 100vh` it was carrying.",
+      "**Do** measure a chip's floor width in the browser before pinning it.",
+      "**Do** treat print as a real surface: check that a new report prints as a flat document, not as a screenshot of cards.",
+      "**Do** keep the Crest Staff app's floors (44px controls, 16px fields) scoped under `.self-service`, and set 16px inline too on any control that sets its own size."
     ],
     "donts": [
-      "Don't build dense, hierarchy-less layouts in the name of \"fitting more in\" - that's the legacy-ERP failure mode this product is explicitly positioned against.",
-      "Don't reach for purple gradients, Inter-everywhere, or a templated hero-plus-three-cards layout - the generic-AI-SaaS look PRODUCT.md names directly as an anti-reference.",
-      "Don't invent a stronger/different shadow to mean \"important\" or \"premium.\" Card elevation (`--theme-card-shadow`) is now uniform policy across every card, not a decoration budget to spend more of - the floating-action and live-pulse shadows are the only two that still carry extra meaning (see Elevation).",
-      "Don't hardcode white or black as text on an accent background - use the paired `accent-text` token.",
-      "Don't use a second saturated brand color alongside Aged Brass on the same screen; if a fourth category is genuinely needed, that's what the rationed purple token is for. (No exceptions remain; Bright's colorful KPI badges were the only named one, retired with that preset in S607.)",
-      "Don't build a multi-series chart palette from the semantic tokens — they are five *roles*, not five validated hues, and nothing measures them as a series set. Both earlier justifications have now expired (accent/purple being one hex died with those presets in S607; Light's `red`/`amber` ΔE 3.1 was fixed in S608), which is itself the argument: the tokens move for reasons that have nothing to do with series separation. Use the validated fixed-hex sets (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`) and re-measure when you touch them — S608 found `CHART_COLORS` slots 3 and 5 at ΔE 0.4 under deuteranopia, i.e. two identical lines on any chart with five or more series, and nobody had noticed.",
-      "Don't dim a row with `opacity` to de-emphasise it; opacity multiplies through the text colour and takes it below AA. Label the state instead.",
-      "Don't put `role=\"button\"` on a `<tr>`. It removes the row from the table's structure, so the cells stop being associated with their column headers. Put a real `<button>` in the first cell (see Data Tables).",
-      "Don't paint a verdict colour on a figure that has not settled yet — early in a period a lumpy-numerator ratio is arithmetic, not signal.",
-      "Don't let a page compute a number it then shows before the read has returned. A KPI painted during load is a claim the page cannot yet support, and on a green token it reads as a healthy one.",
-      "Don't signal a failing field with colour alone, and don't give it a styling hook separate from `aria-invalid` — the two drift, and a form that looks validated then reads as unlabelled.",
-      "Don't put a `position: sticky` element in the body flow and assume it sticks — `index.css`'s `html, body { overflow-x: hidden }` makes body its own scrollport, and it had silently killed three of them. Give the page root its own scroll container and measure it (see Layout).",
-      "Don't dim a disabled *field* the way a disabled button is dimmed. A button's label is a verb; a field's content is data, and a locked period's figures have to stay legible precisely because they can no longer be corrected — flatten the surface instead (see Inputs / Fields)."
+      "**Don't** introduce a second brand colour. If a fourth category is genuinely needed, that is what the rationed violet is for.",
+      "**Don't** build a multi-series chart palette from the semantic tokens. They are five roles, not five validated hues, and they move for reasons that have nothing to do with series separation.",
+      "**Don't** paint a signal colour on a category — a rank, a close type, a delivery partner, a payment method and a table state are facts, not verdicts.",
+      "**Don't** paint a verdict colour on a figure that has not settled yet: early in a period a lumpy-numerator ratio is arithmetic, not signal.",
+      "**Don't** let a page show a number it has not computed. A KPI painted during load is a claim the page cannot support, and on a green token it reads as a healthy one.",
+      "**Don't** render a failed read as an empty state. They are different facts, and only one of them means the figures on screen are real.",
+      "**Don't** hardcode white or black as text on an accent background — use `accent-text`.",
+      "**Don't** invent a stronger shadow to mean \"important\". Card elevation is uniform policy.",
+      "**Don't** dim a row with `opacity` to de-emphasise it: opacity multiplies through the text colour and takes it below AA. Label the state instead.",
+      "**Don't** dim a disabled *field* the way a disabled button is dimmed. Flatten the surface and leave the value legible.",
+      "**Don't** put `role=\"button\"` on a `<tr>` — it removes the row from the table's structure and its cells lose their column headers. Put a real `<button>` in a cell.",
+      "**Don't** write an animation as an inline style; `prefers-reduced-motion` cannot reach it.",
+      "**Don't** assume a `position: sticky` element in the body flow sticks. Measure `getBoundingClientRect().top` across real scroll positions — it computes as `sticky` in devtools either way.",
+      "**Don't** put padding on an `overflow: auto` element to clear a fixed control. Use margin, or the scrollbar ends up somewhere the reader will never find it.",
+      "**Don't** show a user `error.message`. Convert at the call site through `errorText.js`, and never claim a failed write did not land — a dropped connection does not prove that."
     ]
   }
 }

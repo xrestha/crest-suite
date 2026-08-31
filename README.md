@@ -164,6 +164,105 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S662 — 2026-08-31 — DESIGN.md is rewritten from the code, and the pre-hydration tokens stop disagreeing with the preset
+
+Service worker `crest-v178`. No migration. `/impeccable document`, **full rewrite** — deliberately
+not S645's "sidecar only", which was offered first and declined. `DESIGN.md` 1,022 → 900 lines
+(144 KB → 56 KB), sidecar regenerated, one real token defect fixed, 11 stale comments corrected
+across 10 files, one new test. `.claude/rules/design-system.md` updated to record the decision.
+
+**The scan found DESIGN.md was not stale — it is hand-maintained, and S655–S661 had all written into
+it.** What was stale was `.impeccable/design.json`, seven sessions behind: zero hits for
+`page-header`, `ActionError`, `PeriodScope`, `bandFigure`. So the recommendation was refresh + sidecar,
+with full-rewrite offered as the fourth option and its cost stated (it discards the accumulated
+session history and measured evidence). That option was chosen, so the rewrite is what this entry is
+mostly about — including what it broke.
+
+**1 — The rewrite itself.** Eight canonical sections in spec order, new North Star: **"The Lit
+Instrument"** — one warm light source, an instrument that must be read exactly, signal colour spent
+only where a number has earned a verdict. Frontmatter validated: parses as YAML, only the five
+schema-legal groups, all 40 `{token.ref}`s resolve. Georgia is documented as the **signature face**
+rather than "the wordmark only", which was never true — it sets nine sites (wordmark, `PremiumGate`,
+`SubscriptionLock`, the guest menu brand, six print letterheads), and what they have in common is
+that the product is speaking in its own voice rather than showing you your data. Motion moved into
+Components, since the spec has no Motion section and the tokens belong in the sidecar's `extensions`.
+
+**2 — The rewrite's real danger is not what it deletes. It is what it silently stops COVERING, and
+that happened three times.** The prose loss was the expected, accepted trade. The damage was in the
+machine layer, where each omission turned working, deliberate code into apparent drift and none of
+them announced itself:
+
+- **The type ramp narrowed from 16 roles to 8.** The frontmatter is what the detector checks a
+  literal against, so documenting only the roles a designer reasons in made real *tokenised* sizes
+  read as off-ramp — `--font-size-micro` (10px) and `--font-size-chevron` (9px) are declared custom
+  properties in `:root`. The fix is the split the spec already intends: the complete ramp
+  (9/10/11/12/13/14/15/16/17/18/20/22/24/32, measured off the source) in the frontmatter, the
+  readable nine roles in the prose.
+- **Two whole palettes vanished** — the 13-token print grayscale ramp and the guest menu's 14-token
+  bone-and-pine set. Both are real, reused, deliberately theme-independent scales; the guest menu is
+  also the only surface a paying customer sees and now has a prose section explaining why it stopped
+  reading the global tokens (a phone that had ever opened the admin app was rendering a restaurant's
+  public menu in a staff member's chosen preset).
+- **A sanctioned exception kept its config entry and lost its argument.** The sidebar's
+  `width`/`margin-left` collapse animation is recorded in `.impeccable/config.json`'s `ignoreValues`
+  — in both value forms — but the *reasoning* lived only in DESIGN.md's Navigation section. So the
+  suppression survived and the justification did not, which is the shape that gets a deliberate
+  decision "fixed" by a later session.
+
+All three surfaced within minutes, because the design hook runs on an edited UI file and the token
+fix below touched `Layout.css`. **A docs-only commit would have shipped all three undetected** — the
+hook cannot see a file nobody opened. Worth pricing in before treating a documentation change as
+low-risk.
+
+**3 — The defect the extraction actually found: `:root` disagreed with `PRESETS.dark`.**
+`Layout.css`'s `:root` block is the **pre-hydration copy** of the dark preset — it paints in the
+window before `applyTheme()` runs, which is exactly when a wrong value is on screen and nothing has
+overwritten it. Its own comment says it must stay byte-identical. It carried
+`--theme-text2: #8a92a3` / `--theme-text3: #9ca3af` against the preset's `#9ca3af` / `#8a92a3`:
+**S620's text2/text3 role swap landed in ThemeContext and never reached here**, so the first paint
+carried the inverted ladder for eleven days. Second drift in that block; the first (2026-08-12,
+`#6b7280` and an 0.02-vs-0.03 alpha) was also found by diffing rather than by any test.
+
+**The reason this class of bug has no symptom is that both values are correct in isolation.** Fog
+measures 6.70:1 and Slate 5.45:1 on the dark card — both clear AA — so the *ladder* was wrong while
+the *contrast* was fine, and no audit that checks ratios can see it. It is then overwritten
+milliseconds later, so nothing looks broken either.
+
+**4 — So it is a test now, not a habit.** `src/context/themeTokenParity.test.js`: 21 assertions that
+every `--theme-*` in `:root` equals its `PRESETS.dark` field (`cardShadow` included), that the text
+ladder holds in both files, and that a preset gaining a colour field `:root` never declares fails the
+suite. It imports `PRESETS` and parses the CSS as **text**, because the point is what ships in the
+stylesheet and a CSS-module import under jest returns a stub. **Verified by re-introducing the S620
+inversion and watching the right three assertions fail** — a guard nobody has seen fail is not a
+guard. Adding a colour to a preset now forces a decision in its `TOKEN_OF` map, which is where "does
+`:root` need this too?" gets asked.
+
+**5 — Eleven stale preset counts, split by tense.** The retirement of eight presets in S607 left
+comments across the codebase claiming ten or five. The split that matters: **a present-tense claim
+about today's product is wrong and was fixed** (`.btn-danger--strong`'s "ranges across the ten
+presets", `SubscriptionLock`, `ThemeContext`'s "the variants exist only on the five light presets",
+`selfService.css`, `GroupDashboard`, `Login.css`, `AdminClients`, `PaymentReport` ×2, `imsFormulas`,
+`PosOrders`, and `subscription.js`, which also named `#e6e9ef` as the top of the card range — a value
+no current preset has). **A past-tense measurement record is accurate history and was left alone** —
+"23 of 25 combinations across the five light presets failed", "failed AA on 7 of the 10 presets
+here". Those are the evidence the rules rest on; rewriting them deletes the reason each rule exists.
+
+**6 — Sidecar.** Regenerated and validated for *completeness*, not just freshness: 51 colours → 51
+`colorMeta` (each with an 8-step OKLCH tonal ramp and its Light-preset value), 17 typography roles →
+17 `typographyMeta`, zero undescribed and zero orphans in either direction, 41 rules, 12 component
+snippets (`ds-`-prefixed, self-contained, live `var(--theme-*)`). The old 22 components included
+several referencing classes that no longer exist.
+
+**The rule that came out of it, now in `.claude/rules/design-system.md`:** `/impeccable document`
+still **defaults** to sidecar-only, but the full rewrite is the user's call — present the trade
+honestly, do not refuse it, do not perform it unasked. And after any rewrite, **re-derive coverage
+rather than re-reading the prose**: diff the old and new frontmatter key sets, grep `config.json`'s
+ignore reasons for `DESIGN.md` and confirm each still has a home, and assert every token has a
+`colorMeta`/`typographyMeta` entry. Reading the new file tells you it is good; only the diff tells
+you what it no longer covers.
+
+Full suite green (528 tests, 42 suites) and `npm run build:verify` clean.
+
 ### S661 — 2026-08-31 — the POS floor stops painting a full room red, and the kitchen board stops shouting the column it is already in
 
 Service worker `crest-v177`. No migration. `/impeccable colorize pos module`. One new shared module

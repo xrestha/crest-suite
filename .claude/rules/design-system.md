@@ -494,21 +494,51 @@ Two checks whenever a preset value moves:
   previous palette.** `context.mjs` reports sidecar staleness, but it only compares timestamps: it
   cannot see a value that is merely wrong, which is how five of them survived two refreshes.
 
-**But `/impeccable document` in this project means SIDECAR ONLY (S645).** Its playbook offers three
-paths and the destructive one is the default reading: a full run re-extracts tokens from the code
-and **rewrites `DESIGN.md`**. That is safe for an auto-generated file and catastrophic here — ours is
-667 hand-written lines carrying measured contrast figures ("2.84:1 on Rosé Dawn"), S-number
-provenance on every rule, and the reasoning behind each accepted exception. Auto-extraction can read
-the values back out of the code; it cannot reconstruct why any of them are what they are. The
-playbook sanctions the narrow path explicitly — *"If the user only asks to refresh the sidecar,
-preserve DESIGN.md and write only `.impeccable/design.json`"* — and that is the one to take. **Answer
-its stop-and-ask with "sidecar only".**
+**`/impeccable document` defaults to SIDECAR ONLY (S645), and the full rewrite is the user's call
+to make (S662).** Its playbook offers three paths and the destructive one is the default reading: a
+full run re-extracts tokens from the code and **rewrites `DESIGN.md`**. That is safe for an
+auto-generated file and expensive here, so the command stops and asks. **Answer its stop-and-ask
+with "sidecar only" unless the user says otherwise** — the playbook sanctions the narrow path
+explicitly (*"If the user only asks to refresh the sidecar, preserve DESIGN.md and write only
+`.impeccable/design.json`"*). Present the trade honestly and let them choose; do not refuse the
+rewrite, and do not perform it unasked.
 
-Two things make that refresh cheap and safe. **Diff before regenerating**: the sidecar's `rules`
-array is extracted more broadly than the `**The X Rule.**` pattern (51 entries against 8 formally
-named ones), so a naive re-extract silently drops the other 43 — compare and append instead. And
-**verify `colorMeta` against `ThemeContext` by hand while you are there**, because that is the one
-check the staleness hint cannot perform and the S627 finding above is exactly what it misses.
+Two things make the narrow refresh cheap and safe. **Diff before regenerating**: the sidecar's
+`rules` array is extracted more broadly than the `**The X Rule.**` pattern, so a naive re-extract
+silently drops the rest — compare and append instead. And **verify `colorMeta` against
+`ThemeContext`**, because that is the one check the staleness hint cannot perform and the S627
+finding above is exactly what it misses.
+
+**When a full rewrite IS chosen, the risk is not what it deletes — it is what it silently stops
+covering (S662, 2026-08-31, the one time it has been run).** The rewrite went from 1,022 lines to
+~900, which was the point; the real damage was in the machine layer, where three omissions each
+turned working, deliberate code into apparent drift, and none of them announced itself:
+
+- **The type ramp narrowed from 16 roles to 8.** The frontmatter is what the detector checks a
+  literal against, so documenting only the roles a designer reasons in made real *tokenised* sizes
+  (`--font-size-micro` 10px, `--font-size-chevron` 9px) read as off-ramp. Keep the complete ramp in
+  the frontmatter and the readable subset in the prose — that split is what the spec is for.
+- **Whole palettes vanished**: the 13-token print grayscale ramp and the guest menu's 14-token
+  bone-and-pine set. Both are real, reused, deliberately theme-independent scales.
+- **A sanctioned exception lost its rationale.** The sidebar's `width`/`margin-left` collapse
+  animation is recorded in `.impeccable/config.json`'s `ignoreValues`, but the *reason* lived only
+  in DESIGN.md — so the config entry survived and the argument did not.
+
+So: after any rewrite, **re-derive coverage rather than re-reading the prose.** Diff the old and new
+frontmatter key sets, grep `config.json`'s ignore reasons for `DESIGN.md` and confirm each still has
+a home, and check that every frontmatter token has a `colorMeta`/`typographyMeta` entry (a
+completeness assertion, not a spot check). The hook found all three of these within minutes of the
+rewrite landing, which is the argument for editing a UI file straight afterwards rather than
+committing the docs alone.
+
+**`:root` parity is now a test, not a habit** (`src/context/themeTokenParity.test.js`). It asserts
+every `--theme-*` in `Layout.css`'s `:root` block equals its `PRESETS.dark` field, and fails if a
+preset gains a colour that `:root` never declares. It exists because that block drifted twice
+(2026-08-12's `#6b7280`/alpha pair; S620's text2/text3 role swap, live for eleven days) and **the
+failure has no symptom** — the wrong values are overwritten milliseconds later, so nothing looks
+broken and no other test fails. Verified by re-introducing the S620 inversion and watching three
+assertions fail. Adding a colour field to a preset now requires adding it to that test's `TOKEN_OF`
+map, which is deliberate: that is where "does `:root` need this too?" gets asked.
 
 ## A signal colour carries one meaning per module, and a category carries none (S660)
 
