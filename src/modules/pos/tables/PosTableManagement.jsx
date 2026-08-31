@@ -8,14 +8,14 @@ import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
+import { TABLE_STATUS_BADGE as STATUS_BADGE, TABLE_STATUS_LABEL as STATUS_LABEL, tableStripColor } from '../posSignals'
 
 const STATUS_CYCLE = ['available', 'reserved', 'occupied', 'inactive']
-const STATUS_BADGE = { available: 'badge-green', occupied: 'badge-red', reserved: 'badge-amber', inactive: 'badge-gray' }
-const STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: 'Reserved', inactive: 'Inactive' }
-// Same stage-color-strip treatment as the live floor view (PosOrders.jsx) and Kitchen Display —
-// a small badge chip alone doesn't read at a glance; the badge stays too, so color is never the
-// only signal.
-const STATUS_COLOR = { available: 'var(--theme-green)', occupied: 'var(--theme-red)', reserved: 'var(--theme-amber)', inactive: 'var(--theme-border)' }
+// This file used to carry its own byte-identical copy of the status badge/label/colour maps, which
+// is how the floor plan and the setup grid could ever have disagreed. One copy now, in
+// ../posSignals.js. The strip helper is the same one the live floor uses; with no order, no ticket
+// and no guest request to report here, it resolves to "which tables are in play" — which is the
+// only question this screen is for.
 
 const QS_EMPTY  = { prefix: 'Table', start: 1, count: 10, section: '', capacity: 4 }
 const ADD_EMPTY = { name: '', section: '', capacity: 4 }
@@ -590,7 +590,7 @@ export default function PosTableManagement() {
                               padding: '5px 18px', borderRadius: 6, fontSize: 12,
                               fontWeight: active ? 700 : 400, cursor: 'pointer',
                               background: active ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
-                              color: active ? 'var(--theme-accent-text, #000)' : 'var(--theme-text2)',
+                              color: active ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                               border: `1px solid ${active ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                               transition: 'all 0.1s',
                             }}>{station}</button>
@@ -956,9 +956,9 @@ export default function PosTableManagement() {
             <div className="stat-grid" style={{ marginBottom: 20 }}>
               {[
                 { label: 'Total Tables', value: tables.length,    color: 'var(--theme-text1)', tip: null },
-                { label: 'Available',    value: counts.available, color: 'var(--theme-green-text)',  tip: 'Tables ready to seat a new party right now' },
-                { label: 'Occupied',     value: counts.occupied,  color: 'var(--theme-red-text)',    tip: 'Tables with an active order currently open' },
-                { label: 'Reserved',     value: counts.reserved,  color: 'var(--theme-amber-text)',  tip: 'Tables held for an upcoming booking or walk-in queue' },
+                { label: 'Available',    value: counts.available, color: 'var(--theme-text1)',      tip: 'Tables ready to seat a new party right now' },
+                { label: 'Occupied',     value: counts.occupied,  color: 'var(--theme-accent-ink)', tip: 'Tables with an active order currently open' },
+                { label: 'Reserved',     value: counts.reserved,  color: 'var(--theme-text1)',      tip: 'Tables held for an upcoming booking or walk-in queue' },
               ].map(s => (
                 <div key={s.label} className="card" style={{ padding: '12px 18px' }}>
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
@@ -1010,7 +1010,7 @@ export default function PosTableManagement() {
                   onClick={() => openEdit(t)}
                   style={{ padding: '16px 18px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}
                 >
-                  <div style={{ margin: '-16px -18px 2px', height: 6, background: STATUS_COLOR[t.status] || 'var(--theme-border)', flexShrink: 0 }} />
+                  <div style={{ margin: '-16px -18px 2px', height: 6, background: tableStripColor({ status: t.status }), flexShrink: 0 }} />
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
                     {/* The card keeps its onClick as the mouse convenience, but the keyboard
                         path is these two real controls rather than role="button" on the card:

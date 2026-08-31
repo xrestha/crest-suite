@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import { POS_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../posSignals'
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
 
@@ -21,7 +22,8 @@ const DEFAULT_ROLES = [
   { label: 'Supervisor', level: 'supervisor' },
   { label: 'Manager',    level: 'manager' },
 ]
-const LEVEL_BADGE = { staff: 'badge-green', supervisor: 'badge-amber', manager: 'badge-yellow' }
+// Rank is a ladder of access, not a scale of goodness — see POS_LEVEL_BADGE in ../posSignals.js.
+// It used to be green/amber/brass, which put a Supervisor in the same colour as an unfired dish.
 // Orthogonal to the role/rank system above (S431) — which physical station this login works.
 // A 'kitchen'/'bar' team account keeps whatever pos_role rank it has (still governs voids/comps/
 // reports the same as always) but sees only the ticket display in its sidebar, locked to that
@@ -429,7 +431,7 @@ export default function PosStaff() {
                     </td>
                     <td>
                       {p.pos_role
-                        ? <span className={LEVEL_BADGE[p.pos_role] || 'badge-gray'} style={{ fontSize: 11 }}>
+                        ? <span className={LEVEL_BADGE[p.pos_role] || STAFF_LEVEL_BADGE_NONE} style={{ fontSize: 11 }}>
                             {p.pos_role.charAt(0).toUpperCase() + p.pos_role.slice(1)}
                           </span>
                         : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>

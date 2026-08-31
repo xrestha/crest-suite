@@ -159,6 +159,108 @@ Annual = 25% off monthly, applied uniformly everywhere annual pricing appears.
 
 ## Session Log
 
+### S661 — 2026-08-31 — the POS floor stops painting a full room red, and the kitchen board stops shouting the column it is already in
+
+Service worker `crest-v177`. No migration. `/impeccable colorize pos module`. One new shared module
+(`src/modules/pos/posSignals.js` — the module's colour vocabulary), 10 files changed, **no figure and
+no behaviour changed**: this pass changed only what colours mean and which fact each one carries.
+DESIGN.md, `.claude/rules/design-system.md` and `.claude/rules/pos-billing.md` updated.
+
+**HR's problem last session was inconsistency. POS's was worse and is the more transferable
+finding: on both of its busiest screens the loudest mark carried the least information, and it was
+spending the hue the urgent thing needed.** Amber alone measured eight distinct meanings across the
+module — "not fired yet", "cooking normally", "about to go late", "money owed", "a comped bill",
+"Foodmandu", "supervisor", "reserved table" — three of which are categories rather than verdicts,
+and two of which are the *good* outcome.
+
+**1 — The floor plan painted an empty table green and a full one red.** A 6px full-tile strip plus a
+badge, readable across a room, and it said *occupied* — which is revenue, the outcome you want, and
+also the one thing a waiter crossing the floor can already see with their own eyes. Under the Signal
+Polarity Rule this is a verdict inverted; practically it is a wall of red on a busy Friday, which
+trains the eye straight past the red that matters. And the tile's genuinely urgent states were the
+quiet ones: "you have not fired these three dishes" was a thin amber pill.
+
+The strip now answers **does this table need me?** — amber for items typed but not fired, a guest QR
+order waiting or an order not yet synced; green for food ready in the pass; brass for live and in
+hand; quiet for available or held; and status keeps the labelled badge it was always read from.
+`tableStripColor()` resolves attention before state, and every colour it returns is doubled by a
+labelled chip on the same tile (`⚠ N` / `📵` / `🔔 Guest order` / the Ready badge), so nothing is
+conveyed by colour alone. `PosTableManagement.jsx` had carried a **second byte-identical copy** of
+the status maps, which is how the setup grid and the live floor could ever have disagreed; one copy
+now.
+
+**2 — The kitchen board's stage strip was pure redundancy.** Red / amber / green for New / In
+Progress / Ready — on a board that already sorts every ticket into a labelled column by that exact
+stage and puts the next action on its own button. Three non-colour encodings of the fact the loudest
+element was repeating, while lateness — the only thing that needs a cook to move — got a 2px border.
+So an on-time New ticket and a twenty-minute-late one wore the same red band. The strip carries
+lateness now and is quiet otherwise. The column header dot keeps the module's grey → brass → green
+progression (the same one a floor tile's KOT badge uses) and deliberately does *not* mirror the
+strip: a legend keyed to a retired encoding is worse than no legend.
+
+**3 — Same shape one level in, on the order cart.** The `✓ KOT` chip was a solid green fill — sent
+is not done, the kitchen has not touched it — sitting next to the amber `+2` chip that does need a
+press. And the KOT/BOT count badge was **red** for "three dishes waiting to be fired", which is the
+normal state of every order ever taken, two lines from an amber `+N` meaning the same thing. The
+chip is a quiet brass tint, the count is amber, and `.ticket-btn--pending`'s border matches its own
+badge instead of saying neutral while the badge said fault.
+
+**4 — Green is not a button colour in this system.** The Payment button was the only green fill in
+the entire product (`.btn-primary` / `-ghost` / `-danger` / `-danger--strong` is the whole
+vocabulary), and green is this palette's *done* verdict while the bill has not been paid yet. It is
+the accent now — which also makes the money button the most brand-forward control in the product.
+`greenBadgeText` went with it.
+
+**5 — Categories gave their signal colours back.** A comp was amber on five surfaces, i.e. the same
+colour as an unfired dish; it is brass now (a decided close type where the money did not move — the
+same reading HR gives an approved-but-unpaid claim), with only Void staying red, which makes the
+Exception Report's three peers finally read as one scale. A delivery platform's name was an amber
+chip *in the same table as* the outstanding figure that legitimately needs amber; it is grey. POS
+rank was a green/amber/brass ladder for staff/supervisor/manager — HR settled that first (a rank is
+a category; all brass) and POS now matches. An open shift was green, which is this module's *done*;
+it is brass, the live working state, while a parking slip's "Open" correctly stays amber because
+that one is money owed. Also fixed: `--theme-accent-text, #000`, a drifted `var()` fallback of the
+exact S534 shape (the token is `#0f1117` on Dark and `#241a08` on Light; `#000` is neither, and a
+fallback only paints in the window before the theme resolves — precisely when a wrong value shows).
+
+**Measured, and one real defect fell out of it.** Every new pairing clears AA on both presets (worst
+4.74:1, the accent Payment button on Light) and all twelve floor-strip pairs clear ΔE 8 under both
+red-green axes (worst 8.2 — amber vs brass on Light, the two warm yellows DESIGN.md already warns
+about, and each amber state carries its own labelled chip). But the kitchen board's **late vs
+going-late sat at ΔE 3.1 under deuteranopia on Light**: `--theme-red` and `--theme-amber` are the
+exact collision S608 retuned `redText`/`amberText` out of, still present in the *base* tokens the
+strip and border are filled from — and that card has no labelled chip, so colour was the sole
+carrier of an escalating warning. Fixed with a **shape**, not a sixth hue: the elapsed-time readout
+now carries `fcBand()`'s own `△`/`▲`, so the distinction survives greyscale, a printout of the
+board, and both red-green axes. The general form is now a rule — **a signal pair a person compares
+needs its non-colour cue on the element they READ, not on the element that is merely loudest.**
+
+**Two boundaries written down so a later sweep does not churn them.** A *button* is an instruction,
+not a verdict, and keeps the product-wide control vocabulary — so the Void button stays red and the
+Complimentary button stays amber, while the records they write read as close types in brass. And the
+**KOT/BOT station chip keeps S613's purple/brass**: a settled decision, on a filterable column in a
+long log where the hue does real scanning work, and although it means purple carries a second
+meaning in this module beside loyalty, the two never appear on the same screen. Considered and kept,
+with the reasoning in `posSignals.js` — re-deciding a settled colour is how a module ends up with
+three answers.
+
+**6 — And the rank ladder became one value instead of three files.** `ImsStaff.jsx` was the last
+copy of the old green/amber/brass ladder, eighteen sessions behind HR — so on one product a
+Supervisor was amber in two modules and brass in the third, and amber is what those same modules use
+for "needs attention". The fix is not three edits but one home: `src/shared/staffLevelBadge.js`
+holds `STAFF_LEVEL_BADGE` (all brass — a rank is a category) plus `STAFF_LEVEL_BADGE_NONE` for an
+account with no access to that module, which is the one genuinely inert state on the axis. HR, IMS
+and POS all read it; `posSignals.js` re-exports it so a reader of the POS vocabulary still finds it
+there. Same parallel as `operatingBands.js` (S660): a colour decision made twice will be made a
+third way, and this one had already been made three times.
+
+**Verified** by production build (clean), by computing every changed pairing's contrast and ΔE from
+the real `ThemeContext` tokens, and by rendering the floor plan, the kitchen board and the cart in a
+harness at 1280px and 390px on both presets. **Note for the next build:** a running CRA dev server
+repopulates `node_modules/.cache/.eslintcache`, which produces phantom `'X' is not defined` errors
+on imports that are plainly present — CLAUDE.md documents the trap, and that one file is the exact
+thing to delete.
+
 ### S660 — 2026-08-31 — HR agrees with itself about what amber means, and labour cost stops being banded three ways
 
 Service worker `crest-v176`. No migration. `/impeccable colorize hr module`. One new shared module

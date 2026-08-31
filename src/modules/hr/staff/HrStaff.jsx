@@ -6,6 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
+import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 
 // Mirrors src/modules/ims/staff/ImsStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for HR staff (S430). Distinct from HR
@@ -22,12 +23,6 @@ const DEFAULT_ROLES = [
   { label: 'Supervisor', level: 'supervisor' },
   { label: 'Manager',    level: 'manager' },
 ]
-// Access level is a CATEGORICAL axis, not a status one — a Supervisor is not a "warning" and a
-// Staff account is not "healthy". All three therefore use badge-yellow, the accent-tinted
-// categorical tag (same treatment the Department tag on Employees uses); the rank itself is
-// carried by the label text, which is what a reader actually needs. Signal green/amber stay
-// reserved for real status.
-const LEVEL_BADGE = { staff: 'badge-yellow', supervisor: 'badge-yellow', manager: 'badge-yellow' }
 const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', employee_id: '', existing_user_id: '' }
 const EMPTY_ROLE  = { label: '', level: 'staff' }
 
@@ -418,7 +413,7 @@ export default function HrStaff() {
                     </td>
                     <td>
                       {p.hr_role
-                        ? <span className={LEVEL_BADGE[p.hr_role] || 'badge-gray'} style={{ fontSize: 11 }}>
+                        ? <span className={LEVEL_BADGE[p.hr_role] || STAFF_LEVEL_BADGE_NONE} style={{ fontSize: 11 }}>
                             {p.hr_role.charAt(0).toUpperCase() + p.hr_role.slice(1)}
                           </span>
                         : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>

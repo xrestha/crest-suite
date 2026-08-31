@@ -16,6 +16,7 @@ import { computeOrderAmounts, computeGroupAmounts } from '../../../utils/posBill
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
+import { IDENTITY_BADGE, CLOSE_TYPE_BADGE } from '../posSignals'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const WALKIN_KEY = '__CASH_SALES__'
@@ -1001,10 +1002,10 @@ export default function SalesReport() {
                     <td>{v.invoiceNo || '—'}</td>
                     <td>
                       {v.customer}
-                      {v.credited && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>Credit Noted</span>}
+                      {v.credited && <span className={CLOSE_TYPE_BADGE.writeoff} style={{ fontSize: 10, marginLeft: 6 }}>Credit Noted</span>}
                       {v.compNos.length > 0 && (
                         <Tip text="This bill had one or more items comped out of it — see the Comped Bills tab for detail. Excluded from the Gross/Net figures shown here.">
-                          <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>
+                          <span className={CLOSE_TYPE_BADGE.writeoff} style={{ fontSize: 10, marginLeft: 6 }}>
                             Comped ({v.compNos.map(n => `NC-${String(n).padStart(2, '0')}`).join(', ')})
                           </span>
                         </Tip>
@@ -1075,7 +1076,7 @@ export default function SalesReport() {
                         {c.invoiceNo != null ? `#${c.invoiceNo}` : `Order #${c.orderNo}`}
                       </button>
                     </td>
-                    <td style={{ fontWeight: 600, color: 'var(--theme-amber-text)' }}>NC-{String(c.compNo).padStart(2, '0')}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-accent-ink)' }}>NC-{String(c.compNo).padStart(2, '0')}</td>
                     <td>{c.tableName || 'Takeaway'}</td>
                     <td>{c.itemNames}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(c.foodCost)}</td>
@@ -1224,7 +1225,7 @@ export default function SalesReport() {
                           affordance, and :focus-visible still supplies the keyboard ring. */}
                       <button className="btn-linklike" aria-pressed={active} style={{ textDecoration: 'none' }}
                         onClick={e => { e.stopPropagation(); setPartnerFilter(active ? 'all' : g.partner) }}>
-                        <span className="badge-amber" style={{ fontSize: 10 }}>{g.partner}</span>
+                        <span className={IDENTITY_BADGE} style={{ fontSize: 10 }}>{g.partner}</span>
                       </button>
                     </td>
                     <td style={{ textAlign: 'right' }}>{g.bills}</td>
@@ -1301,7 +1302,7 @@ export default function SalesReport() {
                         {r.invoiceNo != null ? `#${r.invoiceNo}` : `Order #${r.orderNo}`}
                       </button>
                     </td>
-                    <td><span className="badge-amber" style={{ fontSize: 10 }}>{r.deliveryPartner}</span></td>
+                    <td><span className={IDENTITY_BADGE} style={{ fontSize: 10 }}>{r.deliveryPartner}</span></td>
                     <td>{r.tableName || 'Takeaway'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(r.amount)}</td>
                     <td>{r.settled ? <span className="badge-green" style={{ fontSize: 11 }}>Settled</span> : <span className="badge-amber" style={{ fontSize: 11 }}>Outstanding</span>}</td>
@@ -1558,7 +1559,7 @@ export default function SalesReport() {
                     <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(p.net)}</td>
                     <td>
                       {over && !p.pan && <span className="badge-red" style={{ fontSize: 11 }}>⚠ Missing PAN</span>}
-                      {over && p.pan && <span className="badge-amber" style={{ fontSize: 11 }}>Annexure 13</span>}
+                      {over && p.pan && <span className={IDENTITY_BADGE} style={{ fontSize: 11 }}>Annexure 13</span>}
                     </td>
                   </tr>
                 )

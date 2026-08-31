@@ -21,27 +21,28 @@ export const toItemPayload = i => ({
 // own settlement path, so a "scan to pay" QR on the bill would be irrelevant or misleading there.
 export const QR_PAY_METHODS = ['eSewa', 'Khalti', 'FonePay']
 
-export const STATUS_BADGE = { available: 'badge-green', occupied: 'badge-red', reserved: 'badge-amber', inactive: 'badge-gray' }
-export const STATUS_LABEL = { available: 'Available', occupied: 'Occupied', reserved: 'Reserved', inactive: 'Inactive' }
-// Same stage-color-strip treatment as KitchenDisplay.jsx's TicketCard, applied to a floor-plan
-// tile — a small badge chip alone doesn't read from across a room; a full-width color band does.
-// The badge stays too, so status is never conveyed by color alone.
-export const STATUS_COLOR = { available: 'var(--theme-green)', occupied: 'var(--theme-red)', reserved: 'var(--theme-amber)', inactive: 'var(--theme-border)' }
-
-// Kitchen/bar status pulled from pos_kot_log for the floor-view table badge — same 3 stages as
-// KitchenDisplay.jsx's board, worded from the wait staff's point of view rather than the kitchen's
-// (they don't "start" or "ready" a ticket, they see it get Sent/Started/Ready).
-export const KOT_STATUS_BADGE = { new: 'badge-red', in_progress: 'badge-amber', ready: 'badge-green' }
-export const KOT_STATUS_LABEL = { new: 'Sent', in_progress: 'Started', ready: 'Ready' }
-// Lower = less done. When a table has multiple open tickets at different stages, the floor badge
-// shows the least-advanced one — that's the one still needing attention.
-export const KOT_STATUS_RANK  = { new: 0, in_progress: 1, ready: 2 }
+// Table status, kitchen/bar stage and the floor strip all live in ../posSignals.js — one colour
+// vocabulary for the whole module, and the only copy (PosTableManagement.jsx used to carry a
+// second one). Re-exported here so this file stays the single import for PosOrders.jsx.
+export {
+  TABLE_STATUS_LABEL as STATUS_LABEL,
+  TABLE_STATUS_BADGE as STATUS_BADGE,
+  KOT_STATUS_LABEL,
+  KOT_STATUS_BADGE,
+  KOT_STATUS_RANK,
+  tableStripColor,
+} from '../posSignals'
 
 // Per-line-item KOT/BOT timer shown in the order cart next to the "✓ KOT/BOT" sent badge — same
-// New/In Progress/Ready stages as KitchenDisplay.jsx's TicketCard, but compact (a few words, not
-// a whole card) since this sits inline on a cart row. `ticket` is a pos_kot_log row (status,
+// Sent/Started/Ready stages as KitchenDisplay.jsx's TicketCard, but compact (a few words, not a
+// whole card) since this sits inline on a cart row. `ticket` is a pos_kot_log row (status,
 // sent_at, started_at, ready_at, estimated_prep_minutes); `now` is a live-ticking epoch ms so the
 // caller re-renders on a timer without this function needing to know about React.
+//
+// Colours follow ../posSignals.js: a dish cooking to plan is brass (working, nothing to do), not
+// amber — amber here used to mean the same thing as "you have not fired this yet", two lines
+// apart on the same cart row. Amber and red are kept for the one case that needs a person: past
+// the kitchen's own estimate.
 export function kotTimerLabel(ticket, now) {
   if (!ticket) return null
   if (ticket.status === 'ready') {
@@ -55,9 +56,9 @@ export function kotTimerLabel(ticket, now) {
     if (ticket.started_at && ticket.estimated_prep_minutes) {
       const remainingMin = Math.round((new Date(ticket.started_at).getTime() + ticket.estimated_prep_minutes * 60000 - now) / 60000)
       const over = remainingMin < 0
-      return { text: over ? `${Math.abs(remainingMin)}m over` : `~${remainingMin}m left`, color: over ? 'var(--theme-red-text)' : 'var(--theme-amber-text)' }
+      return { text: over ? `${Math.abs(remainingMin)}m over` : `~${remainingMin}m left`, color: over ? 'var(--theme-red-text)' : 'var(--theme-accent-ink)' }
     }
-    return { text: 'Cooking', color: 'var(--theme-amber-text)' }
+    return { text: 'Cooking', color: 'var(--theme-accent-ink)' }
   }
   // 'new' — sent but not yet started
   const sentMin = Math.max(0, Math.round((now - new Date(ticket.sent_at).getTime()) / 60000))

@@ -10,6 +10,7 @@ import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { CLOSE_TYPE_BADGE, STATION_BADGE } from '../posSignals'
 
 // Total ever sent, per (order_id, recipe_id) — summing every log row's printed qty gives the true
 // cumulative quantity sent to the kitchen for that item across the order's lifetime. Shared by
@@ -37,9 +38,9 @@ function actualPrepMin(r) {
 // close_type tells them apart. Shared by Reconciliation and Bill Trail so a manager scanning either
 // tab can tell a real payment from ₨0-collected comp at a glance, instead of both reading "Billed".
 function statusBadge(order) {
-  if (order.status === 'voided') return { label: 'Voided', className: 'badge-red' }
-  if (order.close_type === 'writeoff') return { label: 'Comp', className: 'badge-amber' }
-  return { label: 'Billed', className: 'badge-green' }
+  if (order.status === 'voided') return { label: 'Voided', className: CLOSE_TYPE_BADGE.void }
+  if (order.close_type === 'writeoff') return { label: 'Comp', className: CLOSE_TYPE_BADGE.writeoff }
+  return { label: 'Billed', className: CLOSE_TYPE_BADGE.billed }
 }
 
 function flagOrderDiscrepancies(orderById, sentByOrderItem, currentByOrderItem) {
@@ -409,7 +410,7 @@ export default function KotLog() {
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>#{r.order_no}</td>
                     {/* KOT/BOT is a CATEGORY split, not a success state — green is reserved for
                         outcomes (statusBadge's 'Billed'), so KOT takes purple, BOT yellow (S613). */}
-                    <td><span className={r.station === 'BOT' ? 'badge-yellow' : 'badge-purple'} style={{ fontSize: 11 }}>{r.station}</span></td>
+                    <td><span className={STATION_BADGE[r.station] || 'badge-gray'} style={{ fontSize: 11 }}>{r.station}</span></td>
                     <td>{(r.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
                     <td>{staffNames[r.sent_by] || '—'}</td>
                     <td style={{ textAlign: 'right', color: overEst ? 'var(--theme-red-text)' : undefined }}>
@@ -512,7 +513,7 @@ export default function KotLog() {
                                   <tr key={log.id}>
                                     <td>{new Date(log.sent_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</td>
                                     {/* Same KOT-purple / BOT-yellow category colours as the Register tab (S613). */}
-                                    <td><span className={log.station === 'BOT' ? 'badge-yellow' : 'badge-purple'} style={{ fontSize: 11 }}>{log.station}</span></td>
+                                    <td><span className={STATION_BADGE[log.station] || 'badge-gray'} style={{ fontSize: 11 }}>{log.station}</span></td>
                                     <td>{(log.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>
                                     <td>{staffNames[log.sent_by] || '—'}</td>
                                   </tr>

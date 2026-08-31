@@ -328,6 +328,14 @@ holidays and holiday-vs-weekday OT rates were amber-vs-grey, so a gazetted holid
 colour as an overdue approval. Both are brass; Holiday Calendar's table now also agrees with its own
 two stat cards, which had been brass and purple for those same categories all along.
 
+**Staff rank is that corollary's other half, and it now lives outside this module (S661).** HR settled
+it first — a Supervisor is not a "warning" and a Staff account is not "healthy", so all three levels
+take `badge-yellow` — but IMS and POS each held their own copy and both were still on the old
+green/amber/brass ladder, so on one product a Supervisor was amber in two modules and brass here.
+`HrStaff.jsx` now reads `STAFF_LEVEL_BADGE` from `src/shared/staffLevelBadge.js` along with the other
+two, and `STAFF_LEVEL_BADGE_NONE` covers an account with no access to the module — the one genuinely
+inert state on the axis, and previously a loose `'badge-gray'` literal at all three sites.
+
 **Labour Cost % bands through `lcBand` in `src/shared/operatingBands.js`** — never a local
 threshold. Roster's Labor Forecast had `costPct > 35 ? amber : inherit`: a different threshold from
 both dashboards, no healthy state, no too-high state, and hue-only on a row already spending amber

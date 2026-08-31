@@ -1802,7 +1802,10 @@ textarea:focus-visible {
 }
 
 /* Guest QR self-ordering: an unmissable pulse on the new-order banner and the affected floor
-   tile (PosOrders.jsx) — paired with a one-time audio chime when a request first arrives. */
+   tile (PosOrders.jsx) — paired with a one-time audio chime when a request first arrives.
+   Amber, not the accent: a submitted guest order is waiting on a person to accept or dismiss it,
+   which is what amber means across POS (posSignals.js). It was brass here while the floor banner
+   announcing the same event was already amber, so the glow and the banner disagreed. */
 @keyframes guest-order-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
@@ -1811,8 +1814,8 @@ textarea:focus-visible {
   animation: guest-order-pulse 1.4s ease-in-out infinite;
 }
 @keyframes guest-order-glow-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(201,168,76,0.5); }
-  50% { box-shadow: 0 0 0 6px rgba(201,168,76,0.18); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(251,191,36,0.18); }
 }
 .guest-order-glow {
   animation: guest-order-glow-pulse 1.4s ease-in-out infinite;
@@ -2198,9 +2201,13 @@ textarea:focus-visible {
   cursor: default;
 }
 
+/* A KOT/BOT button with unsent items on it. Amber, matching the count badge it carries and the
+   cart's own "+N" chip — the control used to say two things at once, a neutral border for "there
+   is something here" and a red badge for the count, and red is a fault colour in this module
+   (posSignals.js) while an unfired line is the normal state of every order ever taken. */
 .ticket-btn--pending {
   font-weight: 700;
-  border-color: var(--theme-text2);
+  border-color: var(--theme-amber);
 }
 
 /* The 200px floor is set by what a card HOLDS, not by taste. `.stat-value` is 24px/700 and the

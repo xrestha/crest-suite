@@ -536,6 +536,34 @@ Rule**; the HR map itself is in `hr-payroll.md`):
   and amber `⚠` when it is not — two states that had been painted identically while only one of them
   needed anyone to act.
 
+**POS is the same rule with a different failure (S661, `src/modules/pos/posSignals.js`).** Not
+inconsistency — on the floor plan and the kitchen board the **loudest mark carried the least
+information and spent the hue the urgent thing needed**. The floor's 6px strip painted an empty
+table green and a full one red (a category as a verdict, and the polarity inverted: a full room is
+the outcome you want), while telling a waiter something they can already see with their own eyes; it
+answers *does this table need me?* now, and status keeps its labelled badge. The KDS strip was
+red/amber/green for a stage the board already sorts into three labelled columns and puts on the
+action button — so an on-time New ticket and a twenty-minute-late one wore the same red; it carries
+lateness now. Same shape in the cart: `✓ KOT` was a solid green fill asking for nothing beside the
+amber `+2` that does, and the KOT count badge was red for the normal state of every order ever
+taken.
+
+Three things generalise. **Green is not a button colour here** — the Payment button was the only
+green fill in the product, against a vocabulary of `.btn-primary`/`-ghost`/`-danger`/`-danger--strong`,
+and green is this palette's *done* verdict while the bill is unpaid. **The non-colour cue belongs on
+the element a person READS, not the one that is loudest**: measuring the change found the KDS's late
+vs going-late pair at **ΔE 3.1 under deuteranopia on Light** — S608's collision, still live in the
+*base* red/amber the strip and border fill from — on a card with no labelled chip. Fixed with
+`fcBand()`'s `△`/`▲` on the elapsed-time readout, not a sixth hue.
+
+And **when the same colour decision exists in three files, the fix is a fourth file, not three
+edits.** Staff rank had been decided independently in `HrStaff`, `ImsStaff` and `PosStaff`, and two
+of the three drifted — a Supervisor was amber in IMS and POS (the same amber those modules use for
+"needs attention") and brass in HR. `src/shared/staffLevelBadge.js` is now the one value, with
+`STAFF_LEVEL_BADGE_NONE` for the no-access case. Same move as `operatingBands.js`. **The tell that a
+constant wants a shared home is that it appears in files nobody would think to open together** —
+nothing failed here; three near-identical screens simply had to be remembered at once, and were not.
+
 **A banded ratio has one definition, marks included.** `fcBand()` settled food cost in S551/S608 and
 the other three operating ratios were left to drift the same way — Labour Cost % was banded three
 ways at once (30/37 with marks in the Monthly Owner Report, the same 30/37 inline and mark-less on

@@ -6,6 +6,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
 import EstimateTimeModal from './EstimateTimeModal'
+import { ticketStripColor } from '../posSignals'
 
 const STATIONS = ['KOT', 'BOT']
 const POLL_MS = 4000
@@ -17,15 +18,22 @@ const READY_VISIBLE_MS = 10 * 60 * 1000
 const WARN_MS = 8 * 60 * 1000
 const LATE_MS = 15 * 60 * 1000
 
+// The column dot is the module's shared three-stage progression — inert → working → done, the
+// same grey/brass/green KOT_STATUS_BADGE puts on a floor tile. It deliberately does not reuse the
+// card strip's colours: those mean lateness now, and a legend keyed to a retired encoding is
+// worse than no legend.
 const COLUMNS = [
-  { status: 'new',         label: 'New',         action: 'Start',  next: 'in_progress' },
-  { status: 'in_progress', label: 'In Progress',  action: 'Ready',  next: 'ready' },
-  { status: 'ready',       label: 'Ready',        action: null,     next: null },
+  { status: 'new',         label: 'New',         action: 'Start',  next: 'in_progress', dot: 'var(--theme-text3)' },
+  { status: 'in_progress', label: 'In Progress',  action: 'Ready',  next: 'ready',       dot: 'var(--theme-accent)' },
+  { status: 'ready',       label: 'Ready',        action: null,     next: null,          dot: 'var(--theme-green)' },
 ]
 
-// Stage color, independent of the elapsed-time lateness border below — a ticket can be both
-// "New" (red stage) AND late (red lateness border) at once; that's a stronger, not conflicting, signal.
-const STATUS_COLOR = { new: 'var(--theme-red)', in_progress: 'var(--theme-amber)', ready: 'var(--theme-green)' }
+// The card's colour strip carries LATENESS, not stage — see ticketStripColor in ../posSignals.js.
+// It used to be a stage colour (new red / in progress amber / ready green), which was the loudest
+// mark on the card and carried nothing: the board already sorts every ticket into a labelled
+// column by that exact stage and puts the next action on its own button. Worse, it spent red and
+// amber on it, so an on-time New ticket and a twenty-minute-late one wore the same red band and
+// differed only by a 2px border. The strip is now quiet until a cook is actually needed.
 
 // On-screen ticket board that runs ALONGSIDE the existing printed KOT/BOT tickets — sending a
 // KOT/BOT from Order Taking still prints exactly as before (see PosOrders.jsx); this just gives
@@ -235,7 +243,7 @@ export default function KitchenDisplay() {
                   color: 'var(--theme-text2)', margin: '0 0 10px',
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
-                  <span style={{ width: 11, height: 11, borderRadius: '50%', background: STATUS_COLOR[col.status], flexShrink: 0 }} />
+                  <span style={{ width: 11, height: 11, borderRadius: '50%', background: col.dot, flexShrink: 0 }} />
                   {col.label} <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>({colTickets.length})</span>
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -268,7 +276,9 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
   const isLate = ticket.status !== 'ready' && (now - sentMs) > LATE_MS
   const isWarn = ticket.status !== 'ready' && !isLate && (now - sentMs) > WARN_MS
   const borderColor = isLate ? 'var(--theme-red)' : isWarn ? 'var(--theme-amber)' : 'var(--theme-border)'
-  const stageColor = STATUS_COLOR[ticket.status] || 'var(--theme-border)'
+  // Strip and border encode the same fact deliberately — redundant reinforcement of the one thing
+  // on this card that needs someone, not two different facts competing for the same two hues.
+  const stripColor = ticketStripColor({ status: ticket.status, isLate, isWarn })
 
   // Estimated-vs-actual readout, shown once a ticket has an estimate on it (set via the Start
   // popup) — a live "time left" while in progress, then a settled comparison once Ready.
@@ -294,7 +304,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
 
   return (
     <div className="card" style={{ padding: 16, borderColor, borderWidth: isLate || isWarn ? 2 : 1, overflow: 'hidden' }}>
-      <div style={{ margin: '-16px -16px 12px', height: 7, background: stageColor }} />
+      <div style={{ margin: '-16px -16px 12px', height: 7, background: stripColor }} />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
         <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--theme-text1)' }}>{ticket.table_name || 'Takeaway'}</span>
         <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
@@ -306,9 +316,15 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <Tip text="Time since this ticket was sent">
+          <Tip text={`Time since this ticket was sent. △ means it is approaching the ${Math.round(WARN_MS / 60000)}-minute mark, ▲ that it is past ${Math.round(LATE_MS / 60000)} minutes.`}>
             <span style={{ fontSize: 13, color: isLate ? 'var(--theme-red-text)' : isWarn ? 'var(--theme-amber-text)' : 'var(--theme-text3)', fontWeight: isLate || isWarn ? 700 : 400 }}>
-              {elapsedMin} min ago
+              {/* The mark, not the colour, is what makes late and going-late distinguishable.
+                  Measured on Light, --theme-red and --theme-amber sit at ΔE 3.1 under
+                  deuteranopia — the exact collision S608 retuned redText/amberText out of, still
+                  present in the base tokens the strip and border are filled from. Same ▲/△
+                  vocabulary fcBand() uses (filled = act, hollow = watch), so it survives
+                  greyscale and the kitchen's own printout of the board. */}
+              {isLate ? '▲ ' : isWarn ? '△ ' : ''}{elapsedMin} min ago
             </span>
           </Tip>
           {etaNode}

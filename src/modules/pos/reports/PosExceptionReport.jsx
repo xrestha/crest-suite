@@ -11,13 +11,14 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { viewPosBill } from '../../../utils/viewPosBill'
+import { CLOSE_TYPE_BADGE } from '../posSignals'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 
 const TYPE_META = {
-  discount: { label: 'Discount', badge: 'badge-yellow'  },
-  void:     { label: 'Void',     badge: 'badge-red'   },
-  writeoff: { label: 'Comp',     badge: 'badge-amber' },
+  discount: { label: 'Discount', badge: CLOSE_TYPE_BADGE.discount },
+  void:     { label: 'Void',     badge: CLOSE_TYPE_BADGE.void     },
+  writeoff: { label: 'Comp',     badge: CLOSE_TYPE_BADGE.writeoff },
 }
 
 function invoiceLabel(order, vatReg, prefix) {
@@ -292,14 +293,14 @@ export default function PosExceptionReport() {
               <div className="stat-label">
                 <Tip text="Food cost of complimentary orders and individually-comped items — valued at ingredient cost (not menu price), matching the Complimentary Slip" width={250}>Comp Food Cost</Tip>
               </div>
-              <div className="stat-value" style={{ color: 'var(--theme-amber-text)' }}>{fmtNpr(totals.writeoff.amt)}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>{fmtNpr(totals.writeoff.amt)}</div>
               <div className="stat-sub">{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">
                 <Tip text="What every comped order/item would have sold for at menu price (incl. VAT) had it not been comped — the revenue given away, not just its ingredient cost" width={280}>Comp Potential Sales Value</Tip>
               </div>
-              <div className="stat-value" style={{ color: 'var(--theme-amber-text)' }}>{fmtNpr(totals.writeoff.potential)}</div>
+              <div className="stat-value" style={{ color: 'var(--theme-accent-ink)' }}>{fmtNpr(totals.writeoff.potential)}</div>
               <div className="stat-sub">{totals.writeoff.n} comp{totals.writeoff.n !== 1 ? 's' : ''}</div>
             </div>
             <div className="stat-card">

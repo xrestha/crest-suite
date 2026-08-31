@@ -417,6 +417,54 @@ freed amber immediately did real work: a demand-forecast holiday badge is brass 
 set and amber `⚠` when it is not — two states that had been painted identically while only one of
 them needed anyone to act.
 
+**Loudness tracks demand for action, not importance** (added 2026-08-31/S661, from the POS
+module). The POS counterpart to the rule above — `src/modules/pos/posSignals.js` is its
+vocabulary — but the finding was a different shape, and it is the more transferable one. POS was
+not merely inconsistent; on its two busiest screens the **loudest mark carried the least
+information**, and it was spending the hue the urgent thing needed.
+
+- **The floor plan painted an empty table green and a full one red.** Occupancy is a category, not
+  a verdict — and for an owner a full room is the outcome you want, so this was the Signal
+  Polarity Rule inverted, at 6px of full-tile width, on a busy Friday wall of red that trains the
+  eye straight past the red that matters. It was also the thing a waiter crossing the room can
+  already see with their own eyes. The strip now answers **does this table need me?** —
+  amber for items typed but not fired / a guest QR order waiting / an order unsynced, green for
+  food ready in the pass, brass for live-and-in-hand, quiet for available or held — while status
+  keeps the labelled badge it was always read from. Every strip colour is also carried by a
+  labelled chip on the same tile, so nothing is conveyed by colour alone.
+- **The kitchen board's stage strip was pure redundancy.** Red/amber/green for New/In Progress/
+  Ready, on a board that already sorts every ticket into a labelled column by that exact stage and
+  puts the next action on its own button — three non-colour encodings of the fact the loudest
+  element was repeating. So an on-time New ticket and a twenty-minute-late one wore the same red
+  band and differed by a 2px border. The strip carries **lateness** now and is quiet otherwise.
+- **Same shape one level in:** the cart's `✓ KOT` chip was a solid green fill (sent is not done —
+  the kitchen has not touched it) sitting beside the amber `+2` chip that actually needs a press,
+  and the KOT/BOT count badge was **red** for "three dishes waiting to be fired", which is the
+  normal state of every order ever taken. The `✓ KOT` chip is a quiet brass tint and the count is
+  amber, matching the floor tile's own `⚠ N`.
+
+Three smaller ones worth naming. **Green is not a button colour in this system** — the Payment
+button was the only green fill in the product (`.btn-primary`/`-ghost`/`-danger`/`-danger--strong`
+is the whole vocabulary), and green is this palette's *done* verdict while the bill has not been
+paid yet; it is the accent now, which also makes the money button the most brand-forward control
+in the product. **A comp is a close type, not a caution** — it was amber on five surfaces, i.e. the
+same colour as an unfired dish; brass, the same reading HR gives an approved-but-unpaid claim, with
+only Void staying red. And **a delivery platform's name is an identity**: "Foodmandu" was an amber
+chip *in the same table as* the outstanding figure that legitimately needed amber.
+
+**Measured, and one real defect fell out of the measurement.** Every new pairing clears AA (worst
+4.74:1, the accent button on Light) and all twelve floor-strip pairs clear ΔE 8 under both
+red-green axes (worst 8.2, amber vs brass on Light — the two warm yellows this file already warns
+about, and each amber state carries its own labelled chip). But the kitchen board's **late vs
+going-late** sat at **ΔE 3.1 under deuteranopia on Light**: `--theme-red` and `--theme-amber` are
+the exact collision S608 retuned `redText`/`amberText` out of, still present in the *base* tokens
+the strip and border are filled from — and that card had no labelled chip, so colour was the sole
+carrier of an escalating warning. Fixed the way this file fixes every such pair: a **shape**, not a
+sixth hue. The elapsed-time readout now carries `fcBand()`'s own `△`/`▲` vocabulary, so the
+distinction survives greyscale, a printout of the board, and both red-green axes. **A signal pair
+that a person compares needs its non-colour cue on the element they READ, not on the element that
+is merely loudest.**
+
 **A banded ratio has one definition, marks included** (added 2026-08-31/S660). `fcBand()` settled
 food cost in S551/S608; the other three operating ratios had not been settled and drifted the same
 way. Labour Cost % was banded **three** ways at once: the Monthly Owner Report at 30/37 with

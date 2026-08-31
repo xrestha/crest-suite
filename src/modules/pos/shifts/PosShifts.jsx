@@ -280,7 +280,7 @@ function ReportBody({ report, opening, closing, variance }) {
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Comp Food Cost</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-amber-text)' }}>{fmtNpr(report.compTotal)}</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{fmtNpr(report.compTotal)}</div>
         </div>
       </div>
 
@@ -636,7 +636,7 @@ export default function PosShifts() {
             <>
               <div className="card" style={{ padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                 <div>
-                  <span className="badge-green" style={{ fontSize: 11, marginRight: 10 }}>OPEN</span>
+                  <span className="badge-yellow" style={{ fontSize: 11, marginRight: 10 }}>OPEN</span>
                   <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600 }}>{openShift.label || 'Shift'}</span>
                   <span style={{ fontSize: 12, color: 'var(--theme-text3)', marginLeft: 10 }}>
                     Opened by {staffNames[openShift.opened_by] || '—'} · {fmtSpan(openShift.opened_at)} ago

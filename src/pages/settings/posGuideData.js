@@ -103,6 +103,7 @@ export const POS_GUIDE_GROUPS = [
           'QR tender: a per-bill dynamic payment QR (the amount is injected into the merchant\'s registered QR); a confirmation poll auto-closes the bill when the payment lands.',
         ],
         fields: [
+          { label: 'The tile colour strip', desc: 'The band across the top of each table tile answers "does this table need me?", not "is it occupied" — a waiter can see who is sitting down. Amber = something is waiting on a person (items typed but not fired, a guest QR order to accept, an order not yet synced). Green = food is Ready in the pass. Brass = live and in hand, nothing outstanding. Quiet = available or held. The Available/Occupied/Reserved badge beside it is where the table status itself is read, and every strip colour is repeated by a labelled chip on the same tile, so nothing depends on colour alone.' },
           { label: 'Discounts', desc: 'Clamped to the signed-in staff member\'s Discount Limit (set on POS Staff; blank = unlimited) and enforced again server-side, so a modified browser gains nothing. Every discount requires a reason and the buyer\'s name + phone.' },
           { label: 'Item-level comp (Supervisor+)', desc: 'Comp individual lines off a bill that is otherwise paid — a partial comp splits the line into a paid remainder and a comped row. Each comp ACTION takes one NC number (not one per line), reserved atomically before the bill closes; the person applying it is recorded server-side.' },
           { label: 'Credit & delivery partners', desc: 'A Credit bill needs the buyer\'s name + phone (that is what builds the customer book). Foodmandu/Pathao-style partners are BUYERS on a Credit bill, not payment methods — their commission is deliberately computed at settlement in Customers, not at Charge.' },
@@ -134,7 +135,7 @@ export const POS_GUIDE_GROUPS = [
           'KOT/BOT station toggle: FOH, admin and Owner accounts can flip between Kitchen and Bar queues (remembered per device); a kitchen- or bar-team account is locked to its own station with no toggle.',
         ],
         fields: [
-          { label: 'Timing colours', desc: 'A ticket warns as it ages and flags late past the threshold; Ready tickets drop off the board after 10 minutes purely to declutter — they remain in the database and in every KOT report.' },
+          { label: 'Timing colours', desc: 'The card\'s colour band is LATENESS, not stage — stage is already the column the ticket is sitting in. A ticket turns amber with a hollow △ on its elapsed time as it ages, red with a filled ▲ once past the late threshold, and green once Ready; everything on time stays quiet, so the board is only loud when a cook is actually needed. The marks matter as much as the colours: red and amber are hard to tell apart for a red-green colour-blind reader, and △ versus ▲ survives that, a greyscale screen and a printout. Ready tickets drop off the board after 10 minutes purely to declutter — they remain in the database and in every KOT report.' },
         ],
         formulas: [
           'Actual prep time = ready time − started time (blank until both exist) — the figure the KOT Log\'s timing view reports.',

@@ -517,3 +517,42 @@ day a restore comes back empty.
 arbitrary row for an admin, because an admin can read every profile — it reported the admin
 account as `role: client`. Key the query to the JWT's `sub`, and cross-check with a row count
 (admin sees all profiles, a client sees exactly one).
+
+
+## One colour vocabulary, and loudness tracks demand for action (S661)
+
+`src/modules/pos/posSignals.js` is the module's single colour vocabulary — table status, ticket
+stage, close type, rank, the two strip helpers — and the header comment is the normative statement
+of what each hue means here. It exists because eight distinct meanings had accumulated on amber
+alone, including three categories ("Foodmandu", "supervisor", "reserved") and two states that are
+the *good* outcome.
+
+The general rule is in `DESIGN.md` (**Loudness tracks demand for action**) and summarised in
+`.claude/rules/design-system.md`. What is specific to this module:
+
+- **The floor strip is an ATTENTION strip, not a status strip.** `tableStripColor()` resolves
+  attention before state: guest order → unfired/unsynced → food ready → live-and-in-hand → quiet.
+  A waiter crossing the room can already see which tables are occupied; the strip is for what they
+  cannot see. Status keeps its labelled badge, and every strip colour is doubled by a labelled chip
+  on the same tile (`⚠ N` / `📵` / `🔔 Guest order` / the Ready badge).
+- **The KDS strip is lateness.** `ticketStripColor()` — late / going late / ready / quiet. Stage is
+  the column, its heading, and the action button; the strip must not repeat it. The column header
+  dot keeps the module's grey→brass→green progression (the same one `KOT_STATUS_BADGE` puts on a
+  floor tile) and deliberately does **not** mirror the strip: a legend keyed to a retired encoding
+  is worse than no legend.
+- **`--theme-red` and `--theme-amber` collide under deuteranopia on Light (ΔE 3.1)** — the base
+  tokens were never retuned, only `redText`/`amberText` were (S608). Anywhere those two fill
+  something as an escalating pair, the distinction needs a shape on the text the reader acts on.
+  The KDS elapsed-time line carries `△`/`▲` for exactly this.
+- **Two boundaries this rule does not govern**: a *button* keeps the product-wide control
+  vocabulary (so the Void button stays red and the Complimentary button stays amber, while the
+  records they write read as close types in brass), and the **KOT/BOT station chip keeps S613's
+  purple/brass** — a settled decision, on a filterable column, and the two purple meanings in this
+  module (station, loyalty) never share a screen. Considered and kept; re-deciding a settled colour
+  is how a module ends up with three answers.
+
+**The rank ladder is now one value, not three files.** All three staff screens read
+`STAFF_LEVEL_BADGE` from `src/shared/staffLevelBadge.js`. The identical decision had been made
+independently in HR, IMS and POS, and two of the three had drifted: a Supervisor was amber in IMS
+and POS — the same amber those modules use for "needs attention" — and brass in HR. Adding a fourth
+module now costs nothing.

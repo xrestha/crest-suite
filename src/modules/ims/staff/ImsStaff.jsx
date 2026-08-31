@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
+import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 
 // Mirrors src/modules/pos/staff/PosStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for real email+password login instead of a
@@ -20,7 +21,6 @@ const DEFAULT_ROLES = [
   { label: 'Supervisor', level: 'supervisor' },
   { label: 'Manager',    level: 'manager' },
 ]
-const LEVEL_BADGE = { staff: 'badge-green', supervisor: 'badge-amber', manager: 'badge-yellow' }
 const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', employee_id: '', existing_user_id: '' }
 const EMPTY_ROLE  = { label: '', level: 'staff' }
 
@@ -390,7 +390,7 @@ export default function ImsStaff() {
                     </td>
                     <td>
                       {p.ims_role
-                        ? <span className={`badge ${LEVEL_BADGE[p.ims_role] || 'badge-gray'}`}>
+                        ? <span className={`badge ${LEVEL_BADGE[p.ims_role] || STAFF_LEVEL_BADGE_NONE}`}>
                             {p.ims_role.charAt(0).toUpperCase() + p.ims_role.slice(1)}
                           </span>
                         : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>

@@ -23,7 +23,7 @@ import {
 } from '../../../utils/offlineQueue'
 import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
 import {
-  vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, STATUS_COLOR,
+  vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   KOT_STATUS_BADGE, KOT_STATUS_LABEL, KOT_STATUS_RANK, kotTimerLabel,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS,
@@ -50,10 +50,11 @@ export default function PosOrders() {
   // amber (#b45309), a genuinely dark burnt-orange. Same contrast-pick approach avatarColorFor()
   // already uses, so this stays correct if a future preset's amber ever needs white too.
   const amberBadgeText = contrastRatio(colors.amber, '#ffffff') >= contrastRatio(colors.amber, '#000000') ? '#ffffff' : '#000000'
-  // Same reasoning, extended to the green/red solid-fill badges (KOT/BOT sent, Payment button,
-  // Void Order button) that were still hardcoding white text and failing WCAG AA on light pastel
-  // presets (Nord, Catppuccin, Tokyo Night).
-  const greenBadgeText  = contrastRatio(colors.green, '#ffffff') >= contrastRatio(colors.green, '#000000') ? '#ffffff' : '#000000'
+  // Same reasoning for the red solid fill (the Void Order button), which was hardcoding white text
+  // and failing WCAG AA on light pastel presets. The green equivalent is gone with the last two
+  // green fills in the module: the Payment button is now the accent (this system's primary-action
+  // colour — green is its "done" verdict, and the bill has not been paid yet), and the "✓ KOT"
+  // sent chip is a quiet brass tint. See posSignals.js.
   const redBadgeText    = contrastRatio(colors.red, '#ffffff')   >= contrastRatio(colors.red, '#000000')   ? '#ffffff' : '#000000'
 
   // Upsell/Cross-sell suggestion chips (built S210).
@@ -2449,7 +2450,8 @@ The tables were left occupied rather than freed with their orders still open.`)
                         <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
                           <span style={{
                             fontSize: 9, fontWeight: 700, flexShrink: 0,
-                            background: 'var(--theme-green)', color: greenBadgeText,
+                            background: 'color-mix(in srgb, var(--theme-accent) 18%, transparent)',
+                            color: 'var(--theme-accent-ink)',
                             borderRadius: 4, padding: '1px 5px', cursor: 'default',
                           }}>
                             ✓ {botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
@@ -2609,7 +2611,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       className="btn"
                       style={{
                         width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex',
-                        background: 'var(--theme-green)', color: greenBadgeText, fontWeight: 700, border: 'none',
+                        background: 'var(--theme-accent)', color: 'var(--theme-accent-text)', fontWeight: 700, border: 'none',
                         // Same disabled treatment as the KOT/BOT ticket-btn class (opacity 0.5) — this
                         // button uses inline styles instead of that class, so it needs its own dimming.
                         opacity: payDisabled ? 0.5 : 1,
@@ -2639,7 +2641,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     {kotCount > 0 && (
                       <span style={{
                         position: 'absolute', top: -6, right: -4,
-                        background: 'var(--theme-red)', color: redBadgeText,
+                        background: 'var(--theme-amber)', color: amberBadgeText,
                         borderRadius: 10, fontSize: 10, fontWeight: 700,
                         padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
                       }}>{kotCount}</span>
@@ -2660,7 +2662,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     {botCount > 0 && (
                       <span style={{
                         position: 'absolute', top: -6, right: -4,
-                        background: 'var(--theme-red)', color: redBadgeText,
+                        background: 'var(--theme-amber)', color: amberBadgeText,
                         borderRadius: 10, fontSize: 10, fontWeight: 700,
                         padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
                       }}>{botCount}</span>
@@ -3475,8 +3477,17 @@ The tables were left occupied rather than freed with their orders still open.`)
                   onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTable(t) } },
                 } : {})}
               >
-                {/* Glanceable status strip — readable across the room, unlike the small badge chip alone */}
-                <div style={{ margin: '-16px -18px 2px', height: 6, background: STATUS_COLOR[t.status] || 'var(--theme-border)', flexShrink: 0 }} />
+                {/* Glanceable ATTENTION strip — readable across the room, and deliberately not a
+                    status strip: a waiter crossing the floor can already see which tables are
+                    occupied, so the 6px band carries what they cannot see (food ready, items
+                    unfired, a guest order waiting, an order unsynced). Status keeps its labelled
+                    badge below. See posSignals.js. */}
+                <div style={{
+                  margin: '-16px -18px 2px', height: 6, flexShrink: 0,
+                  background: tableStripColor({
+                    status: t.status, order: ord, kotStatus: kotStatusByTable[t.id], guestPending: hasPendingGuest,
+                  }),
+                }} />
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
                   <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{t.name}</span>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
@@ -3492,7 +3503,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     )}
                     {pendingGuestOrders[t.id]?.length > 0 && (
                       <Tip text="A guest submitted an order from the QR menu on this table — open it to Accept or Dismiss">
-                        <span className="badge-yellow" style={{ fontSize: 9 }}>
+                        <span className="badge-amber" style={{ fontSize: 9 }}>
                           🔔 Guest order{pendingGuestOrders[t.id].length > 1 ? ` (${pendingGuestOrders[t.id].length})` : ''}
                         </span>
                       </Tip>
@@ -3564,7 +3575,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>
                     {o.table_name || 'Takeaway'} {o.close_type === 'void' && <span style={{ color: 'var(--theme-red-text)', fontSize: 11 }}>(Void)</span>}
-                    {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-amber-text)', fontSize: 11 }}>(Complimentary)</span>}
+                    {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>(Complimentary)</span>}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
                     {o.invoice_no ? `Inv #${o.invoice_no}` : `Order #${o.order_no}`} · {new Date(o.closed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}

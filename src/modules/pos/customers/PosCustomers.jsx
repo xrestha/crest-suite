@@ -8,6 +8,7 @@ import Tip from '../../../components/Tip'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import LoyaltyTab from './LoyaltyTab'
+import { IDENTITY_BADGE } from '../posSignals'
 
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
@@ -443,7 +444,7 @@ export default function PosCustomers() {
                           <tr key={g.key}>
                             <td>
                               {g.isPartner
-                                ? <span className="badge-amber" style={{ fontSize: 10 }}>{g.label}</span>
+                                ? <span className={IDENTITY_BADGE} style={{ fontSize: 10 }}>{g.label}</span>
                                 : <span style={{ color: 'var(--theme-text2)' }}>{g.label}</span>}
                             </td>
                             <td style={{ textAlign: 'right' }}>{g.unsettledBills || '—'}</td>
@@ -507,7 +508,7 @@ export default function PosCustomers() {
                           <td>
                             {b.buyer_name && b.buyer_name !== b.delivery_partner ? `${b.buyer_name} ` : ''}
                             {b.delivery_partner
-                              ? <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>{b.delivery_partner}</span>
+                              ? <span style={{ color: 'var(--theme-text2)', fontWeight: 600 }}>{b.delivery_partner}</span>
                               : (b.buyer_name || '—')}
                           </td>
                           <td>{b.buyer_phone || '—'}</td>
@@ -594,14 +595,14 @@ export default function PosCustomers() {
                             <td>
                               {b.buyer_name && b.buyer_name !== b.delivery_partner ? `${b.buyer_name} ` : ''}
                               {b.delivery_partner
-                                ? <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>{b.delivery_partner}</span>
+                                ? <span style={{ color: 'var(--theme-text2)', fontWeight: 600 }}>{b.delivery_partner}</span>
                                 : (b.buyer_name || '—')}
                             </td>
                             <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(b.paid_amount || 0)}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{b.delivery_partner ? fmtNpr(b.commission_amount || 0) : '—'}</td>
                             <td style={{ textAlign: 'right' }}>{b.delivery_partner ? fmtNpr((b.paid_amount || 0) - (b.commission_amount || 0)) : '—'}</td>
                             <td>{new Date(b.credit_settled_at).toLocaleDateString()}</td>
-                            <td><span className="badge-green" style={{ fontSize: 11 }}>{b.credit_settled_method}</span></td>
+                            <td><span className={IDENTITY_BADGE} style={{ fontSize: 11 }}>{b.credit_settled_method}</span></td>
                           </tr>
                         ))}
                       </tbody>
