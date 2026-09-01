@@ -187,13 +187,30 @@
 }
 
 /* ── Fitting one viewport ────────────────────────────────────────────────────────────────────
-   Everything on this page — header, hero, trial band, footer — is meant to land inside one screen
-   without scrolling on a normal laptop (~900px of viewport height and up). The section paddings
-   are therefore `clamp(floor, Nvh, ceiling)` rather than fixed: they give the design its full
-   breathing room on a tall monitor and compress toward the floor on a short one, instead of
-   pushing the trial band below the fold. Below ~820px of height the page simply scrolls, which is
-   correct — squeezing past the floors would start costing legibility, and legibility is the whole
-   reason this pass raised the type scale in the first place. ── */
+   Everything on this page — header, hero, trial band, footer — was laid out to land inside one
+   screen without scrolling on a normal laptop. The section paddings are `clamp(floor, Nvh,
+   ceiling)` rather than fixed for that reason: they give the design its full breathing room on a
+   tall monitor and compress toward the floor on a short one, instead of pushing the trial band
+   below the fold. Squeezing past those floors would start costing legibility, and legibility is
+   the whole reason S553 raised the type scale in the first place.
+
+   THE PAGE NO LONGER FULLY MEETS THAT BUDGET, and the measurements below say so rather than
+   describing the page as it was. The signed-out pitch was rewritten to sell three modules instead
+   of one (T12), which is ~130px more column height than the six lines it replaced — and the pitch
+   column, not the sign-in card, is now what drives the hero's height. Re-measured against the real
+   build: 1920x950 fits with 0px to spare, 1920x912 scrolls 21px, 1536x864 scrolls 61px, 1366x768
+   scrolls 146px, 1366x613 fits with 0px to spare.
+
+   What that costs is bounded and was checked: the sign-in card stays above the fold at every one
+   of those sizes, so what falls below it is the trial band — which the header's "Start free trial"
+   already anchor-links to. Two 0px results are NOT slack; S553's own note applies, that a fit
+   landing exactly on the line is not a fit, since one validation message or a Caps Lock hint
+   pushes it over.
+
+   The module headings this pitch briefly carried (POS / IMS / HR, as label rows in the list) were
+   removed for exactly this reason — they were ~93px of the overrun, and grouping was the cheapest
+   thing on the page to give up. Anything added here now comes out of a budget that is already
+   overdrawn: measure at 1536x864 before, not after. ── */
 .login-hero {
   width: 100%;
   max-width: 1240px;
@@ -225,6 +242,14 @@
   letter-spacing: 0.05em;
   color: var(--theme-accent-ink, #c9a84c);
   margin-bottom: clamp(14px, 2vh, 22px);
+}
+
+/* Each line is a block, so the break after "screen," is the author's and not the measure's. Any
+   line still too long for its column wraps inside its own block, and text-wrap: balance keeps that
+   remainder even rather than leaving one word alone on a line. */
+.login-pitch-line {
+  display: block;
+  text-wrap: balance;
 }
 
 .login-pitch-headline {
@@ -296,6 +321,19 @@
   flex-shrink: 0;
   margin-top: 8px;
   position: relative;
+}
+
+/* The data promise is not a fourth module, so it does not sit under the spine. Same row shape as a
+   highlight (bead, 12px gap, 15px text) and a clear step of space above it — enough that it reads
+   as its own statement rather than as whatever group happens to be last. */
+.login-data-promise {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: clamp(18px, 2.6vh, 24px) 0 0;
+  font-size: 15px;
+  color: var(--theme-text2);
+  line-height: 1.5;
 }
 
 /* ── Sign-in card ── */
@@ -813,8 +851,10 @@
    that lands exactly on the line is not a fit, since one extra validation message or a Caps Lock
    hint pushes it over. So the section paddings drop to their floors across the whole common
    desktop band (≤1000px of viewport height, which is every laptop and every 1080p window with
-   browser chrome), leaving the roomier rhythm to genuinely tall monitors. Measured after: 71px of
-   slack at 1920x950, 68px at 1920x912, 27px at 1536x864.
+   browser chrome), leaving the roomier rhythm to genuinely tall monitors. Measured when this tier
+   shipped: 71px of slack at 1920x950, 68px at 1920x912, 27px at 1536x864 — all three since spent
+   by the T12 pitch rewrite; see the current numbers in "Fitting one viewport" above. This tier is
+   what keeps the overrun to 21px and 61px rather than ~90px and ~130px.
 
    Below ~820px of viewport height the page scrolls, and it should: the only thing left to
    compress there is the controls themselves, and shrinking those is what this pass was undoing. ── */
@@ -823,6 +863,7 @@
   .login-trial-inner { padding-top: 22px; padding-bottom: 24px; }
   .login-card        { padding-top: 22px; padding-bottom: 20px; }
   .login-highlights  { margin-top: 16px; gap: 8px; }
+  .login-data-promise { margin-top: 16px; }
 }
 
 /* ── Very short desktop viewports ────────────────────────────────────────────────────────────
@@ -832,7 +873,8 @@
    padding alone, so this tier also steps down type size and control heights on the shared
    `.login-field`/`.login-btn`/`.login-staff-btn` rules, same floor-seeking approach as the
    `pointer: coarse` tier above but shrinking instead of growing. Verified with Playwright at
-   1366x613: fits with room to spare. ── */
+   1366x613: fitted with room to spare when it shipped; re-measured after the T12 pitch rewrite it
+   still fits, but at 0px — this tier now has nothing left in hand. ── */
 @media (min-width: 981px) and (max-height: 700px) {
   .login-nav-inner { height: 44px; }
 
@@ -843,6 +885,7 @@
   .login-pitch-sub   { font-size: 14px; margin-top: 6px; }
   .login-highlights  { margin-top: 8px; gap: 4px; }
   .login-highlights li { font-size: 13px; }
+  .login-data-promise { margin-top: 10px; font-size: 13px; }
 
   .login-card  { padding-top: 14px; padding-bottom: 14px; }
   .login-heading { font-size: 18px; margin-bottom: 2px; }

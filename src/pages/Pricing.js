@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Hexagon, Check, Mail, Calculator, Users, CalendarDays } from 'lucide-react'
+import { useSettings } from '../context/SettingsContext'
 import { MODULE_COLORS, MODULE_INK, moduleTint, TRIAL_DAYS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
 
 // ── Change this to the contact email when ready ──────────────────────────────
@@ -68,6 +69,7 @@ function SectionHeading({ color, title, subtitle }) {
 export default function Pricing() {
   const [annual, setAnnual]   = useState(false)
   const [showFaq, setShowFaq] = useState(false)
+  const { settings } = useSettings()
   const navigate = useNavigate()
 
   // Escape closes the FAQ dialog — a hand-rolled fixed-overlay modal (not the shared Modal/native
@@ -91,8 +93,16 @@ export default function Pricing() {
       {/* Nav */}
       <nav style={{ background: CARD, borderBottom: `1px solid ${BORDER}`, padding: '0 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64, position: 'sticky', top: 0, zIndex: 100 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Hexagon size={22} strokeWidth={2.25} aria-hidden="true" style={{ color: GOLD, flexShrink: 0 }} />
-          <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest Suite</span>
+          {/* Mark and name from the same source — the same S606 fix as Login.js and
+              ResetPassword.js. Here the name was a hardcoded literal rather than app_name, so the
+              pair agreed only because neither of them could move; a white-labelled client
+              following the Pricing link out of the login header still landed on somebody else's
+              brand. The plan names below stay "Crest IMS" / "Crest HR" — those are product names
+              and are not the client's to rebrand. */}
+          {settings?.logo_url
+            ? <img src={settings.logo_url} alt="" style={{ width: 22, height: 22, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
+            : <Hexagon size={22} strokeWidth={2.25} aria-hidden="true" style={{ color: GOLD, flexShrink: 0 }} />}
+          <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{settings?.app_name || 'Crest Suite'}</span>
         </div>
         <button
           onClick={() => navigate('/login')}

@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { useCapsLock } from '../shared/hooks/useCapsLock'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
+import { TRIAL_DAYS } from '../data/pricingPlans'
 import { supabase } from '../supabaseClient'
 import FieldError, { fieldAria } from '../components/FieldError'
 import './Login.css'
@@ -55,14 +56,58 @@ function signInErrorMessage(err) {
   return 'Invalid email or password.'
 }
 
-const HIGHLIGHTS = [
-  'Stop guessing which dishes lose money — Menu Repricing finds them',
-  'Catch ingredient waste before it eats your margin — Theoretical Variance',
-  'Roster, attendance & payroll in one place — no manual hour reconciliation',
-  'SSF & TDS calculated automatically, deadline-ready every month',
-  'Count stock without losing your place when the wifi drops',
-  'See which dishes actually sell well together — real order data, not guesswork',
+// The signed-out pitch. Ordered POS → IMS → HR, and kept in that structure here even though the
+// module headings are no longer RENDERED: the order is the argument (POS leads because it is the
+// lead product — the previous six lines gave it one indirect mention, and three of the six restated
+// a single idea, "we tell you which dishes lose money", in three vocabularies), and the shape is
+// what stops a future line being dropped into the wrong pair.
+//
+// The visible POS / IMS / HR headings were built and then taken back out. They cost about 100px of
+// column height, and this page is laid out to fit one screen from ~830px of viewport height up
+// (S553, tightened S560) — a budget the new copy was already straining. Grouping was the cheapest
+// thing on the page to give up: the bullets still arrive module by module, they just no longer
+// announce it. If they are ever restored, re-measure the fit at 1536x864 first, not after.
+//
+// Every line is problem-then-relief in that order, under ~16 words, two short sentences, no
+// subclauses. That is not a style preference: most buyers here read English as a second or third
+// language, and the failure mode is not simplicity, it is a 27-word sentence with two subclauses
+// that a sharp operator skims past. Hold the constraint if these are ever reordered or rewritten,
+// including within a group.
+//
+// Three claims are deliberately NOT made. Nothing here says live or real-time food cost —
+// writeSalesEntries swallows depletion failures by design so a stock problem never blocks a bill
+// closing, which means a bill can carry revenue with no stock_movements row (S573). That trade-off
+// is right, and it makes running food cost best-effort; a public page must not put an accuracy
+// claim on top of a known silent failure. The data line says "Ask", not "Export any time", because
+// every file in the export path is admin-side and there is no client-facing self-serve button. And
+// nothing promises restore: export is well tested, restore has only ever moved a single row live.
+const HIGHLIGHT_GROUPS = [
+  {
+    module: 'POS',
+    lines: [
+      'One free plate looks small. Crest shows what they add up to.',
+      'Guests spend more when the suggestion is right. Crest shows your staff what sells together.',
+    ],
+  },
+  {
+    module: 'IMS',
+    lines: [
+      "Ingredient prices move every month. Your menu prices don't. Crest shows the gap.",
+      'You know what a plate sells for. Crest shows what it costs you to make.',
+    ],
+  },
+  {
+    module: 'HR',
+    lines: [
+      'Staff quit without notice. Crest works out the final payment for you.',
+      'No HR person? Payroll for the whole team, done in one evening.',
+    ],
+  },
 ]
+
+// Ungrouped and last: a promise about the company, not a feature of a module. Filing it under any
+// one of the three would read as something only that module does.
+const DATA_PROMISE = 'Your data stays yours. Ask any time and we hand it all back.'
 
 export default function Login() {
   const location = useLocation()
@@ -209,8 +254,16 @@ export default function Login() {
           recognisably one site rather than two unrelated screens. ── */}
       <header className="login-nav">
         <div className="login-nav-inner">
+          {/* The mark and the name have to come from the same place. This read app_name while
+              always drawing Crest's own hexagon, so a white-labelled client met their own brand
+              name beside somebody else's mark on the page they log in through (S606) — the sidebar
+              has had this conditional since it was built and the public pages never adopted it.
+              alt is empty for the same reason the hexagon is aria-hidden: the wordmark beside it
+              already names the brand, and a labelled mark announces it twice. */}
           <div className="login-brand-mark">
-            <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
+            {settings?.logo_url
+              ? <img src={settings.logo_url} alt="" style={{ width: 26, height: 26, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
+              : <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />}
             <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
           </div>
           <nav className="login-nav-actions" aria-label="Site">
@@ -233,18 +286,41 @@ export default function Login() {
         <section className="login-hero">
           {/* ── Pitch ── */}
           <div className="login-hero-copy">
-            <span className="login-eyebrow">7-day free trial · No credit card needed</span>
-            <h1 className="login-pitch-headline">Smarter menus. Better margins.</h1>
+            {/* Trial length comes from TRIAL_DAYS, never a literal. Between them this page and
+                Pricing.js used to state it four different ways, one of which was a month. */}
+            <span className="login-eyebrow">{TRIAL_DAYS}-day free trial · No credit card needed</span>
+            {/* Two blocks, so the break lands after "screen" at every width instead of wherever
+                the measure happens to run out — unforced, a phone broke it after "the", which
+                orphans an article on a line and reads as a mistake rather than as a clause. The
+                type size is untouched: this page's whole layout is budgeted against a measured
+                viewport, and shrinking the one thing a visitor reads first is the wrong saving. */}
+            <h1 className="login-pitch-headline">
+              <span className="login-pitch-line">Your business, on one screen,</span>
+              <span className="login-pitch-line">one system for the cash, the store and the staff.</span>
+            </h1>
             <p className="login-pitch-sub">Built for Nepal's F&amp;B industry.</p>
 
+            {/* One list, one lit spine. Six module lines in POS → IMS → HR order; the seventh sits
+                outside the list below, because it is a promise about the company rather than a
+                feature of any module. */}
             <ul className="login-highlights">
-              {HIGHLIGHTS.map((text, i) => (
-                <li key={i}>
+              {HIGHLIGHT_GROUPS.flatMap(group => group.lines).map(text => (
+                <li key={text}>
                   <span className="login-highlight-bullet" />
                   <span>{text}</span>
                 </li>
               ))}
             </ul>
+
+            {/* Outside the <ul>, not the last row in it. The lit spine belongs to .login-highlights
+                and ends where the list does, so stepping out is what actually detaches this line —
+                inside, with the rule still running past it, it read as a third HR bullet no matter
+                how much space sat above it. It keeps the bead: it is still one of the promises,
+                just not one a module makes. */}
+            <p className="login-data-promise">
+              <span className="login-highlight-bullet" />
+              <span>{DATA_PROMISE}</span>
+            </p>
           </div>
 
           {/* ── Sign in ── */}
@@ -339,7 +415,7 @@ export default function Login() {
               the quietest text tier in the system. */}
           <div className="login-band-head">
             <h2 className="login-band-title">Start your free trial</h2>
-            <p className="login-band-sub">Starter plan, free for 7 days · No credit card · Nothing to install</p>
+            <p className="login-band-sub">Starter plan, free for {TRIAL_DAYS} days · No credit card · Nothing to install</p>
           </div>
 
           {trialSuccess ? (

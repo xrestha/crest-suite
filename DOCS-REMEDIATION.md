@@ -809,9 +809,12 @@ check is watching.
 2. ~~T1 (split `README.md`)~~ — **DONE, S666.** Everything else is easier afterwards.
 3. T2a (generated route table) — the gate-mismatch check is the real prize here.
 4. T2b + T2c (plans section in `PRODUCT.md`, entity name).
-5. **T12 (login copy + S606)** — independent of everything above, ships on its own, and is the only
-   task here a prospective client can see. Do it whenever the two verification blockers are cleared;
-   it does not need to wait for the documentation work.
+5. ~~**T12 (login copy + S606)**~~ — **DONE, S667.** Copy replaced, S606 closed on all three public
+   pages, service worker bumped. The module headings the copy specifies were built and then removed:
+   they cost ~93px against the page one-screen budget, which the new copy already overran. That
+   budget is no longer met (1536x864 scrolls 61px) and the comments in `Login.css` and
+   `.claude/rules/auth-and-pins.md` were updated to the re-measured numbers rather than left
+   asserting a fit the page no longer achieves.
 6. T5 (backlog) — **T5a and T5c DONE, S665/S666. T5b outstanding**, before the contractor starts.
 7. T6 (monitoring) — before launch. Jump the queue if a launch date lands.
 8. T7 (staging) — before the contractor starts.

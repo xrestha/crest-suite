@@ -73,8 +73,13 @@ export default function ResetPassword() {
             heading sat 1px from the card edge and physically intruded on the 24px corner radius.
             First thing a user sees after clicking a link in an email. */}
         <div className="login-right" style={{ padding: '48px 34px' }}>
+          {/* Mark and name from the same source — see the same block in Login.js (S606). This is
+              the page a user lands on straight out of a password-reset email, which is exactly
+              when a mismatched brand is read as a phishing tell rather than as a bug. */}
           <div className="login-brand" style={{ marginBottom: 24 }}>
-            <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />
+            {settings?.logo_url
+              ? <img src={settings.logo_url} alt="" style={{ width: 26, height: 26, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
+              : <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />}
             <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
           </div>
 
