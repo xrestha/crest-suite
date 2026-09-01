@@ -85,6 +85,17 @@ is a line that will be stale in a month. That is the failure mode this whole doc
    `README.md` + `PRODUCT.md` + `CHANGELOG/*.md`. Any line that does not is
    either a deliberate rewrite you can name in the commit message, or a silent loss. Print the
    diff; do not accept a non-empty diff without naming every entry.
+
+   **Use `grep -qxF -e "$line"`, with the `-e`, from the start.** Without it, any line beginning
+   with `-` — every `- [x]` bullet, every `--flag` in a code block — is parsed as an option and
+   `grep` dies with `unknown option`, which the loop then reports as an unaccounted line. On this
+   file the printed report is the only thing anyone reads, so a false "unaccounted" sends the next
+   session hunting for a loss that never happened. Hit live while splitting `POS_TODO.md` (T5a):
+   the `comm` set arithmetic was correct throughout and only the display loop lied.
+
+   **Negative-test the check before trusting it** — delete one line from the output, confirm the
+   diff catches it and the script exits non-zero, then restore and `cmp` to prove the restore was
+   byte-identical. A completeness check nobody has seen fail is not evidence.
 4. `git log` shows the original file preserved in history before the split commit.
 
 **To-do carried into this task: S664 is not in the log.** The three rules-corpus checks
@@ -296,9 +307,17 @@ one reader-context.
 ### T5c — Stale entry to fix while you are in there
 
 `POS_TODO.md:13` says the guest QR menu shipped **view-only** with self-order deferred. Self-ordering
-shipped: `submit_guest_order` exists (both overloads, rate-limited in S373, hardened in S604 with
-table-binding at commit and an order-status stepper), and `CLAUDE.md` records S632 settling that
-Guest QR Ordering comes with the POS module on `pos_enabled` alone.
+shipped: `submit_guest_order` is live (rate-limited in S373, hardened in S604 with table-binding at
+commit and an order-status stepper), and `CLAUDE.md` records S632 settling that Guest QR Ordering
+comes with the POS module on `pos_enabled` alone.
+
+**Corrected 2026-09-01:** an earlier draft of this task said "both overloads" exist. They do not.
+`20260707230000` appended a defaulted `p_covers` believing that was `CREATE OR REPLACE`-compatible,
+but Postgres keys the replace on the full argument-type signature, so it created a SECOND function;
+both were live and anon-executable from 2026-07-07 and every later fix landed only on the 4-arg
+body. `20260829120000` dropped the 3-arg one and asserts exactly one survives. The "both overloads"
+phrasing was true when the S532 grant-trap audit wrote it on 2026-08-10 and stopped being true three
+weeks later — which is the same decay this whole document exists to fix, reproduced inside the fix.
 
 The line is wrong in the file whose whole purpose is to stop ground being re-walked — which is
 exactly how a shipped feature gets rebuilt, or gets left off a pricing page because the backlog said
