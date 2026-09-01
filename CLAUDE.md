@@ -385,10 +385,11 @@ guard must be a PATH set (not a visited set) or a shared base costs 0 on its sec
 ## When adding a new feature
 
 See `.claude/skills/new-feature-checklist/SKILL.md` — invoke it before shipping any new page,
-report or module feature. Eight steps: the `feature_flags` **DB column** (the one that breaks every
+report or module feature. Nine steps: the `feature_flags` **DB column** (the one that breaks every
 other client’s flag save when skipped) plus the tier set in `AuthContext.js`, route guards in
-`App.js`, the `Layout.js` nav entry, `Tip` tooltips, the Help page, both README files, Danger Zone
-registration in `admin-user-ops`, and `RESTORE_ORDER` in the Export/Import restore.
+`App.js`, the `Layout.js` nav entry, `Tip` tooltips, the Help page, the `CHANGELOG/` entry and
+E-drive mirror, Danger Zone registration in `admin-user-ops`, `RESTORE_ORDER` in the Export/Import
+restore, and closing the entry in any `*_TODO.md` that carries the feature.
 
 ---
 

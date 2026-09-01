@@ -277,6 +277,10 @@ occurrences of "Crest Hospitality" outside `CHANGELOG/`.
 
 ## T3 — Automate the rotted-glob check
 
+**DONE — S664, 2026-09-01, commit `341d920`.** `scripts/check-rules-globs.mjs`, wired into
+`npm run check:docs` and `npm run build:verify`. Runs clean. The count of globs it covers moves
+every session and is deliberately not recorded here — the script prints it.
+
 S663 found `accounts-and-logins.md` scoped to `src/contexts/AuthContext.js` when the directory is
 `src/context`, singular. That rule had never once loaded for the file it is most about. Four more
 globs pointed at moved or non-existent paths. All five were found by hand.
@@ -297,6 +301,11 @@ and permanently. This is the highest-value ten lines of code in this document.
 ---
 
 ## T4 — Automate the lying-stub check
+
+**DONE — S664, 2026-09-01, commit `341d920`.** `scripts/check-rules-stubs.mjs`, a separate script
+rather than an extension of T3, wired alongside it. Runs clean. It asserts the destination exists
+**and** carries content, so a pointer chain to another stub fails too. T14 records what it still
+does not cover: every path written in prose that is not this one stub pattern.
 
 Three pointer stubs in S663 named a destination file that had never received the content. A stub
 that names a destination is worse than no stub, because it reads as available.
@@ -332,6 +341,11 @@ business to-do list, not an engineering one, or they will keep being scrolled pa
 
 ### T5a — The file has the disease it was built to avoid
 
+**DONE — S665, 2026-09-01, commit `a5d5cc4`.** `POS_TODO.md` 48,595 → 2,676 chars (target was
+under 6,000): header, status key, scope section, open items. `POS_DECISIONS.md` holds the shipped
+history and every struck-through entry with its rationale intact. Cross-linked both ways, and both
+carry the rule that a shipped item moves across in the same commit.
+
 `POS_TODO.md` is 48,595 chars across 200 lines, and roughly 92% of it is completed history. Several
 `Shipped` entries run to a full screen each. The header states the intent — *"completed items are
 struck through, not deleted, so this stays a full history of what was considered"* — and that intent
@@ -364,6 +378,14 @@ Do not merge them into one file. `POS_TODO.md` works partly because it is scoped
 one reader-context.
 
 ### T5c — Stale entry to fix while you are in there
+
+**DONE — the guest-QR entry in S665, commit `a5d5cc4`; the checklist rule in S666.** The
+second half was missed at the time and is worth naming: S665 corrected the stale
+entry but never added the rule below to the new-feature checklist, and the task read as complete
+for a day because the visible half had shipped. It is now step 9 of
+`.claude/skills/new-feature-checklist/SKILL.md`, with the guest-QR entry as its worked example.
+**A partly-done task marked done is the same defect as a stale backlog entry**, which is what this
+sub-task was about.
 
 `POS_TODO.md:13` says the guest QR menu shipped **view-only** with self-order deferred. Self-ordering
 shipped: `submit_guest_order` is live (rate-limited in S373, hardened in S604 with table-binding at
@@ -502,6 +524,14 @@ non-code-facing document a new reader is pointed at, and T2b is already opening 
 ---
 
 ## T11 — Make the `CLAUDE.md` ceiling mechanical, so there is no fifth `/doctor` pass
+
+**DONE — S664, 2026-09-01, commit `341d920`.** `scripts/check-claude-size.mjs`, ceiling 53,000 as
+a committed constant that only ever goes down, failing with the three largest sections named and a
+pointer at "Where a new rule goes". Wired alongside T3 and T4. The `.gitattributes` in the same
+commit is part of this task, not incidental: without `text=auto eol=lf` the same file measures 455
+bytes larger on Windows than on Linux, so the ceiling would mean something different per
+contributor. The `DESIGN.md` side-question was answered — nothing auto-loads it, it is fine as is
+— and chasing that answer is what produced T13.
 
 S663 landed the root file at 51,745 chars and called it the honest floor. It is **51,761 today**. The
 file's own text records that between the second and third pass it regrew 7,052 chars in three days —
@@ -774,7 +804,7 @@ check is watching.
 
 ## Suggested order of work
 
-1. T3 + T4 + T11 (glob, stub and size checks) — one sitting, all three land in `build:verify`
+1. ~~T3 + T4 + T11 (glob, stub and size checks)~~ — **DONE, S664.** All three land in `build:verify`
    together, and they protect the rules corpus before anything else touches it.
 2. ~~T1 (split `README.md`)~~ — **DONE, S666.** Everything else is easier afterwards.
 3. T2a (generated route table) — the gate-mismatch check is the real prize here.
@@ -782,7 +812,7 @@ check is watching.
 5. **T12 (login copy + S606)** — independent of everything above, ships on its own, and is the only
    task here a prospective client can see. Do it whenever the two verification blockers are cleared;
    it does not need to wait for the documentation work.
-6. T5 (backlog) — before the contractor starts.
+6. T5 (backlog) — **T5a and T5c DONE, S665/S666. T5b outstanding**, before the contractor starts.
 7. T6 (monitoring) — before launch. Jump the queue if a launch date lands.
 8. T7 (staging) — before the contractor starts.
 9. T8 (money-math coverage audit).

@@ -1,6 +1,6 @@
 ---
 name: new-feature-checklist
-description: The 8-step checklist for shipping a new Crest Suite feature — feature_flags DB column plus the tier set in AuthContext, route guards in App.js, the Layout.js nav entry, Tip tooltips, the Help page entry, both README files, Danger Zone table registration in admin-user-ops, and Export/Import RESTORE_ORDER. Use when adding any new page, report, or module feature.
+description: The 9-step checklist for shipping a new Crest Suite feature — feature_flags DB column plus the tier set in AuthContext, route guards in App.js, the Layout.js nav entry, Tip tooltips, the Help page entry, the CHANGELOG entry and E-drive mirror, Danger Zone table registration in admin-user-ops, Export/Import RESTORE_ORDER, and closing the backlog entry. Use when adding any new page, report, or module feature.
 ---
 
 ## When adding a new feature
@@ -14,6 +14,23 @@ description: The 8-step checklist for shipping a new Crest Suite feature — fea
 3. **Nav**: add an entry to `NAV` or `REPORTS` in `Layout.js` with `featureKey` and `minPlan`.
 4. **Tooltips**: every non-obvious column header and form label needs a `<Tip>` tooltip.
 5. **Help page**: add an entry to `src/pages/Help.js`.
-6. **README**: update both `C:\crest-suite\README.md` and `E:\CREST SUITE MANAGEMENT\README.md`.
+6. **Changelog**: prepend the session entry to the newest `CHANGELOG/S###-S###.md`, run
+   `npm run changelog:index`, then mirror to the backup drive — `CHANGELOG/` first, then
+   `README.md`. The convention is in `CHANGELOG/README.md`.
+
+   **Do not add the feature to `README.md` itself.** Since S666 that file is a map: it points at
+   other files and restates none of them, and a feature list there would be stale by the next
+   release with nothing to report it. That is the failure the 1.8-million-character split existed
+   to end.
 7. **Danger Zone**: if the feature adds a new client-scoped table (a `client_id` column, directly or via a parent it cascades from), add it to `clearModuleData` and `deleteClientData` in `supabase/functions/admin-user-ops/index.ts`, then `supabase functions deploy admin-user-ops`. These two actions back the Admin → Danger Zone "Clear X Transactions"/"Clear Client Data"/"Delete Client" buttons; a table left out isn't just stale data left behind — most of these FKs default to `NO ACTION` (no cascade), so the button throws a foreign-key violation and aborts mid-sequence the first time a client actually has a row in the missed table (found live, S382, via `pos_credit_notes`). Check for **reverse** FKs too, not just the new table's own `client_id`/parent FK — `pos_orders.credit_note_id → pos_credit_notes.id` is a circular reference in the opposite direction that a table-by-table read-through missed; it only surfaced as a real error when tested against a client with an actual credit note.
 8. **Export / Import**: the same new table needs adding to `RESTORE_ORDER` in `src/modules/admin/dataExport/restoreClientData.js`, positioned after whatever it holds an FK to. A table with its own `client_id` is picked up by the *export* automatically (it walks `CLIENT_SCOPED_TABLES`), so the failure is asymmetric and quiet: the backup contains the rows, and the restore silently skips them. A period- or parent-scoped table needs adding to `PERIOD_SCOPED_TABLES`/`PARENT_SCOPED_TABLES` in `exportClientData.js` as well, or it is missing from the backup entirely.
+
+9. **Close the backlog entry**: if the feature appears in any `*_TODO.md`, move that entry to the
+   matching decisions file in the same commit — `POS_TODO.md` → `POS_DECISIONS.md` today, and
+   the same pairing for the module backlogs when T5b lands.
+
+   **A backlog that says a shipped feature is still open is how it gets rebuilt.** `POS_TODO.md`
+   said the guest QR menu shipped view-only with self-ordering deferred; self-ordering had been
+   live since S373, hardened in S604, and settled onto `pos_enabled` in S632. The entry sat wrong
+   in the one file whose whole purpose is to stop ground being re-walked, which is also how a
+   shipped feature gets left off a pricing page (S665).
