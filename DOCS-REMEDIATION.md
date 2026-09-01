@@ -57,21 +57,40 @@ Specific staleness confirmed by grep against the file itself:
 
 ---
 
-## T1 — Split `README.md` into four files
+## T1 — Split `README.md` into a map and a changelog
 
-**Do.** Replace the single file with:
+**DONE — S666, 2026-09-01, commits `e38b22d` and `bc24fe2`.** `README.md` is 90 lines / 5,288
+chars. The log is 16 range files under `CHANGELOG/`, largest 148,309 chars, plus an index and
+`CHANGELOG/S000-ORIGINAL-HEAD.md` holding the stale head verbatim. All four acceptance criteria
+verified; criterion 3 was upgraded to reconstruction *by* this task and passed byte-identical at
+1,801,834 bytes. The spec below is kept as a record and corrected only where it named files that
+do not exist. What the split found is in `CHANGELOG/S650-S699.md`.
+
+**What shipped.** The single file became:
 
 ```
-README.md            ≤ 200 lines. Quick Start, env vars, repo layout, and a MAP: one line each
-                     pointing at CLAUDE.md, .claude/rules/, DESIGN.md, PRODUCT.md, BACKLOG.md,
-                     DEBT.md, CHANGELOG/. It restates none of them.
-CHANGELOG/           Session log split by S-range, e.g. CHANGELOG/S034-S099.md ... CHANGELOG/S600-S663.md.
-                     CHANGELOG/README.md is an index listing each range with its date span.
+README.md            90 lines / 5,288 chars (spec: ≤ 200 lines, < 12,000 chars). Quick Start,
+                     env vars, repo layout, and a MAP: one line each pointing at CLAUDE.md,
+                     .claude/rules/, the new-feature checklist, DESIGN.md, PRODUCT.md,
+                     POS_TODO.md, POS_DECISIONS.md, CHANGELOG/ and this file. It restates
+                     none of them.
+CHANGELOG/           Session log split by S-range: CHANGELOG/S023-S099.md ... S650-S699.md,
+                     16 files, largest 148,309 chars. CHANGELOG/README.md is the index -- each
+                     range with its date span, plus the convention for adding an entry and
+                     when to start a new file. CHANGELOG/S000-ORIGINAL-HEAD.md holds the
+                     pre-split head verbatim and uncorrected.
 ```
 
 That is the whole split. `ARCHITECTURE.md` is not created — `CLAUDE.md` plus `.claude/rules/` is
 already that document, and it is better than anything this pass would write. `PRODUCT.md` already
 exists and is only extended, in T2.
+
+**The original spec listed `BACKLOG.md` and `DEBT.md` in the map. Neither is there, because
+neither exists.** T5b creates the three module backlogs and T9 creates the debt register; the
+session that lands either adds its pointer to `README.md` then. A map line pointing at a file that
+does not exist is the lying-stub failure T4 automates against, one level up — and a map is exactly
+where it would do the most damage, since a map is read by someone who does not yet know what is
+there. `POS_TODO.md` and `POS_DECISIONS.md` took those two slots because they are real (S665).
 
 **The new README's job is to be a map, not a summary.** Every line that describes rather than points
 is a line that will be stale in a month. That is the failure mode this whole document exists to fix.
@@ -582,13 +601,15 @@ in that order, including within each module group — check this if any bullet i
 - **Verify the payroll duration claim.** "Done in one evening" is the only elapsed-time promise in
   the set and it holds only where attendance is already in the system. A café still on paper
   attendance has a short payroll night because the typing happened earlier.
-- **Trial length: the badge is right, the README is wrong.** `README.md:47` still says "Starter:
-  1-month free trial". The page says 7 days. The pricing page previously stated the trial four
-  different ways — including an FAQ asking about a one-month trial and answering seven days — and it
-  was collapsed to a single `TRIAL_DAYS` constant. Read the value from that constant; do not copy
-  from `README.md`. This line dies with T1 anyway.
-- **Do not copy pricing from `README.md`'s head table either.** `README.md:43` still shows the
-  superseded NPR 5,000/8,000/12,000 bundle figures. Canonical pricing is `src/data/pricingPlans.js`:
+- **Trial length: the badge is right, the old README head was wrong.**
+  `CHANGELOG/S000-ORIGINAL-HEAD.md:65` says "Starter: 1-month free trial". The page says 7 days.
+  The pricing page previously stated the trial four different ways — including an FAQ asking
+  about a one-month trial and answering seven days — and it was collapsed to a single
+  `TRIAL_DAYS` constant. Read the value from that constant; do not copy from either. T1 has
+  landed, so that claim is archived history now rather than a live document.
+- **Do not copy pricing from the old README head table either.**
+  `CHANGELOG/S000-ORIGINAL-HEAD.md:61` shows the superseded NPR 5,000/8,000/12,000 bundle
+  figures. Canonical pricing is `src/data/pricingPlans.js`:
   IMS tiered 2,000/2,600/3,500, HR flat 2,600, POS flat 2,000, Suite Pro a per-outlet add-on at
   +2,000 requiring IMS, annual 25% off.
 
@@ -755,7 +776,7 @@ check is watching.
 
 1. T3 + T4 + T11 (glob, stub and size checks) — one sitting, all three land in `build:verify`
    together, and they protect the rules corpus before anything else touches it.
-2. T1 (split `README.md`) — everything else is easier afterwards.
+2. ~~T1 (split `README.md`)~~ — **DONE, S666.** Everything else is easier afterwards.
 3. T2a (generated route table) — the gate-mismatch check is the real prize here.
 4. T2b + T2c (plans section in `PRODUCT.md`, entity name).
 5. **T12 (login copy + S606)** — independent of everything above, ships on its own, and is the only
