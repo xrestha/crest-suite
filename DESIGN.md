@@ -446,7 +446,12 @@ only ever appears where the product is speaking as itself rather than showing yo
 ### Hierarchy
 
 - **Display** (800, `clamp(24px, 3.4vw, 32px)`, 1.1, `-0.025em`): the signed-out hero headline.
-  The only place in the product with a fluid type size.
+  The only place in the product with a fluid type size. **Its line breaks are authored, not left to
+  the measure** (S667): the headline is block spans, one per line, with `text-wrap: balance` on the
+  remainder. Unforced, a 375px phone broke it after "the" — an orphaned article reads as a mistake
+  rather than as a clause, and at this weight and size the break is as visible as the words. Break
+  the line before shrinking the type; the type size here is load-bearing against a measured
+  viewport budget.
 - **Wordmark** (Georgia 700, 16px sidebar / 20px signed-out, 1.2, `0.04em`): the client's own
   white-labelled brand name. This is the customer's identity, not ours.
 - **Title** (600, 22px): `.page-title`, one per route.

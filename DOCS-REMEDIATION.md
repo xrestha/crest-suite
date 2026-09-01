@@ -565,6 +565,30 @@ confirmation.
 
 ## T12 — Login page copy: headline and bullets
 
+**DONE — S667, 2026-09-01, commit `d8ff95d`.** Copy replaced, S606 closed on all three public
+pages, service worker bumped to `crest-v179`. Two departures from the spec below, both measured
+rather than chosen:
+
+- **The POS / IMS / HR module headings were built and then removed.** They cost ~93px of column
+  height, and this page is laid out to fit one screen (S553, tightened S560) — a budget the new
+  copy already overran. The bullets still arrive in module order and the source still holds them
+  grouped; they simply no longer announce it on screen. What was given up is precisely the spec's
+  second reason for grouping, that it is also how a visitor learns Crest is three products.
+- **That one-screen budget is no longer met, and the two places asserting it now carry the
+  re-measured numbers** (`Login.css` and `.claude/rules/auth-and-pins.md`, which had also been
+  saying the sign-in card rather than the pitch column drives the hero's height — now the reverse):
+  1920x950 fits with 0px to spare, 1920x912 scrolls 21px, 1536x864 scrolls 61px, 1366x768 scrolls
+  146px, 1366x613 fits with 0px. Bounded and checked — the sign-in card stays above the fold at
+  every one of those sizes, so what falls below is the trial band, which the header CTA already
+  anchor-links to.
+
+On the two blockers: the upsell claim was confirmed live (the "Pair with" strip renders on the
+order screen with PAIRED badges), so that bullet shipped as written. **The payroll-duration line
+shipped as specified and was NOT separately re-verified** — its caveat below still stands, that
+"done in one evening" holds where attendance is already in the system.
+
+The spec below is kept as a record.
+
 The signed-out surface still sells the IMS-only product. `Login.js` currently carries "Smarter
 menus. Better margins." above six bullets, three of which restate one idea (Menu Repricing,
 Theoretical Variance and dish affinity all read to an owner as "we tell you which dishes lose
