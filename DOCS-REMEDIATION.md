@@ -141,9 +141,11 @@ covered anywhere, and both were being carried only by a table nobody has updated
 
 ### T2a — Generate the route table; do not hand-write it
 
-`CLAUDE.md` documents how the gates work in depth and never lists a single route. The `README.md`
-table lists routes and is wrong: no HR routes at all despite 232 references to `/hr/` in the log, no
-Group Console, no kitchen board, no guest menu, no `/owner-dashboard`, no `/hr/self-service`.
+`CLAUDE.md` documents how the gates work in depth and never lists a single route. The route
+table is wrong: no HR routes at all despite 232 references to `/hr/` in the log, no Group
+Console, no kitchen board, no guest menu, no `/owner-dashboard`, no `/hr/self-service`. Since
+the S666 split it lives at `CHANGELOG/S000-ORIGINAL-HEAD.md:69–108`, archived verbatim rather
+than corrected, because this task replaces it outright.
 
 **A hand-maintained route table is a value that moves embedded in a permanent document** — the exact
 failure `CLAUDE.md`'s "Never embed a value that moves" rule names. So generate it.
@@ -179,11 +181,11 @@ principles, data ownership. It contains zero occurrences of `NPR` and no plan ta
 **Pricing is not homeless — it is duplicated and contradictory.** `README.md` carries two pricing
 tables that disagree:
 
-- **`README.md:41–47` — STALE. Delete it.** Starter 5,000 / Growth 8,000 / Pro 12,000, one-month
+- **`CHANGELOG/S000-ORIGINAL-HEAD.md:59–65` — STALE. Do not carry it forward.** Starter 5,000 / Growth 8,000 / Pro 12,000, one-month
   trial, IMS features only. These are the same figures that were once hardcoded in Admin Settings >
   Plan Pricing and showed a Growth client on all three modules as NPR 24,000 monthly value against a
   real 7,200 — a 3–4× overstatement.
-- **`README.md:134–152` — current**, and it names the canonical source: `src/data/pricingPlans.js`,
+- **`CHANGELOG/S000-ORIGINAL-HEAD.md:152–170` — current**, and it names the canonical source: `src/data/pricingPlans.js`,
   which also feeds Help's Plan & Pricing tab, the public `/pricing` page and Admin Settings > Plan
   Pricing (S380). `DEFAULT_PLAN_PRICES` is derived from `IMS_TIERS`/`HR_PRICING`/`POS_PRICING`
   specifically so admin analytics can never drift independently again.
