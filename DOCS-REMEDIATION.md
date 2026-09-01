@@ -93,23 +93,34 @@ is a line that will be stale in a month. That is the failure mode this whole doc
    session hunting for a loss that never happened. Hit live while splitting `POS_TODO.md` (T5a):
    the `comm` set arithmetic was correct throughout and only the display loop lied.
 
-   **Negative-test the check before trusting it** — delete one line from the output, confirm the
-   diff catches it and the script exits non-zero, then restore and `cmp` to prove the restore was
-   byte-identical. A completeness check nobody has seen fail is not evidence.
+   **Negative-test the check before trusting it** — drop one line from `README.md` **and** one from
+   a `CHANGELOG/*.md` file, confirm each is flagged and the script exits non-zero, then restore and
+   `cmp` to prove the restore was byte-identical. Test both sides, not one: a loop that reads only
+   the file it was named after passes happily over everything it never opened, and the split's whole
+   risk is on the `CHANGELOG/` side. A completeness check nobody has seen fail is not evidence.
 4. `git log` shows the original file preserved in history before the split commit.
 
-**To-do carried into this task: S664 is not in the log.** The three rules-corpus checks
-(T3/T4/T11, `scripts/check-rules-globs.mjs`, `check-rules-stubs.mjs`, `check-claude-size.mjs`, plus
-`.gitattributes`) shipped without a session entry in `README.md`, deliberately — writing one into
-the 15,364-line log this task is about to split would have put it in a place this task then has to
-move. **The session that lands T1 must write S664 into the correct `CHANGELOG/` range as part of
-its own work**, along with any session between S664 and that one.
+**To-do carried into this task: two sessions are not in the log.** `README.md`'s newest entry is
+S663. Both of the sessions since then shipped deliberately without one — writing an entry into the
+15,364-line log this task is about to split would have put it in a place this task then has to move.
+**The session that lands T1 must write both into the correct `CHANGELOG/` range as part of its own
+work**, along with any session between S665 and that one:
 
-Note that acceptance criterion 3 cannot catch this. The completeness check asserts every line of
-the *pre-change* `README.md` survives the split, and S664's entry was never in the pre-change file
-— so a missing entry passes the check vacuously. It has to be added by hand and confirmed by hand.
-This is the same shape as the guard problem `CLAUDE.md` names about truncated reads: a check that
-only compares against what was already there cannot see what was never there.
+- **S664** — the three rules-corpus checks (T3/T4/T11: `scripts/check-rules-globs.mjs`,
+  `check-rules-stubs.mjs`, `check-claude-size.mjs`), plus `.gitattributes`.
+- **S665** — T5a/T5c: `POS_TODO.md` split into open items (2,676 chars) and `POS_DECISIONS.md`
+  (the shipped history and every struck-through entry, rationale intact); the stale guest-QR entry
+  corrected and moved across; and two corrections back into this file — T5c's `submit_guest_order`
+  "both overloads" claim, and the `grep -qxF -e` trap in acceptance criterion 3 above.
+
+Note that acceptance criterion 3 cannot catch either absence. The completeness check asserts every
+line of the *pre-change* `README.md` survives the split, and neither entry was ever in the
+pre-change file — so both missing entries pass the check vacuously. They have to be added by hand
+and confirmed by hand. This is the same shape as the guard problem `CLAUDE.md` names about truncated
+reads: a check that only compares against what was already there cannot see what was never there.
+
+**Keep this list current.** Every further session that ships before T1 lands adds a bullet here, for
+the same reason and with the same blind spot — the check will not miss it for you.
 
 **Windows encoding trap — this task will hit it.** PowerShell 5.1 `Get-Content` reads ANSI by
 default and `Set-Content -Encoding utf8` writes a BOM. Splitting this file with those cmdlets will
