@@ -87,6 +87,19 @@ is a line that will be stale in a month. That is the failure mode this whole doc
    diff; do not accept a non-empty diff without naming every entry.
 4. `git log` shows the original file preserved in history before the split commit.
 
+**To-do carried into this task: S664 is not in the log.** The three rules-corpus checks
+(T3/T4/T11, `scripts/check-rules-globs.mjs`, `check-rules-stubs.mjs`, `check-claude-size.mjs`, plus
+`.gitattributes`) shipped without a session entry in `README.md`, deliberately — writing one into
+the 15,364-line log this task is about to split would have put it in a place this task then has to
+move. **The session that lands T1 must write S664 into the correct `CHANGELOG/` range as part of
+its own work**, along with any session between S664 and that one.
+
+Note that acceptance criterion 3 cannot catch this. The completeness check asserts every line of
+the *pre-change* `README.md` survives the split, and S664's entry was never in the pre-change file
+— so a missing entry passes the check vacuously. It has to be added by hand and confirmed by hand.
+This is the same shape as the guard problem `CLAUDE.md` names about truncated reads: a check that
+only compares against what was already there cannot see what was never there.
+
 **Windows encoding trap — this task will hit it.** PowerShell 5.1 `Get-Content` reads ANSI by
 default and `Set-Content -Encoding utf8` writes a BOM. Splitting this file with those cmdlets will
 turn every `—` into mojibake and prefix each output file with `EF BB BF`. Use
