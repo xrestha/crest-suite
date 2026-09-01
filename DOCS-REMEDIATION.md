@@ -80,24 +80,51 @@ is a line that will be stale in a month. That is the failure mode this whole doc
 
 1. `README.md` is under 200 lines and under 12,000 characters.
 2. No `CHANGELOG/*.md` file exceeds 200,000 characters.
-3. **Byte-level completeness check, same method as S663.** Take every non-empty line of the
-   pre-change `README.md`, normalise whitespace, and assert each still appears somewhere across
-   `README.md` + `PRODUCT.md` + `CHANGELOG/*.md`. Any line that does not is
-   either a deliberate rewrite you can name in the commit message, or a silent loss. Print the
-   diff; do not accept a non-empty diff without naming every entry.
+3. **Reconstruction, not line membership.** Assert that the archived head plus every
+   `CHANGELOG/*.md` range file, concatenated in file order with each file's generated header
+   removed, reproduces the pre-change `README.md` **byte for byte**. Done on the S666 split:
+   1,801,834 bytes in, 1,801,834 identical bytes back.
 
-   **Use `grep -qxF -e "$line"`, with the `-e`, from the start.** Without it, any line beginning
+   **This replaces the line-membership check this criterion used to specify** — the S663 method,
+   which was the right tool for a file being rewritten and the wrong one for a file only being
+   cut. Reconstruction is strictly stronger and cheaper to write. A set-membership check **cannot
+   see a line that moved to the wrong place**: a session block spliced into the wrong range file,
+   or a paragraph landing above the heading it belongs under, satisfies “every line still appears
+   somewhere” perfectly. It equally cannot see reordering, duplication, or a line that survived
+   only because some unrelated file happened to contain the same text — and across 644
+   near-identically-shaped entries that last one is not hypothetical. Reconstruction catches all
+   four, and because it compares raw bytes it needs no whitespace normalisation and so cannot be
+   fooled by one either.
+
+   **It costs one constraint: the split must be byte-preserving by construction.** Cut only at
+   block boundaries, never reflow, never `rstrip` a block's trailing blank lines, and add new
+   material only in a header that can be mechanically removed. S666 lost 15 blank lines to a stray
+   `rstrip` on the first attempt and reconstruction caught it on the spot; line membership would
+   have passed, because blank lines are not compared.
+
+   **Keep line membership as the fallback for anything genuinely rewritten in transit**, where
+   reconstruction has nothing to compare against — and if you run it, use
+   `grep -qxF -e "$line"`, with the `-e`, from the start. Without it, any line beginning
    with `-` — every `- [x]` bullet, every `--flag` in a code block — is parsed as an option and
    `grep` dies with `unknown option`, which the loop then reports as an unaccounted line. On this
    file the printed report is the only thing anyone reads, so a false "unaccounted" sends the next
    session hunting for a loss that never happened. Hit live while splitting `POS_TODO.md` (T5a):
    the `comm` set arithmetic was correct throughout and only the display loop lied.
 
-   **Negative-test the check before trusting it** — drop one line from `README.md` **and** one from
-   a `CHANGELOG/*.md` file, confirm each is flagged and the script exits non-zero, then restore and
-   `cmp` to prove the restore was byte-identical. Test both sides, not one: a loop that reads only
-   the file it was named after passes happily over everything it never opened, and the split's whole
-   risk is on the `CHANGELOG/` side. A completeness check nobody has seen fail is not evidence.
+   **Negative-test whichever check you rely on, before trusting it** — drop one line from
+   `README.md` **and** one from a `CHANGELOG/*.md` file, confirm each is flagged and the script
+   exits non-zero, then restore and `cmp` to prove the restore was byte-identical. Test both
+   sides, not one: a loop that reads only the file it was named after passes happily over
+   everything it never opened. A check nobody has seen fail is not evidence.
+
+   **S666 found that the `README.md` half of that test proves nothing, and a third test had to be
+   invented.** The whole pre-change head is archived verbatim in `CHANGELOG/S000-ORIGINAL-HEAD.md`,
+   so every line of the new `README.md` also exists there and deleting one still passes. What
+   actually demonstrates the check reads `README.md` is to drop the line from **both**, confirm it
+   is flagged, then restore **only** `README.md` and confirm it passes. Before designing a negative
+   test, check that the line you are deleting has exactly one home. A negative test that cannot
+   fail is not a negative test, and it is the more dangerous outcome, because it is recorded as a
+   pass.
 4. `git log` shows the original file preserved in history before the split commit.
 
 **To-do carried into this task: two sessions are not in the log.** `README.md`'s newest entry is
@@ -113,9 +140,9 @@ work**, along with any session between S665 and that one:
   corrected and moved across; and two corrections back into this file — T5c's `submit_guest_order`
   "both overloads" claim, and the `grep -qxF -e` trap in acceptance criterion 3 above.
 
-Note that acceptance criterion 3 cannot catch either absence. The completeness check asserts every
-line of the *pre-change* `README.md` survives the split, and neither entry was ever in the
-pre-change file — so both missing entries pass the check vacuously. They have to be added by hand
+Note that acceptance criterion 3 cannot catch either absence, and the move to reconstruction
+does not change that — if anything it makes it plainer. Both methods measure the split against
+the *pre-change* file, and neither entry was ever in it, so both pass vacuously. They have to be added by hand
 and confirmed by hand. This is the same shape as the guard problem `CLAUDE.md` names about truncated
 reads: a check that only compares against what was already there cannot see what was never there.
 
@@ -651,6 +678,60 @@ correct fix, so it does not belong in the ordered list below.
 
 ---
 
+## T14 — Prose path and line-number references rot exactly like globs, and nothing checks them
+
+**Finding, not a task. Recorded because it was measured. Deliberately not fixed.**
+
+T3 exists because a `paths:` glob that matches nothing fails silently and permanently. A path
+written in *prose* — `` `src/shared/errorText.js` `` in a rule file, `` `README.md:41–47` `` in this
+document — has exactly the same failure mode and none of the coverage. `check-rules-stubs.mjs`
+catches one narrow form, the `` …is in `.claude/rules/<file>` `` pointer, and nothing else.
+
+**T1 proved the point on itself.** Landing the split broke three references the same afternoon:
+this document's two pointers into `README.md:41–47` and `README.md:134–152`, and
+`accounts-and-logins.md`'s "see S430 in the README session log". All three were repaired in S666,
+by hand, because the session that broke them happened to be looking. Nothing would have reported
+them.
+
+**Measured 2026-09-01** across `CLAUDE.md`, the 25 rule files, and the seven root documents: **209
+backticked repo paths and 10 `file:line` references.** 22 of the 209 do not resolve literally —
+but only **one** is genuine rot: `POS_DECISIONS.md` cites `src/pages/PurchaseOneLakhAboveReport.js`
+twice, and the file has been at `src/modules/ims/reports/PurchaseOneLakhAboveReport.js` since the
+`src/pages/` → `src/modules/` migration — the same migration that rotted three globs in S663.
+
+**The other 21 are the reason this is not the ten lines T3 was.** They fall into five kinds, and a
+naive checker flags every one of them:
+
+- **Relative shorthand.** `shared/errorText.js` means `src/shared/errorText.js`;
+  `admin-user-ops/index.ts` means `supabase/functions/admin-user-ops/index.ts`. Both are clearer
+  in context than the full path would be.
+- **A wrong path quoted on purpose.** `CLAUDE.md` and this file both contain
+  `src/contexts/AuthContext.js` — the S663 rot, quoted verbatim *because* it was the bug. A
+  checker would flag the one place in the repo where that rot is documented.
+- **Files that do not exist yet.** `scripts/gen-routes.mjs` (T2a), `CHANGELOG/pos-shipped.md` (a
+  rejected T5a naming option).
+- **Paths outside the repo.** `scripts/validate_palette.js` belongs to the `dataviz` skill.
+- **Build artefacts.** `/static/js/bundle.js`.
+
+So the check is not "assert the path exists". It is "assert the path exists, unless it is
+shorthand, hypothetical, external, an artefact, or deliberately wrong" — and every one of those
+exemptions is an allow-list that goes stale on its own. **The honest fix is a convention, not a
+script**: write repo-root-relative paths in docs and drop line numbers entirely, then the check
+becomes trivial. That is a decision about how to write, which is why it is recorded here rather
+than done.
+
+**Line numbers are the worse half.** A path breaks only when a file moves. A line number breaks on
+any edit *above* it, in a file nobody thinks of as having moved at all, and there is no revision to
+the reference for anyone to notice — it simply starts pointing at a different line and keeps
+looking correct. Ten of them are live in the corpus today.
+
+**And a dead prose reference is worse than a dead glob in one specific way.** A glob that matches
+nothing is invisible: the rule silently does not load. A path that does not resolve is *visible and
+confidently wrong* — a reader follows it, finds nothing, and generalises to the documentation as a
+whole. That is the failure this entire document was written to stop, arriving through a door no
+check is watching.
+---
+
 ## Explicitly do not do in this pass
 
 - **Do not create `ARCHITECTURE.md`.** `CLAUDE.md` + `.claude/rules/` already is it.
@@ -685,3 +766,6 @@ correct fix, so it does not belong in the ordered list below.
 8. T7 (staging) — before the contractor starts.
 9. T8 (money-math coverage audit).
 10. T9, T10 (debt register, origins).
+
+T13 and T14 are findings, not tasks — each is a decision about how the corpus should be
+written, not a defect with a correct fix, so neither is scheduled here.
