@@ -1,0 +1,49 @@
+# Line endings, normalised so a file is the same size on every machine.
+#
+# WHY THIS LANDED WITH THE TOOLING AND NOT WITH T1
+# ------------------------------------------------
+# `scripts/check-claude-size.mjs` enforces a character ceiling on CLAUDE.md. Without this file,
+# `core.autocrlf=true` makes that measurement platform-dependent: the same CLAUDE.md is 51,761
+# bytes in this Windows working tree and 51,306 in a Linux checkout — 455 bytes apart, purely in
+# line endings, with not one character of content different.
+#
+# A ceiling that means something different per contributor is a value that moves embedded in a
+# permanent check, which is the failure CLAUDE.md's own "Never embed a value that moves" rule
+# names. The script defends itself by normalising CRLF before counting, but the honest fix is for
+# the bytes on disk not to differ in the first place.
+#
+# It also retires the status-vs-diff quirk this repo has lived with: with autocrlf and no
+# attributes file, writing LF into a tracked file leaves `git status` calling it modified while
+# `git diff` shows nothing changed.
+#
+# SAFE TO ADD MID-HISTORY, VERIFIED
+# ---------------------------------
+# `git ls-files --eol` reports every tracked text file as `i/lf` — the index is already pure LF,
+# because autocrlf has been converting on the way in all along. So `text=auto eol=lf` changes no
+# blob content and needs no `--renormalize` commit; it only fixes what lands in the working tree
+# on checkout. Adding this to a repo whose index held CRLF would rewrite every file at once, so
+# check before copying this into another project.
+
+* text=auto eol=lf
+
+# Batch files are the one text format that genuinely requires CRLF — cmd.exe will not reliably
+# parse an LF-only .bat. There are none in the repo today; this is here so adding one later does
+# not quietly break it.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary. `text=auto` already detects all seven of these correctly today, but detection is a guess
+# made from file content and it only has to be wrong once, on a PNG whose first bytes happen to
+# look like text, to corrupt an image on checkout.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.xlsx binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary

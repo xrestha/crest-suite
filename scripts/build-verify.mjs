@@ -42,6 +42,35 @@ import { dirname, join } from 'node:path'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const cache = join(root, 'node_modules', '.cache', '.eslintcache')
 
+// THE DOCUMENTATION CHECKS RUN FIRST
+// ----------------------------------
+// Three guards over the rules corpus (S664). They run before the CRA build, not after, for two
+// reasons: they take well under a second where the build takes minutes, and all three catch
+// faults that are invisible from inside a session rather than faults the compiler would also
+// find. A rotted `paths:` glob, a stub naming a file that never received its content, and an
+// oversized CLAUDE.md all produce a session that looks exactly like a correct one — so the only
+// place they can be caught is here.
+//
+// They are also available on their own as `npm run check:docs`, which is the loop to use while
+// editing the rules corpus. Failing early matters: there is no point spending a three-minute
+// build to then discover a rule has not been loading for two months.
+const DOC_CHECKS = [
+  'check-rules-globs.mjs',
+  'check-rules-stubs.mjs',
+  'check-claude-size.mjs',
+]
+
+for (const script of DOC_CHECKS) {
+  const check = spawnSync(process.execPath, [join(root, 'scripts', script)], {
+    cwd: root,
+    stdio: 'inherit',
+  })
+  if (check.status !== 0) {
+    console.error(`\nbuild:verify stopped — ${script} failed. Nothing was built.`)
+    process.exit(check.status ?? 1)
+  }
+}
+
 // `force` makes a missing file a no-op rather than a throw — the common case on a clean checkout.
 rmSync(cache, { force: true })
 
