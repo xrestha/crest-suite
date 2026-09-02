@@ -37,6 +37,19 @@ instead.
 
 ---
 
+## The sister repo (hss-suite)
+
+**HR, payroll, settlement and `src/utils/bsCalendar.js` are shared with hss-suite**, whose HR module
+was ported from this one; the BS table is identical in both. **A bug fixed on either side stays open
+on the other until it is filed in `docs/CROSS-REPO.md` there** — that file is the backlog both ways,
+and says what is genuinely shared versus what only looks it.
+
+**Copying a permission gate is the trap**: here `isAdmin` is the Crest platform OPERATOR (the
+tenant's Owner is `isOwner`), there it aliases that one company's Owner. Same spelling, different
+meaning.
+
+---
+
 ## Stack
 
 - **React 19 (CRA)** — no Vite, no custom webpack config, no TypeScript
