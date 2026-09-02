@@ -1,4 +1,5 @@
 import { BS_MONTHS, adToBs } from '../../../utils/bsCalendar'
+import { nepalTime } from '../../../shared/nepalTime'
 
 const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'Maintenance', other: 'Other' }
 
@@ -9,7 +10,7 @@ const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'M
 export default function GatePassPrint({ gatePass, bizInfo, issuedByName }) {
   const now = new Date(gatePass.time_in || Date.now())
   const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const nowStr    = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  const nowStr    = nepalTime(now)
   const bs        = adToBs(now)
   const bsDateStr = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
 

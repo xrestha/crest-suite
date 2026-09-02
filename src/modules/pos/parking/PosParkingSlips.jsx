@@ -9,6 +9,7 @@ import Tip from '../../../components/Tip'
 import { printParkingSlip } from './parkingSlipHtml'
 import NewParkingSlipModal from './NewParkingSlipModal'
 import { viewPosBill } from '../../../utils/viewPosBill'
+import { nepalTime } from '../../../shared/nepalTime'
 
 export default function PosParkingSlips() {
   const { clientId, profile, hasPosAccess } = useAuth()
@@ -117,7 +118,7 @@ export default function PosParkingSlips() {
                   <td style={{ fontWeight: 600 }}>{s.vehicle_number}</td>
                   <td>{s.vehicle_type || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                   <td>{s.customer_name || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                  <td>{new Date(s.time_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</td>
+                  <td>{nepalTime(s.time_in)}</td>
                   <td>
                     {s.bill_invoice_no ? (
                       <button

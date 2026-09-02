@@ -9,6 +9,34 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
+### `purchase_entries.created_at` is a BILL-level fact, not a row-level one (S670)
+
+It no longer answers "when was this row written". The edit path in `PurchaseBillForm.jsx` inserts
+replacement lines and deletes the originals, so the column used to restamp to `now()` on every
+correction — a bill's "Entered" time was really the moment of its last typo fix, and the Purchases
+list (ordered `bs_day, created_at, id`) jumped it to the end of its day. The edit now carries the
+earliest superseded row's stamp forward onto every replacement line, so one bill has one entry time,
+in the same way `invoice_ref`, `payment_method` and `discount_amount` are already repeated
+identically on every line of a bill.
+
+Three consequences worth knowing before touching this:
+
+- **Lines added during an edit inherit the bill's original stamp.** That is deliberate, not a
+  rounding-off: the insert rewrites every line on every save, so there is no old-line/new-line
+  distinction available, and a per-line stamp would make the bill's displayed time depend on which
+  line happened to sort first.
+- **`.order('created_at')` still works but means less.** In `Purchases.js` it orders bills within a
+  day and `id` remains the unique paging tiebreaker; in `PurchaseBillPage.jsx` the per-bill line sort
+  now collapses onto `id`.
+- **A genuine "when was this row written" need requires its own column.** Do not reach for
+  `created_at` for that, and do not reach for `updated_at` either — no trigger maintains it anywhere
+  in this schema.
+
+The new-bill path is untouched and still lets `DEFAULT now()` fire; it only `.select()`s the value
+back so the auto-printed voucher can print the server's stamp instead of the browser's clock.
+Because that path is the server's own clock, a purchase entry time has none of the till-vs-server
+skew that POS `opened_at`/`closed_at` do.
+
 ### A key with a fallback must be honoured by every predicate that reads it (S648)
 
 A bill is identified by **`purchase_group_id || id`** — the `billKeyOf` shape above, and the same

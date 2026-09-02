@@ -451,6 +451,36 @@ it got reported. Margin gives byte-identical clearance (a margin on the last chi
 `.card` cannot collapse out of it) and puts the scrollbar directly under the table. **Generally: any
 padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**
 
+
+## A clock time is rendered by `nepalTime()`, never by `toLocaleTimeString` (S670)
+
+`src/shared/nepalTime.js` is the one place a `timestamptz` becomes a time a person reads. Reach for
+it — `nepalTime` on screen, `nepalTime24` in a spreadsheet cell (`"06:50 PM"` sorts before
+`"11:30 AM"` as text, so a 12-hour column mis-orders any workbook a reader sorts by time),
+`nepalDateAd` on a printed slip.
+
+**The rule exists because the obvious form is wrong in a way nothing surfaces.** All 18 clock renders
+in the product were the byte-identical inline
+`toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })`, and every one rendered in the
+**runtime's** timezone. On a till in Kathmandu that is right by accident; for the operator viewing a
+client's data from anywhere else every time on every screen was 5h45m out, with nothing on the page
+to say so. The repo already knew the failure mode — `bsDayBoundaryIso()` pins `+05:45` and explains
+why — but that is date-boundary CONSTRUCTION. Nothing had pinned DISPLAY.
+
+**Pinning a time forces pinning the date beside it.** `adToBs()` reads a Date's LOCAL getters, so a
+bill closed 00:15 Kathmandu renders under the *previous* BS day for a viewer abroad: pin one and not
+the other and the cell shows the date from one day and the time from the next, which is strictly
+worse than being consistently wrong. Any `adToBs(new Date(<timestamptz>))` in a cell that shows a
+time must be `nepalBs(...)`; bucket with `nepalHour`/`nepalCivilDate`, never `.getHours()`.
+
+**Two times in one cell must each carry a date when they fall on different days.** An order opened
+one evening and closed the next afternoon renders as `06:59 PM → 01:23 PM` under a single date,
+which reads as a broken clock rather than an overnight bill. Both sides get dated when they differ,
+neither when they do not — the row's own date already says it. Same rule the Purchases entry stamp
+follows. Where two timestamps come from *different clocks* (POS `opened_at` is the server's default,
+`closed_at` is the till's), show both exactly as recorded and flag an inversion past a minute's
+tolerance; never clamp and never swap.
+
 ## A saved theme pins the user to the preset as it was, so a corrected token never ships (S620)
 
 `switchPreset` persists the **full** colours object to `localStorage`, and `loadSaved` merged

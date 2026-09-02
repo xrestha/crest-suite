@@ -13,6 +13,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
 import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import { nepalHour } from '../../../shared/nepalTime'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const GOLD  = '#c9a84c'
@@ -207,7 +208,10 @@ export default function CoversReport() {
     const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, covers: 0, bills: 0 }))
     for (const o of orders) {
       if (!o.opened_at) continue
-      const h = new Date(o.opened_at).getHours()
+      // Nepal's hour, not the runtime's — .getHours() put a client's dinner rush in the afternoon
+      // for anyone viewing from outside the country, and named the wrong Peak Hour (S670).
+      const h = nepalHour(o.opened_at)
+      if (h == null) continue
       buckets[h].covers += (o.covers || 0); buckets[h].bills += 1
     }
     return buckets

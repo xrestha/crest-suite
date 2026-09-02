@@ -9,6 +9,7 @@ import { BS_MONTHS, bsToAd, formatAd, daysInBsMonth, formatBsDay } from '../../.
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
+import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import PeriodScope from '../../../components/PeriodScope'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { getCf, calcBillTotals, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
@@ -383,6 +384,11 @@ export default function Purchases() {
       `}</style>
       <div className="print-only" style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Purchases — {periodLabel}</h2>
+        {/* A printed sheet leaves the building, so it has to state its own terms rather than rely
+            on the reader remembering what the column meant on screen. */}
+        <p style={{ margin: '4px 0 0', fontSize: 11 }}>
+          Times shown are when each bill was entered into Crest (Nepal time), not when the goods were received.
+        </p>
       </div>
 
       {/* Header */}
@@ -564,7 +570,8 @@ export default function Purchases() {
                   <thead>
                     <tr>
                       <th><Tip text="Day of the Nepali month the goods were received." width={220}>Day</Tip></th>
-                      <th>Item</th><th>Vendor</th>
+                      <th>Item</th>
+                      <th><Tip text="The vendor on the bill, its invoice reference, and the time the bill was ENTERED into Crest — not when the goods were received. The Day column is the delivery day; where the two differ, the entry date is shown too." width={320}>Vendor</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Quantity in your purchase unit, with the base-unit figure in brackets where the two differ — e.g. 2 Crate (24 Bottle). Stock and costing always use the base unit." width={280}>Qty</Tip></th>
                       <th>UOM</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Cost per base unit, not per purchase unit. A NPR 1,200 crate of 24 bottles stores as NPR 50 per bottle — which is what Recipe Costing and Stock value use." width={280}>Rate</Tip></th>
@@ -591,6 +598,39 @@ export default function Purchases() {
                         const vatTaxableG   = groupTotal > 0 ? vatSubtotalG * (1 - discountAmt / groupTotal) : 0
                         const vatAmount     = vatTaxableG * 0.13
                         const groupGrand    = (groupTotal - discountAmt) + vatAmount
+
+                        // When this bill was TYPED INTO Crest — not when the goods arrived. The Day
+                        // column is the receiving date, and the two routinely differ: the whole
+                        // closed-period workflow exists so a Shrawan bill can be entered in Bhadra.
+                        //
+                        // So the entry DATE is rendered only when it differs from the bill's own
+                        // day. A bare "Entered 06:50 PM" sitting inside a row grouped under 15th
+                        // Bhadra reads as "the goods came at 6:50pm on the 15th"; the date turning
+                        // up is what makes it unmistakably an entry stamp. Showing it only when it
+                        // is news also keeps the common case short, which matters on this table —
+                        // see the width history in Layout.css.
+                        //
+                        // `first` is groupEntries[0], and the query sorts .order('created_at')
+                        // .order('id'), so it is the bill's earliest line. Since S670 every line of
+                        // a bill shares one created_at anyway.
+                        const entryBs   = nepalBs(first.created_at)
+                        const entryTime = nepalTime(first.created_at)
+                        const entrySameDay = entryBs && selectedPeriod
+                          && entryBs.year === selectedPeriod.bs_year
+                          && entryBs.month === selectedPeriod.bs_month
+                          && entryBs.day === parseInt(day)
+                        // Its own line, and deliberately NOT nowrap. Appending to the invoice-ref
+                        // line would lengthen an existing nowrap min-content contributor, and
+                        // pinning this one nowrap would be worse still: "Entered 15th Bhadra,
+                        // 06:50 PM" is ~195px of unbreakable text, more than this table's entire
+                        // measured headroom. Vendor is one of only two columns Layout.css permits
+                        // to wrap, which is the whole reason the stamp lives here rather than in a
+                        // tenth column — width added here is free, and a second line costs nothing.
+                        const entryLine = entryTime ? (
+                          <span className="cell-sub">
+                            Entered {entrySameDay || !entryBs ? '' : `${formatBsDay(entryBs.day, entryBs.month)}, `}{entryTime}
+                          </span>
+                        ) : null
 
                         const dayCell = (
                           <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, borderRight: '1px solid var(--theme-border)', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
@@ -642,6 +682,7 @@ export default function Purchases() {
                               <td style={{ verticalAlign: 'middle' }}>
                                 <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{first.vendors?.name || <span style={{ color: 'var(--theme-text2)' }}>No Vendor</span>}</span>
                                 {first.invoice_ref && <span style={{ display: 'block', whiteSpace: 'nowrap', color: 'var(--theme-text2)', fontSize: 11, marginTop: 2 }}>#{first.invoice_ref}</span>}
+                                {entryLine}
                               </td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
@@ -680,6 +721,7 @@ export default function Purchases() {
                                 {first.invoice_ref && <span style={{ color: 'var(--theme-text2)' }}>#{first.invoice_ref} · </span>}
                                 {groupEntries.length} items
                               </span>
+                              {entryLine}
                             </td>
                             <td colSpan={3}></td>
                             <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>

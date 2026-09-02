@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-01 (DOCS-REMEDIATION T5a/T5c — split; open items unchanged)
+Last updated: 2026-09-02 (S670 — added B4, the timezone follow-ups that change a figure rather than a label)
 
 ---
 
@@ -23,6 +23,28 @@ Last updated: 2026-09-01 (DOCS-REMEDIATION T5a/T5c — split; open items unchang
 - [ ] 🟡 `PosOrders.jsx` has no breakpoint — a two-panel flex with a fixed 320px cart, so below
   ~600px the menu side collapses to almost nothing. Deferred rather than missed: restructuring the
   live billing screen is not a layout-pass change, and the till is a tablet/desktop device today.
+
+## B4. Timezone follow-ups left by S670
+
+S670 pinned every clock-time *render* to `Asia/Kathmandu` (`src/shared/nepalTime.js`). Two things in
+the same family were deliberately not taken, because each changes a figure rather than a label:
+
+- [ ] 🔵 **`SalesReport.jsx` range bounds are still runtime-local.** `loadRange` builds `fromTs`/`toTs`
+  with `new Date(iso + 'T00:00:00').toISOString()`, so for a viewer outside Nepal the report selects a
+  slightly different **set** of bills — every tab, including the Annexure 13 One Lakh Above sheet,
+  where a bill crossing a boundary can move a party across the disclosure threshold. Provably
+  identical for a viewer in Nepal. Fix is `bsDayBoundaryIso()` (or a `nepalDayBoundaryIso` in
+  `nepalTime.js`, since the `+05:45` literal now exists in four places). Wants its own
+  before/after row-count check, which is why it was not bundled.
+- [ ] 🔵 **`closed_at` is written by the till, `opened_at` by the server.** A till with a wrong clock
+  can record a close before its own open; the Bill Register now flags that past a minute's tolerance
+  rather than hiding it, but the only real fix is one clock. `guard_pos_order_close()` is already a
+  `BEFORE UPDATE` trigger firing on exactly that transition, so `NEW.closed_at := now()` is a two-line
+  addition — but it retroactively splits the column's meaning across old and new rows, so it needs a
+  deliberate decision rather than a drive-by.
+- [ ] 🟡 **Covers Report's Avg Turn Time silently shrinks its sample.** `if (mins < 0) continue`
+  drops skewed pairs with nothing on screen saying how many, and drops nothing for an absurdly large
+  positive (a bill left open for days). A footnote naming the excluded count would make it honest.
 
 ## D. Known roadmap items
 

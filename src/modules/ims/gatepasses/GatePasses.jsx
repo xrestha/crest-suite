@@ -8,6 +8,7 @@ import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import GatePassPrint from './GatePassPrint'
 import NewGatePassModal from './NewGatePassModal'
+import { nepalTime } from '../../../shared/nepalTime'
 
 const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'Maintenance', other: 'Other' }
 
@@ -142,7 +143,7 @@ export default function GatePasses() {
                   <td>{p.driver_name}</td>
                   <td style={{ fontWeight: 600 }}>{p.vehicle_number}</td>
                   <td>{PURPOSE_LABELS[p.purpose] || p.purpose}</td>
-                  <td>{new Date(p.time_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</td>
+                  <td>{nepalTime(p.time_in)}</td>
                   <td>
                     {p.status === 'open' ? (
                       <span className="badge badge-amber">Open</span>

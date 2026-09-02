@@ -12,6 +12,7 @@ import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { CLOSE_TYPE_BADGE } from '../posSignals'
+import { nepalTime, nepalTime24 } from '../../../shared/nepalTime'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 
@@ -206,6 +207,10 @@ export default function PosExceptionReport() {
       return {
         'Date (AD)':  r.closed_at ? new Date(r.closed_at).toLocaleDateString() : '',
         'Miti (BS)':  bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : '',
+        // The screen has shown this time since the report was written; the sheet never did, so an
+        // exported exception could not be tied back to the shift it happened on. 24-hour because a
+        // sheet column gets sorted, and "06:50 PM" sorts before "11:30 AM" as text.
+        'Time':       nepalTime24(r.closed_at),
         'Bill No':    invoiceLabel(r, vatReg, prefix),
         'On Bill':    r.isItemComp && r.parentInvoiceNo != null
           ? invoiceLabel({ invoice_no: r.parentInvoiceNo, invoice_fy: r.parentInvoiceFy, close_type: 'paid', order_no: r.order_no }, vatReg, prefix)
@@ -388,7 +393,7 @@ export default function PosExceptionReport() {
                         <td>
                           {bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : '—'}
                           <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>
-                            {r.closed_at ? new Date(r.closed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}
+                            {r.closed_at ? nepalTime(r.closed_at) : ''}
                           </span>
                         </td>
                         {/* The row keeps its onClick as the mouse convenience; this button is

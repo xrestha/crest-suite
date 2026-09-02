@@ -25,6 +25,7 @@ Newest at the top; never delete a closed row — a shared defect that came back 
 
 | Date | Found in | Affects | Item | Status |
 | --- | --- | --- | --- | --- |
+| 2026-09-02 | crest-suite | hss-suite | **Every clock time is rendered in the viewer's timezone, not Nepal's.** Crest had 18 byte-identical inline `toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })` call sites and zero occurrences of `Asia/Kathmandu` in `src/`; each rendered in the **runtime's** zone, so an operator viewing a tenant's data from outside Nepal saw every time 5h45m out with nothing on the page saying so. HR is the ported module, so check attendance/roster/self-service time renders there — `rosterHelpers.js:fmtTime` is NOT affected (it formats a Postgres `time` string, not an instant), but anything formatting a `timestamptz` is. Two further traps came out of the fix: (1) pinning the time forces pinning the DATE beside it, since `adToBs()` reads a Date's local getters and a 00:15 Kathmandu instant otherwise renders under the previous BS day; (2) `.getHours()` used for hourly bucketing has the same fault and shifts a whole distribution. Crest's fix is `src/shared/nepalTime.js` — deliberately NOT in `bsCalendar.js`, because that file is mirrored byte-for-byte and a time helper there would have to land in both repos at once. Copy the module or write an equivalent; do not add it to the shared calendar file. | **OPEN** |
 | — | — | — | Nothing open. | — |
 
 ## Closed

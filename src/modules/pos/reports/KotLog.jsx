@@ -11,6 +11,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CLOSE_TYPE_BADGE, STATION_BADGE } from '../posSignals'
+import { nepalTime } from '../../../shared/nepalTime'
 
 // Total ever sent, per (order_id, recipe_id) — summing every log row's printed qty gives the true
 // cumulative quantity sent to the kitchen for that item across the order's lifetime. Shared by
@@ -274,7 +275,7 @@ export default function KotLog() {
         const bs = adToBs(new Date(r.sent_at))
         return {
           'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
-          'Time': new Date(r.sent_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          'Time': nepalTime(r.sent_at),
           'Table': r.table_name || 'Takeaway',
           'Order#': r.order_no,
           'Station': r.station,
@@ -291,7 +292,7 @@ export default function KotLog() {
         const bs = adToBs(new Date(r.removed_at))
         return {
           'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
-          'Time': new Date(r.removed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          'Time': nepalTime(r.removed_at),
           'Order#': r.pos_orders?.order_no ?? '',
           'Invoice#': r.pos_orders?.invoice_no || '',
           'Table': r.pos_orders?.table_name || 'Takeaway',
@@ -324,7 +325,7 @@ export default function KotLog() {
           for (const log of row.logs) {
             rows.push({
               ...base, 'Station': log.station,
-              'Time': new Date(log.sent_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              'Time': nepalTime(log.sent_at),
               'Items': (log.items || []).map(i => `${i.name} ×${i.qty}`).join(', '),
               'Sent By': staffNames[log.sent_by] || '—', 'Flag': flag,
             })
@@ -403,7 +404,7 @@ export default function KotLog() {
                     <td>
                       {bs.day} {BS_MONTHS[bs.month - 1]}
                       <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>
-                        {new Date(r.sent_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                        {nepalTime(r.sent_at)}
                       </span>
                     </td>
                     <td>{r.table_name || 'Takeaway'}</td>
@@ -442,7 +443,7 @@ export default function KotLog() {
                     <td>
                       {bs.day} {BS_MONTHS[bs.month - 1]}
                       <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>
-                        {new Date(r.removed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                        {nepalTime(r.removed_at)}
                       </span>
                     </td>
                     <td>{o?.table_name || 'Takeaway'}</td>
@@ -511,7 +512,7 @@ export default function KotLog() {
                               <tbody>
                                 {row.logs.map(log => (
                                   <tr key={log.id}>
-                                    <td>{new Date(log.sent_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</td>
+                                    <td>{nepalTime(log.sent_at)}</td>
                                     {/* Same KOT-purple / BOT-yellow category colours as the Register tab (S613). */}
                                     <td><span className={STATION_BADGE[log.station] || 'badge-gray'} style={{ fontSize: 11 }}>{log.station}</span></td>
                                     <td>{(log.items || []).map(i => `${i.name} ×${i.qty}`).join(', ')}</td>

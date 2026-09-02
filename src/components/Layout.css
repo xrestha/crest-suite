@@ -1630,6 +1630,14 @@ table.data-table--sticky-first tr:hover td:first-child {
   background: var(--theme-table-hover);
 }
 
+/* The supporting line under a table cell's main value — a clock time under a date, an AD date
+   under a BS one. Exists as a class rather than an inline style because of the print reset below:
+   `@media print { th, td { color: black } }` targets the CELL, so a descendant span carrying its
+   own `color: var(--theme-text3)` inline WINS over the inherited black and prints theme-grey on
+   white paper — invisible from a dark preset. Every such line in the product was inline-styled
+   (S670), so none of them had ever printed legibly; nobody had tried from a dark theme. */
+.cell-sub { display: block; font-size: 11px; color: var(--theme-text3); margin-top: 2px; }
+
 /* Purchases bill list. The Item and Vendor cells are deliberately the only wrappable columns in
    this table, and there is no `.purchases-item-cell` rule any more — that history is worth the
    paragraph, because it was rewritten three times and each fix caused the next.
@@ -2383,6 +2391,10 @@ textarea:focus-visible {
   .badge { border: 1px solid #ccc !important; color: black !important; background: white !important; border-radius: 0 !important; }
   input { background: white !important; color: black !important; border: 1px solid #ccc !important; }
   .no-print { display: none !important; }
+  /* Overrides the cell-level `color: black` reset above for the supporting line, which would
+     otherwise keep its screen colour. Slightly smaller than the cell so it still reads as
+     secondary once every cell has been normalised to 12px. */
+  .cell-sub { color: #444 !important; font-size: 10px !important; }
   /* Row-level checkbox selection (Recipe Costing, Reorder Report) — when at least one row is
      checked, everything else gets this class so Print only outputs the checked subset. Only
      takes effect under print; on-screen the same rows render normally regardless. */

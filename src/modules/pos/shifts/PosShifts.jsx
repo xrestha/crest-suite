@@ -13,6 +13,7 @@ import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
+import { nepalTime } from '../../../shared/nepalTime'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 // Was its own hardcoded copy of the tender-type list (drifted from posOrdersConstants.js) — a
@@ -93,7 +94,7 @@ function fmtAdBs(date) {
 // as a standalone reprint from Shift History.
 function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedByName, closedByName, openedAt, closedAt, denomCounts, opening, closing, report }) {
   const now    = new Date()
-  const nowStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  const nowStr = nepalTime(now)
   const total  = mode === 'open' ? opening : closing
   // Variance derives from the SAME expected-cash figure the slip prints two rows above it —
   // through expectedCashOf, the one definition (hoisted; see below). A local formula here once

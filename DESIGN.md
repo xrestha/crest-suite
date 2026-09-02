@@ -600,6 +600,15 @@ nor its placeholder (Chrome prints placeholders as if they were values), so a sh
 over and filled in with a pen; `.print-hide-row` prints only the rows a user checked. Letterhead
 documents set Georgia and their own grayscale ink ramp rather than reading theme tokens.
 
+**The print reset targets the CELL, which is why a supporting line needs `.cell-sub`.**
+`@media print` sets `th, td { color: black !important }` — inheritance, so any descendant `<span>`
+carrying its own colour inline **wins** and prints in theme ink on white paper. Every secondary line
+inside a table cell in this product was inline-styled that way, so none of them had ever printed
+legibly, and nobody had noticed because nobody had printed from a dark preset. `.cell-sub` is the
+class for that line and carries its own print override. Do not reach for the tempting
+`th *, td * { color: black }` — it would flatten every deliberately-coloured figure inside a cell
+across every printed report.
+
 ### Named Rules
 
 **The Auto-Fit-First Rule.** Reach for `repeat(auto-fit, minmax(<floor>, 1fr))` before declaring a
@@ -876,6 +885,11 @@ if the positioning mechanism changes for other reasons. Both values are recorded
   associating its cells with their column headers. On tables that are almost entirely currency
   columns, that is the whole content. This was copied forward four times, most recently by an
   accessibility fix reaching for the incumbent shape in good faith.
+
+- **`.cell-sub`** is the supporting line under a cell's main value — a clock time under a date,
+  an AD date under a BS one, an invoice ref under a vendor name. 11px, `text3`, its own block. Use
+  it instead of an inline style: it is the only version that survives the print reset (see Print
+  above), and it keeps the seven-or-so places that do this from drifting apart.
 
 **Which column absorbs the squeeze is a decision, and text is the only honest candidate.**
 `white-space: nowrap` goes on the unbreakable atom — a date, a figure, a unit, an invoice ref, an

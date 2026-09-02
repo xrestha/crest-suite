@@ -393,6 +393,23 @@ Effective rate = settled commission ÷ ex-VAT settled base. The contracted rate 
 against is `settings.pos_delivery_partners[].commission_pct`, which existed for a long time as a
 settle-time pre-fill and was read by nothing else.
 
+
+### A printed slip is stamped with the BILL's moment, not the print's (S670)
+
+`buildBillHtml` and `buildCompSlipHtml` derived Date, Miti and time from `new Date()`, so every
+reprint — and every preview opened from the Sales Report's Bill Register, which is exactly what that
+row click does via `viewPosBill()` — put **today** on a month-old Tax Invoice. Both now read
+`order.closed_at`.
+
+**The `|| new Date()` fallback is load-bearing, not padding.** The live close path builds its order
+object in memory and the in-modal preview renders *before* the order is closed, so `closed_at`
+genuinely does not exist yet on either. Remove the fallback and a statutory document prints
+`Invalid Date` in front of a customer — a failure only reachable by clicking Charge, never by
+reading the diff.
+
+Times on every POS slip and screen go through `src/shared/nepalTime.js`; see
+`.claude/rules/design-system.md` for why the obvious `toLocaleTimeString` form is wrong.
+
 ### The four POS report pages are reports, not till screens (S613)
 
 `SalesReport`, `CoversReport`, `KotLog` and `PosExceptionReport` now render the product's shell

@@ -11,7 +11,8 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
-import { getBsToday, formatAd, adToBs, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
+import { getBsToday, formatAd, adToBs, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
+import { nepalTime, nepalTime24, nepalBs, nepalCivilDate, nepalHour } from '../../../shared/nepalTime'
 import { computeOrderAmounts, computeGroupAmounts } from '../../../utils/posBillingMath'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
@@ -24,6 +25,81 @@ const THRESHOLD = 100000
 const GOLD  = '#c9a84c'
 const MUTED = '#6b7280'
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
+// The date cell shared by the three row-level tabs (Bill Register, Comped Bills, Delivery Bills).
+//
+// S670: these tabs showed a BS day and nothing finer, so four bills stamped "4 Bhadra 2083" could
+// not be told apart or put in order. Both of the order's own timestamps go underneath it.
+//
+// Every value here is pinned to Nepal. adToBs() reads a Date's LOCAL getters, so pinning the clock
+// time without pinning the date beside it would render a bill closed 00:15 in Kathmandu as the
+// previous BS day at 12:15 AM for a viewer abroad — the time from one day, the date from another,
+// on one line.
+
+// A till whose clock is behind the server can stamp a close BEFORE the server stamped the open.
+// A minute of tolerance absorbs latency and rounding; past that it is a real wrong clock and worth
+// saying so, rather than flagging every three-second negative into meaninglessness.
+const CLOCK_SKEW_TOLERANCE_MS = 60_000
+
+function BillDateTimeCell({ openedAt, closedAt }) {
+  const bs = nepalBs(closedAt)
+  const civil = nepalCivilDate(closedAt)
+  const opened = nepalTime(openedAt)
+  const closed = nepalTime(closedAt)
+  // The row's date is the CLOSED date, because that is what this report ranges and totals on. An
+  // order opened on an earlier day therefore has to say so, or the cell reads as impossible: a
+  // delivery bill opened 6:59pm and settled with the rest of the batch at 1:23pm the next day
+  // renders as "06:59 PM -> 01:23 PM" under one date, which looks like a clock fault rather than
+  // an overnight bill. Same rule the Purchases entry stamp follows, for the same reason.
+  const openedBs = nepalBs(openedAt)
+  const openedElsewhere = openedBs && bs && !(
+    openedBs.year === bs.year && openedBs.month === bs.month && openedBs.day === bs.day
+  )
+  // Both times are shown exactly as recorded — never clamped, never swapped. This is a ledger; a
+  // row that quietly corrects itself is worse than one showing something impossible. The mark is
+  // a glyph rather than a colour, since red and amber collapse under deuteranopia (S661).
+  const skewed = openedAt && closedAt
+    && (new Date(closedAt) - new Date(openedAt)) < -CLOCK_SKEW_TOLERANCE_MS
+  // Where the two fall on different days, BOTH sides carry their own date. Dating only the opening
+  // side leaves the reader to infer that the closing time inherits the row's date — which is the
+  // same inference that made the undated version misread as a backwards clock. Same day, neither is
+  // dated: the row's own date already says it, and repeating it on every ordinary bill is noise.
+  const openedLabel = openedElsewhere ? `${formatBsDay(openedBs.day, openedBs.month)} ${opened}` : opened
+  const closedLabel = openedElsewhere && bs ? `${formatBsDay(bs.day, bs.month)} ${closed}` : closed
+  return (
+    // nowrap sits on each date+time ATOM, not on the cell — a cell-wide nowrap in a 15-column table
+    // can only overflow, and this line is long in the cross-day case. Breaking at the arrow is the
+    // one break that costs nothing.
+    <td>
+      <span style={{ whiteSpace: 'nowrap' }}>
+        {bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : (civil ? formatAd(civil) : '—')}
+      </span>
+      {closed && (
+        <span className="cell-sub">
+          {opened
+            ? <><span style={{ whiteSpace: 'nowrap' }}>{openedLabel}</span> <span aria-hidden="true">→</span> <span style={{ whiteSpace: 'nowrap' }}>{closedLabel}</span></>
+            : closed}
+          {skewed && (
+            <Tip text="This bill records a close before its open. The opened time comes from the server and the closed time from the till, so a till whose clock is wrong will produce this. Both are shown exactly as recorded — check the till's date and time." width={300}>
+              <span style={{ color: 'var(--theme-amber-text)', marginLeft: 5 }}>⚠</span>
+            </Tip>
+          )}
+        </span>
+      )}
+    </td>
+  )
+}
+
+const bsLabel = bs => bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
+const settledLabel = ts => { const bs = nepalBs(ts); return bs ? `${bsLabel(bs)} ${nepalTime24(ts)}` : '' }
+// The sheet's Date column is the bill's PAID date, so a bare opening time is ambiguous for an order
+// opened on an earlier day. This fills only in that case: blank on an ordinary same-day bill, so
+// the column stays quiet, and the Opened time column keeps one format and sorts correctly.
+const openedOnLabel = (openedAt, closedAt) => {
+  const o = nepalBs(openedAt), c = nepalBs(closedAt)
+  if (!o || !c) return ''
+  return (o.year === c.year && o.month === c.month && o.day === c.day) ? '' : bsLabel(o)
+}
+
 const bsSlash = iso => { const bs = adToBs(new Date(iso)); return `${String(bs.day).padStart(2, '0')}/${String(bs.month).padStart(2, '0')}/${bs.year}` }
 
 const TABS = [
@@ -133,7 +209,7 @@ export default function SalesReport() {
       // Paged: the child pos_order_items read below was already wrapped (S529) while this parent
       // was not, so on a busy month every one of this page's ten tabs silently reported the first
       // 1000 bills as if they were all of them — a believable total, not an error.
-      fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name')
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, order_no, invoice_no, buyer_name, buyer_pan, buyer_phone, discount_amount, opened_at, closed_at, credit_note_id, payment_method, delivery_partner, commission_amount, credit_settled_at, credit_settled_method, paid_amount, bill_remarks, closed_by, table_name')
         .eq('close_type', 'paid')
         .gte('closed_at', fromTs).lte('closed_at', toTs)
         .order('id')),
@@ -224,7 +300,10 @@ export default function SalesReport() {
     for (const o of orders) {
       if (o.credit_note_id) continue
       const amounts = computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg)
-      const bs = adToBs(new Date(o.closed_at))
+      // The BS day this bill belongs to IN NEPAL. adToBs reads a Date's local getters, so a bill
+      // closed just after midnight Kathmandu bucketed into the PREVIOUS day for a viewer abroad —
+      // and the Daily and Hourly tabs then disagreed with each other.
+      const bs = adToBs(nepalCivilDate(o.closed_at))
       const key = `${bs.year}-${bs.month}-${bs.day}`
       map[key] = map[key] || { key, year: bs.year, month: bs.month, day: bs.day, bills: 0, qty: 0, gross: 0, discount: 0, taxable: 0, nonTaxable: 0, vat: 0, net: 0 }
       const b = map[key]
@@ -239,7 +318,8 @@ export default function SalesReport() {
     for (const o of orders) {
       if (o.credit_note_id) continue // same exclusion rule as dailyRows — totals must reconcile across tabs
       const amounts = computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg)
-      const h = new Date(o.closed_at).getHours()
+      const h = nepalHour(o.closed_at)
+      if (h == null) continue
       buckets[h].bills += 1; buckets[h].qty += amounts.totalQty; buckets[h].net += amounts.net
     }
     return buckets
@@ -249,7 +329,7 @@ export default function SalesReport() {
     return orders.map(o => {
       const amounts = computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg)
       return {
-        id: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no, closedAt: o.closed_at,
+        id: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no, openedAt: o.opened_at, closedAt: o.closed_at,
         customer: o.buyer_name || 'CASH SALES', pan: o.buyer_pan || '',
         payMethod: o.payment_method || '—',
         orderMode: o.table_name && o.table_name !== 'Takeaway' ? `Dine-In: ${o.table_name}` : 'Takeaway',
@@ -302,7 +382,7 @@ export default function SalesReport() {
         // VAT-registered client and report every partner as under-remitting.
         const a = computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg)
         return {
-          id: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no, closedAt: o.closed_at,
+          id: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no, openedAt: o.opened_at, closedAt: o.closed_at,
           deliveryPartner: o.delivery_partner, tableName: o.table_name,
           amount: o.paid_amount || 0,
           exVatBase: a.taxableBase + a.nonTaxableBase,
@@ -483,7 +563,7 @@ export default function SalesReport() {
       for (const c of compsByOrder[o.id] || []) {
         rows.push({
           key: `${o.id}:${c.compNo}`, orderId: o.id, orderNo: o.order_no, invoiceNo: o.invoice_no,
-          closedAt: o.closed_at, tableName: o.table_name, compNo: c.compNo, reason: c.reason,
+          openedAt: o.opened_at, closedAt: o.closed_at, tableName: o.table_name, compNo: c.compNo, reason: c.reason,
           itemNames: c.items.map(i => `${i.qty}x ${i.name}`).join(', '),
           foodCost: c.foodCost, potentialValue: c.potentialValue,
         })
@@ -629,7 +709,10 @@ export default function SalesReport() {
     XLSX.utils.sheet_add_json(ws, dataRows, { origin: -1 })
     return ws
   }
-  const dateRangeLine = `@As On Dated : ${fromIso} (B.S. ${bsSlash(fromIso)})  To : ${toIso} (B.S. ${bsSlash(toIso)})  @Division : ${bizInfo.name}`
+  // The letterhead line every sheet in the workbook carries. It now states the timezone too: a
+  // sheet that leaves the building with bare clock times has to say which clock (S594 — a sheet
+  // that does not state its own scope cannot be reconciled a month later).
+  const dateRangeLine = `@As On Dated : ${fromIso} (B.S. ${bsSlash(fromIso)})  To : ${toIso} (B.S. ${bsSlash(toIso)})  @Division : ${bizInfo.name}  @Times : Nepal time (UTC+05:45), 24-hour`
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
@@ -649,9 +732,12 @@ export default function SalesReport() {
       XLSX.writeFile(wb, `hourly-sales-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'voucher') {
       const ws = withLetterhead(XLSX, 'Sales Book Report', dateRangeLine, filteredVoucherRows.map(v => {
-        const bs = adToBs(new Date(v.closedAt))
+        const bs = nepalBs(v.closedAt)
         return {
-          'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`, 'Voucher#': v.orderNo, 'Invoice#': v.invoiceNo || '',
+          // Two discrete columns rather than the screen's single "opened -> closed" line: a sheet
+          // has no width pressure and a reader needs to be able to sort and filter on either.
+          'Date (BS)': bsLabel(bs), 'Opened On (BS)': openedOnLabel(v.openedAt, v.closedAt), 'Opened': nepalTime24(v.openedAt), 'Closed': nepalTime24(v.closedAt),
+          'Voucher#': v.orderNo, 'Invoice#': v.invoiceNo || '',
           'Customer': v.customer, 'PAN': v.pan, 'Payment Mode': v.payMethod, 'Order Mode': v.orderMode,
           'Gross (NPR)': Math.round(v.gross * 100) / 100, 'Discount (NPR)': Math.round(v.discount * 100) / 100,
           'Non-Taxable (NPR)': Math.round(v.nonTaxable * 100) / 100, 'Taxable (NPR)': Math.round(v.taxable * 100) / 100,
@@ -663,9 +749,9 @@ export default function SalesReport() {
       XLSX.writeFile(wb, `bill-register-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'compxref') {
       const ws = withLetterhead(XLSX, 'Comped Bills', dateRangeLine, compedBillRows.map(c => {
-        const bs = adToBs(new Date(c.closedAt))
+        const bs = nepalBs(c.closedAt)
         return {
-          'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
+          'Date (BS)': bsLabel(bs), 'Opened On (BS)': openedOnLabel(c.openedAt, c.closedAt), 'Opened': nepalTime24(c.openedAt), 'Closed': nepalTime24(c.closedAt),
           'Bill No': c.invoiceNo != null ? `#${c.invoiceNo}` : `Order #${c.orderNo}`,
           'NC No': `NC-${String(c.compNo).padStart(2, '0')}`, 'Table': c.tableName || 'Takeaway',
           'Items Comped': c.itemNames,
@@ -707,10 +793,10 @@ export default function SalesReport() {
       XLSX.utils.book_append_sheet(wb, wsSummary, 'By Partner')
       const partnerScope = partnerFilter === 'all' ? 'All partners' : partnerFilter
       const ws = withLetterhead(XLSX, 'Sales Report - Delivery Partners', `${dateRangeLine}  @Partner : ${partnerScope}`, visibleDeliveryRows.map(r => {
-        const bs = adToBs(new Date(r.closedAt))
+        const bs = nepalBs(r.closedAt)
         const billPct = r.settled && r.exVatBase > 0 ? (r.commission / r.exVatBase) * 100 : null
         return {
-          'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
+          'Date (BS)': bsLabel(bs), 'Opened On (BS)': openedOnLabel(r.openedAt, r.closedAt), 'Opened': nepalTime24(r.openedAt), 'Closed': nepalTime24(r.closedAt),
           'Bill No': r.invoiceNo != null ? `#${r.invoiceNo}` : `Order #${r.orderNo}`,
           'Partner': r.deliveryPartner, 'Table': r.tableName || 'Takeaway',
           'Amount (NPR)': Math.round(r.amount * 100) / 100,
@@ -720,6 +806,9 @@ export default function SalesReport() {
           'Comm. %': billPct == null ? '' : `${billPct.toFixed(2)}%`,
           'Net Received (NPR)': r.settled ? Math.round((r.amount - r.commission) * 100) / 100 : '',
           'Settled Via': r.settled ? r.settledMethod : '',
+          // settledAt has been on the row object since the tab was written and never exported —
+          // 'Settled Via' told you how but never when.
+          'Settled On': r.settled ? settledLabel(r.settledAt) : '',
         }
       }))
       XLSX.utils.book_append_sheet(wb, ws, 'Bills')
@@ -798,7 +887,7 @@ export default function SalesReport() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">
-          Sales Report <Tip text="Ten views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement and checks what each platform withheld against the rate you agreed with it, Category, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
+          Sales Report <Tip text="Eleven views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement and checks what each platform withheld against the rate you agreed with it, Category, Product Type, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
           </h1>
           <p className="page-subtitle">
             One report, eleven ways to slice it.
@@ -975,7 +1064,7 @@ export default function SalesReport() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Date (BS)</th><th>Voucher#</th><th>Invoice#</th><th>Customer</th><th>Payment Mode</th><th>Order Mode</th>
+                <th><Tip text="The BS day the bill was paid, with the order's own clock times beneath it — when the order was opened, then when it was paid. Both in Nepal time, whatever timezone you are reading from. The row's date is the date it was PAID — where the order was opened on an earlier day, that day is shown next to the opening time. For an order taken while the till was offline, the opened time is when it synced rather than when the guest sat down." width={320}>Date/Time (BS)</Tip></th><th>Voucher#</th><th>Invoice#</th><th>Customer</th><th>Payment Mode</th><th>Order Mode</th>
                 <th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>Discount</th>
                 <th style={{ textAlign: 'right' }}>Non-Taxable</th><th style={{ textAlign: 'right' }}>Taxable</th>
                 <th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
@@ -987,10 +1076,9 @@ export default function SalesReport() {
             </thead>
             <tbody>
               {filteredVoucherRows.map(v => {
-                const bs = adToBs(new Date(v.closedAt))
                 return (
                   <tr key={v.id} onClick={() => viewPosBill(clientId, { id: v.id })} style={{ cursor: 'pointer' }}>
-                    <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
+                    <BillDateTimeCell openedAt={v.openedAt} closedAt={v.closedAt} />
                     {/* The row keeps its onClick as the mouse convenience; this button is the
                         keyboard/SR path. Never role="button" on the tr — that overrides the
                         implicit row role and unhooks every currency cell from its header. */}
@@ -1053,7 +1141,7 @@ export default function SalesReport() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Date (BS)</th><th>Bill No</th><th>NC No</th><th>Table</th><th>Items Comped</th>
+                <th><Tip text="The BS day the bill was paid, with the order's own clock times beneath it — when the order was opened, then when it was paid. Both in Nepal time, whatever timezone you are reading from. The row's date is the date it was PAID — where the order was opened on an earlier day, that day is shown next to the opening time. For an order taken while the till was offline, the opened time is when it synced rather than when the guest sat down." width={320}>Date/Time (BS)</Tip></th><th>Bill No</th><th>NC No</th><th>Table</th><th>Items Comped</th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Ingredient cost of the comped item(s) — matches the Complimentary Slip valuation" width={240}>Food Cost</Tip>
                 </th>
@@ -1066,10 +1154,9 @@ export default function SalesReport() {
             </thead>
             <tbody>
               {compedBillRows.map(c => {
-                const bs = adToBs(new Date(c.closedAt))
                 return (
                   <tr key={c.key} onClick={() => viewPosBill(clientId, { isItemComp: true, parentOrderId: c.orderId, compNo: c.compNo })} style={{ cursor: 'pointer' }}>
-                    <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
+                    <BillDateTimeCell openedAt={c.openedAt} closedAt={c.closedAt} />
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       <button className="btn-linklike"
                         onClick={e => { e.stopPropagation(); viewPosBill(clientId, { isItemComp: true, parentOrderId: c.orderId, compNo: c.compNo }) }}>
@@ -1273,7 +1360,7 @@ export default function SalesReport() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Date (BS)</th><th>Bill No</th><th>Partner</th><th>Table</th>
+                <th><Tip text="The BS day the bill was paid, with the order's own clock times beneath it — when the order was opened, then when it was paid. Both in Nepal time, whatever timezone you are reading from. The row's date is the date it was PAID — where the order was opened on an earlier day, that day is shown next to the opening time. For an order taken while the till was offline, the opened time is when it synced rather than when the guest sat down." width={320}>Date/Time (BS)</Tip></th><th>Bill No</th><th>Partner</th><th>Table</th>
                 <th style={{ textAlign: 'right' }}>Amount</th><th>Status</th>
                 <th style={{ textAlign: 'right' }}>Commission</th>
                 <th style={{ textAlign: 'right' }}>
@@ -1286,7 +1373,6 @@ export default function SalesReport() {
             </thead>
             <tbody>
               {visibleDeliveryRows.map(r => {
-                const bs = adToBs(new Date(r.closedAt))
                 const billPct = r.settled && r.exVatBase > 0 ? (r.commission / r.exVatBase) * 100 : null
                 const agreed = partnerRates[r.deliveryPartner]
                 // Same two-part tolerance as the rollup, at one bill's scale: rounding to the
@@ -1296,7 +1382,7 @@ export default function SalesReport() {
                   && Math.abs(r.commission - r.exVatBase * agreed / 100) > 1
                 return (
                   <tr key={r.id} onClick={() => viewPosBill(clientId, { id: r.id })} style={{ cursor: 'pointer' }}>
-                    <td>{bs.day} {BS_MONTHS[bs.month - 1]} {bs.year}</td>
+                    <BillDateTimeCell openedAt={r.openedAt} closedAt={r.closedAt} />
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       <button className="btn-linklike" onClick={e => { e.stopPropagation(); viewPosBill(clientId, { id: r.id }) }}>
                         {r.invoiceNo != null ? `#${r.invoiceNo}` : `Order #${r.orderNo}`}

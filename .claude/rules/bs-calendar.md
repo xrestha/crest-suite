@@ -7,6 +7,18 @@ paths:
 
 # BS calendar: how the lookup table was verified, and how to extend it
 
+> **This file is day-granularity, and deliberately stays that way.** `bsDayBoundaryIso()` is the only
+> function here that touches a clock, and it CONSTRUCTS a `+05:45`-pinned boundary for a query — it
+> does not render anything. Clock-time DISPLAY lives in `src/shared/nepalTime.js` (`nepalTime`,
+> `nepalTime24`, `nepalDateAd`, `nepalBs`, `nepalHour`, `nepalCivilDate`). Do not add a time helper
+> here: this file is mirrored byte-for-byte with hss-suite, so anything added has to land in both
+> repos at once, which is exactly why `nepalTime.js` is a separate Crest-only module.
+>
+> The pairing that matters: `nepalBs(ts)` is `adToBsSafe(nepalCivilDate(ts))`, and any cell showing a
+> pinned clock time must use it rather than `adToBs(new Date(ts))` — the latter reads a Date's LOCAL
+> getters, so a bill closed 00:15 Kathmandu shows the PREVIOUS BS day for a viewer abroad, putting
+> the date and the time beside it on two different days.
+
 > Moved out of the root CLAUDE.md (2026-08-27 /doctor pass) so it loads only when working on
 > these files. Root CLAUDE.md keeps the universal invariants.
 

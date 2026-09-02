@@ -1,4 +1,5 @@
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { nepalTime, nepalBs, nepalCivilDate, nepalDateAd } from '../../../shared/nepalTime'
 import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
@@ -9,8 +10,12 @@ import { escapeHtml as esc } from '../../../utils/escapeHtml'
 // live in-modal preview, and so they can be unit-tested independently of the component.
 
 export function buildKotBotHtml({ station, items, ticketNo, outletName, tableName, takenBy, covers }) {
-  const now          = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  const bs           = adToBs(new Date())
+  const stamp        = new Date()
+  const now          = nepalTime(stamp)
+  // nepalCivilDate pins the day to Nepal before adToBs reads its local getters, so a ticket sent
+  // just after midnight Kathmandu cannot print yesterday's date for a station whose tablet is set
+  // to another zone. adToBs rather than nepalBs: this is today, always inside the table.
+  const bs           = adToBs(nepalCivilDate(stamp))
   const date         = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
   const stationLabel = station === 'BOT' ? 'BAR ORDER TICKET' : 'KITCHEN ORDER TICKET'
 
@@ -54,11 +59,16 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   const invoiceNo   = order.invoice_no != null
     ? `${vatReg ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${esc(order.invoice_fy || '')}`
     : `${vatReg ? 'TI' : 'PB'}-(on confirm)`
-  const now         = new Date()
-  const nowStr      = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  const adDateStr   = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const bs          = adToBs(now)
-  const bsDateStr   = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+  // The bill's OWN moment, not the print moment (S670). This was `new Date()`, so a reprint — and
+  // every preview opened from the Sales Report's Bill Register, which is exactly what that row
+  // click does — stamped the slip with today's date and time. A month-old bill reprinted for a
+  // customer therefore carried the wrong date on the document itself.
+  // Falls back to now only for a bill being closed right now, which has no closed_at yet.
+  const stamp       = order.closed_at ? new Date(order.closed_at) : new Date()
+  const nowStr      = nepalTime(stamp)
+  const adDateStr   = nepalDateAd(stamp)
+  const bs          = nepalBs(stamp)
+  const bsDateStr   = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
   const payLabel    = order.payment_method || ''
   // Split payment — multiple tenders against one bill/one invoice number (not a split bill).
   // `payments` is [{ method, amount }], sourced either from pos_order_payments (real print) or
@@ -162,8 +172,7 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
 // of that person's own payment while the rest of the table is still settling up. The one real
 // invoice still only prints once, at full close, via buildBillHtml above.
 export function buildTenderSlipHtml({ tender, remainingAfter, outletName, tableName }) {
-  const now       = new Date()
-  const nowStr    = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  const nowStr    = nepalTime(new Date())
   const change    = tender.tenderedAmount != null ? Math.max(0, tender.tenderedAmount - tender.amount) : 0
 
   return `<!DOCTYPE html>
@@ -202,11 +211,14 @@ export function buildTenderSlipHtml({ tender, remainingAfter, outletName, tableN
 // retail pricing. Standard practice per restaurant accounting for comps.
 export function buildCompSlipHtml({ order, items, costMap, copyLabel, outletName, tableName, authorizedBy }) {
   const ncNo      = order.invoice_no != null ? `NC-${String(order.invoice_no).padStart(2, '0')}` : 'NC-(on confirm)'
-  const now       = new Date()
-  const nowStr    = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const bs        = adToBs(now)
-  const bsDateStr = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+  // The slip's OWN moment, not the moment it was reprinted — see buildBillHtml above. The
+  // fallback is load-bearing, not padding: the in-modal preview renders before the order is
+  // closed, so closed_at genuinely does not exist yet on that path.
+  const stamp     = order.closed_at ? new Date(order.closed_at) : new Date()
+  const nowStr    = nepalTime(stamp)
+  const adDateStr = nepalDateAd(stamp)
+  const bs        = nepalBs(stamp)
+  const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
 
   const totalQty  = items.reduce((s, i) => s + i.qty, 0)
   const totalCost = items.reduce((s, i) => s + i.qty * (costMap[i.recipe_id] || 0), 0)

@@ -16,6 +16,7 @@ import { escapeHtml as esc } from '../../../utils/escapeHtml'
 // sequential reprints, which don't map) — so a bill and its own credit note, printed minutes
 // apart, carried contradictory copy labels. One definition, one convention.
 import { COPY_LABEL } from '../orders/posOrdersConstants'
+import { nepalTime } from '../../../shared/nepalTime'
 export { COPY_LABEL }
 
 export function buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, copyLabel) {
@@ -23,7 +24,7 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   const prefix = esc(settings.invoice_prefix || '')
   const cnNo   = `CN${creditNote.credit_note_no}-${prefix}${prefix ? '-' : ''}${esc(creditNote.invoice_fy || '')}`
   const now       = new Date(creditNote.created_at || Date.now())
-  const nowStr    = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  const nowStr    = nepalTime(now)
   const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
   const bs        = adToBs(now)
   const bsDateStr = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`

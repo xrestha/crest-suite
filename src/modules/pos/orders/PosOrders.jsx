@@ -22,6 +22,7 @@ import {
   enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
 } from '../../../utils/offlineQueue'
 import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
+import { nepalTime } from '../../../shared/nepalTime'
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   KOT_STATUS_BADGE, KOT_STATUS_LABEL, KOT_STATUS_RANK, kotTimerLabel,
@@ -3578,7 +3579,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     {o.close_type === 'writeoff' && <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>(Complimentary)</span>}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
-                    {o.invoice_no ? `Inv #${o.invoice_no}` : `Order #${o.order_no}`} · {new Date(o.closed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                    {o.invoice_no ? `Inv #${o.invoice_no}` : `Order #${o.order_no}`} · {nepalTime(o.closed_at)}
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

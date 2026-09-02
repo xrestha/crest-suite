@@ -149,6 +149,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
       }
     })
 
+    // Carried back to the caller so the auto-printed voucher can state the entry time the
+    // database actually recorded, not the moment the print ran.
+    let savedCreatedAt = null
     if (editingGroupId) {
       // An edit with nothing to supersede is a contradiction, and the one that would duplicate the
       // bill: the insert below always runs, so if this list were empty we would add a second copy
@@ -160,11 +163,36 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
         setSaving(false); return
       }
 
+      // A bill's entry time has to survive its own corrections (S670). This path INSERTS the
+      // replacement lines and then deletes the originals, so without carrying the stamp forward
+      // every edit restamps created_at to now(): the Purchases list (ordered bs_day, created_at,
+      // id) would jump the bill to the end of its day, and the "Entered" time on screen would
+      // become the moment of the last typo fix rather than when the bill was filed.
+      //
+      // The earliest superseded row wins — that is when this bill entered the book. Lines ADDED
+      // during the edit inherit it too, which is the intent: the insert rewrites every line on
+      // every save, so there is no old-line/new-line distinction to preserve, and a per-line
+      // stamp would make the bill's displayed time depend on which line happened to sort first.
+      // This promotes created_at to a bill-level fact stored per line, exactly as invoice_ref,
+      // payment_method and discount_amount already are on this table.
+      //
+      // The raw string is carried through rather than a re-serialised Date, so Postgres' own
+      // microsecond precision survives. Legacy rows (purchase_group_id IS NULL) need no branch:
+      // editingEntries is the set actually loaded, so the minimum is over the real originals.
+      const billCreatedAt = (editingEntries || [])
+        .map(e => e.created_at)
+        .filter(Boolean)
+        .reduce((a, b) => (a && +new Date(a) <= +new Date(b) ? a : b), null)
+
       // Insert the new lines BEFORE removing the old ones (not delete-then-insert) — if the
       // insert fails partway (network blip, an item deleted mid-edit), the bill keeps its
       // previous, still-valid line items instead of being left with none.
       const { error: insErr } = await supabase.from('purchase_entries')
-        .insert(entries.map(e => ({ ...e, purchase_group_id: editingGroupId })))
+        .insert(entries.map(e => ({
+          ...e,
+          purchase_group_id: editingGroupId,
+          ...(billCreatedAt ? { created_at: billCreatedAt } : {}),
+        })))
       if (insErr) {
         const { text, detail } = asActionError(insErr)
         setError({ text: `${text}
@@ -203,12 +231,17 @@ ${text}`, detail })
       }
     } else {
       const groupId = crypto.randomUUID()
-      const { error: insErr } = await supabase.from('purchase_entries').insert(entries.map(e => ({ ...e, purchase_group_id: groupId })))
+      // .select() the stamp back so the voucher can print the server's own entry time rather than
+      // the browser's clock. Same request, no extra round trip.
+      const { data: ins, error: insErr } = await supabase.from('purchase_entries')
+        .insert(entries.map(e => ({ ...e, purchase_group_id: groupId })))
+        .select('created_at')
       if (insErr) { setError(asActionError(insErr)); setSaving(false); return }
+      savedCreatedAt = ins?.[0]?.created_at || null
     }
 
     setSaving(false)
-    onSaved(billHeader, valid)
+    onSaved(billHeader, valid, savedCreatedAt)
   }
 
   // No QuickCalculator here any more. The form carried its own second instance plus a header

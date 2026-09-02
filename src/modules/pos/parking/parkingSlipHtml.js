@@ -1,13 +1,14 @@
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { scopedUpdate } from '../../../shared/scopedDb'
+import { nepalTime } from '../../../shared/nepalTime'
 
 // Pure 80mm-thermal parking token builder — same shape as posOrderPrintHtml.js/creditNoteHtml.js.
 // Not a bill: no items, no VAT — just a claim ticket so the vehicle number is what a valet reads
 // back to reunite car with customer, so it prints large/bold as the single most prominent line.
 export function buildParkingSlipHtml(slip, outletName, propertyAddress, issuedByName, copyLabel) {
   const now       = new Date(slip.time_in || Date.now())
-  const nowStr    = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  const nowStr    = nepalTime(now)
   const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
   const bs        = adToBs(now)
   const bsDateStr = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`

@@ -131,9 +131,9 @@ export default function PurchaseBillPage() {
   // S404+1 design discussion) so it can be stapled to the vendor's physical bill for approval.
   // `after` runs once the print dialog has closed and the voucher is unmounted: on a route we must
   // not navigate away before that, or the node being printed disappears mid-dialog.
-  function printPurchaseBill(header, validLines, after) {
+  function printPurchaseBill(header, validLines, after, createdAt) {
     const vendor = vendors.find(v => v.id === header.vendor_id)
-    setPrintBill({ header, lines: validLines, vendorName: vendor?.name || '' })
+    setPrintBill({ header, lines: validLines, vendorName: vendor?.name || '', createdAt })
     setTimeout(() => {
       printWithTitle(`Purchase Voucher - ${vendor?.name || 'No Vendor'} - ${formatBsDay(header.bs_day, period?.bs_month) || periodLabel} ${period?.bs_year || ''}`.trim())
       setPrintBill(null)
@@ -175,7 +175,7 @@ export default function PurchaseBillPage() {
   // The save is done; what is left is a print that may still be on screen and a prompt that may
   // still be owed. Both are optional, so neither can be the thing that decides when to leave —
   // a two-sided barrier is. Leaving early would cancel the print dialog or drop the prompt.
-  async function handleBillSaved(header, validLines) {
+  async function handleBillSaved(header, validLines, savedCreatedAt) {
     const wasNew = !isEdit
     let printDone = !wasNew
     let changed = null
@@ -188,7 +188,7 @@ export default function PurchaseBillPage() {
         navigate(listUrl)
       }
     }
-    if (wasNew) printPurchaseBill(header, validLines, () => { printDone = true; exitWhenReady() })
+    if (wasNew) printPurchaseBill(header, validLines, () => { printDone = true; exitWhenReady() }, savedCreatedAt)
     changed = await detectRateChanges(validLines)
     exitWhenReady()
   }
@@ -365,6 +365,7 @@ export default function PurchaseBillPage() {
             period={period}
             bizInfo={bizInfo}
             enteredBy={profile?.full_name || profile?.email || ''}
+            enteredAt={printBill.createdAt}
           />
         </div>
       )}

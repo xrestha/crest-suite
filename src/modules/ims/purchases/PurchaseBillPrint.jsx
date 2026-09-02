@@ -1,4 +1,5 @@
-import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
+import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { getCf, calcBillTotals } from './purchasesHelpers'
 
 // A4 print-only Purchase Entry Voucher — auto-printed right after a new bill is saved (Purchases.js)
@@ -6,10 +7,15 @@ import { getCf, calcBillTotals } from './purchasesHelpers'
 // in purchase units exactly as entered (the pre-conversion `lines` PurchaseBillForm hands back via
 // onSaved), matching what's written on the vendor's bill rather than the base-unit values
 // purchase_entries stores — see CLAUDE.md's "Purchases: qty/rate storage convention".
-export default function PurchaseBillPrint({ header, lines, items, vendorName, period, bizInfo, enteredBy }) {
+export default function PurchaseBillPrint({ header, lines, items, vendorName, period, bizInfo, enteredBy, enteredAt }) {
   const totals = calcBillTotals(lines, header.discount)
   const bsDateStr = period && header.bs_day ? `${header.bs_day} ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : ''
   const fmt = n => n.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const entryStamp = enteredAt || new Date()
+  const entryBs = nepalBs(entryStamp)
+  const enteredOnStr = entryBs
+    ? `${formatBsDay(entryBs.day, entryBs.month)} ${entryBs.year}, ${nepalTime(entryStamp)}`
+    : nepalTime(entryStamp) || '—'
 
   return (
     <div style={{ fontFamily: 'Georgia, serif', color: '#000', padding: '20px 24px', maxWidth: 720, margin: '0 auto' }}>
@@ -32,6 +38,13 @@ export default function PurchaseBillPrint({ header, lines, items, vendorName, pe
         <div><span style={{ color: '#777' }}>Payment: </span><span style={{ fontWeight: 700 }}>{header.payment_method}</span></div>
         <div><span style={{ color: '#777' }}>Invoice Ref: </span><span style={{ fontWeight: 700 }}>{header.invoice_ref || '—'}</span></div>
         <div><span style={{ color: '#777' }}>Entered By: </span><span style={{ fontWeight: 700 }}>{enteredBy || '—'}</span></div>
+        {/* The full BS date and time, not a bare clock time. This voucher gets stapled to the
+            vendor's paper bill and read months later, where the bill's own day sits above and the
+            entry date routinely differs from it — the closed-period workflow exists for exactly
+            that. `enteredAt` is the value the database recorded on the insert; the fallback covers
+            a select that came back empty, which reproduces the old behaviour rather than blanking
+            a printed field. */}
+        <div><span style={{ color: '#777' }}>Entered On: </span><span style={{ fontWeight: 700 }}>{enteredOnStr}</span></div>
       </div>
 
       {/* Line items */}
