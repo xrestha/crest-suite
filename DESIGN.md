@@ -471,6 +471,20 @@ screen. It appears where the product speaks in its own voice — a wordmark, a g
 the whole viewport, a document printed on letterhead — and nowhere else. One serif on a screen is
 a signature; two make it an affectation.
 
+**The Brand Lockup Rule.** The mark and the wordmark name the same brand, or neither is shown. All
+four surfaces that draw the lockup — the sidebar and the three signed-out pages (`/login`,
+`/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the
+client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside
+`settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the sidebar
+and on `/pricing`, `objectFit: contain` on a 4px corner. Only the sidebar carried that conditional
+for its first year; the public pages drew Crest's hexagon unconditionally *while naming the client*,
+so a white-labelled operator met their own name beside somebody else's mark on the page they log in
+through — and on the page a password-reset email lands them on, where a mismatched brand reads as a
+phishing tell rather than as a bug (S606, fixed S667). **The mark is always `alt=""` and
+`aria-hidden`**: the wordmark beside it already names the brand, and a labelled mark announces it
+twice. Product names are not the client's to rebrand — Pricing's plan names stay "Crest IMS" and
+"Crest HR".
+
 **Form controls do not inherit `font-family` and must be told to.** Every browser substitutes its
 own UA default into `<input>`, `<button>`, `<select>` and `<textarea>`. Measured before the single
 rule in `index.css` existed: all 14 controls on the login page, all 13 pricing CTAs and **every

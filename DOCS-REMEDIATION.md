@@ -1,6 +1,6 @@
 # DOCS-REMEDIATION.md
 
-Work order for the Crest Suite repo. Thirteen tasks, ordered. Each has acceptance criteria that can
+Work order for the Crest Suite repo. Fourteen tasks, ordered. Each has acceptance criteria that can
 be checked mechanically. Do not reorder — T1 must land before T2, and T6 is the only one that is
 allowed to jump the queue if a launch date is set.
 
@@ -14,19 +14,29 @@ migration, no service-worker version bump. T6–T8 do change app code and shippi
 Before doing anything below, note what the repo already has. This plan was first written without
 sight of these files and has been corrected against them.
 
-- **`CLAUDE.md`** (51,761 chars) — stack, access control and the three gate types, tier thesis,
-  multi-outlet, subscription access, the four S531 privilege invariants, multi-tenant isolation and
-  `scopedDb`, staff role axes, BS calendar rules, page-splitting, Supabase/DB traps.
-- **`.claude/rules/*.md`** (25 files, ~418k chars) — everything scoped by `paths:`, loaded only when
+**Sizes measured 2026-09-02 (S668).** They move every session — read them as scale, not as figures
+to check against. Every one of them had rotted by the time it was next read, three of them badly:
+`POS_TODO.md` was still listed at its pre-T5 size, the checklist at a step count it outgrew, and
+`POS_DECISIONS.md` was not listed at all.
+
+- **`CLAUDE.md`** (51,241 chars, hard ceiling 53,000 — see T11) — stack, access control and the
+  three gate types, tier thesis, multi-outlet, subscription access, the four S531 privilege
+  invariants, multi-tenant isolation and `scopedDb`, staff role axes, BS calendar rules,
+  page-splitting, Supabase/DB traps.
+- **`.claude/rules/*.md`** (25 files, ~414k chars) — everything scoped by `paths:`, loaded only when
   a matching file is open.
-- **`.claude/skills/new-feature-checklist/SKILL.md`** — the eight-step ship checklist.
-- **`DESIGN.md`** (61,149 chars) — full design system: token set for both presets, the scoped guest
-  menu palette, print ramp, typography, layout, components, do/don't.
-- **`PRODUCT.md`** (4,312 chars) — platform, users (owner/manager primary, accountant secondary),
+- **`.claude/skills/new-feature-checklist/SKILL.md`** — the nine-step ship checklist.
+- **`DESIGN.md`** (62,434 chars) — full design system: token set for both presets, the scoped guest
+  menu palette, print ramp, typography, layout, components, do/don't. Nothing auto-loads it
+  (confirmed under T11), and `.impeccable/design.json` is its generated sidecar.
+- **`PRODUCT.md`** (4,895 chars) — platform, users (owner/manager primary, accountant secondary),
   purpose, competitive positioning, brand personality, anti-references, design principles, data
   ownership, accessibility.
-- **`POS_TODO.md`** (48,595 chars) — a real backlog for the POS module: status key, sections by
-  origin, an explicit out-of-scope section, and a shipped history. Five open items, 59 done. See T5.
+- **`POS_TODO.md`** (2,619 chars) — open POS work only: status key, five open items. See T5, which
+  cut it from 48,595 by moving everything settled into `POS_DECISIONS.md`.
+- **`POS_DECISIONS.md`** (48,638 chars) — the other half of that split: everything POS has shipped
+  or deliberately decided against, rationale intact. It is the record of what has already been
+  considered, and the reason a closed question does not get re-asked.
 
 **The architecture documentation problem is already solved.** Do **not** create an `ARCHITECTURE.md`.
 A fourth copy of the gate model and the isolation rules would drift from the three that exist, and

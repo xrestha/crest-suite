@@ -509,6 +509,24 @@ silently drops the rest — compare and append instead. And **verify `colorMeta`
 `ThemeContext`**, because that is the one check the staleness hint cannot perform and the S627
 finding above is exactly what it misses.
 
+**The middle path is usually the right answer, and it now has a name (S668).** Neither of the two
+the paragraph above frames: refresh the sidecar, *and* edit `DESIGN.md` surgically wherever the
+code has moved past it — no re-extraction, no rewrite. The useful result of running it end to end
+was how little there was to do. Every integrity assertion passed: 51/51 frontmatter colours carry a
+`colorMeta` entry and 17/17 type roles a `typographyMeta` one, every `canonical` equals its
+frontmatter value, every mapped token equals `PRESETS.dark`, the four `*-text` variants plus
+`accent-ink` and `focus-outline` all resolve to their dark fallbacks, and the do's, don'ts and key
+characteristics were already verbatim-identical to the prose. The entire drift was **one rule the
+code had acquired and the file had never been told about**, plus two `typographyMeta` purposes.
+
+**Write those checks as assertions, not as a reading pass.** They run in seconds against
+`DESIGN.md`'s frontmatter, the sidecar and `ThemeContext.js`, and they are the only thing that
+catches the S627 class of defect at all. A clean pass is worth as much as a find — it is what
+tells you the narrow path was sufficient, instead of leaving a rewrite as the only way to be sure.
+Assert the counts across the edit too: the sidecar's `rules`, `dos`, `donts`, `colorMeta`,
+`typographyMeta`, `shadows`, `motion` and `breakpoints` should come out unchanged except where you
+meant to add, which is what proves nothing was silently dropped.
+
 **When a full rewrite IS chosen, the risk is not what it deletes — it is what it silently stops
 covering (S662, 2026-08-31, the one time it has been run).** The rewrite went from 1,022 lines to
 ~900, which was the point; the real damage was in the machine layer, where three omissions each

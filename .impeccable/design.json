@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-31T12:23:21.258Z",
+  "generatedAt": "2026-09-02T02:28:51.000Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -777,7 +777,7 @@
     "typographyMeta": {
       "display": {
         "displayName": "Display",
-        "purpose": "The signed-out hero headline. The only fluid type size in the product."
+        "purpose": "The signed-out hero headline. The only fluid type size in the product. Its line breaks are authored, not left to the measure — block spans, one per line, with text-wrap: balance on the remainder. Break the line before shrinking the type; the size here is load-bearing against a measured viewport budget (S667)."
       },
       "figure-lg": {
         "displayName": "Figure (large)",
@@ -817,7 +817,7 @@
       },
       "wordmark": {
         "displayName": "Wordmark",
-        "purpose": "Georgia. The client’s own white-labelled brand name, in the sidebar and on the signed-out pages."
+        "purpose": "Georgia. The client’s own white-labelled brand name, in the sidebar and on the signed-out pages. Never shown without a mark resolved from the same source — see The Brand Lockup Rule."
       },
       "title": {
         "displayName": "Page Title",
@@ -1025,6 +1025,14 @@
       "description": "The message for the thing the user just pressed. Deliberately not a card: a filled panel under a live form reads as a second section rather than as a consequence of the click. The monospace detail is findable, not readable.",
       "html": "<div class=\"ds-action-error\"><p class=\"ds-action-error-text\">The bill saved but its lines did not — it is holding both versions and will double-count. Reopen the bill and re-enter its lines before closing the period.</p><p class=\"ds-action-error-detail\">23505 &middot; duplicate key value violates unique constraint</p></div>",
       "css": ".ds-action-error { margin: 12px 0 0; max-width: 520px; } .ds-action-error-text { font-size: 13px; color: var(--theme-red-text, #f87171); line-height: 1.5; margin: 0; white-space: pre-line; } .ds-action-error-detail { font-size: 11px; color: var(--theme-text3, #8a92a3); font-family: source-code-pro, Menlo, Monaco, Consolas, monospace; line-height: 1.4; margin: 4px 0 0; word-break: break-word; }"
+    },
+    {
+      "name": "Brand Lockup",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Mark plus wordmark, on the sidebar and all three signed-out pages. Both halves resolve from settings: the client's uploaded logo_url or Crest's hexagon, beside app_name. The mark is decorative — the wordmark already names the brand.",
+      "html": "<div class=\"ds-lockup\"><svg class=\"ds-lockup-mark\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\"/></svg><span class=\"ds-lockup-name\">Crest Suite</span></div>",
+      "css": ".ds-lockup { display: flex; align-items: center; gap: 10px; min-width: 0; } .ds-lockup-mark { width: 26px; height: 26px; flex-shrink: 0; color: var(--theme-accent, #c9a84c); } .ds-lockup-mark--client { border-radius: var(--radius-xs, 4px); object-fit: contain; } .ds-lockup-name { font-family: Georgia, serif; font-size: 20px; font-weight: 700; letter-spacing: 0.03em; color: var(--theme-text1, #e8e0d0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }"
     }
   ],
   "narrative": {
@@ -1243,6 +1251,11 @@
         "name": "Open is structural, not a hue, and that was measured rather than chosen",
         "body": "Tinting the chip amber put its label at **4.19:1 on Light** on 12px text, and every tint from 6% to 12% lands between 4.19 and 4.54 — there is no amber fill here that is both visible and safe. Worse, it was not working anyway: against the closed chip it separated by ΔE 6.0 on Dark and 2.6 on Light, both under the floor. So the provisional state is a **dashed edge** — shape, which survives greyscale, every form of colour blindness and a monochrome print, and cannot fail a contrast check because it is not text — joined by the word OPEN and a `△`. `provisionalWhenOpen` is opt-in, because on a data-entry screen an open period is the normal working state and flagging it would be noise.",
         "section": "components"
+      },
+      {
+        "name": "The Brand Lockup Rule",
+        "body": "The mark and the wordmark name the same brand, or neither is shown. All four surfaces that draw the lockup — the sidebar and the three signed-out pages (`/login`, `/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside `settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the sidebar and on `/pricing`, `objectFit: contain` on a 4px corner. Only the sidebar carried that conditional for its first year; the public pages drew Crest's hexagon unconditionally *while naming the client*, so a white-labelled operator met their own name beside somebody else's mark on the page they log in through — and on the page a password-reset email lands them on, where a mismatched brand reads as a phishing tell rather than as a bug (S606, fixed S667). **The mark is always `alt=\"\"` and `aria-hidden`**: the wordmark beside it already names the brand, and a labelled mark announces it twice. Product names are not the client's to rebrand — Pricing's plan names stay \"Crest IMS\" and \"Crest HR\".",
+        "section": "typography"
       }
     ],
     "dos": [
