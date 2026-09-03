@@ -52,6 +52,7 @@ REACT_APP_VAPID_PUBLIC_KEY
 | `src/context/` | Auth, settings and theme providers. Singular `context` — the plural is a glob that has already rotted once |
 | `src/utils/` | Standalone helpers: BS calendar, expression evaluator, subscription state, timeouts |
 | `src/data/` | `pricingPlans.js` — the single source of truth for plans and prices |
+| `src/legal/` | The published Terms and Privacy Policy as markdown, their content hashes, and the registry the acceptance flow stamps. Edit a `.md` and re-run `node scripts/hash-legal.mjs`; a test fails if you forget |
 | `supabase/` | Migrations and Edge Functions |
 | `scripts/` | Build, audit and docs-check scripts, all reachable from `package.json` |
 | `public/` | PWA shell and service worker, plus the second manifest for the staff app |

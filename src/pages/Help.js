@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { MODULE_COLORS, MODULE_INK, colorTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
+
+// Lazy for the same reason Settings lazy-loads its Guides tab: this one runs a query and carries
+// its own table, and every other tab would otherwise pay for it on first paint of /help.
+const LegalTab = lazy(() => import('./help/LegalTab'))
 
 // ── IMS feature data, grouped by plan tier (Getting Started module guide — distinct from the
 // IMS_TIERS pricing data imported above) ─────────────────────────────────────
@@ -1012,6 +1016,7 @@ export default function Help() {
           { id: 'glossary', label: 'Glossary' },
           { id: 'faq',     label: 'FAQ' },
           { id: 'pricing', label: '💎 Pricing' },
+          { id: 'legal',   label: 'Legal' },
         ].map((s, i, arr) => (
           /* .panel-tab is the underline-tab family DESIGN.md added for exactly this shape, and it
              brings the hover state and the coarse-pointer 44px floor an inline style cannot carry.
@@ -1708,6 +1713,12 @@ export default function Help() {
             </div>
           ))}
         </div>
+      )}
+
+      {activeSection === 'legal' && (
+        <Suspense fallback={<p style={{ fontSize: 13, color: 'var(--theme-text3)' }}>Loading…</p>}>
+          <LegalTab />
+        </Suspense>
       )}
 
       </>}

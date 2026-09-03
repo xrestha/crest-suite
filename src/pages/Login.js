@@ -6,6 +6,7 @@ import { useSettings } from '../context/SettingsContext'
 import { useCapsLock } from '../shared/hooks/useCapsLock'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
 import { TRIAL_DAYS } from '../data/pricingPlans'
+import { acceptancePayload, legalPath } from '../legal'
 import { supabase } from '../supabaseClient'
 import FieldError, { fieldAria } from '../components/FieldError'
 import './Login.css'
@@ -138,6 +139,10 @@ export default function Login() {
   const [tError, setTError]     = useState('')
   const [tFieldErr, setTFieldErr] = useState({})
   const [tLoading, setTLoading] = useState(false)
+  // Unchecked by default and required, which is the whole difference between a clickwrap and
+  // the passive sentence this replaced. The server refuses the signup without it too --
+  // a consent control the browser can skip is not a consent control.
+  const [tLegal, setTLegal]     = useState(false)
   const [trialSuccess, setTrialSuccess] = useState(false)
   const [trialCaps, trialCapsHandlers] = useCapsLock()
 
@@ -186,6 +191,7 @@ export default function Login() {
     if (!tEmail.trim())                      errs['trial-email'] = 'Email is required.'
     else if (!EMAIL_RE.test(tEmail.trim()))  errs['trial-email'] = 'Enter a valid email address.'
     if (!tPhone.trim())                      errs['trial-phone'] = 'Phone number is required.'
+    if (!tLegal)                             errs['trial-legal'] = 'Please accept the Terms of Service and Privacy Policy to continue.'
     if (!tPass)                              errs['trial-password'] = 'Password is required.'
     else if (tPass.length < MIN_PASSWORD_LENGTH) {
       errs['trial-password'] = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
@@ -195,7 +201,7 @@ export default function Login() {
     }
 
     setTFieldErr(errs)
-    const firstInvalid = ['trial-biz', 'trial-email', 'trial-password', 'trial-phone'].find(id => errs[id])
+    const firstInvalid = ['trial-biz', 'trial-email', 'trial-password', 'trial-phone', 'trial-legal'].find(id => errs[id])
     if (firstInvalid) { document.getElementById(firstInvalid)?.focus(); return }
 
     setTLoading(true)
@@ -206,6 +212,12 @@ export default function Login() {
         phone:         tPhone.trim(),
         email:         tEmail.trim().toLowerCase(),
         password:      tPass,
+        // The version and hash of what was actually on screen, from the bundle this browser has
+        // loaded -- not what the server happens to think is current. The two can differ for as
+        // long as a cached bundle survives a deploy. No IP, no user agent, no identity: those are
+        // read server-side off the request, because a subject that supplies its own attribution
+        // has not been attributed.
+        accepted_legal: acceptancePayload(),
       })
       const { error: signInErr } = await signIn(tEmail.trim().toLowerCase(), tPass)
       if (signInErr) {
@@ -475,8 +487,36 @@ export default function Login() {
                   here said the same thing as the hero eyebrow and this band's own subline — three
                   statements of one fact, on a page that has to fit a viewport. It now lives in the
                   subline above only. */}
-              <p className="login-consent">
-                By starting a trial you agree to our Terms of Service and Privacy Policy.
+              {/* This was a passive sentence — "By starting a trial you agree to our Terms of
+                  Service and Privacy Policy" — naming two documents that did not exist, as plain
+                  unlinked text, with nothing recorded anywhere. Under the Electronic Transactions
+                  Act 2063 an e-contract needs clearly expressed offer and acceptance; passive
+                  notice is the weakest form of both, and unlinked passive notice of a document
+                  nobody can read is not notice at all.
+
+                  Now: unchecked by default, required, with both documents one click away in a new
+                  tab so the form state survives the trip. The acceptance is recorded server-side
+                  against the version and hash shown here. The label wraps the checkbox, so it is
+                  associated without needing htmlFor. */}
+              <label className="login-consent login-consent--check">
+                <input
+                  id="trial-legal"
+                  type="checkbox"
+                  checked={tLegal}
+                  onChange={e => { setTLegal(e.target.checked); if (e.target.checked) setTFieldErr(p => ({ ...p, 'trial-legal': undefined })) }}
+                  {...trialFieldAria('trial-legal')}
+                />
+                <span>
+                  I have read and agree to the{' '}
+                  <a href={legalPath('terms')} target="_blank" rel="noopener noreferrer">Terms of Service</a>
+                  {' '}and{' '}
+                  <a href={legalPath('privacy')} target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+                  {' '}on behalf of my business.
+                </span>
+              </label>
+              {trialFieldError('trial-legal')}
+              <p className="login-consent login-consent--sub">
+                You are creating a {TRIAL_DAYS}-day free trial. No card required.
               </p>
             </form>
           )}
@@ -484,10 +524,17 @@ export default function Login() {
         </section>
       </main>
 
-      {/* One line, no links: the only one it had was Pricing, which is already a button in the
-          header 900px above — a second route to the same page reads as a different destination. */}
+      {/* Was one line with no links, on the reasoning that its only candidate (Pricing) was
+          already a button in the header. Terms and Privacy are the exception that earns a place:
+          a legal document nobody can find from the page that binds them to it is not published,
+          and every other public surface now carries the same pair. */}
       <footer className="login-footer">
         © {new Date().getFullYear()} {settings?.app_name || 'Crest Suite'} · Built for Nepal's F&amp;B industry
+        <span className="login-footer-legal">
+          <a href={legalPath('terms')}>Terms of Service</a>
+          <span aria-hidden="true"> · </span>
+          <a href={legalPath('privacy')}>Privacy Policy</a>
+        </span>
       </footer>
     </div>
   )

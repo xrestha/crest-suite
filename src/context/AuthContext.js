@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
 import { getAccessState } from '../utils/subscription'
+import { DOC_TYPES, legalDoc } from '../legal'
 
 const AuthContext = createContext({})
 
@@ -106,6 +107,11 @@ export function AuthProvider({ children }) {
   const [session, setSession]                   = useState(null)
   const [profile, setProfile]                   = useState(null)
   const [featureFlags, setFeatureFlags]         = useState({})
+  // Acceptance rows for the documents that currently demand re-acceptance. [] = none outstanding,
+  // null = the read FAILED and we must not conclude anything from it. Those two have to stay
+  // distinguishable: treating a failed read as "nothing accepted" would gate every owner in the
+  // product behind a modal the moment the table became unreachable.
+  const [legalAccepted, setLegalAccepted]       = useState([])
   const [loading, setLoading]                   = useState(true)
   const [ready, setReady]                       = useState(false)
   const [adminViewClientId, setAdminViewClientId]     = useState(() => localStorage.getItem('crest_admin_client_id') || null)
@@ -247,6 +253,31 @@ export function AuthProvider({ children }) {
           data.clients = client
           setFeatureFlags(flags || {})
           setOutlets(prev => nextOutletsOrSame(prev, client, siblings))
+        }
+
+        // Legal re-acceptance. Deliberately shaped like the profile_outlet_access read below: it is
+        // skipped entirely unless some document actually demands re-acceptance, so while
+        // requiresReacceptance is false everywhere (which it is for v1.0) this costs the hot path
+        // exactly nothing and never touches a table a given deployment may not have migrated yet.
+        //
+        // Owner only — staff are not the contracting party and are never gated, so fetching this
+        // for them would be a query whose answer is unused.
+        //
+        // It fails OPEN. On any error `rows` is null, the gate stays down, and the app keeps
+        // working; a missing table, an RLS refusal or a dropped connection must never lock every
+        // owner out of the product. Same stance as getAccessState.
+        const reacceptDocs = DOC_TYPES.filter(t => legalDoc(t)?.requiresReacceptance)
+        const profileIsOwner = data.role === 'client'
+          && !data.pos_role && !data.ims_role && !data.hr_role && !data.hr_self_service
+        if (mounted && reacceptDocs.length && profileIsOwner) {
+          const { data: rows, error: legalErr } = await supabase
+            .from('legal_acceptances')
+            .select('doc_type, doc_version')
+            .eq('client_id', effectiveClientId)
+            .in('doc_type', reacceptDocs)
+          if (mounted) setLegalAccepted(legalErr ? null : (rows || []))
+        } else if (mounted) {
+          setLegalAccepted([])
         }
 
         // The outlet allowlist is fetched SECOND and only for a grouped client — deliberately not
@@ -505,6 +536,17 @@ export function AuthProvider({ children }) {
   // account type belonging to the client — Owner, IMS/HR/POS staff, POS PIN tills — is not.
   const clientRecord  = profile?.clients
   const accessState   = useMemo(() => getAccessState(clientRecord), [clientRecord])
+
+  // A document that demands re-acceptance and has no matching row for this client's CURRENT
+  // version. `null` means the read failed, which is treated as "not required" — see the fetch.
+  const legalReacceptRequired = useMemo(() => {
+    if (isAdmin || !isOwner || legalAccepted === null) return false
+    return DOC_TYPES.some(t => {
+      const doc = legalDoc(t)
+      if (!doc?.requiresReacceptance) return false
+      return !legalAccepted.some(r => r.doc_type === t && r.doc_version === doc.version)
+    })
+  }, [isAdmin, isOwner, legalAccepted])
   const accessLocked  = !isAdmin && accessState.locked
   const accessReason  = accessState.reason
   const graceDaysLeft = accessState.graceLeft
@@ -537,6 +579,7 @@ export function AuthProvider({ children }) {
       plan,
       isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
       accessLocked, accessReason, graceDaysLeft,
+      legalReacceptRequired, refreshProfile: () => session?.user?.id && fetchProfile(session.user.id),
       featureFlags, hasFeature,
       // Multi-outlet. `outlets` is [] for everyone not in a group, so every consumer of these
       // degrades to today's single-outlet behavior without a special case.

@@ -8,6 +8,159 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+/**
+ * Deletes every business row belonging to one client, in FK-safe order.
+ *
+ * Extracted from the `deleteClientData` action (S672) so the automatic trial purge can reuse the
+ * exact same sequence rather than carrying a second copy. That mattered more here than anywhere
+ * else in this function: this is the most destructive code in the product, it is ~130 lines of
+ * hand-ordered deletes, and a second copy would drift the first time a table was added to one and
+ * not the other -- silently, because the symptom is a row that quietly survives a wipe.
+ *
+ * Throws on the first failure, by design: a half-deleted client must be visible, not reported as a
+ * success. Callers translate the throw into their own error shape.
+ *
+ * @param keepStaffVault Archive passes true -- it keeps every auth login, and the vault rows key on
+ *   those user ids, so deleting them would irreversibly lose every staff PIN on a path the product
+ *   calls fully reversible (S574).
+ */
+async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clientId: string, keepStaffVault = false) {
+  const keep_staff_vault = keepStaffVault
+  // keep_staff_vault: passed by Archive. Archive keeps every auth login, and the vault rows
+  // key on those user ids — deleting them made the product's "fully reversible" path
+  // irreversibly lose every staff PIN: the restore's vault-rebuild branch only runs when the
+  // client has NO logins left, which is exactly the state Archive never produces (S574).
+
+  async function del(query: Promise<{ error: unknown }>, label: string) {
+    const { error } = await query
+    if (error) throw new Error(`Failed to delete ${label}: ${(error as { message?: string }).message ?? String(error)}`)
+  }
+
+  const { data: periods } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)
+  const periodIds = (periods || []).map((p: { id: string }) => p.id)
+
+  const { data: recipeRows } = await admin.from('recipes').select('id').eq('client_id', clientId)
+  const recipeIds = (recipeRows || []).map((r: { id: string }) => r.id)
+
+  const { data: poRows } = await admin.from('purchase_orders').select('id').eq('client_id', clientId)
+  const poIds = (poRows || []).map((p: { id: string }) => p.id)
+
+  const { data: reqRows } = await admin.from('requisitions').select('id').eq('client_id', clientId)
+  const reqIds = (reqRows || []).map((r: { id: string }) => r.id)
+
+  if (recipeIds.length > 0) {
+    await del(admin.from('recipe_ingredients').delete().in('recipe_id', recipeIds), 'recipe_ingredients')
+    await del(admin.from('recipe_suggestions').delete().in('recipe_id', recipeIds), 'recipe_suggestions')
+    await del(admin.from('recipe_suggestions').delete().in('suggest_recipe_id', recipeIds), 'recipe_suggestions (reverse)')
+  }
+  if (poIds.length > 0) {
+    await del(admin.from('purchase_order_items').delete().in('po_id', poIds), 'purchase_order_items')
+  }
+  if (reqIds.length > 0) {
+    await del(admin.from('requisition_lines').delete().in('requisition_id', reqIds), 'requisition_lines')
+  }
+
+  if (periodIds.length > 0) {
+    const { data: peRows } = await admin.from('purchase_entries').select('id').in('period_id', periodIds)
+    const peIds = (peRows || []).map((r: { id: string }) => r.id)
+    if (peIds.length > 0) {
+      await del(admin.from('payable_payments').delete().in('purchase_entry_id', peIds), 'payable_payments')
+    }
+    await del(admin.from('purchase_entries').delete().in('period_id', periodIds), 'purchase_entries')
+    await del(admin.from('vendor_returns').delete().in('period_id', periodIds), 'vendor_returns')
+    await del(admin.from('opening_stock').delete().in('period_id', periodIds), 'opening_stock')
+    await del(admin.from('closing_stock').delete().in('period_id', periodIds), 'closing_stock')
+    await del(admin.from('wastages').delete().in('period_id', periodIds), 'wastages')
+    await del(admin.from('staff_meals').delete().in('period_id', periodIds), 'staff_meals')
+    await del(admin.from('sales_entries').delete().in('period_id', periodIds), 'sales_entries')
+    await del(admin.from('budgets').delete().in('period_id', periodIds), 'budgets')
+  }
+
+  // POS module data (orders reference tables; movements/orders must go before periods)
+  // Circular FK: pos_orders.credit_note_id -> pos_credit_notes.id AND
+  // pos_credit_notes.order_id -> pos_orders.id, neither ON DELETE CASCADE.
+  // Null the order-side link first or deleting pos_credit_notes fails.
+  await del(admin.from('pos_orders').update({ credit_note_id: null }).eq('client_id', clientId), 'pos_orders.credit_note_id reset')
+  await del(admin.from('pos_credit_notes').delete().eq('client_id', clientId), 'pos_credit_notes')
+  await del(admin.from('pos_payment_confirmations').delete().eq('client_id', clientId), 'pos_payment_confirmations')
+  await del(admin.from('pos_guest_order_requests').delete().eq('client_id', clientId), 'pos_guest_order_requests')
+  const { data: orderRows } = await admin.from('pos_orders').select('id').eq('client_id', clientId)
+  const orderIds = (orderRows || []).map((o: { id: string }) => o.id)
+  if (orderIds.length > 0) {
+    await del(admin.from('pos_order_items').delete().in('order_id', orderIds), 'pos_order_items')
+  }
+  await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
+  // Before orders/shifts — its FKs to both are ON DELETE SET NULL.
+  await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
+  await del(admin.from('pos_loyalty_ledger').delete().eq('client_id', clientId), 'pos_loyalty_ledger')
+  await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
+  await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
+  await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
+  await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
+  await del(admin.from('pos_loyalty_schemes').delete().eq('client_id', clientId), 'pos_loyalty_schemes')
+  await del(admin.from('pos_parking_slips').delete().eq('client_id', clientId), 'pos_parking_slips')
+  await del(admin.from('pos_tables').delete().eq('client_id', clientId), 'pos_tables')
+
+  // HR module data (payslips reference runs; attendance/payroll reference monthly_periods)
+  const { data: runRows } = await admin.from('hr_payroll_runs').select('id').eq('client_id', clientId)
+  const runIds = (runRows || []).map((r: { id: string }) => r.id)
+  if (runIds.length > 0) {
+    await del(admin.from('hr_payslips').delete().in('run_id', runIds), 'hr_payslips')
+  }
+  await del(admin.from('hr_payroll_runs').delete().eq('client_id', clientId), 'hr_payroll_runs')
+  // Before hr_advance_repayments (whose final_settlement_id points at it) and before
+  // hr_employees, so neither is left referencing a row that no longer exists.
+  await del(admin.from('hr_final_settlements').delete().eq('client_id', clientId), 'hr_final_settlements')
+  await del(admin.from('hr_attendance').delete().eq('client_id', clientId), 'hr_attendance')
+  await del(admin.from('hr_leave_requests').delete().eq('client_id', clientId), 'hr_leave_requests')
+  await del(admin.from('hr_overtime_entries').delete().eq('client_id', clientId), 'hr_overtime_entries')
+  await del(admin.from('hr_festival_allowances').delete().eq('client_id', clientId), 'hr_festival_allowances')
+  await del(admin.from('hr_advance_repayments').delete().eq('client_id', clientId), 'hr_advance_repayments')
+  await del(admin.from('hr_advances').delete().eq('client_id', clientId), 'hr_advances')
+  await del(admin.from('hr_roster').delete().eq('client_id', clientId), 'hr_roster')
+  // hr_tada_claim_items cascades from hr_tada_claims; hr_incentives.config_id SET NULLs on config delete
+  await del(admin.from('hr_tada_claims').delete().eq('client_id', clientId), 'hr_tada_claims')
+  await del(admin.from('hr_incentives').delete().eq('client_id', clientId), 'hr_incentives')
+  await del(admin.from('hr_incentive_configs').delete().eq('client_id', clientId), 'hr_incentive_configs')
+  await del(admin.from('hr_roster_publish_state').delete().eq('client_id', clientId), 'hr_roster_publish_state')
+  await del(admin.from('hr_shift_swap_requests').delete().eq('client_id', clientId), 'hr_shift_swap_requests')
+  await del(admin.from('hr_salary_components').delete().eq('client_id', clientId), 'hr_salary_components')
+  await del(admin.from('hr_employees').delete().eq('client_id', clientId), 'hr_employees')
+  await del(admin.from('hr_leave_types').delete().eq('client_id', clientId), 'hr_leave_types')
+  await del(admin.from('hr_holiday_calendar').delete().eq('client_id', clientId), 'hr_holiday_calendar')
+  await del(admin.from('hr_shift_types').delete().eq('client_id', clientId), 'hr_shift_types')
+
+  await del(admin.from('purchase_orders').delete().eq('client_id', clientId), 'purchase_orders')
+  await del(admin.from('requisitions').delete().eq('client_id', clientId), 'requisitions')
+  await del(admin.from('overheads').delete().eq('client_id', clientId), 'overheads')
+  await del(admin.from('par_levels').delete().eq('client_id', clientId), 'par_levels')
+  await del(admin.from('demand_forecast_daily').delete().eq('client_id', clientId), 'demand_forecast_daily')
+  await del(admin.from('demand_forecast_run_log').delete().eq('client_id', clientId), 'demand_forecast_run_log')
+  // No FK cascade from monthly_owner_reports.period_id -> monthly_periods.id — must go first.
+  await del(admin.from('monthly_owner_reports').delete().eq('client_id', clientId), 'monthly_owner_reports')
+  await del(admin.from('monthly_periods').delete().eq('client_id', clientId), 'monthly_periods')
+  await del(admin.from('recipes').delete().eq('client_id', clientId), 'recipes')
+  await del(admin.from('items').delete().eq('client_id', clientId), 'items')
+  await del(admin.from('ims_gate_passes').delete().eq('client_id', clientId), 'ims_gate_passes')
+  await del(admin.from('assets_depreciation_schedule').delete().eq('client_id', clientId), 'assets_depreciation_schedule')
+  await del(admin.from('assets_depreciation_runs').delete().eq('client_id', clientId), 'assets_depreciation_runs')
+  await del(admin.from('assets_tax_pool_lines').delete().eq('client_id', clientId), 'assets_tax_pool_lines')
+  await del(admin.from('assets_tax_pool_runs').delete().eq('client_id', clientId), 'assets_tax_pool_runs')
+  await del(admin.from('assets_repair_expenses').delete().eq('client_id', clientId), 'assets_repair_expenses')
+  await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
+  await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')
+  await del(admin.from('vendors').delete().eq('client_id', clientId), 'vendors')
+  await del(admin.from('categories').delete().eq('client_id', clientId), 'categories')
+  // Cascades from both profiles and clients, so this is belt-and-braces rather than required —
+  // but CLAUDE.md step 7 asks for every client-scoped table to be listed explicitly, and a
+  // table that only ever cleans itself up implicitly is the kind that gets missed when the
+  // cascade is later changed. app_secrets is deliberately absent: it is app-wide, not
+  // per-client, and must never be touched by a client clear/delete path.
+  if (!keep_staff_vault) {
+    await del(admin.from('staff_pin_vault').delete().eq('client_id', clientId), 'staff_pin_vault')
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -56,11 +209,130 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── Automatic trial purge — called by pg_cron, authenticated by a shared secret ──────
+    //
+    // The Terms (4.3, 7.6) and Privacy Policy (9) promise a lapsed trial's data is deleted 15 days
+    // after the trial ends. `trial_purge_at` had been written at every signup since the form was
+    // built and NOTHING acted on it, so that was a published retention commitment with no
+    // mechanism -- the kind of gap a regulator reads as a misrepresentation rather than a bug.
+    //
+    // This runs unattended against live tenant data, which makes it the most dangerous code in the
+    // product. Everything below is arranged around one question: what would have to be true for
+    // this to delete a PAYING customer?
+    //
+    // The realistic path is an admin who takes payment and forgets to press "Convert to paid" --
+    // `is_trial` is cleared by that button and by nothing else, so the flag alone is not evidence.
+    // Hence six independent guards, ALL of which must hold, any one of which is enough to save a
+    // real customer. They are evaluated in SQL by trials_due_for_purge() (migration
+    // 20260903150000) rather than here, so the decision is auditable without reading Deno.
+    //
+    // This branch does NOT re-decide anything. It reads blocked_reason and obeys it. Two
+    // implementations of "may this be deleted" is how a preview comes to lie -- the same reasoning
+    // push_master_data's dry run already follows.
+    if (action === 'purge_due_trials') {
+      const given = req.headers.get('x-purge-secret') || ''
+      const { data: secretRow } = await admin.from('app_secrets').select('purge_secret').eq('id', 1).single()
+      const expected = secretRow?.purge_secret || ''
+      // Length-independent comparison of fixed-size digests, same shape billing-export uses.
+      const enc = new TextEncoder()
+      const [gh, eh] = await Promise.all([
+        crypto.subtle.digest('SHA-256', enc.encode(given)),
+        crypto.subtle.digest('SHA-256', enc.encode(expected)),
+      ])
+      const ga = new Uint8Array(gh), ea = new Uint8Array(eh)
+      let diff = expected ? 0 : 1
+      for (let i = 0; i < ga.length; i++) diff |= ga[i] ^ ea[i]
+      if (diff !== 0) return json({ error: 'Unauthorized' }, 401)
+
+      // dry_run defaults TRUE. An unattended deleter whose default is "delete" is one typo in a
+      // cron expression away from being fired by hand with no arguments.
+      const dryRun = params?.dry_run !== false
+      const { data: due, error: dueErr } = await admin.rpc('trials_due_for_purge')
+      if (dueErr) return json({ error: dueErr.message }, 500)
+
+      const results: Array<Record<string, unknown>> = []
+      type DueRow = { client_id: string; client_name: string; blocked_reason: string | null }
+      for (const row of (due || []) as DueRow[]) {
+        // Held back by one of the six guards. Logged rather than skipped in silence: "four trials
+        // are overdue and none has a backup" is something an operator has to be able to see and
+        // act on (usually by opening Admin -> Clients so the pre-purge backup runs). A job that
+        // quietly did nothing would look identical to one with nothing to do.
+        if (row.blocked_reason) {
+          if (!dryRun) {
+            await admin.from('trial_purge_log').insert({
+              client_id: row.client_id, client_name: row.client_name,
+              outcome: 'skipped', detail: row.blocked_reason,
+            })
+          }
+          results.push({ client_id: row.client_id, name: row.client_name, action: 'skipped', reason: row.blocked_reason })
+          continue
+        }
+        if (dryRun) {
+          results.push({ client_id: row.client_id, name: row.client_name, action: 'would_purge' })
+          continue
+        }
+        try {
+          // keep_staff_vault false: this is a real end-of-life delete, not Archive's reversible one.
+          await deleteClientDataFor(admin, row.client_id, false)
+          // The clients row SURVIVES, deactivated and stamped. Deleting it would take
+          // legal_acceptances' client_id with it (ON DELETE SET NULL) and erase which business the
+          // consent record belonged to -- and that record is retained 7 years by the same policy
+          // this job exists to honour. Customer Data is deleted; the account shell is not.
+          await admin.from('clients').update({
+            is_active: false,
+            trial_purged_at: new Date().toISOString(),
+          }).eq('id', row.client_id)
+          await admin.from('trial_purge_log').insert({
+            client_id: row.client_id, client_name: row.client_name, outcome: 'purged',
+          })
+          results.push({ client_id: row.client_id, name: row.client_name, action: 'purged' })
+        } catch (e) {
+          const message = (e as Error).message
+          // Logged and continued, never rethrown: one client whose delete hits an FK must not stop
+          // the other five, and a job that dies silently mid-sweep is worse than one that reports.
+          console.error('[purge_due_trials]', row.client_id, message)
+          await admin.from('trial_purge_log').insert({
+            client_id: row.client_id, client_name: row.client_name, outcome: 'failed', detail: message,
+          })
+          results.push({ client_id: row.client_id, name: row.client_name, action: 'failed', error: message })
+        }
+      }
+
+      const purged = results.filter((r) => r.action === 'purged').length
+      const skipped = results.filter((r) => r.action === 'skipped').length
+      const failed = results.filter((r) => r.action === 'failed').length
+      return json({ success: true, dry_run: dryRun, considered: results.length, purged, skipped, failed, results })
+    }
+
     // ── Self-service trial signup — no admin auth required ────────────────────
     if (action === 'register_trial') {
-      const { business_name, email, password, full_name, phone } = params
+      const { business_name, email, password, full_name, phone, accepted_legal } = params
       if (!business_name || !email || !password) {
         return json({ error: 'business_name, email and password are required' }, 400)
+      }
+
+      // The clickwrap is enforced HERE, not only by the checkbox. A consent control the browser can
+      // skip is not a consent control -- the same reasoning as S531 invariant #3, where the POS and
+      // Self-Service PIN lockouts were called around rather than through and therefore did nothing.
+      // Anyone can POST this endpoint directly; if the acceptance were optional server-side, the
+      // checkbox would be decoration and the ledger would have holes exactly where someone chose to
+      // create them.
+      //
+      // Shape only. The version and hash describe what the BROWSER had loaded and displayed, which
+      // is the fact worth recording -- the server cannot know it, and hardcoding a copy here would
+      // be a second source of truth that drifts from src/legal/ on the first document edit.
+      const LEGAL_DOC_TYPES = ['terms', 'privacy']
+      const legalRows = []
+      for (const docType of LEGAL_DOC_TYPES) {
+        const entry = accepted_legal?.[docType]
+        const version = typeof entry?.version === 'string' ? entry.version.trim() : ''
+        const sha = typeof entry?.sha256 === 'string' ? entry.sha256.trim().toLowerCase() : ''
+        if (!version || version.length > 20 || !/^[0-9a-f]{64}$/.test(sha)) {
+          return json({
+            error: 'You must accept the Terms of Service and Privacy Policy to create an account.',
+          }, 400)
+        }
+        legalRows.push({ docType, version, sha })
       }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: 'A valid email is required' }, 400)
       if (password.length < 8) return json({ error: 'Password must be at least 8 characters' }, 400)
@@ -73,6 +345,9 @@ Deno.serve(async (req) => {
       // Per-IP first, then a global circuit breaker so a distributed attempt still can't run away
       // — a real product doing 30 genuine signups in one hour is a good problem to notice manually.
       const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'
+      // Read off the request, never from the payload. Trimmed because a user agent is
+      // attacker-controlled text and there is no reason to store an unbounded string.
+      const userAgent = (req.headers.get('user-agent') || '').slice(0, 400) || null
       const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
 
       const { count: ipCount } = await admin
@@ -169,6 +444,42 @@ Deno.serve(async (req) => {
         return json({ error: profileErr.message }, 400)
       }
 
+      // The acceptance ledger. Written LAST, because it references the client and the user, and
+      // BLOCKING with a rollback rather than best-effort -- an account that exists with no record
+      // of what its owner agreed to is precisely the state this whole change exists to end, so
+      // creating one silently would be worse than refusing the signup. Same rollback shape the
+      // profile failure above already uses.
+      const acceptedAt = new Date().toISOString()
+      const { error: legalErr } = await admin.from('legal_acceptances').insert(
+        legalRows.map((r) => ({
+          client_id:      client.id,
+          client_name:    business_name,
+          user_id:        authData.user.id,
+          user_email:     email,
+          doc_type:       r.docType,
+          doc_version:    r.version,
+          content_sha256: r.sha,
+          method:         'clickwrap_trial',
+          accepted_at:    acceptedAt,
+          ip_address:     ip,
+          user_agent:     userAgent,
+        }))
+      )
+      if (legalErr) {
+        await admin.auth.admin.deleteUser(authData.user.id)
+        await admin.from('clients').delete().eq('id', client.id)
+        console.error('[register_trial] legal_acceptances insert failed:', legalErr.message)
+        return json({ error: 'Could not record your acceptance of the Terms. Please try again.' }, 500)
+      }
+
+      // Summary state for the admin list. Not the record of authority -- legal_acceptances is --
+      // so a failure here is logged and swallowed rather than undoing a completed signup.
+      const { error: statusErr } = await admin
+        .from('clients').update({ agreement_status: 'trial_accepted' }).eq('id', client.id)
+      if (statusErr) {
+        console.error('[register_trial] agreement_status update failed:', statusErr.message)
+      }
+
       return json({ success: true })
     }
 
@@ -200,6 +511,127 @@ Deno.serve(async (req) => {
     const isPosPrivileged    = isCallerAdmin || isCallerPosManager || isCallerOwner
     const isImsPrivileged    = isCallerAdmin || isCallerImsManager || isCallerOwner
     const isHrPrivileged     = isCallerAdmin || isCallerHrManager || isCallerOwner
+
+    // ── Legal acceptance, recorded server-side ───────────────────────────────
+    // Both actions below exist for one reason: the address, the identity and the timestamp on an
+    // acceptance row have to be OBSERVED, not supplied. A browser cannot know its own public IP,
+    // and a subject that chooses its own attribution has not been attributed. So the payload
+    // carries only which document version was on screen; everything that makes the row evidence is
+    // read here off the request and the verified JWT.
+    if (action === 'record_legal_acceptance') {
+      // Owner only. Staff are not the contracting party -- a waiter with a POS PIN cannot bind the
+      // business, and letting them clear the gate would defeat the point of having one.
+      if (!isCallerOwner && !isCallerAdmin) return json({ error: 'Forbidden' }, 403)
+      if (!profile?.client_id) return json({ error: 'No client on this account' }, 400)
+
+      const accepted = params?.accepted_legal
+      const rows = []
+      for (const docType of ['terms', 'privacy']) {
+        const entry = accepted?.[docType]
+        if (!entry) continue
+        const version = typeof entry.version === 'string' ? entry.version.trim() : ''
+        const sha = typeof entry.sha256 === 'string' ? entry.sha256.trim().toLowerCase() : ''
+        if (!version || version.length > 20 || !/^[0-9a-f]{64}$/.test(sha)) {
+          return json({ error: 'Malformed acceptance payload' }, 400)
+        }
+        rows.push({ docType, version, sha })
+      }
+      if (!rows.length) return json({ error: 'Nothing to accept' }, 400)
+
+      const { data: clientRow } = await admin
+        .from('clients').select('name').eq('id', profile.client_id).single()
+
+      const { error: insErr } = await admin.from('legal_acceptances').insert(
+        rows.map((r) => ({
+          client_id:      profile.client_id,
+          client_name:    clientRow?.name || null,
+          user_id:        user.id,
+          user_email:     user.email || null,
+          doc_type:       r.docType,
+          doc_version:    r.version,
+          content_sha256: r.sha,
+          method:         'clickwrap_reaccept',
+          ip_address:     (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown',
+          user_agent:     (req.headers.get('user-agent') || '').slice(0, 400) || null,
+        }))
+      )
+      // Loud, not swallowed: the caller is being held at a blocking gate, and telling them the
+      // acceptance landed when it did not would leave them stuck on the next page load with no
+      // explanation. There is an action they can take -- try again -- so this belongs in front of
+      // them rather than in console.error alone.
+      if (insErr) {
+        console.error('[record_legal_acceptance] insert failed:', insErr.message)
+        return json({ error: 'Could not record your acceptance. Please try again.' }, 500)
+      }
+      return json({ success: true })
+    }
+
+    if (action === 'record_paper_agreement') {
+      // Admin only. This records a physical signed and stamped contract, which only the operator
+      // handling it can attest to -- a client recording its own countersignature would be the same
+      // self-attestation problem in a different coat.
+      if (!isCallerAdmin) return json({ error: 'Forbidden' }, 403)
+
+      const { client_id, signatory_name, signatory_title, signed_on_date, stamped, accepted_legal } = params
+      if (!client_id || !signatory_name || !signed_on_date) {
+        return json({ error: 'client_id, signatory_name and signed_on_date are required' }, 400)
+      }
+
+      const { data: clientRow, error: clientLookupErr } = await admin
+        .from('clients').select('id, name').eq('id', client_id).single()
+      if (clientLookupErr || !clientRow) return json({ error: 'Client not found' }, 404)
+
+      // One row per document the paper agreement incorporates by reference, plus the agreement
+      // itself. Part D of the agreement lists the Terms and Privacy versions and their hashes, so
+      // signing it is an acceptance of those exact versions -- recording only the agreement would
+      // lose which text the signature actually covered.
+      const rows = []
+      for (const docType of ['subscription_agreement', 'terms', 'privacy']) {
+        const entry = accepted_legal?.[docType]
+        if (!entry) continue
+        const version = typeof entry.version === 'string' ? entry.version.trim() : ''
+        const sha = typeof entry.sha256 === 'string' ? entry.sha256.trim().toLowerCase() : ''
+        if (!version || version.length > 20 || !/^[0-9a-f]{64}$/.test(sha)) {
+          return json({ error: 'Malformed acceptance payload' }, 400)
+        }
+        rows.push({ docType, version, sha })
+      }
+      if (!rows.length) return json({ error: 'Nothing to record' }, 400)
+
+      const { error: insErr } = await admin.from('legal_acceptances').insert(
+        rows.map((r) => ({
+          client_id:       clientRow.id,
+          client_name:     clientRow.name,
+          user_id:         null,
+          user_email:      null,
+          doc_type:        r.docType,
+          doc_version:     r.version,
+          content_sha256:  r.sha,
+          method:          'signed_paper',
+          signatory_name:  String(signatory_name).slice(0, 200),
+          signatory_title: signatory_title ? String(signatory_title).slice(0, 200) : null,
+          signed_on_date:  signed_on_date,
+          stamped:         stamped === true,
+          // Who at Crest recorded it, taken from the verified JWT. An operator action on a legal
+          // record needs a name against it.
+          recorded_by:     user.id,
+          ip_address:      (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown',
+          user_agent:      (req.headers.get('user-agent') || '').slice(0, 400) || null,
+        }))
+      )
+      if (insErr) {
+        console.error('[record_paper_agreement] insert failed:', insErr.message)
+        return json({ error: insErr.message }, 500)
+      }
+
+      const { error: statusErr } = await admin.from('clients').update({
+        agreement_status:    'paper_signed',
+        agreement_signed_at: new Date(signed_on_date).toISOString(),
+      }).eq('id', clientRow.id)
+      if (statusErr) return json({ error: statusErr.message }, 500)
+
+      return json({ success: true })
+    }
 
     if (action === 'create_pos_staff' || action === 'reset_pos_pin' || action === 'delete_pos_staff' || action === 'update_pos_role') {
       if (!isPosPrivileged) return json({ error: 'Forbidden' }, 403)
@@ -1239,142 +1671,9 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'deleteClientData') {
-      // keep_staff_vault: passed by Archive. Archive keeps every auth login, and the vault rows
-      // key on those user ids — deleting them made the product's "fully reversible" path
-      // irreversibly lose every staff PIN: the restore's vault-rebuild branch only runs when the
-      // client has NO logins left, which is exactly the state Archive never produces (S574).
       const { clientId, keep_staff_vault } = params
       if (!clientId) return json({ error: 'clientId is required' }, 400)
-
-      async function del(query: Promise<{ error: unknown }>, label: string) {
-        const { error } = await query
-        if (error) throw new Error(`Failed to delete ${label}: ${(error as { message?: string }).message ?? String(error)}`)
-      }
-
-      const { data: periods } = await admin.from('monthly_periods').select('id').eq('client_id', clientId)
-      const periodIds = (periods || []).map((p: { id: string }) => p.id)
-
-      const { data: recipeRows } = await admin.from('recipes').select('id').eq('client_id', clientId)
-      const recipeIds = (recipeRows || []).map((r: { id: string }) => r.id)
-
-      const { data: poRows } = await admin.from('purchase_orders').select('id').eq('client_id', clientId)
-      const poIds = (poRows || []).map((p: { id: string }) => p.id)
-
-      const { data: reqRows } = await admin.from('requisitions').select('id').eq('client_id', clientId)
-      const reqIds = (reqRows || []).map((r: { id: string }) => r.id)
-
-      if (recipeIds.length > 0) {
-        await del(admin.from('recipe_ingredients').delete().in('recipe_id', recipeIds), 'recipe_ingredients')
-        await del(admin.from('recipe_suggestions').delete().in('recipe_id', recipeIds), 'recipe_suggestions')
-        await del(admin.from('recipe_suggestions').delete().in('suggest_recipe_id', recipeIds), 'recipe_suggestions (reverse)')
-      }
-      if (poIds.length > 0) {
-        await del(admin.from('purchase_order_items').delete().in('po_id', poIds), 'purchase_order_items')
-      }
-      if (reqIds.length > 0) {
-        await del(admin.from('requisition_lines').delete().in('requisition_id', reqIds), 'requisition_lines')
-      }
-
-      if (periodIds.length > 0) {
-        const { data: peRows } = await admin.from('purchase_entries').select('id').in('period_id', periodIds)
-        const peIds = (peRows || []).map((r: { id: string }) => r.id)
-        if (peIds.length > 0) {
-          await del(admin.from('payable_payments').delete().in('purchase_entry_id', peIds), 'payable_payments')
-        }
-        await del(admin.from('purchase_entries').delete().in('period_id', periodIds), 'purchase_entries')
-        await del(admin.from('vendor_returns').delete().in('period_id', periodIds), 'vendor_returns')
-        await del(admin.from('opening_stock').delete().in('period_id', periodIds), 'opening_stock')
-        await del(admin.from('closing_stock').delete().in('period_id', periodIds), 'closing_stock')
-        await del(admin.from('wastages').delete().in('period_id', periodIds), 'wastages')
-        await del(admin.from('staff_meals').delete().in('period_id', periodIds), 'staff_meals')
-        await del(admin.from('sales_entries').delete().in('period_id', periodIds), 'sales_entries')
-        await del(admin.from('budgets').delete().in('period_id', periodIds), 'budgets')
-      }
-
-      // POS module data (orders reference tables; movements/orders must go before periods)
-      // Circular FK: pos_orders.credit_note_id -> pos_credit_notes.id AND
-      // pos_credit_notes.order_id -> pos_orders.id, neither ON DELETE CASCADE.
-      // Null the order-side link first or deleting pos_credit_notes fails.
-      await del(admin.from('pos_orders').update({ credit_note_id: null }).eq('client_id', clientId), 'pos_orders.credit_note_id reset')
-      await del(admin.from('pos_credit_notes').delete().eq('client_id', clientId), 'pos_credit_notes')
-      await del(admin.from('pos_payment_confirmations').delete().eq('client_id', clientId), 'pos_payment_confirmations')
-      await del(admin.from('pos_guest_order_requests').delete().eq('client_id', clientId), 'pos_guest_order_requests')
-      const { data: orderRows } = await admin.from('pos_orders').select('id').eq('client_id', clientId)
-      const orderIds = (orderRows || []).map((o: { id: string }) => o.id)
-      if (orderIds.length > 0) {
-        await del(admin.from('pos_order_items').delete().in('order_id', orderIds), 'pos_order_items')
-      }
-      await del(admin.from('stock_movements').delete().eq('client_id', clientId), 'stock_movements')
-      // Before orders/shifts — its FKs to both are ON DELETE SET NULL.
-      await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
-      await del(admin.from('pos_loyalty_ledger').delete().eq('client_id', clientId), 'pos_loyalty_ledger')
-      await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
-      await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
-      await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
-      await del(admin.from('pos_customers').delete().eq('client_id', clientId), 'pos_customers')
-      await del(admin.from('pos_loyalty_schemes').delete().eq('client_id', clientId), 'pos_loyalty_schemes')
-      await del(admin.from('pos_parking_slips').delete().eq('client_id', clientId), 'pos_parking_slips')
-      await del(admin.from('pos_tables').delete().eq('client_id', clientId), 'pos_tables')
-
-      // HR module data (payslips reference runs; attendance/payroll reference monthly_periods)
-      const { data: runRows } = await admin.from('hr_payroll_runs').select('id').eq('client_id', clientId)
-      const runIds = (runRows || []).map((r: { id: string }) => r.id)
-      if (runIds.length > 0) {
-        await del(admin.from('hr_payslips').delete().in('run_id', runIds), 'hr_payslips')
-      }
-      await del(admin.from('hr_payroll_runs').delete().eq('client_id', clientId), 'hr_payroll_runs')
-      // Before hr_advance_repayments (whose final_settlement_id points at it) and before
-      // hr_employees, so neither is left referencing a row that no longer exists.
-      await del(admin.from('hr_final_settlements').delete().eq('client_id', clientId), 'hr_final_settlements')
-      await del(admin.from('hr_attendance').delete().eq('client_id', clientId), 'hr_attendance')
-      await del(admin.from('hr_leave_requests').delete().eq('client_id', clientId), 'hr_leave_requests')
-      await del(admin.from('hr_overtime_entries').delete().eq('client_id', clientId), 'hr_overtime_entries')
-      await del(admin.from('hr_festival_allowances').delete().eq('client_id', clientId), 'hr_festival_allowances')
-      await del(admin.from('hr_advance_repayments').delete().eq('client_id', clientId), 'hr_advance_repayments')
-      await del(admin.from('hr_advances').delete().eq('client_id', clientId), 'hr_advances')
-      await del(admin.from('hr_roster').delete().eq('client_id', clientId), 'hr_roster')
-      // hr_tada_claim_items cascades from hr_tada_claims; hr_incentives.config_id SET NULLs on config delete
-      await del(admin.from('hr_tada_claims').delete().eq('client_id', clientId), 'hr_tada_claims')
-      await del(admin.from('hr_incentives').delete().eq('client_id', clientId), 'hr_incentives')
-      await del(admin.from('hr_incentive_configs').delete().eq('client_id', clientId), 'hr_incentive_configs')
-      await del(admin.from('hr_roster_publish_state').delete().eq('client_id', clientId), 'hr_roster_publish_state')
-      await del(admin.from('hr_shift_swap_requests').delete().eq('client_id', clientId), 'hr_shift_swap_requests')
-      await del(admin.from('hr_salary_components').delete().eq('client_id', clientId), 'hr_salary_components')
-      await del(admin.from('hr_employees').delete().eq('client_id', clientId), 'hr_employees')
-      await del(admin.from('hr_leave_types').delete().eq('client_id', clientId), 'hr_leave_types')
-      await del(admin.from('hr_holiday_calendar').delete().eq('client_id', clientId), 'hr_holiday_calendar')
-      await del(admin.from('hr_shift_types').delete().eq('client_id', clientId), 'hr_shift_types')
-
-      await del(admin.from('purchase_orders').delete().eq('client_id', clientId), 'purchase_orders')
-      await del(admin.from('requisitions').delete().eq('client_id', clientId), 'requisitions')
-      await del(admin.from('overheads').delete().eq('client_id', clientId), 'overheads')
-      await del(admin.from('par_levels').delete().eq('client_id', clientId), 'par_levels')
-      await del(admin.from('demand_forecast_daily').delete().eq('client_id', clientId), 'demand_forecast_daily')
-      await del(admin.from('demand_forecast_run_log').delete().eq('client_id', clientId), 'demand_forecast_run_log')
-      // No FK cascade from monthly_owner_reports.period_id -> monthly_periods.id — must go first.
-      await del(admin.from('monthly_owner_reports').delete().eq('client_id', clientId), 'monthly_owner_reports')
-      await del(admin.from('monthly_periods').delete().eq('client_id', clientId), 'monthly_periods')
-      await del(admin.from('recipes').delete().eq('client_id', clientId), 'recipes')
-      await del(admin.from('items').delete().eq('client_id', clientId), 'items')
-      await del(admin.from('ims_gate_passes').delete().eq('client_id', clientId), 'ims_gate_passes')
-      await del(admin.from('assets_depreciation_schedule').delete().eq('client_id', clientId), 'assets_depreciation_schedule')
-      await del(admin.from('assets_depreciation_runs').delete().eq('client_id', clientId), 'assets_depreciation_runs')
-      await del(admin.from('assets_tax_pool_lines').delete().eq('client_id', clientId), 'assets_tax_pool_lines')
-      await del(admin.from('assets_tax_pool_runs').delete().eq('client_id', clientId), 'assets_tax_pool_runs')
-      await del(admin.from('assets_repair_expenses').delete().eq('client_id', clientId), 'assets_repair_expenses')
-      await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
-      await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')
-      await del(admin.from('vendors').delete().eq('client_id', clientId), 'vendors')
-      await del(admin.from('categories').delete().eq('client_id', clientId), 'categories')
-      // Cascades from both profiles and clients, so this is belt-and-braces rather than required —
-      // but CLAUDE.md step 7 asks for every client-scoped table to be listed explicitly, and a
-      // table that only ever cleans itself up implicitly is the kind that gets missed when the
-      // cascade is later changed. app_secrets is deliberately absent: it is app-wide, not
-      // per-client, and must never be touched by a client clear/delete path.
-      if (!keep_staff_vault) {
-        await del(admin.from('staff_pin_vault').delete().eq('client_id', clientId), 'staff_pin_vault')
-      }
-
+      await deleteClientDataFor(admin, clientId, keep_staff_vault === true)
       return json({ success: true })
     }
 

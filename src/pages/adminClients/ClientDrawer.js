@@ -12,6 +12,7 @@ import Modal from '../../components/Modal'
 import { MIN_PASSWORD_LENGTH } from '../../utils/weakPasswords'
 import { adminOp } from './adminOp'
 import { MODULE_COLORS, MODULE_INK, moduleTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../../data/pricingPlans'
+import ClientLegalTab from './ClientLegalTab'
 import { runBackup } from '../../modules/admin/dataExport/runBackup'
 import { restoreClientData } from '../../modules/admin/dataExport/restoreClientData'
 import {
@@ -861,6 +862,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     { key: 'thresholds', label: 'Thresholds' },
     { key: 'qr',         label: 'QR' },
     { key: 'data',       label: 'Backup' },
+    { key: 'legal',      label: 'Legal' },
     { key: 'danger',     label: '⚠ Danger' },
   ]
 
@@ -1859,6 +1861,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === 'legal' && (
+            <ClientLegalTab
+              client={client}
+              clientSettings={clientSettings}
+              onClientChanged={onClientUpdated}
+            />
           )}
 
           {activeTab === 'danger' && (

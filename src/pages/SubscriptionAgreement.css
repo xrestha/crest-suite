@@ -1,0 +1,235 @@
+/* The printable Subscription Agreement. Scoped under .agr-page throughout — this renders outside
+   the app shell, straight into the body.
+
+   Deliberately black-on-white on screen as well as on paper. Every other surface in this product is
+   theme-aware, and this one is not, because it is a contract: what the operator sees before pressing
+   print has to be what comes out of the printer, and a preview in Tokyo Night tells them nothing
+   about a document that will be read on A4. Same reasoning as the print-only voucher components. */
+
+.agr-page {
+  min-height: 100vh;
+  background: #f1f1f1;
+  padding: 0 0 60px;
+}
+
+/* ── Screen-only chrome ─────────────────────────────────────────────────────────────────── */
+.agr-chrome {
+  max-width: 794px;
+  margin: 0 auto;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--theme-text1);
+  background: var(--theme-card);
+  border-bottom: 1px solid var(--theme-border);
+}
+
+.agr-chrome--warn {
+  display: block;
+  background: color-mix(in srgb, var(--theme-amber) 12%, var(--theme-card));
+  border: 1px solid color-mix(in srgb, var(--theme-amber) 38%, transparent);
+  color: var(--theme-amber-text);
+  line-height: 1.55;
+}
+
+/* ── The paper ──────────────────────────────────────────────────────────────────────────── */
+.agr-paper {
+  /* 794px is A4 at 96dpi — the same figure EmployeeJoiningForm uses, so the on-screen preview is
+     to scale rather than merely approximate. */
+  width: 794px;
+  max-width: 100%;
+  margin: 24px auto;
+  padding: 40px 46px;
+  box-sizing: border-box;
+  background: #fff;
+  color: #111;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.16);
+}
+
+.agr-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 6px;
+  text-align: center;
+}
+
+.agr-sub {
+  margin: 0 0 18px;
+  text-align: center;
+  font-size: 11px;
+}
+
+.agr-h {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 18px 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #bbb;
+}
+
+.agr-p {
+  margin: 0 0 8px;
+}
+
+.agr-note {
+  margin: 6px 0 8px;
+  font-size: 10px;
+  color: #444;
+  line-height: 1.5;
+}
+
+/* A field to be completed by hand. Underscores rather than an input: this document is printed and
+   filled in with a pen, and an <input> would print its own border and placeholder. */
+.agr-blank {
+  letter-spacing: 0.5px;
+}
+
+.agr-rule {
+  border-bottom: 1px solid #999;
+  height: 20px;
+  margin-bottom: 6px;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────────────────────── */
+.agr-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6px 0 8px;
+  font-size: 11px;
+}
+
+.agr-table th,
+.agr-table td {
+  border: 1px solid #999;
+  padding: 5px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.agr-table th {
+  background: #eee;
+  font-weight: 700;
+}
+
+/* Money right-aligns and uses lining figures so the column reads as a column. */
+.agr-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.agr-total-row td {
+  background: #f4f4f4;
+}
+
+.agr-table--docs td {
+  font-size: 10px;
+}
+
+.agr-url {
+  color: #111;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+/* The hash is the whole point of the incorporation-by-reference clause, so it must print in full
+   and must not be truncated by its column. break-all because a 64-character hex string has no
+   break opportunities of its own. */
+.agr-hash {
+  display: block;
+  margin-top: 2px;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-size: 9px;
+  color: #333;
+  word-break: break-all;
+}
+
+.agr-sign td {
+  width: 50%;
+  padding: 7px;
+}
+
+.agr-seal-row td {
+  height: 62px;
+}
+
+.agr-seal {
+  margin-top: 4px;
+  border: 1px dashed #999;
+  height: 46px;
+}
+
+.agr-print-foot {
+  display: none;
+}
+
+/* ── Print ──────────────────────────────────────────────────────────────────────────────── */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 12mm 16mm;
+  }
+
+  .agr-page {
+    min-height: 0;
+    background: #fff;
+    padding: 0;
+  }
+
+  .agr-paper {
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    font-size: 9.5pt;
+  }
+
+  .agr-title { font-size: 15pt; }
+  .agr-sub   { font-size: 8.5pt; }
+  .agr-h     { font-size: 10.5pt; break-after: avoid; }
+  .agr-table { font-size: 8.5pt; }
+  .agr-note  { font-size: 8pt; }
+  .agr-hash  { font-size: 6.5pt; }
+
+  /* Layout.css's print block sets `th, td { color: black }` on the CELL, so a descendant span with
+     its own colour wins and prints grey on white (S670). Everything here is already near-black, but
+     stating it means a later addition cannot quietly reintroduce it. */
+  .agr-paper,
+  .agr-paper * {
+    color: #000 !important;
+  }
+
+  .agr-table th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .agr-total-row td { background: #f4f4f4 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* A signature block split across a page break is the one thing this document must never do. */
+  .agr-sign,
+  .agr-seal-row,
+  .agr-table tr {
+    break-inside: avoid;
+  }
+
+  .agr-table thead {
+    display: table-header-group;
+  }
+
+  .agr-print-foot {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    font-size: 6.5pt;
+    border-top: 0.5pt solid #999;
+    padding-top: 2pt;
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  }
+}

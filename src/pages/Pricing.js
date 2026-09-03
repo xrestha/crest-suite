@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { Hexagon, Check, Mail, Calculator, Users, CalendarDays } from 'lucide-react'
 import { useSettings } from '../context/SettingsContext'
 import { MODULE_COLORS, MODULE_INK, moduleTint, TRIAL_DAYS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
+// The registered entity, from the one place it is pinned against the published legal documents.
+import { COMPANY } from '../legal'
 
 // ── Change this to the contact email when ready ──────────────────────────────
 const CONTACT_EMAIL = 'hello@cresthospitality.com'
@@ -144,6 +146,15 @@ export default function Pricing() {
             </span>
           </button>
         </div>
+        {/* Every figure on this page is exclusive of VAT, and until now the page made no tax claim
+            at all while the Terms said fees are quoted ex-VAT and 13% is added on the invoice. One
+            of the two had to move; a price that turns out to be 13% higher on the invoice than on
+            the page is the kind of surprise the Consumer Protection Act 2075 exists for. Placed
+            with the billing toggle rather than in the footer because that is where the numbers are
+            being compared. */}
+        <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '12px 0 0', textAlign: 'center' }}>
+          All prices exclude VAT. 13% VAT is added on invoice.
+        </p>
       </div>
 
       {/* ── Why Crest — value strip (this page is the single marketing surface per the tool-first
@@ -379,7 +390,13 @@ export default function Pricing() {
             <Mail size={15} strokeWidth={2} aria-hidden="true" /> Email us
           </a>
         </div>
-        <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>© 2083 BS · Crest Hospitality · Kathmandu, Nepal</p>
+        <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>© {new Date().getFullYear()} · {COMPANY.name} · Kathmandu, Nepal</p>
+          {/* Every public page carries the same pair. Plain anchors rather than router Links so
+              the markup is identical to the login and legal footers. */}
+          <p style={{ fontSize: 11, margin: '8px 0 0', display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <a href="/legal/terms" style={{ color: 'var(--theme-text2)', textDecoration: 'none' }}>Terms of Service</a>
+            <a href="/legal/privacy" style={{ color: 'var(--theme-text2)', textDecoration: 'none' }}>Privacy Policy</a>
+          </p>
       </div>
 
       </main>

@@ -273,9 +273,19 @@ inheriting the number.
 
 ### T2c — Entity name
 
-Replace "Crest Hospitality" with "Bloom Hospitality Pvt. Ltd." in the head material of `README.md`
-and in `PRODUCT.md` if it appears. Leave `CHANGELOG/` untouched; historical entries record what was
-true at the time.
+**DONE — S672, 2026-09-03.** Zero occurrences of "Crest Hospitality" remain outside `CHANGELOG/` and
+this file. `README.md` and `PRODUCT.md` turned out to be already clean; the two live sites were
+`Pricing.js`'s footer and — worse — `EmployeeJoiningForm.jsx`, an A4 form a new employee signs,
+which named a company that does not exist.
+
+Both now read `COMPANY.name` from `src/legal/index.js` rather than a third and fourth hand-typed
+copy. That constant is the authoritative one because it is the only copy pinned by a test:
+`legalCompany.test.js` asserts every value in it still appears verbatim in the published Terms and
+Privacy Policy, which is what stops the registered name, number and address drifting apart across
+the documents that have to agree. The registered entity is Bloom Hospitality Pvt. Ltd.,
+registration no. 398714/83/84, PAN 623688353, Saraswatinagar-6, Kathmandu.
+
+Leave `CHANGELOG/` untouched; historical entries record what was true at the time.
 
 **Acceptance criteria.** `ROUTES.md` generated and matching the router in both directions. The
 three-way gate mismatch check runs clean or reports real mismatches. `npm run build:verify`

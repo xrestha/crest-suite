@@ -1,6 +1,9 @@
 import { useAuth } from '../../../context/AuthContext'
 import Modal from '../../../components/Modal'
 import { printWithTitle } from '../../../utils/printTitle'
+// The registered entity. Hand-typed here as "Crest Hospitality (Pvt. Ltd.)" until S672 — this is
+// a form a new employee signs, so the company it names has to be the one that exists.
+import { COMPANY } from '../../../legal'
 
 // ── Auth hook helper ──────────────────────────────────────────────────────────
 
@@ -357,7 +360,7 @@ export default function EmployeeJoiningForm({ onClose }) {
 
         {/* Footer */}
         <div style={{ marginTop: 24, borderTop: '1px solid #ddd', paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: 9, color: '#aaa' }}>Powered by Crest HR — Crest Hospitality (Pvt. Ltd.)</div>
+          <div style={{ fontSize: 9, color: '#aaa' }}>Powered by Crest HR — {COMPANY.name}</div>
           <div style={{ fontSize: 9, color: '#aaa' }}>For official use only — keep on file</div>
         </div>
       </div>

@@ -1,0 +1,491 @@
+/* Public legal document pages: /legal/terms, /legal/privacy and their versioned forms.
+   Scoped under .legal-page throughout — this renders outside the app shell, straight into the
+   body, so anything unscoped here would leak into every other route. */
+
+.legal-page {
+  /* Its own scrollport, NOT `min-height: 100vh`. index.css sets `html, body { overflow-x: hidden }`
+     app-wide; because html's overflow is then not `visible` it stops propagating to the viewport,
+     body becomes its own scroll container sized to its content, and a `position: sticky` child of
+     the body has a scrollport that never scrolls. That is why the sticky bars on /login, /pricing
+     and the guest menu had all silently never stuck (S604). This page has a sticky header AND a
+     sticky contents rail, so it needs the same fix — and it must not carry min-height: 100vh,
+     because 100vh >= 100dvh would push the root taller than its own scrollport and hand the scroll
+     straight back to the body, which is the original bug. */
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  background: var(--theme-bg);
+  color: var(--theme-text1);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────────────────────── */
+.legal-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 64px;
+  padding: 0 32px;
+  background: var(--theme-card);
+  border-bottom: 1px solid var(--theme-border);
+}
+
+.legal-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.legal-brand-name {
+  font-family: Georgia, serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--theme-text1);
+  white-space: nowrap;
+}
+
+.legal-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────────────────────── */
+.legal-main {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 32px 96px;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .legal-main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 20px 16px 64px;
+  }
+}
+
+/* ── Contents rail ──────────────────────────────────────────────────────────────────────── */
+.legal-toc {
+  position: sticky;
+  top: 88px;
+  max-height: calc(100dvh - 120px);
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+@media (max-width: 900px) {
+  .legal-toc {
+    position: static;
+    max-height: none;
+    padding: 12px 14px;
+    background: var(--theme-card);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+  }
+}
+
+.legal-toc-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--theme-text3);
+  margin-bottom: 10px;
+}
+
+.legal-toc a {
+  display: block;
+  padding: 5px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--theme-text2);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  padding-left: 10px;
+  /* A section number and its title must not break apart mid-number; the title itself may wrap. */
+  overflow-wrap: anywhere;
+}
+
+.legal-toc a:hover {
+  color: var(--theme-text1);
+  border-left-color: var(--theme-border);
+}
+
+.legal-toc a:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Document head ──────────────────────────────────────────────────────────────────────── */
+.legal-doc-head {
+  padding-bottom: 20px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--theme-border);
+}
+
+.legal-doc-title {
+  font-family: Georgia, serif;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0 0 12px;
+  color: var(--theme-text1);
+}
+
+.legal-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  font-size: 12px;
+  color: var(--theme-text2);
+}
+
+.legal-meta-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.legal-meta-key {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--theme-text3);
+}
+
+/* The hash is the verifiable part of the document, so it gets monospace and stays selectable.
+   Truncated to 12 chars on screen with the full value available to copy — a 64-char hex string in
+   a metadata row is noise, but it must be obtainable without view-source. */
+.legal-hash {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--theme-text2);
+  background: var(--theme-input-bg);
+  border: 1px solid var(--theme-border-lt);
+  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+.legal-hash:hover {
+  color: var(--theme-text1);
+  border-color: var(--theme-border);
+}
+
+.legal-hash:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+}
+
+/* ── Banners ────────────────────────────────────────────────────────────────────────────── */
+.legal-banner {
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.55;
+  margin-bottom: 20px;
+}
+
+/* Amber is this product's warning colour, and both of these are genuine warnings: a document that
+   is not yet in force, and a version that is not the one that governs. The fill is a tint with
+   full-opacity signal text, never a solid amber fill — red and amber have no paired foreground
+   token that contrasts across all ten presets. */
+.legal-banner--draft,
+.legal-banner--old {
+  background: color-mix(in srgb, var(--theme-amber) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-amber) 38%, transparent);
+  color: var(--theme-amber-text);
+}
+
+.legal-banner strong {
+  font-weight: 700;
+}
+
+.legal-banner a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* ── Document body ──────────────────────────────────────────────────────────────────────── */
+.legal-body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--theme-text1);
+  /* The one reading-measure claim on this page, and it is earned: this is prose meant to be read
+     end to end, not a working surface. */
+  max-width: 76ch;
+}
+
+.legal-body .legal-h2 {
+  font-family: Georgia, serif;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 36px 0 12px;
+  padding-top: 8px;
+  color: var(--theme-text1);
+  scroll-margin-top: 84px; /* clears the sticky header when jumped to from the contents rail */
+}
+
+.legal-body .legal-h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 28px 0 10px;
+  color: var(--theme-text1);
+  scroll-margin-top: 84px;
+}
+
+.legal-body .legal-h4 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 20px 0 8px;
+  color: var(--theme-text2);
+  scroll-margin-top: 84px;
+}
+
+.legal-body .legal-p {
+  margin: 0 0 14px;
+}
+
+.legal-body .legal-ul {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+
+.legal-body .legal-ul li {
+  margin-bottom: 7px;
+}
+
+.legal-body .legal-hr {
+  border: 0;
+  border-top: 1px solid var(--theme-border);
+  margin: 32px 0;
+}
+
+.legal-body .legal-link {
+  color: var(--theme-accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-body .legal-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.legal-body .legal-link:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.legal-body .legal-code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-size: 0.9em;
+  background: var(--theme-input-bg);
+  border: 1px solid var(--theme-border-lt);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+/* The tables here (sub-processors, retention, lawful basis) are wider than the prose measure, so
+   they are allowed to use the full column and scroll inside their own wrapper if they still do not
+   fit. .table-wrap supplies the scroll; this only lifts the reading measure. */
+.legal-body .legal-table-wrap {
+  max-width: none;
+  margin: 0 0 20px;
+}
+
+.legal-body .legal-table {
+  font-size: 13px;
+}
+
+/* A placeholder that has not been filled must be impossible to read past. This is deliberately
+   loud: the whole failure mode it guards against is a draft going out looking finished. */
+.legal-missing {
+  display: inline-block;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-size: 0.85em;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--theme-amber) 20%, transparent);
+  border: 1px dashed var(--theme-amber);
+  color: var(--theme-amber-text);
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+}
+
+.legal-footer {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 32px 40px;
+  border-top: 1px solid var(--theme-border);
+  font-size: 12px;
+  color: var(--theme-text3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.legal-footer a {
+  color: var(--theme-text2);
+  text-decoration: none;
+}
+
+.legal-footer a:hover {
+  color: var(--theme-text1);
+  text-decoration: underline;
+}
+
+/* ── Print ──────────────────────────────────────────────────────────────────────────────── */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 18mm 16mm 22mm;
+  }
+
+  .legal-page {
+    /* The screen scrollport must not survive into print: a fixed-height, overflow:auto root prints
+       exactly one screenful and silently drops the rest of the document. */
+    height: auto;
+    overflow: visible;
+    background: #fff;
+    color: #000;
+  }
+
+  .legal-nav,
+  .legal-toc,
+  .legal-footer,
+  .legal-no-print {
+    display: none !important;
+  }
+
+  .legal-main {
+    display: block;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .legal-body {
+    max-width: none;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #000;
+  }
+
+  /* Layout.css's print block sets `th, td { color: black }`, which targets the CELL — a descendant
+     span carrying an inline theme colour wins over inherited black and prints theme-grey on white
+     (S670). Everything in this document is rendered by LegalMarkdown, which sets no inline colours,
+     so the risk is anything added here later. Stated explicitly rather than left to be rediscovered. */
+  .legal-body,
+  .legal-body * {
+    color: #000 !important;
+  }
+
+  .legal-body .legal-h2 {
+    font-size: 14pt;
+    margin: 18pt 0 6pt;
+    break-after: avoid;
+  }
+
+  .legal-body .legal-h3,
+  .legal-body .legal-h4 {
+    font-size: 11pt;
+    margin: 12pt 0 4pt;
+    break-after: avoid;
+  }
+
+  .legal-body .legal-p,
+  .legal-body li {
+    orphans: 3;
+    widows: 3;
+  }
+
+  .legal-body .legal-link {
+    text-decoration: underline;
+  }
+
+  .legal-body .legal-table-wrap {
+    overflow: visible;
+  }
+
+  .legal-body .legal-table {
+    font-size: 9pt;
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  .legal-body .legal-table th,
+  .legal-body .legal-table td {
+    border: 1px solid #999;
+    padding: 4pt 6pt;
+    background: #fff;
+  }
+
+  /* Repeat the header on every page a long table spans. */
+  .legal-body .legal-table thead {
+    display: table-header-group;
+  }
+
+  .legal-body .legal-table tr {
+    break-inside: avoid;
+  }
+
+  .legal-doc-head {
+    border-bottom: 1px solid #999;
+  }
+
+  .legal-doc-title {
+    font-size: 18pt;
+  }
+
+  .legal-hash {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 8pt;
+  }
+
+  .legal-banner--draft,
+  .legal-banner--old {
+    background: none;
+    border: 1.5pt solid #000;
+    color: #000;
+  }
+
+  /* Running foot: document type, version and hash on EVERY printed page. A signed or filed copy of
+     a legal document has to be identifiable from any single sheet of it — the same reasoning behind
+     MonthlyOwnerReport.css's per-page business/period foot. position: fixed inside a print context
+     repeats on each page rather than sitting once at the end. */
+  .legal-print-foot {
+    display: block !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    font-size: 7.5pt;
+    color: #000;
+    border-top: 0.5pt solid #999;
+    padding-top: 3pt;
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  }
+}
+
+.legal-print-foot {
+  display: none;
+}

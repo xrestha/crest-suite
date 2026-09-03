@@ -106,6 +106,8 @@ const PurchaseOneLakhAboveReport = lazy(() => import('./modules/ims/reports/Purc
 const PosLogin = lazy(() => import('./modules/pos/login/PosLogin'))
 const GuestMenu = lazy(() => import('./modules/pos/guestmenu/GuestMenu'))
 const KitchenDisplay = lazy(() => import('./modules/pos/kds/KitchenDisplay'))
+const Legal = lazy(() => import('./pages/Legal'))
+const SubscriptionAgreement = lazy(() => import('./pages/SubscriptionAgreement'))
 
 function RootRedirect() {
   if (localStorage.getItem('pos_device_client_id')) return <Navigate to="/pos/login" replace />
@@ -123,6 +125,13 @@ export default function App() {
             <Route path="/login"     element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/pricing"   element={<Pricing />} />
+            {/* Public and unauthenticated on purpose: the trial signup checkbox links here, and
+                terms sitting behind a login are not terms anyone consented to. The versioned form
+                exists because an acceptance row references its version forever — a link in the
+                evidence trail that 404s makes the record harder to rely on. */}
+            <Route path="/legal/subscription-agreement/print" element={<SubscriptionAgreement />} />
+            <Route path="/legal/:docType" element={<Legal />} />
+            <Route path="/legal/:docType/:version" element={<Legal />} />
             <Route path="/pos/login" element={<PosLogin />} />
             <Route path="/pos/menu/:tableId" element={<GuestMenu />} />
             <Route path="/hr/self-service/login/:clientId" element={<SelfServiceLogin />} />
