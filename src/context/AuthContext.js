@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
 import { getAccessState } from '../utils/subscription'
-import { DOC_TYPES, legalDoc } from '../legal'
+import { docsRequiringReacceptance } from '../legal'
 
 const AuthContext = createContext({})
 
@@ -266,7 +266,7 @@ export function AuthProvider({ children }) {
         // It fails OPEN. On any error `rows` is null, the gate stays down, and the app keeps
         // working; a missing table, an RLS refusal or a dropped connection must never lock every
         // owner out of the product. Same stance as getAccessState.
-        const reacceptDocs = DOC_TYPES.filter(t => legalDoc(t)?.requiresReacceptance)
+        const reacceptDocs = docsRequiringReacceptance()
         const profileIsOwner = data.role === 'client'
           && !data.pos_role && !data.ims_role && !data.hr_role && !data.hr_self_service
         if (mounted && reacceptDocs.length && profileIsOwner) {
@@ -541,11 +541,9 @@ export function AuthProvider({ children }) {
   // version. `null` means the read failed, which is treated as "not required" — see the fetch.
   const legalReacceptRequired = useMemo(() => {
     if (isAdmin || !isOwner || legalAccepted === null) return false
-    return DOC_TYPES.some(t => {
-      const doc = legalDoc(t)
-      if (!doc?.requiresReacceptance) return false
-      return !legalAccepted.some(r => r.doc_type === t && r.doc_version === doc.version)
-    })
+    return docsRequiringReacceptance().some(doc =>
+      !legalAccepted.some(r => r.doc_type === doc.docType && r.doc_version === doc.version)
+    )
   }, [isAdmin, isOwner, legalAccepted])
   const accessLocked  = !isAdmin && accessState.locked
   const accessReason  = accessState.reason

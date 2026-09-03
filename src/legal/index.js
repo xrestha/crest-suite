@@ -96,12 +96,14 @@ const REGISTRY = {
     effectiveAdLabel: '3 September 2026',
     effectiveBs: '2083-05-18',
     effectiveBsLabel: '18 Bhadra 2083',
-    // Turning this on blocks every tenant Owner until they accept. It is false for 1.0 on purpose:
-    // the documents are still DRAFT (see isDraft below) and gating a live restaurant on a document
-    // that reads "[[NEEDS VALUE: COMPANY_REG_NO]]" would be worse than the gap it closes. Flip it
-    // once the placeholders are filled and the pages are genuinely published — which is also the
-    // moment it does real work, since no existing client has ever recorded consent to anything.
-    requiresReacceptance: false,
+    // ON as of 2026-09-03. Every tenant Owner is held at a blocking screen until they accept, and
+    // that is the point: no client on the platform had ever recorded consent to anything, so the
+    // clickwrap added the same day bound new signups and left every existing one untouched. Staff
+    // are never gated — they are not the contracting party and their work is unaffected.
+    //
+    // Safe to turn on only because the documents are complete; docsRequiringReacceptance() enforces
+    // that independently, so a future draft cannot gate anyone even if this stays true.
+    requiresReacceptance: true,
     changeSummary: null,
   },
   privacy: {
@@ -112,7 +114,7 @@ const REGISTRY = {
     effectiveAdLabel: '3 September 2026',
     effectiveBs: '2083-05-18',
     effectiveBsLabel: '18 Bhadra 2083',
-    requiresReacceptance: false,
+    requiresReacceptance: true,
     changeSummary: null,
   },
 }
@@ -153,6 +155,27 @@ export function missingLegalValues() {
 
 export function anyLegalDraft() {
   return DOC_TYPES.some(isDraft)
+}
+
+/**
+ * The documents that should currently block a tenant Owner until accepted.
+ *
+ * `requiresReacceptance` alone is NOT sufficient, and this function exists so that can never be
+ * forgotten: a document still carrying an unfilled placeholder is excluded no matter what its flag
+ * says. Gating every Owner in the product behind a blocking screen showing them
+ * "[[NEEDS VALUE: COMPANY_REG_NO]]" would be worse than the consent gap it was meant to close, and
+ * the two settings live far enough apart in this file that someone will eventually set one without
+ * checking the other.
+ *
+ * Both the gate's own render and AuthContext's decision read this, so they cannot disagree.
+ */
+export function docsRequiringReacceptance() {
+  // Returns DOCUMENTS, not doc-type strings. Both callers read `.docType`, `.version` and
+  // `.sha256` off these, and the first draft of this returned strings: the gate rendered blank
+  // fields, and — far worse — AuthContext compared an accepted row's doc_version against
+  // `undefined`, so the condition stayed true forever and an Owner who accepted would have been
+  // held at the blocking screen permanently with no way out. Caught by reacceptGuard.test.js.
+  return DOC_TYPES.map(legalDoc).filter((d) => d && d.requiresReacceptance && !isDraft(d.docType))
 }
 
 /**

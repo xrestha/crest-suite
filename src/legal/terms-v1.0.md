@@ -157,7 +157,7 @@ Each party will keep the other's non-public information confidential, use it onl
 
 ## 16. Changes to these Terms
 
-We may update these Terms. Each version has a version number, effective date and content hash published at [crestsuite.com/legal/terms](/legal/terms). For material changes we will notify you in the app or by email at least 30 days before they take effect and, where the change materially affects your rights, ask you to accept the new version. Continued use after the effective date is acceptance. If you do not agree you may terminate before the effective date.
+We may update these Terms. Each version has a version number, effective date and content hash, published on our website and in the Service under [Help → Legal](/legal/terms). For material changes we will notify you in the app or by email at least 30 days before they take effect and, where the change materially affects your rights, ask you to accept the new version. Continued use after the effective date is acceptance. If you do not agree you may terminate before the effective date.
 
 ## 17. Governing law and disputes
 

@@ -4,14 +4,14 @@
 export const LEGAL_META = {
   "terms": {
     "filename": "terms-v1.0.md",
-    "sha256": "6b471510a20bf010bd8dfc13dd003918d3a286e34630bc6f1e83a40c01e12c82",
-    "bytes": 16053,
+    "sha256": "2af14ed4002c57fc7ec6a80fa6877fc26dc7905f5fcca3d98cf75c5537d32fa7",
+    "bytes": 16079,
     "missing": []
   },
   "privacy": {
     "filename": "privacy-v1.0.md",
-    "sha256": "22ed85ef084c282172709ad4eaa119a5b955f51269c19521da27994c8ba1a71b",
-    "bytes": 11388,
+    "sha256": "087314bf124fbe55a23cebdccbb959bca26cb7e91d22c340c0c5ec827994c8ec",
+    "bytes": 11412,
     "missing": []
   }
 }

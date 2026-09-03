@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import { withTimeout } from '../utils/withTimeout'
 import ActionError, { asActionError } from './ActionError'
-import { DOC_TYPES, legalDoc, acceptancePayload, legalPath } from '../legal'
+import { docsRequiringReacceptance, acceptancePayload, legalPath } from '../legal'
 
 export default function LegalReacceptance() {
   const { signOut, refreshProfile } = useAuth()
@@ -26,7 +26,7 @@ export default function LegalReacceptance() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  const pending = DOC_TYPES.map(legalDoc).filter((d) => d?.requiresReacceptance)
+  const pending = docsRequiringReacceptance()
 
   async function accept() {
     if (!checked || busy) return

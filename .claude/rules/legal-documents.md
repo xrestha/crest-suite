@@ -104,12 +104,23 @@ from `ProtectedRoute`, exactly like `SubscriptionLock`, Sign Out included. Order
 `accessLocked`: a lapsed client has a more immediate problem, and being asked to agree to terms for
 a product you cannot currently open reads as a demand.
 
-`requiresReacceptance` is `false` for v1.0 on purpose. Turning it on blocks every tenant Owner until
-they accept — which is the point, since no existing client has ever recorded consent — but not while
-the documents are drafts. **The AuthContext read is skipped entirely unless some document sets the
-flag**, so today it costs the hot path nothing and never touches a table a deployment may not have
-migrated. It fails OPEN on a read error (`legalAccepted === null`), because a dropped connection
-must not lock every owner out.
+**`requiresReacceptance` is ON for v1.0 as of 2026-09-03**, so every tenant Owner is held until they
+accept. That is what closes the gap the clickwrap could not reach: it bound new signups from the day
+it shipped and left every existing client with no consent record.
+
+Two properties keep that safe. **`docsRequiringReacceptance()` is the only thing either consumer
+reads** — AuthContext's decision and the gate's own render — and it excludes a DRAFT document no
+matter what its flag says, so a v1.1 copied from v1.0 with a placeholder left in cannot gate anyone.
+And the whole read **fails OPEN** on error (`legalAccepted === null`), because a dropped connection
+must not lock every owner out of the product.
+
+**That helper returned doc-type STRINGS in its first draft, and it is worth knowing why that was
+nearly catastrophic rather than cosmetic.** Both callers read `.docType`/`.version` off the result.
+The gate would have rendered blank fields — visible, someone would report it — but AuthContext
+compared an accepted row's `doc_version` against `undefined`, so the gate condition stayed true
+after a successful acceptance: an Owner who accepted would have been held at the blocking screen
+**permanently, with no way out except Sign Out**. `reacceptGuard.test.js` caught it. The branch had
+no live data, which is exactly why it needed a test rather than a read-through.
 
 ## Where each surface lives, and why not where you'd expect
 

@@ -115,7 +115,7 @@ The Service is for businesses and is not directed at anyone under 18. Customers 
 
 ## 12. Changes to this policy
 
-Each version of this policy has a version number, effective date and content hash published at [crestsuite.com/legal/privacy](/legal/privacy). We will notify Customers of material changes at least 30 days in advance by email or in-app notice, and where the change materially affects Customer Data we will ask for acceptance of the new version.
+Each version of this policy has a version number, effective date and content hash, published on our website and in the Service under [Help → Legal](/legal/privacy). We will notify Customers of material changes at least 30 days in advance by email or in-app notice, and where the change materially affects Customer Data we will ask for acceptance of the new version.
 
 ## 13. Contact
 
