@@ -75,9 +75,13 @@ export const COMPANY = {
   regNo: '398714/83/84',
   pan: '623688353',
   address: 'Saraswatinagar-6, Kathmandu',
-  legalEmail: 'legal@crestsuite.com',
-  privacyEmail: 'privacy@crestsuite.com',
-  supportEmail: 'support@crestsuite.com',
+  // One address for all three roles, because it is the one that exists. The crestsuite.com
+  // mailboxes these replaced were never provisioned -- and a Privacy Policy directing a data
+  // subject to a mailbox nobody reads is a statutory contact point that does not work, not a
+  // cosmetic detail. Split them back out once the domain has real mailboxes behind it.
+  legalEmail: 'bloomhospitalitynp@gmail.com',
+  privacyEmail: 'bloomhospitalitynp@gmail.com',
+  supportEmail: 'bloomhospitalitynp@gmail.com',
   privacyOfficer: 'Aashish Shrestha',
 }
 

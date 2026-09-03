@@ -31,7 +31,7 @@ Crest Suite is a software-as-a-service platform for hospitality operations in Ne
 
 3.3 We may change, add or remove features, and may release Modules to some tiers before others. We will not materially reduce the core functionality of a paid Module during a prepaid period without offering a pro-rata refund for that Module.
 
-3.4 Support is provided by email at [support@crestsuite.com](mailto:support@crestsuite.com) and any in-app channel during Crest's business hours in Nepal. Response targets, if any, are set out in the Subscription Agreement.
+3.4 Support is provided by email at [bloomhospitalitynp@gmail.com](mailto:bloomhospitalitynp@gmail.com) and any in-app channel during Crest's business hours in Nepal. Response targets, if any, are set out in the Subscription Agreement.
 
 ## 4. Free trial
 
@@ -47,7 +47,7 @@ Crest Suite is a software-as-a-service platform for hospitality operations in Ne
 
 5.1 You are responsible for everything done in your Account by your Users, including anyone who uses a shared device, a PIN or credentials that a User has disclosed.
 
-5.2 You must keep login credentials and PINs confidential, assign each User only the role they need, remove Users who leave your business promptly, and tell us at [support@crestsuite.com](mailto:support@crestsuite.com) immediately if you suspect unauthorised access.
+5.2 You must keep login credentials and PINs confidential, assign each User only the role they need, remove Users who leave your business promptly, and tell us at [bloomhospitalitynp@gmail.com](mailto:bloomhospitalitynp@gmail.com) immediately if you suspect unauthorised access.
 
 5.3 You must provide accurate business details (including legal name, PAN/VAT number and address) and keep them current. We may suspend an Account whose details we cannot verify.
 
@@ -75,7 +75,7 @@ Crest Suite is a software-as-a-service platform for hospitality operations in Ne
 
 7.4 **Aggregated data.** We may create and use anonymised or aggregated statistics derived from Customer Data (for example, average stock turnover across cafés) provided they do not identify you, your Users or any individual.
 
-7.5 **Export.** Many parts of the Service let you export your own records to Excel directly from the screen you are looking at. For a complete copy of your Customer Data, ask us at [support@crestsuite.com](mailto:support@crestsuite.com) and we will provide it in a commonly used format at no charge, normally within 7 working days. You may make that request at any time while the Account is open, and for 30 days after it ends.
+7.5 **Export.** Many parts of the Service let you export your own records to Excel directly from the screen you are looking at. For a complete copy of your Customer Data, ask us at [bloomhospitalitynp@gmail.com](mailto:bloomhospitalitynp@gmail.com) and we will provide it in a commonly used format at no charge, normally within 7 working days. You may make that request at any time while the Account is open, and for 30 days after it ends.
 
 7.6 **Retention and deletion.** We delete Customer Data within 90 days after the Account ends, except where we must keep it by law or it is held in routine backups that expire on their own schedule. Nepali law requires you to keep VAT, income tax and payroll records for a set number of years; that obligation is yours, and you must request and take a copy of what you need before deletion.
 
@@ -169,7 +169,7 @@ We may update these Terms. Each version has a version number, effective date and
 
 ## 18. General
 
-18.1 **Notices** to Crest go to [legal@crestsuite.com](mailto:legal@crestsuite.com) or the registered office; notices to you go to your Account's owner email. Email notice is effective on the business day it is sent.
+18.1 **Notices** to Crest go to [bloomhospitalitynp@gmail.com](mailto:bloomhospitalitynp@gmail.com) or the registered office; notices to you go to your Account's owner email. Email notice is effective on the business day it is sent.
 
 18.2 **Force majeure.** Neither party is liable for failure caused by events beyond its reasonable control, including internet or power failure in Nepal, natural disaster, strike or government action, provided reasonable efforts are made to resume performance.
 
@@ -179,4 +179,4 @@ We may update these Terms. Each version has a version number, effective date and
 
 18.5 **Language.** These Terms are written in English. A Nepali translation may be provided for convenience; the English text governs.
 
-18.6 **Contact.** Bloom Hospitality Pvt. Ltd., Saraswatinagar-6, Kathmandu · [legal@crestsuite.com](mailto:legal@crestsuite.com)
+18.6 **Contact.** Bloom Hospitality Pvt. Ltd., Saraswatinagar-6, Kathmandu · [bloomhospitalitynp@gmail.com](mailto:bloomhospitalitynp@gmail.com)

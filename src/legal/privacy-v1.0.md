@@ -105,7 +105,7 @@ Under the Individual Privacy Act, 2075 and this policy, individuals whose inform
 - ask us to delete information we no longer need, or withdraw consent for uses based on consent;
 - object to marketing at any time using the unsubscribe link or by emailing us.
 
-To exercise these rights, email [privacy@crestsuite.com](mailto:privacy@crestsuite.com) or write to Aashish Shrestha, Privacy Officer, at Saraswatinagar-6, Kathmandu. We will respond within 15 days and may need to verify your identity. If you are unhappy with our response you may complain to the District Court under the Privacy Act; note that the Act sets a time limit for filing complaints (currently three months from the date you knew of the matter).
+To exercise these rights, email [bloomhospitalitynp@gmail.com](mailto:bloomhospitalitynp@gmail.com) or write to Aashish Shrestha, Privacy Officer, at Saraswatinagar-6, Kathmandu. We will respond within 15 days and may need to verify your identity. If you are unhappy with our response you may complain to the District Court under the Privacy Act; note that the Act sets a time limit for filing complaints (currently three months from the date you knew of the matter).
 
 If your request concerns Customer Data held on behalf of a business that uses Crest Suite, we will forward it to that business and help them respond.
 
@@ -119,7 +119,7 @@ Each version of this policy has a version number, effective date and content has
 
 ## 13. Contact
 
-Privacy requests and questions: [privacy@crestsuite.com](mailto:privacy@crestsuite.com)
+Privacy requests and questions: [bloomhospitalitynp@gmail.com](mailto:bloomhospitalitynp@gmail.com)
 
 Privacy officer: Aashish Shrestha
 
