@@ -167,28 +167,99 @@
   color: var(--theme-text3);
 }
 
-/* The hash is the verifiable part of the document, so it gets monospace and stays selectable.
-   Truncated to 12 chars on screen with the full value available to copy — a 64-char hex string in
-   a metadata row is noise, but it must be obtainable without view-source. */
-.legal-hash {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
-  font-size: 11px;
-  color: var(--theme-text2);
-  background: var(--theme-input-bg);
-  border: 1px solid var(--theme-border-lt);
-  border-radius: var(--radius-sm);
-  padding: 2px 7px;
+/* ── Verify disclosure ──────────────────────────────────────────────────────────────────────
+   The content hash used to sit in the meta row beside the version and the effective date. Wrong
+   altitude for that company: a restaurant owner has no use for a 64-character digest, while the
+   version and date are exactly what they came to check. It is not removed — for a lawyer or an
+   auditor it is the most load-bearing thing on the page — it just moves one disclosure down. ── */
+.legal-verify-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 5px 0;
+  background: none;
+  border: 0;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--theme-text3);
   cursor: pointer;
 }
 
-.legal-hash:hover {
+.legal-verify-toggle:hover {
   color: var(--theme-text1);
-  border-color: var(--theme-border);
 }
 
-.legal-hash:focus-visible {
+.legal-verify-toggle:focus-visible {
   outline: 2px solid var(--theme-focus-outline);
-  outline-offset: 2px;
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.legal-verify-chev {
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+
+.legal-verify-chev--open {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .legal-verify-chev { transition: none; }
+}
+
+.legal-verify {
+  margin-top: 10px;
+  padding: 14px 16px;
+  background: var(--theme-input-bg);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-md);
+  max-width: 76ch;
+}
+
+.legal-verify-lead {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--theme-text2);
+}
+
+.legal-verify-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+/* The full 64 characters, and it must break rather than overflow — there is no break opportunity
+   inside a hex string, so on a phone this is the one thing on the page that would force a
+   horizontal scroll. */
+.legal-verify-hash {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--theme-text1);
+  word-break: break-all;
+  min-width: 0;
+}
+
+.legal-verify-cmd {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: var(--theme-bg);
+  border: 1px solid var(--theme-border-lt);
+  border-radius: var(--radius-sm);
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--theme-text2);
+  overflow-x: auto;
+}
+
+.legal-verify-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--theme-text3);
 }
 
 /* ── Banners ────────────────────────────────────────────────────────────────────────────── */
@@ -452,13 +523,6 @@
 
   .legal-doc-title {
     font-size: 18pt;
-  }
-
-  .legal-hash {
-    background: none;
-    border: 0;
-    padding: 0;
-    font-size: 8pt;
   }
 
   .legal-banner--draft,

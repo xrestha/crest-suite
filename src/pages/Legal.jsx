@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { Hexagon, Printer, Check, Copy } from 'lucide-react'
+import { Hexagon, Printer, Check, Copy, ChevronDown, Download, ShieldCheck } from 'lucide-react'
 
 import { useSettings } from '../context/SettingsContext'
 import { printWithTitle } from '../utils/printTitle'
@@ -58,6 +58,7 @@ export default function Legal() {
   const [text, setText] = useState(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [verifyOpen, setVerifyOpen] = useState(false)
 
   const doc = DOC_TYPES.includes(docType) ? legalDoc(docType) : null
 
@@ -115,8 +116,31 @@ export default function Legal() {
   const knownPriorVersion = Boolean(PRIOR_VERSIONS[`${docType}-${requestedVersion}`])
   const draft = isDraft(docType)
 
-  const shortHash = doc.sha256 ? doc.sha256.slice(0, 12) : '—'
   const printName = `${settings?.app_name || 'Crest Suite'} ${doc.title} v${doc.version}`
+
+  /**
+   * Hands over the exact bytes the hash was computed from.
+   *
+   * Without this the published hash is only checkable by someone who can reach the git repo, which
+   * is a poor kind of verifiable for a document aimed at a customer's lawyer. Copy-to-clipboard was
+   * the other option and is worse: the clipboard normalises line endings on Windows, so the pasted
+   * text would hash to something different and the check would fail for a reason nobody could see.
+   * A Blob preserves the bytes.
+   */
+  function downloadSource() {
+    if (!text) return
+    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = doc.filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // Revoked on the next tick rather than immediately — Safari has not always finished reading
+    // the blob by the time click() returns.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
 
   function copyHash() {
     if (!doc.sha256 || !navigator.clipboard) return
@@ -189,27 +213,6 @@ export default function Legal() {
                 <span className="legal-meta-key">Effective</span>
                 {doc.effectiveAdLabel} ({doc.effectiveBsLabel} BS)
               </span>
-              <span className="legal-meta-item">
-                <span className="legal-meta-key">SHA-256</span>
-                <button
-                  type="button"
-                  className="legal-hash"
-                  onClick={copyHash}
-                  title={doc.sha256 || ''}
-                  aria-label={`Copy the full SHA-256 hash of this document. Begins ${shortHash}.`}
-                >
-                  {copied ? (
-                    <>
-                      <Check size={11} aria-hidden="true" style={{ verticalAlign: -1 }} /> copied
-                    </>
-                  ) : (
-                    <>
-                      {shortHash}…{' '}
-                      <Copy size={11} aria-hidden="true" style={{ verticalAlign: -1 }} />
-                    </>
-                  )}
-                </button>
-              </span>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm legal-no-print"
@@ -219,6 +222,72 @@ export default function Legal() {
                 PDF
               </button>
             </div>
+
+            {/* The content hash used to sit in the row above, beside the version and the effective
+                date. It is the wrong altitude for that company: a restaurant owner reading these
+                terms has no use for a 64-character digest, while the version and the date are
+                exactly what they came to check. It is not removed, because for a lawyer or an
+                auditor it is the most load-bearing thing on the page — it is what makes "version
+                1.0" mean one specific wording rather than a label anyone could reuse after an edit.
+                So it moves one disclosure down, where it costs the ordinary reader nothing and the
+                person who needs it can still find it.
+
+                A real <button> with aria-expanded/aria-controls, per the pattern Help.js's
+                FeatureCard already uses — not a div with an onClick. */}
+            <button
+              type="button"
+              className="legal-verify-toggle legal-no-print"
+              aria-expanded={verifyOpen}
+              aria-controls={`legal-verify-${docType}`}
+              onClick={() => setVerifyOpen((v) => !v)}
+            >
+              <ShieldCheck size={13} aria-hidden="true" />
+              Verify this document
+              <ChevronDown
+                size={13}
+                aria-hidden="true"
+                className={`legal-verify-chev${verifyOpen ? ' legal-verify-chev--open' : ''}`}
+              />
+            </button>
+
+            {verifyOpen && (
+              <div id={`legal-verify-${docType}`} className="legal-verify legal-no-print">
+                <p className="legal-verify-lead">
+                  Every published version of this document has a SHA-256 fingerprint. Change one
+                  character anywhere in it and this value changes completely — so it identifies this
+                  exact wording, not just its version number. It is recorded against every
+                  acceptance and printed on any signed Subscription Agreement.
+                </p>
+                <div className="legal-verify-row">
+                  <span className="legal-meta-key">SHA-256</span>
+                  <code className="legal-verify-hash">{doc.sha256}</code>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={copyHash}>
+                    {copied ? (
+                      <><Check size={12} aria-hidden="true" style={{ verticalAlign: -2 }} /> Copied</>
+                    ) : (
+                      <><Copy size={12} aria-hidden="true" style={{ verticalAlign: -2 }} /> Copy</>
+                    )}
+                  </button>
+                </div>
+                <p className="legal-verify-lead">
+                  To check it yourself, download the exact text this was taken over and hash it:
+                </p>
+                <pre className="legal-verify-cmd">sha256sum {doc.filename}</pre>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={downloadSource}
+                  disabled={!text}
+                >
+                  <Download size={12} aria-hidden="true" style={{ verticalAlign: -2 }} /> Download
+                  the exact text
+                </button>
+                <p className="legal-verify-note">
+                  The file downloads with Unix line endings, which is what the hash is taken over —
+                  opening it in an editor that converts them and saving would change the result.
+                </p>
+              </div>
+            )}
           </header>
 
           {/* Part E rule 5 of the source spec, made structural: a document still carrying an

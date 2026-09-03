@@ -131,6 +131,10 @@ export function legalDoc(docType) {
   const meta = LEGAL_META[docType] || {}
   return {
     ...base,
+    // The source filename, so the page can offer the EXACT bytes the hash was taken over. Without
+    // it the published hash is only checkable by someone who can reach the git repo, which is a
+    // poor kind of verifiable for a document aimed at a customer's lawyer.
+    filename: meta.filename || `${docType}-v${base.version}.md`,
     sha256: meta.sha256 || null,
     bytes: meta.bytes || 0,
     missing: meta.missing || [],
