@@ -9,6 +9,7 @@ import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import QtyInput from '../../../components/QtyInput'
+import UsageChip from '../../../components/UsageChip'
 import { Navigate } from 'react-router-dom'
 import { printWithTitle } from '../../../utils/printTitle'
 import { errorInfo } from '../../../shared/errorText'
@@ -893,13 +894,8 @@ ${text}`, detail })
                       </td>
                       <td>
                         {usageMap[item.id]?.length > 0 ? (
-                          <Tip text={`Has records in: ${usageMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} width={260}><span style={{
-                            fontSize: 11, background: 'rgba(201,168,76,0.12)',
-                            color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.3)',
-                            borderRadius: 'var(--radius-xs)', padding: '2px 7px', cursor: 'default', whiteSpace: 'nowrap'
-                          }}>
-                            🔗 {usageMap[item.id].join(', ')}
-                          </span></Tip>
+                          <UsageChip codes={usageMap[item.id]}
+                            text={`Has records in: ${usageMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} />
                         ) : (
                           <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>
                         )}

@@ -1254,6 +1254,31 @@ tr.interactive-row:focus-visible {
   border: 1px solid rgba(248,113,113,0.45);
 }
 
+/* A square icon-only button for a row's Actions column, worn over .btn plus a variant
+   (.btn-ghost / .btn-danger) so it keeps the focus ring, the :disabled treatment and the coarse
+   touch floor rather than being hand-rolled inline.
+
+   It exists because a row of four text buttons IS a column width: on Vendors, "Confirm Balance",
+   "Edit", "Deactivate" and "Delete" measured ~340px of the table, which pushed the whole thing
+   into horizontal scroll — and the thing that scrolled out of view was the vendor NAME, i.e. the
+   only column that says which row you are acting on. Reported from a screenshot, not by a
+   detector.
+
+   Icon-only, so `aria-label` is REQUIRED on every one of these (the label is the accessible name;
+   an icon has none), with the same string on `title` for the pointer. */
+.btn-icon {
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.btn-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
 /* A table cell that navigates. Reads as a link, behaves as a button — used where the row's
    identity IS the action (an outlet name that switches to that outlet), so the affordance has to
    sit on the name itself rather than in a trailing Actions column. */

@@ -442,6 +442,31 @@ representative row rendered in a headless browser and queried for `scrollWidth` 
 viewport. A table that fits on the machine it was built on tells you nothing about the one it was
 reported from.
 
+**But a harness lies quietly, and S671 got two different wrong answers before a right one.** Both
+failures produced *plausible* numbers, which is the whole danger — neither looked wrong, and the
+only tell was two passes disagreeing with each other:
+
+- **The harness double-debited the sidebar.** It placed a 240px `<div>` beside `.main-content` — but
+  Layout.css's own `.main-content` already reserves the sidebar with `margin-left`, so every reading
+  came in 240px pessimistic (854px of room reported at a 1440px viewport, against a true 1094px).
+- **Then it resized a wrapper instead of the viewport.** Setting `.shell { width: 1440px }` inside a
+  671px browser window reports `overflow: 0` for a table that overflows badly in the real one — the
+  scroll container is sized by the window, not by the div you widened.
+
+So: **resize the viewport** (`page.setViewportSize`), never an element, and reload between passes so
+no inline style from the previous one survives. Before trusting a single figure, **check the
+harness's own reported room against the arithmetic** — viewport, minus the shell's reservations,
+minus the card's padding. If it does not come out, the harness is wrong and every number in it is.
+
+**A table's identity column needs a `min-width`, because under `table-layout: auto` it is the one
+that pays.** Everything to its right is typically nowrap — a phone, a code, a badge, a row of
+controls, none of which can give width back — so the wrappable name column absorbs the entire
+squeeze and keeps doing so past the point of usefulness: Vendors' collapsed to **111px** at a 1024px
+window and broke real supplier names over five lines, standing rows **145px** tall. A 180px floor
+took those rows to 86px for 59px more horizontal scroll. **That trade is only worth making when the
+column is also sticky** — otherwise you have bought taller-legible names at the cost of scrolling
+the name off screen, which is the same defect wearing the other hat.
+
 **A scroll container's clearance must be MARGIN, not padding.** `.table-wrap--fab-clear` (21 tables)
 reserved its 88px of Fab clearance with `padding-bottom` — inside the scroll container, so the
 horizontal scrollbar rendered 88px below the last row: below the fold on any table long enough to

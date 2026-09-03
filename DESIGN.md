@@ -737,6 +737,13 @@ four of which live on the class and none of which announce their absence.
 - **Link-like:** a `<td>` control that reads as a link and behaves as a button, for where the row's
   identity *is* the action (an outlet name that switches to that outlet). Accent-ink, underlined at
   1px, thickening to 2px on hover.
+- **Icon-only (`.btn-icon`):** a 30px square holding a 15px glyph, worn *over* `.btn` plus a
+  variant so it keeps the focus ring, the disabled treatment and the coarse touch floor. For a
+  row's Actions column, where a set of text buttons is a column width rather than a control: on
+  Vendors, four of them measured **314px** and pushed the table's min-content to 1115px against
+  934px of room at a 1280px window — and the column that scrolled out of view to pay for them was
+  the one naming the row. **An icon has no accessible name, so `aria-label` is required on every
+  one**, with the same string on `title` for the pointer.
 - **Disabled:** one treatment for every variant — `opacity: 0.55` plus `not-allowed`. Before this
   lived on the class, each call site carried its own inline `opacity`, so a button that used the
   class alone had no disabled state at all: it simply stopped responding while looking unchanged.

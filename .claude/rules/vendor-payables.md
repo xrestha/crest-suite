@@ -2,12 +2,50 @@
 paths:
   - "src/modules/ims/reports/**"
   - "src/modules/ims/purchases/**"
+  - "src/modules/ims/vendors/**"
   - "src/modules/ownerReport/computeVendorPurchasingSection.js"
 ---
 
 # Vendor balance / payables (billKeyOf, aging, payment allocation layers)
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
+
+### The `vendors` row is the only copy of the supplier's NAME (S671)
+
+`purchase_entries`, `purchase_orders` and `vendor_returns` store a `vendor_id` and nothing else;
+every report resolves the name by joining `vendors`. `ims_gate_passes` is the sole table carrying a
+`vendor_name` of its own. So that row is not a lookup convenience — **deleting it is what erases the
+supplier from the client's own history**, on every past bill, Vendor Report, Outstanding Payables
+line and balance confirmation at once.
+
+**And the FK layer protects only half of it, which is the part worth remembering.** The four tables
+split by `ON DELETE` behaviour and the two halves fail in opposite directions:
+
+| Table | On vendor delete | Result |
+| --- | --- | --- |
+| `purchase_entries`, `purchase_orders` | plain FK (NO ACTION) | Postgres **refuses**; nothing is lost |
+| `vendor_returns`, `ims_gate_passes` | `ON DELETE SET NULL` | the delete **succeeds** and the rows silently lose their supplier |
+
+A guard that leans on "the database will stop me" is therefore right about two tables and wrong
+about two, with no error on the wrong half — and `vendor_returns` keeps no name, so that loss is
+unrecoverable. **Check every referencing table in the app, and check `confdeltype` before assuming a
+foreign key is a guard at all.** `payable_payments` hangs off `purchase_entry_id` rather than the
+vendor, so it is covered transitively.
+
+**The answer for a vendor with history is `vendors.archived_at` (migration `20260903120000`), not a
+delete.** The row is kept and hidden: every FK, join and report is untouched, and the vendor leaves
+the Vendors page and every picker. A `CHECK (archived_at IS NULL OR is_active IS NOT TRUE)` carries
+the one invariant that matters — `is_active` is what every purchase, PO and gate-pass picker filters
+on, so an archived-but-active vendor would keep appearing in the dropdowns it was archived to leave.
+Restore clears `archived_at` and **deliberately leaves the vendor inactive**, so the two columns
+never have to be reasoned about in one write. A hard delete survives only where it is genuinely
+free: a vendor nothing points at.
+
+**Denormalising a `vendor_name` snapshot onto the other three was considered and rejected.** It
+needs `vendor_id` to go nullable on `purchase_entries`, and `VendorReport`/`OutstandingPayables`
+group by `vendor_id` — so two deleted vendors would both become NULL and **merge their outstanding
+balances**. A hidden row costs one column; a denormalised name costs an invariant on the module's
+most important table.
 
 ### `purchase_entries.created_at` is a BILL-level fact, not a row-level one (S670)
 

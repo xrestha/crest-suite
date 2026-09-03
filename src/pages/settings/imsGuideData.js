@@ -150,7 +150,8 @@ export const IMS_GUIDE_GROUPS = [
         summary: 'The supplier directory used by Purchases, Purchase Orders, and Gate Passes.',
         workflow: [
           'Add/Edit via modal: Vendor Name (required), Contact Person, Phone, Address, PAN/VAT No.',
-          'List with search (name or vendor code), Edit / Deactivate-Activate / Delete (admin-only).',
+          'Row actions are icon buttons (hover for the label): balance-confirmation letter, Edit, Deactivate-Activate, plus one admin-only slot that is a bin icon (Delete) on a vendor nothing references, a box icon (Archive) on a referenced vendor that is already inactive, and a padlock — no action, only a tooltip naming what is attached — on a referenced vendor still active. They are icons because four text buttons were 314px of a table whose min-content then exceeded the page at 1280px; the vendor name column is sticky for the same reason.',
+          'Archived vendors leave the list entirely. An admin-only "Show archived (N)" toggle switches the table to them; each of those rows offers Confirm Balance and Restore only — Edit and Activate are withheld, since either would put the vendor back into the purchase dropdowns by a side door and Activate would trip the DB CHECK. Restore leaves it inactive.',
           'Prev/Next buttons in the edit modal let an admin walk the whole vendor list without closing/reopening it.',
         ],
         fields: [
@@ -159,7 +160,9 @@ export const IMS_GUIDE_GROUPS = [
         ],
         formulas: [],
         gotchas: [
-          'Delete is hard-blocked (not even admin can force it) if the vendor has any purchase history — the only path for a vendor with history is Deactivate.',
+          'Delete is hard-blocked (not even admin can force it) if the vendor is referenced by a purchase entry, purchase order, vendor return or gate pass — the only path for a vendor with history is Deactivate. The button is not rendered at all on those rows; the click-time re-check is still there because the page-load usage snapshot can be minutes old.',
+          'Two of the four references would NOT be caught by the database. purchase_entries and purchase_orders hold a plain FK so Postgres refuses the delete, but vendor_returns and ims_gate_passes are ON DELETE SET NULL — the delete succeeds and those rows silently lose their supplier, and vendor_returns stores no name of its own. That is why the check is done in the app across all four rather than left to the FK.',
+          'Archive is a hidden row, not a deleted one, and that is the whole mechanism: purchase_entries, purchase_orders and vendor_returns store only vendor_id and resolve the name by joining vendors, so the row surviving is the only reason history keeps its supplier. vendors.archived_at holds it (migration 20260903120000), with a CHECK that an archived vendor is never active — is_active is the column every purchase, PO and gate-pass picker filters on.',
         ],
         connections: 'Feeds the vendor picker in Purchases, Purchase Orders, Gate Passes; feeds Vendor Report, Outstanding Payables, Price Tracker.',
       },
