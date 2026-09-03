@@ -7,6 +7,7 @@ import { getSubStatus } from '../utils/subscription'
 import RailTip from './RailTip'
 import RouteFallback from './RouteFallback'
 import CommandPalette from './CommandPalette'
+import AppErrorBoundary from './AppErrorBoundary'
 // Aliased — `Calculator` is already taken in this file by the lucide icon used for the HR
 // Calculation nav entry.
 import QuickCalculator from './Calculator'
@@ -1249,9 +1250,16 @@ export default function Layout() {
           </div>
         )}
 
-        <Suspense fallback={<RouteFallback />}>
-          <Outlet />
-        </Suspense>
+        {/* Page scope (S673): wraps ONLY the Suspense/Outlet, not the whole <main> — a crash inside
+            a page renders this fallback in place with the sidebar and header still standing;
+            navigating away (resetKey = location.pathname) clears it automatically. Wrapping more
+            than this would let a Layout render error be swallowed here instead of falling through
+            to the app-scope boundary in App.js. */}
+        <AppErrorBoundary resetKey={location.pathname} fullPage={false} route={location.pathname}>
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet />
+          </Suspense>
+        </AppErrorBoundary>
       </main>
 
       <CommandPalette

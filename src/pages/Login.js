@@ -9,6 +9,7 @@ import { TRIAL_DAYS } from '../data/pricingPlans'
 import { acceptancePayload, legalPath } from '../legal'
 import { supabase } from '../supabaseClient'
 import FieldError, { fieldAria } from '../components/FieldError'
+import SupportContactLine from '../components/SupportContactLine'
 import './Login.css'
 
 async function edgeOp(action, params = {}) {
@@ -534,6 +535,10 @@ export default function Login() {
           <a href={legalPath('terms')}>Terms of Service</a>
           <span aria-hidden="true"> · </span>
           <a href={legalPath('privacy')}>Privacy Policy</a>
+          {/* Kept on this SAME line rather than a third footer row — this page is laid out to a
+              measured viewport budget with 0px of slack (S553/S560), and a wrapped long line costs
+              more than a longer short one (see the comment on .login-footer-legal below). */}
+          <SupportContactLine variant="inline" leadSeparator className="login-footer-support-inline" />
         </span>
       </footer>
     </div>

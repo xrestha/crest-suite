@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { useSettings } from '../context/SettingsContext'
 import { Lock } from 'lucide-react'
+import { useSupportContact } from '../shared/hooks/useSupportContact'
 
 // Full-page lock shown in place of the app once a client's subscription has lapsed.
 //
@@ -13,18 +13,17 @@ import { Lock } from 'lucide-react'
 // Owner may need to sign in as a different (unlocked) client.
 export default function SubscriptionLock() {
   const { accessReason, profile, signOut, subscribeRequested, requestSubscription, trialPurgeInDays } = useAuth()
-  const { settings } = useSettings()
   const [sending, setSending] = useState(false)
 
   const clientName = profile?.clients?.name || 'Your account'
 
   // Every copy variant below ends by asking the client to get in touch, and this screen used to
-  // give them no way to do it — no phone, no email, nothing. The details exist in settings and are
-  // already rendered by Help.js, which sits behind this very lock. A lapsed invoice here is
-  // usually a collection delay rather than a decision to leave (see GRACE_DAYS), so the one screen
-  // whose entire job is restarting a conversation must not be the one screen that severs it.
-  const phone = settings?.contact_phone || ''
-  const email = settings?.contact_email || ''
+  // give them no way to do it when settings.contact_phone/email were blank, which is their default
+  // — the client's own consultant details win when set, Crest's own support line otherwise
+  // (useSupportContact, S673). A lapsed invoice here is usually a collection delay rather than a
+  // decision to leave (see GRACE_DAYS), so the one screen whose entire job is restarting a
+  // conversation must not be the one screen that severs it.
+  const { phone, email, telHref } = useSupportContact()
 
   const COPY = {
     trial: {
@@ -90,7 +89,7 @@ export default function SubscriptionLock() {
             marginBottom: 20, fontSize: 13,
           }}>
             {phone && (
-              <a className="btn btn-ghost" href={`tel:${phone.replace(/\s+/g, '')}`}>Call {phone}</a>
+              <a className="btn btn-ghost" href={telHref}>Call {phone}</a>
             )}
             {email && (
               <a className="btn btn-ghost" href={`mailto:${email}?subject=${encodeURIComponent(`Reactivate ${clientName}`)}`}>Email us</a>

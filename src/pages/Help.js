@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { MODULE_COLORS, MODULE_INK, colorTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
+import Tip from '../components/Tip'
+import SupportContactLine from '../components/SupportContactLine'
 
 // Lazy for the same reason Settings lazy-loads its Guides tab: this one runs a query and carries
 // its own table, and every other tab would otherwise pay for it on first paint of /help.
@@ -1008,6 +1010,12 @@ export default function Help() {
         <p className="page-subtitle">How to use every feature — glossary, FAQ, and tips</p>
       </div>
 
+      {/* Visible on every tab without a click, not just the Support one below (S673) — the guide
+          answers "how", this answers "who do I ask when the guide doesn't". */}
+      <div className="no-print" style={{ marginBottom: 16, fontSize: 12, color: 'var(--theme-text3)' }}>
+        Need help? <SupportContactLine variant="inline" />
+      </div>
+
       {/* Section tabs */}
       <div role="tablist" aria-label="Help sections" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 28, borderBottom: '1px solid var(--theme-border)' }}>
         {[
@@ -1016,6 +1024,7 @@ export default function Help() {
           { id: 'glossary', label: 'Glossary' },
           { id: 'faq',     label: 'FAQ' },
           { id: 'pricing', label: '💎 Pricing' },
+          { id: 'support', label: 'Support' },
           { id: 'legal',   label: 'Legal' },
         ].map((s, i, arr) => (
           /* .panel-tab is the underline-tab family DESIGN.md added for exactly this shape, and it
@@ -1712,6 +1721,26 @@ export default function Help() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Support (S673) */}
+      {activeSection === 'support' && (
+        <div style={{ maxWidth: 560 }}>
+          <div className="card">
+            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Get in touch</h3>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
+              For anything the guide above doesn't answer — a bug, a question, or your outlet is down.
+            </p>
+            <SupportContactLine variant="block" />
+            <div style={{ marginTop: 16 }}>
+              <Tip text="Sunday–Friday, 9am–6pm Nepal time for general questions. If your outlet can't take orders or bill guests, call any time — that one case doesn't wait for business hours.">
+                <span style={{ fontSize: 11, color: 'var(--theme-text3)', borderBottom: '1px dotted var(--theme-text3)', cursor: 'help' }}>
+                  What "outlet-down issues any time" means
+                </span>
+              </Tip>
+            </div>
+          </div>
         </div>
       )}
 

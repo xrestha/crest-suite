@@ -8,6 +8,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
+import SupportContactLine from '../../../components/SupportContactLine'
 import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import SearchableSelect from '../../../components/SearchableSelect'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -705,10 +706,14 @@ export default function Stock() {
       )}
 
       {!isOnline && (
-        <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          <span>📵</span>
-          <span><strong>Offline</strong> — entries are saved locally and will sync when you reconnect.</span>
-          {pendingSync > 0 && <span style={{ marginLeft: 'auto', background: 'rgba(251,191,36,0.15)', borderRadius: 'var(--radius-lg)', padding: '2px 10px', fontWeight: 600 }}>{pendingSync} pending</span>}
+        <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>📵</span>
+            <span><strong>Offline</strong> — entries are saved locally and will sync when you reconnect.</span>
+            {pendingSync > 0 && <span style={{ marginLeft: 'auto', background: 'rgba(251,191,36,0.15)', borderRadius: 'var(--radius-lg)', padding: '2px 10px', fontWeight: 600 }}>{pendingSync} pending</span>}
+          </div>
+          {/* S673: a broken app needs a phone number, not just a network. */}
+          <SupportContactLine variant="inline" />
         </div>
       )}
       {syncing && (

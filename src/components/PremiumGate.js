@@ -1,6 +1,6 @@
 import { useAuth } from '../context/AuthContext'
-import { useSettings } from '../context/SettingsContext'
 import { useNavigate } from 'react-router-dom'
+import { useSupportContact } from '../shared/hooks/useSupportContact'
 
 const PLAN_RANK  = { starter: 0, growth: 1, pro: 2 }
 const PLAN_LABEL = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
@@ -9,17 +9,18 @@ const PLAN_LABEL = { starter: 'Starter', growth: 'Growth', pro: 'Pro' }
 // featureKey: still supported as an admin override — Starter clients with a flag set can pass
 export default function PremiumGate({ children, featureKey, minPlan = 'growth' }) {
   const { isAdmin, plan, hasFeature } = useAuth()
-  const { settings } = useSettings()
   const navigate = useNavigate()
+  // Called unconditionally (Rules of Hooks) even on the allowed path, where its result goes
+  // unused. The client's own consultant details win when settings.contact_phone/email are set;
+  // Crest's own support line fills in otherwise (S673) — this used to fall through to a bare
+  // "Contact your Crest consultant to upgrade" with no way to actually do that.
+  const { phone, email, website, telHref } = useSupportContact()
 
   const meetsMinPlan = isAdmin || (PLAN_RANK[plan] >= PLAN_RANK[minPlan])
   const allowed      = meetsMinPlan || (featureKey && hasFeature(featureKey))
 
   if (allowed) return children
 
-  const phone      = settings?.contact_phone   || ''
-  const email      = settings?.contact_email   || ''
-  const website    = settings?.contact_website || ''
   const planNeeded = PLAN_LABEL[minPlan] || 'Growth'
 
   const upgradeDesc = minPlan === 'pro'
@@ -59,7 +60,7 @@ export default function PremiumGate({ children, featureKey, minPlan = 'growth' }
           {phone && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>📞</span>
-              <a href={`tel:${phone}`} style={{ color: 'var(--theme-text1)', fontSize: 14, textDecoration: 'none' }}>{phone}</a>
+              <a href={telHref} style={{ color: 'var(--theme-text1)', fontSize: 14, textDecoration: 'none' }}>{phone}</a>
             </div>
           )}
           {email && (
@@ -75,9 +76,6 @@ export default function PremiumGate({ children, featureKey, minPlan = 'growth' }
                 target="_blank" rel="noopener noreferrer"
                 style={{ color: 'var(--theme-text1)', fontSize: 14, textDecoration: 'none' }}>{website}</a>
             </div>
-          )}
-          {!phone && !email && !website && (
-            <p style={{ color: 'var(--theme-text3)', fontSize: 13, margin: 0 }}>Contact your Crest consultant to upgrade.</p>
           )}
         </div>
 

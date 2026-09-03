@@ -16,6 +16,10 @@ import { Hexagon, Printer, Check, Copy, ChevronDown, Download, ShieldCheck } fro
 import { useSettings } from '../context/SettingsContext'
 import { printWithTitle } from '../utils/printTitle'
 import LegalMarkdown from '../legal/LegalMarkdown'
+// The one support address (src/shared/supportContact.js re-exports legal's own COMPANY.supportEmail)
+// — this used to be a hardcoded mailto: link to "support@" the crestsuite .com domain, which the
+// project does not own (see supportAddress.test.js, which asserts that link never comes back).
+import { SUPPORT_EMAIL } from '../shared/supportContact'
 import {
   DOC_TYPES,
   legalDoc,
@@ -320,7 +324,7 @@ export default function Legal() {
             <div className="legal-banner legal-banner--old" role="alert">
               <strong>This document could not be loaded.</strong> Please reload the page. If it
               keeps happening, email{' '}
-              <a href="mailto:support@crestsuite.com">support@crestsuite.com</a> and we will send it
+              <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> and we will send it
               to you directly.
             </div>
           )}

@@ -13,6 +13,7 @@ import Layout from './components/Layout'
 import PremiumGate from './components/PremiumGate'
 import ModuleGate from './components/ModuleGate'
 import RouteFallback from './components/RouteFallback'
+import AppErrorBoundary from './components/AppErrorBoundary'
 import './components/Layout.css'
 const Login = lazy(() => import('./pages/Login'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
@@ -116,6 +117,10 @@ function RootRedirect() {
 
 export default function App() {
   return (
+    // App scope (S673): a throw in the providers themselves — ThemeProvider, AuthProvider,
+    // SettingsProvider — is caught here too, which is why the fallback (AppErrorBoundary.jsx)
+    // uses literal var(--theme-*, #hex) defaults rather than trusting the tokens to be set.
+    <AppErrorBoundary>
     <ThemeProvider>
     <AuthProvider>
       <SettingsProvider>
@@ -307,5 +312,6 @@ export default function App() {
       </SettingsProvider>
     </AuthProvider>
     </ThemeProvider>
+    </AppErrorBoundary>
   )
 }

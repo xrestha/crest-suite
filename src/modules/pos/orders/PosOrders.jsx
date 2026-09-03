@@ -8,6 +8,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { setIfChanged, rowsSignature, mapSignature } from '../../../shared/setIfChanged'
 import { pointsValue, maxRedeemablePoints } from '../customers/loyaltyPoints'
 import Tip from '../../../components/Tip'
+import SupportContactLine from '../../../components/SupportContactLine'
 import { contrastRatio } from '../../../utils/avatarColor'
 import QRCode from 'qrcode'
 import { adToBs, getBsToday, getBsFiscalYear } from '../../../utils/bsCalendar'
@@ -3338,14 +3339,19 @@ The tables were left occupied rather than freed with their orders still open.`)
       })()}
 
       {!isOnline && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          <span>📵</span>
-          <span><strong>Offline</strong> — orders are saved on this device and will sync when you reconnect. Billing stays disabled until then.</span>
-          {pendingOrderIds.size > 0 && (
-            <span style={{ marginLeft: 'auto', background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', borderRadius: 20, padding: '2px 10px', fontWeight: 600, flexShrink: 0 }}>
-              {pendingOrderIds.size} pending
-            </span>
-          )}
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span>📵</span>
+            <span><strong>Offline</strong> — orders are saved on this device and will sync when you reconnect. Billing stays disabled until then.</span>
+            {pendingOrderIds.size > 0 && (
+              <span style={{ marginLeft: 'auto', background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', borderRadius: 20, padding: '2px 10px', fontWeight: 600, flexShrink: 0 }}>
+                {pendingOrderIds.size} pending
+              </span>
+            )}
+          </div>
+          {/* S673: this is the screen "outlet is down" happens on — a broken app needs a phone
+              number, not just a network. */}
+          <SupportContactLine variant="inline" />
         </div>
       )}
       {syncingOffline && (
