@@ -120,6 +120,15 @@
         "value": "transition: margin-left",
         "createdAt": "2026-08-30T08:33:46.324Z",
         "reason": "codebase decision, not user: paired half of .sidebar-shell's width transition - .main-content must resize in lockstep or it ends the animation at the wrong width, which is what every table's available width is measured against. Documented at Layout.css:320-324; zeroed under prefers-reduced-motion at Layout.css:280-287."
+      },
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "src/components/Layout.css"
+        ],
+        "createdAt": "2026-09-04T13:35:03.286Z",
+        "reason": "Sidebar collapse: .sidebar-wrap animates width 240<->56px and .main-content its matching margin-left in lockstep (Layout.css L361/L863). A transform cannot express it — the content column's reserved space must actually change, or the sidebar slides OVER the content instead of the page reflowing. Sanctioned since 2026-08-18; the two per-value entries recording that decision are inert, because extractFindingIgnoreValue() returns '' for layout-transition (not in directValueRules), so only a file-scoped wildcard can suppress it. Rationale also in DESIGN.md and .claude/rules/design-system.md."
       }
     ]
   }

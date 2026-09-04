@@ -26,7 +26,7 @@ import ActionError, { asActionError } from '../components/ActionError'
 import { printWithTitle } from '../utils/printTitle'
 import { adToBs, BS_MONTHS } from '../utils/bsCalendar'
 import { clientMrrBreakdown } from '../shared/clientMrr'
-import { COMPANY, DOC_TYPES, legalDoc, legalAbsoluteUrl, siteOrigin, legalReadiness } from '../legal'
+import { COMPANY, DOC_TYPES, PRODUCT_NAME, legalDoc, legalAbsoluteUrl, siteOrigin, legalReadiness } from '../legal'
 import './SubscriptionAgreement.css'
 
 // Crest is VAT-registered and every published price is exclusive of VAT, so the agreement has to
@@ -99,7 +99,10 @@ export default function SubscriptionAgreement() {
   const vat = Math.round(subtotal * VAT_RATE)
   const total = subtotal + vat
   const agrId = agreementId(targetId, today)
-  const providerName = settings?.app_name || 'Crest Suite'
+  // The product's own name, matching the hardcoded <h1> two lines below. It read settings.app_name,
+  // so the running foot of a signed contract could identify itself by a tenant's trading name —
+  // and signed out (or admin with no client selected) that resolves to the global settings row.
+  const providerName = PRODUCT_NAME
 
   return (
     <div className="agr-page">

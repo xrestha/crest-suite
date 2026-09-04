@@ -1,4 +1,4 @@
-import { nepalTime, nepalCivilDate, nepalBs, nepalDateAd, nepalDateLong } from './nepalTime'
+import { nepalTime, nepalCivilDate, nepalBs, nepalBsLong, nepalDateAd, nepalDateLong } from './nepalTime'
 import { adToBs } from '../utils/bsCalendar'
 
 // These assertions are deliberately independent of the machine's timezone — that is the entire
@@ -99,5 +99,21 @@ describe('nepalBs', () => {
   it('returns null for the absent and the malformed', () => {
     expect(nepalBs(null)).toBeNull()
     expect(nepalBs('not a date')).toBeNull()
+  })
+})
+
+describe('nepalBsLong', () => {
+  it('names the day the way a Nepali operator says it', () => {
+    // The registry's own effective date: 3 September 2026 AD is 18 Bhadra 2083 BS, and both
+    // src/legal/index.js and the two documents' front matter state that pairing verbatim. If this
+    // ever disagrees with them, one of the two is wrong and it matters on a contract.
+    expect(nepalBsLong('2026-09-03T06:00:00+05:45')).toBe('18 Bhadra 2083')
+  })
+
+  it('falls back to empty rather than a confident wrong date outside the table', () => {
+    // Same range guard as nepalBs, so a caller can print the AD date alone instead.
+    expect(nepalBsLong('1900-01-01T00:00:00Z')).toBe('')
+    expect(nepalBsLong(null)).toBe('')
+    expect(nepalBsLong('not a date')).toBe('')
   })
 })

@@ -23,7 +23,14 @@
 //   3. node scripts/hash-legal.mjs
 //   4. Bump `version` and the effective dates here, and set requiresReacceptance if the change
 //      materially affects the customer's rights.
-//   5. Bump CACHE_NAME in public/service-worker.js, or existing users keep the old text.
+//   5. SHIP THE OLD TEXT TOO, or /legal/terms/1.0 shows the reader that it cannot. `LEGAL_TEXT` is
+//      keyed by doc type alone, so this bundle only ever holds the CURRENT wording — and
+//      `loadLegalText` therefore refuses any other version rather than serving the new text under
+//      a banner naming the old one. That refusal is the safe failure, not the finished one: every
+//      acceptance row in the ledger deep-links to the exact version it recorded, so until the
+//      generator emits prior versions as well, the one link whose whole purpose is "show me what I
+//      agreed to" answers with an apology. Make `SOURCES` a list per doc type before publishing 1.1.
+//   6. Bump CACHE_NAME in public/service-worker.js, or existing users keep the old text.
 
 import { LEGAL_META } from './generated/legalMeta'
 
@@ -84,6 +91,23 @@ export const COMPANY = {
   supportEmail: 'bloomhospitalitynp@gmail.com',
   privacyOfficer: 'Aashish Shrestha',
 }
+
+/**
+ * The product's own name, on the surfaces that speak for the PROVIDER rather than for a tenant.
+ *
+ * Not `settings.app_name`. Every other signed-out page is right to white-label — a client's staff
+ * sign in at /login and it should carry their brand — but these documents are a contract between
+ * COMPANY.name above and the customer, and the first sentence of both says so. Reading app_name
+ * here put a tenant's trading name in the header, in "© <year> …" under Crest's own legal text and
+ * in the running foot of every printed copy, so a filed contract identified itself by the name of
+ * one of the parties it binds. It was also literally wrong in production: signed out there is no
+ * client, so SettingsContext loads the `client_id IS NULL` row, and that row's app_name is whatever
+ * the operator last saved there.
+ *
+ * DESIGN.md already draws this line for a neighbouring case — "Product names are not the client's
+ * to rebrand", which is why Pricing's plan names stay "Crest IMS" and "Crest HR".
+ */
+export const PRODUCT_NAME = 'Crest Suite'
 
 export const DOC_TYPES = ['terms', 'privacy']
 
@@ -213,8 +237,21 @@ export function legalReadiness() {
   return { ready: missing.length === 0, missing: missing.sort() }
 }
 
-/** The text, on demand. Only the /legal routes and the re-acceptance gate should call this. */
-export async function loadLegalText(docType) {
+/**
+ * The text, on demand. Only the /legal routes and the re-acceptance gate should call this.
+ *
+ * `version` is optional, and passing it is what makes a versioned URL honest. `LEGAL_TEXT` holds
+ * exactly one wording per doc type — the current one — so before this took a version,
+ * `/legal/terms/1.0` after 1.1 shipped would have rendered **1.1's text** underneath a banner
+ * reading "Version 1.0 has been superseded". Both acceptance tables deep-link there with the
+ * version they recorded, so the single link whose purpose is "show me the text I agreed to" would
+ * have shown a different document and said so nowhere. Returning null is not a good answer, but it
+ * is a true one, and Legal.jsx says plainly which version it cannot show.
+ */
+export async function loadLegalText(docType, version) {
+  const doc = legalDoc(docType)
+  if (!doc) return null
+  if (version && version !== doc.version) return null
   const { LEGAL_TEXT } = await import('./generated/legalText')
   return LEGAL_TEXT[docType] || null
 }

@@ -8,20 +8,26 @@
 //
 // The text is fetched through loadLegalText()'s dynamic import rather than a static one, so the
 // ~27 kB of prose is its own chunk and the landing page does not carry it.
+//
+// This page does NOT white-label. Every other signed-out surface reads settings.app_name and is
+// right to — a client's staff sign in at /login. These documents are a contract between
+// COMPANY.name and the customer, so the header, the copyright line and the printed running foot all
+// name the provider. See the comment on PRODUCT_NAME in src/legal/index.js.
 
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { Hexagon, Printer, Check, Copy, ChevronDown, Download, ShieldCheck } from 'lucide-react'
 
-import { useSettings } from '../context/SettingsContext'
 import { printWithTitle } from '../utils/printTitle'
-import LegalMarkdown from '../legal/LegalMarkdown'
+import LegalMarkdown, { stripDocFrontMatter } from '../legal/LegalMarkdown'
 // The one support address (src/shared/supportContact.js re-exports legal's own COMPANY.supportEmail)
 // — this used to be a hardcoded mailto: link to "support@" the crestsuite .com domain, which the
 // project does not own (see supportAddress.test.js, which asserts that link never comes back).
 import { SUPPORT_EMAIL } from '../shared/supportContact'
 import {
+  COMPANY,
   DOC_TYPES,
+  PRODUCT_NAME,
   legalDoc,
   loadLegalText,
   isDraft,
@@ -56,8 +62,6 @@ function buildToc(md) {
 
 export default function Legal() {
   const { docType, version } = useParams()
-  const navigate = useNavigate()
-  const { settings } = useSettings()
 
   const [text, setText] = useState(null)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -66,12 +70,28 @@ export default function Legal() {
 
   const doc = DOC_TYPES.includes(docType) ? legalDoc(docType) : null
 
+  // Derived above the effects, not below them, because the effect has to know whether the URL is
+  // asking for a version this bundle can actually produce. PRIOR_VERSIONS is empty until a second
+  // version of anything ships, so today the mismatch branch only catches a typo or a stale link —
+  // but an acceptance row references its version forever, so it has to exist before it is needed.
+  const requestedVersion = version || doc?.version
+  const isCurrentVersion = Boolean(doc) && requestedVersion === doc.version
+  const knownPriorVersion = Boolean(PRIOR_VERSIONS[`${docType}-${requestedVersion}`])
+  const draft = Boolean(doc) && isDraft(docType)
+
   useEffect(() => {
     let alive = true
-    if (!doc) return undefined
+    // No document, or a version whose wording this bundle does not hold. Either way there is
+    // nothing to fetch, and fetching anyway would put the CURRENT text under a banner naming a
+    // different version.
+    if (!doc || !isCurrentVersion) {
+      setText(null)
+      setLoadFailed(false)
+      return undefined
+    }
     setText(null)
     setLoadFailed(false)
-    loadLegalText(docType)
+    loadLegalText(docType, requestedVersion)
       .then((t) => {
         if (!alive) return
         // A missing document is a failed read, not an empty one. Rendering nothing here would show
@@ -85,42 +105,29 @@ export default function Legal() {
     return () => {
       alive = false
     }
-  }, [docType, doc])
+  }, [docType, doc, isCurrentVersion, requestedVersion])
+
+  // The tab, the bookmark and the browser history entry. index.html's <title> is a static
+  // "Crest Suite", so before this both documents — the two most link-shared, most bookmarked pages
+  // in the product — were indistinguishable from each other and from the app, and a screen reader
+  // announced nothing on arrival (WCAG 2.4.2, Level A). Same save-and-restore shape as GuestMenu's.
+  // printWithTitle composes with it: that swaps in its own title and restores on `afterprint`.
+  const pageTitle = doc ? `${doc.title} — ${PRODUCT_NAME}` : `Document not found — ${PRODUCT_NAME}`
+  useEffect(() => {
+    const previous = document.title
+    document.title = pageTitle
+    return () => {
+      document.title = previous
+    }
+  }, [pageTitle])
 
   const toc = useMemo(() => buildToc(text), [text])
+  // Rendered without the document's own title and version line, which the page header above already
+  // carries. `text` itself is never touched — it is what the Download button hands over and what
+  // the hash was taken across.
+  const bodyText = useMemo(() => (text ? stripDocFrontMatter(text) : null), [text])
 
-  // An unknown document type is a 404, not a blank page. App.js has no catch-all route, so
-  // without this an address like /legal/nonsense renders an empty document shell.
-  if (!doc) {
-    return (
-      <div className="legal-page">
-        <main className="legal-main" style={{ display: 'block' }}>
-          <h1 className="legal-doc-title">Document not found</h1>
-          <p className="legal-p">
-            There is no legal document at this address. The current documents are the{' '}
-            <Link className="legal-link" to={legalPath('terms')}>
-              Terms of Service
-            </Link>{' '}
-            and the{' '}
-            <Link className="legal-link" to={legalPath('privacy')}>
-              Privacy Policy
-            </Link>
-            .
-          </p>
-        </main>
-      </div>
-    )
-  }
-
-  // A version in the URL that is not the current one. PRIOR_VERSIONS is empty until a second
-  // version of anything ships, so today this only ever catches a typo or a stale link — but an
-  // acceptance row references its version forever, so the branch has to exist before it is needed.
-  const requestedVersion = version || doc.version
-  const isCurrentVersion = requestedVersion === doc.version
-  const knownPriorVersion = Boolean(PRIOR_VERSIONS[`${docType}-${requestedVersion}`])
-  const draft = isDraft(docType)
-
-  const printName = `${settings?.app_name || 'Crest Suite'} ${doc.title} v${doc.version}`
+  const printName = doc ? `${PRODUCT_NAME} ${doc.title} v${doc.version}` : PRODUCT_NAME
 
   /**
    * Hands over the exact bytes the hash was computed from.
@@ -157,25 +164,20 @@ export default function Legal() {
     )
   }
 
-  return (
+  // The shell is drawn once, around every state. It used to be skipped on the not-found branch,
+  // which left a stale external link landing on a page with no brand, no way to sign in and no
+  // footer — the two states that most need the chrome were the two that did without it.
+  const shell = (children, plain = false) => (
     <div className="legal-page">
-      <nav className="legal-nav">
+      <nav className="legal-nav" aria-label="Legal documents">
         <div className="legal-brand">
-          {settings?.logo_url ? (
-            <img
-              src={settings.logo_url}
-              alt=""
-              style={{ width: 22, height: 22, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }}
-            />
-          ) : (
-            <Hexagon
-              size={22}
-              strokeWidth={2.25}
-              aria-hidden="true"
-              style={{ color: 'var(--theme-accent)', flexShrink: 0 }}
-            />
-          )}
-          <span className="legal-brand-name">{settings?.app_name || 'Crest Suite'}</span>
+          <Hexagon
+            size={22}
+            strokeWidth={2.25}
+            aria-hidden="true"
+            style={{ color: 'var(--theme-accent)', flexShrink: 0 }}
+          />
+          <span className="legal-brand-name">{PRODUCT_NAME}</span>
         </div>
 
         <div className="legal-nav-actions">
@@ -183,31 +185,84 @@ export default function Legal() {
             <Link
               key={t}
               to={legalPath(t)}
-              className={t === docType ? 'btn btn-sm' : 'btn btn-ghost btn-sm'}
+              className={
+                t === docType
+                  ? 'btn btn-sm legal-nav-link legal-nav-link--current'
+                  : 'btn btn-ghost btn-sm legal-nav-link'
+              }
               aria-current={t === docType ? 'page' : undefined}
             >
               {legalDoc(t).title}
             </Link>
           ))}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/login')}>
+          {/* A Link, not a button calling navigate(): its two neighbours are links to the same kind
+              of destination, and a button cannot be middle-clicked or opened in a new tab. */}
+          <Link to="/login" className="btn btn-ghost btn-sm legal-nav-link">
             Sign in →
-          </button>
+          </Link>
         </div>
       </nav>
 
-      <main className="legal-main">
-        <aside className="legal-toc" aria-label="Contents">
-          <div className="legal-toc-label">Contents</div>
-          {toc.map((s) => (
-            <a key={s.id} href={`#${s.id}`}>
-              {s.label}
-            </a>
-          ))}
-        </aside>
+      <main className={plain ? 'legal-main legal-main--plain' : 'legal-main'}>{children}</main>
 
-        <article>
-          <header className="legal-doc-head">
-            <h1 className="legal-doc-title">{doc.title}</h1>
+      <footer className="legal-footer">
+        {/* The provider, not the tenant: this is a copyright line over Crest's own legal text. */}
+        <span>
+          © {new Date().getFullYear()} {COMPANY.name}
+        </span>
+        <span className="legal-footer-links">
+          <Link to={legalPath('terms')}>Terms of Service</Link>
+          <Link to={legalPath('privacy')}>Privacy Policy</Link>
+          <Link to="/pricing">Pricing</Link>
+          <Link to="/login">Sign in</Link>
+        </span>
+      </footer>
+
+      {/* Repeats on every printed page — see Legal.css. A filed or posted copy of a contract has to
+          be identifiable from any single sheet. */}
+      {doc && (
+        <div className="legal-print-foot" aria-hidden="true">
+          {PRODUCT_NAME} · {doc.title} · v{doc.version} · effective {doc.effectiveAdLabel} · sha256{' '}
+          {doc.sha256}
+        </div>
+      )}
+    </div>
+  )
+
+  // An unknown document type is a 404, not a blank page. App.js routes bare /legal to the Terms,
+  // so the only way here now is a typed or stale address with a segment we do not recognise.
+  if (!doc) {
+    return shell(
+      <>
+        <h1 className="legal-doc-title">Document not found</h1>
+        <p className="legal-p">
+          There is no legal document at this address. The current documents are the{' '}
+          <Link className="legal-link" to={legalPath('terms')}>
+            Terms of Service
+          </Link>{' '}
+          and the{' '}
+          <Link className="legal-link" to={legalPath('privacy')}>
+            Privacy Policy
+          </Link>
+          .
+        </p>
+      </>,
+      true
+    )
+  }
+
+  return shell(
+    <>
+      <header className="legal-doc-head">
+        <h1 className="legal-doc-title">{doc.title}</h1>
+
+        {/* On a version we cannot serve, the meta row and the verify panel are deliberately absent:
+            both describe the version in FORCE, and printing "Version 1.0 · sha256 2af14e…" on a
+            page the reader reached by asking for 0.9 attaches the current document's fingerprint to
+            a different document's address. The banner below names the version in force and links
+            to it, which is the whole of what this page can honestly say. */}
+        {isCurrentVersion && (
+          <>
             <div className="legal-meta-row">
               <span className="legal-meta-item">
                 <span className="legal-meta-key">Version</span>
@@ -277,9 +332,13 @@ export default function Legal() {
                   To check it yourself, download the exact text this was taken over and hash it:
                 </p>
                 <pre className="legal-verify-cmd">sha256sum {doc.filename}</pre>
+                {/* btn-primary, not a bare `btn`. `.btn` alone carries the box — padding, radius,
+                    weight, focus ring — and declares no background or colour at all, so this
+                    rendered as browser-default button chrome: #f0f0f0 on black, on a #0f1117 panel.
+                    Same silent half-a-job failure the badge classes were fixed for. */}
                 <button
                   type="button"
-                  className="btn btn-sm"
+                  className="btn btn-primary btn-sm"
                   onClick={downloadSource}
                   disabled={!text}
                 >
@@ -292,71 +351,78 @@ export default function Legal() {
                 </p>
               </div>
             )}
-          </header>
+          </>
+        )}
+      </header>
 
-          {/* Part E rule 5 of the source spec, made structural: a document still carrying an
-              unfilled placeholder must never present itself as being in force. The banner is
-              driven by the same detector the build and the tests use, so it cannot be forgotten
-              once the values are filled — it disappears on its own. */}
-          {draft && (
-            <div className="legal-banner legal-banner--draft" role="status">
-              <strong>Draft — not yet in force.</strong> This document is still missing details of
-              the contracting company and has not been reviewed by a Nepal-licensed lawyer. It is
-              published here for review only and does not yet govern any account.
-            </div>
-          )}
+      {/* Rendered between the head and the body on every viewport. It used to be the first child of
+          .legal-main, which put eighteen section links ahead of the title on a phone — the grid
+          hides source order on desktop and hands it straight back the moment the columns collapse.
+          Placed explicitly in the grid instead, so the rail keeps the left column and the reading
+          order stays title → contents → document. */}
+      {toc.length > 0 && (
+        <nav className="legal-toc" aria-labelledby="legal-toc-label">
+          <h2 className="legal-toc-label" id="legal-toc-label">
+            Contents
+          </h2>
+          <ol className="legal-toc-list">
+            {toc.map((s) => (
+              <li key={s.id}>
+                <a href={`#${s.id}`}>{s.label}</a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )}
 
-          {!isCurrentVersion && (
-            <div className="legal-banner legal-banner--old" role="status">
-              <strong>This is not the current version.</strong>{' '}
-              {knownPriorVersion
-                ? `Version ${requestedVersion} has been superseded.`
-                : `Version ${requestedVersion} is not a version of this document that we published.`}{' '}
-              The version in force is{' '}
-              <Link to={legalPath(docType)}>
-                {doc.version}, effective {doc.effectiveAdLabel}
-              </Link>
-              .
-            </div>
-          )}
+      <article>
+        {/* Part E rule 5 of the source spec, made structural: a document still carrying an
+            unfilled placeholder must never present itself as being in force. The banner is
+            driven by the same detector the build and the tests use, so it cannot be forgotten
+            once the values are filled — it disappears on its own. */}
+        {draft && (
+          <div className="legal-banner legal-banner--draft" role="status">
+            <strong>Draft — not yet in force.</strong> This document is still missing details of
+            the contracting company and has not been reviewed by a Nepal-licensed lawyer. It is
+            published here for review only and does not yet govern any account.
+          </div>
+        )}
 
-          {loadFailed && (
-            <div className="legal-banner legal-banner--old" role="alert">
-              <strong>This document could not be loaded.</strong> Please reload the page. If it
-              keeps happening, email{' '}
-              <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> and we will send it
-              to you directly.
-            </div>
-          )}
+        {!isCurrentVersion && (
+          <div className="legal-banner legal-banner--old" role="status">
+            <strong>This is not the current version.</strong>{' '}
+            {knownPriorVersion
+              ? `Version ${requestedVersion} has been superseded.`
+              : `Version ${requestedVersion} is not a version of this document that we published.`}{' '}
+            Only the wording in force is published here, so the text of {requestedVersion} is not
+            shown — asking us for it is the reliable way to get it, at{' '}
+            <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>. The version in force is{' '}
+            <Link to={legalPath(docType)}>
+              {doc.version}, effective {doc.effectiveAdLabel}
+            </Link>
+            .
+          </div>
+        )}
 
-          {text === null && !loadFailed ? (
+        {loadFailed && (
+          <div className="legal-banner legal-banner--old" role="alert">
+            <strong>This document could not be loaded.</strong> Please reload the page. If it
+            keeps happening, email{' '}
+            <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> and we will send it
+            to you directly.
+          </div>
+        )}
+
+        {isCurrentVersion && !loadFailed && (
+          text === null ? (
             <p className="legal-p" style={{ color: 'var(--theme-text3)' }}>
               Loading…
             </p>
           ) : (
-            text && <LegalMarkdown text={text} />
-          )}
-        </article>
-      </main>
-
-      <footer className="legal-footer">
-        <span>
-          © {new Date().getFullYear()} {settings?.app_name || 'Crest Suite'}
-        </span>
-        <span style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
-          <Link to={legalPath('terms')}>Terms of Service</Link>
-          <Link to={legalPath('privacy')}>Privacy Policy</Link>
-          <Link to="/pricing">Pricing</Link>
-          <Link to="/login">Sign in</Link>
-        </span>
-      </footer>
-
-      {/* Repeats on every printed page — see Legal.css. A filed or posted copy of a contract has to
-          be identifiable from any single sheet. */}
-      <div className="legal-print-foot" aria-hidden="true">
-        {settings?.app_name || 'Crest Suite'} · {doc.title} · v{doc.version} · effective{' '}
-        {doc.effectiveAdLabel} · sha256 {doc.sha256}
-      </div>
-    </div>
+            <LegalMarkdown text={bodyText} />
+          )
+        )}
+      </article>
+    </>
   )
 }

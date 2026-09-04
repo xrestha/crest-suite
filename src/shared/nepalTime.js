@@ -1,4 +1,4 @@
-import { adToBsSafe } from '../utils/bsCalendar'
+import { adToBsSafe, BS_MONTHS } from '../utils/bsCalendar'
 
 /**
  * Clock times, pinned to Nepal.
@@ -140,6 +140,23 @@ const longFmt = new Intl.DateTimeFormat('en-GB', {
 export function nepalDateLong(ts) {
   const d = toDate(ts)
   return d ? longFmt.format(d) : ''
+}
+
+/**
+ * The same day in BS, named the way an operator says it — "18 Bhadra 2083". Empty outside the
+ * verified table, so a caller can print the AD date alone rather than a confidently wrong BS one.
+ *
+ * The BS sibling of nepalDateLong, and meant to sit beside it rather than instead of it: PRODUCT.md
+ * is explicit that BS is the native calendar and AD appears alongside where a bank, a vendor or the
+ * IRD will ask for it. The legal-acceptance tables were showing AD only, on the one column where
+ * the date IS the record, while the effective dates a few rows above read "3 September 2026
+ * (18 Bhadra 2083 BS)".
+ */
+export function nepalBsLong(ts) {
+  const bs = nepalBs(ts)
+  if (!bs) return ''
+  const name = BS_MONTHS[bs.month - 1]
+  return name ? `${bs.day} ${name} ${bs.year}` : ''
 }
 
 /**

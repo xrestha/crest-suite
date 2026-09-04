@@ -14,7 +14,8 @@ import { supabase } from '../../supabaseClient'
 import { withTimeout } from '../../utils/withTimeout'
 import ActionError, { asActionError } from '../../components/ActionError'
 import Tip from '../../components/Tip'
-import { nepalTime, nepalDateLong } from '../../shared/nepalTime'
+import BsCalendarPicker from '../../components/BsCalendarPicker'
+import { nepalTime, nepalDateLong, nepalBsLong } from '../../shared/nepalTime'
 import { adminOp } from '../../shared/adminOp'
 import { DOC_TYPES, legalDoc, legalVersionPath, acceptancePayload, legalReadiness } from '../../legal'
 
@@ -147,8 +148,11 @@ export default function ClientLegalTab({ client, clientSettings, onClientChanged
 
   return (
     <div>
+      {/* badge-sentence: the badge classes carry `text-transform: capitalize`, which title-cased
+          this entire two-sentence warning — "Do Not Send An Agreement To A Client Until These Are
+          Filled In And The Pages Are Republished." */}
       {!legalReadiness().ready && (
-        <div className="badge-amber" style={{ display: 'block', padding: '10px 12px', marginBottom: 16, lineHeight: 1.5 }}>
+        <div className="badge-amber badge-sentence" style={{ display: 'block', padding: '10px 12px', marginBottom: 16, lineHeight: 1.5 }}>
           Not ready to publish — still missing {legalReadiness().missing.join(', ')}. Do not send an
           agreement to a client until these are filled in and the pages are republished.
         </div>
@@ -256,10 +260,20 @@ export default function ClientLegalTab({ client, clientSettings, onClientChanged
         </div>
       </div>
       <div style={FIELD_ROW}>
+        {/* BsCalendarPicker, not <input type="date">. The counterparty dated the paper in BS —
+            that is the calendar a Nepali agreement is signed in — so a native AD picker made the
+            operator convert by hand on the one field where the date IS the record. Stores AD
+            exactly as before (the picker commits formatAd(bsToAd(…))), so nothing downstream
+            changes. PRODUCT.md: BS is the native calendar, AD appears alongside it. */}
         <div className="form-field">
-          <label htmlFor="paper-date">Date signed (AD) *</label>
-          <input id="paper-date" type="date" value={paper.signed_on_date}
-            onChange={e => setPaper(p => ({ ...p, signed_on_date: e.target.value }))} />
+          <label htmlFor="paper-date">Date signed *</label>
+          <BsCalendarPicker
+            id="paper-date"
+            value={paper.signed_on_date}
+            onChange={v => setPaper(p => ({ ...p, signed_on_date: v || '' }))}
+            placeholder="Select the date on the agreement"
+            clearable
+          />
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer', alignSelf: 'end', paddingBottom: 8 }}>
           <input type="checkbox" checked={paper.stamped}
@@ -270,7 +284,10 @@ export default function ClientLegalTab({ client, clientSettings, onClientChanged
       </div>
 
       {paperErr && <ActionError error={paperErr} />}
-      <button type="button" className="btn" onClick={recordPaper} disabled={!paperReady || recording}
+      {/* btn-primary: `.btn` alone is the box and declares no background or colour, so this
+          rendered as raw browser button chrome. It is this section's own commit and writes an
+          immutable row to a seven-year ledger — a ghost button would under-signal that. */}
+      <button type="button" className="btn btn-primary" onClick={recordPaper} disabled={!paperReady || recording}
         style={{ marginBottom: 28 }}>
         {recording ? 'Recording…' : 'Record signed agreement'}
       </button>
@@ -320,16 +337,23 @@ export default function ClientLegalTab({ client, clientSettings, onClientChanged
                   <td>
                     {r.signatory_name || r.user_email || '—'}
                     {r.signatory_title && (
-                      <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>{r.signatory_title}</span>
+                      <span className="cell-sub">{r.signatory_title}</span>
                     )}
                   </td>
                   {/* nepalDateLong, not nepalDateAd: "09/04/2026" reads as 9 April to anyone who
                       writes DD/MM, and on this table the date IS the record. Named month, day
-                      first — the form the registry's own effective dates already take. */}
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {r.signed_on_date ? nepalDateLong(`${r.signed_on_date}T00:00:00+05:45`) : nepalDateLong(r.accepted_at)}
-                    <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>
-                      {r.signed_on_date ? 'signed' : nepalTime(r.accepted_at)}
+                      first — the form the registry's own effective dates already take. BS
+                      underneath, in the calendar the agreement was signed in. nowrap on the date
+                      rather than the cell, so this column can still give width back. */}
+                  <td>
+                    <span style={{ whiteSpace: 'nowrap' }}>
+                      {r.signed_on_date ? nepalDateLong(`${r.signed_on_date}T00:00:00+05:45`) : nepalDateLong(r.accepted_at)}
+                    </span>
+                    <span className="cell-sub">
+                      {[
+                        nepalBsLong(r.signed_on_date ? `${r.signed_on_date}T00:00:00+05:45` : r.accepted_at),
+                        r.signed_on_date ? 'signed' : nepalTime(r.accepted_at),
+                      ].filter(Boolean).join(' · ')}
                     </span>
                   </td>
                   <td style={{ whiteSpace: 'nowrap', fontSize: 11, fontFamily: "source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace" }}>

@@ -35,7 +35,14 @@ REACT_APP_SUPABASE_URL
 REACT_APP_SUPABASE_ANON_KEY
 REACT_APP_USDA_API_KEY
 REACT_APP_VAPID_PUBLIC_KEY
+REACT_APP_SITE_ORIGIN
 ```
+
+`.env.example` says what each one is for. `REACT_APP_SITE_ORIGIN` is the only one whose absence is
+silent in dev and visible on paper: it is the production domain the printed Subscription Agreement
+quotes as the evidence of what a signed contract incorporated by reference, so unset it prints
+`[SET REACT_APP_SITE_ORIGIN]/legal/terms` rather than a plausible wrong domain, and
+`legalReadiness()` refuses to call the documents publishable.
 
 `REACT_APP_SUPABASE_SERVICE_ROLE_KEY` must never be set here or in Vercel — admin operations go through the `admin-user-ops` Supabase Edge Function instead (see S311).
 

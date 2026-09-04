@@ -266,7 +266,8 @@ takes the `*-text` variant while a FILL takes the base token; never build a mult
 palette out of the semantic tokens (Recharts SVG props stay literal hex); motion uses the four
 `--motion-*`/`--ease-*` tokens, and Recharts series animation is unreachable from CSS so every
 series needs `{...chartMotion()}`; the radius/type scales are CLOSED sets defined in `DESIGN.md`;
-reach for a global class (`data-table`, `btn`, `badge-*`, `form-input`, `form-select`, `page-header`/`page-header--split`) rather than
+reach for a global class (`data-table`, `btn` **+ a colour variant**, `badge-*`, `form-input`,
+`form-select`, `page-header`/`page-header--split`) rather than
 inline styles — an inline-styled control escapes the `:disabled` treatment, the `[aria-invalid]`
 hook and the `@media (pointer: coarse)` 16px touch floor. There is no `badge-gold`. A table needs
 at least one column that can absorb a squeeze, so `white-space: nowrap` goes on the unbreakable

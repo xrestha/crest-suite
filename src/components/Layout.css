@@ -1874,6 +1874,16 @@ textarea:focus-visible {
   color: var(--theme-text2);
 }
 
+/* A badge whose content is a SENTENCE rather than a chip label.
+   `text-transform: capitalize` above is right for "pending" or "paid" and wrong for anything with
+   a verb in it: the admin Legal tab borrowed `.badge-amber` for a two-sentence operator warning and
+   it rendered "Do Not Send An Agreement To A Client Until These Are Filled In", while Help → Legal's
+   draft chip read "Draft — Not Yet In Force". Same silent shape as the missing `badge-gold` and the
+   half-a-job `badge-green`: CSS raises nothing when a class does the wrong part of its job. */
+.badge-sentence {
+  text-transform: none;
+}
+
 .form-field {
   display: flex;
   flex-direction: column;

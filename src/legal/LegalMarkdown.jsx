@@ -215,6 +215,31 @@ export function parseMarkdown(md) {
   return blocks
 }
 
+/**
+ * Drop the document's own `# ` title and the `**Version … — Effective …**` line beneath it.
+ *
+ * Both have to stay in the FILE: the hash is taken over those bytes, and the copy the Download
+ * button hands to a lawyer has to identify itself without the page around it. On screen they are
+ * the page header said twice — the reader crossed a rule to be told "Terms of Service" and
+ * "Version 1.0 — Effective 3 September 2026 (18 Bhadra 2083 BS)" again, in a different typeface,
+ * having read both in the header a moment earlier.
+ *
+ * So this strips for RENDER only, and never mutates the text held in state. Written defensively:
+ * a document that does not open this way is returned untouched, and the version line is only
+ * dropped when it is really the version line.
+ */
+export function stripDocFrontMatter(md) {
+  const lines = String(md || '').split('\n')
+  if (!/^#\s+\S/.test(lines[0] || '')) return String(md || '')
+  let i = 1
+  while (i < lines.length && !lines[i].trim()) i += 1
+  if (/^\*\*Version\b.*\*\*$/.test((lines[i] || '').trim())) {
+    i += 1
+    while (i < lines.length && !lines[i].trim()) i += 1
+  }
+  return lines.slice(i).join('\n')
+}
+
 export default function LegalMarkdown({ text }) {
   return <div className="legal-body">{parseMarkdown(text)}</div>
 }

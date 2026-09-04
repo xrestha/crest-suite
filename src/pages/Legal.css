@@ -40,12 +40,43 @@
   min-width: 0;
 }
 
+/* ── The header below the width it was drawn for ─────────────────────────────────────────────
+   Measured: the one-row header needs 638px of viewport for the default wordmark (64 padding +
+   16 gap + 182 brand + 376 actions) and more for a longer one. At 390 the actions ran to x=424 —
+   34px of "Sign in →" clipped away by index.css's `overflow-x: hidden` — while the brand was
+   squeezed to zero and painted over the first button. Below 640 the header therefore stacks, and
+   it also stops being sticky: 84px of fixed chrome is a heavy toll on an 844px phone screen when
+   the surface underneath it is a 16,000-word contract you scroll for ten minutes. The contents
+   rail is already static at this width, so nothing else depended on the offset. */
+@media (max-width: 640px) {
+  .legal-nav {
+    position: static;
+    height: auto;
+    padding: 12px 16px;
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+
+  .legal-nav-actions {
+    width: 100%;
+    flex-shrink: 1;
+    flex-wrap: wrap;
+  }
+}
+
 .legal-brand-name {
   font-family: Georgia, serif;
   font-size: 17px;
   font-weight: 700;
   color: var(--theme-text1);
   white-space: nowrap;
+  /* `nowrap` on a `min-width: 0` flex child is how the brand came to paint OUTSIDE its own box:
+     measured at 390px the parent computed to 0px wide and this span carried on rendering from
+     x=64 to x=214, straight across the "Terms of Service" button beside it — elementFromPoint at
+     the wordmark's own centre returned the button. Clipping is the wrong answer at the widths the
+     header is designed for, but it must never overprint its neighbour. */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .legal-nav-actions {
@@ -55,22 +86,83 @@
   flex-shrink: 0;
 }
 
+/* `.btn` is the BOX — padding, radius, size, weight, cursor, focus ring — and declares no
+   background and no colour. The current document was written as `btn btn-sm` with no variant, so
+   the anchor fell through to the browser's own link styling: #0000EE underlined, which measured
+   1.81:1 against the Dark nav card (AA wants 4.5:1) and made the page you are already on the most
+   clickable-looking thing in the header. This is the product's own active-nav treatment — the
+   accent tint behind accent ink that Layout.css uses for a live sidebar link. */
+.legal-nav-link {
+  text-decoration: none;
+}
+
+.legal-nav-link--current {
+  background: var(--theme-focus-ring);
+  color: var(--theme-accent-ink);
+}
+
+.legal-nav-link--current:hover {
+  background: var(--theme-focus-ring);
+  color: var(--theme-accent-ink);
+}
+
 /* ── Layout ─────────────────────────────────────────────────────────────────────────────── */
+/* Three grid children — head, contents rail, body — placed EXPLICITLY rather than left to flow.
+   The rail is the second child in the DOM so that a collapsed single column reads
+   title → contents → document; on desktop the placement below lifts it back into the left gutter
+   and spans it across both rows so `position: sticky` still has a containing block to travel in.
+   Ordering the DOM the other way round is what put eighteen section links ahead of the document
+   title on every phone: a grid hides source order right up until the columns collapse. */
 .legal-main {
   max-width: 1180px;
   margin: 0 auto;
   padding: 32px 32px 96px;
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
-  gap: 40px;
+  column-gap: 40px;
+  row-gap: 0;
   align-items: start;
+}
+
+.legal-main > .legal-doc-head {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.legal-main > .legal-toc {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.legal-main > article {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+}
+
+/* The not-found page: no rail, no gutter to hold open. */
+.legal-main--plain {
+  display: block;
+  max-width: 820px;
 }
 
 @media (max-width: 900px) {
   .legal-main {
     grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
+    row-gap: 24px;
     padding: 20px 16px 64px;
+  }
+
+  .legal-main > .legal-doc-head,
+  .legal-main > .legal-toc,
+  .legal-main > article {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  /* The head owns the rule and the space above the rail; the rail owns the space below itself. */
+  .legal-main > .legal-doc-head {
+    margin-bottom: 0;
   }
 }
 
@@ -94,13 +186,23 @@
   }
 }
 
+/* An <h2>, so the rail is a real landmark with a real name rather than an aria-label over a bag of
+   anchors. The margin is reset because a heading brings its own. */
 .legal-toc-label {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--theme-text3);
-  margin-bottom: 10px;
+  margin: 0 0 10px;
+}
+
+/* An ordered list: the sections are numbered in the document itself, and a screen reader should be
+   able to say how many there are. The markers are off because the labels already carry "1." etc. */
+.legal-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .legal-toc a {
@@ -301,6 +403,21 @@
   max-width: 76ch;
 }
 
+/* A document's own `# ` heading. Legal.jsx strips it before render, because it duplicates the page
+   title — but LegalMarkdown will emit `legal-h1` for any H1 it is given, and a class with no rule
+   is the failure that has no error: it rendered in Poppins 21px with scroll-margin-top 0, the one
+   sans-serif heading among Georgia ones, and nothing anywhere said so. Styled defensively so a
+   future document that opens differently cannot reintroduce it. */
+.legal-body .legal-h1 {
+  font-family: Georgia, serif;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 14px;
+  color: var(--theme-text1);
+  scroll-margin-top: 84px;
+}
+
 .legal-body .legal-h2 {
   font-family: Georgia, serif;
   font-size: 22px;
@@ -330,6 +447,17 @@
 
 .legal-body .legal-p {
   margin: 0 0 14px;
+}
+
+/* Below 640 the header is no longer sticky (see the block above the layout section), so an 84px
+   scroll offset would drop the reader most of a screen short of the heading they tapped. */
+@media (max-width: 640px) {
+  .legal-body .legal-h1,
+  .legal-body .legal-h2,
+  .legal-body .legal-h3,
+  .legal-body .legal-h4 {
+    scroll-margin-top: 12px;
+  }
 }
 
 .legal-body .legal-ul {
@@ -412,6 +540,13 @@
   justify-content: space-between;
 }
 
+.legal-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+}
+
 .legal-footer a {
   color: var(--theme-text2);
   text-decoration: none;
@@ -420,6 +555,43 @@
 .legal-footer a:hover {
   color: var(--theme-text1);
   text-decoration: underline;
+}
+
+.legal-footer a:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Touch ───────────────────────────────────────────────────────────────────────────────────
+   This file had no `pointer: coarse` tier at all, so every control it invents — the contents rail,
+   the verify disclosure, the footer links — kept its mouse sizing on a phone. Layout.css's floors
+   reach `.btn` and the shell's own classes and cannot know about these. Measured at 390px before
+   this block: rail links 28.2px tall with a 0px gap between eighteen of them, verify toggle 28px,
+   footer links 18px. The rail is the only practical way through a 16,000-word contract on a phone.
+   Scoped to the input method rather than a width, per the product's standing rule. */
+@media (pointer: coarse) {
+  .legal-toc a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .legal-toc-list li + li {
+    margin-top: 2px;
+  }
+
+  .legal-verify-toggle {
+    min-height: 44px;
+  }
+
+  .legal-footer a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
 }
 
 /* ── Print ──────────────────────────────────────────────────────────────────────────────── */

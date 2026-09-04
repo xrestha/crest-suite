@@ -136,6 +136,10 @@ export default function App() {
                 terms sitting behind a login are not terms anyone consented to. The versioned form
                 exists because an acceptance row references its version forever — a link in the
                 evidence trail that 404s makes the record harder to rely on. */}
+            {/* Bare /legal matched no route and App.js has no catch-all, so it rendered an empty
+                #root — no text, no error, nothing. Truncating a URL to look for "the legal section"
+                is ordinary behaviour; Legal.jsx's own 404 only ever saw an unknown :docType. */}
+            <Route path="/legal" element={<Navigate to="/legal/terms" replace />} />
             <Route path="/legal/subscription-agreement/print" element={<SubscriptionAgreement />} />
             <Route path="/legal/:docType" element={<Legal />} />
             <Route path="/legal/:docType/:version" element={<Legal />} />

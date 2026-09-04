@@ -4,6 +4,7 @@ paths:
   - "src/pages/Legal.jsx"
   - "src/pages/Legal.css"
   - "src/pages/SubscriptionAgreement.jsx"
+  - "src/pages/SubscriptionAgreement.css"
   - "src/pages/help/LegalTab.jsx"
   - "src/pages/adminClients/ClientLegalTab.jsx"
   - "src/components/LegalReacceptance.jsx"
@@ -196,6 +197,59 @@ of an empty table.
   on the acceptance ledger the date is the fact on record. Named month, day first, matching the
   registry's `effectiveAdLabel` on the same panel. Leave `nepalDateAd` alone — the bills are a
   separate decision.
+
+## The legal pages do NOT white-label (S678)
+
+Every other signed-out surface reads `settings.app_name` and is right to — a client's staff sign
+in at `/login`, and DESIGN.md's Brand Lockup Rule exists so the mark and the wordmark name the
+same brand there. **These documents are the exception**, because they are a contract between
+`COMPANY.name` and the customer and their own first sentence says so. Reading `app_name` here put
+a tenant's trading name in the header, in `© <year> …` beneath Crest's own legal text, and in the
+running foot of every printed copy — so a filed contract identified itself by the name of one of
+the parties it binds.
+
+It was also wrong in fact, not just in principle: signed out there is no client, so
+`SettingsContext` loads the `client_id IS NULL` row, and production's global row carries whatever
+the operator last saved. The live page rendered **BHATTI CHOILA** as the brand of Crest's Terms of
+Service.
+
+`PRODUCT_NAME` in `src/legal/index.js` is the one value, used by `Legal.jsx` (brand, print foot,
+print job title) and `SubscriptionAgreement.jsx` (`providerName`, matching its already-hardcoded
+`<h1>`); the footer copyright is `COMPANY.name`. Same line DESIGN.md draws for Pricing's plan
+names — product names are not the client's to rebrand.
+
+## A versioned URL must not serve a version it does not hold (S678)
+
+`LEGAL_TEXT` is keyed by **doc type alone**, so this bundle only ever holds the current wording.
+`loadLegalText(docType)` ignored the version entirely, which meant `/legal/terms/0.9` rendered
+v1.0's full text underneath a banner reading *"Version 0.9 is not a version of this document that
+we published"* — and after 1.1 ships, `/legal/terms/1.0` would render **1.1's text** under
+*"Version 1.0 has been superseded"*. Both acceptance tables deep-link there with the version they
+recorded, so the single link whose entire purpose is *"show me the text I agreed to"* would have
+shown a different document, correctly labelled, with nothing saying so.
+
+`loadLegalText(docType, version)` now returns null for anything but the current version, and the
+page renders **no body, no meta row and no hash** — the hash is the sharp one: printing v1.0's
+fingerprint on a page reached by asking for 0.9 attaches this document's identity to another
+document's address, which is the opposite of what the fingerprint is for. The banner says what it
+cannot show and gives the support address.
+
+**This is the safe failure, not the finished one.** Step 5 of the "Adding version 1.1" checklist
+in `index.js` says so: make `SOURCES` a list per doc type and emit prior versions before
+publishing 1.1, or the ledger's own links answer with an apology.
+
+## The document's front matter is stripped for RENDER, never from `text` (S678)
+
+Both `.md` files open with `# Crest Suite Terms of Service` and `**Version 1.0 — Effective 3
+September 2026 (18 Bhadra 2083 BS)**`. On screen those are the page header said twice, in a
+different typeface, one rule apart. `stripDocFrontMatter()` (exported from `LegalMarkdown.jsx`)
+drops them for display only.
+
+**It must never touch the stored `text`.** That string is what the Download button hands over and
+what the SHA-256 was taken across; a copy that opens without its own title and version identifies
+nothing once it is off the page, and one byte's difference makes the published hash unverifiable.
+The function is written defensively — a document that does not open this way is returned
+untouched — and only drops the version line when it really is the version line.
 
 ## The markdown renderer is ours, on purpose
 

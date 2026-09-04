@@ -744,6 +744,16 @@ four of which live on the class and none of which announce their absence.
   934px of room at a 1280px window — and the column that scrolled out of view to pay for them was
   the one naming the row. **An icon has no accessible name, so `aria-label` is required on every
   one**, with the same string on `title` for the pointer.
+- **`.btn` alone is the BOX, and carries no background and no colour.** It declares padding,
+  radius, size, weight, cursor, transition and the focus ring; a variant supplies the two things
+  that make it visible. Written without one it inherits, which on a `<button>` means the browser's
+  own chrome (`#f0f0f0` fill, black label — a light button on a charcoal card) and on an `<a>`
+  means the UA link colour: the Terms page's current-document link rendered `#0000EE` underlined,
+  measuring **1.81:1** on the Dark nav card against AA's 4.5:1, so the page you were already on
+  was both the least legible thing in the header and the only one that looked clickable. Exactly
+  the badge-box failure one section down, on the class it was never applied to — **CSS has no
+  error for a class that does half a job**, and `btn btn-sm` reads as complete because `btn-sm` is
+  real. Treat a bare `className="btn"` as a bug on sight.
 - **Disabled:** one treatment for every variant — `opacity: 0.55` plus `not-allowed`. Before this
   lived on the class, each call site carried its own inline `opacity`, so a button that used the
   class alone had no disabled state at all: it simply stopped responding while looking unchanged.
@@ -762,6 +772,12 @@ four of which live on the class and none of which announce their absence.
   with no padding, radius or weight, and nothing in the markup said the class pair was incomplete.
   CSS has no error for a class that does half a job — which is also why there is **no
   `badge-gold`**, and never was.
+- **A badge carrying a SENTENCE takes `.badge-sentence`.** The box sets `text-transform:
+  capitalize`, which is right for `paid` or `pending` and wrong for anything with a verb in it: a
+  two-sentence operator warning on the admin Legal tab rendered "Do Not Send An Agreement To A
+  Client Until These Are Filled In", and Help → Legal's draft chip read "Draft — Not Yet In Force".
+  The modifier turns the transform off and nothing else. It is a release valve, not an invitation
+  — a chip that needs a sentence is usually a banner wearing the wrong class.
 - **Roles:** green (paid/approved/ready), red (overdue/rejected/void), amber (pending/open), grey
   (inert/cancelled/a plain identity), violet (the rationed fourth category), and **`badge-yellow`,
   which is the accent tint, not amber** — the categorical tag. A category, an item type, a staff

@@ -16,7 +16,7 @@ import { supabase } from '../../supabaseClient'
 import { withTimeout } from '../../utils/withTimeout'
 import ActionError, { asActionError } from '../../components/ActionError'
 import Tip from '../../components/Tip'
-import { nepalTime, nepalDateLong } from '../../shared/nepalTime'
+import { nepalTime, nepalDateLong, nepalBsLong } from '../../shared/nepalTime'
 import { DOC_TYPES, legalDoc, legalPath, legalVersionPath, isDraft } from '../../legal'
 
 const METHOD_LABEL = {
@@ -111,8 +111,10 @@ export default function LegalTab() {
                   </code>
                 </div>
               </div>
+              {/* badge-sentence: the badge classes carry `text-transform: capitalize`, which is
+                  right for a one-word status and turned this into "Draft — Not Yet In Force". */}
               {isDraft(t) && (
-                <div className="badge-amber" style={{ marginTop: 10, display: 'inline-block' }}>
+                <div className="badge-amber badge-sentence" style={{ marginTop: 10, display: 'inline-block' }}>
                   Draft — not yet in force
                 </div>
               )}
@@ -175,7 +177,7 @@ export default function LegalTab() {
                     >
                       {DOC_LABEL[r.doc_type] || r.doc_type}
                     </a>
-                    <span style={{ display: 'block', fontSize: 10, color: 'var(--theme-text3)', fontFamily: "source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace" }}>
+                    <span className="cell-sub" style={{ fontFamily: "source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace" }}>
                       {r.content_sha256 ? `${r.content_sha256.slice(0, 12)}…` : ''}
                     </span>
                   </td>
@@ -189,22 +191,32 @@ export default function LegalTab() {
                   <td>
                     {r.signatory_name || r.user_email || '—'}
                     {r.signatory_title && (
-                      <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>
-                        {r.signatory_title}
-                      </span>
+                      <span className="cell-sub">{r.signatory_title}</span>
                     )}
                   </td>
                   {/* nepalTime/nepalDateLong rather than toLocaleString: every clock in this
                       product is pinned to Nepal, so an operator reading a client's record from
                       anywhere else sees the time the signer actually saw. Long form, not
                       nepalDateAd's "09/04/2026" — a DD/MM reader takes that as 9 April, and on
-                      this table the date is the record. */}
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {r.signed_on_date
-                      ? nepalDateLong(`${r.signed_on_date}T00:00:00+05:45`)
-                      : nepalDateLong(r.accepted_at)}
-                    <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>
-                      {r.signed_on_date ? 'signed' : nepalTime(r.accepted_at)}
+                      this table the date is the record.
+
+                      BS underneath, because it is the calendar the reader signs in and the
+                      effective dates two cards above already read "3 September 2026 (18 Bhadra
+                      2083 BS)". .cell-sub rather than an inline-styled span: an inline colour on a
+                      descendant beats @media print's `th, td { color: black }` and prints theme
+                      grey on white paper. nowrap on the DATE, not the cell — this column has two
+                      long lines and the table has to be able to give width back somewhere. */}
+                  <td>
+                    <span style={{ whiteSpace: 'nowrap' }}>
+                      {r.signed_on_date
+                        ? nepalDateLong(`${r.signed_on_date}T00:00:00+05:45`)
+                        : nepalDateLong(r.accepted_at)}
+                    </span>
+                    <span className="cell-sub">
+                      {[
+                        nepalBsLong(r.signed_on_date ? `${r.signed_on_date}T00:00:00+05:45` : r.accepted_at),
+                        r.signed_on_date ? 'signed' : nepalTime(r.accepted_at),
+                      ].filter(Boolean).join(' · ')}
                     </span>
                   </td>
                   <td style={{ whiteSpace: 'nowrap', fontFamily: "source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace", fontSize: 11 }}>

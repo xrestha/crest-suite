@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useLocation, Navigate } from 'react-router-dom'
+import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import { Hexagon } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
@@ -531,10 +531,14 @@ export default function Login() {
           and every other public surface now carries the same pair. */}
       <footer className="login-footer">
         © {new Date().getFullYear()} {settings?.app_name || 'Crest Suite'} · Built for Nepal's F&amp;B industry
+        {/* Link, not a plain <a>: the router owns both of these routes, so a bare href threw away
+            the loaded bundle and reloaded the whole app to move one route sideways. The consent
+            links above stay plain anchors — they carry target="_blank" on purpose, so the half-
+            filled signup form survives the trip. */}
         <span className="login-footer-legal">
-          <a href={legalPath('terms')}>Terms of Service</a>
+          <Link to={legalPath('terms')}>Terms of Service</Link>
           <span aria-hidden="true"> · </span>
-          <a href={legalPath('privacy')}>Privacy Policy</a>
+          <Link to={legalPath('privacy')}>Privacy Policy</Link>
           {/* Kept on this SAME line rather than a third footer row — this page is laid out to a
               measured viewport budget with 0px of slack (S553/S560), and a wrapped long line costs
               more than a longer short one (see the comment on .login-footer-legal below). */}

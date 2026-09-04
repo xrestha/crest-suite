@@ -477,6 +477,55 @@ it got reported. Margin gives byte-identical clearance (a margin on the last chi
 padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**
 
 
+## `.btn` with no colour variant renders as browser chrome (S678)
+
+`.btn` is the BOX — padding, radius, 13px/500, cursor, transition, focus ring, `:disabled`. It
+declares **no `background` and no `color`**. `.btn-primary` / `-ghost` / `-danger` / `-danger--strong`
+supply those, and one of them is mandatory.
+
+Without one the element inherits, and what it inherits depends on the tag, which is why this is
+hard to see in review:
+
+- on a **`<button>`**, the UA's own chrome — `background: #f0f0f0`, `color: #000`. On a dark card
+  it is the only light-filled thing on the page and reads as a rendering fault.
+- on an **`<a>`**, the UA link styling — `#0000EE`, underlined. Measured on the public Terms page's
+  current-document link: **1.81:1** against the Dark nav card, against AA's 4.5:1. It was also the
+  *only* underlined, blue thing in the header, so the page the reader was already on looked like
+  the one control worth pressing while the page they could travel to looked like a resting button.
+  A second brand colour, arrived at by omission rather than by choice.
+
+**This is the `badge-green`-written-alone failure on the class it was never applied to.** The
+badges were made self-sufficient in S576 precisely because CSS raises no error for a class that
+does half a job; `.btn` kept the hazard. `btn btn-sm` is the shape that hides it best — `btn-sm`
+is a real class, so the pair reads complete and only the colour is missing.
+
+Grep for `className="btn"` and `'btn btn-sm'` with no variant beside them. Three sites had it in
+the legal surface alone, two of them on a public page.
+
+## A badge whose content is a sentence takes `.badge-sentence` (S678)
+
+The badge box carries `text-transform: capitalize`. Right for `paid`; wrong for prose. The admin
+Legal tab borrowed `.badge-amber` for a two-sentence readiness warning and shipped **"Not Ready To
+Publish — Still Missing SITE_ORIGIN. Do Not Send An Agreement To A Client Until These Are Filled
+In And The Pages Are Republished."** at 11px, and Help → Legal's draft chip read "Draft — Not Yet
+In Force".
+
+`.badge-sentence` turns the transform off and touches nothing else. Reach for it only when the
+badge genuinely is the right container: a chip needing two sentences is usually a banner wearing a
+chip's class, and the modifier makes that easier to ignore than to fix.
+
+## A page that invents its own class names opts out of the touch tier (S678)
+
+`Layout.css`'s `@media (pointer: coarse)` block can only reach selectors it knows about — `.btn`,
+`.tab-btn`, `.sidebar-link`, the bare-element floor. **A stylesheet that names its own controls
+gets none of it, silently.** `Legal.css` had no coarse block at all, so on the public Terms page
+measured at 390px: contents-rail links **28.2px tall with a 0px gap** between eighteen of them,
+the verify disclosure 28px, footer links 18px — on the one surface in the product that is pure
+reading and pure thumb.
+
+The tell is a CSS file with its own component prefix and no `pointer: coarse` block in it. Scope
+the tier to the input method, never to a width: a narrow desktop window keeps its density.
+
 ## A clock time is rendered by `nepalTime()`, never by `toLocaleTimeString` (S670)
 
 `src/shared/nepalTime.js` is the one place a `timestamptz` becomes a time a person reads. Reach for

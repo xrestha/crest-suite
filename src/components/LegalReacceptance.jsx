@@ -79,7 +79,10 @@ export default function LegalReacceptance() {
   return (
     <div
       style={{
-        minHeight: '100vh',
+        // dvh, not vh: on a phone 100vh is the tallest the viewport ever gets, so with two pending
+        // documents and a change summary the Accept button lands under the URL bar on a screen
+        // whose only controls are Accept and Sign out.
+        minHeight: '100dvh',
         background: 'var(--theme-bg)',
         display: 'flex',
         alignItems: 'center',
