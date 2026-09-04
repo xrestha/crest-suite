@@ -121,6 +121,27 @@ export function nepalDateAd(ts) {
   return d ? adFmt.format(d) : ''
 }
 
+const longFmt = new Intl.DateTimeFormat('en-GB', {
+  timeZone: ZONE, day: 'numeric', month: 'long', year: 'numeric',
+})
+
+/**
+ * The AD calendar date as read in Nepal, with the month NAMED — "4 September 2026".
+ *
+ * For surfaces where the date is itself the fact on record. `nepalDateAd` above is "09/04/2026",
+ * which a reader who writes DD/MM (Nepal does) takes as 9 April; that ambiguity is tolerable on a
+ * bill whose format S670 chose not to change silently, and not on an acceptance ledger, where a
+ * misread date is a misread contract. This is also the form the legal registry already uses for
+ * its effective dates (`effectiveAdLabel`), so the two dates on the same panel finally agree.
+ *
+ * `month: 'long'` on purpose: en-GB's SHORT September is "Sept" in current ICU, which is the kind
+ * of thing that reads as a typo in a legal record.
+ */
+export function nepalDateLong(ts) {
+  const d = toDate(ts)
+  return d ? longFmt.format(d) : ''
+}
+
 /**
  * The 24-hour clock time in Nepal — "19:45". For spreadsheet cells only.
  *

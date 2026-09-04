@@ -190,6 +190,12 @@ of an empty table.
   a non-admin is pinned to their own `clientId` whatever the query string says.
 - **Route order matters**: the print route is declared BEFORE `/legal/:docType`, or `:docType`
   swallows `subscription-agreement`.
+- **Dates on both Legal tabs go through `nepalDateLong` ("4 September 2026"), not `nepalDateAd`
+  (S676).** `nepalDateAd` is `en-US` by S670's deliberate choice for the printed bill, so it gives
+  `09/04/2026` — which a DD/MM reader (Nepal) takes as 9 April. On a bill that is a format habit;
+  on the acceptance ledger the date is the fact on record. Named month, day first, matching the
+  registry's `effectiveAdLabel` on the same panel. Leave `nepalDateAd` alone — the bills are a
+  separate decision.
 
 ## The markdown renderer is ours, on purpose
 

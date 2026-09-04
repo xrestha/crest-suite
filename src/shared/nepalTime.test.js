@@ -1,4 +1,4 @@
-import { nepalTime, nepalCivilDate, nepalBs } from './nepalTime'
+import { nepalTime, nepalCivilDate, nepalBs, nepalDateAd, nepalDateLong } from './nepalTime'
 import { adToBs } from '../utils/bsCalendar'
 
 // These assertions are deliberately independent of the machine's timezone — that is the entire
@@ -57,6 +57,30 @@ describe('nepalCivilDate', () => {
   it('returns null rather than an Invalid Date', () => {
     expect(nepalCivilDate(null)).toBeNull()
     expect(nepalCivilDate('not a date')).toBeNull()
+  })
+})
+
+describe('nepalDateLong', () => {
+  it('names the month, so the day and month cannot be read in the wrong order', () => {
+    // 2026-09-04 10:17Z is 16:02 in Kathmandu — the afternoon the acceptance ledger recorded.
+    expect(nepalDateLong('2026-09-04T10:17:00Z')).toBe('4 September 2026')
+    // The same instant through nepalDateAd is "09/04/2026", which a DD/MM reader takes as 9 April.
+    expect(nepalDateAd('2026-09-04T10:17:00Z')).toBe('09/04/2026')
+  })
+
+  it('is day-first with a full month name — never "Sept", never a numeric month', () => {
+    expect(nepalDateLong('2026-09-04T10:17:00Z')).toMatch(/^\d{1,2} [A-Z][a-z]{2,8} \d{4}$/)
+    expect(nepalDateLong('2026-09-04T10:17:00Z')).not.toContain('Sept ')
+  })
+
+  it('crosses midnight into the NEXT Nepal day, like every other formatter here', () => {
+    // 18:30Z on the 20th is 00:15 on the 21st in Kathmandu.
+    expect(nepalDateLong('2026-08-20T18:30:00Z')).toBe('21 August 2026')
+  })
+
+  it('returns empty string for the absent and the malformed', () => {
+    expect(nepalDateLong(null)).toBe('')
+    expect(nepalDateLong('not a date')).toBe('')
   })
 })
 

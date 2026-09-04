@@ -16,7 +16,7 @@ import { supabase } from '../../supabaseClient'
 import { withTimeout } from '../../utils/withTimeout'
 import ActionError, { asActionError } from '../../components/ActionError'
 import Tip from '../../components/Tip'
-import { nepalTime, nepalDateAd } from '../../shared/nepalTime'
+import { nepalTime, nepalDateLong } from '../../shared/nepalTime'
 import { DOC_TYPES, legalDoc, legalPath, legalVersionPath, isDraft } from '../../legal'
 
 const METHOD_LABEL = {
@@ -194,13 +194,15 @@ export default function LegalTab() {
                       </span>
                     )}
                   </td>
-                  {/* nepalTime/nepalDateAd rather than toLocaleString: every clock in this product
-                      is pinned to Nepal, so an operator reading a client's record from anywhere
-                      else sees the time the signer actually saw. */}
+                  {/* nepalTime/nepalDateLong rather than toLocaleString: every clock in this
+                      product is pinned to Nepal, so an operator reading a client's record from
+                      anywhere else sees the time the signer actually saw. Long form, not
+                      nepalDateAd's "09/04/2026" — a DD/MM reader takes that as 9 April, and on
+                      this table the date is the record. */}
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {r.signed_on_date
-                      ? nepalDateAd(`${r.signed_on_date}T00:00:00+05:45`)
-                      : nepalDateAd(r.accepted_at)}
+                      ? nepalDateLong(`${r.signed_on_date}T00:00:00+05:45`)
+                      : nepalDateLong(r.accepted_at)}
                     <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>
                       {r.signed_on_date ? 'signed' : nepalTime(r.accepted_at)}
                     </span>

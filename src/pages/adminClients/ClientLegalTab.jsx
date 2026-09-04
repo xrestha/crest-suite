@@ -14,7 +14,7 @@ import { supabase } from '../../supabaseClient'
 import { withTimeout } from '../../utils/withTimeout'
 import ActionError, { asActionError } from '../../components/ActionError'
 import Tip from '../../components/Tip'
-import { nepalTime, nepalDateAd } from '../../shared/nepalTime'
+import { nepalTime, nepalDateLong } from '../../shared/nepalTime'
 import { adminOp } from '../../shared/adminOp'
 import { DOC_TYPES, legalDoc, legalVersionPath, acceptancePayload, legalReadiness } from '../../legal'
 
@@ -323,8 +323,11 @@ export default function ClientLegalTab({ client, clientSettings, onClientChanged
                       <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>{r.signatory_title}</span>
                     )}
                   </td>
+                  {/* nepalDateLong, not nepalDateAd: "09/04/2026" reads as 9 April to anyone who
+                      writes DD/MM, and on this table the date IS the record. Named month, day
+                      first — the form the registry's own effective dates already take. */}
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {r.signed_on_date ? nepalDateAd(`${r.signed_on_date}T00:00:00+05:45`) : nepalDateAd(r.accepted_at)}
+                    {r.signed_on_date ? nepalDateLong(`${r.signed_on_date}T00:00:00+05:45`) : nepalDateLong(r.accepted_at)}
                     <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>
                       {r.signed_on_date ? 'signed' : nepalTime(r.accepted_at)}
                     </span>
