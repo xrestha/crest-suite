@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
 import { getAccessState } from '../utils/subscription'
-import { docsRequiringReacceptance } from '../legal'
+import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
 
 const AuthContext = createContext({})
 
@@ -266,15 +266,25 @@ export function AuthProvider({ children }) {
         // It fails OPEN. On any error `rows` is null, the gate stays down, and the app keeps
         // working; a missing table, an RLS refusal or a dropped connection must never lock every
         // owner out of the product. Same stance as getAccessState.
-        const reacceptDocs = docsRequiringReacceptance()
+        // Doc-type strings, not documents: this scope only counts them and filters a column by
+        // them. The memo that decides the gate reads the documents themselves, because it needs
+        // each one's `version` to compare against the accepted row.
+        const reacceptTypes = reacceptDocTypes()
         const profileIsOwner = data.role === 'client'
           && !data.pos_role && !data.ims_role && !data.hr_role && !data.hr_self_service
-        if (mounted && reacceptDocs.length && profileIsOwner) {
+        if (mounted && reacceptTypes.length && profileIsOwner) {
           const { data: rows, error: legalErr } = await supabase
             .from('legal_acceptances')
             .select('doc_type, doc_version')
             .eq('client_id', effectiveClientId)
-            .in('doc_type', reacceptDocs)
+            // reacceptDocTypes(), never docsRequiringReacceptance() — this compares against the
+            // doc_type COLUMN, and the latter returns document objects. Passing those here
+            // filtered on the literal text "[object Object]", matched nothing, and returned
+            // `{ data: [], error: null }`: a successful read reporting that the client had
+            // accepted nothing, which held every Owner at the gate permanently and could not be
+            // cleared by accepting. Silent in both directions — no error to catch, and the
+            // fail-OPEN branch (`legalAccepted === null`) never reached (S674).
+            .in('doc_type', reacceptTypes)
           if (mounted) setLegalAccepted(legalErr ? null : (rows || []))
         } else if (mounted) {
           setLegalAccepted([])

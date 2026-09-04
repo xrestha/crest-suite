@@ -12,4 +12,4 @@
 // appVersion.test.js reads that file off disk and fails if the two disagree — the
 // legalHash.test.js pattern: a test that fails when you forget, not a comment that trusts you to
 // remember.
-export const APP_VERSION = 'crest-v187'
+export const APP_VERSION = 'crest-v188'

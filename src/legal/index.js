@@ -183,6 +183,24 @@ export function docsRequiringReacceptance() {
 }
 
 /**
+ * The same set as `docsRequiringReacceptance()`, reduced to doc-type STRINGS.
+ *
+ * Exists because the distinction has now gone wrong in both directions, each time producing the
+ * identical symptom — an Owner permanently held at the gate, accepting changing nothing. The first
+ * draft of the function above returned strings and its callers wanted objects; then AuthContext
+ * passed the objects straight into a `.in('doc_type', …)` filter, which PostgREST stringified to
+ * "[object Object]", matched no rows, and returned `{ data: [], error: null }` — a successful read
+ * reporting that the client had accepted nothing (S674).
+ *
+ * So: anything comparing against the `doc_type` COLUMN calls this; anything rendering a document or
+ * reading its version and hash calls `docsRequiringReacceptance()`. Neither caller should be doing
+ * the `.map` itself.
+ */
+export function reacceptDocTypes() {
+  return docsRequiringReacceptance().map((d) => d.docType)
+}
+
+/**
  * Is v1.0 publishable, and if not, what is still missing?
  *
  * Covers BOTH the unfilled [[NEEDS VALUE]] markers in the prose and the unset production origin.

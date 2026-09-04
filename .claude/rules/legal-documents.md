@@ -145,6 +145,38 @@ likely thing to be wrong — into the same string as `Forbidden` and a failed in
 the response body. It moved out of `src/pages/adminClients/` for this: a route guard reaching into a
 page directory is what made skipping the wrapper the path of least resistance.
 
+## `doc_type` filters take `reacceptDocTypes()`, never `docsRequiringReacceptance()` (S675)
+
+The objects-versus-strings distinction above has now gone wrong in **both** directions, and both
+times the symptom was identical: every Owner held at the gate, accepting changing nothing. The
+second time it was live.
+
+`AuthContext` filtered the ledger with `.in('doc_type', docsRequiringReacceptance())`. PostgREST
+stringifies what it is given, so the filter was on the literal text `[object Object]` — no rows,
+**`error: null`**. A successful read asserting the client had accepted nothing.
+
+**Both safeguards on this screen were bypassed by that, and it is worth seeing why.** The read
+fails OPEN on error, but there was no error. And `reacceptGuard.test.js` existed *specifically*
+because of the first occurrence — it tests the helper, and the helper was right both times. **The
+fault was at the call site, which chose the wrong one of two correct functions, so a test of the
+helper passes while the product is shut.**
+
+So the split is now explicit and the rule is on the *reader*, not the writer:
+
+- **Comparing against the `doc_type` COLUMN** → `reacceptDocTypes()` (strings).
+- **Rendering a document, or reading its `version`/`sha256`** → `docsRequiringReacceptance()`.
+- **Neither caller does the `.map` itself.** That is what made the two interchangeable at a glance.
+
+`reacceptGuard.test.js` now also reads the **source** of `src/` and fails on any `.in('doc_type', …)`
+given anything but a types-shaped value. Both source guards were checked against the exact string
+that shipped, because a source-scanning test that matches nothing is indistinguishable from one that
+passes.
+
+**The general shape, worth carrying beyond this file: a filter that matches nothing returns
+`{ data: [], error: null }`, which every fail-open guard reads as a good answer.** Same family as
+the 1000-row truncation rule and the RESTRICTIVE-policy empty read — an empty result is not evidence
+of an empty table.
+
 ## Where each surface lives, and why not where you'd expect
 
 - **Client-facing acceptance record → Help, not Settings.** `/settings` sits behind
