@@ -495,7 +495,7 @@ const POS_FEATURES = [
                 },
                 {
                   icon: '⊞', name: 'Table Management', path: '/pos/tables',
-                  desc: 'Set up your restaurant floor plan — create tables, assign them to sections (Main Hall, Bar, Outdoor), set capacity, and track status (Available / Occupied / Reserved / Inactive). The Ticket Routing tab lets you assign each recipe category to KOT (kitchen) or BOT (bar) so tickets print at the right station automatically. Requires Supervisor role or above.',
+                  desc: 'Set up your restaurant floor plan — create tables, assign them to sections (Main Hall, Bar, Outdoor), set capacity, and track status (Available / Occupied / Reserved / Inactive). The Ticket Routing tab lets you assign each recipe category to KOT (kitchen) or BOT (bar) so tickets print at the right station automatically. The Reservations tab holds the booking settings — expected sitting length per party size, the WhatsApp confirmation text, and the outlet\'s booking link and printable QR. Requires Supervisor role or above.',
                   tips: [
                     'Click a status badge directly on the floor grid to cycle it — no need to open the editor',
                     'Use sections to group tables by area; the section filter tabs appear automatically once you have more than one section',
@@ -563,6 +563,19 @@ const POS_FEATURES = [
                   ],
                 },
                 {
+                  icon: '🕗', name: 'Reservations', path: '/pos/reservations',
+                  desc: 'The booking book. Take a booking by phone, WhatsApp or at the door (name, phone, party size, day and time, optional tables), or let customers request one themselves from the outlet\'s booking QR / link. A booking shows as a chip on its table on the Orders floor; tapping that table when the party sits down opens the order with the covers already filled in, and paying the bill marks the booking completed. Any POS staff rank can use it.',
+                  tips: [
+                    'Booked → Confirmed → Arrived → Seated → Completed. No-show and Cancelled end it. The 💬 button opens WhatsApp with the confirmation message prefilled — sent from your own phone, nothing goes out automatically',
+                    'Typing a phone number looks the guest up: visits, unsettled credit and past no-shows appear under the field, from the customer book you already have',
+                    'Booked covers by hour is compared against the room\'s seats and only WARNS — the ninth booking for a forty-seat room is still yours to take',
+                    'Online requests wait in an amber band at the top for Accept or Decline; the guest\'s phone shows the answer within seconds. Switch the link on and print its QR under Tables → Reservations',
+                    'The booking page greys out what you cannot have: days you mark Closed or Walk-ins only (Tables → Reservations), specific closed dates such as Dashain, and any slot where booked guests plus the party would exceed your seats — the server refuses the same cases, so a stale page cannot slip one through',
+                    'A party seated while the till was offline stays Arrived — press Done on it once they have eaten; the visit counts as kept',
+                    'Sitting length per party size is prefilled from your own measured turn times (Tables → Reservations), so nobody has to guess how long a table of six takes',
+                  ],
+                },
+                {
                   icon: '🅿', name: 'Parking Slips', path: '/pos/parking',
                   desc: 'Issue a printable parking token for a customer\'s vehicle — no order or table required, so a walk-in can get one before ordering. Enter the vehicle number (required), plus optional vehicle type, customer name, a linked bill, and notes. Requires Supervisor role or above to issue/print; any staff can view the log and mark a slip Exited once the vehicle is retrieved.',
                   tips: [
@@ -585,6 +598,7 @@ const POS_FEATURES = [
                     'A bill tagged Foodmandu or Pathao (an amber badge next to the customer name) shows a Commission % field when you Settle it — pre-filled from Table Management → Delivery Partners as a starting suggestion, confirm or adjust it to match what the platform actually remitted before picking the settlement method',
                     'The Who owes what table totals the ledger by counterparty — each delivery platform separately, plus one Direct customers row — so a balance can be chased per platform instead of read off a bill-by-bill list. It covers every Credit bill ever, settled and unsettled; for one month, and to check what a platform withheld against the rate you agreed, use Sales Report → Delivery Partners',
                     'The Age column shows how long each credit bill has been outstanding — chase the old ones first',
+                    'No-shows counts bookings under that phone number marked No-show on the Reservations page; the same count appears on the booking form the next time they book, so the host decides knowingly',
                     'Settling is Supervisor+ (routine cashier work); issuing credit at Charge stays Manager+ only',
                     'Loyalty tab: create one or more schemes (how many points per NPR 100, and a minimum spend below which a bill earns nothing), then enrol customers one at a time. Anyone left on “Not enrolled” earns nothing at all — switching Loyalty on never starts accruing points for your whole existing customer book',
                     'A customer belongs to one scheme at a time. What a point is WORTH is a single number for the outlet, set at the top of the same tab — schemes differ only in how fast points are earned, so staff only ever have to explain one redemption rate at the till',
@@ -650,6 +664,7 @@ const POS_FEATURES = [
                     'Peak Hours buckets by when the table was opened (guests seated), not when the bill was paid — that\'s the number that tells you when to add floor staff',
                     'RevPASH (Revenue Per Available Seat-Hour) needs your Operating Hours set on the Overview tab first — without it, the card just prompts you to set them',
                     'By Server ranks staff by covers served, not bills — a server who takes fewer but larger tables can still lead here',
+                    'Reservations splits the range\'s covers into booked (bills a booking was seated onto) and walk-in, gives the no-show rate (no-shows ÷ kept + no-shows — cancelled bookings are neither), and breaks bookings down by how they were made and by the hour they were made for',
                   ],
                 },
                 {

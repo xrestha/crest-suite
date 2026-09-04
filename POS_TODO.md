@@ -46,6 +46,21 @@ the same family were deliberately not taken, because each changes a figure rathe
   drops skewed pairs with nothing on screen saying how many, and drops nothing for an absurdly large
   positive (a bill left open for days). A footnote naming the excluded count would make it honest.
 
+## C. Reservations — later phases (Phase 1 shipped S677, see POS_DECISIONS.md)
+
+- [ ] 🔵 **Paid SMS confirmations / reminders** (Sparrow or Aakash, ~NPR 1.5 per SMS). Opt-in per
+  client; the client must first register a sender ID with the telcos under NTA rules (business
+  documents, generic IDs prohibited). Build as an Edge Function `pos-sms` holding the token in
+  `client_secrets` (privilege invariant 4). Not before a client with a registered sender ID asks.
+- [ ] 🔵 **Deposits / advances for party bookings.** Two things settle the shape before it is built:
+  it must be a TENDER, never a discount (`payment_method` CHECKs on two tables plus the two display
+  lists — the S618 loyalty rule), and Nepal VAT Act s.16 arguably makes an advance taxable when
+  RECEIVED, which needs an accountant's answer and its own receipt document.
+- [ ] 🔵 **Walk-in waitlist** (quote a wait, notify when ready). Shares `pos_reservations`
+  (`source='walk_in'`, no fixed time); needs a notify channel, which is the SMS item above.
+- [ ] ⚪ **Phone verification on the public booking page** — impossible without an SMS rail; today
+  the staff WhatsApp/call IS the verification. Revisit with the SMS item.
+
 ## D. Known roadmap items
 
 - [ ] 🟡 QR payment auto-confirmation — receiver scaffold + admin UI shipped S271/S272, 2026-07-06 (`pos_payment_webhook` Edge Function, `settings.pos_webhook_secret` config in Manage Clients → QR tab). Still needs real FonePay/eSewa merchant onboarding + their actual signature scheme before anything goes live — low priority, blocked on merchant credentials, not engineering.

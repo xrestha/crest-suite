@@ -14,6 +14,8 @@ import ChartCard from '../../../components/ChartCard'
 import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { nepalHour } from '../../../shared/nepalTime'
+import { turnoverByBand } from './coversMath'
+import { SOURCE_LABEL } from '../reservations/reservationStatus'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
 const GOLD  = '#c9a84c'
@@ -22,21 +24,16 @@ const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 P
 const bsSlash = iso => { const bs = adToBs(new Date(iso)); return `${String(bs.day).padStart(2, '0')}/${String(bs.month).padStart(2, '0')}/${bs.year}` }
 
 const TABS = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'trend',    label: 'Daily Trend' },
-  { key: 'turnover', label: 'Turnover Time' },
-  { key: 'peak',     label: 'Peak Hours' },
-  { key: 'server',   label: 'By Server' },
+  { key: 'overview',     label: 'Overview' },
+  { key: 'trend',        label: 'Daily Trend' },
+  { key: 'turnover',     label: 'Turnover Time' },
+  { key: 'peak',         label: 'Peak Hours' },
+  { key: 'server',       label: 'By Server' },
+  { key: 'reservations', label: 'Reservations' },
 ]
 
-// Party-size bands for Turnover Time — a 2-top and an 8-top have very different expected dine
-// durations, so one blended average across every order wouldn't tell a manager much.
-const PARTY_BANDS = [
-  { key: '1-2', label: '1–2 covers', test: c => c <= 2 },
-  { key: '3-4', label: '3–4 covers', test: c => c >= 3 && c <= 4 },
-  { key: '5-6', label: '5–6 covers', test: c => c >= 5 && c <= 6 },
-  { key: '7+',  label: '7+ covers',  test: c => c >= 7 },
-]
+// Party-size bands and the turnover roll-up live in coversMath.js (S677) so the Reservations
+// settings tab shows the same measured minutes this report prints. One definition, two readers.
 
 // "HH:MM" -> hours as a decimal (e.g. "22:30" -> 22.5). Returns null if unset/unparseable.
 function parseHM(s) {
@@ -55,6 +52,7 @@ export default function CoversReport() {
   const [toIso,   setToIso]   = useState(formatAd(new Date()))
   const [orders,       setOrders]       = useState([])
   const [itemsByOrder, setItemsByOrder] = useState({})
+  const [reservations, setReservations] = useState([]) // bookings whose time falls in the range (S677)
   const [vatReg,       setVatReg]       = useState(true)
   const [staffNames,   setStaffNames]   = useState({})
   const [totalSeats,   setTotalSeats]   = useState(0)
@@ -98,17 +96,24 @@ export default function CoversReport() {
       supabase.from('settings').select('id, is_vat_registered, pos_open_time, pos_close_time').eq('client_id', clientId).maybeSingle(),
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
       scopedFrom('pos_tables', 'id, capacity'),
+      // Bookings by their BOOKED time, on the same range bounds as the bills so the tabs agree
+      // with each other. Paged for the same reason the orders are: every rate below divides by
+      // a count taken from this read.
+      fetchAllRows(() => scopedFrom('pos_reservations', 'id, status, source, party_size, reserved_for, order_id')
+        .gte('reserved_for', fromTs).lte('reserved_for', toTs)
+        .order('id')),
     ])
     // S612 silent-zero rule: a failed read here would render a confident report of 0 covers,
     // visually identical to a genuinely quiet range.
     const failed = firstError(results)
     if (failed) {
       setLoadError(failed)
-      setOrders([]); setItemsByOrder({})
+      setOrders([]); setItemsByOrder({}); setReservations([])
       setLoading(false)
       return
     }
-    const [{ data: orderData }, { data: settings }, { data: profs }, { data: tbls }] = results
+    const [{ data: orderData }, { data: settings }, { data: profs }, { data: tbls }, { data: resvData }] = results
+    setReservations(resvData || [])
     setVatReg(settings?.is_vat_registered ?? true)
     setSettingsId(settings?.id || null)
     setOpenTime(settings?.pos_open_time || '')
@@ -220,19 +225,51 @@ export default function CoversReport() {
   const peakTotalCovers = peakRows.reduce((s, h) => s + h.covers, 0)
   const peakBusiestHour = peakRows.reduce((best, h) => h.covers > best.covers ? h : best, peakRows[0])
 
-  const turnoverRows = useMemo(() => {
-    const buckets = PARTY_BANDS.map(b => ({ ...b, orders: 0, totalMinutes: 0, covers: 0, net: 0 }))
+  const turnoverRows = useMemo(
+    () => turnoverByBand(orders, o => computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg).net),
+    [orders, itemsByOrder, vatReg]
+  )
+
+  // Bookings vs walk-ins. A booking is KEPT when it reached a table (seated or completed) and a
+  // NO-SHOW when staff said so; the rate is no-shows over the bookings that were decided either
+  // way — cancelled and still-open bookings are neither. Covers split by whether the bill's order
+  // is one a booking was seated onto (pos_reservations.order_id).
+  const resvStats = useMemo(() => {
+    const isKept = r => r.status === 'completed' || r.status === 'seated'
+    const noShows = reservations.filter(r => r.status === 'no_show').length
+    const kept = reservations.filter(isKept).length
+    const cancelled = reservations.filter(r => r.status === 'cancelled').length
+    const decided = kept + noShows
+    const bookedOrderIds = new Set(reservations.filter(r => r.order_id).map(r => r.order_id))
+    let bookedCovers = 0, walkInCovers = 0
     for (const o of orders) {
-      if (!o.opened_at || !o.closed_at) continue
-      const mins = (new Date(o.closed_at) - new Date(o.opened_at)) / 60000
-      if (mins < 0) continue
-      const band = buckets.find(b => b.test(o.covers || 0))
-      if (!band) continue
-      band.orders += 1; band.totalMinutes += mins; band.covers += (o.covers || 0)
-      band.net += computeOrderAmounts(o, itemsByOrder[o.id] || [], vatReg).net
+      if (bookedOrderIds.has(o.id)) bookedCovers += (o.covers || 0)
+      else walkInCovers += (o.covers || 0)
     }
-    return buckets.map(b => ({ ...b, avgMinutes: b.orders > 0 ? b.totalMinutes / b.orders : 0 }))
-  }, [orders, itemsByOrder, vatReg])
+    const bySource = {}
+    for (const r of reservations) {
+      const k = r.source || 'other'
+      bySource[k] = bySource[k] || { source: k, bookings: 0, covers: 0, kept: 0, noShows: 0, cancelled: 0 }
+      const s = bySource[k]
+      s.bookings += 1; s.covers += (r.party_size || 0)
+      if (isKept(r)) s.kept += 1
+      if (r.status === 'no_show') s.noShows += 1
+      if (r.status === 'cancelled') s.cancelled += 1
+    }
+    const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, bookings: 0, covers: 0 }))
+    for (const r of reservations) {
+      const h = nepalHour(r.reserved_for)
+      if (h == null) continue
+      byHour[h].bookings += 1; byHour[h].covers += (r.party_size || 0)
+    }
+    return {
+      total: reservations.length, kept, noShows, cancelled,
+      noShowRate: decided > 0 ? noShows / decided : null,
+      bookedCovers, walkInCovers,
+      bySource: Object.values(bySource).sort((a, b) => b.bookings - a.bookings),
+      byHour,
+    }
+  }, [reservations, orders])
 
   const serverRows = useMemo(() => {
     const map = {}
@@ -288,10 +325,17 @@ export default function CoversReport() {
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'By Server')
       XLSX.writeFile(wb, `covers-by-server-${fromIso}-to-${toIso}.xlsx`)
+    } else if (tab === 'reservations') {
+      const ws = withLetterhead(XLSX, 'Covers Report - Reservations', resvStats.bySource.map(r => ({
+        'Booked via': SOURCE_LABEL[r.source] || r.source, 'Bookings': r.bookings, 'Guests booked': r.covers,
+        'Kept': r.kept, 'No-shows': r.noShows, 'Cancelled': r.cancelled,
+      })))
+      XLSX.utils.book_append_sheet(wb, ws, 'Reservations')
+      XLSX.writeFile(wb, `covers-reservations-${fromIso}-to-${toIso}.xlsx`)
     }
   }
 
-  const isEmpty = orders.length === 0
+  const isEmpty = tab === 'reservations' ? reservations.length === 0 : orders.length === 0
 
   return (
     <div>
@@ -471,6 +515,101 @@ export default function CoversReport() {
             </tbody>
           </table>
         </div>
+      ) : tab === 'reservations' ? (
+        reservations.length === 0 ? (
+          <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
+            No bookings in this range. Bookings are taken on the Reservations page or through the outlet's booking link.
+          </div>
+        ) : (
+          <>
+            <div className="stat-grid" style={{ marginBottom: 20 }}>
+              <div className="stat-card">
+                <div className="stat-label">Bookings</div>
+                <div className="stat-value">{resvStats.total}</div>
+                <div className="stat-sub">{resvStats.kept} kept · {resvStats.cancelled} cancelled</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">No-show rate <Tip text="No-shows ÷ (kept + no-shows). Cancelled and still-open bookings are neither, so they do not dilute it." width={240}>ⓘ</Tip></div>
+                <div className="stat-value" style={{ color: resvStats.noShowRate != null && resvStats.noShowRate >= 0.1 ? 'var(--theme-red-text)' : undefined }}>
+                  {resvStats.noShowRate == null ? '—' : `${(resvStats.noShowRate * 100).toFixed(1)}%`}
+                </div>
+                <div className="stat-sub">{resvStats.noShows} no-show{resvStats.noShows === 1 ? '' : 's'}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Booked covers <Tip text="Covers on bills that a booking was seated onto — the party size becomes the order's covers at seating." width={240}>ⓘ</Tip></div>
+                <div className="stat-value">{resvStats.bookedCovers.toLocaleString()}</div>
+                <div className="stat-sub">
+                  {resvStats.bookedCovers + resvStats.walkInCovers > 0
+                    ? `${Math.round(100 * resvStats.bookedCovers / (resvStats.bookedCovers + resvStats.walkInCovers))}% of covers served`
+                    : 'no covers served'}
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Walk-in covers</div>
+                <div className="stat-value">{resvStats.walkInCovers.toLocaleString()}</div>
+                <div className="stat-sub">bills with no booking behind them</div>
+              </div>
+            </div>
+
+            <div className="table-wrap" style={{ marginBottom: 24 }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Booked via <Tip text="How the booking reached you — phone, WhatsApp, a walk-in asking for later, the booking link." width={220}>ⓘ</Tip></th>
+                    <th style={{ textAlign: 'right' }}>Bookings</th>
+                    <th style={{ textAlign: 'right' }}>Guests booked</th>
+                    <th style={{ textAlign: 'right' }}>Kept</th>
+                    <th style={{ textAlign: 'right' }}>No-shows</th>
+                    <th style={{ textAlign: 'right' }}>Cancelled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {resvStats.bySource.map(r => (
+                    <tr key={r.source}>
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{SOURCE_LABEL[r.source] || r.source}</td>
+                      <td style={{ textAlign: 'right' }}>{r.bookings}</td>
+                      <td style={{ textAlign: 'right' }}>{r.covers}</td>
+                      <td style={{ textAlign: 'right' }}>{r.kept}</td>
+                      <td style={{ textAlign: 'right', fontWeight: r.noShows > 0 ? 700 : 400 }}>{r.noShows}</td>
+                      <td style={{ textAlign: 'right' }}>{r.cancelled}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td>Total</td>
+                    <td style={{ textAlign: 'right' }}>{resvStats.total}</td>
+                    <td style={{ textAlign: 'right' }}>{resvStats.bySource.reduce((s, r) => s + r.covers, 0)}</td>
+                    <td style={{ textAlign: 'right' }}>{resvStats.kept}</td>
+                    <td style={{ textAlign: 'right' }}>{resvStats.noShows}</td>
+                    <td style={{ textAlign: 'right' }}>{resvStats.cancelled}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Booked for <Tip text="The hour bookings were made FOR (their booked time), not when they were taken." width={220}>ⓘ</Tip></th>
+                    <th style={{ textAlign: 'right' }}>Bookings</th>
+                    <th style={{ textAlign: 'right' }}>Guests booked</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {resvStats.byHour.filter(h => h.bookings > 0).map(h => (
+                    <tr key={h.hour}>
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{hourLabel(h.hour)}</td>
+                      <td style={{ textAlign: 'right' }}>{h.bookings}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{h.covers}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )
       ) : tab === 'peak' ? (
         <>
           <ChartCard

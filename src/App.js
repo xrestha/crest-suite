@@ -96,6 +96,8 @@ const PosOrders = lazy(() => import('./modules/pos/orders/PosOrders'))
 const PosTableManagement = lazy(() => import('./modules/pos/tables/PosTableManagement'))
 const PosStaff = lazy(() => import('./modules/pos/staff/PosStaff'))
 const PosCustomers = lazy(() => import('./modules/pos/customers/PosCustomers'))
+const PosReservations = lazy(() => import('./modules/pos/reservations/PosReservations'))
+const GuestBooking = lazy(() => import('./modules/pos/booking/GuestBooking'))
 const PosParkingSlips = lazy(() => import('./modules/pos/parking/PosParkingSlips'))
 const PosExceptionReport = lazy(() => import('./modules/pos/reports/PosExceptionReport'))
 const PosShifts = lazy(() => import('./modules/pos/shifts/PosShifts'))
@@ -139,6 +141,10 @@ export default function App() {
             <Route path="/legal/:docType/:version" element={<Legal />} />
             <Route path="/pos/login" element={<PosLogin />} />
             <Route path="/pos/menu/:tableId" element={<GuestMenu />} />
+            {/* Public booking page (S677): the outlet's booking QR / link. The client UUID is the
+                credential, as the table UUID is for the guest menu; the RPCs gate on pos_enabled
+                and the outlet's own online-booking toggle. */}
+            <Route path="/pos/book/:clientId" element={<GuestBooking />} />
             <Route path="/hr/self-service/login/:clientId" element={<SelfServiceLogin />} />
             <Route path="/hr/self-service" element={<SelfServiceHome />} />
             <Route path="/" element={<RootRedirect />} />
@@ -289,6 +295,7 @@ export default function App() {
               <Route path="/pos/tables" element={<ModuleGate module="pos"><PosTableManagement /></ModuleGate>} />
               <Route path="/pos/customers" element={<ModuleGate module="pos"><PosCustomers /></ModuleGate>} />
               <Route path="/pos/parking" element={<ModuleGate module="pos"><PosParkingSlips /></ModuleGate>} />
+              <Route path="/pos/reservations" element={<ModuleGate module="pos"><PosReservations /></ModuleGate>} />
               <Route path="/pos/shifts" element={<ModuleGate module="pos"><PosShifts /></ModuleGate>} />
               <Route path="/pos/exceptions" element={<ModuleGate module="pos"><PosExceptionReport /></ModuleGate>} />
               <Route path="/pos/credit-notes" element={<ModuleGate module="pos"><CreditNotes /></ModuleGate>} />

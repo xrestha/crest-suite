@@ -9,6 +9,11 @@ import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { TABLE_STATUS_BADGE as STATUS_BADGE, TABLE_STATUS_LABEL as STATUS_LABEL, tableStripColor } from '../posSignals'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import { adToBs, formatBsDay, formatAd } from '../../../utils/bsCalendar'
+import { turnoverByBand, PARTY_BANDS } from '../reports/coversMath'
+import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS, DEFAULT_WHATSAPP_TEMPLATE } from '../reservations/reservationSettings'
 
 const STATUS_CYCLE = ['available', 'reserved', 'occupied', 'inactive']
 // This file used to carry its own byte-identical copy of the status badge/label/colour maps, which
@@ -92,6 +97,18 @@ export default function PosTableManagement() {
   const [deliveryMsg,     setDeliveryMsg]     = useState('')
   const [deliveryLoaded,  setDeliveryLoaded]  = useState(false)
 
+  // Reservations (S677) — settings.pos_reservation_settings plus the outlet's public booking
+  // link and QR. See src/modules/pos/reservations/reservationSettings.js for the shape.
+  const [resv,         setResv]         = useState(DEFAULT_RESERVATION_SETTINGS)
+  const [resvMeasured, setResvMeasured] = useState(null) // turnoverByBand over the last 90 days, or null if unread
+  const [resvLoading,  setResvLoading]  = useState(false)
+  const [resvSaving,   setResvSaving]   = useState(false)
+  const [resvMsg,      setResvMsg]      = useState('')
+  const [resvLoaded,   setResvLoaded]   = useState(false)
+  const [outletName,   setOutletName]   = useState('')
+  const [bookingQrUrl, setBookingQrUrl] = useState('')
+  const [newClosedDate, setNewClosedDate] = useState('') // AD iso from the BS picker, pending Add
+
   useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line
 
   // Each settings tab below only loads once per its own xLoaded flag — cheap while clientId is
@@ -105,12 +122,14 @@ export default function PosTableManagement() {
     setHscLoaded(false)
     setDiscLoaded(false)
     setDeliveryLoaded(false)
+    setResvLoaded(false)
     if (!clientId) return
     if (mainTab === 'routing') loadRouting()
     else if (mainTab === 'notes') loadNotePresets()
     else if (mainTab === 'hsc') loadHscItems()
     else if (mainTab === 'discounts') loadDiscReasons()
     else if (mainTab === 'delivery') loadDeliverySettings()
+    else if (mainTab === 'reservations') loadReservationSettings()
   }, [clientId]) // eslint-disable-line
 
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
@@ -492,6 +511,111 @@ export default function PosTableManagement() {
     setDeliveryMsg(error ? 'error:' + error.message : 'ok:Delivery partner settings saved.')
   }
 
+  // ── Reservations ──────────────────────────────────────────────────────────────
+  // Expected sitting length per party size (prefilled from the outlet's own measured turn times,
+  // the Covers Report's Turnover Time arithmetic), the late/seat windows, the WhatsApp message
+  // template, and the public booking link — the QR a customer scans to request a table.
+
+  function bookingUrl() { return `${window.location.origin}/pos/book/${clientId}` }
+
+  async function loadReservationSettings() {
+    setResvLoading(true); setResvMsg('')
+    const since = new Date(Date.now() - 90 * 86400000).toISOString()
+    const [{ data: s, error: sErr }, { data: client }, { data: orders, error: oErr }] = await Promise.all([
+      supabase.from('settings').select('pos_reservation_settings').eq('client_id', clientId).maybeSingle(),
+      supabase.from('clients').select('name').eq('id', clientId).maybeSingle(),
+      // 90 days of paid bills crosses 1000 rows on a busy outlet — paged, unique tiebreaker.
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, covers, opened_at, closed_at').eq('close_type', 'paid').gte('closed_at', since).order('id')),
+    ])
+    if (sErr) { setResvMsg('error:' + sErr.message); setResvLoading(false); return }
+    setResv(normalizeReservationSettings(s?.pos_reservation_settings))
+    setOutletName(client?.name || '')
+    // The measured figure is a hint beside the field, not the field — a failed read drops the
+    // hint, never the tab.
+    setResvMeasured(oErr ? null : turnoverByBand(orders || []))
+    setResvLoading(false)
+    setResvLoaded(true)
+    QRCode.toDataURL(bookingUrl(), { margin: 1, width: 240 }).then(setBookingQrUrl).catch(() => setBookingQrUrl(''))
+  }
+
+  function openReservationsTab() {
+    setMainTab('reservations')
+    if (!resvLoaded) loadReservationSettings()
+  }
+
+  function setResvField(key, value) { setResv(prev => ({ ...prev, [key]: value })); setResvMsg('') }
+  function setResvBand(key, value)  { setResv(prev => ({ ...prev, duration_by_band: { ...prev.duration_by_band, [key]: value } })); setResvMsg('') }
+  function toggleResvWeekday(key, n) {
+    setResv(prev => {
+      const has = (prev[key] || []).includes(n)
+      const next = has ? (prev[key] || []).filter(x => x !== n) : [...(prev[key] || []), n].sort((a, b) => a - b)
+      // A day cannot be both closed and walk-in only; ticking one clears the other.
+      const other = key === 'closed_weekdays' ? 'walk_in_weekdays' : 'closed_weekdays'
+      return { ...prev, [key]: next, [other]: (prev[other] || []).filter(x => x !== n || has) }
+    })
+    setResvMsg('')
+  }
+  function addClosedDate() {
+    if (!newClosedDate) return
+    setResv(prev => ({ ...prev, closed_dates: [...new Set([...(prev.closed_dates || []), newClosedDate])].sort() }))
+    setNewClosedDate('')
+    setResvMsg('')
+  }
+  function removeClosedDate(iso) {
+    setResv(prev => ({ ...prev, closed_dates: (prev.closed_dates || []).filter(d => d !== iso) }))
+    setResvMsg('')
+  }
+  const closedDateLabel = iso => {
+    const bs = adToBs(new Date(iso + 'T00:00:00'))
+    return bs ? `${formatBsDay(bs.day, bs.month)} ${bs.year} · ${iso}` : iso
+  }
+
+  async function saveReservationSettings() {
+    if (!clientId) return
+    setResvSaving(true); setResvMsg('')
+    const cleaned = normalizeReservationSettings(resv)
+    const payload = { pos_reservation_settings: cleaned }
+    const { data: existing, error: existErr } = await supabase
+      .from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    let error = existErr || null
+    if (!error && existing?.id) {
+      ;({ error } = await supabase.from('settings').update(payload).eq('id', existing.id))
+    } else if (!error) {
+      // A failed existing-row read must NOT fall into insert (S613) — a second settings row
+      // splits every settings read after it.
+      ;({ error } = await supabase.from('settings').insert({ client_id: clientId, ...payload }))
+    }
+    setResv(cleaned)
+    setResvSaving(false)
+    setResvMsg(error ? 'error:' + error.message : 'ok:Reservation settings saved.')
+  }
+
+  async function copyBookingUrl() {
+    try { await navigator.clipboard.writeText(bookingUrl()); setResvMsg('ok:Booking link copied.') }
+    catch { setResvMsg('error:Could not copy — select the link below and copy it by hand.') }
+  }
+
+  function printBookingQr() {
+    if (!bookingQrUrl) return
+    // Same popup shape as printQr above: sever window.opener on the kept reference rather than
+    // passing noopener as a feature, which would return null and leave nothing to print.
+    const w = window.open('', '_blank', 'width=380,height=560,left=200,top=100')
+    if (!w) return
+    w.opener = null
+    w.document.write(`
+      <html><head><title>${esc(outletName)} — Book a table</title></head>
+      <body style="font-family:sans-serif;text-align:center;padding:24px">
+        <h2 style="margin:0 0 4px">${esc(outletName)}</h2>
+        <p style="margin:0 0 20px;color:#666;font-size:13px">Scan to book a table</p>
+        <img src="${bookingQrUrl}" style="width:240px;height:240px" />
+        <p style="margin:16px 0 0;color:#666;font-size:11px;word-break:break-all">${esc(bookingUrl())}</p>
+      </body></html>
+    `)
+    w.document.close()
+    w.focus()
+    setTimeout(() => { w.print(); w.close() }, 300)
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   return (
@@ -539,6 +663,12 @@ export default function PosTableManagement() {
             className={`tab-btn${mainTab === 'delivery' ? ' tab-btn--active' : ''}`}
             onClick={openDeliveryTab}
           >Delivery Partners</button>
+        </Tip>
+        <Tip text="How long a party of each size is expected to sit (prefilled from your own measured turn times), when a booking counts as late, the WhatsApp confirmation message, and the booking link / QR customers scan to request a table">
+          <button
+            className={`tab-btn${mainTab === 'reservations' ? ' tab-btn--active' : ''}`}
+            onClick={openReservationsTab}
+          >Reservations</button>
         </Tip>
       </div>
 
@@ -1065,6 +1195,187 @@ export default function PosTableManagement() {
 
           <Fab show={tables.length > 0} onClick={openAdd} />
         </>
+      )}
+
+      {/* ══ RESERVATIONS TAB ══ */}
+      {mainTab === 'reservations' && (
+        <div style={{ maxWidth: 560 }}>
+          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
+            Bookings live on the Reservations page and show on the Orders floor as a chip on the
+            table they hold. The figures here decide how long a booking is expected to occupy its
+            table, when it reads as late, and what the WhatsApp confirmation says. The booking link
+            at the bottom is what a customer scans to request a table — every request waits for a
+            staff Accept.
+          </p>
+
+          {resvLoading ? (
+            <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : (
+            <>
+              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>
+                Expected sitting length <Tip text="Per party size. Prefills the booking form and sizes the block on the capacity strip. 'Measured' is this outlet's own average from opening a table to paying its bill over the last 90 days — the Covers Report's Turnover Time figure." width={300}>ⓘ</Tip>
+              </h3>
+              <div className="table-wrap" style={{ marginBottom: 18 }}>
+                <table className="data-table">
+                  <thead><tr><th>Party</th><th style={{ textAlign: 'right' }}>Minutes</th><th>Measured</th><th></th></tr></thead>
+                  <tbody>
+                    {PARTY_BANDS.map(b => {
+                      const m = resvMeasured?.find(x => x.key === b.key)
+                      const measured = m && m.orders > 0 ? Math.round(m.avgMinutes) : null
+                      return (
+                        <tr key={b.key}>
+                          <td><label htmlFor={`resv-band-${b.key}`} style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{b.label}</label></td>
+                          <td style={{ textAlign: 'right' }}>
+                            <input id={`resv-band-${b.key}`} type="number" min={15} max={720} step={5} inputMode="numeric"
+                              className="form-input form-input--auto" style={{ width: 90, textAlign: 'right' }}
+                              value={resv.duration_by_band[b.key]} onChange={e => setResvBand(b.key, e.target.value)} />
+                          </td>
+                          <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                            {resvMeasured === null ? <span style={{ color: 'var(--theme-text3)' }}>—</span>
+                              : measured == null ? <span style={{ color: 'var(--theme-text3)' }}>no sittings yet</span>
+                              : measured > 720
+                                // A bill left open for days skews the average past anything a sitting can be
+                                // (POS_TODO B4). Say so rather than offer a number the field would refuse.
+                                ? <span style={{ color: 'var(--theme-text3)' }}>{m.orders} sitting{m.orders === 1 ? '' : 's'} · average skewed by bills left open</span>
+                                : `${measured} min · ${m.orders} sitting${m.orders === 1 ? '' : 's'}`}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {measured != null && measured >= 15 && measured <= 720 && (
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setResvBand(b.key, String(measured))}>Use measured</button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px 16px', marginBottom: 18 }}>
+                <div className="form-field">
+                  <label htmlFor="resv-grace">
+                    Late after (min) <Tip text="Minutes past the booked time before a booking that is not yet marked Arrived shows a late flag on the Reservations page." width={260}>ⓘ</Tip>
+                  </label>
+                  <input id="resv-grace" type="number" min={0} max={180} inputMode="numeric" value={resv.arrival_grace_minutes} onChange={e => setResvField('arrival_grace_minutes', e.target.value)} />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="resv-window">
+                    Offer seating from (min before) <Tip text="Tapping a booked table this many minutes before its time offers 'Seat <name>' instead of the covers numpad." width={260}>ⓘ</Tip>
+                  </label>
+                  <input id="resv-window" type="number" min={0} max={240} inputMode="numeric" value={resv.seat_window_minutes} onChange={e => setResvField('seat_window_minutes', e.target.value)} />
+                </div>
+              </div>
+
+              <div className="form-field" style={{ marginBottom: 18 }}>
+                <label htmlFor="resv-template">
+                  WhatsApp confirmation message <Tip text="What the 💬 button on the Reservations page prefills. Placeholders: {name} {party} {outlet} {date} {time}. Sent from the host's own WhatsApp — nothing is sent automatically." width={300}>ⓘ</Tip>
+                </label>
+                <textarea id="resv-template" rows={3} value={resv.whatsapp_template} onChange={e => setResvField('whatsapp_template', e.target.value)} />
+                <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start', marginTop: 6 }} onClick={() => setResvField('whatsapp_template', DEFAULT_WHATSAPP_TEMPLATE)}>Reset to default</button>
+              </div>
+
+              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>
+                Online booking <Tip text="A public page customers reach from a QR or link — on a table tent, the door, your Instagram bio, your Facebook Book Now button. They pick a day, time and party size and enter a name and mobile number; the request lands on the Reservations page for a staff Accept or Decline, and their phone shows the answer." width={320}>ⓘ</Tip>
+              </h3>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-text1)', marginBottom: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={resv.public_booking_enabled} onChange={e => setResvField('public_booking_enabled', e.target.checked)} />
+                Accept online booking requests
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px 16px', marginBottom: 14 }}>
+                <div className="form-field">
+                  <label htmlFor="resv-maxparty">
+                    Largest party online <Tip text="Bigger groups are told to call. Keeps a banquet-sized request from being a one-tap surprise." width={240}>ⓘ</Tip>
+                  </label>
+                  <input id="resv-maxparty" type="number" min={1} max={99} inputMode="numeric" value={resv.max_party_online} onChange={e => setResvField('max_party_online', e.target.value)} disabled={!resv.public_booking_enabled} />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="resv-lead">
+                    Minimum notice (min) <Tip text="A request for a time sooner than this is refused with 'please call' — a same-minute online request cannot be accepted by anyone in time." width={260}>ⓘ</Tip>
+                  </label>
+                  <input id="resv-lead" type="number" min={0} max={1440} inputMode="numeric" value={resv.min_lead_minutes} onChange={e => setResvField('min_lead_minutes', e.target.value)} disabled={!resv.public_booking_enabled} />
+                </div>
+              </div>
+              <div style={{ marginBottom: 18 }}>
+                <span className="field-label" id="resv-closed-label" style={{ display: 'block', marginBottom: 6 }}>
+                  Closed on <Tip text="Weekly off days. The booking page shows them as Closed and refuses a request for them. Ticking a day here clears it from Walk-ins only." width={260}>ⓘ</Tip>
+                </span>
+                <div role="group" aria-labelledby="resv-closed-label" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
+                    <button key={d} type="button" className={`tab-btn${(resv.closed_weekdays || []).includes(i) ? ' tab-btn--active' : ''}`}
+                      aria-pressed={(resv.closed_weekdays || []).includes(i)} onClick={() => toggleResvWeekday('closed_weekdays', i)}>{d}</button>
+                  ))}
+                </div>
+                <span className="field-label" id="resv-walkin-label" style={{ display: 'block', marginBottom: 6 }}>
+                  Walk-ins only on <Tip text="Days you are open but take no online bookings — the page shows them as Walk-in and refuses a request for them. Staff can still enter a booking by hand." width={280}>ⓘ</Tip>
+                </span>
+                <div role="group" aria-labelledby="resv-walkin-label" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
+                    <button key={d} type="button" className={`tab-btn${(resv.walk_in_weekdays || []).includes(i) ? ' tab-btn--active' : ''}`}
+                      aria-pressed={(resv.walk_in_weekdays || []).includes(i)} onClick={() => toggleResvWeekday('walk_in_weekdays', i)}>{d}</button>
+                  ))}
+                </div>
+                <div className="form-field" style={{ marginBottom: 12 }}>
+                  <label htmlFor="resv-closed-date">
+                    Closed dates <Tip text="Dashain, Tihar, a private function — any single day the page should show as Closed. Not taken from the HR holiday calendar: most outlets are open on a public holiday." width={280}>ⓘ</Tip>
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <BsCalendarPicker id="resv-closed-date" value={newClosedDate} onChange={setNewClosedDate} placeholder="Pick a BS date" />
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={addClosedDate} disabled={!newClosedDate}>Add date</button>
+                  </div>
+                  {(resv.closed_dates || []).length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                      {(resv.closed_dates || []).map(iso => (
+                        <span key={iso} className="badge badge-gray" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          {closedDateLabel(iso)}
+                          <button type="button" className="btn-linklike" aria-label={`Remove ${iso}`} onClick={() => removeClosedDate(iso)} style={{ fontSize: 12 }}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {(resv.closed_dates || []).some(iso => iso < formatAd(new Date())) && (
+                    <span style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }}>Past dates are kept for the record; they no longer affect the page.</span>
+                  )}
+                </div>
+                <div className="form-field">
+                  <label htmlFor="resv-notice">
+                    Notice on the booking page <Tip text="One line under the page title, for anything the rules above cannot say — 'Groups over 12 please call', 'Terrace closed in monsoon'. 160 characters." width={260}>ⓘ</Tip>
+                  </label>
+                  <input id="resv-notice" maxLength={160} value={resv.page_notice || ''} onChange={e => setResvField('page_notice', e.target.value)} placeholder="Optional" />
+                </div>
+              </div>
+              <div className="form-field" style={{ marginBottom: 18 }}>
+                <label htmlFor="resv-link">Booking link</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input id="resv-link" className="form-input" readOnly value={bookingUrl()} style={{ flex: '1 1 260px', fontSize: 12 }} onFocus={e => e.target.select()} />
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={copyBookingUrl}>Copy link</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={printBookingQr} disabled={!bookingQrUrl}>Print QR</button>
+                </div>
+                {!resv.public_booking_enabled && (
+                  <span style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }}>The page shows "not taking online bookings" until the box above is ticked and saved.</span>
+                )}
+              </div>
+              {bookingQrUrl && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+                  <img src={bookingQrUrl} alt="Booking QR" style={{ width: 120, height: 120, borderRadius: 'var(--radius-sm)', border: '1px solid var(--theme-border)' }} />
+                  <span style={{ fontSize: 12, color: 'var(--theme-text3)', lineHeight: 1.5 }}>
+                    Print it for the table tents and the door; paste the link into your Instagram bio, Facebook Book Now button and Google Maps listing.
+                  </span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <button className="btn btn-primary" onClick={saveReservationSettings} disabled={resvSaving}>
+                  {resvSaving ? 'Saving…' : 'Save Reservation Settings'}
+                </button>
+                {resvMsg && (
+                  <span style={{ fontSize: 12, color: resvMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+                    {resvMsg.replace(/^(error|ok):/, '')}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* Add / Edit modal */}

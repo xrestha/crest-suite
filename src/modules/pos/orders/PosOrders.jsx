@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -11,7 +11,9 @@ import Tip from '../../../components/Tip'
 import SupportContactLine from '../../../components/SupportContactLine'
 import { contrastRatio } from '../../../utils/avatarColor'
 import QRCode from 'qrcode'
-import { adToBs, getBsToday, getBsFiscalYear } from '../../../utils/bsCalendar'
+import { adToBs, getBsToday, getBsFiscalYear, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor } from '../reservations/reservationStatus'
+import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
@@ -23,7 +25,7 @@ import {
   enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
 } from '../../../utils/offlineQueue'
 import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
-import { nepalTime } from '../../../shared/nepalTime'
+import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   KOT_STATUS_BADGE, KOT_STATUS_LABEL, KOT_STATUS_RANK, kotTimerLabel,
@@ -109,6 +111,21 @@ export default function PosOrders() {
   const [coversModal,      setCoversModal]      = useState(false)
   const [pendingTable,     setPendingTable]      = useState(null)
   const [pendingCoversStr, setPendingCoversStr]  = useState('')
+
+  /* ── reservations (S677) ── */
+  // Today's live bookings (booked / confirmed / arrived), read with the floor and re-polled every
+  // 60 s. DERIVED onto the tiles — pos_tables.status is never written by this feature, because
+  // that stored column already drifts against open orders and a second writer would compound it.
+  const [floorReservations, setFloorReservations] = useState([])
+  const [requestCount,      setRequestCount]      = useState(0) // public booking requests awaiting Accept
+  // The booking a tapped table is due for, offered as "Seat <name>" instead of the covers numpad.
+  const [seatPrompt, setSeatPrompt] = useState(null)
+  // The booking the order being opened belongs to. A ref rather than state: performSave reads it
+  // synchronously right after the pos_orders insert returns — the same reason savingRef exists.
+  const seatReservationRef = useRef(null)
+  const [reservationSettings, setReservationSettings] = useState(DEFAULT_RESERVATION_SETTINGS)
+  const location = useLocation()
+  const navigate = useNavigate()
 
   /* ── order screen ── */
   const [activeTable, setActiveTable] = useState(null)
@@ -278,12 +295,13 @@ export default function PosOrders() {
     } else {
       Promise.all([
         supabase.from('settings')
-          .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone, payment_qr_data, pos_delivery_partners')
+          .select('pos_bot_categories, pos_note_presets, pos_discount_reasons, is_vat_registered, invoice_prefix, vat_number, property_address, property_phone, payment_qr_data, pos_delivery_partners, pos_reservation_settings')
           .eq('client_id', clientId).maybeSingle(),
         supabase.from('clients').select('name').eq('id', clientId).single(),
       ]).then(([{ data }, { data: clientData }]) => {
         const arr = data?.pos_bot_categories
         if (arr?.length) setBotCategories(new Set(arr))
+        setReservationSettings(normalizeReservationSettings(data?.pos_reservation_settings))
         setNotePresets(data?.pos_note_presets || [])
         setDiscountReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
         setBillingSettings({
@@ -337,6 +355,29 @@ export default function PosOrders() {
     const poll = setInterval(() => loadPendingGuestOrders(), 5000)
     return () => clearInterval(poll)
   }, [view, clientId]) // eslint-disable-line
+
+  // Bookings change on the scale of minutes, not seconds — 60 s, not the 5 s the kitchen needs.
+  // The once-a-minute clock tick beside it is what moves a tile's booking chip from quiet to
+  // "due" as the booked time approaches, since the poll's setIfChanged suppresses re-renders
+  // when nothing in the data moved.
+  useEffect(() => {
+    if (view !== 'floor') return
+    const poll = setInterval(() => loadFloorReservations(), 60000)
+    const tick = setInterval(() => setKotNow(Date.now()), 60000)
+    return () => { clearInterval(poll); clearInterval(tick) }
+  }, [view, clientId]) // eslint-disable-line
+
+  // Handoff from the Reservations page: "Seat <name>" there picks a table and navigates here with
+  // the booking and the FULL pos_tables row (table_name is snapshotted onto the order at first
+  // save and prints on every KOT and bill). The history entry is cleared before the table opens
+  // so a reload can never replay the seat.
+  useEffect(() => {
+    const handoff = location.state?.seatReservation
+    if (!handoff?.reservation?.id || !handoff?.table?.id || !clientId) return
+    seatReservationRef.current = handoff.reservation
+    navigate(location.pathname, { replace: true, state: null })
+    openTable(handoff.table)
+  }, [location.state, clientId]) // eslint-disable-line
 
   useEffect(() => {
     const up   = () => { setIsOnline(true);  flushRef.current?.() }
@@ -662,6 +703,36 @@ export default function PosOrders() {
     setFloorLoad(false)
     loadKotStatus(map)
     loadPendingGuestOrders()
+    loadFloorReservations()
+  }
+
+  // Today's live bookings for the floor tiles, plus the count of public requests awaiting an
+  // Accept. Deliberately NOT part of loadFloor's Promise.all above — that batch destructures
+  // `{ data }` only, and a dropped error here would blank every tile's booking chip.
+  async function loadFloorReservations() {
+    if (!navigator.onLine) return
+    const today = nepalBs(new Date())
+    if (!today) return
+    const start = bsDayBoundaryIso(today.year, today.month, today.day, false)
+    const endOfDay = bsDayBoundaryIso(today.year, today.month, today.day, true)
+    // Six hours past the BS day's end: a 12:15 AM booking belongs to tomorrow's date but to
+    // tonight's service, so it is on the board during the preceding evening.
+    const end = new Date(new Date(endOfDay).getTime() + 6 * 3600000).toISOString()
+    const [{ data, error }, { count, error: countErr }] = await Promise.all([
+      scopedFrom('pos_reservations', 'id, customer_name, phone, party_size, reserved_for, duration_minutes, status, arrived_at, pos_reservation_tables(table_id)')
+        .in('status', FLOOR_STATUSES)
+        .gte('reserved_for', start).lte('reserved_for', end)
+        .order('reserved_for'),
+      scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('status', 'requested'),
+    ])
+    // A failed poll keeps last-good — an emptied strip reads as "no bookings tonight".
+    if (error) console.error('loadFloorReservations failed, keeping last known:', error)
+    else {
+      const rows = (data || []).map(r => ({ ...r, tables: tableIdsOf(r).sort().join(',') }))
+      setIfChanged(setFloorReservations, rows, list => rowsSignature(list, ['id', 'status', 'reserved_for', 'party_size', 'customer_name', 'arrived_at', 'tables']))
+    }
+    if (countErr) console.error('reservation request count failed, keeping last known:', countErr)
+    else setRequestCount(count || 0)
   }
 
   // Pending (not yet Accepted/Dismissed) guest self-order requests, grouped by table — see
@@ -997,6 +1068,58 @@ export default function PosOrders() {
     cachePosMenu(clientId, data || [], suggMap)
   }
 
+  // table_id → the earliest live booking holding it (rows arrive sorted by time), plus the
+  // bookings holding no table at all. Plain derivation: the list is a handful of rows.
+  const reservationsByTable = {}
+  const unassignedReservations = []
+  for (const r of floorReservations) {
+    const ids = tableIdsOf(r)
+    if (ids.length === 0) { unassignedReservations.push(r); continue }
+    for (const id of ids) if (!reservationsByTable[id]) reservationsByTable[id] = r
+  }
+
+  // The booking a host would seat if they tapped this table right now, or null.
+  function dueReservationFor(tableId) {
+    const r = reservationsByTable[tableId]
+    return r && isDue(r, Date.now(), reservationSettings.seat_window_minutes) ? r : null
+  }
+
+  // The original tail of openTable for a table with no order on it: a pending guest QR request
+  // supplies the covers, otherwise the numpad asks. Also the "Walk-in instead" answer to the
+  // seat prompt below.
+  function startFreshOrder(table) {
+    const pendingGuestReq = pendingGuestOrders[table.id]?.[0]
+    if (pendingGuestReq) {
+      // The guest already gave a covers count when placing their order — skip the redundant
+      // numpad and go straight to the order screen with it pre-filled. This does NOT merge the
+      // request's items into the cart; that still only happens via an explicit Accept tap on
+      // the banner below (decideGuestOrder), same as always.
+      setActiveTable(table)
+      setOrderId(null); setOrderNo(null); setOrderItems([])
+      setCovers(pendingGuestReq.covers || 1)
+      setMsg(''); setView('order'); loadMenu()
+    } else {
+      setPendingTable(table)
+      setPendingCoversStr('')
+      setCoversModal(true)
+      loadMenu()
+    }
+  }
+
+  // Seat a booked party: the booking supplies the covers (no numpad) and the buyer name/phone, so
+  // the bill carries the guest and closeOrder's customer upsert builds the book for free. The
+  // link back to the booking is written by performSave once the pos_orders row exists.
+  function seatReservation(table, res) {
+    seatReservationRef.current = res
+    setSeatPrompt(null)
+    setActiveTable(table)
+    setOrderId(null); setOrderNo(null); setOrderItems([])
+    setCovers(Math.max(1, parseInt(res.party_size, 10) || 1))
+    setBuyerName(res.customer_name || '')
+    setBuyerPhone(res.phone || '')
+    setMsg(''); setView('order'); loadMenu()
+  }
+
   async function openTable(table) {
     setFloorMsg('')
 
@@ -1055,6 +1178,9 @@ export default function PosOrders() {
     }
 
     if (existing) {
+      // A booking handed off onto a table that already has an order must not attach to that
+      // bill — it belongs to whoever is already sitting there.
+      seatReservationRef.current = null
       setActiveTable(table)
       setOrderId(existing.id)
       setOrderNo(existing.order_no || null)
@@ -1067,22 +1193,13 @@ export default function PosOrders() {
       cachePosOrderForTable(table.id, { orderId: existing.id, orderNo: existing.order_no || null, covers: existing.covers || 1, items })
       setMsg(''); setView('order'); loadMenu()
     } else {
-      const pendingGuestReq = pendingGuestOrders[table.id]?.[0]
-      if (pendingGuestReq) {
-        // The guest already gave a covers count when placing their order — skip the redundant
-        // numpad and go straight to the order screen with it pre-filled. This does NOT merge the
-        // request's items into the cart; that still only happens via an explicit Accept tap on
-        // the banner below (decideGuestOrder), same as always.
-        setActiveTable(table)
-        setOrderId(null); setOrderNo(null); setOrderItems([])
-        setCovers(pendingGuestReq.covers || 1)
-        setMsg(''); setView('order'); loadMenu()
-      } else {
-        setPendingTable(table)
-        setPendingCoversStr('')
-        setCoversModal(true)
-        loadMenu()
-      }
+      // An explicit handoff from the Reservations page seats straight away; a table whose
+      // booking is due offers the party by name before falling back to the numpad.
+      const handoff = seatReservationRef.current
+      if (handoff?.id) { seatReservation(table, handoff); return }
+      const due = dueReservationFor(table.id)
+      if (due) { setSeatPrompt({ table, reservation: due }); loadMenu(); return }
+      startFreshOrder(table)
     }
   }
 
@@ -1303,6 +1420,9 @@ export default function PosOrders() {
         opened_by:  profile?.id || null,
         items: itemsPayload,
       })
+      // A party seated offline keeps its booking at 'arrived' — the link needs the server row
+      // and is never written from the queue; the Reservations page's Done action covers it.
+      seatReservationRef.current = null
       setPendingOrderIds(prev => new Set([...prev, oid]))
       if (isNewOrder && activeTable?.id) {
         setTables(prev => prev.map(t => t.id === activeTable.id ? { ...t, status: 'occupied' } : t))
@@ -1324,6 +1444,16 @@ export default function PosOrders() {
       oNo = newOrder.order_no || null
       setOrderId(oid)
       setOrderNo(oNo)
+      // Link a seated booking to the order it just became. The status guard means a booking
+      // decided elsewhere in the meantime (cancelled, seated on another device) is left alone.
+      const seatRes = seatReservationRef.current
+      seatReservationRef.current = null
+      if (seatRes?.id) {
+        const { error: linkErr } = await scopedUpdate('pos_reservations', { ...stampFor('seated'), order_id: oid })
+          .eq('id', seatRes.id).in('status', ['booked', 'confirmed', 'arrived'])
+        if (linkErr) warnWrite(`The booking for ${seatRes.customer_name} still shows as waiting in Reservations though its order was saved — mark it Seated there.`, linkErr)
+        else loadFloorReservations()
+      }
       if (activeTable?.id) {
         // A silent failure here is how a table gets seated twice: the order exists, but the
         // floor keeps showing the tile as free. The optimistic repaint is deliberately inside
@@ -1587,6 +1717,18 @@ export default function PosOrders() {
     setCloseReason('')
     setBuyerName(''); setBuyerAddress(''); setBuyerPan(''); setBuyerPhone(''); setBillRemarks('')
     setDeliveryPartner('')
+    // A party seated from a booking already told us who they are. Prefill from the linked
+    // reservation so the bill carries the guest and the customer book / loyalty see them — a
+    // lookup rather than session state, because the table may be billed from another device or
+    // after a reload. Best-effort: a failed read simply leaves the fields blank as before.
+    if (orderId && navigator.onLine) {
+      scopedFrom('pos_reservations', 'customer_name, phone').eq('order_id', orderId).eq('status', 'seated').limit(1)
+        .then(({ data, error }) => {
+          if (error || !data?.[0]) return
+          setBuyerName(prev => prev || data[0].customer_name || '')
+          setBuyerPhone(prev => prev || data[0].phone || '')
+        })
+    }
     setDiscountStr(''); setDiscountMode('amount'); setDiscountReason('')
     setCloseMsg('')
     setCompCostMap({})
@@ -1933,6 +2075,15 @@ export default function PosOrders() {
             .catch(e => { console.error('pos_tables release failed (non-fatal):', e) })
         : null
 
+      // A booking seated from the floor completes when its bill closes — every close type, since
+      // the visit is over as far as the book is concerned (the bill's own outcome is read through
+      // order_id). Zero rows matched is the ordinary walk-in case, not a failure.
+      const reservationDone = Promise.resolve(
+        scopedUpdate('pos_reservations', stampFor('completed')).eq('order_id', orderId).eq('status', 'seated')
+      ).then(({ error }) => {
+        if (error) warnWrite('The booking linked to this bill still shows as Seated in Reservations — mark it Completed there.', error)
+      }).catch(e => { console.error('pos_reservations completion failed (non-fatal):', e) })
+
       // Auto-build the customer book: any bill with buyer Name + Phone (required for discounts and
       // Credit sales) adds/updates a pos_customers row keyed by phone. Non-fatal — never blocks billing.
       let custUpsert = null
@@ -1989,6 +2140,7 @@ export default function PosOrders() {
       }
 
       if (tableFree) await tableFree
+      await reservationDone
 
       if (closeType === 'paid') await printBill(updated, payableOrderItems)
       if (closeType === 'writeoff') await printCompSlip(updated, orderItems)
@@ -2204,6 +2356,8 @@ The tables were left occupied rather than freed with their orders still open.`)
     setView('floor'); setActiveTable(null); setOrderId(null); setOrderNo(null); setOrderItems([]); setMsg('')
     setSuggestions([])
     setMenuLoaded(false)
+    // A seat abandoned before the first save must not leak onto the next table opened.
+    seatReservationRef.current = null
     // Any guest request Accepted-locally-but-not-yet-saved is abandoned along with orderItems
     // above — it was never written to the DB (see performSave), so it's still genuinely
     // 'pending' there. Clear the local flag and re-poll to bring it back into the banner/badge
@@ -3271,6 +3425,36 @@ The tables were left occupied rather than freed with their orders still open.`)
       </Modal>
     )}
 
+    {/* ── Seat prompt: a tapped table has a booking due (S677). Lives in the FLOOR return, the
+           same tree as openTable's callers — see the two-returns note in pos-billing.md. ── */}
+    {seatPrompt && (
+      <Modal
+        title={seatPrompt.table.name}
+        onClose={() => setSeatPrompt(null)}
+        maxWidth={360}
+      >
+        <p style={{ margin: '0 0 6px', fontSize: 12, color: 'var(--theme-text3)' }}>Booked for this table</p>
+        <p style={{ margin: '0 0 18px', fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)' }}>
+          {seatPrompt.reservation.customer_name} ×{seatPrompt.reservation.party_size}
+          <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>{nepalTime(seatPrompt.reservation.reserved_for)}</span>
+        </p>
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%', padding: '12px 0', fontSize: 15, marginBottom: 10, justifyContent: 'center' }}
+          onClick={() => seatReservation(seatPrompt.table, seatPrompt.reservation)}
+        >
+          Seat {seatPrompt.reservation.customer_name} ×{seatPrompt.reservation.party_size}
+        </button>
+        <button
+          className="btn btn-ghost"
+          style={{ width: '100%', padding: '12px 0', fontSize: 15, justifyContent: 'center' }}
+          onClick={() => { const t = seatPrompt.table; setSeatPrompt(null); startFreshOrder(t) }}
+        >
+          Walk-in instead
+        </button>
+      </Modal>
+    )}
+
     <div>
 
       <div className="page-header page-header--split">
@@ -3315,6 +3499,30 @@ The tables were left occupied rather than freed with their orders still open.`)
           )}
         </div>
       </div>
+
+      {/* Today's bookings — a quiet strip, not an alarm: brass/grey chips, amber only for a party
+          that has arrived and is waiting (loudness tracks demand for action, posSignals.js). */}
+      {(floorReservations.length > 0 || requestCount > 0) && (
+        <div className="card" style={{ padding: '10px 14px', marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--theme-text2)' }}>
+          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>🕗 Today's bookings</span>
+          {floorReservations.map(r => {
+            const names = tableIdsOf(r).map(id => tables.find(t => t.id === id)?.name).filter(Boolean)
+            return (
+              <Tip key={r.id} text={r.status === 'arrived' ? `${r.customer_name} has arrived and is waiting for a table.` : `${r.customer_name}, party of ${r.party_size}, booked for ${nepalTime(r.reserved_for)}${names.length ? ` at ${names.join(', ')}` : ' — no table held yet'}.`} width={240}>
+                <span className={`badge ${r.status === 'arrived' ? 'badge-amber' : 'badge-gray'}`} style={{ cursor: 'default' }}>
+                  {nepalTime(r.reserved_for)} {r.customer_name} ×{r.party_size}{names.length ? ` (${names.join(', ')})` : ''}
+                </span>
+              </Tip>
+            )
+          })}
+          {requestCount > 0 && (
+            <Tip text="Booking requests sent from the outlet's booking link, waiting for a staff Accept on the Reservations page." width={240}>
+              <span className="badge badge-amber" style={{ cursor: 'default' }}>🔔 {requestCount} booking request{requestCount === 1 ? '' : 's'}</span>
+            </Tip>
+          )}
+          <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => navigate('/pos/reservations')}>Reservations →</button>
+        </div>
+      )}
 
       {Object.keys(pendingGuestOrders).length > 0 && (() => {
         const total = Object.values(pendingGuestOrders).reduce((s, arr) => s + arr.length, 0)
@@ -3544,6 +3752,25 @@ The tables were left occupied rather than freed with their orders still open.`)
                 {t.section && (
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{t.section}</div>
                 )}
+
+                {/* The booking due on this table. Quiet by default; brass when due within the seat
+                    window (tap to seat); amber ONLY when the party has arrived and the table is
+                    still occupied — the one state here that is waiting on a person. */}
+                {reservationsByTable[t.id] && (() => {
+                  const r = reservationsByTable[t.id]
+                  const waiting = r.status === 'arrived' && !!ord
+                  const due = !waiting && isDue(r, kotNow, reservationSettings.seat_window_minutes)
+                  const cls = waiting ? 'badge-amber' : due ? 'badge-yellow' : 'badge-gray'
+                  return (
+                    <Tip text={waiting
+                      ? `${r.customer_name} (party of ${r.party_size}) has arrived — this table is still occupied.`
+                      : `Booked ${nepalTime(r.reserved_for)} for ${r.customer_name}, party of ${r.party_size}. Tap the table when they sit down: the order opens with the covers filled in.`} width={240}>
+                      <span className={`badge ${cls}`} style={{ fontSize: 10, alignSelf: 'flex-start', cursor: 'default' }}>
+                        🕗 {nepalTime(r.reserved_for)} · {r.customer_name} ×{r.party_size}
+                      </span>
+                    </Tip>
+                  )
+                })()}
 
                 {ord ? (
                   <div>

@@ -9,6 +9,7 @@ import RowDisclosure from '../../../components/RowDisclosure'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import LoyaltyTab from './LoyaltyTab'
 import { IDENTITY_BADGE } from '../posSignals'
+import { normalizePhone } from '../../../utils/phone'
 
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
@@ -38,6 +39,9 @@ export default function PosCustomers() {
   // Customers
   const [customers, setCustomers] = useState([])
   const [custLoading, setCustLoading] = useState(true)
+  // phone_canonical → no-show count from the reservations book (S677). null until read, so a
+  // failed read renders as "unknown" rather than as a clean record for everyone.
+  const [noShowByPhone, setNoShowByPhone] = useState(null)
   const [search, setSearch] = useState('')
   const [expandedId, setExpandedId] = useState(null)
   const [historyMap, setHistoryMap] = useState({})   // { customerId: orders[] | 'loading' }
@@ -141,8 +145,18 @@ export default function PosCustomers() {
     // bill — so it is one of the few POS tables with no period to bound it, and a bare select
     // would quietly stop at 1000 with no error: the missing regulars simply would not be found
     // by the search box, and nothing on screen would say why.
-    const { data } = await fetchAllRows(() => scopedFrom('pos_customers').order('name').order('id'))
+    const [{ data }, { data: noShows, error: nsErr }] = await Promise.all([
+      fetchAllRows(() => scopedFrom('pos_customers').order('name').order('id')),
+      // One row per no-show ever recorded — unbounded like the book itself, so paged too.
+      fetchAllRows(() => scopedFrom('pos_reservations', 'id, phone_canonical').eq('status', 'no_show').order('id')),
+    ])
     setCustomers(data || [])
+    if (nsErr) { console.error('no-show read failed, column shows unknown:', nsErr); setNoShowByPhone(null) }
+    else {
+      const m = {}
+      for (const r of noShows || []) { if (r.phone_canonical) m[r.phone_canonical] = (m[r.phone_canonical] || 0) + 1 }
+      setNoShowByPhone(m)
+    }
     setCustLoading(false)
   }
 
@@ -331,6 +345,7 @@ export default function PosCustomers() {
                     <th>Phone</th>
                     <th>Address</th>
                     <th><Tip text="Customer's own PAN, if given for a full tax invoice" width={200}>PAN</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Bookings under this phone number that were marked No-show on the Reservations page. Shown on the booking form when they book again." width={260}>No-shows</Tip></th>
                     <th><Tip text="When this customer first appeared on a bill" width={200}>Since</Tip></th>
                     <th></th>
                   </tr>
@@ -352,6 +367,13 @@ export default function PosCustomers() {
                         <td>{c.phone}</td>
                         <td>{c.address || '—'}</td>
                         <td>{c.pan || '—'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          {noShowByPhone === null
+                            ? <span style={{ color: 'var(--theme-text3)' }} title="Could not read the reservations book">?</span>
+                            : (noShowByPhone[normalizePhone(c.phone)] || 0) > 0
+                              ? <span className="badge badge-red">{noShowByPhone[normalizePhone(c.phone)]}</span>
+                              : <span style={{ color: 'var(--theme-text3)' }}>0</span>}
+                        </td>
                         <td>{c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
                         {/* Mouse affordance only — the RowDisclosure carries aria-expanded, so
                             this duplicate hint stays out of the accessibility tree. */}
@@ -361,7 +383,7 @@ export default function PosCustomers() {
                       </tr>
                       {expandedId === c.id && (
                         <tr>
-                          <td colSpan={6} style={{ background: 'var(--theme-bg)', padding: '10px 18px' }}>
+                          <td colSpan={7} style={{ background: 'var(--theme-bg)', padding: '10px 18px' }}>
                             {historyMap[c.id] === 'loading' || !historyMap[c.id] ? (
                               <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading order history…</span>
                             ) : historyMap[c.id].length === 0 ? (

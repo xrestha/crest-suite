@@ -40,6 +40,7 @@ export const CLIENT_SCOPED_TABLES = [
   'pos_credit_notes', 'pos_kot_log', 'pos_kot_removals', 'pos_shifts', 'pos_cash_movements', 'pos_payment_confirmations',
   'pos_guest_order_requests', 'pos_parking_slips',
   'pos_loyalty_schemes', 'pos_loyalty_ledger',
+  'pos_reservations', 'pos_reservation_tables',
   // Cross-module
   'monthly_owner_reports',
 ]

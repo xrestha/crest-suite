@@ -119,6 +119,7 @@ export const POS_PRICING = {
   monthly: 2000, annual: 1500,
   features: [
     'Table Management & Order Taking',
+    'Table Reservations & Online Booking QR',
     'KOT/BOT to Kitchen & Bar',
     'Billing — Discounts, Complimentary, Credit Notes',
     'Shift Reconciliation (X/Z Reports)',

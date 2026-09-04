@@ -46,6 +46,24 @@ export const TABLE_STATUS_LABEL = { available: 'Available', occupied: 'Occupied'
 export const TABLE_STATUS_BADGE = { available: 'badge-gray', occupied: 'badge-yellow', reserved: 'badge-yellow', inactive: 'badge-gray' }
 
 // ---------------------------------------------------------------------------------------------
+// Reservation status (S677). Booked / Confirmed / Seated are three states of a promise and none
+// of them is a problem — categories, so grey and brass. Two states are waiting on a PERSON, right
+// now, and take amber: a public request nobody has accepted, and a party that has arrived and is
+// standing at the door. Completed is the finished-right verdict; No-show is the exception the
+// Covers Report chases and the one line here with a cost, so it is the only red. Cancelled is
+// inert. Labels live beside the transition table in reservations/reservationStatus.js.
+export const RESERVATION_STATUS_BADGE = {
+  requested: 'badge-amber',
+  booked:    'badge-gray',
+  confirmed: 'badge-yellow',
+  arrived:   'badge-amber',
+  seated:    'badge-yellow',
+  completed: 'badge-green',
+  no_show:   'badge-red',
+  cancelled: 'badge-gray',
+}
+
+// ---------------------------------------------------------------------------------------------
 // Kitchen/bar ticket stage, worded from the wait staff's side (they see a ticket get Sent /
 // Started / Ready, they do not "start" or "ready" it). A monotone progression inert → working →
 // done: nothing here is a fault, so nothing here is red or amber. Only Ready asks for anything —

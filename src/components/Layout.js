@@ -18,7 +18,7 @@ import { BS_MONTHS } from '../utils/bsCalendar'
 import { colorTint } from '../data/pricingPlans'
 import {
   Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
-  Building2, Calculator, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
+  Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
   CalendarX2, ChefHat, ChevronDown, ClipboardCheck, ClipboardList, Clock, Coins, Combine,
   ConciergeBell, Contact, CreditCard, Crown, FileBarChart, FileCheck2, FileDigit,
   FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon,
@@ -154,6 +154,7 @@ const POS_GROUPS = [
     { to: '/pos/orders', label: 'Orders', icon: ConciergeBell, minPosRole: 'staff' },
     { to: '/pos/kds', label: 'Kitchen Display', icon: Utensils, minPosRole: 'staff' },
     { to: '/pos/parking', label: 'Parking Slips', icon: ParkingSquare, minPosRole: 'staff' },
+    { to: '/pos/reservations', label: 'Reservations', icon: CalendarCheck, minPosRole: 'staff' },
     { to: '/pos/tables', label: 'Tables', icon: LayoutGrid, minPosRole: 'manager' },
     { to: '/pos/customers', label: 'Customers', icon: Contact, minPosRole: 'supervisor' },
     { to: '/pos/shifts', label: 'Shifts', icon: Clock, minPosRole: 'supervisor' },

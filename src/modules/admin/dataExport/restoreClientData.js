@@ -37,6 +37,8 @@ const RESTORE_ORDER = [
   'pos_tables', 'pos_loyalty_schemes', 'pos_customers', 'pos_shifts', 'pos_parking_slips',
   'pos_orders', 'pos_order_items', 'pos_order_payments', 'pos_kot_log', 'pos_kot_removals',
   'pos_loyalty_ledger',
+  // Reservations reference pos_orders (order_id) and pos_tables (via the join table), both above.
+  'pos_reservations', 'pos_reservation_tables',
   'pos_guest_order_requests', 'pos_payment_confirmations',
   'pos_cash_movements',
   'pos_credit_notes',
@@ -47,7 +49,15 @@ const RESTORE_ORDER = [
 
 // Generated columns cannot appear in an INSERT payload at all — Postgres rejects the statement
 // rather than ignoring the field.
-const GENERATED_COLUMNS = { items: ['per_uom_rate'] }
+// pos_customers.phone_canonical was missing here from the day the restore shipped (S545) — the
+// export carried it (select('*')) and Postgres refuses a generated column in an INSERT, so every
+// restore of the customer book was rejected while the backup looked complete. Found S677 while
+// registering pos_reservations, which carries the same generated column.
+const GENERATED_COLUMNS = {
+  items: ['per_uom_rate'],
+  pos_customers: ['phone_canonical'],
+  pos_reservations: ['phone_canonical'],
+}
 
 // pos_orders.credit_note_id -> pos_credit_notes.id, while pos_credit_notes.order_id ->
 // pos_orders.id. Neither cascades, so one of the two must be inserted with the link empty and

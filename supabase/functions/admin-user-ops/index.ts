@@ -93,6 +93,10 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   // Before orders/shifts — its FKs to both are ON DELETE SET NULL.
   await del(admin.from('pos_cash_movements').delete().eq('client_id', clientId), 'pos_cash_movements')
   await del(admin.from('pos_loyalty_ledger').delete().eq('client_id', clientId), 'pos_loyalty_ledger')
+  // Reservations: order_id SET NULLs and the join table cascades, so neither is load-bearing —
+  // named so the sequence still lists every table it clears (the S382 lesson).
+  await del(admin.from('pos_reservation_tables').delete().eq('client_id', clientId), 'pos_reservation_tables')
+  await del(admin.from('pos_reservations').delete().eq('client_id', clientId), 'pos_reservations')
   await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
   await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
   await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')
@@ -1658,6 +1662,8 @@ Deno.serve(async (req) => {
         // here so the sequence still names every table it clears, which is what makes a missed
         // one visible on review (S382's pos_credit_notes was missed exactly by being implicit).
         await del(admin.from('pos_loyalty_ledger').delete().eq('client_id', clientId), 'pos_loyalty_ledger')
+        await del(admin.from('pos_reservation_tables').delete().eq('client_id', clientId), 'pos_reservation_tables')
+        await del(admin.from('pos_reservations').delete().eq('client_id', clientId), 'pos_reservations')
         await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
         await del(admin.from('pos_orders').delete().eq('client_id', clientId), 'pos_orders')
         await del(admin.from('pos_shifts').delete().eq('client_id', clientId), 'pos_shifts')

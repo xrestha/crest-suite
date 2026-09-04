@@ -20,6 +20,7 @@ import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
 import ConfirmModal from '../../components/ConfirmModal'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
+import { nepalBs } from '../../shared/nepalTime'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
@@ -796,15 +797,36 @@ export default function ClientDashboard() {
     const billCount     = orders.length
     const avgCheck      = billCount > 0 ? revenueTotal / billCount : 0
 
+    // Tonight's bookings (S677): the same window the Orders floor uses — today's BS day plus six
+    // hours past midnight, so a 12:15 AM booking belongs to tonight's service. "Still to come" is
+    // the covers not yet seated; a seated party is already inside Tables Occupied. Requests are
+    // public-page bookings waiting for a staff Accept, whatever day they are for.
+    const todayBs = nepalBs(new Date())
+    let bookings = [], bookingsErr = null, requestsPending = 0, requestsErr = null
+    if (todayBs) {
+      const dayStart = bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, false)
+      const dayEnd = new Date(new Date(bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, true)).getTime() + 6 * 3600000).toISOString()
+      const [b, r] = await Promise.all([
+        scopedFrom('pos_reservations', 'status, party_size')
+          .in('status', ['booked', 'confirmed', 'arrived', 'seated'])
+          .gte('reserved_for', dayStart).lte('reserved_for', dayEnd),
+        scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('status', 'requested'),
+      ])
+      bookings = b.data || []; bookingsErr = b.error
+      requestsPending = r.count || 0; requestsErr = r.error
+    }
+
     const { data: tables, error: tablesErr } = await scopedFrom('pos_tables', 'status').neq('status', 'inactive')
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
     const tablesOccupied = (tables || []).filter(t => t.status === 'occupied').length
     const tablesTotal    = (tables || []).length
+    const bookingsTonight = bookings.length
+    const coversToCome    = bookings.filter(b => b.status !== 'seated').reduce((s, b) => s + (b.party_size || 0), 0)
 
-    const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || ordersErr || tablesErr
+    const hadRealError = (periodErr && periodErr.code !== 'PGRST116') || ordersErr || tablesErr || bookingsErr || requestsErr
     setLoadErrors(prev => ({ ...prev, pos: hadRealError ? 'POS data failed to load — figures below may be incomplete or stale.' : '' }))
 
-    setAndCache(setPosStats, 'posStats', { revenueTotal, coversTotal, billCount, avgCheck, tablesOccupied, tablesTotal })
+    setAndCache(setPosStats, 'posStats', { revenueTotal, coversTotal, billCount, avgCheck, tablesOccupied, tablesTotal, bookingsTonight, coversToCome, requestsPending })
   }
 
   // Kitchen/bar-team variant (S431) — today's pos_kot_log activity for just this team's own
@@ -1576,6 +1598,25 @@ export default function ClientDashboard() {
           {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
         </div>
         <div style={kpiSubtextStyle}>{hasPosAccess('manager') ? 'Right now →' : 'Right now'}</div>
+      </div>
+      {/* Tonight's bookings (S677) — what is still walking through the door, beside what has
+          already been served. Amber only when public requests are waiting on a staff Accept:
+          that is the one state here that is waiting on a person (posSignals.js). A cached
+          posStats from before this tile existed lacks the fields, hence the `?? 0`. */}
+      <div {...kpiCard(() => navigate('/pos/reservations'))}>
+        <div style={kpiLabelStyle}>
+          <Tip text="Bookings for tonight's service that are still expected or already seated, from the Reservations page. 'To come' is the guest count not yet seated — the covers the floor should be ready for on top of what is already served." width={280}>Bookings Tonight</Tip>
+        </div>
+        <div style={{ ...kpiValueStyle(18), color: (posStats?.requestsPending ?? 0) > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : (posStats.bookingsTonight ?? 0)}
+        </div>
+        <div style={kpiSubtextStyle}>
+          {!posStats
+            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            : (posStats.requestsPending ?? 0) > 0
+              ? <>{posStats.requestsPending} request{posStats.requestsPending === 1 ? '' : 's'} to accept →</>
+              : <>{posStats.coversToCome ?? 0} cover{(posStats.coversToCome ?? 0) === 1 ? '' : 's'} to come →</>}
+        </div>
       </div>
     </>
   )

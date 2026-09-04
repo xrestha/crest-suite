@@ -1,0 +1,208 @@
+/* ============================================================================================
+   GUEST BOOKING — the outlet's public booking page (/pos/book/:clientId)
+   ============================================================================================
+   The second customer-facing surface after the guest menu, and it borrows that page's whole
+   argument (see guestMenu.css): a public page must not read the global --theme-* tokens, because
+   they are Crest's back-office palette AND whatever preset the last staff member to open this
+   phone had picked. So the same bone-and-pine card palette is re-declared here for this subtree
+   only. Values are copied, not imported: the two pages are meant to read as the same printed
+   world, and a shared file would invite one of them to drift the other.
+
+   Nothing here may be reached for from a staff screen.
+   ============================================================================================ */
+
+.guest-booking {
+  --gb-paper:      #F0EDE5;
+  --gb-ground:     #E7E3D8;
+  --gb-pine:       #004643;
+  --gb-pine-deep:  #00312F;
+  --gb-ink:        #1C1B17;
+  --gb-sage:       #4A5C58;
+  --gb-sage-lt:    #566762;
+  --gb-rule:       #D3CCBC;
+  --gb-control:    #4A7A75;
+  --gb-success:    #2F6B2A;
+  --gb-warn:       #8A5A17;
+  --gb-danger:     #A03328;
+  --gb-danger-tint: rgba(166,58,43,0.10);
+  --gb-success-tint: rgba(47,107,42,0.10);
+
+  /* Own scrollport (S604): position: sticky and the fold are dead in the body flow app-wide. */
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--gb-ground);
+  color: var(--gb-ink);
+  font-family: inherit;
+  -webkit-text-size-adjust: 100%;
+}
+
+.guest-booking * { box-sizing: border-box; }
+
+.gb-wrap {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+
+.gb-head { text-align: center; padding: 8px 0 18px; }
+.gb-outlet { margin: 0; font-size: 22px; font-weight: 700; color: var(--gb-pine); letter-spacing: 0.2px; }
+.gb-tagline { margin: 6px 0 0; font-size: 13px; color: var(--gb-sage-lt); }
+
+.gb-card {
+  background: var(--gb-paper);
+  border: 1px solid var(--gb-rule);
+  border-radius: 18px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.gb-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gb-sage);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 0 0 8px;
+}
+
+/* The two-week calendar. Seven columns aligned to the weekday, so a Saturday sits under "Sat" and
+   the fourteen bookable days are all on screen at once — no sideways scroll to discover. Cells
+   shrink with the viewport (minmax(0,1fr)); at 360px that is ~44px each, which is the touch floor. */
+.gb-cal-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.gb-cal-caption { font-size: 12px; color: var(--gb-sage-lt); white-space: nowrap; }
+.gb-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.gb-cal-head { font-size: 10px; font-weight: 700; text-align: center; color: var(--gb-sage-lt); text-transform: uppercase; letter-spacing: 0.3px; padding-bottom: 2px; }
+.gb-day {
+  min-width: 0;
+  min-height: 56px;
+  padding: 6px 2px;
+  border-radius: 12px;
+  border: 1px solid var(--gb-control);
+  background: var(--gb-paper);
+  color: var(--gb-ink);
+  font: inherit;
+  line-height: 1.15;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  cursor: pointer;
+}
+.gb-day-bs { font-size: 16px; font-weight: 700; }
+.gb-day small { display: block; font-size: 10px; color: var(--gb-sage-lt); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.gb-day[aria-pressed="true"] { background: var(--gb-pine); border-color: var(--gb-pine); color: #fff; }
+.gb-day[aria-pressed="true"] small { color: rgba(255,255,255,0.8); }
+.gb-day:focus-visible { outline: 2px solid var(--gb-pine); outline-offset: 2px; }
+/* Closed / walk-in-only days and full slots: present, labelled, not tappable. The label carries
+   the reason so a greyed cell never reads as merely disabled. */
+.gb-day:disabled, .gb-chip:disabled {
+  background: var(--gb-ground);
+  border-color: var(--gb-rule);
+  border-style: dashed;
+  color: var(--gb-sage-lt);
+  cursor: default;
+}
+.gb-day:disabled .gb-day-bs { color: var(--gb-sage-lt); font-weight: 600; }
+.gb-day:disabled small:first-of-type { color: var(--gb-warn); font-weight: 700; }
+.gb-chip:disabled small { color: var(--gb-warn); font-weight: 700; }
+.gb-notice { margin: 8px 0 0; font-size: 13px; color: var(--gb-warn); font-weight: 600; }
+
+/* Time chips — a wrapping row, each chip a real button. */
+.gb-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.gb-chips--wrap { flex-wrap: wrap; overflow: visible; }
+.gb-chip {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  min-width: 76px;
+  min-height: 56px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--gb-control);
+  background: var(--gb-paper);
+  color: var(--gb-ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+}
+.gb-chip small { display: block; font-size: 11px; color: var(--gb-sage-lt); }
+.gb-chip--time { min-height: 44px; min-width: 84px; padding: 10px 8px; }
+.gb-chip[aria-pressed="true"] { background: var(--gb-pine); border-color: var(--gb-pine); color: #fff; }
+.gb-chip[aria-pressed="true"] small { color: rgba(255,255,255,0.8); }
+.gb-chip:focus-visible { outline: 2px solid var(--gb-pine); outline-offset: 2px; }
+
+.gb-field { margin-bottom: 12px; }
+.gb-field label { display: block; font-size: 13px; font-weight: 600; color: var(--gb-sage); margin-bottom: 4px; }
+.gb-input, .gb-textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--gb-control);
+  background: var(--gb-paper);
+  color: var(--gb-ink);
+  font: inherit;
+  font-size: 16px; /* under 16px iOS Safari zooms the viewport on focus and never zooms back */
+}
+.gb-textarea { min-height: 72px; resize: vertical; }
+.gb-input[aria-invalid="true"], .gb-textarea[aria-invalid="true"] { border-color: var(--gb-danger); }
+.gb-err { display: block; margin-top: 4px; font-size: 12px; color: var(--gb-danger); }
+
+.gb-stepper { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--gb-control); border-radius: 12px; overflow: hidden; }
+.gb-stepper button {
+  width: 48px; height: 44px; border: none; background: var(--gb-paper); color: var(--gb-pine);
+  font: inherit; font-size: 20px; font-weight: 700; cursor: pointer;
+}
+.gb-stepper button:disabled { color: var(--gb-rule); cursor: default; }
+.gb-stepper output { min-width: 56px; text-align: center; font-size: 18px; font-weight: 700; color: var(--gb-ink); }
+
+.gb-submit {
+  width: 100%;
+  min-height: 52px;
+  border: none;
+  border-radius: 12px;
+  background: var(--gb-pine);
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 6px;
+}
+.gb-submit:hover:not(:disabled) { background: var(--gb-pine-deep); }
+.gb-submit:disabled { opacity: 0.55; cursor: default; }
+.gb-submit:focus-visible { outline: 2px solid var(--gb-pine-deep); outline-offset: 2px; }
+.gb-linkbtn { background: none; border: none; color: var(--gb-pine); font: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; padding: 8px 0; min-height: 44px; }
+
+.gb-note { font-size: 12px; color: var(--gb-sage-lt); line-height: 1.5; margin: 10px 0 0; }
+.gb-note a { color: var(--gb-pine); }
+.gb-alert { border-radius: 12px; padding: 10px 12px; font-size: 14px; line-height: 1.45; margin-bottom: 12px; }
+.gb-alert--danger { background: var(--gb-danger-tint); color: var(--gb-danger); }
+.gb-alert--stale { background: rgba(138,90,23,0.10); color: var(--gb-warn); }
+
+/* The status card after submitting. */
+.gb-status { text-align: center; padding: 8px 0 4px; }
+.gb-status-stage { font-size: 20px; font-weight: 700; margin: 0 0 6px; color: var(--gb-pine); }
+.gb-status--confirmed .gb-status-stage { color: var(--gb-success); }
+.gb-status--declined .gb-status-stage { color: var(--gb-danger); }
+.gb-status-detail { margin: 0; font-size: 14px; color: var(--gb-sage); line-height: 1.5; }
+.gb-summary { margin: 14px 0 0; padding: 12px; border-radius: 12px; background: var(--gb-ground); font-size: 14px; color: var(--gb-ink); line-height: 1.6; }
+
+.gb-empty { text-align: center; padding: 48px 16px; color: var(--gb-sage); font-size: 15px; line-height: 1.6; }
+.gb-foot { text-align: center; font-size: 11px; color: var(--gb-sage-lt); margin-top: 24px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .gb-status { animation: gb-in 260ms cubic-bezier(0.16,1,0.3,1); }
+  @keyframes gb-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+}

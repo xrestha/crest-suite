@@ -573,6 +573,48 @@ independently in HR, IMS and POS, and two of the three had drifted: a Supervisor
 and POS — the same amber those modules use for "needs attention" — and brass in HR. Adding a fourth
 module now costs nothing.
 
+## Reservations: a promise about a future table, never a table state (S677)
+
+`src/modules/pos/reservations/` and `src/modules/pos/booking/` (the public page). The rules that
+are load-bearing, each with the reason it exists:
+
+- **Bookings are DERIVED onto the floor and never write `pos_tables.status`.** That stored column
+  already drifts against open orders (`PosOrders.jsx` paints occupancy from `pos_orders`, the badge
+  from `t.status`); a second writer would compound it. The manual `'reserved'` toggle on Table
+  Management is a separate, recordless hold and stays that way.
+- **Seating is the handoff, and `seated ⇒ order_id` is a database CHECK.** `seatReservation()` in
+  `PosOrders.jsx` sets covers = party size and prefills the buyer; `performSave` writes
+  `order_id` + `seated` right after the `pos_orders` insert, from a REF (`seatReservationRef`),
+  not state, for the same reason `savingRef` exists. `closeOrder` completes it beside the table
+  release through `warnWrite()`. The Covers Report's booked-vs-walk-in split reads that link, so a
+  booking contributes covers exactly once, via its order. `completed` is reachable from
+  `booked/confirmed/arrived` too (a party seated offline or by hand): kept, but no covers.
+- **The handoff from the page to the floor carries the FULL `pos_tables` row**, because
+  `table_name` is snapshotted onto the order at first save and printed on every KOT and bill.
+- **Today's floor window is the BS day plus six hours**, so a 12:15 AM booking is on tonight's
+  board. The Reservations page's day view is strict. The dashboard's Bookings Tonight tile uses
+  the floor's window, never the page's.
+- **The public RPC `submit_reservation_request` RETURNS jsonb rather than raising** for every
+  refusal that should cost quota. An exception rolls back the attempts row with everything else,
+  so a refused request would burn nothing and the cheapest attack is to keep getting refused —
+  `trial_signup_attempts` could record-then-fail across two HTTP requests; one SQL transaction
+  cannot. Validation refusals (`closed_day`, `walk_in`, `full`, `hours`, …) sit BEFORE the
+  attempts insert on purpose. **The page words every refusal itself by `code`** and uses the
+  server's `message` only as a fallback: the server says "the restaurant", and a client may be a
+  cafe, a bar or a banquet hall.
+- **Nothing self-confirms.** A public request lands as `requested` and waits for a staff Accept;
+  there is no phone verification because there is no SMS rail (POS_TODO C). The staff WhatsApp or
+  call is the verification.
+- **Closed wins over walk-in-only** (`normalizeReservationSettings` strips the overlap; the
+  settings tab clears the other list when one is ticked). Closures are the outlet's own list —
+  never derived from the HR holiday calendar, since most outlets are open on a public holiday.
+- **`pos_reservations` is the schema's only table with a real `updated_at` trigger.** A new table
+  wanting one attaches `touch_updated_at()`; do not write a second function.
+- **Generated columns must be in `restoreClientData.js`'s `GENERATED_COLUMNS`.** Registering
+  `pos_reservations.phone_canonical` there is how S677 found that `pos_customers.phone_canonical`
+  never was, i.e. every restore of the customer book had been rejected since S545 while the backup
+  looked complete. Any table carrying a GENERATED column needs the entry the day it is created.
+
 ## Server-assigned numbers, the offline queue, and `settings` RLS
 
 Migrated from the root `CLAUDE.md` (S663).

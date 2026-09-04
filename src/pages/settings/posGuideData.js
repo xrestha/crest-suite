@@ -166,14 +166,48 @@ export const POS_GUIDE_GROUPS = [
         connections: 'Reads today\'s billed orders for linking. Otherwise standalone — parking never touches the money path.',
       },
       {
+        id: 'reservations',
+        title: 'Reservations',
+        route: '/pos/reservations',
+        plan: 'Staff+',
+        summary:
+          'The booking book. A booking is a promise about a future table, kept in its own record and DERIVED onto the Orders floor — it never writes the table\'s status. Take one by phone, WhatsApp or at the door, or let customers request one from the outlet\'s booking QR / link; every online request waits for a staff Accept. Seating hands off to Order Taking with the party size as the covers, and paying the bill marks the booking completed.',
+        workflow: [
+          'Take: + New booking — name, phone (looked up in the customer book: visits, unsettled credit, past no-shows), guests, BS day + time, optional held tables, how they booked. Sitting length prefills per party size.',
+          'Confirm: the 💬 button opens WhatsApp on this device with the confirmation message prefilled; the number is on the row for a phone call. Nothing is sent automatically — no SMS gateway, no sender ID to register.',
+          'Seat: from the booking\'s Seat button (pick the table) or by tapping the held table on the Orders floor when it is due — either way the order opens with covers filled in and the booking flips to Seated with the order linked.',
+          'Close: paying the bill (any close type) marks the booking Completed. No-show and Cancel (reason required) end it otherwise; Done covers a party seated by hand or offline.',
+          'Online requests: an amber band at the top of the page, polled every 15 s with a chime — Accept confirms, Decline needs a reason, and the guest\'s phone shows the answer within seconds.',
+        ],
+        fields: [
+          { label: 'Status ladder', desc: 'Requested (online only) → Booked → Confirmed → Arrived → Seated → Completed; No-show and Cancelled are terminal. Seated MEANS the order exists — the database refuses a seated row with no order_id.' },
+          { label: 'Booked covers by hour', desc: 'A booking occupies every hour its sitting touches (7:30 PM for 90 minutes sits in 7 and 8), summed and compared to the room\'s seats. A soft warning, never a block.' },
+          { label: 'Floor chip', desc: 'Grey when quiet, brass when due within the seat window, amber only when the party has ARRIVED and its table is still occupied — the one state waiting on a person.' },
+          { label: 'Booking link / QR', desc: 'Tables → Reservations: toggle "Accept online booking requests", set the largest party and minimum notice, print the QR. The public page shows a two-week calendar (BS day first, AD beside it) and half-hour slots inside opening hours; a guest never chooses a table.' },
+          { label: 'Closed / walk-in / full', desc: 'Closed weekdays, closed dates (Dashain, a private function) and walk-in-only weekdays grey the day out on the public calendar; a slot is greyed as Full when booked covers in any hour of the sitting plus this party would exceed the room\'s seats. All three are refused server-side too (codes closed_day, walk_in, full). A room with no capacity set is never "full" — the host decides at Accept.' },
+        ],
+        formulas: [
+          'No-show rate (Covers Report → Reservations) = no-shows ÷ (kept + no-shows); cancelled and still-open bookings are neither.',
+          'Booked covers vs walk-in covers = covers on bills a booking was seated onto (pos_reservations.order_id) vs the rest.',
+        ],
+        gotchas: [
+          'The manual Reserved status on a table tile is unrelated — a hand-set hold with no record behind it. Bookings never write it and never read it.',
+          'A booking for 12:15 AM belongs to the NEXT BS day in the book but shows on tonight\'s floor: the floor reads today plus six hours past midnight.',
+          'Online requests are rate-limited server-side (one pending per phone, a per-network hourly cap) and there is no phone verification — the staff WhatsApp or call IS the verification. Bigger parties than the online maximum are told to call.',
+          'A booking seated while the till is offline keeps its status at Arrived: the link needs the server row and is never written from the offline queue. Press Done on it afterwards.',
+        ],
+        connections: 'Reads pos_customers, pos_orders (credit, visits) at booking time. Writes order_id on seat from Order Taking and completes on bill close. Feeds Covers Report → Reservations, the No-shows column on Customers, and the Dashboard\'s Bookings Tonight tile (tonight\'s live bookings, covers still to come, requests waiting). Settings live on Tables → Reservations.',
+      },
+      {
         id: 'tables',
         title: 'Tables (Table Management)',
         route: '/pos/tables',
         plan: 'Manager only',
         summary:
-          'All POS floor configuration in six tabs: Tables (the grid itself, plus each table\'s guest-menu QR), Ticket Routing (which menu categories print as BOT vs KOT), Quick Notes (kitchen note presets), HSC Codes (per-item codes printed on the tax invoice), Discount Reasons, and Delivery Partners.',
+          'All POS floor configuration in seven tabs: Tables (the grid itself, plus each table\'s guest-menu QR), Ticket Routing (which menu categories print as BOT vs KOT), Quick Notes (kitchen note presets), HSC Codes (per-item codes printed on the tax invoice), Discount Reasons, Delivery Partners, and Reservations (sitting length per party size, the late/seat windows, the WhatsApp confirmation text, and the outlet\'s booking link and QR).',
         workflow: [
-          'Tables: add one by one or Quick Setup bulk-creates Table 1..N; set capacity (feeds the Covers report\'s seat count); cycle status available → reserved → occupied → inactive; print each table\'s QR for the guest menu.',
+          'Tables: add one by one or Quick Setup bulk-creates Table 1..N; set capacity (feeds the Covers report\'s seat count and the Reservations capacity strip); cycle status available → reserved → occupied → inactive; print each table\'s QR for the guest menu.',
+          'Reservations: expected sitting length per party size, with the outlet\'s own MEASURED average beside each field and a one-tap "Use measured"; the WhatsApp template; the online-booking toggle, largest party and minimum notice; Copy link / Print QR for the booking page.',
           'Ticket Routing: assign categories to the Bar ticket — everything else goes to the Kitchen. The default split sends Beverage to the bar.',
           'Delivery Partners: name + commission % + phone per partner — the list the Charge screen offers as Credit buyers and Customers uses at settlement.',
         ],
@@ -209,8 +243,9 @@ export const POS_GUIDE_GROUPS = [
         gotchas: [
           'A CASH settlement also records a cash-drawer movement against the open shift — without it the drawer would count "over" by the settled amount forever, since the bill itself stays marked Credit. If no shift is open, the page says to record it as a Cash In next shift rather than losing the money trail.',
           'The credit list is unbounded by date on purpose (old debts are still debts) — it is paged underneath, so it stays complete however long the system runs.',
+          'The No-shows column comes from the reservations book, matched on the canonical phone number; a "?" means that read failed, not that the record is clean.',
         ],
-        connections: 'Built from Orders\' buyer details; settlements post drawer movements into Shifts; partner definitions come from Table Management. Credit totals appear in the Sales Report\'s payment summary.',
+        connections: 'Built from Orders\' buyer details; settlements post drawer movements into Shifts; partner definitions come from Table Management. Credit totals appear in the Sales Report\'s payment summary. No-shows come from Reservations, and a party seated from a booking arrives on its bill with name and phone already filled in, so the book grows from bookings too.',
       },
       {
         id: 'shifts',
@@ -371,9 +406,10 @@ export const POS_GUIDE_GROUPS = [
         route: '/pos/covers-report',
         plan: 'Manager only',
         summary:
-          'Seats and sitting patterns: covers and average spend per cover, daily trend, table turnover time banded by party size, peak hours, per-server figures, and RevPASH (revenue per available seat-hour).',
+          'Seats and sitting patterns: covers and average spend per cover, daily trend, table turnover time banded by party size, peak hours, per-server figures, RevPASH (revenue per available seat-hour), and a Reservations tab — booked vs walk-in covers, the no-show rate, and bookings by source and by the hour they were made for.',
         workflow: [
           'Pick the range; the Turnover tab bands sittings by party size (1-2 / 3-4 / 5-6 / 7+) because one blended average dine-duration tells a manager nothing.',
+          'Reservations: bookings whose BOOKED time falls in the range. Kept = seated or completed; no-show rate = no-shows ÷ (kept + no-shows), so cancelled and still-open bookings neither help nor hurt it.',
         ],
         fields: [
           { label: 'RevPASH', desc: 'Revenue ÷ (total seats × open hours). Needs the opening and closing time set (editable inline on the report); left unset, that one card hides rather than blocking the rest. Total seats = the capacity sum from Table Management.' },
@@ -385,7 +421,7 @@ export const POS_GUIDE_GROUPS = [
           'Credit-noted bills are excluded — same rule as the Sales Report, so the two never disagree about a reversed evening.',
           'Reads are paged; truncation here would not just shrink totals, it would skew the averages the report exists for.',
         ],
-        connections: 'Covers come from Orders\' cover counts; capacity from Table Management; revenue math shared with the Sales Report.',
+        connections: 'Covers come from Orders\' cover counts; capacity from Table Management; revenue math shared with the Sales Report. The Turnover tab\'s per-band averages are the same arithmetic (coversMath.js) the Reservations settings show as "Measured", so the two can never disagree. Booked-vs-walk-in reads the order link a seated booking carries.',
       },
     ],
   },

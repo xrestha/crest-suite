@@ -77,9 +77,11 @@ The Supabase CLI is installed and linked to the live project (`supabase link`, r
 
 ## `updated_at` is not maintained by the database — check before you trust it (S620)
 
-**There is no trigger anywhere in this schema that sets `updated_at`.** Not on any table, in any
-migration. The column exists with `DEFAULT now()`, which fires on INSERT only, so unless application
-code writes it explicitly on every UPDATE it stays frozen at the row's creation time forever.
+**Only ONE table in this schema maintains `updated_at` by trigger: `pos_reservations`
+(`pos_reservations_touch`, `touch_updated_at()`, migration `20260904200000`, S677).** Everywhere
+else the column exists with `DEFAULT now()`, which fires on INSERT only, so unless application code
+writes it explicitly on every UPDATE it stays frozen at the row's creation time forever. A new table
+that wants a live `updated_at` attaches that same trigger function — do not write a second one.
 
 That makes it reliable on some tables and meaningless on others, which is worse than uniformly
 absent — it reads as trustworthy because you last saw it work somewhere else:
@@ -87,6 +89,7 @@ absent — it reads as trustworthy because you last saw it work somewhere else:
 | Table | `updated_at` |
 | --- | --- |
 | `feature_flags`, `par_levels`, `settings`, `client_secrets` | written by app code — usable |
+| `pos_reservations` | maintained by trigger (`pos_reservations_touch`) — usable |
 | **`hr_employees`, `pos_customers`** | **column exists, nothing writes it — always equals `created_at`** |
 
 This shipped a real near-miss. `scripts/bs-date-audit.mjs` proposes corrections to stored dates and
