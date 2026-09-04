@@ -122,6 +122,29 @@ after a successful acceptance: an Owner who accepted would have been held at the
 **permanently, with no way out except Sign Out**. `reacceptGuard.test.js` caught it. The branch had
 no live data, which is exactly why it needed a test rather than a read-through.
 
+## The gate must never be able to sit on "Recording…" (S674)
+
+The paragraph above is about the gate staying up because the *comparison* was wrong. This is the
+same end state reached at runtime, and it shipped in S672 alongside it. Two rules, both now in the
+code:
+
+- **Every await in `accept()` is bounded, and `busy` clears in a `finally`.** `busy` used to clear
+  only in the `catch`, on the reasoning that a successful accept unmounts the gate. `refreshProfile`
+  → `fetchProfile` makes several sequential Supabase reads, any of which can hang forever, and it
+  runs **after** the acceptance is already written — so a hang there leaves the row in a seven-year
+  ledger, the gate up, and the screen's only control reading "Recording…" for good. The file's own
+  header comment had explained that exact hazard for the call immediately above it.
+- **Reaching the line after `refreshProfile()` means the gate did not clear**, so it says so and
+  offers a Reload. Do not silently re-arm the button: a second press writes a duplicate row.
+
+**Call the Edge Function through `adminOp` (`src/shared/adminOp.js`), never
+`supabase.functions.invoke` directly.** invoke reports every non-2xx as the same `Edge Function
+returned a non-2xx status code`, which collapses `Unknown action: record_legal_acceptance` — what
+you get when the function has not been redeployed since S672 added the action, and the single most
+likely thing to be wrong — into the same string as `Forbidden` and a failed insert. `adminOp` reads
+the response body. It moved out of `src/pages/adminClients/` for this: a route guard reaching into a
+page directory is what made skipping the wrapper the path of least resistance.
+
 ## Where each surface lives, and why not where you'd expect
 
 - **Client-facing acceptance record → Help, not Settings.** `/settings` sits behind

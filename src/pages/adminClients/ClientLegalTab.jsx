@@ -15,7 +15,7 @@ import { withTimeout } from '../../utils/withTimeout'
 import ActionError, { asActionError } from '../../components/ActionError'
 import Tip from '../../components/Tip'
 import { nepalTime, nepalDateAd } from '../../shared/nepalTime'
-import { adminOp } from './adminOp'
+import { adminOp } from '../../shared/adminOp'
 import { DOC_TYPES, legalDoc, legalVersionPath, acceptancePayload, legalReadiness } from '../../legal'
 
 const FIELD_ROW = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }

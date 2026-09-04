@@ -15,7 +15,7 @@ import { useState } from 'react'
 import { ScrollText, ExternalLink } from 'lucide-react'
 
 import { useAuth } from '../context/AuthContext'
-import { supabase } from '../supabaseClient'
+import { adminOp } from '../shared/adminOp'
 import { withTimeout } from '../utils/withTimeout'
 import ActionError, { asActionError } from './ActionError'
 import { docsRequiringReacceptance, acceptancePayload, legalPath } from '../legal'
@@ -25,6 +25,7 @@ export default function LegalReacceptance() {
   const [checked, setChecked] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const [recorded, setRecorded] = useState(false)
 
   const pending = docsRequiringReacceptance()
 
@@ -33,28 +34,44 @@ export default function LegalReacceptance() {
     setBusy(true)
     setError(null)
     try {
+      // Through adminOp, NOT supabase.functions.invoke directly. invoke reports every non-2xx as
+      // the same "Edge Function returned a non-2xx status code"; adminOp reads the response body,
+      // so `Unknown action: record_legal_acceptance` — what this returns when the function has not
+      // been redeployed since the action was added — arrives as itself rather than as a generic
+      // string indistinguishable from Forbidden or from a failed insert.
+      //
       // withTimeout because a supabase-js call can hang forever: every call awaits
       // getAccessToken() before it reaches fetch(), so when the auth layer stalls the promise
-      // neither resolves nor rejects and the `finally` that clears `busy` never runs. On a screen
-      // whose only control is this button, that is a permanently dead page.
-      const { data, error: fnErr } = await withTimeout(
-        supabase.functions.invoke('admin-user-ops', {
-          body: {
-            action: 'record_legal_acceptance',
-            accepted_legal: acceptancePayload(pending.map((d) => d.docType)),
-          },
+      // neither resolves nor rejects. On a screen whose only control is this button, that is a
+      // permanently dead page.
+      await withTimeout(
+        adminOp('record_legal_acceptance', {
+          accepted_legal: acceptancePayload(pending.map((d) => d.docType)),
         }),
         20000,
         'Recording your acceptance'
       )
-      if (fnErr) throw fnErr
-      if (data?.error) throw new Error(data.error)
 
       // Re-read the profile so the gate clears from the same state that raised it, rather than
       // being hidden by local state that the next page load would contradict.
-      await refreshProfile()
+      //
+      // Bounded for the same reason as the call above, and it is NOT the lesser risk: fetchProfile
+      // makes several sequential reads, any one of which can hang, and this one runs after the
+      // acceptance has already been written. An unguarded hang here is the worst state available —
+      // the row is in the ledger, the gate stays up, and the button says "Recording…" forever with
+      // nothing to press. refreshProfile returns `false` rather than a promise when there is no
+      // session, hence Promise.resolve.
+      await withTimeout(Promise.resolve(refreshProfile()), 20000, 'Refreshing your account')
+
+      // Reaching this line means the gate did not unmount, so the re-read did not clear it. The
+      // acceptance is recorded either way; saying so — and offering a reload — is the difference
+      // between a stuck screen and a recoverable one.
+      setRecorded(true)
     } catch (e) {
       setError(asActionError(e, 'operator'))
+    } finally {
+      // Always, including the success path. If the gate cleared, this is a no-op on an unmounted
+      // component; if it did not, the button must not stay stuck on "Recording…".
       setBusy(false)
     }
   }
@@ -160,10 +177,32 @@ export default function LegalReacceptance() {
 
         {error && <ActionError error={error} />}
 
+        {/* The acceptance landed but the gate is still up. Never silently re-arm the button here:
+            a second press would write a second identical row to a 7-year ledger, and the person is
+            entitled to know their agreement was recorded even though the screen did not move. */}
+        {recorded && !error && (
+          <div
+            className="action-error"
+            role="status"
+            style={{ borderColor: 'var(--theme-amber)', marginBottom: 4 }}
+          >
+            <p className="action-error-text">
+              Your acceptance was recorded, but this screen did not refresh. Reload the page to
+              continue — you will not be asked to accept again.
+            </p>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
-          <button type="button" className="btn btn-primary" onClick={accept} disabled={!checked || busy}>
-            {busy ? 'Recording…' : 'Accept and continue'}
-          </button>
+          {recorded && !error ? (
+            <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          ) : (
+            <button type="button" className="btn btn-primary" onClick={accept} disabled={!checked || busy}>
+              {busy ? 'Recording…' : 'Accept and continue'}
+            </button>
+          )}
           {/* Leaving must stay possible. A gate with no exit is a lockout. */}
           <button type="button" className="btn btn-ghost" onClick={signOut} disabled={busy}>
             Sign out
