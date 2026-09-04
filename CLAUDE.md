@@ -7,11 +7,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Where a new rule goes
 
 **Default to `.claude/rules/`, not this file.** Everything here loads on *every* request, so a rule
-that only matters while one module is open is paid for by every session that never opens it. Four
-`/doctor` passes have now had to migrate sections out (2026-08-18, S605, S615, S663 — that
-last one halved the file, 110k → 51k chars), and between the second and third the root file regrew
+that only matters while one module is open is paid for by every session that never opens it. Five
+`/doctor` passes have now had to migrate sections out (2026-08-18, S605, S615, S663, S678 — the
+S663 one halved the file, 110k → 51k chars), and between the second and third the root file regrew
 7,052 chars in three days — not through carelessness, but because a new
 rule has one obvious home and no single session can see that it is the fortieth to pick it.
+**S678 found the file at 391 chars of headroom against its own 53,000 ceiling**, and what it cut was
+not new bloat but three S663 stubs that had kept their full bodies alongside the pointer — so the
+regrowth to watch for is a section that was migrated and never actually shrank.
 
 Ask which file the rule is *reachable from*, not which file it is about:
 
@@ -219,9 +222,10 @@ Self-Service login.
 
 ### Splitting a page component once it outgrows one file
 
-Six pages past 1,200 lines were split in 2026-07-06 using whichever of four patterns matched what was actually inside. **A page with more than one `return` will happily render your new UI where nobody can reach it** — `PosOrders.jsx` early-returns the order screen and then falls through to the floor view, so a modal added at the tail of the file lands in the floor view while its opener lives on the order screen. It compiles, passes every detector, and reads correctly in review (S578). Check which return a handler lives in before placing its modal, and prefer a live click over any amount of static checking.
-
-The four patterns and when each applies are in `.claude/rules/component-library.md`.
+See `.claude/rules/component-library.md` (auto-loads when editing components, pages or modules).
+Headline rule: **a page with more than one `return` will render your new UI where nobody can reach
+it** — check which return a handler lives in before placing its modal, and prefer a live click over
+any amount of static checking (S578).
 
 ### Bikram Sambat (BS) calendar
 
@@ -244,11 +248,10 @@ See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). H
 
 ### Page-revisit caching (`src/shared/sessionDataCache.js`, added S460)
 
-Route-level pages unmount on navigation, so revisiting one re-fetches everything by default. `sessionDataCache.js` is a deliberately dumb `sessionStorage` key-value cache that does no calculation of its own.
-
-**Before adding it to a page, check whether anything on it batch-saves "every visible row" trusting current on-screen state as the baseline** — that is the one shape where this pattern is actively dangerous rather than merely ineffective, because a stale cached number can be *written back* over a real figure. `Stock.js` and `Sales.js` both have that shape.
-
-The adoption test, the pages deliberately left unwired, and why, are in `.claude/rules/frontend-performance.md`.
+See `.claude/rules/frontend-performance.md` (auto-loads when editing `src/modules/` or the cache
+itself). Headline rule: **a page that batch-saves "every visible row" from on-screen state must not
+adopt it** — a stale cached number can be written back over a real figure, and `Stock.js` and
+`Sales.js` both have that shape.
 
 ---
 
@@ -372,9 +375,11 @@ See `.claude/rules/vendor-payables.md` (auto-loads when editing IMS report, purc
 
 ### Sales Entry saves through one atomic RPC, not three round trips
 
-`save_sales_day(p_period_id, p_bs_day, p_rows)` does delete + insert + cross-mode cleanup in a single transaction; `src/modules/ims/sales/persistSalesDay.js` is the only caller and serves both Daily and Bulk. It is deliberately **`SECURITY INVOKER`** — `sales_entries` carries RESTRICTIVE staff-isolation policies and INVOKER keeps every one enforced for free. Adding `SECURITY DEFINER` here would silently punch through that isolation; don't.
-
-The legacy three-call fallback and when it can be deleted are in `.claude/rules/supabase-sql.md`.
+`save_sales_day` is the one transaction behind both Daily and Bulk, and
+`src/modules/ims/sales/persistSalesDay.js` is its only caller. It is deliberately
+**`SECURITY INVOKER`** — adding `SECURITY DEFINER` would silently punch through `sales_entries`'
+RESTRICTIVE staff-isolation policies; don't. Detail and the legacy three-call fallback are in
+`.claude/rules/supabase-sql.md`.
 
 ### `recipe_ingredients` has no `client_id` column
 
