@@ -297,7 +297,8 @@ export default function Settings() {
           <button key={tab} onClick={() => setActiveTab(tab)} style={{
             background: 'none', border: 'none', cursor: 'pointer',
             padding: '10px 20px', fontSize: 13, fontWeight: 500,
-            color: activeTab === tab ? 'var(--theme-accent)' : 'var(--theme-text2)',
+            // accent-ink, not the base accent: as TEXT the base measured 3.27:1 on Light (S682).
+            color: activeTab === tab ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
             borderBottom: activeTab === tab ? '2px solid var(--theme-accent)' : '2px solid transparent',
             marginBottom: -1
           }}>{tab}</button>

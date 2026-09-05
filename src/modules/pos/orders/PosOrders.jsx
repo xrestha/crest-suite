@@ -2503,6 +2503,7 @@ The tables were left occupied rather than freed with their orders still open.`)
             </div>
             <input
               type="text"
+              aria-label="Search menu by name or code"
               placeholder="🔍 Search name or code…"
               value={menuSearch}
               onChange={e => setMenuSearch(e.target.value)}
@@ -2652,6 +2653,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                   </div>
                   <input
                     type="text"
+                    aria-label={`Note for ${item.name}`}
                     value={item.notes || ''}
                     onChange={e => updateItemNote(idx, e.target.value)}
                     onFocus={() => setNoteFocusIdx(idx)}
@@ -2708,7 +2710,10 @@ The tables were left occupied rather than freed with their orders still open.`)
                       onClick={() => addItem(r)}
                       style={{
                         background: 'var(--theme-card)',
-                        border: `1px solid ${r._manual ? 'var(--theme-accent)' : isChefsPick ? 'var(--theme-amber)' : 'var(--theme-border)'}`,
+                        // A Chef's pick is a CATEGORY (menu-engineering "puzzle"), not a verdict, so it
+                        // takes brass at half strength — never amber, which on this same screen already
+                        // means "unfired lines" and "a guest order waiting" (One Signal Meaning Rule).
+                        border: `1px solid ${r._manual ? 'var(--theme-accent)' : isChefsPick ? 'color-mix(in srgb, var(--theme-accent) 55%, transparent)' : 'var(--theme-border)'}`,
                         borderRadius: 14, padding: '5px 10px', fontSize: 12, cursor: 'pointer',
                         color: 'var(--theme-text1)', display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left',
                       }}
@@ -2917,14 +2922,17 @@ The tables were left occupied rather than freed with their orders still open.`)
                 {(requireBuyerId || buyerExpanded) && (
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                      <input placeholder="Name" value={buyerName} onChange={e => setBuyerName(e.target.value)}
+                      {/* Placeholder text is not a label (it vanishes on the first keystroke), and a
+                          red border is reinforcement, not the message — so each field carries its
+                          name and the two mandatory ones carry aria-invalid (S682). */}
+                      <input placeholder="Name" aria-label="Buyer name" aria-invalid={requireBuyerId && !buyerName.trim() ? true : undefined} value={buyerName} onChange={e => setBuyerName(e.target.value)}
                         style={{ ...billInput, borderColor: requireBuyerId && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
-                      <input placeholder="PAN No." value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
-                      <input placeholder="Address" value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} style={billInput} />
-                      <input placeholder="Phone" value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
+                      <input placeholder="PAN No." aria-label="Buyer PAN number" value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
+                      <input placeholder="Address" aria-label="Buyer address" value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} style={billInput} />
+                      <input placeholder="Phone" aria-label="Buyer phone" aria-invalid={requireBuyerId && !buyerPhone.trim() ? true : undefined} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
                         style={{ ...billInput, borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                     </div>
-                    <input placeholder="Remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
+                    <input placeholder="Remarks" aria-label="Bill remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
                   </>
                 )}
               </div>
@@ -3140,6 +3148,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     border: `1px solid ${discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                   }}>%</button>
                   <input type="number" min="0" step="any" max={discountMode === 'percent' ? 100 : undefined}
+                    aria-label={discountMode === 'percent' ? 'Discount percent' : 'Discount amount in rupees'}
                     placeholder="0" value={discountStr} onChange={e => setDiscountStr(e.target.value)}
                     style={{ ...billInput, flex: 1 }} />
                   {discountMode === 'percent' && discountAmt > 0 && (
@@ -3286,7 +3295,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                   <option value="">— Select —</option>
                   {COMP_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
-                <input placeholder="Remarks (optional)" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%', marginBottom: 12 }} />
+                <input placeholder="Remarks (optional)" aria-label="Complimentary slip remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%', marginBottom: 12 }} />
                 <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text3)' }}>
                   ₨0 is collected, but this still counts against food-cost/inventory reporting. Prints an internal
                   Complimentary Slip valued at food cost — not a Tax Invoice or PAN Bill, no outlet name shown.

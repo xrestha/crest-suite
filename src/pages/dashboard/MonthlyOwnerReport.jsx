@@ -478,7 +478,7 @@ export default function MonthlyOwnerReport() {
                     <Row label="Gross Payroll" value={fmt(snapshot.hr.payroll?.gross)} />
                     <Row label="Overtime" value={`${num(snapshot.hr.payroll?.ot?.hours)} hrs — ${fmt(snapshot.hr.payroll?.ot?.amount)}`} />
                     <Row label="Employer SSF" value={fmt(snapshot.hr.payroll?.ssfEmployer)} />
-                    <Row label="Total Payroll Cost" value={fmt(snapshot.hr.payroll?.total)} color="var(--theme-accent)" />
+                    <Row label="Total Payroll Cost" value={fmt(snapshot.hr.payroll?.total)} color="var(--theme-accent-ink)" />
                     <Row label="Active Headcount" value={num(snapshot.hr.headcount?.active)} />
                     <Row label="New Hires / Terminations" value={`${num(snapshot.hr.headcount?.newHires)} / ${num(snapshot.hr.headcount?.terminations)}`} />
                     <Row label="Attendance Rate" value={snapshot.hr.attendance ? pct(snapshot.hr.attendance.rate) : 'N/A'}
@@ -550,7 +550,7 @@ export default function MonthlyOwnerReport() {
 
             {snapshot.menuEngineering && (() => {
               const me = snapshot.menuEngineering
-              const quadrantColor = { Star: 'var(--theme-green-text)', Plowhorse: 'var(--theme-accent)', Puzzle: 'var(--theme-amber-text)', Dog: 'var(--theme-red-text)' }
+              const quadrantColor = { Star: 'var(--theme-green-text)', Plowhorse: 'var(--theme-accent-ink)', Puzzle: 'var(--theme-amber-text)', Dog: 'var(--theme-red-text)' }
               return (
                 <div className="owner-report-section owner-report-page-break">
                   <h3 style={sectionTitleStyle}>Menu Engineering Matrix</h3>

@@ -341,7 +341,7 @@ export default function HrDashboard() {
           label="Active Staff"
           value={empStats?.active ?? '—'}
           sub={empStats?.probation > 0 ? `+ ${empStats.probation} on probation` : 'no probation'}
-          color="var(--theme-green)"
+          color="var(--theme-green-text)"
           tip="Active employees only. Probation shown separately — both are included in payroll."
           onClick={() => navigate('/hr/employees')}
         />
@@ -349,7 +349,7 @@ export default function HrDashboard() {
           label="Basic Payroll / Month"
           value={`NPR ${fmt(empStats?.payrollBase)}`}
           sub="active + probation, basic only"
-          color="var(--theme-accent)"
+          color="var(--theme-accent-ink)"
           tip="Sum of basic salary for active and probation employees. Full payroll (allowances, SSF, TDS) is computed during the payroll run."
           onClick={() => navigate('/hr/payroll')}
         />
@@ -364,7 +364,7 @@ export default function HrDashboard() {
           label="Retiring Soon"
           value={empStats?.retiringSoon ?? 0}
           sub="within 180 days"
-          color={empStats?.retiringSoon > 0 ? 'var(--theme-accent)' : 'var(--theme-green)'}
+          color={empStats?.retiringSoon > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)'}
           tip="Active or probation employees whose retirement date (DOB + 60 years) falls within the next 180 days."
           onClick={() => navigate('/hr/employees')}
           alert={empStats?.retiringSoon > 0}
@@ -382,7 +382,7 @@ export default function HrDashboard() {
               label="Net Payable"
               value={`NPR ${fmt(payInfo.netPay)}`}
               sub={`${payInfo.periodLabel} take-home total`}
-              color="var(--theme-green)"
+              color="var(--theme-green-text)"
               tip="Total net pay disbursed to all employees in the last finalized payroll run."
               onClick={() => navigate('/hr/payroll')}
             />

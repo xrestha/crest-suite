@@ -65,7 +65,7 @@ function DenomGrid({ counts, onChange }) {
               <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>₨{d}</span>
               <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{fmtNpr(d * (parseInt(counts[d]) || 0))}</span>
             </div>
-            <input type="number" min="0" step="1" value={counts[d]}
+            <input type="number" min="0" step="1" value={counts[d]} aria-label={`Count of ₨${d} notes`}
               // min="0" only blocks the spinner arrows — a typed "-5" still lands in the input
               // unless clamped here, since every downstream sum just does parseInt(...) || 0.
               onChange={e => onChange({ ...counts, [d]: e.target.value === '' ? '' : String(Math.max(0, parseInt(e.target.value) || 0)) })}
@@ -807,7 +807,7 @@ export default function PosShifts() {
             </p>
 
             {modal === 'open' && (
-              <input placeholder="Label (optional, e.g. Morning)" value={label} onChange={e => setLabel(e.target.value)}
+              <input placeholder="Label (optional, e.g. Morning)" aria-label="Shift label" value={label} onChange={e => setLabel(e.target.value)}
                 className="form-input" style={{ width: '100%', marginBottom: 14 }} />
             )}
 

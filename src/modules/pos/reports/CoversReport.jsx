@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
+import { TOOLTIP_CHROME } from '../../../shared/tooltipChrome'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -18,6 +19,9 @@ import { turnoverByBand } from './coversMath'
 import { SOURCE_LABEL } from '../reservations/reservationStatus'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+// SVG presentation attributes only (tick fills, Bar fill) — var() does not resolve there. Never
+// as HTML text: as 11px caption text MUTED measured 3.9:1 on the Dark card and GOLD is the Dark
+// accent on every preset (S682). Text takes the tokens.
 const GOLD  = '#c9a84c'
 const MUTED = '#6b7280'
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
@@ -448,10 +452,10 @@ export default function CoversReport() {
             title="Covers Served by Day"
             cardStyle={{ marginBottom: 24 }}
             footer={trendRows.length > 0 && (
-              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 8 }}>
                 Total <strong style={{ color: 'var(--theme-text1)' }}>{trendTotalCovers.toLocaleString()}</strong> covers
                 {' '}· avg <strong style={{ color: 'var(--theme-text1)' }}>{trendAvgPerDay.toFixed(1)}</strong>/day
-                {trendBusiestDay && <> · busiest <span style={{ color: GOLD, fontWeight: 600 }}>{trendBusiestDay.day}/{trendBusiestDay.month}</span> ({trendBusiestDay.covers} covers)</>}
+                {trendBusiestDay && <> · busiest <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{trendBusiestDay.day}/{trendBusiestDay.month}</span> ({trendBusiestDay.covers} covers)</>}
               </div>
             )}
             renderChart={h => (
@@ -460,8 +464,8 @@ export default function CoversReport() {
                   <XAxis dataKey="name" tick={{ fill: MUTED, fontSize: 11 }} />
                   <YAxis tick={{ fill: MUTED, fontSize: 11 }} allowDecimals={false} />
                   <Tooltip
-                    contentStyle={{ background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 8, fontSize: 12, color: '#e8e0d0' }}
-                    labelStyle={{ color: '#e8e0d0' }} itemStyle={{ color: '#e8e0d0' }}
+                    contentStyle={{ ...TOOLTIP_CHROME, fontSize: 12, color: 'var(--theme-text1)' }}
+                    labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={v => [v, 'Covers']}
                   />
                   <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} {...chartMotion()} />
@@ -616,9 +620,9 @@ export default function CoversReport() {
             title="Covers by Hour Seated"
             cardStyle={{ marginBottom: 24 }}
             footer={peakTotalCovers > 0 && (
-              <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 8 }}>
                 Total <strong style={{ color: 'var(--theme-text1)' }}>{peakTotalCovers.toLocaleString()}</strong> covers
-                {peakBusiestHour && peakBusiestHour.covers > 0 && <> · peak hour <span style={{ color: GOLD, fontWeight: 600 }}>{hourLabel(peakBusiestHour.hour)}</span> ({peakBusiestHour.covers} covers)</>}
+                {peakBusiestHour && peakBusiestHour.covers > 0 && <> · peak hour <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{hourLabel(peakBusiestHour.hour)}</span> ({peakBusiestHour.covers} covers)</>}
               </div>
             )}
             renderChart={h => (
@@ -627,8 +631,8 @@ export default function CoversReport() {
                   <XAxis dataKey="name" tick={{ fill: MUTED, fontSize: 11 }} angle={-45} textAnchor="end" interval={1} />
                   <YAxis tick={{ fill: MUTED, fontSize: 11 }} allowDecimals={false} />
                   <Tooltip
-                    contentStyle={{ background: '#181c27', border: '1px solid #2a2f3d', borderRadius: 8, fontSize: 12, color: '#e8e0d0' }}
-                    labelStyle={{ color: '#e8e0d0' }} itemStyle={{ color: '#e8e0d0' }}
+                    contentStyle={{ ...TOOLTIP_CHROME, fontSize: 12, color: 'var(--theme-text1)' }}
+                    labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={v => [v, 'Covers']}
                   />
                   <Bar dataKey="value" radius={[4, 4, 0, 0]} fill={GOLD} {...chartMotion()} />

@@ -1109,9 +1109,11 @@ export default function Sales() {
                         const disc = allDayDiscounts[recipe.id] || 0
                         const rev  = recipeRevenue(recipe)
                         const revPct = sumTotalRev > 0 ? (rev / sumTotalRev) * 100 : 0
+                        // An unsold item is labelled by its "—" sold count and a slate name, never by
+                        // opacity: at 0.4 the name measured 2.5:1 and the figure 1.9:1 (S682).
                         return (
-                          <tr key={recipe.id} style={{ opacity: sold === 0 ? 0.4 : 1 }}>
-                            <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
+                          <tr key={recipe.id}>
+                            <td style={{ fontWeight: 600, color: sold === 0 ? 'var(--theme-text3)' : 'var(--theme-text1)' }}>{recipe.name}</td>
                             <td><span className="badge badge-yellow">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: sold > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                               {sold > 0 ? sold.toLocaleString() : '—'}

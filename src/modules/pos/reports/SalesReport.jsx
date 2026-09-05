@@ -999,7 +999,7 @@ export default function SalesReport() {
             footer={hourlyTotalNet > 0 && (
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
                 Total <strong style={{ color: 'var(--theme-text1)' }}>{fmtNpr(hourlyTotalNet)}</strong>
-                {hourlyPeak && hourlyPeak.net > 0 && <> · peak hour <span style={{ color: GOLD, fontWeight: 600 }}>{hourLabel(hourlyPeak.hour)}</span> ({fmtNpr(hourlyPeak.net)})</>}
+                {hourlyPeak && hourlyPeak.net > 0 && <> · peak hour <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{hourLabel(hourlyPeak.hour)}</span> ({fmtNpr(hourlyPeak.net)})</>}
               </div>
             )}
             renderChart={h => (

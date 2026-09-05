@@ -10,6 +10,13 @@ import { COMPANY } from '../legal'
 const CONTACT_EMAIL = 'hello@cresthospitality.com'
 
 const GOLD   = 'var(--theme-accent)'
+// The accent AS TEXT. `GOLD` is a fill (button backgrounds, icons, the section dot); on the Light
+// preset the base accent measured 3.1–3.35:1 as button text here (S682), below AA — which is the
+// whole reason `--theme-accent-ink` exists (DESIGN.md → Brass Ink).
+const GOLD_INK = 'var(--theme-accent-ink)'
+// Brass tints derived from the live token rather than the Dark preset's rgba literal, so they
+// re-tone with the accent on Light (DESIGN.md → "Brass is a range, not one value").
+const brassTint = pct => `color-mix(in srgb, var(--theme-accent) ${pct}%, transparent)`
 const GREEN  = 'var(--theme-green-text)'   // text use only — see ThemeContext's PRESETS note
 const BG     = 'var(--theme-bg)'
 const CARD   = 'var(--theme-card)'
@@ -108,7 +115,7 @@ export default function Pricing() {
         </div>
         <button
           onClick={() => navigate('/login')}
-          style={{ background: 'rgba(201,168,76,0.1)', border: `1px solid rgba(201,168,76,0.35)`, color: GOLD, padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+          style={{ background: brassTint(10), border: `1px solid ${brassTint(35)}`, color: GOLD_INK, padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
           Login →
         </button>
       </nav>
@@ -134,12 +141,12 @@ export default function Pricing() {
         <div style={{ display: 'inline-flex', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 'var(--radius-md)', padding: 4, gap: 2 }}>
           <button
             onClick={() => setAnnual(false)} aria-pressed={!annual}
-            style={{ background: !annual ? 'rgba(201,168,76,0.15)' : 'none', border: !annual ? `1px solid rgba(201,168,76,0.3)` : '1px solid transparent', color: !annual ? GOLD : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+            style={{ background: !annual ? brassTint(15) : 'none', border: !annual ? `1px solid ${brassTint(30)}` : '1px solid transparent', color: !annual ? GOLD_INK : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
             Monthly
           </button>
           <button
             onClick={() => setAnnual(true)} aria-pressed={annual}
-            style={{ background: annual ? 'rgba(201,168,76,0.15)' : 'none', border: annual ? `1px solid rgba(201,168,76,0.3)` : '1px solid transparent', color: annual ? GOLD : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+            style={{ background: annual ? brassTint(15) : 'none', border: annual ? `1px solid ${brassTint(30)}` : '1px solid transparent', color: annual ? GOLD_INK : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
             Annual
             <span style={{ background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: GREEN, fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 700, letterSpacing: '0.04em' }}>
               Save 25%
@@ -337,7 +344,7 @@ export default function Pricing() {
       <div style={{ textAlign: 'center', padding: '0 24px 80px' }}>
         <button
           onClick={() => setShowFaq(true)}
-          style={{ background: 'rgba(201,168,76,0.08)', border: `1px solid rgba(201,168,76,0.25)`, color: GOLD, padding: '11px 28px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+          style={{ background: brassTint(8), border: `1px solid ${brassTint(25)}`, color: GOLD_INK, padding: '11px 28px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
           FAQ — Common Questions
         </button>
       </div>

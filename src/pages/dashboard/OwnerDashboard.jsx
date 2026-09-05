@@ -641,10 +641,12 @@ export default function OwnerDashboard() {
           <ChartCard
             title="Cost & Margin — Trend"
             legend={<>
-              <span style={{ color: TREND_COLORS.fc }}>● Food Cost %</span>
-              <span style={{ color: TREND_COLORS.labor }}>● Labor Cost %</span>
-              <span style={{ color: TREND_COLORS.prime }}>● Prime Cost %</span>
-              <span style={{ color: TREND_COLORS.margin }}>● Net Margin %</span>
+              {/* The series colour sits on the swatch only. As 10px TEXT the chart palette measured
+                  1.9–2.5:1 on the Light card (S682) — a chart series may take colour alone, a
+                  label a person reads may not. */}
+              {[['fc', 'Food Cost %'], ['labor', 'Labor Cost %'], ['prime', 'Prime Cost %'], ['margin', 'Net Margin %']].map(([k, label]) => (
+                <span key={k}><span aria-hidden="true" style={{ color: TREND_COLORS[k] }}>●</span> {label}</span>
+              ))}
             </>}
             footer={<p className="sr-only">Trend of Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across the last {trendChartData.length} closed periods, sourced from each period's frozen Monthly Owner Report snapshot.</p>}
             renderChart={h => (

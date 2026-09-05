@@ -474,6 +474,7 @@ export default function PosStaff() {
                     <td>
                       <input
                         type="checkbox"
+                        aria-label={`Allow ${p.full_name || 'this account'} to void bills`}
                         checked={!!p.pos_allow_void}
                         disabled={saving[p.id]}
                         onChange={e => updateAllowVoid(p.id, e.target.checked)}

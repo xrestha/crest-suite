@@ -450,14 +450,19 @@ export default function PayForm({ employee, onSave, onClose }) {
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>SSF Details</p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
                   {/* Toggle switch */}
-                  <button type="button" role="switch" aria-checked={form.ssf_enrolled} aria-label="SSF Enrolled"
+                  {/* Off-track is slate (text3), not the border token — on Light the border is
+                      #ddd6cf and a white knob on it measured ~1.2:1, so the switch's state was
+                      unreadable. The knob is the card colour, which contrasts with both tracks on
+                      both presets (S682). */}
+                  <button type="button" id="pay-ssf-enrolled" role="switch" aria-checked={form.ssf_enrolled} aria-label="SSF Enrolled"
                     onClick={() => set('ssf_enrolled', !form.ssf_enrolled)}
-                    style={{ position: 'relative', width: 42, height: 24, borderRadius: 12, cursor: 'pointer', flexShrink: 0, padding: 0, border: 'none', background: form.ssf_enrolled ? 'var(--theme-accent)' : 'var(--theme-border)', transition: 'background 0.2s' }}>
-                    <span style={{ position: 'absolute', top: 3, left: form.ssf_enrolled ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }} />
+                    style={{ position: 'relative', width: 42, height: 24, borderRadius: 'var(--radius-full)', cursor: 'pointer', flexShrink: 0, padding: 0, border: 'none', background: form.ssf_enrolled ? 'var(--theme-accent)' : 'var(--theme-text3)', transition: 'background 0.2s' }}>
+                    <span style={{ position: 'absolute', top: 3, left: form.ssf_enrolled ? 21 : 3, width: 18, height: 18, borderRadius: '50%', background: 'var(--theme-card)', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }} />
                   </button>
-                  <span style={{ fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }} onClick={() => set('ssf_enrolled', !form.ssf_enrolled)}>
+                  {/* The caption is a <label> for the switch rather than a second, mouse-only onClick. */}
+                  <label htmlFor="pay-ssf-enrolled" style={{ fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
                     <Tip text="SSF enrolled employees have 11% deducted from their salary and 20% contributed by the employer. Enable this for employees registered under Nepal's Social Security Fund." width={300}>SSF Enrolled</Tip>
-                  </span>
+                  </label>
                   {form.ssf_enrolled && <span style={{ fontSize: 11, color: 'var(--theme-green-text)', marginLeft: 'auto' }}>11% emp · 20% employer</span>}
                 </div>
                 {form.ssf_enrolled && (

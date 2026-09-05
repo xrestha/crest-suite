@@ -275,7 +275,12 @@ ${text}`, detail })
           {(() => {
             const allVat  = billLines.every(l => l.vat_inclusive)
             const someVat = billLines.some(l => l.vat_inclusive)
-            const knobBg = allVat ? 'var(--theme-amber)' : someVat ? 'var(--theme-amber)' : 'var(--theme-border)'
+            // Track: amber when any line carries VAT, slate (text3) when none — NOT the border
+            // token, which is the card's own edge colour and left a white knob on it at ~1.2:1.
+            // The state label is TEXT and takes the amber-text variant / fog; coloured with the
+            // track token it measured 1.44:1 on Light and 1.27:1 on Dark in the "No VAT" state (S682).
+            const knobBg = someVat ? 'var(--theme-amber)' : 'var(--theme-text3)'
+            const labelColor = someVat ? 'var(--theme-amber-text)' : 'var(--theme-text2)'
             const knobOpacity = someVat && !allVat ? 0.6 : 1
             return (
               <button
@@ -286,9 +291,9 @@ ${text}`, detail })
                 style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '8px 4px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
               >
                 <div style={{ width: 34, height: 18, borderRadius: 'var(--radius-md)', background: knobBg, opacity: knobOpacity, position: 'relative', transition: 'background 0.2s, opacity 0.2s', flexShrink: 0 }}>
-                  <div style={{ position: 'absolute', top: 3, left: allVat ? 17 : someVat ? 11 : 3, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+                  <div style={{ position: 'absolute', top: 3, left: allVat ? 17 : someVat ? 11 : 3, width: 12, height: 12, borderRadius: '50%', background: 'var(--theme-card)', transition: 'left 0.2s' }} />
                 </div>
-                <span style={{ fontSize: 13, fontWeight: someVat ? 700 : 400, color: knobBg, opacity: knobOpacity, letterSpacing: '0.04em' }}>
+                <span style={{ fontSize: 13, fontWeight: someVat ? 700 : 400, color: labelColor, letterSpacing: '0.04em' }}>
                   {allVat ? 'VAT 13%' : someVat ? 'VAT Mixed' : 'No VAT'}
                 </span>
               </button>

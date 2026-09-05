@@ -1463,9 +1463,12 @@ tr.interactive-row:focus-visible {
   .sidebar-dropdown-item {
     min-height: 44px;
   }
+  /* 44, not 40: measured at 40x40 on every route under a coarse pointer (S682) — the one shell
+     control below the product's own touch floor, and the one that re-scopes the whole session
+     when it is the outlet switcher's neighbour. */
   .sidebar-search-btn {
-    min-height: 40px;
-    min-width: 40px;
+    min-height: 44px;
+    min-width: 44px;
   }
   /* The star sits inside a 44px row; it needs its own hit area, not just its glyph. */
   .sidebar-pin {
