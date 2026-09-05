@@ -60,7 +60,19 @@
   .legal-nav-actions {
     width: 100%;
     flex-shrink: 1;
-    flex-wrap: wrap;
+    /* One row, not two. At the default sizes the three actions measured 140 + 124 + 92 + two
+       10px gaps = 376px against 358px of room, so "Sign in" wrapped alone onto a third header
+       row and the header stood 145px tall. Tightened to fit the narrowest common phone
+       (360px viewport, 328px of room) with the label widths Poppins actually produces. */
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .legal-nav .legal-nav-link {
+    padding: 6px 9px;
+    font-size: 12px;
+    white-space: nowrap;
+    min-width: 0;
   }
 }
 
@@ -175,14 +187,70 @@
   padding-right: 8px;
 }
 
+/* The phone-only disclosure control. Hidden wherever the rail has a gutter of its own; the
+   heading label and the always-open list do that job there. */
+.legal-toc-toggle {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .legal-toc {
     position: static;
     max-height: none;
-    padding: 12px 14px;
+    padding: 0;
     background: var(--theme-card);
     border: 1px solid var(--theme-border);
     border-radius: var(--radius-md);
+  }
+
+  .legal-toc-label {
+    display: none;
+  }
+
+  /* One full-width row: the word, the count, the chevron. It is the whole card while closed, so
+     it carries the card's padding itself, and it is a 44px target on any pointer at this width —
+     a phone is the only reason it exists. */
+  .legal-toc-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 14px;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    text-align: left;
+    color: var(--theme-text1);
+    cursor: pointer;
+  }
+
+  .legal-toc-toggle:focus-visible {
+    outline: 2px solid var(--theme-focus-outline);
+    outline-offset: -2px;
+  }
+
+  .legal-toc-toggle-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--theme-text3);
+  }
+
+  .legal-toc-count {
+    flex: 1;
+    font-size: 12px;
+    color: var(--theme-text2);
+  }
+
+  .legal-toc-list {
+    padding: 0 14px 10px;
+  }
+
+  .legal-toc-list--collapsed {
+    display: none;
   }
 }
 
@@ -510,6 +578,84 @@
 
 .legal-body .legal-table {
   font-size: 13px;
+}
+
+/* Below 640 a three-column prose table is the wrong shape: the Privacy Policy's purpose table
+   stood 1,175px tall at 390px with rows of 133px because three paragraphs shared 338px, and the
+   sub-processor table overflowed its wrapper by 24px besides. Each row becomes a small card and
+   each cell carries its column's name from `data-label` (LegalMarkdown sets it from the header
+   row). `screen` is stated because print's page box is wider than 640px anyway and a phone
+   printing this must still get a table. The explicit ARIA roles LegalMarkdown puts on the table
+   elements are what keep it a table for assistive tech once `display: block` takes away the
+   implicit ones. */
+@media screen and (max-width: 640px) {
+  .legal-body .legal-table-wrap {
+    overflow: visible;
+  }
+
+  .legal-body .legal-table,
+  .legal-body .legal-table tbody,
+  .legal-body .legal-table tr,
+  .legal-body .legal-table td {
+    display: block;
+  }
+
+  /* Visually hidden, not display:none — the column names still exist for a screen reader that
+     navigates the table by header. */
+  .legal-body .legal-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .legal-body .legal-table tr {
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    margin-bottom: 10px;
+  }
+
+  .legal-body .legal-table td {
+    border: 0;
+    padding: 6px 0;
+    white-space: normal;
+  }
+
+  .legal-body .legal-table td + td {
+    border-top: 1px solid var(--theme-border-lt);
+  }
+
+  .legal-body .legal-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--theme-text3);
+  }
+
+  /* The first column is the row's identity (a purpose, a provider, a kind of information), so
+     it is the card's title rather than one labelled field among three. Ten cards each opening
+     with the same word "PURPOSE" was the reader's first impression of the table. */
+  .legal-body .legal-table td:first-child {
+    font-weight: 600;
+    padding-top: 4px;
+  }
+
+  .legal-body .legal-table td:first-child::before {
+    display: none;
+  }
+
+  /* Layout.css's `tr:hover td` tint reads as a selection on a card that cannot be selected. */
+  .legal-body .legal-table tr:hover td {
+    background: transparent;
+  }
 }
 
 /* A placeholder that has not been filled must be impossible to read past. This is deliberately

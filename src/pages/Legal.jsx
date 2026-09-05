@@ -67,6 +67,12 @@ export default function Legal() {
   const [loadFailed, setLoadFailed] = useState(false)
   const [copied, setCopied] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
+  // Whether the contents list is open on a phone. Above 900px the rail is always open and this
+  // state is inert (the toggle is display:none there); below it the list starts CLOSED. Measured
+  // at 390×844 before this existed, the Terms' first sentence sat at y=976 — below the whole first
+  // screen — behind a 559px card of eighteen links. A reader who tapped "Terms of Service" should
+  // meet the terms, not a map of them.
+  const [tocOpen, setTocOpen] = useState(false)
 
   const doc = DOC_TYPES.includes(docType) ? legalDoc(docType) : null
 
@@ -198,7 +204,7 @@ export default function Legal() {
           {/* A Link, not a button calling navigate(): its two neighbours are links to the same kind
               of destination, and a button cannot be middle-clicked or opened in a new tab. */}
           <Link to="/login" className="btn btn-ghost btn-sm legal-nav-link">
-            Sign in →
+            Sign in
           </Link>
         </div>
       </nav>
@@ -365,10 +371,37 @@ export default function Legal() {
           <h2 className="legal-toc-label" id="legal-toc-label">
             Contents
           </h2>
-          <ol className="legal-toc-list">
+          {/* The phone's version of the label above: a real disclosure button, shown only below
+              900px (Legal.css), where the rail has no gutter of its own and would otherwise stand
+              between the title and the first sentence. Two elements rather than one button styled
+              two ways, because a button that does nothing on desktop is a control that lies. */}
+          <button
+            type="button"
+            className="legal-toc-toggle"
+            aria-expanded={tocOpen}
+            aria-controls="legal-toc-list"
+            onClick={() => setTocOpen((v) => !v)}
+          >
+            <span className="legal-toc-toggle-label">Contents</span>
+            <span className="legal-toc-count">{toc.length} sections</span>
+            <ChevronDown
+              size={14}
+              aria-hidden="true"
+              className={`legal-verify-chev${tocOpen ? ' legal-verify-chev--open' : ''}`}
+            />
+          </button>
+          <ol
+            id="legal-toc-list"
+            className={`legal-toc-list${tocOpen ? '' : ' legal-toc-list--collapsed'}`}
+          >
             {toc.map((s) => (
               <li key={s.id}>
-                <a href={`#${s.id}`}>{s.label}</a>
+                {/* Choosing a section closes the list on a phone, so the reader lands on the text
+                    rather than under the same eighteen links they just scrolled past. Inert on
+                    desktop, where the collapsed class has no rule. */}
+                <a href={`#${s.id}`} onClick={() => setTocOpen(false)}>
+                  {s.label}
+                </a>
               </li>
             ))}
           </ol>

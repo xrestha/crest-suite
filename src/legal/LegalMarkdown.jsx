@@ -161,24 +161,41 @@ export function parseMarkdown(md) {
         i += 1
       }
       const tk = key++
+      // The column name as plain text, for the `data-label` each cell carries. Below 640px
+      // Legal.css stacks a row into a card and prints this above every cell, so the header row
+      // (visually hidden there) is not the only place the column is named.
+      const labels = header.map((h) => h.replace(/[*`]/g, ''))
+      // jsx-a11y calls these roles redundant. They are, on a table displayed as a table; the
+      // comment below says why they stop being redundant at 640px. CI builds treat the warning as
+      // an error, so it is silenced for this block only.
+      /* eslint-disable jsx-a11y/no-redundant-roles */
       blocks.push(
         // table-wrap is the app's own horizontal-scroll wrapper. A legal document read on a phone
         // has the same overflow problem as any other wide table, and the sub-processor and
         // retention tables are genuinely wide.
+        //
+        // The ARIA roles restate what the elements already mean. They are here because the phone
+        // stylesheet sets `display: block` on these elements, and Chrome and Safari both drop a
+        // table's IMPLICIT roles when its display changes — a screen reader would then read the
+        // sub-processor table as a run of unrelated text. An explicit role survives the restyle.
         <div key={`tw${tk}`} className="table-wrap legal-table-wrap">
-          <table className="data-table legal-table">
-            <thead>
-              <tr>
+          <table className="data-table legal-table" role="table">
+            <thead role="rowgroup">
+              <tr role="row">
                 {header.map((h, hi) => (
-                  <th key={hi}>{renderInline(h, `t${tk}h${hi}`)}</th>
+                  <th key={hi} role="columnheader">
+                    {renderInline(h, `t${tk}h${hi}`)}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody role="rowgroup">
               {rows.map((r, ri) => (
-                <tr key={ri}>
+                <tr key={ri} role="row">
                   {header.map((_, ci) => (
-                    <td key={ci}>{renderInline(r[ci] || '', `t${tk}r${ri}c${ci}`)}</td>
+                    <td key={ci} role="cell" data-label={labels[ci]}>
+                      {renderInline(r[ci] || '', `t${tk}r${ri}c${ci}`)}
+                    </td>
                   ))}
                 </tr>
               ))}
@@ -186,6 +203,7 @@ export function parseMarkdown(md) {
           </table>
         </div>
       )
+      /* eslint-enable jsx-a11y/no-redundant-roles */
       continue
     }
 
