@@ -602,6 +602,25 @@ are load-bearing, each with the reason it exists:
   attempts insert on purpose. **The page words every refusal itself by `code`** and uses the
   server's `message` only as a fallback: the server says "the restaurant", and a client may be a
   cafe, a bar or a banquet hall.
+- **The ladder reverses in exactly two places, and only on the booking's own day (S681).**
+  `no_show → arrived` ("They turned up") and `cancelled → booked` ("Reinstate"). A no-show is shown
+  on every future booking form from that phone number, so a guest marked at 8:20 who walks in at
+  8:25 needs a path back that is not "make a second booking and leave the mark". `stampFor(to, now,
+  from)` clears the mark being left (`no_show_at`; `cancelled_at` + `cancel_reason`) in the same
+  write, so the Covers Report and the Customers no-show column forget it too. `canRevive()` gates
+  it to the Nepal civil day of `reserved_for` — the table says what is ever legal, the page says
+  when. `completed` stays terminal: the bill that closed it is its own record. **Mark done, the
+  reversals and No-show all confirm through `ConfirmModal`** with consequence copy; nothing that
+  ends or revives a booking is a bare button.
+- **A request is DECLINED, a booking is CANCELLED, and the two reason lists differ** because the
+  decline reason is rendered on the guest's phone — "Guest cancelled" shown to a guest who asked
+  and was refused is false. `DECLINE_REASONS` when `status === 'requested'`, `CANCEL_REASONS`
+  otherwise; both store into `cancel_reason`.
+- **The row shows ONE next step** (Confirm → Arrived → Seat) plus 💬 plus a `RowMenu`; 💬 only on
+  live rows, because the template is the booking confirmation. Every `transition()` ends in a
+  `role="status"` line saying what happened and, when the row belongs to another day, where it
+  went — an accepted request is usually for a day other than the one on screen and used to
+  simply vanish.
 - **Nothing self-confirms.** A public request lands as `requested` and waits for a staff Accept;
   there is no phone verification because there is no SMS rail (POS_TODO C). The staff WhatsApp or
   call is the verification.

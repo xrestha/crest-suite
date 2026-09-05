@@ -1744,6 +1744,63 @@ table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
   }
 }
 
+/* ── Row overflow menu (RowMenu.jsx, S681) ─────────────────────────────────────────────────────
+   A table row's SECONDARY actions behind one ⋯ control, so the move a host makes every time can
+   stand alone. Portalled and fixed, because every table sits in a .table-wrap that would clip it.
+   The hover/focus fill is --theme-focus-ring — the same tint .tab-btn--active and the rail's active
+   states already use for "this one", not a new grey. */
+.row-menu {
+  position: fixed;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 4px;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--theme-card-shadow);
+  z-index: 300;
+}
+.row-menu-item {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--theme-text1);
+  cursor: pointer;
+}
+.row-menu-item:hover:not(:disabled),
+.row-menu-item:focus-visible {
+  background: var(--theme-focus-ring);
+  outline: none;
+}
+.row-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--theme-focus-outline);
+}
+/* Signal colour as TEXT takes the -text variant (the .btn-danger rule, same reason). */
+.row-menu-item--danger { color: var(--theme-red-text); }
+.row-menu-item:disabled { opacity: 0.55; cursor: not-allowed; }
+.row-menu-hint { display: block; font-size: 11px; color: var(--theme-text3); margin-top: 2px; }
+.row-menu-sep { height: 1px; background: var(--theme-border-lt); margin: 4px 6px; }
+@media (pointer: coarse) {
+  .row-menu-item { min-height: 44px; }
+}
+
+/* What the last status move did — "Sharma ×4 confirmed — 5th Bhadra at 7:30 PM. Show that day".
+   Sits where ActionError sits and reads in the success colour AS TEXT; it is a sentence, not a
+   card, for the same reason .action-error is not one. */
+.resv-notice {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--theme-green-text);
+}
+
 /* A report that could not load. This is deliberately NOT the empty state: "nothing to show" and
    "could not load" are different facts and only one of them means the figures on screen are real.
    See ReportPage.jsx for why every report renders one or the other and never a page of zeros. */

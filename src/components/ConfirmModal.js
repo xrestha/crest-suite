@@ -29,8 +29,8 @@ export default function ConfirmModal({
     <Modal title={title} onClose={busy ? () => {} : onCancel} maxWidth={480} zIndex={zIndex}>
       <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{children}</div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-        <button className="btn" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
-        <button className={danger ? 'btn btn-danger' : 'btn btn-primary'} onClick={onConfirm} disabled={busy}>
+        <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
+        <button type="button" className={danger ? 'btn btn-danger' : 'btn btn-primary'} onClick={onConfirm} disabled={busy}>
           {busy ? busyLabel : confirmLabel}
         </button>
       </div>

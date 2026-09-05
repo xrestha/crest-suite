@@ -753,6 +753,13 @@ four of which live on the class and none of which announce their absence.
 - **Link-like:** a `<td>` control that reads as a link and behaves as a button, for where the row's
   identity *is* the action (an outlet name that switches to that outlet). Accent-ink, underlined at
   1px, thickening to 2px on hover.
+- **Overflow (`RowMenu`, S681):** when a row's actions are a column width rather than a control,
+  the first move is not `.btn-icon` for each — it is ONE next step plus a ⋯ menu (`.row-menu`) for
+  the rest. Reservations had six identical `btn-ghost btn-sm` per row with the two irreversible
+  moves interleaved among the routine ones; the menu takes the secondary and destructive items
+  (danger items last, under a separator, in `--theme-red-text`) and the row keeps the move a host
+  makes every time. A real menu — `aria-haspopup`, `role="menu"`, arrows, Escape, focus return —
+  portalled and fixed because `.table-wrap` clips.
 - **Icon-only (`.btn-icon`):** a 30px square holding a 15px glyph, worn *over* `.btn` plus a
   variant so it keeps the focus ring, the disabled treatment and the coarse touch floor. For a
   row's Actions column, where a set of text buttons is a column width rather than a control: on

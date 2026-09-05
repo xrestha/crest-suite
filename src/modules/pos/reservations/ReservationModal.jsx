@@ -193,7 +193,7 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
         </div>
         <div className="form-field">
           <label htmlFor={idFor('party')}>
-            Guests <Tip text="Party size. Becomes the covers count on the order when the party is seated, and sets the expected sitting length below." width={260}>ⓘ</Tip>
+            Party size <Tip text="How many people. Becomes the covers count on the order when the party is seated, and sets the expected sitting length below." width={260}>ⓘ</Tip>
           </label>
           <input id={idFor('party')} type="number" min={1} max={99} inputMode="numeric" value={party} onChange={e => setParty(e.target.value)} {...fieldAria(idFor('party'), errors.party)} />
           <FieldError id={idFor('party')} message={errors.party} />
