@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-02T02:28:51.000Z",
+  "generatedAt": "2026-09-05T06:09:05.358Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -947,6 +947,14 @@
       "css": ".ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); } .ds-btn-ghost:hover:not(:disabled) { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); }"
     },
     {
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "A 30px square holding a 15px glyph, worn over .btn plus a colour variant so it keeps the focus ring, the disabled treatment and the coarse touch floor. For a row's Actions column, where a set of text buttons is a column width rather than a control. An icon has no accessible name, so aria-label is required on every one, with the same string on title for the pointer.",
+      "html": "<button class=\"ds-btn ds-btn-ghost ds-btn-icon\" aria-label=\"Edit vendor\" title=\"Edit vendor\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 20h9\"/><path d=\"M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z\"/></svg></button>",
+      "css": ".ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); } .ds-btn-ghost:hover:not(:disabled) { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); } .ds-btn-icon { padding: 0; width: 30px; height: 30px; justify-content: center; flex: 0 0 auto; } .ds-btn-icon svg { width: 15px; height: 15px; }"
+    },
+    {
       "name": "Danger Button",
       "kind": "button",
       "refersTo": "button-danger",
@@ -958,7 +966,7 @@
       "name": "Status Badge",
       "kind": "chip",
       "refersTo": "badge",
-      "description": "An alpha tint of its own colour with the contrast-safe *-text variant as foreground. The box lives on every colour variant, so badge-green written alone still renders as a chip.",
+      "description": "An alpha tint of its own colour with the contrast-safe *-text variant as foreground. The box lives on every colour variant, so badge-green written alone still renders as a chip. A badge carrying a sentence takes .badge-sentence, which turns off the capitalize transform and nothing else; a chip that needs a sentence is usually a banner wearing the wrong class.",
       "html": "<span class=\"ds-badge ds-badge-green\">paid</span> <span class=\"ds-badge ds-badge-amber\">pending</span> <span class=\"ds-badge ds-badge-red\">overdue</span> <span class=\"ds-badge ds-badge-yellow\">Dairy</span> <span class=\"ds-badge ds-badge-gray\">cancelled</span>",
       "css": ".ds-badge, .ds-badge-green, .ds-badge-amber, .ds-badge-red, .ds-badge-yellow, .ds-badge-gray { display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm, 8px); font-size: 11px; font-weight: 500; text-transform: capitalize; font-family: inherit; } .ds-badge-green { background: rgba(52,211,153,0.10); color: var(--theme-green-text, #34d399); } .ds-badge-amber { background: rgba(251,191,36,0.12); color: var(--theme-amber-text, #fbbf24); } .ds-badge-red { background: rgba(248,113,113,0.10); color: var(--theme-red-text, #f87171); } .ds-badge-yellow { background: rgba(201,168,76,0.12); color: var(--theme-accent-ink, #c9a84c); } .ds-badge-gray { background: rgba(138,146,163,0.10); color: var(--theme-text2, #9ca3af); }"
     },
@@ -1037,13 +1045,13 @@
   ],
   "narrative": {
     "northStar": "The Lit Instrument",
-    "overview": "Crest Suite is an instrument a restaurant is run from, and it is lit by exactly one source. Aged Brass is that light: it falls on the thing you are working in — the active route, the live table, the period this report covers, the button that commits — and everything else sits in an unlit, even charcoal. Depth here is not a stack of shadows; it is the difference between what the light reaches and what it does not. On the signed-out pages that metaphor is literal (three warm radial lights over an otherwise dead ground); inside the app it is disciplined down to a single accent that never spends itself twice on one screen.\n The instrument half is the constraint on all of it. Two people read the same figure: an owner deciding between services, and an accountant who has to file on it. So a number is never dressed up, never approximated for effect, and never coloured unless the colour is a verdict the product is prepared to defend. Signal green, red and amber are reserved for that verdict and spent nowhere else — a category, a rank, a delivery partner and a close type are facts, not judgments, and they take brass or grey. Where a verdict is shown it carries a shape mark as well as a hue, because roughly one man in twelve cannot separate the hues and every one of these screens gets printed in monochrome eventually.\n Density is deliberate and non-negotiable: 13px body, 11px column headers, tight table rows, 32px page padding, no reading measure anywhere. This is a working surface, not a document. The softness that keeps it from reading as legacy Nepali ERP comes from the radius scale (8/12/18/24px) and the warm neutral ground, not from whitespace the data cannot spare.",
+    "overview": "Crest Suite is an instrument a restaurant is run from, and it is lit by exactly one source. Aged Brass is that light: it falls on the thing you are working in — the active route, the live table, the period this report covers, the button that commits — and everything else sits in an unlit, even charcoal. Depth here is not a stack of shadows; it is the difference between what the light reaches and what it does not. On the signed-out pages that metaphor is literal (three warm radial lights over an otherwise dead ground); inside the app it is disciplined down to a single accent that never spends itself twice on one screen.\n The instrument half is the constraint on all of it. Two people read the same figure: an owner deciding between services, and an accountant who has to file on it. So a number is never dressed up, never approximated for effect, and never coloured unless the colour is a verdict the product is prepared to defend. Signal green, red and amber are reserved for that verdict and spent nowhere else — a category, a rank, a delivery partner and a close type are facts, not judgments, and they take brass or grey. Where a verdict is shown it carries a shape mark as well as a hue, because roughly one man in twelve cannot separate the hues and every one of these screens gets printed in monochrome eventually.\n Density is deliberate and non-negotiable: 13px body, 11px column headers, tight table rows, 32px page padding, no reading measure anywhere inside the app. This is a working surface, not a document. The softness that keeps it from reading as legacy Nepali ERP comes from the radius scale (8/12/18/24px) and the warm neutral ground, not from whitespace the data cannot spare. The one document in the product — the Terms and Privacy Policy at `/legal/*` — is the one place a measure is earned, and it is set at **60ch on the body's children** (measured 66–72 real characters per line; the 76ch it shipped with held ~95, because `ch` is the width of Poppins' wide zero, not of its average letter).",
     "keyCharacteristics": [
       "One accent (Aged Brass), one rationed fourth-category hue (violet), four semantic signals.",
       "Two presets — Dark (default) and Light — plus a `system` mode that follows the device.",
       "Colour is never the only carrier: a band ships a `✓`/`△`/`▲` mark, a state ships a word.",
       "Flat, tinted chips over solid fills; a card's elevation is uniform policy, not a highlight.",
-      "Five surfaces, one system: the app shell, the signed-out pages, the Crest Staff phone app, the",
+      "Five surfaces, one system: the app shell, the signed-out pages, the Crest Staff phone app, the guest menu and paper. They do not share a density or, in two cases, a palette — and they must not leak into each other.",
       "Every value is a `--theme-*` custom property, so the whole product re-tones from one place."
     ],
     "rules": [
@@ -1119,7 +1127,7 @@
       },
       {
         "name": "The shell is a fixed sidebar plus a flowing content column",
-        "body": "`.sidebar-wrap` is `position: fixed` at 240px (56px collapsed) and `.main-content` reserves that space with a matching `margin-left` on the same two values; the two animate in lockstep. Content padding is 32px on every page and nothing is centred in a reading measure — every screen here is a working surface rather than a document.",
+        "body": "`.sidebar-wrap` is `position: fixed` at 240px (56px collapsed) and `.main-content` reserves that space with a matching `margin-left` on the same two values; the two animate in lockstep. Content padding is 32px on every page and nothing is centred in a reading measure — every screen here is a working surface rather than a document. (`/legal/*` renders outside the shell and is the exception; see Density above.)",
         "section": "layout"
       },
       {
@@ -1160,6 +1168,11 @@
       {
         "name": "A page that renders into the body flow needs its own scrollport",
         "body": "`index.css` sets `html, body { overflow-x: hidden }` as an app-wide horizontal guard; because html's overflow is then not `visible`, body becomes its own scroll container sized to its content and a `position: sticky` child of the body has a scrollport that never scrolls. Every screen inside the app shell is immune because the shell scrolls its own div — the exceptions are the pages that render directly into the body (`/login`, `/pricing`, the guest menu), and all three had a sticky bar that had never once stuck. Measured at 390x780, `.login-nav`'s viewport `top` went 0 → −250 → −600, moving 1:1 with the content. The fix is per page: `height: 100dvh; overflow-y: auto; overscroll-behavior: contain` on the page root, **and delete the `min-height: 100vh` it was carrying**. Use `dvh`, not `vh` — on a phone `100vh` is the tallest the viewport ever gets, so the fold lands under the URL bar.",
+        "section": "layout"
+      },
+      {
+        "name": "The print reset targets the CELL, which is why a supporting line needs `.cell-sub`",
+        "body": "`@media print` sets `th, td { color: black !important }` — inheritance, so any descendant `<span>` carrying its own colour inline **wins** and prints in theme ink on white paper. Every secondary line inside a table cell in this product was inline-styled that way, so none of them had ever printed legibly, and nobody had noticed because nobody had printed from a dark preset. `.cell-sub` is the class for that line and carries its own print override. Do not reach for the tempting `th *, td * { color: black }` — it would flatten every deliberately-coloured figure inside a cell across every printed report.",
         "section": "layout"
       },
       {
@@ -1254,7 +1267,12 @@
       },
       {
         "name": "The Brand Lockup Rule",
-        "body": "The mark and the wordmark name the same brand, or neither is shown. All four surfaces that draw the lockup — the sidebar and the three signed-out pages (`/login`, `/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside `settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the sidebar and on `/pricing`, `objectFit: contain` on a 4px corner. Only the sidebar carried that conditional for its first year; the public pages drew Crest's hexagon unconditionally *while naming the client*, so a white-labelled operator met their own name beside somebody else's mark on the page they log in through — and on the page a password-reset email lands them on, where a mismatched brand reads as a phishing tell rather than as a bug (S606, fixed S667). **The mark is always `alt=\"\"` and `aria-hidden`**: the wordmark beside it already names the brand, and a labelled mark announces it twice. Product names are not the client's to rebrand — Pricing's plan names stay \"Crest IMS\" and \"Crest HR\".",
+        "body": "The mark and the wordmark name the same brand, or neither is shown. Four of the five surfaces that draw the lockup — the sidebar and the three signed-out pages (`/login`, `/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside `settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the sidebar and on `/pricing`, `objectFit: contain` on a 4px corner. Only the sidebar carried that conditional for its first year; the public pages drew Crest's hexagon unconditionally *while naming the client*, so a white-labelled operator met their own name beside somebody else's mark on the page they log in through — and on the page a password-reset email lands them on, where a mismatched brand reads as a phishing tell rather than as a bug (S606, fixed S667). **The mark is always `alt=\"\"` and `aria-hidden`**: the wordmark beside it already names the brand, and a labelled mark announces it twice. Product names are not the client's to rebrand — Pricing's plan names stay \"Crest IMS\" and \"Crest HR\".",
+        "section": "typography"
+      },
+      {
+        "name": "The fifth surface is `/legal/*`, and it is the deliberate exception: it does not white-label at all",
+        "body": "(S678). Those pages carry Crest's hexagon and the literal `PRODUCT_NAME`, with `COMPANY.name` on the copyright line and in the printed running foot — never `settings.app_name`, never `settings.logo_url`. The rule above is right everywhere a client's own staff sign in; it is wrong on a contract between the provider and that client, whose first sentence names the provider. Reading `app_name` there put a tenant's trading name above Crest's own Terms of Service, in `© <year> …` beneath them, and on every printed copy — a filed contract identifying itself by the name of one of the parties it binds. It was wrong in fact as well as in principle: signed out there is no client, so `SettingsContext` resolves the `client_id IS NULL` row and the live page rendered whatever the operator last saved into it. Same line this rule already draws for Pricing's plan names — product names are not the client's to rebrand.",
         "section": "typography"
       }
     ],
