@@ -291,6 +291,16 @@
   border-left-color: var(--theme-border);
 }
 
+/* The section the reader is in (aria-current="location", set from the page's own scroll). The
+   2px transparent border above was reserved for exactly this. Accent as the edge and accent-ink
+   as the text, the product's own active-nav treatment — the one lit thing in the rail, which is
+   what the rail is for on a document eighteen sections long. */
+.legal-toc a[aria-current] {
+  color: var(--theme-accent-ink);
+  border-left-color: var(--theme-accent);
+  font-weight: 600;
+}
+
 .legal-toc a:focus-visible {
   outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;

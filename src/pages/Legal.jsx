@@ -130,6 +130,43 @@ export default function Legal() {
 
   const toc = useMemo(() => buildToc(text), [text])
 
+  // Which section the reader is in, for the rail. The page is its own scrollport (see Legal.css
+  // on why `.legal-page` scrolls rather than the body), so the listener goes on that element, not
+  // on window — a window scroll listener here would never fire. "Current" is the last heading
+  // whose top has passed the sticky header's bottom edge; below that line nothing has been
+  // reached yet and the first section is current. Recomputed at most once per frame.
+  const [activeId, setActiveId] = useState(null)
+  useEffect(() => {
+    const root = document.querySelector('.legal-page')
+    if (!root || !text) return undefined
+    let frame = 0
+    const measure = () => {
+      frame = 0
+      const heads = root.querySelectorAll('.legal-body .legal-h2')
+      let current = heads[0]?.id || null
+      for (const h of heads) {
+        if (h.getBoundingClientRect().top <= 96) current = h.id
+        else break
+      }
+      // At the very end the last two or three sections share one screen and none of their
+      // headings ever crosses the line, so "Contact" could never light up. Scrolled to the
+      // bottom, the reader is in the last section.
+      if (heads.length && root.scrollTop + root.clientHeight >= root.scrollHeight - 2) {
+        current = heads[heads.length - 1].id
+      }
+      setActiveId(current)
+    }
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(measure)
+    }
+    measure()
+    root.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      root.removeEventListener('scroll', onScroll)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [text])
+
   // The "In short" box for THIS version, if one has been written (null otherwise — a new version
   // does not inherit the old one's paraphrases). Its clause references resolve against the same
   // contents list the rail is built from, so a renumbered heading turns the reference into plain
@@ -446,7 +483,11 @@ export default function Legal() {
                 {/* Choosing a section closes the list on a phone, so the reader lands on the text
                     rather than under the same eighteen links they just scrolled past. Inert on
                     desktop, where the collapsed class has no rule. */}
-                <a href={`#${s.id}`} onClick={() => setTocOpen(false)}>
+                <a
+                  href={`#${s.id}`}
+                  aria-current={activeId === s.id ? 'location' : undefined}
+                  onClick={() => setTocOpen(false)}
+                >
                   {s.label}
                 </a>
               </li>
