@@ -16,16 +16,18 @@ export default function SeatTableModal({ reservation, tables, openTableIds, onCl
 
   return (
     <Modal title={`Seat ${reservation.customer_name} ×${reservation.party_size}`} onClose={onClose} maxWidth={560}>
-      <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         Tap the table they are sitting at. The order opens with {reservation.party_size} cover{reservation.party_size === 1 ? '' : 's'} filled in
         and this booking is marked Seated. A table with a running order cannot be picked — it belongs to another party.
       </p>
       {usable.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--theme-text3)' }}>No tables set up yet.</p>
       ) : sections.map(sec => (
-        <div key={sec || '__none'} style={{ marginBottom: 14 }}>
+        <div key={sec || '__none'} style={{ marginBottom: 16 }}>
           {sections.length > 1 && (
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
+            // The data-table th eyebrow's values (11px / 500 / 0.08em / text2) — a second eyebrow with its
+            // own weight and a unitless letterSpacing (0.4 = 0.4px) is how one product grows two.
+            <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
               {sec || 'No section'}
             </div>
           )}

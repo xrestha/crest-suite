@@ -171,6 +171,7 @@ export default function PosReservations() {
   // reported and the list refreshed, never treated as success.
   async function transition(row, to, extra = {}) {
     if (!canTransition(row.status, to)) return false
+    if (busyId != null) return false // a second press while one is in flight — the buttons are not disabled, see actionBtn
     setBusyId(row.id); setActionError(null)
     const { data, error } = await scopedUpdate('pos_reservations', { ...stampFor(to), ...extra })
       .eq('id', row.id).eq('status', row.status).select('id')
@@ -218,10 +219,14 @@ export default function PosReservations() {
   const isToday = dayIso === todayIso()
   const scopeLabel = filter === 'upcoming' ? 'Next 7 days' : `${bsLabelOf(dayBs)}${isToday ? ' (today)' : ''}`
 
-  const actionBtn = (label, onClick, { danger = false, tip = '' } = {}, key) => {
+  // The busy row's buttons stay ENABLED and wear aria-busy: disabling the one the keyboard user
+  // just pressed drops focus to <body>, and the transition() guard already ignores a second press.
+  // Other rows' buttons are disabled as before, so only one write can be in flight.
+  const actionBtn = (row, label, onClick, { danger = false, tip = '' } = {}, key) => {
+    const mine = busyId === row.id
     const btn = (
       <button key={key || label} type="button" className={`btn btn-ghost btn-sm${danger ? ' btn-danger' : ''}`}
-        onClick={onClick} disabled={busyId != null}>{label}</button>
+        onClick={onClick} disabled={busyId != null && !mine} aria-busy={mine || undefined}>{label}</button>
     )
     return tip ? <Tip key={key || label} text={tip} width={240}>{btn}</Tip> : btn
   }
@@ -237,16 +242,16 @@ export default function PosReservations() {
       </Tip>,
     ]
     if (r.status === 'requested') {
-      out.push(actionBtn('Accept', () => transition(r, 'confirmed'), { tip: 'Confirms the booking — the guest\'s phone shows it as confirmed within a few seconds.' }, 'accept'))
-      out.push(actionBtn('Decline', () => { setCancelTarget(r); setCancelReason('') }, { danger: true }, 'decline'))
+      out.push(actionBtn(r, 'Accept', () => transition(r, 'confirmed'), { tip: 'Confirms the booking — the guest\'s phone shows it as confirmed within a few seconds.' }, 'accept'))
+      out.push(actionBtn(r, 'Decline', () => { setCancelTarget(r); setCancelReason('') }, { danger: true }, 'decline'))
       return [...contact, ...out]
     }
-    if (r.status === 'booked') out.push(actionBtn('Confirm', () => transition(r, 'confirmed'), { tip: 'The guest has confirmed they are coming.' }, 'confirm'))
-    if (canTransition(r.status, 'arrived')) out.push(actionBtn('Arrived', () => transition(r, 'arrived'), { tip: 'The party is here and waiting for a table.' }, 'arrived'))
-    if (canTransition(r.status, 'seated'))  out.push(actionBtn('Seat', () => setSeatTarget(r), { tip: 'Pick the table — opens the order with covers filled in.' }, 'seat'))
-    if (r.status === 'arrived')             out.push(actionBtn('Done', () => transition(r, 'completed'), { tip: 'The visit happened without the order being opened from here (seated by hand, or while offline).' }, 'done'))
-    if (canTransition(r.status, 'no_show')) out.push(actionBtn('No-show', () => setNoShowTarget(r), { danger: true }, 'noshow'))
-    if (canTransition(r.status, 'cancelled')) out.push(actionBtn('Cancel', () => { setCancelTarget(r); setCancelReason('') }, {}, 'cancel'))
+    if (r.status === 'booked') out.push(actionBtn(r, 'Confirm', () => transition(r, 'confirmed'), { tip: 'The guest has confirmed they are coming.' }, 'confirm'))
+    if (canTransition(r.status, 'arrived')) out.push(actionBtn(r, 'Arrived', () => transition(r, 'arrived'), { tip: 'The party is here and waiting for a table.' }, 'arrived'))
+    if (canTransition(r.status, 'seated'))  out.push(actionBtn(r, 'Seat', () => setSeatTarget(r), { tip: 'Pick the table — opens the order with covers filled in.' }, 'seat'))
+    if (r.status === 'arrived')             out.push(actionBtn(r, 'Done', () => transition(r, 'completed'), { tip: 'The visit happened without the order being opened from here (seated by hand, or while offline).' }, 'done'))
+    if (canTransition(r.status, 'no_show')) out.push(actionBtn(r, 'No-show', () => setNoShowTarget(r), { danger: true }, 'noshow'))
+    if (canTransition(r.status, 'cancelled')) out.push(actionBtn(r, 'Cancel', () => { setCancelTarget(r); setCancelReason('') }, {}, 'cancel'))
     if (out.length === 0) return contact
     return [...contact, ...out]
   }
@@ -280,15 +285,15 @@ export default function PosReservations() {
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 16 }}>
-        <button className={`tab-btn${filter === 'day' ? ' tab-btn--active' : ''}`} onClick={() => setFilter('day')}>Day</button>
-        <button className={`tab-btn${filter === 'unconfirmed' ? ' tab-btn--active' : ''}`} onClick={() => setFilter('unconfirmed')}>Unconfirmed</button>
-        <button className={`tab-btn${filter === 'upcoming' ? ' tab-btn--active' : ''}`} onClick={() => setFilter('upcoming')}>Next 7 days</button>
+        <button type="button" className={`tab-btn${filter === 'day' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'day'} onClick={() => setFilter('day')}>Day</button>
+        <button type="button" className={`tab-btn${filter === 'unconfirmed' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'unconfirmed'} onClick={() => setFilter('unconfirmed')}>Unconfirmed</button>
+        <button type="button" className={`tab-btn${filter === 'upcoming' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'upcoming'} onClick={() => setFilter('upcoming')}>Next 7 days</button>
       </div>
 
       {/* Public booking requests — an outlet with the link switched off never sees this band. */}
       {requests.length > 0 && (
-        <div className="card" style={{ padding: '14px 18px', marginBottom: 16, borderColor: 'var(--theme-amber)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div className="card" style={{ padding: 16, marginBottom: 16, borderColor: 'var(--theme-amber)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span className="badge badge-amber">🔔 {requests.length} booking request{requests.length === 1 ? '' : 's'}</span>
             <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
               Sent from the booking link. Accept to confirm, or decline with a reason — the guest's phone updates either way.
@@ -297,7 +302,7 @@ export default function PosReservations() {
           <div className="table-wrap">
             <table className="data-table">
               <thead>
-                <tr><th>For</th><th>Guest</th><th style={{ textAlign: 'right' }}>Guests</th><th>Note</th><th></th></tr>
+                <tr><th>For</th><th>Guest</th><th style={{ textAlign: 'right' }}>Guests</th><th>Note</th><th><span className="visually-hidden">Actions</span></th></tr>
               </thead>
               <tbody>
                 {requests.map(r => {
@@ -314,7 +319,7 @@ export default function PosReservations() {
                         {[r.occasion, r.notes].filter(Boolean).join(' · ') || <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                       </td>
                       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'inline-flex', gap: 6 }}>{rowActions(r)}</div>
+                        <div style={{ display: 'inline-flex', gap: 8 }}>{rowActions(r)}</div>
                       </td>
                     </tr>
                   )
@@ -328,7 +333,7 @@ export default function PosReservations() {
       <ActionError error={actionError} className="action-error--top" />
 
       {loading ? (
-        <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+        <p role="status" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
         <ReportLoadError error={loadError} />
       ) : (
@@ -374,7 +379,7 @@ export default function PosReservations() {
                     <div style={{ fontSize: 14, fontWeight: 700, color: capacity.over.has(c.hour) ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
                       {c.covers}
                     </div>
-                    {totalSeats > 0 && <div style={{ fontSize: 9, color: 'var(--theme-text3)' }}>/ {totalSeats}</div>}
+                    {totalSeats > 0 && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>/ {totalSeats}</div>}
                   </div>
                 ))}
               </div>
@@ -396,7 +401,7 @@ export default function PosReservations() {
                     <th><Tip text="Tables held for this party. Empty means the host will pick one at seating." width={220}>Tables</Tip></th>
                     <th><Tip text="Booked → Confirmed → Arrived → Seated → Completed. No-show and Cancelled end it. Seated means the order is open; Completed means the bill closed." width={280}>Status</Tip></th>
                     <th>Via</th>
-                    <th></th>
+                    <th><span className="visually-hidden">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -428,7 +433,7 @@ export default function PosReservations() {
                           <td>{statusChip(r)}</td>
                           <td><span className={`badge ${IDENTITY_BADGE}`}>{SOURCE_LABEL[r.source] || r.source}</span></td>
                           <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                            <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>{rowActions(r)}</div>
+                            <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>{rowActions(r)}</div>
                           </td>
                         </tr>
                         {open && hasDetail && (

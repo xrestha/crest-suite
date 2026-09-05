@@ -242,7 +242,7 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
         ) : (
           <div role="group" aria-labelledby={idFor('tables-label')} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {sections.map(sec => (
-              <div key={sec || '__none'} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+              <div key={sec || '__none'} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                 {sections.length > 1 && <span style={{ fontSize: 11, color: 'var(--theme-text3)', minWidth: 70 }}>{sec || 'No section'}</span>}
                 {usableTables.filter(t => (t.section || '') === sec).map(t => {
                   const on = tableIds.has(t.id)
@@ -252,9 +252,10 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
                       className={`tab-btn${on ? ' tab-btn--active' : ''}`}
                       aria-pressed={on}
                       onClick={() => toggleTable(t.id)}
-                      title={`${t.name} · ${t.capacity ?? '—'} seats`}
                     >
-                      {t.name}
+                      {/* Seats on the chip itself — a title attribute is hover-only, and the host picking
+                          tables for a party of eight on a tablet has no hover. SeatTableModal already shows it. */}
+                      {t.name} <span style={{ fontSize: 11, fontWeight: 400 }}>· {t.capacity ?? '—'} seats</span>
                     </button>
                   )
                 })}

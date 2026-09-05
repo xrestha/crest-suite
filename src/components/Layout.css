@@ -1197,6 +1197,26 @@ tr.interactive-row:focus-visible {
   transition: background 0.13s, color 0.13s;
 }
 
+/* The small step. Until S680 this class had NO base rule — only the coarse-pointer min-height
+   below — so `btn btn-sm` rendered identically to `btn` on every mouse device, and a Reservations
+   row carrying six of them was six full-size buttons. DESIGN.md had described the class as real
+   for a month; the stylesheet disagreed. 12px type on 5/10 padding: one weight step under .btn,
+   the same footprint as .tab-btn, so a row's action cluster and the page's filter strip agree. */
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  gap: 4px;
+}
+
+/* A button whose write is in flight. Disabling the button a keyboard user just pressed drops
+   focus to <body>, and when the write lands they restart from the top of the page — so the
+   pressed button stays enabled (its handler guards against a second press) and wears this
+   instead. Same opacity as :disabled, so the row reads as "busy" without changing shape. */
+.btn[aria-busy="true"] {
+  opacity: 0.55;
+  cursor: progress;
+}
+
 /* One disabled treatment for every variant. Each call site used to carry its own
    `opacity: busy ? 0.6 : 1` inline, so a button that reached for the class alone had no disabled
    state at all — it simply stopped responding while looking exactly as it had. */

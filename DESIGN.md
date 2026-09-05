@@ -770,6 +770,18 @@ four of which live on the class and none of which announce their absence.
   the badge-box failure one section down, on the class it was never applied to — **CSS has no
   error for a class that does half a job**, and `btn btn-sm` reads as complete because `btn-sm` is
   real. Treat a bare `className="btn"` as a bug on sight.
+- **Small (`.btn-sm`):** 12px on `5px 10px`, `gap: 4px` — one weight step under `.btn`, the same
+  footprint as `.tab-btn`, so a row's action cluster and the page's filter strip agree. **Until
+  S680 this class had no base rule at all**: the only `.btn-sm` selector in the product was the
+  coarse-pointer `min-height: 32px`, so on every mouse device `btn btn-sm` rendered identically to
+  `btn`, and a Reservations row carrying six of them was six full-size buttons. The paragraph above
+  had called the class "real" for a month; the stylesheet disagreed, and nothing fails when a class
+  is missing. Verify a size class exists in `Layout.css` before trusting the name.
+- **Busy (`aria-busy="true"`):** the same `opacity: 0.55` as disabled, with `cursor: progress`,
+  for the button whose write is in flight. It exists because *disabling* the button a keyboard user
+  just pressed drops focus to `<body>`, so when the write lands they restart from the top of the
+  page. The pressed button stays enabled (its handler guards a second press) and wears this; its
+  neighbours on other rows are disabled as before.
 - **Disabled:** one treatment for every variant — `opacity: 0.55` plus `not-allowed`. Before this
   lived on the class, each call site carried its own inline `opacity`, so a button that used the
   class alone had no disabled state at all: it simply stopped responding while looking unchanged.
