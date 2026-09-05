@@ -448,9 +448,7 @@ export default function Legal() {
 
         {isCurrentVersion && !loadFailed && (
           text === null ? (
-            <p className="legal-p" style={{ color: 'var(--theme-text3)' }}>
-              Loading…
-            </p>
+            <p className="legal-p legal-loading">Loading…</p>
           ) : (
             <LegalMarkdown text={bodyText} />
           )

@@ -444,10 +444,16 @@
 /* Amber is this product's warning colour, and both of these are genuine warnings: a document that
    is not yet in force, and a version that is not the one that governs. The fill is a tint with
    full-opacity signal text, never a solid amber fill — red and amber have no paired foreground
-   token that contrasts across all ten presets. */
+   token that contrasts across all ten presets.
+
+   6%, not 12%. `--theme-amber-text` is tuned against the card and the page ground, and a warm
+   tint of amber is neither: at 12% on the Light preset the banner text measured 4.19:1, under
+   AA for 13px, and it is the identical pairing PeriodScope's docs record failing at exactly that
+   figure. At 6% the tint still reads as a band against the ground while the text clears 4.5:1;
+   the border carries the rest of the warning. */
 .legal-banner--draft,
 .legal-banner--old {
-  background: color-mix(in srgb, var(--theme-amber) 12%, transparent);
+  background: color-mix(in srgb, var(--theme-amber) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--theme-amber) 38%, transparent);
   color: var(--theme-amber-text);
 }
@@ -513,8 +519,17 @@
   scroll-margin-top: 84px;
 }
 
-.legal-body .legal-p {
+/* Also bare, for the same reason as `.legal-link` below: the not-found page and the loading line
+   both use this class OUTSIDE `.legal-body`, and inherited the UA's 16px and 1em margins there —
+   a different size from the 14px document they stand in for. */
+.legal-p {
   margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.legal-loading {
+  color: var(--theme-text3);
 }
 
 /* Below 640 the header is no longer sticky (see the block above the layout section), so an 84px
@@ -543,17 +558,23 @@
   margin: 32px 0;
 }
 
-.legal-body .legal-link {
+/* Bare `.legal-link`, deliberately NOT scoped under `.legal-body`. It was, and the not-found
+   page's two links — the only controls on the page a stale external link lands on — sit in a
+   paragraph outside the body, so they fell through to the UA's own `#0000EE`: roughly 2.0:1 on
+   the Dark ground, and blue beside visited-purple on Light. The S678 second-brand-colour-by-
+   omission failure, one branch over from where it was fixed. A class that is only styled inside
+   one ancestor is a class that is half a job everywhere else. */
+.legal-link {
   color: var(--theme-accent-ink);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.legal-body .legal-link:hover {
+.legal-link:hover {
   text-decoration-thickness: 2px;
 }
 
-.legal-body .legal-link:focus-visible {
+.legal-link:focus-visible {
   outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
