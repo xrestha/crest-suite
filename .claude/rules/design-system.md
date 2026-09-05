@@ -502,6 +502,16 @@ is a real class, so the pair reads complete and only the colour is missing.
 Grep for `className="btn"` and `'btn btn-sm'` with no variant beside them. Three sites had it in
 the legal surface alone, two of them on a public page.
 
+**The same failure one level up: a class styled only under one ancestor is half a job everywhere
+else (S679).** `.legal-link` and `.legal-p` were written as `.legal-body .legal-link` and
+`.legal-body .legal-p`, and the not-found page's two links and the Loading line sit OUTSIDE
+`.legal-body` — so they fell through to the UA: `#0000EE` at 16px, roughly **2.0:1** on Dark, blue
+beside visited-purple on Light, on the branch a stale external link lands on. The class name on the
+element reads as adopted; only the selector knows it is conditional. When a class carries an
+identity (a link, a paragraph, a badge), style it bare and scope only the genuinely contextual
+overrides (a hover thickness, a print colour). Before trusting a stylesheet, grep its
+`.parent .child` pairs for a `.child` that is also used outside `.parent`.
+
 ## A badge whose content is a sentence takes `.badge-sentence` (S678)
 
 The badge box carries `text-transform: capitalize`. Right for `paid`; wrong for prose. The admin

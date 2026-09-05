@@ -81,7 +81,8 @@ export default function LegalTab() {
       <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 18px', lineHeight: 1.65 }}>
         These are the documents that govern your use of Crest Suite. Each one carries a version, an
         effective date and a content hash, so the text you agreed to can always be identified
-        exactly.
+        exactly. Each opens with a short plain-language summary; the numbered sections beneath it
+        are the agreement itself.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 34 }}>

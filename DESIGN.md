@@ -251,9 +251,13 @@ because roughly one man in twelve cannot separate the hues and every one of thes
 printed in monochrome eventually.
 
 Density is deliberate and non-negotiable: 13px body, 11px column headers, tight table rows, 32px
-page padding, no reading measure anywhere. This is a working surface, not a document. The softness
-that keeps it from reading as legacy Nepali ERP comes from the radius scale (8/12/18/24px) and the
-warm neutral ground, not from whitespace the data cannot spare.
+page padding, no reading measure anywhere inside the app. This is a working surface, not a
+document. The softness that keeps it from reading as legacy Nepali ERP comes from the radius scale
+(8/12/18/24px) and the warm neutral ground, not from whitespace the data cannot spare. The one
+document in the product — the Terms and Privacy Policy at `/legal/*` — is the one place a measure
+is earned, and it is set at **60ch on the body's children** (measured 66–72 real characters per
+line; the 76ch it shipped with held ~95, because `ch` is the width of Poppins' wide zero, not of
+its average letter).
 
 **Key Characteristics:**
 
@@ -518,7 +522,7 @@ from one rule. Only digits are affected; text cells are unchanged.
 `position: fixed` at 240px (56px collapsed) and `.main-content` reserves that space with a matching
 `margin-left` on the same two values; the two animate in lockstep. Content padding is 32px on every
 page and nothing is centred in a reading measure — every screen here is a working surface rather
-than a document.
+than a document. (`/legal/*` renders outside the shell and is the exception; see Density above.)
 
 **Spacing rhythm is a 4/8/16/24 scale, applied by convention rather than by token.** There are no
 `--spacing-*` custom properties, so the scale lives in the frontmatter and in usage. 16px is the

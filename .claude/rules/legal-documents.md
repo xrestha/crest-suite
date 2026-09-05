@@ -238,6 +238,48 @@ cannot show and gives the support address.
 in `index.js` says so: make `SOURCES` a list per doc type and emit prior versions before
 publishing 1.1, or the ledger's own links answer with an apology.
 
+## The "In short" box is page chrome, keyed by version (S679)
+
+`src/legal/legalSummaries.js` holds a five-or-six-line plain-language summary per
+`${docType}-${version}`, rendered by `Legal.jsx` above §1 inside an `<aside>` that says, in its own
+note, that it is not part of the agreement. **It lives outside the markdown on purpose**: the `.md`
+is hashed byte for byte and every ledger row records that hash, so a sentence added to the document
+is a new version, a re-hash and a re-acceptance for every Owner. A reader's aid must not cost that.
+
+Three properties to keep:
+
+- **Keyed by version, and a missing key renders nothing.** v1.1 shows no box until someone writes
+  one against v1.1's clauses — step 7 of the "Adding version 1.1" checklist in `index.js`. A
+  paraphrase of a clause that has since changed is worse than none.
+- **Every line names one section, and the link is resolved from the live contents list**
+  (`sectionHref` in `Legal.jsx`, the same `buildToc` the rail uses), never a hardcoded slug. A
+  renumbered heading turns the reference into plain text on screen instead of a link to nowhere.
+- **Not printed** (`legal-no-print`). A filed copy carries the agreement and nothing that could be
+  mistaken for part of it.
+
+Check each line against its clause when writing one. The wording is the discipline; the mechanism
+only stops it drifting silently.
+
+## Heading levels: `##` is h2, and the page owns h1 (S679)
+
+`LegalMarkdown` once shifted every markdown level down by one so the document's own `# ` title
+could sit under the page's `<h1>`. S678 began stripping that title for render, which left the
+shift with nothing to justify it and a real cost: the only level-2 heading on the page was the
+rail's "Contents", and a screen reader walking level-2 headings found a table of contents and no
+document. `#` → h2 (defensive; it is stripped anyway), `##` → h2, `###` → h3. The CSS classes stay
+keyed on the *markdown* level (`legal-h2` is a `##`), so the renderer test asserts the outline.
+
+## Below 640px the tables are stacked cards, and the ARIA roles are why that is safe (S679)
+
+`Legal.css` sets `display: block` on the Privacy tables' `table`/`tbody`/`tr`/`td` under
+`screen and (max-width: 640px)` and prints each cell's column name from `data-label`, which the
+renderer sets from the header row (inline markup stripped). **Chrome and Safari drop a table's
+implicit ARIA roles when its display changes**, so the renderer also sets `role="table"` /
+`rowgroup` / `row` / `columnheader` / `cell` explicitly — jsx-a11y calls them redundant, CI treats
+the warning as an error, and the block carries an `eslint-disable` with the reason. Do not remove
+the roles to quiet the linter; on a phone they are the only thing keeping the sub-processor table a
+table.
+
 ## The document's front matter is stripped for RENDER, never from `text` (S678)
 
 Both `.md` files open with `# Crest Suite Terms of Service` and `**Version 1.0 — Effective 3
