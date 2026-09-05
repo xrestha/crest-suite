@@ -471,8 +471,8 @@ screen. It appears where the product speaks in its own voice — a wordmark, a g
 the whole viewport, a document printed on letterhead — and nowhere else. One serif on a screen is
 a signature; two make it an affectation.
 
-**The Brand Lockup Rule.** The mark and the wordmark name the same brand, or neither is shown. All
-four surfaces that draw the lockup — the sidebar and the three signed-out pages (`/login`,
+**The Brand Lockup Rule.** The mark and the wordmark name the same brand, or neither is shown. Four
+of the five surfaces that draw the lockup — the sidebar and the three signed-out pages (`/login`,
 `/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the
 client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside
 `settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the sidebar
@@ -484,6 +484,18 @@ phishing tell rather than as a bug (S606, fixed S667). **The mark is always `alt
 `aria-hidden`**: the wordmark beside it already names the brand, and a labelled mark announces it
 twice. Product names are not the client's to rebrand — Pricing's plan names stay "Crest IMS" and
 "Crest HR".
+
+**The fifth surface is `/legal/*`, and it is the deliberate exception: it does not white-label at
+all** (S678). Those pages carry Crest's hexagon and the literal `PRODUCT_NAME`, with
+`COMPANY.name` on the copyright line and in the printed running foot — never `settings.app_name`,
+never `settings.logo_url`. The rule above is right everywhere a client's own staff sign in; it is
+wrong on a contract between the provider and that client, whose first sentence names the provider.
+Reading `app_name` there put a tenant's trading name above Crest's own Terms of Service, in
+`© <year> …` beneath them, and on every printed copy — a filed contract identifying itself by the
+name of one of the parties it binds. It was wrong in fact as well as in principle: signed out there
+is no client, so `SettingsContext` resolves the `client_id IS NULL` row and the live page rendered
+whatever the operator last saved into it. Same line this rule already draws for Pricing's plan
+names — product names are not the client's to rebrand.
 
 **Form controls do not inherit `font-family` and must be told to.** Every browser substitutes its
 own UA default into `<input>`, `<button>`, `<select>` and `<textarea>`. Measured before the single

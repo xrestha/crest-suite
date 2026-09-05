@@ -558,6 +558,25 @@ file's own text records that between the second and third pass it regrew 7,052 c
 and correctly diagnoses why: *"a new rule has one obvious home and no single session can see that it
 is the fortieth to pick it."*
 
+**The fifth `/doctor` pass happened anyway, on 2026-09-04 (S678) — and the mechanism is why it was
+survivable rather than why it was avoided.** The check did its job: it reported the file at 52,609
+of 53,000, **391 chars from failing `build:verify`**, which is what made the pass necessary at a
+moment of someone's choosing rather than mid-feature. So the task title overstates what a ceiling
+can do — a ceiling cannot stop regrowth, only make it impossible to ignore, and that is worth more
+than the title claimed.
+
+What the pass found is the part worth keeping. **The 889 chars it recovered were not new bloat: they
+were three sections S663 had already migrated, whose bodies had stayed in the root beside the new
+pointer** — `frontend-performance.md`, `component-library.md` and `supabase-sql.md` each carry the
+fuller text under a "Migrated from the root `CLAUDE.md` (S663)" heading, and the root kept its copy
+anyway. A migration that leaves the original in place looks done, passes both T3 and T4, and costs
+exactly what not doing it would have. **Audit for that shape before assuming the file is at its
+floor**: grep the root for the destination filenames T4 already validates, and check whether the
+text above each pointer is a stub or a duplicate. Two further migrations were proposed in the same
+pass and **dropped on inspection**, because the destination's globs did not reach the rule's readers
+— which is T3's blind spot stated precisely: T3 proves a glob resolves to some file, never that it
+resolves to the files that need the rule.
+
 That diagnosis is right, and it means the problem cannot be solved by any single session's judgement.
 Four `/doctor` passes have now been spent on it. The fifth is already scheduled by arithmetic.
 
@@ -734,7 +753,15 @@ rule's `paths:` globs actually match. Measured 2026-09-01 against 363 files unde
 | `hr-payroll.md` | 29,687 | 77 | 5.1% |
 | `pos-billing.md` | 45,301 | 41 | 4.1% |
 
-**The case that prompted this.** `design-system.md` is 65,384 chars — larger than `CLAUDE.md`
+**Re-measured 2026-09-04 (S678): `design-system.md` is now 74,592 chars — up 9,208 (+14%) in three
+days**, against a root `CLAUDE.md` that a ceiling holds at 52,004. The corpus it leads is 466,954
+chars across 27 files, up from 411,319 across 25. So the thing T13 recorded as unmeasured is not
+merely unmeasured, it is moving, and faster than the file the ceiling actually guards — three days
+being the same interval over which the root file once regrew 7,052 chars. Each addition was
+individually correct, which is exactly the failure mode T11's own diagnosis names. **If any ceiling
+is worth making mechanical next, it is this one, keyed on size × glob reach rather than size.**
+
+**The case that prompted this.** `design-system.md` was 65,384 chars — larger than `CLAUDE.md`
 itself at 51,027 — and its globs are `src/**/*.css`, `src/components/**`, `src/pages/**` and
 `src/modules/**`. That is 282 of 363 files under `src/`, so it loads on roughly four out of five
 frontend edits. `component-library.md` carries nearly the same glob set. Together they are ~81,900
