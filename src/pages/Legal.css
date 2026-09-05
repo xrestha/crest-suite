@@ -384,7 +384,7 @@
   background: var(--theme-input-bg);
   border: 1px solid var(--theme-border);
   border-radius: var(--radius-md);
-  max-width: 76ch;
+  max-width: 60ch; /* the document's measure, so the head does not read wider than the body */
 }
 
 .legal-verify-lead {
@@ -472,9 +472,20 @@
   font-size: 14px;
   line-height: 1.7;
   color: var(--theme-text1);
-  /* The one reading-measure claim on this page, and it is earned: this is prose meant to be read
-     end to end, not a working surface. */
-  max-width: 76ch;
+}
+
+/* The one reading-measure claim on this page, and it is earned: this is prose meant to be read
+   end to end, not a working surface.
+
+   60ch, and on the CHILDREN rather than the container, for two measured reasons. `ch` is the
+   width of the font's zero, and Poppins' zero is wide against its average letter: the previous
+   76ch box was 668px and held about 95 characters per line — well past the 75-character ceiling
+   for comfortable reading, on the one surface in the product that is pure reading. 60ch lands
+   the real count in the low seventies. And a measure on the container capped the tables with it,
+   so the "tables may use the full column" rule below had been inert since it was written; now the
+   wrapper is excluded and the tables genuinely get the column. */
+.legal-body > :not(.legal-table-wrap) {
+  max-width: 60ch;
 }
 
 /* A document's own `# ` heading. Legal.jsx strips it before render, because it duplicates the page
@@ -590,10 +601,11 @@
 }
 
 /* The tables here (sub-processors, retention, lawful basis) are wider than the prose measure, so
-   they are allowed to use the full column and scroll inside their own wrapper if they still do not
-   fit. .table-wrap supplies the scroll; this only lifts the reading measure. */
+   they use the full column and scroll inside their own wrapper if they still do not fit.
+   .table-wrap supplies the scroll; the measure rule above excludes this wrapper by selector, which
+   is what actually lifts the measure — a `max-width: none` here could never override a cap set on
+   the parent, and for one release did not. */
 .legal-body .legal-table-wrap {
-  max-width: none;
   margin: 0 0 20px;
 }
 
@@ -792,10 +804,14 @@
   }
 
   .legal-body {
-    max-width: none;
     font-size: 10.5pt;
     line-height: 1.55;
     color: #000;
+  }
+
+  /* The screen measure lives on the body's children; paper has its own margins. */
+  .legal-body > :not(.legal-table-wrap) {
+    max-width: none;
   }
 
   /* Layout.css's print block sets `th, td { color: black }`, which targets the CELL — a descendant
