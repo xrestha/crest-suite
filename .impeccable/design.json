@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-05T06:09:05.358Z",
+  "generatedAt": "2026-09-05T07:23:29.322Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -955,6 +955,22 @@
       "css": ".ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); } .ds-btn-ghost:hover:not(:disabled) { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); } .ds-btn-icon { padding: 0; width: 30px; height: 30px; justify-content: center; flex: 0 0 auto; } .ds-btn-icon svg { width: 15px; height: 15px; }"
     },
     {
+      "name": "Small Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "The small step: 12px on 5/10 padding, the .tab-btn footprint, so a row’s action cluster and the page’s filter strip agree. Real since S680 — before that .btn-sm had only a coarse-pointer min-height and rendered identically to .btn on every mouse device. The second button shows aria-busy: the pressed button stays ENABLED and wears disabled’s opacity with cursor: progress, because disabling the control a keyboard user just pressed drops focus to <body>.",
+      "html": "<span style=\"display:inline-flex;gap:8px;align-items:center\"><button class=\"ds-btn ds-btn-ghost ds-btn-sm\">Confirm</button><button class=\"ds-btn ds-btn-ghost ds-btn-sm\" aria-busy=\"true\">Arrived</button><button class=\"ds-btn ds-btn-ghost ds-btn-sm\" disabled>Seat</button></span>",
+      "css": ".ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); } .ds-btn-ghost:hover:not(:disabled) { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); } .ds-btn-sm { padding: 5px 10px; font-size: 12px; gap: 4px; } .ds-btn[aria-busy=\"true\"] { opacity: 0.55; cursor: progress; }"
+    },
+    {
+      "name": "Row Menu",
+      "kind": "custom",
+      "refersTo": "button-ghost",
+      "description": "The ⋯ overflow for a table row’s SECONDARY actions (RowMenu.jsx, S681). A row shows one next step, the contact button and this; Reservations had six identical ghost pills per row with the irreversible moves interleaved among the routine ones. The trigger is a small ghost icon button with aria-haspopup=\"menu\"; the panel is a portalled, fixed role=\"menu\" of role=\"menuitem\" buttons (every table sits in an overflow-x .table-wrap that would clip it). Danger items last, under a separator, in the red TEXT variant; a same-day-only item is shown disabled with a hint rather than omitted. Shown open and static here so the panel renders.",
+      "html": "<div style=\"display:inline-flex;flex-direction:column;align-items:flex-end;gap:4px\"><button class=\"ds-btn ds-btn-ghost ds-btn-sm ds-btn-icon\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-label=\"More for Sharma\" title=\"More for Sharma\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"19\" cy=\"12\" r=\"1\"/><circle cx=\"5\" cy=\"12\" r=\"1\"/></svg></button><div role=\"menu\" aria-label=\"More for Sharma\" class=\"ds-row-menu\"><button role=\"menuitem\" class=\"ds-row-menu-item\">Arrived</button><button role=\"menuitem\" class=\"ds-row-menu-item\">Seat…</button><button role=\"menuitem\" class=\"ds-row-menu-item\">Mark done…</button><div role=\"separator\" class=\"ds-row-menu-sep\"></div><button role=\"menuitem\" class=\"ds-row-menu-item ds-row-menu-item--danger\">No-show…</button><button role=\"menuitem\" class=\"ds-row-menu-item ds-row-menu-item--danger\">Cancel booking…</button><button role=\"menuitem\" class=\"ds-row-menu-item\" disabled>They turned up…<span class=\"ds-row-menu-hint\">Only on the booking’s own day</span></button></div></div>",
+      "css": ".ds-btn-ghost { background: var(--theme-input-bg, #0f1117); color: var(--theme-text1, #e8e0d0); border: 1px solid var(--theme-border-lt, #1e2330); } .ds-btn-ghost:hover:not(:disabled) { background: var(--theme-table-hover, rgba(255,255,255,0.03)); border-color: var(--theme-accent, #c9a84c); } .ds-btn-sm { padding: 5px 10px; font-size: 12px; gap: 4px; } .ds-btn-icon { padding: 0; width: 30px; height: 30px; justify-content: center; flex: 0 0 auto; } .ds-btn-icon svg { width: 15px; height: 15px; } .ds-row-menu { min-width: 200px; padding: 4px; background: var(--theme-card, #181c27); border: 1px solid var(--theme-border, #2a2f3d); border-radius: var(--radius-md, 12px); box-shadow: var(--theme-card-shadow, 0 10px 24px -8px rgba(15,17,23,0.55)); } .ds-row-menu-item { appearance: none; display: block; width: 100%; text-align: left; background: none; border: none; border-radius: var(--radius-sm, 8px); padding: 8px 12px; font: inherit; font-size: 13px; color: var(--theme-text1, #e8e0d0); cursor: pointer; } .ds-row-menu-item:hover:not(:disabled), .ds-row-menu-item:focus-visible { background: var(--theme-focus-ring, rgba(201,168,76,0.15)); outline: none; } .ds-row-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--theme-focus-outline, #c9a84c); } .ds-row-menu-item--danger { color: var(--theme-red-text, #f87171); } .ds-row-menu-item:disabled { opacity: 0.55; cursor: not-allowed; } .ds-row-menu-hint { display: block; font-size: 11px; color: var(--theme-text3, #8a92a3); margin-top: 2px; } .ds-row-menu-sep { height: 1px; background: var(--theme-border-lt, #1e2330); margin: 4px 6px; }"
+    },
+    {
       "name": "Danger Button",
       "kind": "button",
       "refersTo": "button-danger",
@@ -1274,6 +1290,21 @@
         "name": "The fifth surface is `/legal/*`, and it is the deliberate exception: it does not white-label at all",
         "body": "(S678). Those pages carry Crest's hexagon and the literal `PRODUCT_NAME`, with `COMPANY.name` on the copyright line and in the printed running foot — never `settings.app_name`, never `settings.logo_url`. The rule above is right everywhere a client's own staff sign in; it is wrong on a contract between the provider and that client, whose first sentence names the provider. Reading `app_name` there put a tenant's trading name above Crest's own Terms of Service, in `© <year> …` beneath them, and on every printed copy — a filed contract identifying itself by the name of one of the parties it binds. It was wrong in fact as well as in principle: signed out there is no client, so `SettingsContext` resolves the `client_id IS NULL` row and the live page rendered whatever the operator last saved into it. Same line this rule already draws for Pricing's plan names — product names are not the client's to rebrand.",
         "section": "typography"
+      },
+      {
+        "name": "A size class exists only if the stylesheet says so",
+        "section": "components",
+        "body": "`btn btn-sm` read as complete for a month while `.btn-sm` had no base rule — the only selector was the coarse-pointer min-height — so on every mouse device it rendered identically to `.btn`. CSS raises no error for a class that does not exist. Verify a size or variant class in Layout.css before trusting its name; the S678 bare-`.btn` failure is the same shape one step over."
+      },
+      {
+        "name": "A pressed button stays enabled and wears aria-busy",
+        "section": "components",
+        "body": "Disabling the control a keyboard user just pressed drops focus to `<body>`, so when the write lands they restart from the top of the page. The pressed button keeps focus, its handler ignores a second press, and `.btn[aria-busy=\"true\"]` gives it disabled’s opacity with `cursor: progress`. Its neighbours on other rows are disabled as before, so one write is in flight at a time."
+      },
+      {
+        "name": "A row’s actions are one next step plus an overflow, never a bar of equals",
+        "section": "components",
+        "body": "When a row’s actions are a column width rather than a control, show the move made every time (Confirm → Arrived → Seat), the contact button, and a ⋯ `RowMenu` for the rest, with the destructive items last under a separator in the red text variant. Six identical ghost pills per row, the irreversible ones interleaved with the routine ones, is how a Saturday book became a wall of 120 look-alike buttons."
       }
     ],
     "dos": [
