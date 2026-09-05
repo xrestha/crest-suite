@@ -467,6 +467,72 @@
   text-decoration: underline;
 }
 
+/* ── "In short" ─────────────────────────────────────────────────────────────────────────────
+   The plain-language summary above §1 (src/legal/legalSummaries.js). A card surface, one tone off
+   the page, so it reads as a thing set beside the contract rather than the contract's first
+   section — and it is excluded from print, because a filed copy must carry the agreement and
+   nothing that could be mistaken for part of it. Same measure as the body. */
+.legal-summary {
+  font-size: 14px; /* so its 60ch is the body's 60ch — the box is outside .legal-body */
+  max-width: 60ch;
+  margin: 0 0 28px;
+  padding: 16px 18px 14px;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-md);
+}
+
+.legal-summary-title {
+  font-family: Georgia, serif;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0 0 4px;
+  color: var(--theme-text1);
+}
+
+.legal-summary-note {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--theme-text2);
+}
+
+.legal-summary-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--theme-text1);
+}
+
+.legal-summary-list li {
+  margin-bottom: 8px;
+}
+
+.legal-summary-list li:last-child {
+  margin-bottom: 0;
+}
+
+/* The clause reference after each line: quiet, and a link where the section resolves. */
+.legal-summary-ref {
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--theme-text3);
+}
+
+a.legal-summary-ref {
+  color: var(--theme-accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a.legal-summary-ref:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 /* ── Document body ──────────────────────────────────────────────────────────────────────── */
 .legal-body {
   font-size: 14px;

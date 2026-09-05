@@ -34,6 +34,7 @@ import {
   legalPath,
   PRIOR_VERSIONS,
 } from '../legal'
+import { legalSummary } from '../legal/legalSummaries'
 import './Legal.css'
 
 /**
@@ -128,6 +129,16 @@ export default function Legal() {
   }, [pageTitle])
 
   const toc = useMemo(() => buildToc(text), [text])
+
+  // The "In short" box for THIS version, if one has been written (null otherwise — a new version
+  // does not inherit the old one's paraphrases). Its clause references resolve against the same
+  // contents list the rail is built from, so a renumbered heading turns the reference into plain
+  // text on screen rather than a link that scrolls nowhere.
+  const summary = doc && isCurrentVersion ? legalSummary(docType, doc.version) : null
+  const sectionHref = (n) => {
+    const hit = toc.find((s) => s.label.startsWith(`${n}.`))
+    return hit ? `#${hit.id}` : null
+  }
   // Rendered without the document's own title and version line, which the page header above already
   // carries. `text` itself is never touched — it is what the Download button hands over and what
   // the hash was taken across.
@@ -324,7 +335,9 @@ export default function Legal() {
               onClick={() => setVerifyOpen((v) => !v)}
             >
               <ShieldCheck size={13} aria-hidden="true" />
-              Verify this document
+              {/* Not "Verify this document": to a reader with English as a second language an
+                  imperative reads as an instruction they must follow, and this is an offer. */}
+              Check this is the real text
               <ChevronDown
                 size={13}
                 aria-hidden="true"
@@ -487,7 +500,45 @@ export default function Legal() {
           text === null ? (
             <p className="legal-p legal-loading">Loading…</p>
           ) : (
-            <LegalMarkdown text={bodyText} />
+            <>
+              {/* Page chrome, not document text: the markdown is hashed and every acceptance
+                  records that hash, so a reader's aid lives beside the contract and says so. See
+                  src/legal/legalSummaries.js. Not printed — a filed copy carries the agreement and
+                  nothing that could be mistaken for part of it. */}
+              {summary && (
+                <aside className="legal-summary legal-no-print" aria-labelledby="legal-summary-title">
+                  <h2 className="legal-summary-title" id="legal-summary-title">
+                    In short
+                  </h2>
+                  {/* The first clause names the provider by its registered name, and the header
+                      names the product; for a first-time reader nothing bridged the two before
+                      the legalese did. One sentence does. */}
+                  <p className="legal-summary-note">
+                    {PRODUCT_NAME} is made by {COMPANY.name.replace(/\.$/, '')}. This is a
+                    plain-language summary, not part of the agreement — the numbered sections
+                    below are what you accept.
+                  </p>
+                  <ul className="legal-summary-list">
+                    {summary.map((item, i) => {
+                      const href = sectionHref(item.section)
+                      return (
+                        <li key={i}>
+                          {item.text}{' '}
+                          {href ? (
+                            <a className="legal-summary-ref" href={href}>
+                              §{item.section}
+                            </a>
+                          ) : (
+                            <span className="legal-summary-ref">§{item.section}</span>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </aside>
+              )}
+              <LegalMarkdown text={bodyText} />
+            </>
           )
         )}
       </article>

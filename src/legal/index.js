@@ -31,6 +31,10 @@
 //      generator emits prior versions as well, the one link whose whole purpose is "show me what I
 //      agreed to" answers with an apology. Make `SOURCES` a list per doc type before publishing 1.1.
 //   6. Bump CACHE_NAME in public/service-worker.js, or existing users keep the old text.
+//   7. Write the "In short" box for the new version in ./legalSummaries.js, checking every line
+//      against the clause it cites. It is keyed by version on purpose: 1.1 renders NO summary
+//      until one is written for it, because a paraphrase of a clause that has since changed is
+//      worse than none.
 
 import { LEGAL_META } from './generated/legalMeta'
 
