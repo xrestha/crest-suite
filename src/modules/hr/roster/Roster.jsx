@@ -386,10 +386,18 @@ export default function Roster() {
   // in JS" precedent as LeaveManagement.jsx. Used to flag/block scheduling an employee on a day
   // they already have approved leave for.
   const [approvedLeaveByEmp, setApprovedLeaveByEmp] = useState({}) // { employeeId: [{start:Date, end:Date}] }
+  // True when the read failed: the guard is advisory, so it says on the board that conflicts
+  // cannot be checked rather than silently letting a scheduled-on-leave day through.
+  const [leaveGuardUnavailable, setLeaveGuardUnavailable] = useState(false)
   useEffect(() => {
     if (!clientId) return
-    scopedFrom('hr_leave_requests', 'employee_id, start_date, end_date').eq('status', 'approved')
-      .then(({ data }) => {
+    // Paged (S682): "small table" stops being true after a couple of years — every approved
+    // request the client has ever had, and past the 1000-row cap the guard silently missed
+    // conflicts for whichever employees fell off the page.
+    fetchAllRows(() => scopedFrom('hr_leave_requests', 'id, employee_id, start_date, end_date').eq('status', 'approved').order('id'))
+      .then(({ data, error }) => {
+        setLeaveGuardUnavailable(!!error)
+        if (error) { console.error('approved-leave read failed:', error); return }
         const map = {}
         for (const r of data || []) {
           if (!map[r.employee_id]) map[r.employee_id] = []
@@ -768,6 +776,11 @@ export default function Roster() {
       </div>
 
       {/* Top tab bar */}
+      {leaveGuardUnavailable && (
+        <p role="status" className="no-print" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          Approved-leave conflicts cannot be checked right now — the leave requests could not be loaded. Reload to try again.
+        </p>
+      )}
       <div className="tab-bar no-print" style={{ marginBottom: 20 }}>
         <button className={`tab-btn${tab === 'board'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('board')}>Roster Board</button>
         <button className={`tab-btn${tab === 'shifts' ? ' tab-btn--active' : ''}`} onClick={() => setTab('shifts')}>Shift Types</button>

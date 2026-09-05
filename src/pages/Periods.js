@@ -11,6 +11,7 @@ import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerRepo
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
 import { closingCountNote } from './periods/closingCountNote'
+import { errorText } from '../shared/errorText'
 
 export default function Periods() {
   const { isAdmin, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()
@@ -84,15 +85,22 @@ export default function Periods() {
   // re-running this (e.g. a retried close after a network blip) can't fail on a conflict. Both
   // tables are period-scoped, not client-scoped (see CLAUDE.md), so this stays on raw
   // supabase.from() like the rest of Stock.js's opening/closing reads and writes.
+  //
+  // Returns `{ error }` rather than dropping it (S682): a failed closing_stock read used to look
+  // like "nothing was counted" and open the new month with NO opening stock and no message —
+  // every variance and COGS figure for that month wrong from day one, with "Resync Opening Stock"
+  // the only recovery and nothing to say it was needed.
   async function carryForwardOpeningStock(closedPeriodId, newPeriodId) {
-    if (!closedPeriodId || !newPeriodId) return
-    const { data: closingRows } = await supabase.from('closing_stock')
+    if (!closedPeriodId || !newPeriodId) return { error: null }
+    const { data: closingRows, error: readErr } = await supabase.from('closing_stock')
       .select('item_id, physical_qty').eq('period_id', closedPeriodId)
+    if (readErr) return { error: readErr }
     const rows = (closingRows || [])
       .filter(r => r.physical_qty != null)
       .map(r => ({ period_id: newPeriodId, item_id: r.item_id, qty: r.physical_qty }))
-    if (rows.length === 0) return
-    await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' })
+    if (rows.length === 0) return { error: null }
+    const { error: writeErr } = await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' })
+    return { error: writeErr || null }
   }
 
   // Best-effort, non-blocking — report generation touches ~10 tables across 3 modules and must
@@ -306,7 +314,17 @@ export default function Periods() {
         )
       }
     }
-    if (nextPeriodId) await carryForwardOpeningStock(period.id, nextPeriodId)
+    if (nextPeriodId) {
+      const { error: cfErr } = await carryForwardOpeningStock(period.id, nextPeriodId)
+      if (cfErr) {
+        console.error('Opening-stock carry-forward failed:', cfErr)
+        window.alert(
+          `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} was closed and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opened, but the closing count could not be carried into it as opening stock — ` +
+          `${BS_MONTHS[nextMonth - 1]}'s Stock Count currently opens with no opening figures.\n\n` +
+          `Use "Resync Opening Stock" on the ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} row to carry it forward before anyone enters purchases or sales.\n\n${errorText(cfErr, 'operator')}`
+        )
+      }
+    }
     await generateReportBestEffort(clientId, { ...period, status: 'closed' })
     setJustClosedReport({ bsYear: period.bs_year, bsMonth: period.bs_month })
     loadPeriods()
@@ -390,8 +408,14 @@ export default function Periods() {
   async function resyncOpeningStock(period) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
-    const { data: nextPeriod } = await scopedFrom('monthly_periods', 'id')
+    const { data: nextPeriod, error: nextErr } = await scopedFrom('monthly_periods', 'id')
       .eq('bs_year', nextYear).eq('bs_month', nextMonth).maybeSingle()
+    // A failed read is not "no period exists" — that sentence is a confident claim about the data,
+    // and it was being made on a dropped connection (S682).
+    if (nextErr) {
+      window.alert(`Could not check whether a ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists, so nothing was synced. Try again.\n\n${errorText(nextErr, 'operator')}`)
+      return
+    }
     if (!nextPeriod) {
       window.alert(`No ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists yet for this client — nothing to sync into.`)
       return

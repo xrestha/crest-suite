@@ -7,7 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
-import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
 import { computePayslip } from './payrollCompute'
 import { computeMonthlyTds } from './tds'
 import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift, groupByEmployee, sliceFor } from './payrollData'
@@ -134,7 +134,15 @@ export default function PayrollRun() {
     setRepayments(reps || [])
     setRun(runRow || null)
     if (runRow) {
-      const { data: slips } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      if (!periodReq.isCurrent(periodId)) return
+      // A failed slip read used to render an EMPTY register under a saved run's header, and the
+      // stale-draft comparison then ran against nothing. PayrollCalculation.jsx:271 is the shape.
+      if (slipErr) {
+        setMsg('error:Could not load this run\'s payslips — nothing below is a real figure. ' + errorText(slipErr, 'operator'))
+        setPayslips([]); setYtdMap({}); setTadaMap({})
+        return
+      }
       setPayslips(slips || [])
       // Only a saved run needs the freshness comparison; with no run there is nothing to be
       // stale against, and these two are the page's only extra round trips.
@@ -337,15 +345,17 @@ export default function PayrollRun() {
     if (!freshness.ok) {
       const staleNames   = freshness.stale.map(nameOf)
       const missingNames = freshness.missing.map(nameOf)
+      // The amber stale-draft banner above the register already lists every affected employee
+      // and carries the Regenerate button; this only has to say why the click did nothing. It was
+      // a window.alert (S682) — a multi-line diagnostic in a box that cannot be copied, styled or
+      // read beside the register, and that a "block dialogs" setting turns into a silent no-op.
       const lines = [
-        'This payroll cannot be finalized yet — it no longer matches the current attendance, overtime and TADA data.',
-        '',
-        staleNames.length   ? `Figures changed since Generate (${staleNames.length}): ${staleNames.slice(0, 8).join(', ')}${staleNames.length > 8 ? `, +${staleNames.length - 8} more` : ''}` : '',
-        missingNames.length ? `Employees with no payslip in this run (${missingNames.length}): ${missingNames.slice(0, 8).join(', ')}${missingNames.length > 8 ? `, +${missingNames.length - 8} more` : ''}` : '',
-        '',
-        'Click Regenerate to rebuild the draft from current data, then finalize.',
+        'Not finalized — this draft no longer matches current attendance, overtime and TADA data.',
+        staleNames.length   ? `${staleNames.length} changed since Generate` : '',
+        missingNames.length ? `${missingNames.length} with no payslip` : '',
+        'Click Regenerate, then finalize.',
       ].filter(Boolean)
-      window.alert(lines.join('\n'))
+      setMsg('error:' + lines.join(' · '))
       return
     }
 
@@ -366,7 +376,9 @@ export default function PayrollRun() {
     // Build auto-repayment rows and track which advances become fully settled
     const repayRows = []
     const settleIds = []
-    const today = new Date().toISOString().split('T')[0]
+    // formatAd, not toISOString().slice(0,10): the UTC slice is YESTERDAY between 00:00 and 05:45
+    // Nepal time, which is exactly when a payroll gets finalized after a late shift.
+    const today = formatAd(new Date())
     const monthLabel = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} payroll`
 
     for (const slip of payslips) {
@@ -402,18 +414,35 @@ export default function PayrollRun() {
       if ((s.tada_amount || 0) > 0 && Array.isArray(s.tada_claim_ids)) tadaClaimIds.push(...s.tada_claim_ids)
     })
 
-    await scopedUpdate('hr_payroll_runs', { status: 'finalized', finalized_at: new Date().toISOString() }).eq('id', run.id)
+    // Five writes to four ledgers, and supabase-js never throws — it resolves `{ error }`. Before
+    // S682 all five ran bare and the page then said "Finalized" whatever had landed, so a dropped
+    // connection could leave the run finalized with no repayment rows, or repayments recorded and
+    // the advances still active, or TADA claims still Approved and payable a second time. Stop at
+    // the first failure and say which ledger did NOT move. Reopen → Finalize is idempotent by
+    // design (the delete-then-insert above), so "reopen and finalize again" is always a safe
+    // recovery, and the reload first means the register shows the true state, not the intended one.
+    const failAt = async (what, error) => {
+      await loadAll(period.id, period.bs_year, period.bs_month)
+      setMsg('error:' + what + ' ' + errorText(error, 'operator'))
+      setBusy(false)
+    }
+    const { error: runErr } = await scopedUpdate('hr_payroll_runs', { status: 'finalized', finalized_at: new Date().toISOString() }).eq('id', run.id)
+    if (runErr) { await failAt('Payroll was NOT finalized — nothing has changed.', runErr); return }
     // Idempotent: delete prior auto-repayments for this run, then re-insert
-    await scopedDelete('hr_advance_repayments').eq('payroll_run_id', run.id)
+    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('payroll_run_id', run.id)
+    if (delErr) { await failAt('The run is marked finalized, but its advance repayments were not recorded. Reopen it and finalize again.', delErr); return }
     if (repayRows.length > 0) {
-      await scopedInsert('hr_advance_repayments', repayRows)
+      const { error: insErr } = await scopedInsert('hr_advance_repayments', repayRows)
+      if (insErr) { await failAt('The run is marked finalized, but its advance repayments were not recorded. Reopen it and finalize again.', insErr); return }
     }
     if (settleIds.length > 0) {
-      await scopedUpdate('hr_advances', { status: 'settled' }).in('id', settleIds)
+      const { error: settleErr } = await scopedUpdate('hr_advances', { status: 'settled' }).in('id', settleIds)
+      if (settleErr) { await failAt(`Repayments were recorded, but ${settleIds.length} fully repaid advance(s) still show as active. Reopen and finalize again, or settle them in Advances & Loans.`, settleErr); return }
     }
     if (tadaClaimIds.length > 0) {
-      await scopedUpdate('hr_tada_claims', { status: 'paid', paid_at: new Date().toISOString(), paid_method: 'Payroll' })
+      const { error: tadaErr } = await scopedUpdate('hr_tada_claims', { status: 'paid', paid_at: new Date().toISOString(), paid_method: 'Payroll' })
         .in('id', tadaClaimIds).eq('status', 'approved')
+      if (tadaErr) { await failAt(`Payroll is finalized, but ${tadaClaimIds.length} TADA claim(s) paid through it still show as Approved — mark them Paid in TADA Claims so they are not reimbursed twice.`, tadaErr); return }
     }
 
     await loadAll(period.id, period.bs_year, period.bs_month)
@@ -436,13 +465,26 @@ export default function PayrollRun() {
     // (S600): reopening a payroll run could reactivate an advance a settlement had closed and
     // already deducted in full, handing a departed employee a live loan and silently invalidating
     // the settlement's frozen figure. Scoped to this run's own advances, that cannot happen.
-    const { data: ownReps } = await scopedFrom('hr_advance_repayments', 'advance_id').eq('payroll_run_id', run.id)
+    //
+    // Both guard reads carry their error (S682): a failed read here used to leave `touchedIds`
+    // empty, delete the run's repayment rows anyway and skip every reactivation — the exact
+    // divergence the paragraph above says this code prevents. FinalSettlement.jsx's reopen has
+    // the same shape: refuse before the first write, and after it name what is already changed.
+    const failAt = async (what, error) => {
+      await loadAll(period.id, period.bs_year, period.bs_month)
+      setMsg('error:' + what + ' ' + errorText(error, 'operator'))
+      setBusy(false)
+    }
+    const { data: ownReps, error: ownErr } = await scopedFrom('hr_advance_repayments', 'advance_id').eq('payroll_run_id', run.id)
+    if (ownErr) { setMsg('error:Could not read this run\'s advance repayments, so nothing was changed — try again. ' + errorText(ownErr, 'operator')); setBusy(false); return }
     const touchedIds = [...new Set((ownReps || []).map(r => r.advance_id))]
 
-    await scopedDelete('hr_advance_repayments').eq('payroll_run_id', run.id)
+    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('payroll_run_id', run.id)
+    if (delErr) { setMsg('error:Nothing was changed — this run\'s advance repayments could not be removed. Try again. ' + errorText(delErr, 'operator')); setBusy(false); return }
 
     if (touchedIds.length > 0) {
-      const { data: updatedReps } = await scopedFrom('hr_advance_repayments', 'advance_id, amount').in('advance_id', touchedIds)
+      const { data: updatedReps, error: updErr } = await scopedFrom('hr_advance_repayments', 'advance_id, amount').in('advance_id', touchedIds)
+      if (updErr) { await failAt(`This run's repayments were removed, but its ${touchedIds.length} advance(s) could not be re-checked, so none were reactivated. Reactivate them in Advances & Loans, or press Reopen again.`, updErr); return }
       const updatedRepaidMap = {}
       ;(updatedReps || []).forEach(r => {
         updatedRepaidMap[r.advance_id] = (updatedRepaidMap[r.advance_id] || 0) + (parseFloat(r.amount) || 0)
@@ -452,7 +494,8 @@ export default function PayrollRun() {
         .filter(a => Math.max(0, parseFloat(a.amount) - (updatedRepaidMap[a.id] || 0)) > 0.01)
         .map(a => a.id)
       if (reactivateIds.length > 0) {
-        await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivateIds)
+        const { error: reErr } = await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivateIds)
+        if (reErr) { await failAt(`This run's repayments were removed, but ${reactivateIds.length} advance(s) still show as settled. Reactivate them in Advances & Loans, or press Reopen again.`, reErr); return }
       }
     }
 
@@ -463,11 +506,13 @@ export default function PayrollRun() {
       if (Array.isArray(s.tada_claim_ids) && s.tada_claim_ids.length > 0) tadaClaimIds.push(...s.tada_claim_ids)
     })
     if (tadaClaimIds.length > 0) {
-      await scopedUpdate('hr_tada_claims', { status: 'approved', paid_at: null, paid_method: null })
+      const { error: tadaErr } = await scopedUpdate('hr_tada_claims', { status: 'approved', paid_at: null, paid_method: null })
         .in('id', tadaClaimIds).eq('paid_method', 'Payroll')
+      if (tadaErr) { await failAt('Advances were reset, but the TADA claims paid through this run still show as Paid. Press Reopen again, or fix them in TADA Claims.', tadaErr); return }
     }
 
-    await scopedUpdate('hr_payroll_runs', { status: 'draft', finalized_at: null }).eq('id', run.id)
+    const { error: draftErr } = await scopedUpdate('hr_payroll_runs', { status: 'draft', finalized_at: null }).eq('id', run.id)
+    if (draftErr) { await failAt('Its ledgers were reset, but the run still shows as finalized — press Reopen again.', draftErr); return }
     await loadAll(period.id, period.bs_year, period.bs_month)
     setMsg('ok:Reopened'); setBusy(false)
   }
@@ -681,7 +726,7 @@ export default function PayrollRun() {
                           <td style={{ textAlign: 'right' }}>
                             {finalized
                               ? <span style={{ color: s.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.tds > 0 ? `−${fmt(s.tds)}` : '—'}</span>
-                              : <input type="number" min="0" defaultValue={s.tds || ''} onBlur={e => updateTds(s, e.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
+                              : <input type="number" min="0" defaultValue={s.tds || ''} onBlur={e => updateTds(s, e.target.value)} placeholder="0" aria-label={`TDS for ${emp?.full_name || 'employee'}`} style={{ ...inp, width: 80, textAlign: 'right' }} />}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
@@ -694,7 +739,7 @@ export default function PayrollRun() {
                               )}
                               {finalized
                                 ? <span style={{ color: (s.tada_amount || 0) > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{(s.tada_amount || 0) > 0 ? `+${fmt(s.tada_amount)}` : '—'}</span>
-                                : <input type="number" min="0" defaultValue={s.tada_amount || ''} onBlur={e => updateTada(s, e.target.value)} placeholder="0" style={{ ...inp, width: 80, textAlign: 'right' }} />}
+                                : <input type="number" min="0" defaultValue={s.tada_amount || ''} onBlur={e => updateTada(s, e.target.value)} placeholder="0" aria-label={`TADA amount for ${emp?.full_name || 'employee'}`} style={{ ...inp, width: 80, textAlign: 'right' }} />}
                             </div>
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>

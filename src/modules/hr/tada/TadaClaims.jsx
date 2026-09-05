@@ -8,6 +8,8 @@ import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import TadaSettingsModal from './TadaSettingsModal'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount } from './tadaShared'
 import { TADA_REQUEST_STATUS } from '../payrollConstants'
@@ -52,6 +54,7 @@ export default function TadaClaims() {
   const [claims,    setClaims]    = useState([])
   const [items,     setItems]     = useState([])
   const [loading,   setLoading]   = useState(true)
+  const [loadError, setLoadError] = useState(null) // a failed read is not an empty queue
 
   const [filterStatus, setFilterStatus] = useState('pending') // pending | approved | rejected | paid | all
   // hr_tada_claims has no bs_year/bs_month of its own — it's a standalone ledger of plain AD
@@ -81,15 +84,26 @@ export default function TadaClaims() {
   const load = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
-    const [{ data: emps }, { data: vends }, { data: cls }, { data: settingsRow }, { data: pers }] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, employee_code, status').order('full_name'),
       scopedFrom('vendors', 'id, name').eq('is_active', true).order('name'),
-      scopedFrom('hr_tada_claims').order('created_at', { ascending: false }),
+      // Paged (S682): every claim the client has ever filed, so the silent 1000-row cap would
+      // drop the OLDEST claims from the list with no error. `.order('id')` is the tiebreaker.
+      fetchAllRows(() => scopedFrom('hr_tada_claims').order('created_at', { ascending: false }).order('id')),
       // settings has a nullable client_id (no free-default tier for it, unlike most tables) —
       // stays on raw supabase.from() rather than scopedDb, same as every other settings read.
       supabase.from('settings').select('tada_vehicle_rates, tada_purpose_options, tada_start_points').eq('client_id', clientId).maybeSingle(),
       scopedFrom('monthly_periods', 'id, bs_year, bs_month, status').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
     ])
+    // A failed read is not an empty queue: keep the last-good lists and say so.
+    const failed = results.find(r => r && r.error)
+    if (failed) {
+      setLoadError(asActionError(failed.error, 'operator'))
+      setLoading(false)
+      return
+    }
+    setLoadError(null)
+    const [{ data: emps }, { data: vends }, { data: cls }, { data: settingsRow }, { data: pers }] = results
     setEmployees(emps || [])
     setVendors(vends || [])
     setClaims(cls || [])
@@ -106,7 +120,9 @@ export default function TadaClaims() {
     if (claimIds.length > 0) {
       // hr_tada_claim_items has no client_id column of its own — scoped via claim_id against
       // this client's already-scoped claim ids, same parent-scoped pattern as recipe_ingredients.
-      const { data: its } = await supabase.from('hr_tada_claim_items').select('*').in('claim_id', claimIds)
+      // Chunked: an .in() list of every claim id is a URL as well as a row count (S629).
+      const { data: its, error: itsErr } = await fetchAllRowsChunked(claimIds, ids => supabase.from('hr_tada_claim_items').select('*').in('claim_id', ids).order('id'))
+      if (itsErr) { setLoadError(asActionError(itsErr, 'operator')); setLoading(false); return }
       setItems(its || [])
     } else {
       setItems([])
@@ -340,6 +356,8 @@ export default function TadaClaims() {
           </button>
         </div>
       </div>
+
+      <ActionError error={loadError} />
 
       {/* Summary cards */}
       <div className="stat-grid">

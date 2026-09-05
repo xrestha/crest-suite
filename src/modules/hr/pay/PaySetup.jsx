@@ -182,6 +182,7 @@ export default function PaySetup() {
                   <th>
                     <Tip text="Whether bank name + account number are on file for salary disbursement." width={240}>Bank</Tip>
                   </th>
+                  <th><span className="visually-hidden">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -189,8 +190,11 @@ export default function PaySetup() {
                   const s = getSalary(emp)
                   const st = STATUS_COLORS[emp.status] || STATUS_COLORS.inactive
                   const hasBank = emp.bank_name && emp.bank_account_no
+                  // The row click stays as a pointer convenience; the Edit button in the last cell
+                  // is the keyboard/screen-reader path. Before S682 the <tr onClick> was the ONLY
+                  // way into pay + bank details, so a keyboard user could not set pay.
                   return (
-                    <tr key={emp.id} style={{ cursor: 'pointer' }} onClick={() => setEditing(emp)} title="Click to edit pay & bank details">
+                    <tr key={emp.id} style={{ cursor: 'pointer' }} onClick={() => setEditing(emp)}>
                       <td>
                         <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
                         <div style={{ display: 'flex', gap: 6, marginTop: 3, alignItems: 'center' }}>
@@ -228,6 +232,12 @@ export default function PaySetup() {
                       <td style={{ fontSize: 12 }}>
                         {hasBank ? <span style={{ color: 'var(--theme-text3)' }}>{emp.bank_name}</span> : <span style={{ color: 'var(--theme-amber-text)' }}>⚠ not set</span>}
                       </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button type="button" className="btn btn-ghost btn-sm" aria-label={`Edit pay and bank details for ${emp.full_name}`}
+                          onClick={e => { e.stopPropagation(); setEditing(emp) }}>
+                          Edit
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
@@ -241,6 +251,7 @@ export default function PaySetup() {
                   <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmt(totals.deductions)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(totals.net)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmt(totals.ssf_employer)}</td>
+                  <td />
                   <td />
                 </tr>
               </tfoot>

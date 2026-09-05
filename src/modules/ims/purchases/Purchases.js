@@ -19,6 +19,7 @@ import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 
 // A bill row's payment method as every screen displays it. NULL means Cash — the form's default,
 // and what pre-column bills hold — so the filter, the option list and the row badge all resolve it
@@ -82,6 +83,7 @@ export default function Purchases() {
   // "Delete All" typed-confirmation (purchases/returns) — a whole-period wipe gets a heavier
   // confirmation than a routine single-bill delete, which still uses window.confirm.
   const [deleteAllTarget, setDeleteAllTarget] = useState(null) // 'purchases' | 'returns' | null
+  const [actionError, setActionError]         = useState(null) // the last delete that did not land
   const [deleteAllTyped, setDeleteAllTyped]   = useState('')
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -177,12 +179,18 @@ export default function Purchases() {
     const n = groupEntries.length
     const groupTotal = groupEntries.reduce((s, e) => s + e.qty * e.rate, 0)
     if (!window.confirm(`Delete this bill (${n} item${n !== 1 ? 's' : ''}, NPR ${Math.round(groupTotal).toLocaleString('en-NP')})? Any returns linked to these entries will be unlinked. This cannot be undone.`)) return
+    setActionError(null)
     const hasGroupId = groupEntries[0]?.purchase_group_id
-    if (hasGroupId) {
-      await supabase.from('purchase_entries').delete().eq('purchase_group_id', groupId)
-    } else {
+    // supabase-js resolves `{ error }`; a bare await here meant a refused delete (RLS on a closed
+    // period, a dropped connection) just reloaded the same rows and the bill "came back" with no
+    // explanation (S682).
+    const { error } = hasGroupId
+      ? await supabase.from('purchase_entries').delete().eq('purchase_group_id', groupId)
       // Legacy pre-purchase_group_id bills: one .in() delete, not one round trip per entry.
-      await supabase.from('purchase_entries').delete().in('id', groupEntries.map(e => e.id))
+      : await supabase.from('purchase_entries').delete().in('id', groupEntries.map(e => e.id))
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setActionError({ text: `This bill is still recorded — it was not deleted. ${text}`, detail })
     }
     loadPurchases(selectedPeriod.id)
     loadReturns(selectedPeriod.id)
@@ -194,13 +202,23 @@ export default function Purchases() {
 
   async function performDeleteAllPurchases() {
     if (!selectedPeriod || purchases.length === 0) return
-    await supabase.from('purchase_entries').delete().eq('period_id', selectedPeriod.id)
+    setActionError(null)
+    const { error } = await supabase.from('purchase_entries').delete().eq('period_id', selectedPeriod.id)
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setActionError({ text: `The purchases for this period were not deleted — check the list below for what is still recorded. ${text}`, detail })
+    }
     await Promise.all([loadPurchases(selectedPeriod.id), loadReturns(selectedPeriod.id)])
   }
 
   async function performDeleteAllReturns() {
     if (!selectedPeriod || returns.length === 0) return
-    await scopedDelete('vendor_returns').eq('period_id', selectedPeriod.id)
+    setActionError(null)
+    const { error } = await scopedDelete('vendor_returns').eq('period_id', selectedPeriod.id)
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setActionError({ text: `The returns for this period were not deleted — check the list below for what is still recorded. ${text}`, detail })
+    }
     loadReturns(selectedPeriod.id)
   }
 
@@ -409,6 +427,8 @@ export default function Purchases() {
           <button className="btn btn-ghost" onClick={() => printWithTitle(`Purchases - ${periodLabel}`)}>Print</button>
         </div>
       </div>
+
+      <ActionError error={actionError} className="no-print" />
 
       {/* Stats — not while loading or after a failed read: a figure the page has not computed
           is not a figure (S594), and stale totals above the error card would contradict it. */}

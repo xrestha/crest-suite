@@ -670,10 +670,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
     // resolves ri.sub_recipe to null for them, and calcRecipeCost/calcSubRecipeCostPerUnit
     // silently skip any ingredient row where sub_recipe_id is set but sub_recipe isn't — the
     // parent recipe's food cost quietly dropped with no warning. Block the delete instead.
-    const { data: referencing } = await supabase
+    const { data: referencing, error: refErr } = await supabase
       .from('recipe_ingredients')
       .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
       .eq('sub_recipe_id', recipe.id)
+    // A check that could not run has not passed (S682): on a failed read `referencing` was null,
+    // the guard passed, and a sub-recipe other dishes depend on was deleted anyway.
+    if (refErr) {
+      const { text, detail } = asActionError(refErr)
+      setError({ text: `Couldn't check whether "${recipe.name}" is used by other recipes, so it was not deleted. Try again. ${text}`, detail })
+      return
+    }
     const usedByNames = [...new Set((referencing || []).map(r => r.recipes?.name).filter(Boolean))]
     if (usedByNames.length > 0) {
       setError(`Can't delete "${recipe.name}" — it's used as an ingredient in: ${usedByNames.join(', ')}. Remove it from those recipes first.`)
@@ -681,9 +688,19 @@ Check the recipe list before saving again — if it timed out after the recipe w
     }
 
     if (!window.confirm(`Delete "${recipe.name}"?`)) return
-    await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipe.id)
+    const { error: ingErr } = await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipe.id)
+    if (ingErr) {
+      const { text, detail } = asActionError(ingErr)
+      setError({ text: `"${recipe.name}" was not deleted and nothing was changed. ${text}`, detail })
+      return
+    }
     if (recipe.linked_item_id) {
-      await scopedUpdate('items', { is_active: false }).eq('id', recipe.linked_item_id)
+      const { error: itemErr } = await scopedUpdate('items', { is_active: false }).eq('id', recipe.linked_item_id)
+      if (itemErr) {
+        const { text, detail } = asActionError(itemErr)
+        setError({ text: `"${recipe.name}" was not deleted, but its ingredient list has already been cleared and its mirror item is still active. Reopen it and re-enter the ingredients, or try the delete again. ${text}`, detail })
+        return
+      }
     }
     const { error } = await scopedDelete('recipes').eq('id', recipe.id)
     if (error) {

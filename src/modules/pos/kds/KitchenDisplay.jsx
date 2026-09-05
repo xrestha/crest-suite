@@ -7,6 +7,7 @@ import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
 import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor } from '../posSignals'
+import { errorText } from '../../../shared/errorText'
 
 const STATIONS = ['KOT', 'BOT']
 const POLL_MS = 4000
@@ -64,6 +65,9 @@ export default function KitchenDisplay() {
   // indication the DB write never landed — a busy kitchen could believe a ticket was done when
   // it wasn't. Now reverted immediately below on error, with a dismissible reason shown here.
   const [kdsError, setKdsError] = useState('')
+  // A failed POLL, kept apart from a failed ticket update: it clears itself on the next good
+  // poll, and while it shows the board is the last successful read, not an empty kitchen.
+  const [pollError, setPollError] = useState('')
   // Ticket awaiting an estimated prep time before it can advance to In Progress — see
   // requestEstimate/confirmStart below and EstimateTimeModal.jsx.
   const [estimateTicket, setEstimateTicket] = useState(null)
@@ -82,11 +86,21 @@ export default function KitchenDisplay() {
     // cross the 1000-row cap inside a single day — and this query is sorted OLDEST first, so a
     // truncated read drops the newest tickets: precisely the ones the kitchen is waiting on, with
     // no error to say anything was dropped. `.order('id')` is the unique tiebreaker paging needs.
-    const { data } = await fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
+    const { data, error } = await fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
       .eq('station', station)
       .neq('status', 'cancelled')
       .gte('sent_at', startOfDay.toISOString())
       .order('sent_at', { ascending: true }).order('id'))
+    if (error) {
+      // One failed poll must not write its empty result (the S654 rule, found here in S682): it
+      // erased every New/Cooking/Ready ticket from the wall — the kitchen reads "nothing to cook"
+      // — and rebuilt `seenTicketIds` from the empty set, so the next good poll re-chimed for
+      // every ticket already on the board. Keep the last-good tickets and say the board is stale.
+      setPollError('Could not refresh the board — the tickets shown are from the last successful check. ' + errorText(error, 'staff'))
+      setLoading(false)
+      return
+    }
+    setPollError('')
     const rows = data || []
     const newTickets = rows.filter(t => t.status === 'new')
     if (loadedOnce.current && newTickets.some(t => !seenTicketIds.current.has(t.id))) {
@@ -220,15 +234,20 @@ export default function KitchenDisplay() {
         )}
       </div>
 
-      {kdsError && (
-        <div role="alert" style={{
+      {/* A real Dismiss button, not a "(tap to dismiss)" div: role="alert" is not an interactive
+          role, and the div had no tabIndex or key handler — mouse and touch only. */}
+      {[pollError && ['poll', pollError, () => setPollError('')], kdsError && ['kds', kdsError, () => setKdsError('')]]
+        .filter(Boolean).map(([key, text, dismiss]) => (
+        <div key={key} role="alert" style={{
+          display: 'flex', alignItems: 'center', gap: 12,
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)',
-          borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
-          color: 'var(--theme-red-text)', cursor: 'pointer',
-        }} onClick={() => setKdsError('')}>
-          {kdsError} <span style={{ opacity: 0.7 }}>(tap to dismiss)</span>
+          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
+          color: 'var(--theme-red-text)',
+        }}>
+          <span style={{ flex: 1 }}>{text}</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={dismiss}>Dismiss</button>
         </div>
-      )}
+      ))}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>

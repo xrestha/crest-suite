@@ -10,6 +10,7 @@ import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import LoyaltyTab from './LoyaltyTab'
 import { IDENTITY_BADGE } from '../posSignals'
 import { normalizePhone } from '../../../utils/phone'
+import { errorText } from '../../../shared/errorText'
 
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
@@ -203,7 +204,15 @@ export default function PosCustomers() {
     const defaultPct = partner?.commission_pct
     setSettleCommissionPct(defaultPct != null ? String(defaultPct) : '')
     setSettleExVatLoading(true)
-    const { data: items } = await scopedFrom('pos_order_items', 'qty, unit_price, vat_rate, comped').eq('order_id', order.id)
+    const { data: items, error: itemsErr } = await scopedFrom('pos_order_items', 'qty, unit_price, vat_rate, comped').eq('order_id', order.id)
+    if (itemsErr) {
+      // A dropped read here used to give an ex-VAT base of 0, and settleBill then STORED
+      // commission_amount = 0 on the settlement with no warning (S682). settleBill refuses while
+      // the base is unknown, and this says why.
+      setSettleExVatLoading(false)
+      setSettleMsg('error:Could not load this bill\'s lines, so the commission cannot be worked out — nothing was settled. Close this and try Settle again. ' + errorText(itemsErr, 'operator'))
+      return
+    }
     // Excludes comped items — commission has nothing to withhold on a line that was never
     // actually charged, same exclusion every other revenue calc in this codebase applies.
     const amounts = computeOrderAmounts(order, (items || []).filter(i => !i.comped), vatReg)
@@ -212,6 +221,10 @@ export default function PosCustomers() {
   }
 
   async function settleBill(order, method) {
+    if (order.delivery_partner && settleExVatBase == null) {
+      setSettleMsg('error:This bill\'s commission base has not loaded, so it cannot be settled yet — close this and try Settle again.')
+      return
+    }
     setSettleBusy(true); setSettleMsg('')
     const patch = {
       credit_settled_at:     new Date().toISOString(),
@@ -233,8 +246,12 @@ export default function PosCustomers() {
     // customer has already paid for, so it warns rather than rolling back.
     let ledgerWarning = ''
     if (method === 'Cash') {
-      const { data: openShift } = await scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle()
-      if (!openShift) {
+      const { data: openShift, error: shiftErr } = await scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle()
+      if (shiftErr) {
+        // A failed read is not "no shift is open" — that instruction sent the operator to record
+        // a Cash In next shift while a shift was in fact open (S682).
+        ledgerWarning = ` Could not check whether a shift is open, so this cash may not be on the drawer count — check the current shift's Cash In entries. ${errorText(shiftErr, 'operator')}`
+      } else if (!openShift) {
         ledgerWarning = ' No shift is open, so this cash is not on any drawer reconciliation — record it as a Cash In when you open the next shift.'
       } else {
         const { error: mErr } = await scopedInsert('pos_cash_movements', {

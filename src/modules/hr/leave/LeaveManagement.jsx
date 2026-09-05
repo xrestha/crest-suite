@@ -8,6 +8,8 @@ import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
 import { leaveBalance } from './leaveBalance'
 import { disabledStyle } from '../../../shared/inlineFieldState'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { errorText } from '../../../shared/errorText'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 
@@ -82,22 +84,39 @@ export default function LeaveManagement() {
 
   async function load() {
     setLoading(true); setMsg('')
-    // Seed default leave types on first visit.
-    let { data: lt } = await scopedFrom('hr_leave_types').order('sort_order')
+    // A failed read is not an empty list (S682): every read here carries its error, and the page
+    // keeps whatever it last loaded rather than painting "no requests" and a full-quota balance.
+    const loadFailed = (what, error) => {
+      setMsg(`error:Could not load ${what} — the figures on this page are from the last successful load. ` + errorText(error, 'operator'))
+      setLoading(false)
+    }
+    // Seed default leave types on first visit. The error check comes FIRST: a failed read used to
+    // look exactly like "no types yet" and seeded a duplicate set on every retry.
+    let { data: lt, error: ltErr } = await scopedFrom('hr_leave_types').order('sort_order')
+    if (ltErr) { loadFailed('leave types', ltErr); return }
     if (!lt || lt.length === 0) {
-      await scopedInsert('hr_leave_types', DEFAULT_LEAVE_TYPES)
+      const { error: seedErr } = await scopedInsert('hr_leave_types', DEFAULT_LEAVE_TYPES)
+      if (seedErr) { loadFailed('the default leave types', seedErr); return }
       const r = await scopedFrom('hr_leave_types').order('sort_order')
+      if (r.error) { loadFailed('leave types', r.error); return }
       lt = r.data || []
     }
-    const [{ data: emps }, { data: pr }, { data: reqs }, { data: setl }] = await Promise.all([
+    const results = await Promise.all([
       // Every status, not just active/probation — the Balances tab filters in JS so it can show a
       // leaver on request, while every other tab here still works from the active list below.
       scopedFrom('hr_employees', 'id, full_name, employee_code, department, status').order('full_name'),
       scopedFrom('monthly_periods', 'id, bs_year, bs_month, status'),
-      scopedFrom('hr_leave_requests').order('start_date', { ascending: false }),
+      // Paged: this is the client's ENTIRE request history and the source of the Balances tab, so
+      // the silent 1000-row cap would quietly overstate an employee's remaining leave once the
+      // table crossed it (~1–2 years for a 40-person outlet). `.order('id')` is the tiebreaker
+      // paging needs.
+      fetchAllRows(() => scopedFrom('hr_leave_requests').order('start_date', { ascending: false }).order('id')),
       scopedFrom('hr_final_settlements', 'employee_id, leave_type_id, leave_days_encashed, last_working_date, status')
         .eq('status', 'finalized'),
     ])
+    const failed = results.find(r => r && r.error)
+    if (failed) { loadFailed('leave data', failed.error); return }
+    const [{ data: emps }, { data: pr }, { data: reqs }, { data: setl }] = results
     setTypes(lt); setEmployees(emps || []); setPeriods(pr || []); setRequests(reqs || [])
     setSettlements(setl || [])
     setLoading(false)
@@ -183,7 +202,15 @@ export default function LeaveManagement() {
       ? (isHalf ? 'half_paid_leave' : 'paid_leave')
       : (isHalf ? 'half_unpaid_leave' : 'unpaid_leave')
     const missing = await syncAttendance(req, status)
-    await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id)
+    const { error: apprErr } = await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id)
+    if (apprErr) {
+      // The attendance rows are already written (upserted, so re-approving is safe); the request
+      // is the half that did not move. Say so rather than "Approved".
+      await load()
+      setMsg('error:The leave days were marked on the attendance sheet, but this request still shows Pending. Approve it again — re-approving is safe. ' + errorText(apprErr, 'operator'))
+      setBusy(false)
+      return
+    }
     await load()
     setMsg(missing.length
       ? `error:Approved, but no period exists for: ${missing.join(', ')}. Create the period(s), then re-approve to mark those days.`
@@ -199,9 +226,19 @@ export default function LeaveManagement() {
     // Re-check the request's current status from the DB rather than trusting the client-cached
     // `req` — another admin session may have approved/decided it since our last load(), and
     // deciding off a stale 'pending' would skip reverting attendance a concurrent approval wrote.
-    const { data: fresh } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
+    // A guard that drops its read error passes vacuously: on a failed read `fresh` was null,
+    // the revert was skipped, and the request was rejected while its paid-leave days stayed
+    // marked (and paid). Refuse before writing anything.
+    const { data: fresh, error: freshErr } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
+    if (freshErr) { setMsg('error:Could not check this request\'s current status, so nothing was changed — try again. ' + errorText(freshErr, 'operator')); setBusy(false); return }
     if (fresh?.status === 'approved') await revertAttendance(req)
-    await scopedUpdate('hr_leave_requests', { status: newStatus, decided_at: new Date().toISOString() }).eq('id', req.id)
+    const { error: decErr } = await scopedUpdate('hr_leave_requests', { status: newStatus, decided_at: new Date().toISOString() }).eq('id', req.id)
+    if (decErr) {
+      await load()
+      setMsg(`error:${fresh?.status === 'approved' ? 'The attendance days were reverted, but ' : ''}the request still shows ${fresh?.status || 'its previous status'} — ${verb.toLowerCase()} it again. ` + errorText(decErr, 'operator'))
+      setBusy(false)
+      return
+    }
     await load(); setMsg(`ok:${verb}ed`); setBusy(false)
   }
 

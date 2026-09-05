@@ -13,6 +13,7 @@ import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import SearchableSelect from '../../../components/SearchableSelect'
 import ConfirmModal from '../../../components/ConfirmModal'
 import QtyInput from '../../../components/QtyInput'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import './Stock.css'
 import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cachePeriods, getCachedPeriods, cacheStockData, getCachedStockData, enqueue, getQueue, dequeue } from '../../../utils/offlineQueue'
 import { BS_MONTHS, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
@@ -59,6 +60,8 @@ export default function Stock() {
   const [search, setSearch] = useState('')
   const [saveAllLoading, setSaveAllLoading] = useState(false)
   const [saved, setSaved] = useState(false)
+  // The last save that did not land, as `<ActionError>` copy naming what the server holds now.
+  const [saveError, setSaveError] = useState(null)
   // Shared ConfirmModal for the page's bulk writes (S575 rule; these three ran on window.confirm
   // until S612): { title, body, confirmLabel, danger, run }.
   const [pendingConfirm, setPendingConfirm] = useState(null)
@@ -254,30 +257,53 @@ export default function Stock() {
     setStockData(prev => ({ ...prev, [itemId]: { ...prev[itemId], [field]: value } }))
   }
 
+  // supabase-js resolves `{ error }` and never throws, so before S682 a refused write (a closed
+  // period's trigger, an RLS refusal, a dropped connection) passed straight through the promise
+  // chains below and the cell kept reading as saved. `fail()` turns it into a thrown error the
+  // chain's catch records against the row. `cleared` is for the two delete-then-insert fields:
+  // once the delete has landed and the insert is refused, the server holds NOTHING for that item
+  // — a different fact from "your new figure did not save", and the message has to say which.
+  const fail = (error, cleared = false) => {
+    if (error) throw Object.assign(new Error(error.message || String(error)), { supabase: error, cleared })
+  }
   async function persistValueDirect(periodId, itemId, fieldKey, qty) {
     if (fieldKey === 'opening') {
       if (qty <= 0) {
-        await supabase.from('opening_stock').delete().eq('period_id', periodId).eq('item_id', itemId)
+        fail((await supabase.from('opening_stock').delete().eq('period_id', periodId).eq('item_id', itemId)).error)
       } else {
-        await supabase.from('opening_stock').upsert({ period_id: periodId, item_id: itemId, qty }, { onConflict: 'period_id,item_id' })
+        fail((await supabase.from('opening_stock').upsert({ period_id: periodId, item_id: itemId, qty }, { onConflict: 'period_id,item_id' })).error)
       }
     }
     if (fieldKey === 'closing') {
       if (qty <= 0) {
-        await supabase.from('closing_stock').delete().eq('period_id', periodId).eq('item_id', itemId)
+        fail((await supabase.from('closing_stock').delete().eq('period_id', periodId).eq('item_id', itemId)).error)
       } else {
-        await supabase.from('closing_stock').upsert({ period_id: periodId, item_id: itemId, physical_qty: qty, counted_at: new Date().toISOString() }, { onConflict: 'period_id,item_id' })
+        fail((await supabase.from('closing_stock').upsert({ period_id: periodId, item_id: itemId, physical_qty: qty, counted_at: new Date().toISOString() }, { onConflict: 'period_id,item_id' })).error)
       }
     }
     if (fieldKey === 'wastage') {
       // Only the undated catch-all row — dated daily-wastage rows are managed in the Daily Wastage tab.
-      await supabase.from('wastages').delete().eq('period_id', periodId).eq('item_id', itemId).is('bs_day', null)
-      if (qty > 0) await supabase.from('wastages').insert({ period_id: periodId, item_id: itemId, qty, bs_day: null })
+      fail((await supabase.from('wastages').delete().eq('period_id', periodId).eq('item_id', itemId).is('bs_day', null)).error)
+      if (qty > 0) fail((await supabase.from('wastages').insert({ period_id: periodId, item_id: itemId, qty, bs_day: null })).error, true)
     }
     if (fieldKey === 'staff_meal') {
-      await supabase.from('staff_meals').delete().eq('period_id', periodId).eq('item_id', itemId).eq('type', 'staff')
-      if (qty > 0) await supabase.from('staff_meals').insert({ period_id: periodId, item_id: itemId, qty, type: 'staff' })
+      fail((await supabase.from('staff_meals').delete().eq('period_id', periodId).eq('item_id', itemId).eq('type', 'staff')).error)
+      if (qty > 0) fail((await supabase.from('staff_meals').insert({ period_id: periodId, item_id: itemId, qty, type: 'staff' })).error, true)
     }
+  }
+
+  const FIELD_LABEL = { opening: 'opening stock', closing: 'closing count', wastage: 'wastage', staff_meal: 'staff meal' }
+  // Called from the promise chains' catch: names the row, says what the server holds NOW, and
+  // keeps the raw detail. Nothing here claims the write did not land (a dead fetch does not prove
+  // that) — it says the value on screen is not known to be stored, which is the honest fact.
+  function noteSaveFailure(itemId, fieldKey, err, count) {
+    const label = FIELD_LABEL[fieldKey] || fieldKey
+    const name = itemId ? (items.find(i => i.id === itemId)?.name || 'this item') : `${count} item(s)`
+    const held = err?.cleared
+      ? `the server now holds no ${label} figure for it`
+      : 'what is on screen is not known to be stored'
+    const { text, detail } = asActionError(err?.supabase || err)
+    setSaveError({ text: `The ${label} figure for ${name} was not saved — ${held}. Re-enter it and save again. ${text}`, detail })
   }
 
   // Wastage/staff-meal saves are delete()-then-insert() (two round trips, unlike opening/
@@ -299,7 +325,7 @@ export default function Stock() {
         return
       }
       await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
-    }).catch(() => {}) // don't let one failed save wedge the chain for this key forever
+    }).catch(err => noteSaveFailure(itemId, fieldKey, err)) // recorded, and never wedges the chain for this key
     persistLocks.current[key] = run
     return run
   }
@@ -392,27 +418,27 @@ export default function Stock() {
       const zeros = entries.filter(e => e.qty <= 0).map(e => e.itemId)
       const positives = entries.filter(e => e.qty > 0)
       if (fieldKey === 'opening') {
-        if (zeros.length) await supabase.from('opening_stock').delete().eq('period_id', periodId).in('item_id', zeros)
-        if (positives.length) await supabase.from('opening_stock').upsert(
-          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty })), { onConflict: 'period_id,item_id' })
+        if (zeros.length) fail((await supabase.from('opening_stock').delete().eq('period_id', periodId).in('item_id', zeros)).error)
+        if (positives.length) fail((await supabase.from('opening_stock').upsert(
+          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty })), { onConflict: 'period_id,item_id' })).error)
       } else if (fieldKey === 'closing') {
-        if (zeros.length) await supabase.from('closing_stock').delete().eq('period_id', periodId).in('item_id', zeros)
+        if (zeros.length) fail((await supabase.from('closing_stock').delete().eq('period_id', periodId).in('item_id', zeros)).error)
         if (positives.length) {
           const countedAt = new Date().toISOString()
-          await supabase.from('closing_stock').upsert(
-            positives.map(e => ({ period_id: periodId, item_id: e.itemId, physical_qty: e.qty, counted_at: countedAt })), { onConflict: 'period_id,item_id' })
+          fail((await supabase.from('closing_stock').upsert(
+            positives.map(e => ({ period_id: periodId, item_id: e.itemId, physical_qty: e.qty, counted_at: countedAt })), { onConflict: 'period_id,item_id' })).error)
         }
       } else if (fieldKey === 'wastage') {
         // Same shape as persistValueDirect: only the undated catch-all rows are this tab's to replace.
-        await supabase.from('wastages').delete().eq('period_id', periodId).in('item_id', allIds).is('bs_day', null)
-        if (positives.length) await supabase.from('wastages').insert(
-          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, bs_day: null })))
+        fail((await supabase.from('wastages').delete().eq('period_id', periodId).in('item_id', allIds).is('bs_day', null)).error)
+        if (positives.length) fail((await supabase.from('wastages').insert(
+          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, bs_day: null })))).error, true)
       } else if (fieldKey === 'staff_meal') {
-        await supabase.from('staff_meals').delete().eq('period_id', periodId).in('item_id', allIds).eq('type', 'staff')
-        if (positives.length) await supabase.from('staff_meals').insert(
-          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, type: 'staff' })))
+        fail((await supabase.from('staff_meals').delete().eq('period_id', periodId).in('item_id', allIds).eq('type', 'staff')).error)
+        if (positives.length) fail((await supabase.from('staff_meals').insert(
+          positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, type: 'staff' })))).error, true)
       }
-    }).catch(() => {}) // same policy as persistValue: a failed save must not wedge the chains
+    }).catch(err => noteSaveFailure(null, fieldKey, err, entries.length)) // recorded; never wedges the chains
     entries.forEach(e => { persistLocks.current[`${e.itemId}:${fieldKey}`] = run })
     return run
   }
@@ -436,11 +462,18 @@ export default function Stock() {
     if (!selectedPeriod || !wEntry.item_id) return
     const qty = parseFloat(wEntry.qty) || 0
     if (qty <= 0) return
-    setWBusy(true)
-    await supabase.from('wastages').insert({
+    setWBusy(true); setSaveError(null)
+    const { error } = await supabase.from('wastages').insert({
       period_id: selectedPeriod.id, item_id: wEntry.item_id, qty,
       bs_day: wDay, reason: wEntry.reason || 'Other',
     })
+    if (error) {
+      // Keep the form as typed so the entry can be retried without re-picking the item.
+      const { text, detail } = asActionError(error)
+      setSaveError({ text: `This wastage entry was not added. ${text}`, detail })
+      setWBusy(false)
+      return
+    }
     setWEntry({ item_id: '', qty: '', reason: wEntry.reason })
     await loadStockData(selectedPeriod.id, items)
     setWBusy(false)
@@ -448,8 +481,12 @@ export default function Stock() {
 
   async function deleteDailyWastage(id) {
     if (!selectedPeriod) return
-    setWBusy(true)
-    await supabase.from('wastages').delete().eq('id', id)
+    setWBusy(true); setSaveError(null)
+    const { error } = await supabase.from('wastages').delete().eq('id', id)
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setSaveError({ text: `This wastage entry is still recorded — it was not deleted. ${text}`, detail })
+    }
     await loadStockData(selectedPeriod.id, items)
     setWBusy(false)
   }
@@ -698,6 +735,7 @@ export default function Stock() {
           </select>
         </div>
       </div>
+      <ActionError error={saveError} className="no-print" />
 
       {isLocked && (
         <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>

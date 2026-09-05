@@ -20,11 +20,16 @@ export const STATUS_TINT = {
 
 // hr_employees.status → tint. Shared by EmployeeList.jsx and PaySetup.jsx, which previously
 // each defined an identical copy of this exact mapping independently.
+//
+// `color` is overridden to the `*-text` variant exactly as HR_REQUEST_STATUS does below, because
+// both consumers paint it as 10–11px TEXT. STATUS_TINT's `color` is the base FILL token, which on
+// the Light preset is #15803d — measured 3.99:1 on its own tint (S682), below AA. The tint and
+// border keep the base token, which is what they are for.
 export const EMPLOYEE_STATUS_COLORS = {
-  active:     STATUS_TINT.green,
-  probation:  STATUS_TINT.accent,
-  resigned:   STATUS_TINT.red,
-  terminated: STATUS_TINT.red,
+  active:     { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' },
+  probation:  { ...STATUS_TINT.accent, color: 'var(--theme-accent-ink)' },
+  resigned:   { ...STATUS_TINT.red,    color: 'var(--theme-red-text)' },
+  terminated: { ...STATUS_TINT.red,    color: 'var(--theme-red-text)' },
   inactive:   STATUS_TINT.gray,
 }
 

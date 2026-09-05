@@ -916,6 +916,14 @@ export default function Help() {
   const [openGS, setOpenGS] = useState(() => {
     try { return JSON.parse(localStorage.getItem('crest_help_gs')) || {} } catch { return {} }
   })
+  // The Getting-Started headers are real disclosure buttons inside their <h3> (the same shape as
+  // the feature accordion and the FAQ further down). They were <div onClick> until S682, which
+  // closed the onboarding walkthrough to every keyboard and screen-reader user.
+  const GS_TOGGLE_STYLE = {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%',
+    background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left',
+    font: 'inherit', color: 'inherit',
+  }
   function gsOpen(key, state = openGS) {
     return state[key] === true
   }
@@ -1150,13 +1158,15 @@ export default function Help() {
           {imsEnabled && (
           <div>
           <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.03)', borderColor: 'rgba(201,168,76,0.2)' }}>
-            <div onClick={() => toggleGS('ims')} style={{ display: 'flex', gap: 16, alignItems: 'flex-start', cursor: 'pointer' }}>
-              <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⬢</span>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+              <span aria-hidden="true" style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⬢</span>
               <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <h3 style={{ margin: 0, fontSize: 15, color: 'var(--theme-text1)' }}>Welcome to Crest Suite</h3>
-                  <span style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{gsOpen('ims') ? '▲' : '▼'}</span>
-                </div>
+                <h3 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--theme-text1)' }}>
+                  <button type="button" aria-expanded={gsOpen('ims')} onClick={() => toggleGS('ims')} style={GS_TOGGLE_STYLE}>
+                    <span>Welcome to Crest Suite</span>
+                    <span aria-hidden="true" style={{ color: 'var(--theme-text3)', fontSize: 13, fontWeight: 400 }}>{gsOpen('ims') ? '▲' : '▼'}</span>
+                  </button>
+                </h3>
                 {!gsOpen('ims') && (
                   <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, monthly workflow, and common mistakes to avoid.</p>
                 )}
@@ -1256,13 +1266,15 @@ export default function Help() {
           {hrEnabled && (
           <div>
             <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.03)', borderColor: 'rgba(201,168,76,0.2)' }}>
-              <div onClick={() => toggleGS('hr')} style={{ display: 'flex', gap: 16, alignItems: 'flex-start', cursor: 'pointer' }}>
-                <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>👤</span>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                <span aria-hidden="true" style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>👤</span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <h3 style={{ margin: 0, fontSize: 15, color: 'var(--theme-text1)' }}>Welcome to Crest HR</h3>
-                    <span style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{gsOpen('hr') ? '▲' : '▼'}</span>
-                  </div>
+                  <h3 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--theme-text1)' }}>
+                    <button type="button" aria-expanded={gsOpen('hr')} onClick={() => toggleGS('hr')} style={GS_TOGGLE_STYLE}>
+                      <span>Welcome to Crest HR</span>
+                      <span aria-hidden="true" style={{ color: 'var(--theme-text3)', fontSize: 13, fontWeight: 400 }}>{gsOpen('hr') ? '▲' : '▼'}</span>
+                    </button>
+                  </h3>
                   {!gsOpen('hr') && (
                     <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, monthly workflow, and common mistakes to avoid.</p>
                   )}
@@ -1331,13 +1343,15 @@ export default function Help() {
           {posEnabled && (
           <div>
             <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.03)', borderColor: 'rgba(201,168,76,0.2)' }}>
-              <div onClick={() => toggleGS('pos')} style={{ display: 'flex', gap: 16, alignItems: 'flex-start', cursor: 'pointer' }}>
-                <span style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⊕</span>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                <span aria-hidden="true" style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⊕</span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: gsOpen('pos') ? 8 : 0 }}>
-                    <h3 style={{ margin: 0, fontSize: 15, color: 'var(--theme-text1)' }}>Welcome to Crest POS</h3>
-                    <span style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{gsOpen('pos') ? '▲' : '▼'}</span>
-                  </div>
+                  <h3 style={{ margin: gsOpen('pos') ? '0 0 8px' : 0, fontSize: 15, color: 'var(--theme-text1)' }}>
+                    <button type="button" aria-expanded={gsOpen('pos')} onClick={() => toggleGS('pos')} style={GS_TOGGLE_STYLE}>
+                      <span>Welcome to Crest POS</span>
+                      <span aria-hidden="true" style={{ color: 'var(--theme-text3)', fontSize: 13, fontWeight: 400 }}>{gsOpen('pos') ? '▲' : '▼'}</span>
+                    </button>
+                  </h3>
                   {!gsOpen('pos') && (
                     <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, daily workflow, and common mistakes to avoid.</p>
                   )}

@@ -14,6 +14,8 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, formatBsDay, formatAd } from '../../../utils/bsCalendar'
 import { turnoverByBand, PARTY_BANDS } from '../reports/coversMath'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS, DEFAULT_WHATSAPP_TEMPLATE } from '../reservations/reservationSettings'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { errorText } from '../../../shared/errorText'
 
 const STATUS_CYCLE = ['available', 'reserved', 'occupied', 'inactive']
 // This file used to carry its own byte-identical copy of the status badge/label/colour maps, which
@@ -78,6 +80,7 @@ export default function PosTableManagement() {
   const [hscLoading, setHscLoading] = useState(false)
   const [hscLoaded,  setHscLoaded]  = useState(false)
   const [hscSaving,  setHscSaving]  = useState({})   // { recipeId: bool }
+  const [hscError,   setHscError]   = useState(null) // the last HSC write that did not land
 
   // Discount Reasons
   const [discReasons,   setDiscReasons]   = useState(DEFAULT_DISCOUNT_REASONS)
@@ -328,11 +331,22 @@ export default function PosTableManagement() {
 
   // ── Quick Notes ──────────────────────────────────────────────────────────────
 
+  // Each settings tab below loads the client's list, edits it on screen, and its Save writes the
+  // WHOLE on-screen array back. So a loader that drops its error and substitutes a stub is not a
+  // display bug: a failed read followed by a routine Save replaced the client's real quick notes,
+  // discount reasons or delivery commission rates with the stub, and said "Saved." (S682). On a
+  // failed read the tab now stays "not loaded" — Save is disabled — and says so; re-opening the
+  // tab retries.
+  const loadFailed = what => error =>
+    `error:Could not load ${what} — Save is disabled until it loads. Re-open this tab to retry. ` + errorText(error, 'operator')
+
   async function loadNotePresets() {
     setNotesLoading(true)
-    const { data } = await supabase.from('settings').select('pos_note_presets').eq('client_id', clientId).maybeSingle()
-    setNotePresets(data?.pos_note_presets || [])
+    const { data, error } = await supabase.from('settings').select('pos_note_presets').eq('client_id', clientId).maybeSingle()
     setNotesLoading(false)
+    if (error) { setNotesMsg(loadFailed('the quick notes')(error)); return }
+    setNotePresets(data?.pos_note_presets || [])
+    setNotesMsg('')
     setNotesLoaded(true)
   }
 
@@ -391,9 +405,17 @@ export default function PosTableManagement() {
   async function saveHsc(recipe, value) {
     const trimmed = value.trim()
     if (trimmed === (recipe.hsc_code || '')) return
-    setHscSaving(s => ({ ...s, [recipe.id]: true }))
-    await scopedUpdate('recipes', { hsc_code: trimmed || null }).eq('id', recipe.id)
-    setHscItems(items => items.map(r => r.id === recipe.id ? { ...r, hsc_code: trimmed || null } : r))
+    setHscSaving(s => ({ ...s, [recipe.id]: true })); setHscError(null)
+    // The HSC code prints on the IRD Tax Invoice, so an optimistic write here is the wrong kind
+    // of optimism: a refused update used to show the new code as saved while every bill kept
+    // printing the old one (S682). State only follows a write that landed.
+    const { error } = await scopedUpdate('recipes', { hsc_code: trimmed || null }).eq('id', recipe.id)
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setHscError({ text: `The HSC code for ${recipe.name} was not saved — bills still print "${recipe.hsc_code || 'none'}". ${text}`, detail })
+    } else {
+      setHscItems(items => items.map(r => r.id === recipe.id ? { ...r, hsc_code: trimmed || null } : r))
+    }
     setHscSaving(s => ({ ...s, [recipe.id]: false }))
   }
 
@@ -401,9 +423,11 @@ export default function PosTableManagement() {
 
   async function loadDiscReasons() {
     setDiscLoading(true)
-    const { data } = await supabase.from('settings').select('pos_discount_reasons').eq('client_id', clientId).maybeSingle()
-    setDiscReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
+    const { data, error } = await supabase.from('settings').select('pos_discount_reasons').eq('client_id', clientId).maybeSingle()
     setDiscLoading(false)
+    if (error) { setDiscMsg(loadFailed('the discount reasons')(error)); return }
+    setDiscReasons(data?.pos_discount_reasons?.length ? data.pos_discount_reasons : DEFAULT_DISCOUNT_REASONS)
+    setDiscMsg('')
     setDiscLoaded(true)
   }
 
@@ -452,13 +476,15 @@ export default function PosTableManagement() {
 
   async function loadDeliverySettings() {
     setDeliveryLoading(true)
-    const { data } = await supabase.from('settings')
+    const { data, error } = await supabase.from('settings')
       .select('pos_delivery_partners').eq('client_id', clientId).maybeSingle()
+    setDeliveryLoading(false)
+    if (error) { setDeliveryMsg(loadFailed('the delivery partners')(error)); return }
     setPartners(data?.pos_delivery_partners ?? [
       { name: 'Foodmandu', commission_pct: '', phone: '9800000001' },
       { name: 'Pathao',    commission_pct: '', phone: '9800000002' },
     ])
-    setDeliveryLoading(false)
+    setDeliveryMsg('')
     setDeliveryLoaded(true)
   }
 
@@ -797,7 +823,7 @@ export default function PosTableManagement() {
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <button className="btn btn-primary" onClick={saveNotePresets} disabled={notesSaving}>
+                <button className="btn btn-primary" onClick={saveNotePresets} disabled={notesSaving || !notesLoaded}>
                   {notesSaving ? 'Saving…' : 'Save Quick Notes'}
                 </button>
                 {notesMsg && (
@@ -821,6 +847,7 @@ export default function PosTableManagement() {
             Leave blank unless it applies. Printed on the POS bill per line if set.
           </p>
 
+          <ActionError error={hscError} />
           {hscLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : hscItems.length === 0 ? (
@@ -913,7 +940,7 @@ export default function PosTableManagement() {
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <button className="btn btn-primary" onClick={saveDiscReasons} disabled={discSaving}>
+                <button className="btn btn-primary" onClick={saveDiscReasons} disabled={discSaving || !discLoaded}>
                   {discSaving ? 'Saving…' : 'Save Discount Reasons'}
                 </button>
                 {discMsg && (
@@ -992,7 +1019,7 @@ export default function PosTableManagement() {
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <button className="btn btn-primary" onClick={saveDeliverySettings} disabled={deliverySaving}>
+                <button className="btn btn-primary" onClick={saveDeliverySettings} disabled={deliverySaving || !deliveryLoaded}>
                   {deliverySaving ? 'Saving…' : 'Save Delivery Partner Settings'}
                 </button>
                 {deliveryMsg && (
@@ -1109,17 +1136,24 @@ export default function PosTableManagement() {
             </div>
           )}
 
-          {floorMsg && (
-            <div style={{
-              background: floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.08)' : 'rgba(52,211,153,0.08)',
-              border: `1px solid ${floorMsg.startsWith('error:') ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.25)'}`,
-              borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: 13,
-              color: floorMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
-              cursor: 'pointer',
-            }} onClick={() => setFloorMsg('')}>
-              {floorMsg.replace(/^(error|ok):/, '')} <span style={{ opacity: 0.7 }}>(tap to dismiss)</span>
-            </div>
-          )}
+          {floorMsg && (() => {
+            const isErr = floorMsg.startsWith('error:')
+            const tone = isErr ? 'var(--theme-red)' : 'var(--theme-green)'
+            // A real Dismiss button: the old "(tap to dismiss)" div was mouse/touch only. Tints
+            // come from the live tokens, not the Dark preset's rgba literals.
+            return (
+              <div role={isErr ? 'alert' : 'status'} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                background: `color-mix(in srgb, ${tone} 8%, transparent)`,
+                border: `1px solid color-mix(in srgb, ${tone} 25%, transparent)`,
+                borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
+                color: isErr ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
+              }}>
+                <span style={{ flex: 1 }}>{floorMsg.replace(/^(error|ok):/, '')}</span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFloorMsg('')}>Dismiss</button>
+              </div>
+            )
+          })()}
 
           {/* Floor grid */}
           {loading ? (
