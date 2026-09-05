@@ -46,8 +46,10 @@
    34px of "Sign in →" clipped away by index.css's `overflow-x: hidden` — while the brand was
    squeezed to zero and painted over the first button. Below 640 the header therefore stacks, and
    it also stops being sticky: 84px of fixed chrome is a heavy toll on an 844px phone screen when
-   the surface underneath it is a 16,000-word contract you scroll for ten minutes. The contents
-   rail is already static at this width, so nothing else depended on the offset. */
+   the surface underneath it is a 2,500-word contract that scrolls for ~12,000px on a phone. (An
+   earlier note here said 16,000 words; the Terms measure 2,517 and the Privacy Policy 1,700 —
+   the decision holds on the real figure, which is why it is now stated.) The contents rail is
+   already static at this width, so nothing else depended on the offset. */
 @media (max-width: 640px) {
   .legal-nav {
     position: static;
@@ -391,9 +393,12 @@
 .legal-verify {
   margin-top: 10px;
   padding: 14px 16px;
-  background: var(--theme-input-bg);
+  /* The card token, not the input well: on Dark the well IS the page ground (#0f1117 on
+     #0f1117), so the panel was delineated by its 1px border alone and never read as a surface. */
+  background: var(--theme-card);
   border: 1px solid var(--theme-border);
   border-radius: var(--radius-md);
+  font-size: 14px; /* so 60ch below is the body's 60ch; the children set their own sizes */
   max-width: 60ch; /* the document's measure, so the head does not read wider than the body */
 }
 
@@ -437,7 +442,7 @@
 
 .legal-verify-note {
   margin: 10px 0 0;
-  font-size: 11px;
+  font-size: 12px; /* 11px is the column-header size; this is a sentence someone has to read */
   line-height: 1.55;
   color: var(--theme-text3);
 }
@@ -823,7 +828,8 @@ a.legal-summary-ref:focus-visible {
    the verify disclosure, the footer links — kept its mouse sizing on a phone. Layout.css's floors
    reach `.btn` and the shell's own classes and cannot know about these. Measured at 390px before
    this block: rail links 28.2px tall with a 0px gap between eighteen of them, verify toggle 28px,
-   footer links 18px. The rail is the only practical way through a 16,000-word contract on a phone.
+   footer links 18px. The rail is the only practical way through an eighteen-section contract on a
+   phone.
    Scoped to the input method rather than a width, per the product's standing rule. */
 @media (pointer: coarse) {
   .legal-toc a {
@@ -854,6 +860,16 @@ a.legal-summary-ref:focus-visible {
   @page {
     size: A4 portrait;
     margin: 18mm 16mm 22mm;
+
+    /* "Page 3 of 7", so a sheet of a filed copy can be cited. A page-margin box: Chromium prints
+       it, Firefox and WebKit ignore the block and lose nothing else. It sits in the 22mm bottom
+       margin, below the fixed running foot, which stays inside the page box. */
+    @bottom-right {
+      content: 'Page ' counter(page) ' of ' counter(pages);
+      font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+      font-size: 7.5pt;
+      color: #000;
+    }
   }
 
   .legal-page {

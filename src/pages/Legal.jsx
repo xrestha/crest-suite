@@ -564,7 +564,8 @@ export default function Legal() {
                       const href = sectionHref(item.section)
                       return (
                         <li key={i}>
-                          {item.text}{' '}
+                          {/* A no-break space, so the reference cannot orphan onto its own line. */}
+                          {item.text}&nbsp;
                           {href ? (
                             <a className="legal-summary-ref" href={href}>
                               §{item.section}
