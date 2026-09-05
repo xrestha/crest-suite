@@ -118,10 +118,29 @@ describe('block constructs', () => {
     expect(container.querySelectorAll('li')).toHaveLength(3)
   })
 
+  it('keeps a ## section at h2 rather than demoting it under the contents rail', () => {
+    // Every level was shifted down by one for a release. With the document's own # title
+    // stripped for render, the only level-2 heading on the page was the rail's "Contents", so a
+    // screen reader walking level-2 headings found a table of contents and no document.
+    const { container } = renderDoc('## 1. Acceptance\n\n### 1.1 Detail\n\n#### Deeper')
+    expect(container.querySelector('h2').textContent).toBe('1. Acceptance')
+    expect(container.querySelector('h3').textContent).toBe('1.1 Detail')
+    expect(container.querySelector('h4').textContent).toBe('Deeper')
+    expect(container.querySelector('h1')).toBeNull()
+  })
+
   it('renders a pipe table with its header', () => {
     renderDoc('| Provider | Purpose |\n|---|---|\n| Supabase | Database |')
     expect(screen.getByRole('columnheader', { name: 'Provider' })).toBeInTheDocument()
     expect(screen.getByRole('cell', { name: 'Supabase' })).toBeInTheDocument()
+  })
+
+  it('labels every body cell with its column name, for the stacked phone layout', () => {
+    const { container } = renderDoc('| Provider | **Purpose** |\n|---|---|\n| Supabase | Database |')
+    const cells = container.querySelectorAll('tbody td')
+    expect(cells[0].getAttribute('data-label')).toBe('Provider')
+    // Inline markup is stripped from the label — it is printed by CSS, which cannot render it.
+    expect(cells[1].getAttribute('data-label')).toBe('Purpose')
   })
 
   it('returns nothing for empty or missing input rather than throwing', () => {

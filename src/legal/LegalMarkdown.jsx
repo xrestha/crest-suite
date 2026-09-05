@@ -137,7 +137,12 @@ export function parseMarkdown(md) {
         .replace(/[*`[\]()]/g, '')
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
-      const Tag = `h${Math.min(level + 1, 6)}` // document h1 becomes the page h2; the page owns h1
+      // The page owns h1, so a document's own `# ` title (stripped for render anyway) becomes h2,
+      // and `## ` sections are h2 as well — NOT demoted below it. They were, for one release: every
+      // level shifted down by one, so with the title stripped the only level-2 heading on the page
+      // was the contents rail's "Contents", and a screen-reader user walking level-2 headings
+      // found a table of contents and no document. Deeper levels keep their own number.
+      const Tag = `h${Math.min(Math.max(level, 2), 6)}`
       blocks.push(
         React.createElement(
           Tag,

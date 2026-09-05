@@ -175,6 +175,16 @@ export default function Legal() {
   // footer — the two states that most need the chrome were the two that did without it.
   const shell = (children, plain = false) => (
     <div className="legal-page">
+      {/* WCAG 2.4.1. Three header links and up to eighteen contents-rail links precede the first
+          word of the document in the tab order — 23 stops on the Terms before a keyboard user
+          reaches the text they came for. Layout.css's .skip-link is global (App.js imports it),
+          hidden until focused, then a real visible target. Only when there is a document to skip
+          to; the not-found page has nothing after its one paragraph. */}
+      {doc && (
+        <a href="#legal-document" className="skip-link">
+          Skip to document
+        </a>
+      )}
       <nav className="legal-nav" aria-label="Legal documents">
         <div className="legal-brand">
           <Hexagon
@@ -187,20 +197,27 @@ export default function Legal() {
         </div>
 
         <div className="legal-nav-actions">
-          {DOC_TYPES.map((t) => (
-            <Link
-              key={t}
-              to={legalPath(t)}
-              className={
-                t === docType
-                  ? 'btn btn-sm legal-nav-link legal-nav-link--current'
-                  : 'btn btn-ghost btn-sm legal-nav-link'
-              }
-              aria-current={t === docType ? 'page' : undefined}
-            >
-              {legalDoc(t).title}
-            </Link>
-          ))}
+          {DOC_TYPES.map((t) => {
+            // Lit only when this page IS that document. On /legal/terms/0.9 the body shows none
+            // of the Terms — only a banner saying so — and a header pill claiming "you are on the
+            // Terms of Service" disagreed with the page beneath it. There the pill is a plain
+            // link to the version in force, which is exactly what the banner also offers.
+            const current = t === docType && isCurrentVersion
+            return (
+              <Link
+                key={t}
+                to={legalPath(t)}
+                className={
+                  current
+                    ? 'btn btn-sm legal-nav-link legal-nav-link--current'
+                    : 'btn btn-ghost btn-sm legal-nav-link'
+                }
+                aria-current={current ? 'page' : undefined}
+              >
+                {legalDoc(t).title}
+              </Link>
+            )
+          })}
           {/* A Link, not a button calling navigate(): its two neighbours are links to the same kind
               of destination, and a button cannot be middle-clicked or opened in a new tab. */}
           <Link to="/login" className="btn btn-ghost btn-sm legal-nav-link">
@@ -326,13 +343,24 @@ export default function Legal() {
                 <div className="legal-verify-row">
                   <span className="legal-meta-key">SHA-256</span>
                   <code className="legal-verify-hash">{doc.sha256}</code>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={copyHash}>
+                  {/* "Copy" alone does not say what; the visible word stays short because the
+                      64-character hash beside it already says. The status line is for a screen
+                      reader: the button's label flipping to "Copied" is a visual change only. */}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    aria-label={copied ? 'SHA-256 copied' : 'Copy SHA-256'}
+                    onClick={copyHash}
+                  >
                     {copied ? (
                       <><Check size={12} aria-hidden="true" style={{ verticalAlign: -2 }} /> Copied</>
                     ) : (
                       <><Copy size={12} aria-hidden="true" style={{ verticalAlign: -2 }} /> Copy</>
                     )}
                   </button>
+                  <span role="status" className="sr-only">
+                    {copied ? 'SHA-256 copied to the clipboard' : ''}
+                  </span>
                 </div>
                 <p className="legal-verify-lead">
                   To check it yourself, download the exact text this was taken over and hash it:
@@ -390,8 +418,14 @@ export default function Legal() {
               className={`legal-verify-chev${tocOpen ? ' legal-verify-chev--open' : ''}`}
             />
           </button>
+          {/* role="list" is redundant to the linter and not to WebKit: Safari + VoiceOver drop a
+              list's semantics once `list-style: none` removes its markers, so "list, 18 items" —
+              the one thing a screen-reader user wants to hear about a table of contents — goes
+              silent. The explicit role restores it. */}
+          {/* eslint-disable-next-line jsx-a11y/no-redundant-roles */}
           <ol
             id="legal-toc-list"
+            role="list"
             className={`legal-toc-list${tocOpen ? '' : ' legal-toc-list--collapsed'}`}
           >
             {toc.map((s) => (
@@ -408,7 +442,10 @@ export default function Legal() {
         </nav>
       )}
 
-      <article>
+      {/* tabIndex -1 so the skip link's target actually takes focus in every browser; Safari and
+          older Chrome otherwise scroll to a fragment without moving focus, and the next Tab lands
+          back in the header. */}
+      <article id="legal-document" tabIndex={-1}>
         {/* Part E rule 5 of the source spec, made structural: a document still carrying an
             unfilled placeholder must never present itself as being in force. The banner is
             driven by the same detector the build and the tests use, so it cannot be forgotten
