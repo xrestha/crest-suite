@@ -64,6 +64,11 @@ const DEFAULT_FLAGS = {
 export function SettingsProvider({ children }) {
   const { clientId, isPremium, isAdmin } = useAuth()
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
+  // The platform row's admin-edited support contact (S683) — `settings.support_contact` on the
+  // client_id-NULL row. null until read, and null if the read fails or the column is absent
+  // (migration not yet applied): resolveSupportContact() then falls back to its constants, so a
+  // missing column costs the edit screen and nothing else.
+  const [platformSupport, setPlatformSupport] = useState(null)
   const [featureFlags, setFeatureFlags] = useState(DEFAULT_FLAGS)
   const [loading, setLoading] = useState(true)
 
@@ -76,6 +81,16 @@ export function SettingsProvider({ children }) {
       query = cid ? query.eq('client_id', cid) : query.is('client_id', null)
       const { data } = await query.maybeSingle()
       setSettings(data ? { ...DEFAULT_SETTINGS, ...data } : DEFAULT_SETTINGS)
+      // Signed-out and admin-with-no-client already read the platform row above; a client
+      // session read its own row, so the platform contact needs one more small read. Fail-soft:
+      // on any error keep whatever was last known rather than blanking six surfaces (the KDS-poll
+      // rule — a failed read is not an empty value).
+      if (cid) {
+        const { data: prow, error: perr } = await supabase.from('settings').select('support_contact').is('client_id', null).maybeSingle()
+        if (!perr) setPlatformSupport(prow?.support_contact || null)
+      } else {
+        setPlatformSupport(data?.support_contact || null)
+      }
     } catch (e) {
       setSettings(DEFAULT_SETTINGS)
     } finally {
@@ -129,6 +144,22 @@ export function SettingsProvider({ children }) {
       if (error) throw new Error(errorLine(error))
     }
     await loadSettings(cid)
+  }
+
+  // Writes the platform support contact to the client_id-NULL row regardless of which client the
+  // admin is currently viewing (S683) — saveSettings() would otherwise target the viewed client's
+  // row, and this is one fact for every client. Same existing-row guard as the other two savers.
+  async function savePlatformSupport(contact) {
+    const { data: existing, error: exErr } = await supabase.from('settings').select('id').is('client_id', null).maybeSingle()
+    if (exErr) throw new Error(errorLine(exErr))
+    if (existing?.id) {
+      const { error } = await supabase.from('settings').update({ support_contact: contact, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      if (error) throw new Error(errorLine(error))
+    } else {
+      const { error } = await supabase.from('settings').insert({ client_id: null, support_contact: contact })
+      if (error) throw new Error(errorLine(error))
+    }
+    setPlatformSupport(contact)
   }
 
   // Same guard as saveSettings, and both writes now report: this is the admin's "save this
@@ -192,8 +223,8 @@ export function SettingsProvider({ children }) {
 
   return (
     <SettingsContext.Provider value={{
-      settings, featureFlags, loading,
-      saveSettings, saveClientSettings, saveFeatureFlags,
+      settings, featureFlags, loading, platformSupport,
+      saveSettings, saveClientSettings, saveFeatureFlags, savePlatformSupport,
       loadSettings, loadClientSettings, loadClientFeatureFlags,
       isFeatureEnabled, recipeCategories
     }}>

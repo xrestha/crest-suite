@@ -26,35 +26,67 @@ polling). This session shipped only Part B.6 — contact details plus a crash bo
 ticket table, the operator alert, or the admin inbox. See "Later" below for what's deferred and
 where the groundwork for it already sits.
 
-## One phone number, one definition, ships unfilled
+## The support contact is DATA the admin edits, and the constants are the floor under it (S683)
 
-`src/shared/supportContact.js` is the only place Crest's own support phone, hours and email exist.
-`SUPPORT_EMAIL` re-exports `COMPANY.supportEmail` from `src/legal/index.js` rather than copying it —
-that file's own comment explains why three copies of a contact fact is how two of them end up
-disagreeing.
+`src/shared/supportContact.js` holds the floor: `SUPPORT_EMAIL` (a re-export of
+`COMPANY.supportEmail` from `src/legal/index.js`, never a copy — that file's own comment explains
+why three copies of a contact fact is how two end up disagreeing), `SUPPORT_HOURS` (general hours
+only), and a floor mobile. The LIVE value is `settings.support_contact` — a jsonb column on the
+**platform row** (`client_id IS NULL`), edited in **Settings → Support**, upper section.
 
-The phone ships as `'[[NEEDS VALUE: SUPPORT_PHONE]]'`, the same draft-marker convention
-`isDraft()` uses for the legal documents. **`supportPhone()` returns `null` while it stands, and
-every consumer hides the phone rather than ever rendering the placeholder** — `SupportContactLine`
-simply omits the Call/WhatsApp entry when `telHref`/`whatsappHref` are null. To activate it: edit
-`SUPPORT_PHONE_RAW` in `supportContact.js` to the real digits. No other file needs to change.
+That row was chosen because it already has exactly the right shape and needed no policy work:
+`settings_select` lets every reader including `anon` on `/login` SELECT it, and only `is_admin()`
+can UPDATE it. Migration `20260906120000_platform_support_contact.sql` adds the column and
+**asserts the `client_id IS NULL` arm is still in `settings_select`** — a future tightening that
+dropped it would silently blank six surfaces. The frontend fails soft (`SettingsProvider` keeps
+`platformSupport` null on a read error, so the constants render) — applying the migration late
+costs the edit screen and nothing else.
 
-**Don't reach for `SUPPORT_PHONE_RAW` directly anywhere else** — it is module-private on purpose,
-referenced only inside `supportPhone()`'s own guard. Every call site goes through `supportPhone()`
-or `useSupportContact()`, so the "hide while unfilled" rule can never be bypassed by a shortcut.
+**Why it was built.** The phone shipped as `'[[NEEDS VALUE: SUPPORT_PHONE]]'` from S673 to S683 —
+three days in which Help → Support promised "outlet-down issues any time" with no line to call —
+because the only way to set it was a commit. Every consumer correctly hid the phone rather than
+render the marker, which is exactly why nothing looked broken. The floor mobile is now the
+founder's own (Bloom Hospitality has no landline yet); the admin screen is where the office line,
+a separate WhatsApp/Viber number, or an IT department's contact goes later, with no deploy.
 
-## `useSupportContact()` — the constant-is-the-floor merge
+**Fixed channel slots, deliberately not a list** (decided 2026-09-06): `mobile`, `landline`,
+`whatsapp`, `viber`, `email`, `website`, plus `hours` and an emergency switch. The crash page and
+the offline banners need ONE number on a button, and a fixed shape keeps "which one" a property of
+the data. `whatsapp`/`viber` blank → fall back to `mobile`, never to the landline (a landline
+cannot take either). **Viber is offered beside WhatsApp** because it is Nepal's household default
+for free calls (10M+ users); its deep link is `viber://chat?number=977…` — country code, no `+`,
+no leading zero. **Social handles were considered and scratched**: a crashed till does not need a
+TikTok link. **`anydesk` is Crest's own AnyDesk ID/alias, and it is never a link.** Remote help on
+a Nepali till runs the other way — the client installs AnyDesk and sends Crest *their* 9-digit
+address; an `anydesk:<id>` deep link would open a session onto Crest's machine. Crest's alias is
+published because AnyDesk shows the requester's alias in the client's accept dialog: it is how a
+client refuses an impostor. Help → Support only; a consultant override leaves it in place.
 
-`settings.contact_phone`/`contact_email` (Settings → Contact, admin-only, per client — labelled
-"Upgrade Contact Details") win wherever an admin has actually set them, routing that client to
-their own consultant. Crest's own line fills in otherwise. Before this, `SubscriptionLock`,
-`PremiumGate` and `Help` each read `settings.contact_phone` raw and fell through to nothing (or a
-bare "Contact your Crest consultant to upgrade" with no way to actually do that) whenever the field
-was blank — which is its default. Any new surface needing a support contact should call the hook,
-not read `settings.contact_*` directly.
+**The emergency promise is a switch, not a sentence.** `emergency_enabled` + `emergency_channel`
+name which line is answered outside `hours`; `resolveSupportContact()` returns `emergency` only
+while the switch is on AND the named channel has a number. The Help page prints it from the
+block variant — the S673 hardcoded `Tip` gloss was removed so it cannot drift from the setting.
+It defaults ON with the mobile, mirroring the promise the S673 string had already made, so
+filling the row never silently withdraws it.
 
-`website` has no platform-wide fallback — there is no Crest marketing site to point at — so it
-stays whatever the per-client field holds, possibly empty.
+**Don't reach for `SUPPORT_PHONE_RAW` directly anywhere else** — it is module-private, read only
+inside `supportPhone()`. Every call site goes through `useSupportContact()`, which is now one line
+over `resolveSupportContact()`.
+
+## `resolveSupportContact()` — the one merge, three layers, a pure function
+
+Precedence per field: **this client's consultant** (`settings.contact_phone`/`contact_email`/
+`contact_website` on the client's own row — Settings → Support, lower section) → **platform row**
+→ **constants**. A consultant phone replaces the WHOLE phone family (call, WhatsApp, Viber derive
+from it; the Crest landline is dropped) — the point of the override is to route that client to
+one person, not to mix that person's mobile with Crest's office line. Hours are always Crest's.
+`website` has no constant floor. All of this is asserted in `supportContact.test.js`; a new
+surface calls the hook and never re-derives precedence.
+
+Two write paths exist because they target different rows: `savePlatformSupport()` always writes
+the `client_id IS NULL` row, whichever client the admin is viewing; the consultant fields ride on
+the page's ordinary `saveSettings()`. Using `saveSettings()` for the platform contact would write
+it onto the viewed client's row, where nothing reads it.
 
 ## `SupportContactLine` — three variants, one component
 

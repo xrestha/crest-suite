@@ -1,30 +1,19 @@
 import { useSettings } from '../../context/SettingsContext'
-import { normalizePhone } from '../../utils/phone'
-import { SUPPORT_EMAIL, SUPPORT_HOURS, supportPhone } from '../supportContact'
+import { resolveSupportContact } from '../supportContact'
 
 /**
- * The constant-is-the-floor merge (S673): `settings.contact_phone`/`contact_email` — the
- * per-client "Upgrade Contact Details" an admin can set in Settings → Contact — win wherever an
- * admin has actually set them, routing that client to their own consultant. Crest's own support
- * line (src/shared/supportContact.js) fills in everywhere else, so SubscriptionLock/PremiumGate/
- * Help stop falling through to "Contact your Crest consultant" with no way to actually do that.
+ * The constant-is-the-floor merge (S673), now three layers deep (S683): a client's own
+ * consultant (`settings.contact_phone`/`contact_email`/`contact_website`, the lower section of
+ * Settings → Support) wins wherever an admin has set it; the admin-edited platform row
+ * (`settings.support_contact` on the client_id-NULL row, the upper section) fills in next; the
+ * constants in src/shared/supportContact.js are the floor under both. The merge itself is
+ * resolveSupportContact(), a pure function, so precedence is asserted in its test rather than
+ * re-derived per surface.
  *
- * `website` has no platform-wide fallback — there is no Crest marketing site to point at here —
- * so it stays whatever the per-client field holds, possibly empty.
+ * `website` has no constant floor — there is no Crest marketing site to point at — so it is
+ * whatever the consultant or platform field holds, possibly empty.
  */
 export function useSupportContact() {
-  const { settings } = useSettings()
-  const phone = settings?.contact_phone || supportPhone() || ''
-  const email = settings?.contact_email || SUPPORT_EMAIL
-  const website = settings?.contact_website || ''
-  const digits = normalizePhone(phone)
-
-  return {
-    phone,
-    email,
-    website,
-    telHref: phone ? `tel:${phone.replace(/\s+/g, '')}` : null,
-    whatsappHref: digits ? `https://wa.me/977${digits}` : null,
-    hours: SUPPORT_HOURS,
-  }
+  const { settings, platformSupport } = useSettings()
+  return resolveSupportContact({ platform: platformSupport, client: settings })
 }

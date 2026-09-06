@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { MODULE_COLORS, MODULE_INK, colorTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
-import Tip from '../components/Tip'
 import SupportContactLine from '../components/SupportContactLine'
 
 // Lazy for the same reason Settings lazy-loads its Guides tab: this one runs a query and carries
@@ -1764,14 +1763,9 @@ export default function Help() {
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
               For anything the guide above doesn't answer — a bug, a question, or your outlet is down.
             </p>
+            {/* Hours and the outlet-down promise come from the block itself (S683): both are now
+                admin-edited in Settings → Support, so a hardcoded gloss here would drift from them. */}
             <SupportContactLine variant="block" />
-            <div style={{ marginTop: 16 }}>
-              <Tip text="Sunday–Friday, 9am–6pm Nepal time for general questions. If your outlet can't take orders or bill guests, call any time — that one case doesn't wait for business hours.">
-                <span style={{ fontSize: 11, color: 'var(--theme-text3)', borderBottom: '1px dotted var(--theme-text3)', cursor: 'help' }}>
-                  What "outlet-down issues any time" means
-                </span>
-              </Tip>
-            </div>
           </div>
         </div>
       )}

@@ -9,13 +9,15 @@ import { MODULE_COLORS, DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
 import { assignMissingProductCodes } from '../shared/productCode'
 import { useConfirm } from '../shared/hooks/useConfirm'
 import { Navigate } from 'react-router-dom'
+import SupportContactLine from '../components/SupportContactLine'
+import { DEFAULT_SUPPORT_CONTACT, EMERGENCY_CHANNELS, SUPPORT_HOURS, resolveSupportContact } from '../shared/supportContact'
 
 // Lazy so the three module guides' prose (several thousand lines of admin-only strings) lives in
 // its own on-demand chunk instead of the Settings chunk every client login downloads — the Guides
 // tab is admin-only, so a client can never render it.
 const GuidesTab = lazy(() => import('./settings/GuidesTab'))
 
-const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Contact', 'Plan Pricing', 'Data', 'Theme', 'Guides']
+const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Support', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
 // Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
 function deriveInvoicePrefix(name) {
@@ -24,13 +26,13 @@ function deriveInvoicePrefix(name) {
 }
 
 export default function Settings() {
-  const { settings, saveSettings, loadSettings, recipeCategories } = useSettings()
+  const { settings, saveSettings, loadSettings, recipeCategories, platformSupport, savePlatformSupport } = useSettings()
   const { ask: askConfirm, confirmEl } = useConfirm()
   const { clientId, isAdmin, hasFeature, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
-  const ADMIN_TABS = new Set(['Branding', 'Property', 'Contact', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
-  const CLIENT_HIDDEN = new Set(['Contact', 'Branding', 'Property', 'Data', 'Plan Pricing', 'Guides'])
+  const ADMIN_TABS = new Set(['Branding', 'Property', 'Support', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
+  const CLIENT_HIDDEN = new Set(['Support', 'Branding', 'Property', 'Data', 'Plan Pricing', 'Guides'])
   const TABS = ALL_TABS.filter(t => {
     if (isAdmin) return ADMIN_TABS.has(t)
     if (CLIENT_HIDDEN.has(t)) return false
@@ -58,6 +60,14 @@ export default function Settings() {
   const [newCat, setNewCat] = useState('')
   const [catSaving, setCatSaving] = useState(false)
   const [catMsg, setCatMsg] = useState('')
+  // Settings → Support, upper section (S683): the platform row's contact, edited here and saved
+  // through savePlatformSupport() — NOT through save(), which targets whichever client's row is
+  // being viewed. Seeded from the loaded value; the defaults fill any slot the row never had.
+  const [platformForm, setPlatformForm] = useState({ ...DEFAULT_SUPPORT_CONTACT })
+  const [platformSaving, setPlatformSaving] = useState(false)
+  const [platformMsg, setPlatformMsg] = useState('')
+  useEffect(() => { setPlatformForm({ ...DEFAULT_SUPPORT_CONTACT, ...(platformSupport || {}) }) }, [platformSupport])
+  function updatePlatform(key, val) { setPlatformForm(f => ({ ...f, [key]: val })) }
 
   useEffect(() => {
     loadSettings(isAdmin && !clientId ? null : clientId)
@@ -106,6 +116,19 @@ export default function Settings() {
       setError(e.message)
     }
     setSaving(false)
+  }
+
+  async function savePlatform() {
+    setPlatformSaving(true); setPlatformMsg('')
+    try {
+      const trimmed = Object.fromEntries(Object.entries(platformForm).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]))
+      await savePlatformSupport(trimmed)
+      setPlatformMsg('ok:Support contact saved — every client sees it on their next load.')
+      setTimeout(() => setPlatformMsg(''), 4000)
+    } catch (e) {
+      setPlatformMsg('error:' + e.message)
+    }
+    setPlatformSaving(false)
   }
 
   async function handleLogoUpload(file) {
@@ -709,34 +732,132 @@ export default function Settings() {
       )}
 
       {/* CONTACT */}
-      {activeTab === 'Contact' && (
-        <div className="card">
-          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Upgrade Contact Details</h3>
-          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
-            These details appear on the Premium upgrade prompt shown to Basic plan clients.
-          </p>
-          <div className="form-grid form-grid-2">
-            <div className="form-field">
-              <label htmlFor="set-contact-phone">Phone</label>
-              <input id="set-contact-phone" value={form.contact_phone || ''} onChange={e => update('contact_phone', e.target.value)} placeholder="e.g. 9809727572" />
-              <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Shown as a clickable call link</span>
+      {/* SUPPORT (S683) — two sections: Crest's own line for every client, then the consultant
+          override for the client being viewed. The upper section saves to the platform row on its
+          own button; the lower rides on the page's Save like every other per-client field. */}
+      {activeTab === 'Support' && (() => {
+        const hint = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }
+        const preview = resolveSupportContact({ platform: platformForm, client: null })
+        const emergencyOptions = EMERGENCY_CHANNELS.filter(c => preview[c.key])
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div className="card">
+              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Crest Support — shown to every client</h3>
+              <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
+                The line a client reaches when the app itself cannot help: the crash page, the login footer, the
+                offline banners in Stock Count and POS, Help → Support, and the "not on your plan" cards. Blank slots
+                simply do not render. Nothing here is per-client — for that, use the section below.
+              </p>
+              <div className="form-grid form-grid-2">
+                <div className="form-field">
+                  <label htmlFor="sup-mobile"><Tip text="The number on the Call button. It also serves WhatsApp and Viber unless you give those their own numbers below.">Mobile</Tip></label>
+                  <input id="sup-mobile" className="form-input" inputMode="tel" autoComplete="off" value={platformForm.mobile} onChange={e => updatePlatform('mobile', e.target.value)} placeholder="e.g. +977 98X XXX XXXX" />
+                  <span style={hint}>Call · WhatsApp · Viber</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="sup-landline"><Tip text="An office line. Rendered as 'Call office' beside the mobile — it never gets a WhatsApp or Viber link, since a landline cannot take either. Kathmandu lines read 01-XXXXXXX locally, +977 1 XXXXXXX internationally.">Landline</Tip></label>
+                  <input id="sup-landline" className="form-input" inputMode="tel" autoComplete="off" value={platformForm.landline} onChange={e => updatePlatform('landline', e.target.value)} placeholder="e.g. +977 1 XXXXXXX (none yet)" />
+                  <span style={hint}>Call only — no chat links</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="sup-whatsapp"><Tip text="Only if the WhatsApp number differs from the mobile. Blank uses the mobile.">WhatsApp number</Tip></label>
+                  <input id="sup-whatsapp" className="form-input" inputMode="tel" autoComplete="off" value={platformForm.whatsapp} onChange={e => updatePlatform('whatsapp', e.target.value)} placeholder="Blank = same as mobile" />
+                  <span style={hint}>Opens wa.me — Meta's click-to-chat link</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="sup-viber"><Tip text="Viber is the household default in Nepal for free calls, with 10M+ users beside WhatsApp — a support line that offers one should offer both. Blank uses the mobile.">Viber number</Tip></label>
+                  <input id="sup-viber" className="form-input" inputMode="tel" autoComplete="off" value={platformForm.viber} onChange={e => updatePlatform('viber', e.target.value)} placeholder="Blank = same as mobile" />
+                  <span style={hint}>Opens a Viber chat on phones with Viber installed</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="sup-email">Email</label>
+                  <input id="sup-email" className="form-input" type="email" autoComplete="off" value={platformForm.email} onChange={e => updatePlatform('email', e.target.value)} placeholder={`Blank = ${preview.email}`} />
+                  <span style={hint}>Blank keeps the legal support address</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="sup-website">Website</label>
+                  <input id="sup-website" className="form-input" autoComplete="off" value={platformForm.website} onChange={e => updatePlatform('website', e.target.value)} placeholder="e.g. crestsuite.com (none yet)" />
+                  <span style={hint}>Shown on Help → Support only</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="sup-anydesk"><Tip text="Crest's own AnyDesk ID or alias. Shown on Help → Support as: install AnyDesk, send us your 9-digit address, and accept only a request from THIS alias — AnyDesk shows the requester's alias in the accept dialog, so this is how a client tells Crest from an impostor. Never rendered as a link into Crest's machine.">AnyDesk (Crest's address)</Tip></label>
+                  <input id="sup-anydesk" className="form-input" autoComplete="off" value={platformForm.anydesk} onChange={e => updatePlatform('anydesk', e.target.value)} placeholder="e.g. crest@ad or 123 456 789" />
+                  <span style={hint}>Remote help — Help → Support only</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="sup-hours"><Tip text="General hours, in your own words. Printed under the contact details on Help → Support.">Support hours</Tip></label>
+                  <input id="sup-hours" className="form-input" autoComplete="off" value={platformForm.hours} onChange={e => updatePlatform('hours', e.target.value)} placeholder={SUPPORT_HOURS} />
+                  <span style={hint}>Blank = {SUPPORT_HOURS}</span>
+                </div>
+                <div className="form-field">
+                  <span className="field-label" id="sup-emergency-label"><Tip text="Switch on only if someone genuinely answers outside the hours above. While on, Help → Support prints: 'If your outlet can't take orders or bill guests, <channel> <number> is answered any time.' Off, that sentence does not exist.">Outlet-down emergencies</Tip></span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', minHeight: 36 }}>
+                    <input type="checkbox" checked={!!platformForm.emergency_enabled} onChange={e => updatePlatform('emergency_enabled', e.target.checked)} />
+                    Answered any time, outside the hours above
+                  </label>
+                  <select id="sup-emergency-channel" className="form-select" aria-labelledby="sup-emergency-label" aria-label="Which line is answered for outlet-down emergencies" value={platformForm.emergency_channel} disabled={!platformForm.emergency_enabled} onChange={e => updatePlatform('emergency_channel', e.target.value)}>
+                    {EMERGENCY_CHANNELS.map(c => (
+                      <option key={c.key} value={c.key} disabled={!preview[c.key]}>{c.label}{preview[c.key] ? ` — ${preview[c.key]}` : ' — no number'}</option>
+                    ))}
+                  </select>
+                  <span style={hint}>{platformForm.emergency_enabled ? (emergencyOptions.length ? 'Names the line clients should use for an emergency' : 'Add a number above first') : 'No promise is made while this is off'}</span>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 20, padding: '14px 18px', background: 'var(--theme-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--theme-border)' }}>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>What a client sees on Help → Support</div>
+                <SupportContactLine variant="block" contact={preview} />
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20, flexWrap: 'wrap' }}>
+                <button className="btn btn-primary" onClick={savePlatform} disabled={platformSaving} aria-busy={platformSaving || undefined}>
+                  {platformSaving ? 'Saving…' : 'Save Support Contact'}
+                </button>
+                {platformMsg && (
+                  <span role={platformMsg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 13, color: platformMsg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                    {platformMsg.replace(/^(ok|error):/, '')}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="form-field">
-              <label htmlFor="set-contact-email">Email</label>
-              <input id="set-contact-email" type="email" value={form.contact_email || ''} onChange={e => update('contact_email', e.target.value)} placeholder="e.g. info@cresthospitality.com" />
-              <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Shown as a clickable mailto link</span>
-            </div>
-            <div className="form-field">
-              <label htmlFor="set-contact-website">Website</label>
-              <input id="set-contact-website" value={form.contact_website || ''} onChange={e => update('contact_website', e.target.value)} placeholder="e.g. cresthospitality.com" />
-              <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Shown as a clickable external link</span>
+
+            <div className="card">
+              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                This client's consultant{clientId ? '' : ' — pick a client first'}
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
+                Optional, per client. When set, it replaces the Crest line above for this client only — on the upgrade
+                prompts, the lock screen and Help → Support — so the client reaches the person who looks after them.
+                Saved with the page's Save button below. Blank means they see Crest Support.
+              </p>
+              {clientId ? (
+                <div className="form-grid form-grid-2">
+                  <div className="form-field">
+                    <label htmlFor="set-contact-phone"><Tip text="Replaces the mobile, WhatsApp and Viber above for this client. The Crest landline is not shown beside a consultant.">Consultant phone</Tip></label>
+                    <input id="set-contact-phone" inputMode="tel" autoComplete="off" value={form.contact_phone || ''} onChange={e => update('contact_phone', e.target.value)} placeholder="e.g. 98XXXXXXXX" />
+                    <span style={hint}>Call · WhatsApp · Viber for this client</span>
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="set-contact-email">Consultant email</label>
+                    <input id="set-contact-email" type="email" autoComplete="off" value={form.contact_email || ''} onChange={e => update('contact_email', e.target.value)} placeholder={`Blank = ${preview.email}`} />
+                    <span style={hint}>Shown as a mailto link</span>
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="set-contact-website">Website</label>
+                    <input id="set-contact-website" autoComplete="off" value={form.contact_website || ''} onChange={e => update('contact_website', e.target.value)} placeholder="e.g. consultant.com.np" />
+                    <span style={hint}>Shown on Help → Support only</span>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>
+                  Choose a client from the sidebar's client switcher to set their consultant. The Crest line above
+                  applies to everyone until then.
+                </p>
+              )}
             </div>
           </div>
-          <div style={{ marginTop: 20, padding: '14px 18px', background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)', fontSize: 12, color: 'var(--theme-text2)' }}>
-            💡 Leave all fields blank to show a generic "Contact your Crest consultant" message instead.
-          </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* PLAN PRICING */}
       {activeTab === 'Plan Pricing' && (() => {
