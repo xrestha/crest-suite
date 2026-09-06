@@ -57,6 +57,10 @@
   margin-bottom: 14px;
 }
 
+/* A card is focused programmatically after a refused submit (tabIndex -1); it is never in the
+   tab order, so a ring would only ever announce our own scroll. */
+.gb-card:focus { outline: none; }
+
 .gb-label {
   display: block;
   font-size: 12px;

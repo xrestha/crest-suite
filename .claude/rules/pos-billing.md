@@ -650,6 +650,16 @@ are load-bearing, each with the reason it exists:
   `pos_reservations.phone_canonical` there is how S677 found that `pos_customers.phone_canonical`
   never was, i.e. every restore of the customer book had been rejected since S545 while the backup
   looked complete. Any table carrying a GENERATED column needs the entry the day it is created.
+- **A refused submit on the public page must SAY SO beside the button and MOVE the guest (S685).**
+  On a phone the Day and Time cards are two screens above "Request this table"; an inline
+  `Pick a day.` rendered there, with nothing scrolled or focused and nothing near the thumb, was
+  reported as "the button does nothing" — and the three RPCs were probed live before the page
+  was suspected, all fine. `validate()` therefore sets the alert beside the button
+  (`missingSummary`) and `scrollIntoView` + focus on the first card or field still needed (the
+  cards carry `tabIndex={-1}`, un-ringed); picking a day or a time clears the summary. Name and
+  phone keep only their inline error, because those fields sit right above the button. The
+  submit RPC goes through `withTimeout(…, 20000)` — a stalled call on a public page leaves the
+  button on "Sending…" with no way back but a reload.
 
 ## Server-assigned numbers, the offline queue, and `settings` RLS
 

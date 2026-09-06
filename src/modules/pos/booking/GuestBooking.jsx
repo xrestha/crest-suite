@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { adToBsSafe, formatBsDay, BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
 import { nepalCivilDate, nepalTime, nepalBs, nepalDateLong } from '../../../shared/nepalTime'
 import { normalizePhone } from '../../../utils/phone'
+import { withTimeout } from '../../../utils/withTimeout'
 import { durationFor } from '../reservations/reservationSettings'
 import { loadMapFrom, slotIsFull, dayFlags } from './bookingAvailability'
 import './guestBooking.css'
@@ -47,6 +48,16 @@ function refusalCopy(code, outlet, maxParty, lead) {
 }
 
 const sessionKey = clientId => `guestBooking:${clientId}`
+// What the alert beside the button says when a submit is refused for a card the guest cannot
+// see. Name and phone sit right above the button and keep their inline error; Day and Time are
+// two screens up on a phone, where an inline error with nothing moved or focused reads as a
+// button that does nothing (S685).
+function missingSummary(e) {
+  if (e.day) return 'Pick a day and a time above, then send the request.'
+  if (e.time) return 'Pick a time above, then send the request.'
+  return ''
+}
+
 function loadStored(clientId) {
   try { const raw = sessionStorage.getItem(sessionKey(clientId)); return raw ? JSON.parse(raw) : null } catch { return null }
 }
@@ -123,6 +134,11 @@ export default function GuestBooking() {
   const [fieldErr, setFieldErr] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  // Where a refused submit takes the guest: the first card or field that still needs them.
+  const dayCardRef = useRef(null)
+  const timeCardRef = useRef(null)
+  const nameRef = useRef(null)
+  const phoneRef = useRef(null)
 
   const [request, setRequest] = useState(() => loadStored(clientId)) // { id, name, party, reservedFor }
   const [status, setStatus] = useState(null)   // { status, reserved_for, party_size, outlet_name, cancel_reason }
@@ -209,17 +225,32 @@ export default function GuestBooking() {
     const canonical = normalizePhone(phone)
     if (!canonical || canonical.length !== 10) e.phone = 'Please enter a 10-digit mobile number.'
     setFieldErr(e)
-    return Object.keys(e).length === 0
+    if (Object.keys(e).length === 0) return true
+    setSubmitError(missingSummary(e))
+    const target = e.day ? dayCardRef.current : e.time ? timeCardRef.current : e.name ? nameRef.current : phoneRef.current
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      target.focus({ preventScroll: true })
+    }
+    return false
   }
 
   async function submit(ev) {
     ev.preventDefault()
     if (!validate()) return
     setSubmitting(true); setSubmitError('')
-    const { data, error: err } = await supabase.rpc('submit_reservation_request', {
-      p_client_id: clientId, p_name: name.trim(), p_phone: phone.trim(), p_party_size: party,
-      p_reserved_for: reservedFor, p_occasion: occasion || null, p_notes: notes.trim() || null,
-    })
+    // A supabase call can hang before it ever reaches fetch (withTimeout.js); on a public page
+    // that would leave the button on "Sending…" with no way back but a reload.
+    let res
+    try {
+      res = await withTimeout(supabase.rpc('submit_reservation_request', {
+        p_client_id: clientId, p_name: name.trim(), p_phone: phone.trim(), p_party_size: party,
+        p_reserved_for: reservedFor, p_occasion: occasion || null, p_notes: notes.trim() || null,
+      }), 20000, 'Booking request')
+    } catch (e) {
+      res = { data: null, error: e }
+    }
+    const { data, error: err } = res
     setSubmitting(false)
     const outlet = page?.outlet_name || ''
     if (err) {
@@ -326,7 +357,7 @@ export default function GuestBooking() {
       </header>
 
       <form onSubmit={submit} noValidate>
-        <div className="gb-card">
+        <div className="gb-card" ref={dayCardRef} tabIndex={-1}>
           <div className="gb-cal-top">
             <span className="gb-label" id="gb-day-label" style={{ margin: 0 }}>Day</span>
             <span className="gb-cal-caption">{monthCaption(days)} · next 14 days</span>
@@ -340,7 +371,7 @@ export default function GuestBooking() {
               return (
                 <button key={d.iso} type="button" className="gb-day" aria-pressed={dayIso === d.iso} disabled={off}
                   aria-label={`${d.isToday ? 'Today, ' : ''}${d.weekday} ${d.bsLong} (${d.adLabel})${why ? `, ${why}` : ''}`}
-                  onClick={() => { setDayIso(d.iso); setTime(''); setFieldErr(e => ({ ...e, day: undefined })) }}>
+                  onClick={() => { setDayIso(d.iso); setTime(''); setSubmitError(''); setFieldErr(e => ({ ...e, day: undefined })) }}>
                   <span className="gb-day-bs">{d.bsNum}</span>
                   <small>{off ? (d.closed ? 'Closed' : 'Walk-in') : d.isToday ? 'Today' : d.bsMonthShort}</small>
                   <small>{d.adLabel}</small>
@@ -351,7 +382,7 @@ export default function GuestBooking() {
           {fieldErr.day && <span className="gb-err" role="alert">{fieldErr.day}</span>}
         </div>
 
-        <div className="gb-card">
+        <div className="gb-card" ref={timeCardRef} tabIndex={-1}>
           <span className="gb-label" id="gb-time-label">Time</span>
           {!dayIso ? (
             <p className="gb-note" style={{ margin: 0 }}>Pick a day first.</p>
@@ -366,7 +397,7 @@ export default function GuestBooking() {
                   return (
                     <button key={v} type="button" className="gb-chip gb-chip--time" aria-pressed={time === v} disabled={full}
                       aria-label={`${label12(s.h, s.m)}${full ? ', fully booked' : ''}`}
-                      onClick={() => { setTime(v); setFieldErr(e => ({ ...e, time: undefined })) }}>
+                      onClick={() => { setTime(v); setSubmitError(''); setFieldErr(e => ({ ...e, time: undefined })) }}>
                       {label12(s.h, s.m)}
                       {full && <small>Full</small>}
                     </button>
@@ -398,13 +429,13 @@ export default function GuestBooking() {
         <div className="gb-card">
           <div className="gb-field">
             <label htmlFor="gb-name">Your name</label>
-            <input id="gb-name" className="gb-input" value={name} onChange={e => setName(e.target.value)} autoComplete="name"
+            <input id="gb-name" ref={nameRef} className="gb-input" value={name} onChange={e => setName(e.target.value)} autoComplete="name"
               aria-invalid={fieldErr.name ? 'true' : undefined} aria-describedby={fieldErr.name ? 'gb-name-err' : undefined} />
             {fieldErr.name && <span id="gb-name-err" className="gb-err" role="alert">{fieldErr.name}</span>}
           </div>
           <div className="gb-field">
             <label htmlFor="gb-phone">Mobile number</label>
-            <input id="gb-phone" className="gb-input" value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder="98XXXXXXXX"
+            <input id="gb-phone" ref={phoneRef} className="gb-input" value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder="98XXXXXXXX"
               aria-invalid={fieldErr.phone ? 'true' : undefined} aria-describedby={fieldErr.phone ? 'gb-phone-err' : undefined} />
             {fieldErr.phone && <span id="gb-phone-err" className="gb-err" role="alert">{fieldErr.phone}</span>}
           </div>
