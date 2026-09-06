@@ -173,13 +173,6 @@ const POS_GROUPS = [
     { to: '/pos/staff', label: 'POS Staff', icon: Users2, minPosRole: 'manager' },
   ]},
 ]
-// A 'kitchen'/'bar' pos_team account (S431) has no use for anything front-of-house — Orders,
-// Parking Slips, Tables, Customers, Shifts, Menu Pricing, Reports, POS Staff admin — regardless
-// of its pos_role rank. Explicit allowlist rather than tagging every other item: fail-closed, so
-// a future new POS page is hidden from kitchen/bar by default until someone deliberately adds it
-// here, matching this codebase's established fail-closed convention elsewhere (scopedDb, RLS).
-const KITCHEN_TEAM_ALLOWED_PATHS = ['/pos/kds']
-
 const HR_GROUPS = [
   { key: 'hr-people', label: 'People', items: [
     { to: '/hr/employees',  label: 'Employees',        icon: Users, minHrRole: 'manager' },
@@ -215,7 +208,7 @@ export default function Layout() {
           isTrial, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
           accessReason, graceDaysLeft, clientId,
           outlets, switchableOutlets, canSwitchOutlet, switchOutlet,
-          hasPosAccess, posRole, posTeam, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
+          hasPosAccess, posRole, canReachPosPath, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
           suitePlan } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
@@ -405,7 +398,10 @@ export default function Layout() {
     if (item.minPosRole && !hasPosAccess(item.minPosRole)) return false
     // minPosRole is unique to POS nav items (IMS/HR use minImsRole/minHrRole), so this scopes
     // cleanly to POS without touching the other two modules' items.
-    if (item.minPosRole && (posTeam === 'kitchen' || posTeam === 'bar') && !KITCHEN_TEAM_ALLOWED_PATHS.includes(item.to)) return false
+    // A kitchen/bar station team sees the KDS and nothing else. The allowlist lives in
+    // shared/posTeamAccess.js and ModuleGate enforces it on the route too (S683) — this line
+    // only decides what the sidebar and the command palette OFFER.
+    if (item.minPosRole && !canReachPosPath(item.to)) return false
     if (item.minImsRole && !hasImsAccess(item.minImsRole)) return false
     if (item.minHrRole && !hasHrAccess(item.minHrRole)) return false
     return true

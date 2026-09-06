@@ -154,26 +154,43 @@ async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, 
 // stock for it.
 export async function depleteManualSales(supabase, { clientId, periodId, bsDay, rows }) {
   try {
+    const candidates = (rows || []).filter(r => Number(r.qty_sold) > 0)
+
+    // The POS-supersedes-manual guard reads BEFORE this day's movements are replaced, and a read
+    // that fails stops here — leaving the previous save's depletion in place rather than an empty
+    // day. It used to run after the delete and drop its error: on a failed read `posRows` was
+    // null, the index empty, every manual row "not superseded", and a recipe POS had already
+    // depleted deposited a second movement (S683). A check that could not run has not passed.
+    let posIndex = buildPosIndex([])
+    if (candidates.length > 0) {
+      const recipeIds = [...new Set(candidates.map(r => r.recipe_id))]
+      // bs_day is selected (not just recipe_id) so buildPosIndex can key the supersedes check by
+      // day — the query below is already day-scoped, but the shared index is what Stock Movements'
+      // Sub-Recipe Usage view also reads, and that one sees the whole period at once.
+      const posQuery = supabase.from('sales_entries').select('recipe_id, bs_day')
+        .eq('period_id', periodId).in('recipe_id', recipeIds).in('source', ['pos', 'pos_comp'])
+      const { data: posRows, error: posErr } = await (bsDay === 0 ? posQuery : posQuery.eq('bs_day', bsDay))
+      if (posErr) {
+        console.error("manual stock_movements: the POS-supersedes check could not run, so this day's movements were left as they were:", posErr)
+        return
+      }
+      // The POS-supersedes-manual rule lives in salesDepletion.js, shared with the read path that
+      // re-derives sub-recipe consumption from sales_entries — see that file's header for why.
+      posIndex = buildPosIndex((posRows || []).map(r => ({ ...r, source: 'pos' })))
+    }
+
     // Replace this day's manual movements wholesale, matching save_sales_day's own delete+reinsert
     // semantics for sales_entries — otherwise a re-save with fewer/changed rows leaves stale
-    // movements behind from a previous save.
-    await scopedDelete('stock_movements', clientId)
+    // movements behind from a previous save. A refused delete stops the reinsert: inserting over
+    // rows that are still there is the double-depletion this function exists to prevent.
+    const { error: delErr } = await scopedDelete('stock_movements', clientId)
       .eq('period_id', periodId).eq('bs_day', bsDay).eq('source', 'manual')
-
-    const candidates = (rows || []).filter(r => Number(r.qty_sold) > 0)
+    if (delErr) {
+      console.error('manual stock_movements: could not clear this day before re-depleting; left as they were:', delErr)
+      return
+    }
     if (candidates.length === 0) return
 
-    const recipeIds = [...new Set(candidates.map(r => r.recipe_id))]
-    // bs_day is selected (not just recipe_id) so buildPosIndex can key the supersedes check by day
-    // — the query below is already day-scoped, but the shared index is what Stock Movements'
-    // Sub-Recipe Usage view also reads, and that one sees the whole period at once.
-    const posQuery = supabase.from('sales_entries').select('recipe_id, bs_day')
-      .eq('period_id', periodId).in('recipe_id', recipeIds).in('source', ['pos', 'pos_comp'])
-    const { data: posRows } = await (bsDay === 0 ? posQuery : posQuery.eq('bs_day', bsDay))
-
-    // The POS-supersedes-manual rule lives in salesDepletion.js, shared with the read path that
-    // re-derives sub-recipe consumption from sales_entries — see that file's header for why.
-    const posIndex = buildPosIndex((posRows || []).map(r => ({ ...r, source: 'pos' })))
     const qualifying = candidates.filter(r => !posSupersedesManual(r.recipe_id, bsDay, posIndex))
     if (qualifying.length === 0) return
 

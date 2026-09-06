@@ -1,3 +1,4 @@
+import { isStationTeam, posPathReachable } from '../shared/posTeamAccess'
 import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
@@ -371,6 +372,11 @@ export function AuthProvider({ children }) {
   // login works. Admin/owner always resolve to 'foh' (the unrestricted default), same shape as
   // the rank fields above, so neither is ever narrowed by a kitchen/bar nav carve-out.
   const posTeam = isAdmin || isOwner ? 'foh' : (profile?.pos_team || 'foh')
+  // Which POS paths this login may reach: a kitchen/bar station team gets the KDS and nothing
+  // else. ONE predicate, read by the sidebar, the command palette and ModuleGate (S683) — the
+  // allowlist itself lives in shared/posTeamAccess.js.
+  const stationTeam = isStationTeam(posTeam)
+  const canReachPosPath = path => posPathReachable(posTeam, path)
 
   // ── Multi-outlet ──
   // An Owner reaches every outlet in the group. Anyone else reaches their home outlet plus
@@ -598,6 +604,8 @@ export function AuthProvider({ children }) {
       posEnabled,
       posRole,
       posTeam,
+      isStationTeam: stationTeam,
+      canReachPosPath,
       imsRole,
       hrRole,
       isOwner,

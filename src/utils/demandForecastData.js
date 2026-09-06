@@ -1,6 +1,6 @@
 import { supabase } from '../supabaseClient'
 import { scopedFrom, scopedInsert, scopedDelete } from '../shared/scopedDb'
-import { fetchAllRows } from '../shared/fetchAllRows'
+import { fetchAllRowsChunked } from '../shared/fetchAllRows'
 import { bsToAd, adToBs } from './bsCalendar'
 import { computeOrderAmounts } from './posBillingMath'
 
@@ -120,21 +120,31 @@ export async function runForecast(clientId, horizonDays = 7) {
   lookbackStart.setDate(lookbackStart.getDate() - LOOKBACK_DAYS)
 
   try {
-    const [{ data: orders }, { data: periods }, { data: holidays }] = await Promise.all([
+    const [ordersRes, periodsRes, holidaysRes] = await Promise.all([
       scopedFrom('pos_orders', clientId, 'id, covers, closed_at, credit_note_id')
         .eq('status', 'billed').eq('close_type', 'paid')
         .gte('closed_at', lookbackStart.toISOString()),
       scopedFrom('monthly_periods', clientId, 'id, bs_year, bs_month'),
       scopedFrom('hr_holiday_calendar', clientId, 'bs_year, bs_month, bs_day, name, holiday_type, demand_multiplier'),
     ])
+    // A failed read is not "no history": every read in this run used to drop its error, so a dead
+    // connection trained the forecast on nothing and wrote a confident zero for every day (S683).
+    // Each throws into the catch below, which records the failure on the run row and rethrows.
+    const readErr = ordersRes.error || periodsRes.error || holidaysRes.error
+    if (readErr) throw readErr
+    const orders = ordersRes.data, periods = periodsRes.data, holidays = holidaysRes.data
     const orderList = orders || []
 
     let itemsByOrder = {}
     if (orderList.length > 0) {
       // Paged: the forecast reads a long history of bills, so this is the largest pos_order_items
       // read in the app — truncation would silently train the forecast on a fraction of it (S529).
-      const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, qty, unit_price, vat_rate, comped')
-        .in('order_id', orderList.map(o => o.id)).order('id'))
+      // Chunked as well as paged: LOOKBACK_DAYS of bills is hundreds of order ids, and an `.in()`
+      // list is a URL before it is a row count.
+      const { data: items, error: itemsErr } = await fetchAllRowsChunked(orderList.map(o => o.id), ids =>
+        scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, qty, unit_price, vat_rate, comped')
+          .in('order_id', ids).order('id'))
+      if (itemsErr) throw itemsErr
       itemsByOrder = (items || []).reduce((acc, i) => {
         ;(acc[i.order_id] = acc[i.order_id] || []).push(i)
         return acc
@@ -148,9 +158,12 @@ export async function runForecast(clientId, horizonDays = 7) {
       const periodsById = Object.fromEntries((periods || []).map(p => [p.id, p]))
       const periodIds = (periods || []).map(p => p.id)
       if (periodIds.length > 0) {
-        const { data: manualEntries } = await supabase.from('sales_entries')
-          .select('period_id, recipe_id, bs_day, qty_sold, source')
-          .in('period_id', periodIds).eq('source', 'manual')
+        // Every period the client has ever had, so this crosses 1000 rows inside one real year —
+        // it was a bare select, silently truncated (S683).
+        const { data: manualEntries, error: manualErr } = await fetchAllRowsChunked(periodIds, ids =>
+          supabase.from('sales_entries').select('period_id, recipe_id, bs_day, qty_sold, source')
+            .in('period_id', ids).eq('source', 'manual').order('id'))
+        if (manualErr) throw manualErr
         history = history.concat(buildManualDailyHistory(manualEntries || [], periodsById))
       }
     }
@@ -167,7 +180,9 @@ export async function runForecast(clientId, horizonDays = 7) {
     const allRecipeIds = [...new Set(forecast.flatMap(f => Object.keys(f.forecastQtyByRecipe)))]
     let priceByRecipe = {}
     if (allRecipeIds.length > 0) {
-      const { data: recs } = await scopedFrom('recipes', clientId, 'id, selling_price').in('id', allRecipeIds)
+      const { data: recs, error: recsErr } = await fetchAllRowsChunked(allRecipeIds, ids =>
+        scopedFrom('recipes', clientId, 'id, selling_price').in('id', ids).order('id'))
+      if (recsErr) throw recsErr
       priceByRecipe = Object.fromEntries((recs || []).map(r => [r.id, r.selling_price || 0]))
     }
 

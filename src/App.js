@@ -110,6 +110,7 @@ const PosLogin = lazy(() => import('./modules/pos/login/PosLogin'))
 const GuestMenu = lazy(() => import('./modules/pos/guestmenu/GuestMenu'))
 const KitchenDisplay = lazy(() => import('./modules/pos/kds/KitchenDisplay'))
 const Legal = lazy(() => import('./pages/Legal'))
+const NotFound = lazy(() => import('./pages/NotFound'))
 const SubscriptionAgreement = lazy(() => import('./pages/SubscriptionAgreement'))
 
 function RootRedirect() {
@@ -229,7 +230,7 @@ export default function App() {
               <Route path="/recipe-margin"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="recipe_margin" minPlan="growth"><RecipeMargin /></PremiumGate></ModuleGate>} />
               <Route path="/menu-pricing"
-                element={<PremiumGate featureKey="menu_pricing" minPlan="starter"><MenuPricing /></PremiumGate>} />
+                element={<ModuleGate anyOf={['ims', 'pos']}><PremiumGate featureKey="menu_pricing" minPlan="starter"><MenuPricing /></PremiumGate></ModuleGate>} />
               <Route path="/menu-repricing"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="menu_repricing" minPlan="growth"><MenuRepricing /></PremiumGate></ModuleGate>} />
               <Route path="/best-sellers"
@@ -316,6 +317,11 @@ export default function App() {
                 element={<ProtectedRoute adminOnly><AuditLog /></ProtectedRoute>} />
               <Route path="/admin/guest-menu"
                 element={<ProtectedRoute adminOnly><AdminGuestMenu /></ProtectedRoute>} />
+
+              {/* Anything else inside the shell — a typo, a truncated link, a route that moved (S683).
+                  One splat, nested here on purpose: a signed-out visitor is sent to /login by
+                  ProtectedRoute first, and a second '*' outside this group would never match. */}
+              <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>
           </Suspense>

@@ -93,6 +93,23 @@ bill form used to receive rows already narrowed from a client-scoped list; the p
 `purchases_select` passes `is_admin()` — so an admin viewing client A could open client B's bill by
 id. The page requires the bill's `period_id` to appear in its own scoped period list.
 
+**A team allowlist in the nav was the sixth (S683), and it had escaped every audit because the
+audit greps for `min*Role`.** `KITCHEN_TEAM_ALLOWED_PATHS = ['/pos/kds']` sat in `Layout.js` with a
+comment calling it fail-closed — "a future new POS page is hidden from kitchen/bar by default". It
+was fail-closed for the sidebar and for nothing else: `posTeam` reached four files in the tree and
+no POS page read it for access, so a kitchen or bar PIN account typing `/pos/orders` got the till
+and, at supervisor rank, `/pos/shifts` — the cash-drawer reconciliation. The predicate now lives
+in `src/shared/posTeamAccess.js` (`posPathReachable`, `STATION_TEAM_HOME`), `AuthContext` exposes
+it as `canReachPosPath(path)`, `isItemVisible` reads it for the sidebar and the palette, and
+**`ModuleGate` enforces it on every POS route** — so a POS page nobody has written yet is already
+unreachable to a station team, which is what fail-closed was supposed to mean. Two siblings closed
+in the same step: `/menu-pricing` was the one in-app route with **no `ModuleGate` at all** (an
+HR-only client could type its way onto the POS-only branch; `ModuleGate` now takes `anyOf` for a
+route two modules share), and `App.js` had **no `path="*"`** anywhere, so a typo or a moved route
+rendered an empty `#root` — `NotFound.jsx` is nested inside the Layout group on purpose (a
+signed-out visitor is sent to `/login` by `ProtectedRoute` first, and a second splat outside the
+group would never match).
+
 ## `is_premium`, `ims_plan` and how `plan` finally came to resolve
 
 Migrated from the root `CLAUDE.md` (S663). This is the tail of the original Guest QR Ordering paragraph; the root keeps the `pos_enabled` prohibition.
