@@ -863,6 +863,16 @@ four of which live on the class and none of which announce their absence.
   `cursor: pointer`, so a text field wearing it announces itself as a menu — 60 inputs across 22
   files had done exactly that. `.form-input--auto` is the width escape hatch for a filter toolbar,
   because width is layout, not control identity.
+- **A checkbox inside a `.form-field` is not a text field.** `.form-field input` is a descendant
+  rule, so until S684 it gave `type="checkbox"` the well, the border, the text-field padding and
+  `width: 100%`: the Settings → Support emergency switch measured 454×13 with its tick centred in
+  the column and the sentence beside it squeezed into a 64px strip, five words on five lines, on
+  both presets — and ClientDrawer's VAT box carried a nine-property inline workaround for the same
+  reason. One rule now exempts `[type="checkbox"]` and `[type="radio"]` (auto width, no padding, no
+  well, `accent-color` from the accent). **`.form-check`** is the row a checkbox sits in when the
+  caption above it is the field's name and the text beside it is a sentence: 13px/400, plain
+  colour, 36px so it lines up with an input beside it in a `.form-grid`. Do not re-add the inline
+  workaround.
 - **A switch's off-track is slate and its knob is the card colour.** Both hand-rolled switches
   (SSF Enrolled on the pay form, the VAT toggle on a purchase bill) shipped a white knob on a
   `--theme-border` track — on Light the border is `#ddd6cf`, so the off state measured ~1.2:1 and

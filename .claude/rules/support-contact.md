@@ -69,13 +69,24 @@ block variant — the S673 hardcoded `Tip` gloss was removed so it cannot drift 
 It defaults ON with the mobile, mirroring the promise the S673 string had already made, so
 filling the row never silently withdraws it.
 
+**"No phone line" is a state, not a blank (S684).** `phone_enabled` (default `true`, so every row
+saved before it keeps publishing) makes `resolveSupportContact()` return an empty phone family —
+mobile, landline, both chat links, and therefore the emergency promise — WITHOUT reading the floor
+mobile. A WhatsApp or Viber number survives only where it was given explicitly, since it can no
+longer fall back to a mobile that is not published; a consultant still wins per client. It exists
+because the floor is the founder's personal number and a blank Mobile fell through to it, so the
+only way to take that number off eight surfaces was another number or a deploy. Every consumer
+already guarded on `phone`/`telHref` being falsy; the test asserts the off state, the explicit
+chat channel, the consultant and the default.
+
 **Where a client finds it.** The sidebar's bottom rail carries a **Support** button (`LifeBuoy`)
 beside Help, landing on `/help?section=support`; `Help.js` reads `?section=` against
 `HELP_SECTIONS` and follows it on change, so a link can name the section — before S683 it lived
 only in component state, six tabs in, and "where is support?" was the first question asked once
 the contact became editable. The Settings → Support form's Mobile field names the built-in floor in
-its own placeholder and hint while blank, because the emergency dropdown and the preview show a
-resolved number, and a number the reader can see but cannot find a box for reads as "not editable".
+its hint while blank, because the preview shows a resolved number and a number the reader can see
+but cannot find a box for reads as "not editable" — ONCE: S684 took it out of the placeholder and
+the emergency dropdown's options, where the same number had been repeated four times on one card.
 
 **Don't reach for `SUPPORT_PHONE_RAW` directly anywhere else** — it is module-private, read only
 inside `supportPhone()`. Every call site goes through `useSupportContact()`, which is now one line
@@ -103,6 +114,16 @@ Two write paths exist because they target different rows: `savePlatformSupport()
 the `client_id IS NULL` row, whichever client the admin is viewing; the consultant fields ride on
 the page's ordinary `saveSettings()`. Using `saveSettings()` for the platform contact would write
 it onto the viewed client's row, where nothing reads it.
+
+**Each card has its own Save, and the platform form's seed is keyed on the VALUE (S684).**
+`saveSettings()` ends in `loadSettings()`, which sets `platformSupport` to a fresh object from the
+row on every run — so an effect keyed on that reference re-seeded the platform form from the row
+after every page-level save and every client switch, discarding what the admin had typed while the
+header button said "✓ Saved". The seed compares the serialised row against the last seed and
+returns when equal. The Support tab hides the header "Save Changes" (measured: it was 1,345px from
+the consultant fields while the other card's button was 243px away), and the consultant card
+carries its own "Save Consultant" over the same `save()`. The preview renders the FORM, not the
+row, and says so with an amber "Unsaved" chip while the two differ.
 
 ## `SupportContactLine` — three variants, one component
 
