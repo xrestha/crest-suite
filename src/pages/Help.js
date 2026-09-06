@@ -1,9 +1,18 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { MODULE_COLORS, MODULE_INK, colorTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
 import SupportContactLine from '../components/SupportContactLine'
+// The Help sections a URL may open directly: /help?section=support is the sidebar's Support
+// button (S683) — before it, "where is support?" had no answer a link could give, because the
+// section lived only in component state. Anything else falls back to the guide.
+const HELP_SECTIONS = ['guide', 'modules', 'glossary', 'faq', 'pricing', 'support', 'legal']
+const sectionFromSearch = search => {
+  const s = new URLSearchParams(search).get('section')
+  return HELP_SECTIONS.includes(s) ? s : null
+}
+
 
 // Lazy for the same reason Settings lazy-loads its Guides tab: this one runs a query and carries
 // its own table, and every other tab would otherwise pay for it on first paint of /help.
@@ -881,7 +890,11 @@ const POS_MISTAKES = [
 
 export default function Help() {
   const { imsEnabled, hrEnabled, posEnabled, plan, isAdmin } = useAuth()
-  const [activeSection, setActiveSection]         = useState('guide')
+  const location = useLocation()
+  const [activeSection, setActiveSection]         = useState(() => sectionFromSearch(location.search) || 'guide')
+  // Clicking the rail's Support button while already on /help changes only the query string, so
+  // the initializer above does not rerun — follow the URL when it names a section.
+  useEffect(() => { const s = sectionFromSearch(location.search); if (s) setActiveSection(s) }, [location.search])
   const [expandedModule, setExpandedModule]       = useState(null)
   const [expandedFaq, setExpandedFaq]             = useState(null)
   const [pricingAnnual, setPricingAnnual]         = useState(false)

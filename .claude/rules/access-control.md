@@ -146,9 +146,10 @@ What holds now, and why each piece is where it is:
   the closing banner asks what to switch on instead of selling a trial to a paying customer. It
   stays outside `ProtectedRoute` on purpose — a visitor must still be able to read it.
 
-Still open from the same finding: `SUPPORT_PHONE_RAW` in `supportContact.js` is the last unfilled
-`[[NEEDS VALUE]]` in the product, so every one of these surfaces shows email only until it is
-filled. One constant; six surfaces light up. See `support-contact.md`.
+The last piece of the same finding — `SUPPORT_PHONE_RAW`, the one unfilled `[[NEEDS VALUE]]` in
+the product, which left every one of these surfaces showing email only — closed later in S683 by
+making the contact DATA: `settings.support_contact` on the platform row, edited in Settings →
+Support, with the founder's mobile as the constant floor. See `support-contact.md`.
 
 ## `is_premium`, `ims_plan` and how `plan` finally came to resolve
 

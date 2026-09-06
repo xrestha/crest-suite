@@ -21,7 +21,7 @@ import {
   Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
   CalendarX2, ChefHat, ChevronDown, ClipboardCheck, ClipboardList, Clock, Coins, Combine,
   ConciergeBell, Contact, CreditCard, Crown, FileBarChart, FileCheck2, FileDigit,
-  FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon,
+  FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, LifeBuoy,
   History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart,
   LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree, PanelLeftClose,
   PanelLeftOpen, ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
@@ -1123,6 +1123,13 @@ export default function Layout() {
         {/* Bottom-anchored, icon-only, always visible regardless of collapsed state — same three
             actions today's rail always kept visible at its bottom. */}
         <nav className="sidebar-bottom" aria-label="Help and account">
+          {/* Support is a rail button of its own (S683): the contact lived six tabs into Help,
+              and "where do I find support?" was the first thing asked once it became editable.
+              No active state — it lands on /help, which the Help button already claims. */}
+          <RailTip label="Support">
+            <NavLink to="/help?section=support" title="Support" className="rail-btn"
+              onClick={() => setMobileSidebarOpen(false)}><LifeBuoy size={18} strokeWidth={1.75} /></NavLink>
+          </RailTip>
           <RailTip label="Help">
             <NavLink to="/help" title="Help"
               className={({ isActive }) => `rail-btn${isActive ? ' rail-btn--active' : ''}`}
