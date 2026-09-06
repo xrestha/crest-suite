@@ -425,6 +425,7 @@ export default function Layout() {
 
   function renderNavItem(item, { pinnable = true, style } = {}) {
     const isPinned = pins.includes(item.to)
+    const count = navCounts[item.to] || 0
     return (
       <NavLink key={item.to} to={item.to}
         className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
@@ -432,6 +433,13 @@ export default function Layout() {
         onClick={() => setMobileSidebarOpen(false)}>
         <span className="sidebar-icon"><item.icon size={16} strokeWidth={1.75} /></span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
+        {count > 0 && (
+          <span className="badge-amber badge-sentence" style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4, flexShrink: 0 }}
+            aria-label={`${count} booking request${count === 1 ? '' : 's'} waiting`}
+            title={`${count} booking request${count === 1 ? '' : 's'} waiting for Accept`}>
+            {count}
+          </span>
+        )}
         {/* Pins are the shell's own answer to a 41-destination nav, so they cannot be mouse-only.
             role="button" + tabIndex rather than a real <button> because this sits inside the
             NavLink's <a>, where a nested <button> would be invalid HTML; togglePin already calls
@@ -571,7 +579,10 @@ export default function Layout() {
   ].filter(Boolean)
   const panel = panelOrder.includes(activePanel) ? activePanel : panelOrder[0]
   const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS' }
-  const { hrPending, posPending } = useNavBadgeCounts(hrVisible, posVisible)
+  const { hrPending, posPending, posRequests } = useNavBadgeCounts(hrVisible, posVisible)
+  // Per-route counts rendered on the nav row itself, so a number waiting on one page is visible
+  // from every other page in the module. Keyed by route because NAV is a module-level constant.
+  const navCounts = { '/pos/reservations': posRequests }
 
   // Top "Dashboard" nav label — mirrors ClientDashboard.jsx's own dashTitle exactly (admin always
   // sees "Admin Dashboard"; a real client with 2-3 modules sees generic "Dashboard"; a client with
@@ -745,8 +756,13 @@ export default function Layout() {
       tip: hrPending > 0 ? `Crest HR — ${hrPending} pending` : 'Crest HR',
     },
     posVisible && {
-      key: 'pos', label: 'POS', icon: Store, dot: posPending > 0 ? 'var(--theme-amber)' : null,
-      tip: posPending > 0 ? `Crest POS — ${posPending} pending` : 'Crest POS',
+      key: 'pos', label: 'POS', icon: Store, dot: posPending + posRequests > 0 ? 'var(--theme-amber)' : null,
+      tip: posPending + posRequests > 0
+        ? `Crest POS — ${[
+          posPending > 0 ? `${posPending} pending` : null,
+          posRequests > 0 ? `${posRequests} booking request${posRequests === 1 ? '' : 's'}` : null,
+        ].filter(Boolean).join(' · ')}`
+        : 'Crest POS',
     },
   ].filter(Boolean)
   const totalTabCount = (adminTab ? 1 : 0) + moduleTabs.length

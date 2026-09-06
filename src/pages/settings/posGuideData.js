@@ -171,7 +171,7 @@ export const POS_GUIDE_GROUPS = [
         route: '/pos/reservations',
         plan: 'Staff+',
         summary:
-          'The booking book. A booking is a promise about a future table, kept in its own record and DERIVED onto the Orders floor — it never writes the table\'s status. Take one by phone, WhatsApp or at the door, or let customers request one from the outlet\'s booking QR / link; every online request waits for a staff Accept. Seating hands off to Order Taking with the party size as the covers, and paying the bill marks the booking completed.',
+          'The booking book. A booking is a promise about a future table, kept in its own record and DERIVED onto the Orders floor — it never writes the table\'s status. Take one by phone, WhatsApp or at the door, or let customers request one from the outlet\'s booking QR / link; every online request waits for a staff Accept — the count shows on the Reservations row in the sidebar, on the POS dot in the rail and on the dashboard\'s Bookings Tonight tile, and the Reservations page chimes while it is open. Seating hands off to Order Taking with the party size as the covers, and paying the bill marks the booking completed.',
         workflow: [
           'Take: + New booking — name, phone (looked up in the customer book: visits, unsettled credit, past no-shows), guests, BS day + time, optional held tables, how they booked. Sitting length prefills per party size.',
           'Confirm: the 💬 button opens WhatsApp on this device with the confirmation message prefilled; the number is on the row for a phone call. Nothing is sent automatically — no SMS gateway, no sender ID to register.',

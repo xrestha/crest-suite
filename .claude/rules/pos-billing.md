@@ -660,6 +660,12 @@ are load-bearing, each with the reason it exists:
   phone keep only their inline error, because those fields sit right above the button. The
   submit RPC goes through `withTimeout(…, 20000)` — a stalled call on a public page leaves the
   button on "Sending…" with no way back but a reload.
+- **Anything that waits for a human Accept must feed `useNavBadgeCounts` (S686).** The rail's
+  amber dot on the HR/POS icon and the per-route `navCounts` chip in `Layout.js` are the shell's
+  only alert visible from every page; a count shown on the page the item lands on, or on a
+  dashboard tile's second line, was reported as "no notification" by an owner on the IMS
+  dashboard. `posRequests` (reservations `status = 'requested'`) is the first POS entry; keep a
+  failed count at its last value rather than zero.
 
 ## Server-assigned numbers, the offline queue, and `settings` RLS
 
