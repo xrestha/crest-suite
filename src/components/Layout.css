@@ -1405,10 +1405,15 @@ tr.interactive-row:focus-visible {
      /payables and /menu-repricing, where they are the row-select and select-all controls, i.e.
      the entry point to every bulk action on those pages. Below the 24px minimum on any pointer,
      and unusable with a thumb. */
+  /* !important for the same reason the 16px floor below carries it, and it was measured: eleven
+     checkboxes across IMS and POS set `width: 15, height: 15` in an inline style object — the
+     bill-form VAT toggles, the PO receive column, Menu Pricing's On-POS and pairing rows — and no
+     selector beats an inline style, so without it this rule reached exactly the controls that
+     already had no inline size and skipped every one that had opted out (S682). */
   input[type="checkbox"],
   input[type="radio"] {
-    width: 20px;
-    height: 20px;
+    width: 20px !important;
+    height: 20px !important;
   }
   /* .tab-btn measured 23px tall — just under the floor, and it is the day-picker on Purchases. */
   .tab-btn {

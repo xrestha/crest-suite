@@ -15,6 +15,7 @@ export function useFoodBeverageSplit({ activePeriod, includeManual, includePos }
   const { scopedFrom } = useScopedDb()
   const [buckets, setBuckets] = useState({})
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const loadIdRef = useRef(0)
 
   useEffect(() => {
@@ -37,10 +38,18 @@ export function useFoodBeverageSplit({ activePeriod, includeManual, includePos }
         b[cat] = (b[cat] || 0) + r.amount
       })
       setBuckets(b)
+      setError(null)
+      setLoading(false)
+    }).catch(e => {
+      // Both loaders now throw on a failed read (S682), so this hook needs the catch or the Sales
+      // Mix card would spin forever — and an empty bucket map here is the same silent zero.
+      if (loadIdRef.current !== myId) return
+      setError(e?.message || 'Could not load the sales mix.')
+      setBuckets({})
       setLoading(false)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, activePeriod?.id, includeManual, includePos])
 
-  return { buckets, loading }
+  return { buckets, loading, error }
 }

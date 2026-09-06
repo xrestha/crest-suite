@@ -19,13 +19,26 @@ const fmtNpr = n => `NPR ${Math.round(n).toLocaleString('en-NP')}`
 // Sales Entry's Period Summary. Totals are now computed from ALL rows and passed in explicitly.
 export default function SalesPivot({ activePeriod, posEnabled, title = 'Sales by Category' }) {
   const navigate = useNavigate()
-  const { rows, loading } = useSalesPivotData({ activePeriod, posEnabled })
+  const { rows, loading, error } = useSalesPivotData({ activePeriod, posEnabled })
 
   if (loading) {
     return (
       <div className="card" style={{ padding: '14px 16px' }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>{title}</div>
         <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
+      </div>
+    )
+  }
+
+  // A failed read is not an empty period, and on this card the empty state reads as a fact about
+  // the month's trading (S682).
+  if (error) {
+    return (
+      <div className="card" style={{ padding: '14px 16px' }} role="alert">
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{title}</div>
+        <p style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: 0 }}>
+          Couldn't load this breakdown — nothing here is a real figure. Reload the page.
+        </p>
       </div>
     )
   }

@@ -620,12 +620,16 @@ export default function Settings() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
             {cats.map((cat, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', border: '1px solid var(--theme-border)', borderRadius: 6, background: 'var(--theme-bg)' }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', background: 'var(--theme-bg)' }}>
                 <span style={{ flex: 1, fontSize: 13, color: 'var(--theme-text1)' }}>{cat}</span>
+                {/* A named control, not a bare glyph dimmed to 0.7 on red text (S682): title is
+                    the last-resort naming mechanism and announces nothing on touch. */}
                 <button
+                  type="button"
+                  className="btn btn-danger btn-icon"
                   onClick={() => setCats(prev => prev.filter((_, idx) => idx !== i))}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--theme-red-text)', fontSize: 18, lineHeight: 1, padding: '0 4px', opacity: 0.7 }}
-                  title="Remove category"
+                  aria-label={`Remove the "${cat}" category`}
+                  title={`Remove the "${cat}" category`}
                 >×</button>
               </div>
             ))}

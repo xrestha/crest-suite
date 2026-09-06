@@ -10,6 +10,8 @@ import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { supabase } from '../../supabaseClient'
+import { firstError } from '../../shared/queryError'
+import { errorLine } from '../../shared/errorText'
 import { bsToAd, adToBs, daysInBsMonth } from '../../utils/bsCalendar'
 
 // Same Nepal-offset boundary construction as ClientDashboard.jsx's own bsDayBoundaryIso — bsToAd
@@ -24,13 +26,18 @@ function bsDayBoundaryIso(bsYear, bsMonth, bsDay, endOfDay) {
 }
 
 export async function loadFromSalesEntries(period, scopedFrom) {
-  const [{ data: sales }, { data: recipes }] = await Promise.all([
+  const results = await Promise.all([
     // Excludes both pos_comp (never billed) and pos (already counted by the POS-sourced pivot —
     // PosOrders.jsx stamps a source:'pos' row per bill at close) so this "manual" pivot and the
     // POS pivot can render side by side without double-counting the same revenue.
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').neq('source', 'pos').order('id')),
     scopedFrom('recipes', 'id, category, selling_price'),
   ])
+  // Same rule as loadFromPos below: a failed read here would render as "No sales recorded yet
+  // this period" on a card an owner reads as fact (S682).
+  const failed = firstError(results)
+  if (failed) throw new Error(failed)
+  const [{ data: sales }, { data: recipes }] = results
   const priceMap = {}, catMap = {}
   ;(recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0; catMap[r.id] = r.category || 'Uncategorized' })
   const agg = {}
@@ -54,8 +61,12 @@ export async function loadFromPos(period, scopedFrom) {
   const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, lastDay, true)
   // Same exclusions as SalesReport.jsx/computePosSection — credit-noted bills' revenue
   // correction posts on the day the Credit Note is issued, not retroactively here.
-  const { data: orders } = await scopedFrom('pos_orders', 'id, closed_at, credit_note_id')
+  const { data: orders, error: ordersErr } = await scopedFrom('pos_orders', 'id, closed_at, credit_note_id')
     .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs)
+  // A failed read must not render as "No sales recorded yet this period" — that is the silent-zero
+  // shape on the dashboard card an owner glances at between services (S682). Throw so the hook can
+  // say the figure could not be built.
+  if (ordersErr) throw new Error(errorLine(ordersErr))
   const validOrders = (orders || []).filter(o => !o.credit_note_id)
   if (validOrders.length === 0) return []
   const orderDayMap = {}
@@ -64,7 +75,8 @@ export async function loadFromPos(period, scopedFrom) {
   // Paged: a month of bill lines runs to thousands, past PostgREST's silent 1000-row cap, which
   // would quietly shrink the dashboard's POS Sales by Category pivot to a fraction of the
   // month while still reading as a complete one (S529).
-  const { data: items } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, comped').in('order_id', orderIds).order('id'))
+  const { data: items, error: itemsErr } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, comped').in('order_id', orderIds).order('id'))
+  if (itemsErr) throw new Error(errorLine(itemsErr))
   const agg = {}
   ;(items || []).forEach(i => {
     if (i.comped) return // never billed at menu price — excluded from revenue, same as every POS report
@@ -81,27 +93,34 @@ export async function loadFromPos(period, scopedFrom) {
   })
 }
 
-// Returns { rows, loading } where rows is a flat [{ category, day, amount }] — the caller pivots
+// Returns { rows, loading, error } where rows is a flat [{ category, day, amount }] — the caller pivots
 // this into whatever top-N/last-N-days shape it wants to display (SalesPivot.jsx).
 export function useSalesPivotData({ activePeriod, posEnabled }) {
   const { clientId } = useAuth()
   const { scopedFrom } = useScopedDb()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const loadIdRef = useRef(0)
 
   useEffect(() => {
     if (!clientId || !activePeriod) { setRows([]); setLoading(false); return }
     const myId = ++loadIdRef.current
     setLoading(true)
+    setError(null)
     const loader = posEnabled ? loadFromPos(activePeriod, scopedFrom) : loadFromSalesEntries(activePeriod, scopedFrom)
     loader.then(flatRows => {
       if (loadIdRef.current !== myId) return // superseded by a newer client switch
       setRows(flatRows)
       setLoading(false)
+    }).catch(e => {
+      if (loadIdRef.current !== myId) return
+      setError(e?.message || 'Could not load the sales breakdown.')
+      setRows([])
+      setLoading(false)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, activePeriod?.id, posEnabled])
 
-  return { rows, loading }
+  return { rows, loading, error }
 }
