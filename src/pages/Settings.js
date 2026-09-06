@@ -757,6 +757,10 @@ export default function Settings() {
         const hint = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }
         const preview = resolveSupportContact({ platform: platformForm, client: null })
         const emergencyOptions = EMERGENCY_CHANNELS.filter(c => preview[c.key])
+        const phoneOn = platformForm.phone_enabled !== false
+        // Plain weight/colour on purpose: `.form-field label` styles a caption, and these are
+        // sentences beside a checkbox.
+        const checkRow = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 400, letterSpacing: 0, textTransform: 'none', color: 'var(--theme-text1)', cursor: 'pointer', minHeight: 36, margin: 0 }
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card">
@@ -769,13 +773,13 @@ export default function Settings() {
               <div className="form-grid form-grid-2">
                 <div className="form-field">
                   <label htmlFor="sup-mobile"><Tip text="The number on the Call button. It also serves WhatsApp and Viber unless you give those their own numbers below.">Mobile</Tip></label>
-                  <input id="sup-mobile" className="form-input" inputMode="tel" autoComplete="off" value={platformForm.mobile} onChange={e => updatePlatform('mobile', e.target.value)} placeholder={`Blank = built-in ${supportPhone() || 'none'}`} />
-                  <span style={hint}>{platformForm.mobile.trim() ? 'Call · WhatsApp · Viber' : `Blank — clients see the built-in number ${supportPhone()}. Type here to replace it.`}</span>
+                  <input id="sup-mobile" className="form-input" inputMode="tel" autoComplete="off" value={platformForm.mobile} onChange={e => updatePlatform('mobile', e.target.value)} placeholder="Leave blank for the built-in line" disabled={!phoneOn} />
+                  <span style={hint}>{!phoneOn ? 'Not published while the phone line is off' : platformForm.mobile.trim() ? 'Call · WhatsApp · Viber' : `Blank — clients see the built-in number ${supportPhone()}. Type here to replace it.`}</span>
                 </div>
                 <div className="form-field">
                   <label htmlFor="sup-landline"><Tip text="An office line. Rendered as 'Call office' beside the mobile — it never gets a WhatsApp or Viber link, since a landline cannot take either. Kathmandu lines read 01-XXXXXXX locally, +977 1 XXXXXXX internationally.">Landline</Tip></label>
-                  <input id="sup-landline" className="form-input" inputMode="tel" autoComplete="off" value={platformForm.landline} onChange={e => updatePlatform('landline', e.target.value)} placeholder="e.g. +977 1 XXXXXXX (none yet)" />
-                  <span style={hint}>Call only — no chat links</span>
+                  <input id="sup-landline" className="form-input" inputMode="tel" autoComplete="off" value={platformForm.landline} onChange={e => updatePlatform('landline', e.target.value)} placeholder="e.g. +977 1 XXXXXXX (none yet)" disabled={!phoneOn} />
+                  <span style={hint}>{phoneOn ? 'Call only — no chat links' : 'Not published while the phone line is off'}</span>
                 </div>
                 <div className="form-field">
                   <label htmlFor="sup-whatsapp"><Tip text="Only if the WhatsApp number differs from the mobile. Blank uses the mobile.">WhatsApp number</Tip></label>
@@ -809,17 +813,24 @@ export default function Settings() {
                 </div>
                 <div className="form-field">
                   <span className="field-label" id="sup-emergency-label"><Tip text="Switch on only if someone genuinely answers outside the hours above. While on, Help → Support prints: 'If your outlet can't take orders or bill guests, <channel> <number> is answered any time.' Off, that sentence does not exist.">Outlet-down emergencies</Tip></span>
-                  {/* Plain weight/colour on purpose: `.form-field label` styles a caption, and this is a sentence beside a checkbox. */}
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 400, letterSpacing: 0, textTransform: 'none', color: 'var(--theme-text1)', cursor: 'pointer', minHeight: 36, margin: 0 }}>
+                  <label style={checkRow}>
                     <input type="checkbox" aria-describedby="sup-emergency-label" checked={!!platformForm.emergency_enabled} onChange={e => updatePlatform('emergency_enabled', e.target.checked)} style={{ margin: 0, flexShrink: 0 }} />
                     <span>Answered any time, outside the hours above</span>
                   </label>
                   <select id="sup-emergency-channel" className="form-select" aria-label="Which line is answered for outlet-down emergencies" value={platformForm.emergency_channel} disabled={!platformForm.emergency_enabled} onChange={e => updatePlatform('emergency_channel', e.target.value)}>
                     {EMERGENCY_CHANNELS.map(c => (
-                      <option key={c.key} value={c.key} disabled={!preview[c.key]}>{c.label}{preview[c.key] ? ` — ${preview[c.key]}` : ' — no number'}</option>
+                      <option key={c.key} value={c.key} disabled={!preview[c.key]}>{c.label}{preview[c.key] ? '' : ' — no number'}</option>
                     ))}
                   </select>
-                  <span style={hint}>{platformForm.emergency_enabled ? (emergencyOptions.length ? 'Names the line clients should use for an emergency' : 'Add a number above first') : 'No promise is made while this is off'}</span>
+                  <span style={hint}>{platformForm.emergency_enabled ? (emergencyOptions.length ? 'Live for every client once saved — they are told this line is answered any time' : 'Add a number above first') : 'No promise is made while this is off'}</span>
+                </div>
+                <div className="form-field">
+                  <span className="field-label" id="sup-phone-label"><Tip text="Off = no Call button anywhere: the crash page, the lock screen, the login footer, the offline banners and Help → Support show email — and WhatsApp or Viber only if you gave those their own numbers. The built-in number is not used either. Switch this off the day the mobile above should stop being published.">Phone line</Tip></span>
+                  <label style={checkRow}>
+                    <input type="checkbox" aria-describedby="sup-phone-label" checked={phoneOn} onChange={e => updatePlatform('phone_enabled', e.target.checked)} style={{ margin: 0, flexShrink: 0 }} />
+                    <span>Publish a number clients can call</span>
+                  </label>
+                  <span style={hint}>{phoneOn ? 'A Call button on every support surface' : 'No Call button anywhere. Email always shows.'}</span>
                 </div>
               </div>
 

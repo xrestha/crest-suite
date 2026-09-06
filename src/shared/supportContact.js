@@ -113,6 +113,10 @@ export const DEFAULT_SUPPORT_CONTACT = {
   // never silently withdraws it; the admin can switch it off in Settings → Support.
   emergency_enabled: true,
   emergency_channel: 'mobile',
+  // Off = publish NO number (S684). Until this existed a blank Mobile fell through to the floor
+  // constant, so the founder's personal phone could only be taken off the eight support surfaces
+  // by another number or a deploy. "No phone line" is a state the business can now choose.
+  phone_enabled: true,
 }
 
 const clean = v => String(v ?? '').trim()
@@ -153,6 +157,12 @@ export function resolveSupportContact({ platform, client } = {}) {
   if (consultantPhone) {
     mobile = consultantPhone; landline = ''
     whatsapp = consultantPhone; viber = consultantPhone
+  } else if (p.phone_enabled === false) {
+    // No phone line: the floor mobile is NOT read — it is a seed for the first fill, not a line
+    // Crest has promised to answer — and a chat number survives only where it was given
+    // explicitly, since it can no longer fall back to a mobile that is not published.
+    mobile = ''; landline = ''
+    whatsapp = clean(p.whatsapp); viber = clean(p.viber)
   } else {
     mobile = clean(p.mobile) || supportPhone() || ''
     landline = clean(p.landline)

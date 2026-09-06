@@ -114,3 +114,28 @@ describe('resolveSupportContact — the one merge', () => {
     expect(r.anydesk).toBe('crest@ad')
   })
 })
+
+test("'no phone line' drops the whole phone family, the floor included, and the promise with it (S684)", () => {
+  const r = resolveSupportContact({ platform: { phone_enabled: false }, client: null })
+  expect(r.phone).toBe('')
+  expect(r.telHref).toBeNull()
+  expect(r.whatsappHref).toBeNull()
+  expect(r.viberHref).toBeNull()
+  expect(r.emergency).toBeNull()          // no number, so no "answered any time" sentence
+  expect(r.email).toBe(SUPPORT_EMAIL)     // email always floors
+  // A chat number given explicitly is still a channel the business answers.
+  const r2 = resolveSupportContact({
+    platform: { phone_enabled: false, whatsapp: '+977 980 555 6666', emergency_enabled: true, emergency_channel: 'whatsapp' },
+    client: null,
+  })
+  expect(r2.phone).toBe('')
+  expect(r2.whatsappHref).toBe('https://wa.me/9779805556666')
+  expect(r2.emergency).toEqual({ channel: 'whatsapp', label: 'WhatsApp', value: '+977 980 555 6666' })
+  // A consultant still routes that one client to a person.
+  const r3 = resolveSupportContact({ platform: { phone_enabled: false }, client: { contact_phone: '9812345678' } })
+  expect(r3.phone).toBe('9812345678')
+  expect(r3.telHref).toBe('tel:9812345678')
+  // The default is on, so a row saved before the switch existed keeps publishing its number.
+  expect(DEFAULT_SUPPORT_CONTACT.phone_enabled).toBe(true)
+  expect(resolveSupportContact({ platform: { mobile: '+977 980 111 2222' }, client: null }).phone).toBe('+977 980 111 2222')
+})
