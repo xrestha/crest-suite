@@ -71,7 +71,15 @@ export const PRESETS = {
     // sex-linked; deuteranopia and protanopia together are ~8% of men. Fixing the common case at
     // the cost of the rare one is the deliberate trade, and the pairing matters less too: red vs
     // accent are error text vs links, not two bands of one scale the way red vs amber are.
-    greenText: '#137538', redText: '#8f2440', amberText: '#a85200', purpleText: '#7c3aed', accentInk: '#7a561e',
+    //
+    // greenText/amberText/purpleText darkened one step in S683 (polish), for a second constraint
+    // S608 did not measure: a *-text variant must clear 4.5:1 on its own 10–12% tint over the PAGE
+    // ground, not only on the card — that is what a .badge-* is, and a badge is not always on a
+    // card. Measured on the built page: amber 4.19, purple 4.33 (never tuned for Light at all — it
+    // was the bare base), green 4.60 with the sidebar chip at 4.34. Now 4.99 / 5.40 / 5.26 on the
+    // page, and the S608 pairing survives: amber vs red is ΔE 13.5 (deuteranopia) / 11.7
+    // (protanopia), both ≥8. redText and accentInk are untouched.
+    greenText: '#116b33', redText: '#8f2440', amberText: '#964900', purpleText: '#6d28d9', accentInk: '#7a561e',
     cardShadow: '0 1px 2px rgba(28,25,23,0.06), 0 10px 24px -8px rgba(28,25,23,0.1)',
   },
 }

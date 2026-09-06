@@ -14,13 +14,13 @@ function fmt(days) {
 // convention (DESIGN.md's tint pattern is "alpha fill + full-opacity signal text"), and a faint
 // tint reads correctly as red/amber/green on every preset because only the text carries meaning.
 function statusFromDays(days) {
-  if (days < 0)   return { label: 'Expired',  days, color: 'var(--theme-red-text)',   bg: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 30%, transparent)'  }
-  if (days <= 7)  return { label: fmt(days),   days, color: 'var(--theme-red-text)',   bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }
-  if (days <= 30) return { label: fmt(days),   days, color: 'var(--theme-amber-text)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-amber) 25%, transparent)'  }
+  if (days < 0)   return { label: 'Expired',  days, color: 'var(--theme-red-text)',   bg: 'color-mix(in srgb, var(--theme-red) 12%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-red) 30%, transparent)'  }
+  if (days <= 7)  return { label: fmt(days),   days, color: 'var(--theme-red-text)',   bg: 'color-mix(in srgb, var(--theme-red) 10%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }
+  if (days <= 30) return { label: fmt(days),   days, color: 'var(--theme-amber-text)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, var(--theme-card))',  border: 'color-mix(in srgb, var(--theme-amber) 25%, transparent)'  }
   // Green tint at 0.06, not 0.10: green-text sits closest to the AA line of the three variants,
   // and at 0.10 the healthy chip measured 4.42:1 on the Light preset — the one state that renders
   // for months on end (S612). The fainter wash keeps the hue while the text carries the meaning.
-  return            { label: fmt(days),   days, color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 6%, transparent)',  border: 'color-mix(in srgb, var(--theme-green) 20%, transparent)'   }
+  return            { label: fmt(days),   days, color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 6%, var(--theme-card))',  border: 'color-mix(in srgb, var(--theme-green) 20%, transparent)'   }
 }
 
 // Per-date status helper — pass any date string directly
@@ -96,10 +96,10 @@ export function getSubStatus(client) {
   // invisible to each other's screens (S574; migration 20260818190000 folded it in).
   if (client?.is_trial && client?.trial_expires_at) {
     const days = Math.ceil((new Date(client.trial_expires_at) - now) / 86400000)
-    if (days < 0) return { label: 'Trial expired', days, color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }
+    if (days < 0) return { label: 'Trial expired', days, color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }
     const m = Math.floor(days / 30)
     const trialLabel = days >= 30 ? `Trial · ${m}mo` : `Trial · ${days}d`
-    return { label: trialLabel, days, color: 'var(--theme-accent-ink)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' }
+    return { label: trialLabel, days, color: 'var(--theme-accent-ink)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' }
   }
   // Explicit, not a silent "—": a client with no dates at all fails OPEN in getAccessState
   // (unlimited access) and is skipped by the auto-deactivation sweep, so this is the one state

@@ -793,3 +793,16 @@ the Owner Dashboard, and `costPct > 35 ? amber` on the Roster board). `src/share
 is the one definition. **Reach for `bandFigure(pct, bander)` and render its `text`**, never
 `bander(pct).color`: the helper appends the ✓/△/▲, which is the mechanism that stops a call site
 taking the colour and dropping the shape — exactly how the dashboard's copy lost it.
+
+**A `*-text` variant has TWO grounds to clear, and S608 measured only one (S683 polish).** The
+Light variants were tuned against the card and the page as plain text. A `.badge-*` is that same
+text on a 10–12% tint of its own hue, and a badge is not always on a card: probed on the built
+page, amber measured **4.19** and purple **4.33** on the page ground (both fine on a card), and
+`purpleText` had never been tuned for Light at all — it was the bare base. Green, amber and purple
+moved one step darker (`#116b33` / `#964900` / `#6d28d9`), each chosen by measuring four candidates
+against every ground in the product, and S608's colour-blindness floor was re-checked rather than
+assumed (amber vs red: ΔE 13.5 deuteranopia, 17.6 protanopia, floor 8). **Before moving a text
+variant, probe `.badge-*` on `document.body`, not on a card**, and re-run the CVD pair. The
+subscription chips in `utils/subscription.js` mix their tint with `--theme-card` rather than
+`transparent` for the related reason: the sidebar ground is darker than the card, so a see-through
+pill there measured 4.34 with text tuned for 4.5 on white.

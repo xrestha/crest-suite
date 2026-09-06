@@ -132,9 +132,11 @@ export default function Pricing() {
 
       {/* Hero */}
       <div style={{ textAlign: 'center', padding: '72px 32px 52px' }}>
-        <div style={{ display: 'inline-block', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 'var(--radius-full)', padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
-          {TRIAL_DAYS}-day free trial · No credit card required
-        </div>
+        {!session && (
+          <div style={{ display: 'inline-block', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 'var(--radius-full)', padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
+            {TRIAL_DAYS}-day free trial · No credit card required
+          </div>
+        )}
         <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
           Simple, honest pricing
         </h1>

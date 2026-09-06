@@ -278,7 +278,8 @@ export default function KitchenDisplay() {
                   {col.label} <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>({colTickets.length})</span>
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {colTickets.length === 0 && (
+                  {/* A single quiet column keeps its dash; a wholly empty board says so once, above. */}
+                  {colTickets.length === 0 && visible.length > 0 && (
                     <div className="card" style={{ padding: 20, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 12 }}>—</div>
                   )}
                   {colTickets.map(t => (
