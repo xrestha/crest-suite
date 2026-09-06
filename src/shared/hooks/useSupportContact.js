@@ -15,5 +15,10 @@ import { resolveSupportContact } from '../supportContact'
  */
 export function useSupportContact() {
   const { settings, platformSupport } = useSettings()
-  return resolveSupportContact({ platform: platformSupport, client: settings })
+  // Only a CLIENT's row carries a consultant. Signed out (and admin-with-no-client) `settings` is
+  // the platform row itself, whose contact_* columns are legacy platform values — already folded
+  // into `platformSupport` by platformSupportFromRow(). Passing that row as `client` made the
+  // /login footer show them over the Support tab (S683).
+  const client = settings?.client_id ? settings : null
+  return resolveSupportContact({ platform: platformSupport, client })
 }

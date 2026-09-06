@@ -2,7 +2,7 @@ import { COMPANY } from '../legal'
 import {
   SUPPORT_EMAIL, SUPPORT_HOURS, DEFAULT_SUPPORT_CONTACT,
   supportPhone, supportPhoneMissing, supportTelHref, supportWhatsappHref,
-  whatsappHrefFor, viberHrefFor, telHrefFor, resolveSupportContact,
+  whatsappHrefFor, viberHrefFor, telHrefFor, resolveSupportContact, platformSupportFromRow,
 } from './supportContact'
 
 test('SUPPORT_EMAIL is the one legal support address, not a second copy', () => {
@@ -92,6 +92,20 @@ describe('resolveSupportContact — the one merge', () => {
     expect(r.viberHref).toBe('viber://chat?number=9779801234567')
     expect(r.email).toBe('help@crest.example')         // blank consultant email → platform email, not the constant
     expect(r.hours).toBe('Sun–Fri 10:00–17:00')        // hours are Crest's, a consultant does not set them
+  })
+
+  test("the platform row's legacy contact_* seed the platform contact, and lose to a saved support_contact", () => {
+    // What /login showed on 2026-09-06: the NULL row's old Contact-tab values, wearing a client's column names.
+    const legacyRow = { client_id: null, contact_phone: '9803727572', contact_email: 'xrestha@gmail.com', contact_website: '', support_contact: null }
+    const seeded = platformSupportFromRow(legacyRow)
+    expect(seeded).toEqual({ ...DEFAULT_SUPPORT_CONTACT, mobile: '9803727572', email: 'xrestha@gmail.com', website: '' })
+    expect(resolveSupportContact({ platform: seeded, client: null }).phone).toBe('9803727572')
+    // Once the Support tab has been saved, the legacy columns are ignored entirely.
+    const saved = platformSupportFromRow({ ...legacyRow, support_contact: { ...DEFAULT_SUPPORT_CONTACT, mobile: '+977 971 459 8771' } })
+    expect(resolveSupportContact({ platform: saved, client: null }).phone).toBe('+977 971 459 8771')
+    // A row with nothing in either place seeds nothing, so the constants stay the floor.
+    expect(platformSupportFromRow({ client_id: null, contact_phone: '', contact_email: null })).toBeNull()
+    expect(platformSupportFromRow(null)).toBeNull()
   })
 
   test('AnyDesk is Crest\'s remote-help address: platform only, untouched by a consultant, blank by default', () => {

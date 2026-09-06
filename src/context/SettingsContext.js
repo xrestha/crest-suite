@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient'
 import { useAuth } from './AuthContext'
 import { DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
 import { errorLine } from '../shared/errorText'
+import { platformSupportFromRow } from '../shared/supportContact'
 
 const SettingsContext = createContext({})
 
@@ -86,10 +87,11 @@ export function SettingsProvider({ children }) {
       // on any error keep whatever was last known rather than blanking six surfaces (the KDS-poll
       // rule — a failed read is not an empty value).
       if (cid) {
-        const { data: prow, error: perr } = await supabase.from('settings').select('support_contact').is('client_id', null).maybeSingle()
-        if (!perr) setPlatformSupport(prow?.support_contact || null)
+        const { data: prow, error: perr } = await supabase.from('settings')
+          .select('support_contact, contact_phone, contact_email, contact_website').is('client_id', null).maybeSingle()
+        if (!perr) setPlatformSupport(platformSupportFromRow(prow))
       } else {
-        setPlatformSupport(data?.support_contact || null)
+        setPlatformSupport(platformSupportFromRow(data))
       }
     } catch (e) {
       setSettings(DEFAULT_SETTINGS)

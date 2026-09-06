@@ -118,6 +118,24 @@ export const DEFAULT_SUPPORT_CONTACT = {
 const clean = v => String(v ?? '').trim()
 
 /**
+ * The platform row's support contact, from the row itself. `support_contact` wins; when it has
+ * never been saved, the row's legacy `contact_phone`/`contact_email`/`contact_website` stand in —
+ * those were written by the old per-client Contact tab whenever an admin used it with NO client
+ * selected, so on the client_id-NULL row they were always platform values wearing a client's
+ * column names. Found live on /login (S683): the footer showed that legacy pair while the Support
+ * tab's values lost to it, because the hook mistook them for a consultant override. Seeding from
+ * them here means the Support form opens showing what clients currently see, and the first Save
+ * retires them.
+ */
+export function platformSupportFromRow(row) {
+  if (!row) return null
+  if (row.support_contact && typeof row.support_contact === 'object') return row.support_contact
+  const mobile = clean(row.contact_phone), email = clean(row.contact_email), website = clean(row.contact_website)
+  if (!mobile && !email && !website) return null
+  return { ...DEFAULT_SUPPORT_CONTACT, mobile, email, website }
+}
+
+/**
  * The one merge. `client` is a client's own settings row (its `contact_phone`/`contact_email`/
  * `contact_website` are the per-client consultant override an admin sets in Settings → Support,
  * lower section); `platform` is the platform row's `support_contact`. Either may be null.

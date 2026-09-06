@@ -83,6 +83,14 @@ one person, not to mix that person's mobile with Crest's office line. Hours are 
 `website` has no constant floor. All of this is asserted in `supportContact.test.js`; a new
 surface calls the hook and never re-derives precedence.
 
+**The platform row's `contact_*` columns are NOT a consultant.** The old Contact tab wrote them
+onto the `client_id IS NULL` row whenever an admin used it with no client selected, and signed-out
+`SettingsProvider` loads that row as `settings` — so passing `settings` straight in as `client`
+showed those legacy values on `/login` over the Support tab (found from a screenshot, S683).
+`useSupportContact()` passes a row as `client` only when it carries a `client_id`;
+`platformSupportFromRow()` folds the legacy columns into the platform contact instead, as a seed
+that a saved `support_contact` supersedes.
+
 Two write paths exist because they target different rows: `savePlatformSupport()` always writes
 the `client_id IS NULL` row, whichever client the admin is viewing; the consultant fields ride on
 the page's ordinary `saveSettings()`. Using `saveSettings()` for the platform contact would write
