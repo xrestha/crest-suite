@@ -22,7 +22,9 @@ import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
 import { Navigate } from 'react-router-dom'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
-import { fcBand, fcThresholds } from '../../../shared/imsFormulas'
+import { fcBand, fcThresholds, fcFigure } from '../../../shared/imsFormulas'
+import { bandFigure, nmBand } from '../../../shared/operatingBands'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 // How long any single save request may hang before the button gives up and re-enables itself.
 // Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
@@ -36,6 +38,7 @@ export default function Recipes() {
   const showNutrition = hasFeature('nutrition_facts')
   const { settings, recipeCategories } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   // Seeded from a short-lived per-tab cache (sessionDataCache.js) so revisiting this page shows
   // the last-known recipes/items/overhead figures instantly instead of a blank skeleton. Safe
   // here (unlike Sales Entry/Stock Count) because saving a recipe only ever writes that one
@@ -562,7 +565,10 @@ export default function Recipes() {
         for (let attempt = 0; attempt < 3; attempt++) {
           ;({ data, error } = await withTimeout(scopedInsert('recipes', payload, { single: true }), SAVE_TIMEOUT_MS, 'Save'))
           if (!error || error.code !== '23505' || !wasAutoIssued) break
-          const { data: fresh } = await scopedFrom('recipes', 'recipe_code')
+          const { data: fresh, error: freshErr } = await scopedFrom('recipes', 'recipe_code')
+          // A failed read here restarted the code sequence from scratch and collided again; abort
+          // with the collision instead (S682).
+          if (freshErr) { error = freshErr; break }
           payload.recipe_code = nextProductCode(
             productCodePrefix(payload.category), (fresh || []).map(r => r.recipe_code))
         }
@@ -687,7 +693,20 @@ Check the recipe list before saving again — if it timed out after the recipe w
       return
     }
 
-    if (!window.confirm(`Delete "${recipe.name}"?`)) return
+    askConfirm({
+      title: `Delete "${recipe.name}"?`,
+      confirmLabel: 'Delete Recipe', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <p style={{ margin: 0 }}>
+          The recipe and its ingredient list are removed{recipe.linked_item_id ? ', and its mirror item is deactivated' : ''}.
+          Sales already recorded against it keep their figures. This cannot be undone.
+        </p>
+      ),
+      run: () => deleteRecipeNow(recipe),
+    })
+  }
+
+  async function deleteRecipeNow(recipe) {
     const { error: ingErr } = await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipe.id)
     if (ingErr) {
       const { text, detail } = asActionError(ingErr)
@@ -1340,12 +1359,15 @@ ${text}`, detail })
               {!isSubRecipeForm && livePrice > 0 && (
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Food Cost %</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: liveFcPct <= 30 ? 'var(--theme-green-text)' : liveFcPct <= 38 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
-                    {liveFcPct?.toFixed(1)}%
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                    {liveFcPct <= 30 ? '✓ Good' : liveFcPct <= 38 ? '⚠ Acceptable' : '✗ Too high'}
-                  </div>
+                  {/* Banded through fcFigure(settings) like the card beside it — this used to be a
+                      local 30/38 threshold, so the form and the list could disagree about the same
+                      dish, and the settings target was ignored here (S682). */}
+                  {(() => { const f = fcFigure(liveFcPct, settings); return (
+                    <>
+                      <div style={{ fontSize: 18, fontWeight: 700, ...f.style }} title={f.title}>{f.text}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{f.band.label || 'No target set'}</div>
+                    </>
+                  ) })()}
                 </div>
               )}
               {!isSubRecipeForm && livePrice > 0 && (
@@ -1647,10 +1669,14 @@ ${text}`, detail })
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>True Net Margin %</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: trueNetMargin >= 30 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                        {trueNetMargin != null ? `${trueNetMargin.toFixed(1)}%` : '—'}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{trueNetMargin >= 30 ? '✓ Healthy' : '✗ Below 30%'}</div>
+                      {/* Net margin bands through nmBand (operatingBands.js), the same definition the
+                          dashboards use — not a local ≥30 (S682). */}
+                      {(() => { const f = bandFigure(trueNetMargin, nmBand); return (
+                        <>
+                          <div style={{ fontSize: 18, fontWeight: 700, ...f.style }} title={f.title}>{f.text}</div>
+                          <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{f.band.label || '—'}</div>
+                        </>
+                      ) })()}
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Suggested Price @ 30% margin</div>
@@ -1816,6 +1842,7 @@ ${text}`, detail })
       )}
 
       <Fab onClick={openNew} label="+ New Recipe" show={view === 'list'} />
+      {confirmEl}
     </div>
   )
 }

@@ -76,19 +76,30 @@ export default function TaxPoolTab({ assets }) {
   }
 
   async function deleteExpense(id) {
-    await scopedDelete('assets_repair_expenses').eq('id', id)
+    setErr(null)
+    const { error } = await scopedDelete('assets_repair_expenses').eq('id', id)
+    if (error) { const a = asActionError(error); setErr({ text: 'The repair expense was not deleted — it is still on the list. ' + a.text, detail: a.detail }) }
     loadRepairExpenses()
   }
 
   async function preview() {
     setLoading(true); setMsg(''); setErr(null)
     const priorFyLabel = getBsFiscalYear(fyStart - 1, 4)
-    const { data: priorRun } = await scopedFrom('assets_tax_pool_runs')
+    const { data: priorRun, error: priorRunErr } = await scopedFrom('assets_tax_pool_runs')
       .eq('fiscal_year', priorFyLabel).eq('status', 'posted')
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    // A failed read used to compute every pool's opening WDV as 0 — a preview that read as a
+    // first-ever run and could be POSTED as one (S682). Refuse to compute instead.
+    const refuse = error => {
+      const a = asActionError(error)
+      setErr({ text: `Could not read the ${priorFyLabel} tax-pool run, so no preview was computed — every opening WDV would have been wrong. Try again. ` + a.text, detail: a.detail })
+      setLoading(false)
+    }
+    if (priorRunErr) { refuse(priorRunErr); return }
     let priorLinesByPool = {}
     if (priorRun) {
-      const { data: priorLines } = await scopedFrom('assets_tax_pool_lines').eq('run_id', priorRun.id)
+      const { data: priorLines, error: priorLinesErr } = await scopedFrom('assets_tax_pool_lines').eq('run_id', priorRun.id)
+      if (priorLinesErr) { refuse(priorLinesErr); return }
       ;(priorLines || []).forEach(l => { priorLinesByPool[l.pool] = l })
     }
 
@@ -225,9 +236,9 @@ ${text}`, detail })
               {POOLS_AD.map(p => <option key={p} value={p}>{POOL_LABELS[p]}</option>)}
             </select>
           </div>
-          <input type="date" className="form-input form-input--auto" value={newExpense.expense_date} onChange={e => setNewExpense(f => ({ ...f, expense_date: e.target.value }))} />
-          <input type="number" className="form-input" placeholder="Amount" value={newExpense.amount} onChange={e => setNewExpense(f => ({ ...f, amount: e.target.value }))} style={{ width: 120 }} />
-          <input className="form-input" placeholder="Description" value={newExpense.description} onChange={e => setNewExpense(f => ({ ...f, description: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
+          <input type="date" className="form-input form-input--auto" aria-label="Repair expense date" value={newExpense.expense_date} onChange={e => setNewExpense(f => ({ ...f, expense_date: e.target.value }))} />
+          <input type="number" className="form-input" placeholder="Amount" aria-label="Repair expense amount (NPR)" value={newExpense.amount} onChange={e => setNewExpense(f => ({ ...f, amount: e.target.value }))} style={{ width: 120 }} />
+          <input className="form-input" placeholder="Description" aria-label="Repair expense description" value={newExpense.description} onChange={e => setNewExpense(f => ({ ...f, description: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
           <button className="btn btn-ghost" onClick={addExpense}>+ Add</button>
         </div>
         <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px', fontStyle: 'italic' }}>

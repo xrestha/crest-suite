@@ -16,6 +16,7 @@ import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { disabledStyle } from '../../../shared/inlineFieldState'
+import ReportLoadError from '../../../components/ReportLoadError'
 
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
 // purpose and is deliberately GONE (S458): an 8s gate is *tighter* than the 15s cap that
@@ -61,6 +62,9 @@ export default function Sales() {
   const [recipes, setRecipes]       = useState(() => readPageCache('sales', 'recipes', effectiveClientId) ?? [])
   const [sales, setSales]           = useState({}) // { recipe_id: qty } — bulk only, bs_day=0
   const [loading, setLoading]       = useState(true)
+  // A failed sales read must not render as an empty grid: this page batch-saves what is on
+  // screen, so a blank grid followed by Save writes zeros over real figures (S682).
+  const [loadError, setLoadError]   = useState(null)
   const [bulkForm, setBulkForm]     = useState({})
   const [bulkSaving, setBulkSaving] = useState(false)
   const [bulkSaved, setBulkSaved]   = useState(false)
@@ -142,11 +146,14 @@ export default function Sales() {
   }
 
   async function loadSales(periodId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('sales_entries')
       .select('*')
       .eq('period_id', periodId)
       .eq('bs_day', 0) // bulk entries only
+    if (!periodReq.isCurrent(periodId)) return
+    if (error) { setLoadError(error); return }
+    setLoadError(null)
     const map = {}
     ;(data || []).forEach(s => {
       map[s.recipe_id] = parseFloat(s.qty_sold) || 0
@@ -159,9 +166,11 @@ export default function Sales() {
   async function loadDailySales(periodId, day) {
     // Excludes comps (source='pos_comp') — a comped item was never actually sold, and this
     // page's every figure (including the Day revenue shown alongside it) means real sales.
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('sales_entries').select('*')
       .eq('period_id', periodId).eq('bs_day', day).neq('source', 'pos_comp')
+    if (error) { setLoadError(error); return }
+    setLoadError(null)
     const map = {}
     const discMap = {}
     // Accumulate, don't overwrite — loadAllDaySums below has always summed, and this must agree
@@ -181,8 +190,11 @@ export default function Sales() {
     // Paged (S613): POS writes one row per bill per recipe, so a month crosses the silent
     // 1000-row cap — and allDaySums doubles as a save-time fallback baseline, so a truncated
     // read here would not just misreport, it could be written back.
-    const { data } = await fetchAllRows(() => supabase
+    const { data, error } = await fetchAllRows(() => supabase
       .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price').eq('period_id', periodId).neq('source', 'pos_comp').order('id'))
+    // This map is the save-time fallback baseline for every item the user did not type into —
+    // a failed read here must block the page, not fall back to "nothing sold".
+    if (error) { if (periodReq.isCurrent(periodId)) setLoadError(error); return }
     const agg = {}
     const discAgg = {}
     const pricedAgg = {}
@@ -206,10 +218,11 @@ export default function Sales() {
 
   async function loadMonthlyEntries(periodId) {
     setMonthlyLoading(true)
-    const { data } = await fetchAllRows(() => supabase
+    const { data, error } = await fetchAllRows(() => supabase
       .from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp').order('id'))
-    setMonthlyEntries(data || [])
     setMonthlyLoading(false)
+    if (error) { setLoadError(error); return }
+    setMonthlyEntries(data || [])
   }
 
   // Build the payload each mode would write. Kept separate from the save itself so the
@@ -685,7 +698,8 @@ export default function Sales() {
       ) : (
         <>
           {/* BULK ENTRY */}
-          {viewMode === 'bulk' && (
+          {loadError && <ReportLoadError error={loadError} />}
+          {!loadError && viewMode === 'bulk' && (
             <>
               <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
                 Enter total qty sold for the entire period per menu item. Sub-recipes are excluded.
@@ -783,7 +797,7 @@ export default function Sales() {
           )}
 
           {/* DAILY ENTRY */}
-          {viewMode === 'daily' && (
+          {!loadError && viewMode === 'daily' && (
             <>
               <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
                 Enter qty sold per menu item for a single day. Use Bulk Entry for period totals instead.
@@ -977,7 +991,7 @@ export default function Sales() {
           )}
 
           {/* DAILY BREAKDOWN */}
-          {viewMode === 'breakdown' && (() => {
+          {!loadError && viewMode === 'breakdown' && (() => {
             if (monthlyLoading) return <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p></div>
             if (monthlyEntries.length === 0) return (
               <div className="card">
@@ -1070,7 +1084,7 @@ export default function Sales() {
           })()}
 
           {/* PERIOD SUMMARY */}
-          {viewMode === 'summary' && (() => {
+          {!loadError && viewMode === 'summary' && (() => {
             // summaryBase is the category-scoped list the figures are measured against; the search
             // only picks which of those rows are drawn. % of Revenue therefore keeps meaning "share
             // of this category's period revenue" whether or not a search is typed — otherwise

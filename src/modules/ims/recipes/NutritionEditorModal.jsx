@@ -5,6 +5,7 @@ import Modal from '../../../components/Modal'
 import { NUTRIENTS, EMPTY_NUTRITION, buildNutritionPayload, defaultBasisUnit } from '../../../utils/nutrition'
 import { suggestSeedsForSource } from '../../../data/nutritionSeed'
 import { UNITS } from './recipeCostCalc'
+import ActionError, { asActionError } from '../../../components/ActionError'
 
 const LIBRARIES = ['DFTQC Nepal', 'IFCT 2017', 'USDA']
 
@@ -133,7 +134,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
     setNutriError('')
     const payload = buildNutritionPayload(nutriForm, nutriForm.basis_unit)
     const { error } = await supabase.from('items').update({ nutrition: payload }).eq('id', item.id)
-    if (error) { setNutriError(error.message); setNutriSaving(false); return }
+    if (error) { const a = asActionError(error); setNutriError({ text: 'The nutrition figures were not saved. ' + a.text, detail: a.detail }); setNutriSaving(false); return }
     setNutriSaving(false)
     onSaved(item.id, payload)
   }
@@ -256,7 +257,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '12px 0 0' }}>
         Library values are reference estimates — verify for branded or prepared items.
       </p>
-      {nutriError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '10px 0 0' }}>{nutriError}</p>}
+      <ActionError error={nutriError} />
       <div className="form-actions" style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={saveNutri} disabled={nutriSaving}>

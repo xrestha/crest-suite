@@ -5,6 +5,7 @@ import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import { getCf } from './purchasesHelpers'
 import { formatBsDay } from '../../../utils/bsCalendar'
+import ActionError, { asActionError } from '../../../components/ActionError'
 
 const EMPTY_RETURN = { purchase_entry_id: '', qty: '', notes: '' }
 
@@ -85,10 +86,10 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
 
     if (editingReturnId) {
       const { error } = await scopedUpdate('vendor_returns', payload).eq('id', editingReturnId)
-      if (error) { setReturnError(error.message); setReturnSaving(false); return }
+      if (error) { const a = asActionError(error); setReturnError({ text: 'The return was not updated — it still shows its previous figures. ' + a.text, detail: a.detail }); setReturnSaving(false); return }
     } else {
       const { error } = await scopedInsert('vendor_returns', payload)
-      if (error) { setReturnError(error.message); setReturnSaving(false); return }
+      if (error) { const a = asActionError(error); setReturnError({ text: 'The return was not recorded. ' + a.text, detail: a.detail }); setReturnSaving(false); return }
     }
 
     setReturnSaving(false)
@@ -200,7 +201,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
             )
           })()}
 
-          {returnError && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '10px 0 0' }}>{returnError}</p>}
+          <ActionError error={returnError} />
           <div className="form-actions">
             <button className="btn btn-ghost" onClick={() => { setShowReturnForm(false); setEditingReturnId(null) }}>Cancel</button>
             {/* .btn-danger, not a solid --theme-red fill: red has no paired foreground token (it ranges

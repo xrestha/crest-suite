@@ -209,10 +209,10 @@ export default function DemandForecast() {
                               <span key={recipeId}>{recipeNames[recipeId] || recipeId}: <strong style={{ color: 'var(--theme-text2)' }}>{qty.toFixed(1)}</strong></span>
                             ))}
                             {hiddenCount > 0 && (
-                              <span style={{ cursor: 'pointer', color: 'var(--theme-accent-ink)' }} onClick={() => setExpandedItemsIdx(idx)}>+{hiddenCount} more</span>
+                              <button type="button" className="btn-linklike" onClick={() => setExpandedItemsIdx(idx)}>+{hiddenCount} more</button>
                             )}
                             {showingAll && allItems.length > PREVIEW_COUNT && (
-                              <span style={{ cursor: 'pointer', color: 'var(--theme-accent-ink)' }} onClick={() => setExpandedItemsIdx(null)}>show less</span>
+                              <button type="button" className="btn-linklike" onClick={() => setExpandedItemsIdx(null)}>show less</button>
                             )}
                           </div>
                           {/* Print always shows the complete item list regardless of on-screen

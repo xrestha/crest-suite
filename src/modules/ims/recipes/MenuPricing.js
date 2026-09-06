@@ -8,6 +8,7 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand, fcThresholds } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
+import ActionError, { asActionError } from '../../../components/ActionError'
 
 
 function vatOf(r) {
@@ -213,7 +214,7 @@ export default function MenuPricing() {
           ...payload,
         })
     setAddSaving(false)
-    if (error) { setAddError(error.message); return }
+    if (error) { const a = asActionError(error); setAddError({ text: (editingId ? 'The changes were not saved. ' : 'The menu item was not added. ') + a.text, detail: a.detail }); return }
     setAddModal(false); setAddForm(EMPTY_FORM); setEditingId(null)
     load()
   }
@@ -441,7 +442,7 @@ export default function MenuPricing() {
                   onKeyDown={e => e.key === 'Enter' && saveNewItem()} placeholder="e.g. 25"
                   style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
               </div>
-              {addError && <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-red-text)' }}>{addError}</p>}
+              <ActionError error={addError} />
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
               <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setAddModal(false); setEditingId(null) }}>Cancel</button>
@@ -796,7 +797,7 @@ export default function MenuPricing() {
                 )}
               </div>
 
-              {addError && <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-red-text)' }}>{addError}</p>}
+              <ActionError error={addError} />
             </div>
 
             <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>

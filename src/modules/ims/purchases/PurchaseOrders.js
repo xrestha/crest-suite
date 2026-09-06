@@ -11,6 +11,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 
@@ -36,6 +37,7 @@ export default function PurchaseOrders() {
   const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
 
   // Deliberately NOT on sessionDataCache (S460): the page's core content is the PO list, and
   // confirmReceive writes `qty_received + receiving` off that state — a read-modify-write
@@ -275,12 +277,20 @@ It stays on the list as a record, but can no longer be sent or received against.
     await loadPos(selectedPeriod.id)
   }
 
-  async function deletePo(po) {
+  function deletePo(po) {
     if (!isAdmin) return
-    const msg = po.status !== 'draft'
-      ? `Delete ${po.status.toUpperCase()} PO ${po.po_number}?\n\nThis permanently removes the PO and its line items. Purchase entries already created from receiving are NOT deleted — manage those in Purchases.\n\nThis cannot be undone.`
-      : `Delete draft PO ${po.po_number}? This cannot be undone.`
-    if (!window.confirm(msg)) return
+    // A non-draft PO is a sent or received document; the ask is the product's own dialog (S682).
+    askConfirm({
+      title: `Delete ${po.status !== 'draft' ? po.status.toUpperCase() + ' ' : 'draft '}PO ${po.po_number}?`,
+      confirmLabel: 'Delete PO', danger: true, busyLabel: 'Deleting…',
+      body: po.status !== 'draft'
+        ? <p style={{ margin: 0 }}>The PO and its line items are permanently removed. Purchase entries already created from receiving it are <strong>not</strong> deleted — manage those in Purchases. This cannot be undone.</p>
+        : <p style={{ margin: 0 }}>The draft and its line items are removed. Nothing has been sent or received against it. This cannot be undone.</p>,
+      run: () => deletePoNow(po),
+    })
+  }
+
+  async function deletePoNow(po) {
     setListError(null)
     const { error: lineErr } = await supabase.from('purchase_order_items').delete().eq('po_id', po.id)
     if (lineErr) {
@@ -936,6 +946,7 @@ ${text}`, detail })
       )}
 
       <Fab onClick={openNew} label="+ New PO" show={!!selectedPeriod} />
+      {confirmEl}
     </div>
   )
 }

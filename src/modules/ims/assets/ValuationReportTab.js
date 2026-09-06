@@ -8,6 +8,7 @@ import StatPill from '../../../components/StatPill'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
 import { computePortfolioValuation } from './depreciationCompute'
+import ReportLoadError from '../../../components/ReportLoadError'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-NP', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -20,13 +21,16 @@ export default function ValuationReportTab({ assets }) {
   const [posted, setPosted] = useState([]) // all posted schedule rows, client-wide
   const [asOf, setAsOf] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null) // a failed read is not "no posted runs yet"
 
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     setLoading(true)
-    const { data } = await scopedFrom('assets_depreciation_schedule', 'asset_id, period_end, closing_nbv')
+    const { data, error } = await scopedFrom('assets_depreciation_schedule', 'asset_id, period_end, closing_nbv')
       .eq('is_posted', true).order('period_end', { ascending: true })
+    if (error) { setLoadError(error); setLoading(false); return }
+    setLoadError(null)
     setPosted(data || [])
     if (data && data.length > 0) setAsOf(data[data.length - 1].period_end)
     setLoading(false)
@@ -67,6 +71,8 @@ export default function ValuationReportTab({ assets }) {
 
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : !valuation ? (
         <div className="card"><div className="empty-state"><p className="empty-state-text">No posted depreciation runs yet — post a run on the Depreciation Runs tab first.</p></div></div>
       ) : (

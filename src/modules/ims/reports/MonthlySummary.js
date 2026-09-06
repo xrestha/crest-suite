@@ -7,7 +7,8 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { COGS_FORMULA } from '../../../shared/imsFormulas'
+import { COGS_FORMULA, fcFigure } from '../../../shared/imsFormulas'
+import { useSettings } from '../../../context/SettingsContext'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -17,6 +18,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
+  const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const periodReq = useLatestRequest()
@@ -263,9 +265,12 @@ export default function MonthlySummary() {
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>
                 <Tip text="COGS ÷ Net Sales Revenue × 100. Tells you how much of every rupee earned went to ingredients. Target: 28–35%." width={240}>Food Cost %</Tip>
               </div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: report.fcPct == null ? 'var(--theme-text2)' : report.fcPct <= 35 ? 'var(--theme-green-text)' : report.fcPct <= 45 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)' }}>
-                {report.fcPct != null ? `${report.fcPct.toFixed(1)}%` : '—'}
-              </div>
+              {/* Banded through fcFigure(settings) — this was a local 35/45 ternary with no mark, a
+                  third definition beside fcBand and Recipes' own, so the same month read green here
+                  and amber on the dashboard (S682). 24px is the figure step; 28 was off the ramp. */}
+              {(() => { const f = fcFigure(report.fcPct, settings); return (
+                <div style={{ fontSize: 24, fontWeight: 800, ...f.style }} title={f.title}>{f.text}</div>
+              ) })()}
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>
                 {report.fcPct == null ? 'Add sales entries to calculate' :
                   report.fcPct <= 35 ? '✓ Within benchmark (28–35%)' :

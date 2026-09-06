@@ -20,6 +20,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 // A bill row's payment method as every screen displays it. NULL means Cash — the form's default,
 // and what pre-column bills hold — so the filter, the option list and the row badge all resolve it
@@ -30,6 +31,7 @@ export default function Purchases() {
   const { clientId, profile, loading: authLoading, isAdmin, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const navigate = useNavigate()
   // `?period=<id>` selects a specific month instead of the open one. It is what makes the closed-
   // month correction path hold together: Periods links here to enter a bill that was missed, and
@@ -174,11 +176,21 @@ export default function Purchases() {
     navigate(`/purchases/${groupId}/edit`)
   }
 
-  async function deleteGroup(groupId) {
+  function deleteGroup(groupId) {
     const groupEntries = purchases.filter(p => (p.purchase_group_id || p.id) === groupId)
     const n = groupEntries.length
     const groupTotal = groupEntries.reduce((s, e) => s + e.qty * e.rate, 0)
-    if (!window.confirm(`Delete this bill (${n} item${n !== 1 ? 's' : ''}, NPR ${Math.round(groupTotal).toLocaleString('en-NP')})? Any returns linked to these entries will be unlinked. This cannot be undone.`)) return
+    // A bill is money on the vendor ledger and stock on the count; the ask is the product's own
+    // dialog with the amount in it (S682; was window.confirm).
+    askConfirm({
+      title: 'Delete this bill?',
+      confirmLabel: 'Delete Bill', danger: true, busyLabel: 'Deleting…',
+      body: <p style={{ margin: 0 }}>{n} item{n !== 1 ? 's' : ''}, NPR {Math.round(groupTotal).toLocaleString('en-NP')}, come off this period's purchases and the vendor's payable. Any returns linked to these entries are unlinked and stay on the returns list. This cannot be undone.</p>,
+      run: () => deleteGroupNow(groupId, groupEntries),
+    })
+  }
+
+  async function deleteGroupNow(groupId, groupEntries) {
     setActionError(null)
     const hasGroupId = groupEntries[0]?.purchase_group_id
     // supabase-js resolves `{ error }`; a bare await here meant a refused delete (RLS on a closed
@@ -515,7 +527,7 @@ export default function Purchases() {
                 >
                   D{d}
                   {billCountPerDay[d] > 0 && (
-                    <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.65 }}>
+                    <span style={{ marginLeft: 4, fontSize: 10, color: 'var(--theme-text3)' }}>
                       · {billCountPerDay[d]} {billCountPerDay[d] === 1 ? 'bill' : 'bills'}
                     </span>
                   )}
@@ -934,9 +946,14 @@ export default function Purchases() {
                       <>
                         {/* Category header — click to collapse/expand, so a long item list can be
                             narrowed down without scrolling past categories you don't need right now */}
-                        <tr key={`cat-${cat}`} style={{ background: 'rgba(201,168,76,0.06)', cursor: 'pointer' }} onClick={() => toggleRegisterCat(cat)}>
+                        <tr key={`cat-${cat}`} style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', cursor: 'pointer' }} onClick={() => toggleRegisterCat(cat)}>
                           <td colSpan={3 + numDays + 1} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 11, color: 'var(--theme-accent-ink)', letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--theme-border)' }}>
-                            <span style={{ display: 'inline-block', width: 14 }}>{collapsed ? '▸' : '▾'}</span>{cat}
+                            {/* A real disclosure button inside the cell: the row click stays for the mouse,
+                                this is the keyboard path (S682). */}
+                            <button type="button" aria-expanded={!collapsed} onClick={e => { e.stopPropagation(); toggleRegisterCat(cat) }}
+                              style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit', cursor: 'pointer' }}>
+                              <span aria-hidden="true" style={{ display: 'inline-block', width: 14 }}>{collapsed ? '▸' : '▾'}</span>{cat}
+                            </button>
                             <span style={{ fontWeight: 400, color: 'var(--theme-text3)', textTransform: 'none', letterSpacing: 0, marginLeft: 8 }}>({byCategory[cat].length})</span>
                           </td>
                         </tr>
@@ -974,7 +991,7 @@ export default function Purchases() {
           </div>
         )
       })()}
-
+      {confirmEl}
     </div>
   )
 }

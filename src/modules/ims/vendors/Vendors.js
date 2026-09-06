@@ -9,6 +9,7 @@ import Tip from '../../../components/Tip'
 import UsageChip from '../../../components/UsageChip'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { Navigate, Link } from 'react-router-dom'
 import { FileText, Pencil, Eye, EyeOff, Trash2, Archive as ArchiveIcon, ArchiveRestore, Lock } from 'lucide-react'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -48,6 +49,7 @@ export default function Vendors() {
   const { clientId, isAdmin, hasImsAccess } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom, scopedInsert } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   // Seeded from the short-lived session cache so a revisit paints the last-known list instantly
   // while the fresh read reloads quietly underneath (S460 pattern). Safe here: every save on this
   // page writes only the one vendor being edited, never a baseline derived from this list.
@@ -239,12 +241,20 @@ export default function Vendors() {
       setUsage(u => (u.status === 'ready' ? { status: 'ready', map: { ...u.map, [vendor.id]: counts } } : u))
       return
     }
-    if (!window.confirm(`Permanently delete "${vendor.name}"? Nothing is recorded against it, so no history is lost — but this cannot be undone.`)) return
-    setDeleting(vendor.id)
-    const { error } = await supabase.from('vendors').delete().eq('id', vendor.id)
-    setDeleting(null)
-    if (error) { setListError(asActionError(error)); return }
-    loadVendors()
+    // Permanent, so the ask is the product's own dialog (S682); Archive below stays on the native
+    // confirm because it is reversible from "Show archived".
+    askConfirm({
+      title: `Permanently delete "${vendor.name}"?`,
+      confirmLabel: 'Delete Vendor', danger: true, busyLabel: 'Deleting…',
+      body: <p style={{ margin: 0 }}>Nothing is recorded against this vendor, so no purchase history is lost — the row itself is removed and cannot be restored. If it might be bought from again, archive it instead.</p>,
+      run: async () => {
+        setDeleting(vendor.id)
+        const { error } = await supabase.from('vendors').delete().eq('id', vendor.id)
+        setDeleting(null)
+        if (error) { const a = asActionError(error); setListError({ text: `"${vendor.name}" was not deleted — it is still listed. ` + a.text, detail: a.detail }); return }
+        loadVendors()
+      },
+    })
   }
 
   // The answer for a vendor that HAS been bought from. The row leaves this page and every vendor
@@ -589,6 +599,7 @@ You can put it back from "Show archived".`)) return
       </div>
 
       <Fab onClick={openNew} label="+ Add Vendor" show={!showForm} />
+      {confirmEl}
     </div>
   )
 }

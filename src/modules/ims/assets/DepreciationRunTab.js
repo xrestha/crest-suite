@@ -34,8 +34,16 @@ export default function DepreciationRunTab({ assets, onReload }) {
     if (!periodStart || !periodEnd) { setErr('Pick both a period start and end date before previewing the run.'); return }
     setLoading(true); setMsg(''); setErr(null)
 
-    const { data: postedRows } = await scopedFrom('assets_depreciation_schedule')
+    const { data: postedRows, error: postedErr } = await scopedFrom('assets_depreciation_schedule')
       .eq('is_posted', true).order('period_end', { ascending: true })
+    // A failed read used to compute every asset's opening NBV from cost — a preview that read as
+    // a first-ever run and could be POSTED as one (S682). Refuse to compute instead.
+    if (postedErr) {
+      const a = asActionError(postedErr)
+      setErr({ text: 'Could not read the posted depreciation runs, so no preview was computed — every opening figure would have been wrong. Try again. ' + a.text, detail: a.detail })
+      setLoading(false)
+      return
+    }
     const priorScheduleByAssetId = {}
     ;(postedRows || []).forEach(row => { priorScheduleByAssetId[row.asset_id] = row }) // last write wins (ascending)
 
@@ -146,6 +154,7 @@ ${text}`, detail })
                       </td>
                       <td>
                         <input className="form-input" value={l.override_reason} onChange={e => updateLine(l.asset_id, 'override_reason', e.target.value)}
+                          aria-label={`Override reason for ${asset?.name || l.asset_id}`}
                           placeholder={l.override_amount !== '' ? 'Required' : ''} style={{ width: '100%' }} />
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(closingNbv)}</td>

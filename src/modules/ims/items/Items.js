@@ -15,6 +15,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { errorInfo } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -41,6 +42,7 @@ export default function Items() {
   const { clientId, isAdmin, hasImsAccess } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   // Seeded from the short-lived session cache so a revisit paints the last-known list instantly
   // while the fresh reads reload quietly underneath (S460 pattern). Safe here: saves on this page
   // write only the one item being edited; the delete guard's usageMap is never cached — it always
@@ -148,41 +150,57 @@ export default function Items() {
         setPageError(`"${item.name}" can't be deleted — it already appears in ${fullNames}, and deleting it would take those records with it. Hide it instead: it stops being offered on new entries, and everything it is already on keeps its item.`)
         return
       }
-      // Admin: offer to force-delete (removes the referencing records too).
-      if (window.confirm(
-        `"${item.name}" is referenced in: ${fullNames}.\n\n` +
-        `FORCE DELETE will permanently remove the item AND every record that references it ` +
-        `(purchases, stock counts, wastage, staff meals, requisitions, vendor returns, recipe lines).\n\n` +
-        `This erases its history and recalculates affected reports. It cannot be undone.\n\nProceed?`
-      )) {
-        await forceDeleteItem(item)
-      }
+      // Admin: offer to force-delete (removes the referencing records too). The most destructive
+      // action in IMS, so the ask is the product's own dialog with the consequence spelled out
+      // (S682; was a window.confirm with the same text squeezed into an OS box).
+      askForceDelete(item, `"${item.name}" is referenced in ${fullNames}.`)
       return
     }
-    if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return
-    const { error } = await supabase.from('items').delete().eq('id', item.id)
-    if (error) {
-      // Foreign-key violation from a reference the badge didn't show (e.g. a zero-quantity row).
-      const isFk = /foreign key|violates|referenced/i.test(error.message || '')
-      if (isFk && isAdmin) {
-        if (window.confirm(
-          `"${item.name}" still has hidden references (e.g. a zero-quantity stock/purchase row).\n\n` +
-          `Force-delete it and permanently remove those references? This cannot be undone.`
-        )) {
-          await forceDeleteItem(item)
+    askConfirm({
+      title: `Delete "${item.name}"?`,
+      confirmLabel: 'Delete Item', danger: true, busyLabel: 'Deleting…',
+      body: <p style={{ margin: 0 }}>Nothing references this item, so no purchase, count or recipe changes — it is simply removed from Item Master. This cannot be undone.</p>,
+      run: async () => {
+        setPageError(null)
+        const { error } = await supabase.from('items').delete().eq('id', item.id)
+        if (error) {
+          // Foreign-key violation from a reference the badge didn't show (e.g. a zero-quantity row).
+          const isFk = /foreign key|violates|referenced/i.test(error.message || '')
+          if (isFk && isAdmin) {
+            askForceDelete(item, `"${item.name}" still has hidden references (e.g. a zero-quantity stock or purchase row).`)
+            return
+          }
+          if (isFk) {
+            setPageError(`"${item.name}" can't be deleted — an older record still refers to it (a purchase, stock count, wastage, staff meal, requisition, vendor return or recipe line) even though nothing shows against it here. Hide it instead, which keeps that history intact.`)
+          } else {
+            const { text, detail } = asActionError(error)
+            setPageError({ text: `"${item.name}" was not deleted. ${text}`, detail })
+          }
+          return
         }
-        return
-      }
-      if (isFk) {
-        setPageError(`"${item.name}" can't be deleted — an older record still refers to it (a purchase, stock count, wastage, staff meal, requisition, vendor return or recipe line) even though nothing shows against it here. Hide it instead, which keeps that history intact.`)
-      } else {
-        const { text, detail } = asActionError(error)
-        setPageError({ text: `"${item.name}" was not deleted. ${text}`, detail })
-      }
-      return
-    }
-    loadItems()
-    checkAllUsage()
+        loadItems()
+        checkAllUsage()
+      },
+    })
+  }
+
+  function askForceDelete(item, lead) {
+    askConfirm({
+      title: `Force-delete "${item.name}"?`,
+      confirmLabel: 'Force Delete', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>{lead}</p>
+          <p style={{ margin: '0 0 8px' }}>
+            Force-delete permanently removes the item <strong>and every record that references it</strong> — purchases, stock
+            counts, wastage, staff meals, requisitions, vendor returns and recipe lines. Every report covering those periods
+            changes.
+          </p>
+          <p style={{ margin: 0 }}>To keep the history, hide the item instead. This cannot be undone.</p>
+        </>
+      ),
+      run: () => forceDeleteItem(item),
+    })
   }
 
   // Admin-only hard delete: clears every FK reference, then removes the item.
@@ -214,11 +232,17 @@ ${text}`, detail })
     const withConversion = items.filter(i => i.purchase_unit)
     setPageError(null)
     if (withConversion.length === 0) { setPageError('No items have a purchase-unit conversion set, so there is nothing to clear.'); return }
-    if (!window.confirm(`Clear conversions on ${withConversion.length} item${withConversion.length !== 1 ? 's' : ''}?\n\nThis resets Purchase Unit, Base Unit, Conversion Factor and Purchase Qty to 1 for each affected item. This cannot be undone.`)) return
-    const { error } = await scopedUpdate('items', { purchase_unit: null, base_unit: null, conversion_factor: 1, purchase_qty: 1 })
-      .not('purchase_unit', 'is', null)
-    if (error) { setPageError(asActionError(error)); return }
-    await loadItems()
+    askConfirm({
+      title: `Clear conversions on ${withConversion.length} item${withConversion.length !== 1 ? 's' : ''}?`,
+      confirmLabel: 'Clear Conversions', danger: true, busyLabel: 'Clearing…',
+      body: <p style={{ margin: 0 }}>Purchase Unit, Base Unit, Conversion Factor and Purchase Qty reset to 1 on each affected item, so the next purchase bill for any of them is entered in the base unit. Existing purchases keep the quantities they were stored with. This cannot be undone.</p>,
+      run: async () => {
+        const { error } = await scopedUpdate('items', { purchase_unit: null, base_unit: null, conversion_factor: 1, purchase_qty: 1 })
+          .not('purchase_unit', 'is', null)
+        if (error) { setPageError(asActionError(error)); return }
+        await loadItems()
+      },
+    })
   }
 
   async function loadCategories() {
@@ -920,6 +944,7 @@ ${text}`, detail })
       </div>
 
       <Fab onClick={openNew} label="+ Add Item" show={!showForm} />
+      {confirmEl}
     </div>
   )
 }

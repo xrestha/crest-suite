@@ -7,6 +7,7 @@ import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { errorText } from '../../../shared/errorText'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import AssetFormModal from './AssetFormModal'
 import AssetCategoryModal from './AssetCategoryModal'
 import AssetCard from './AssetCard'
@@ -18,6 +19,9 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   const { clientId, isAdmin } = useAuth()
   const { scopedFrom } = useScopedDb()
   const [nbvByAssetId, setNbvByAssetId] = useState(() => readPageCache('fixed-assets', 'nbv', clientId) ?? {})
+  // A failed NBV read must not render every asset at full cost / 0% depreciated — and must never
+  // be written into the cache (S682).
+  const [nbvError, setNbvError] = useState(null)
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterStatus, setFilterStatus] = useState('active')
   const [filterLocation, setFilterLocation] = useState('all')
@@ -40,8 +44,14 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   // batch-save baseline like Stock.js's "Save All").
   async function loadNbv() {
     if (assets.length === 0) { setNbvByAssetId({}); return }
-    const { data } = await scopedFrom('assets_depreciation_schedule', 'asset_id, period_end, closing_nbv')
+    const { data, error } = await scopedFrom('assets_depreciation_schedule', 'asset_id, period_end, closing_nbv')
       .eq('is_posted', true).order('period_end', { ascending: true })
+    if (error) {
+      const a = asActionError(error)
+      setNbvError({ text: 'Could not load the posted depreciation, so the Net Book Value column is not real — it shows the last figures this browser saw, or cost. Reload before relying on it. ' + a.text, detail: a.detail })
+      return
+    }
+    setNbvError(null)
     const map = {}
     ;(data || []).forEach(row => { map[row.asset_id] = row.closing_nbv }) // last write wins (ascending order)
     setNbvByAssetId(map)
@@ -131,7 +141,11 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
               {filtered.map(a => (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => setViewingAsset(a)}>
                   <td>{a.asset_code}</td>
-                  <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{a.name}</td>
+                  {/* The row click stays for the mouse; the name is the keyboard path into the
+                      asset detail (S682). */}
+                  <td style={{ fontWeight: 600 }}>
+                    <button type="button" className="btn-linklike" onClick={e => { e.stopPropagation(); setViewingAsset(a) }}>{a.name}</button>
+                  </td>
                   <td>{a.assets_categories?.name || '—'}</td>
                   <td style={{ textAlign: 'right' }}>{a.quantity}</td>
                   <td style={{ textAlign: 'right' }}>{fmt(a.unit_cost)}</td>
@@ -159,6 +173,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
         </div>
       )}
 
+      <ActionError error={nbvError} />
       <Fab onClick={() => setShowForm(true)} label="+ Add Asset" />
 
       {showForm && (

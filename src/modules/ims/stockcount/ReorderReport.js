@@ -13,11 +13,15 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 export default function ReorderReport() {
   const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
+  const [actionError, setActionError] = useState(null) // a reset or clear that did not land
   const navigate = useNavigate()
 
   const periodReq = useLatestRequest()
@@ -331,18 +335,38 @@ export default function ReorderReport() {
     XLSX.writeFile(wb, `Reorder_Report_${period.replace(' ', '_')}.xlsx`)
   }
 
-  async function resetAllPar() {
-    if (!window.confirm('Reset ALL par levels to 0? This cannot be undone.')) return
-    await scopedDelete('par_levels')
-    setParLevels({})
-    setRows(r => r.map(row => ({ ...row, par: 0, shortfall: 0, needsReorder: false, shortfallValue: 0 })))
+  // Both actions wipe a whole table for the client; they ask through the product's own dialog and
+  // the state only follows a write that landed (S682; both were window.confirm + a bare await).
+  function resetAllPar() {
+    const n = Object.keys(parLevels).length
+    askConfirm({
+      title: 'Reset every par level to 0?',
+      confirmLabel: 'Reset All Par Levels', danger: true, busyLabel: 'Resetting…',
+      body: <p style={{ margin: 0 }}>{n > 0 ? `${n} item${n === 1 ? '' : 's'} currently ${n === 1 ? 'has' : 'have'} a par level. ` : ''}Every par level is removed, so no item shows a shortfall or a reorder flag until pars are entered again. This cannot be undone.</p>,
+      run: async () => {
+        setActionError(null)
+        const { error } = await scopedDelete('par_levels')
+        if (error) { const a = asActionError(error); setActionError({ text: 'The par levels were not reset — they are unchanged. ' + a.text, detail: a.detail }); return }
+        setParLevels({})
+        setRows(r => r.map(row => ({ ...row, par: 0, shortfall: 0, needsReorder: false, shortfallValue: 0 })))
+      },
+    })
   }
 
-  async function clearBookStock() {
+  function clearBookStock() {
     if (!selectedPeriod) return
-    if (!window.confirm(`Delete all stock_movements ledger rows for ${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}? Book Stock resets to "—" for every item in this period. Physical counts and Current Stock are unaffected. Cannot be undone.`)) return
-    await scopedDelete('stock_movements').eq('period_id', selectedPeriod.id)
-    setRows(r => r.map(row => ({ ...row, bookStock: null, hasMovements: false })))
+    const label = `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
+    askConfirm({
+      title: `Clear the book-stock ledger for ${label}?`,
+      confirmLabel: 'Delete Ledger Rows', danger: true, busyLabel: 'Deleting…',
+      body: <p style={{ margin: 0 }}>Every stock_movements row for {label} is deleted, so Book Stock reads "—" for every item in this period and Stock Movements shows nothing for it. Physical counts and Current Stock are unaffected. This cannot be undone.</p>,
+      run: async () => {
+        setActionError(null)
+        const { error } = await scopedDelete('stock_movements').eq('period_id', selectedPeriod.id)
+        if (error) { const a = asActionError(error); setActionError({ text: `The ledger for ${label} was not cleared — Book Stock is unchanged. ` + a.text, detail: a.detail }); return }
+        setRows(r => r.map(row => ({ ...row, bookStock: null, hasMovements: false })))
+      },
+    })
   }
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
@@ -391,6 +415,8 @@ export default function ReorderReport() {
       </div>
 
       {/* A failed read renders as a failure — Book Stock is ordered against (S612). */}
+      <ActionError error={actionError} className="no-print" />
+      {confirmEl}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
       <div className="stat-grid no-print">
@@ -516,10 +542,13 @@ export default function ReorderReport() {
                             />
                           ) : (
                             <Tip text="Click to set the par level — minimum stock quantity before reorder is triggered." width={230}>
-                              <span onClick={() => startEditPar(row.item.id, row.par)}
-                                style={{ cursor: 'pointer', color: row.par > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)', borderBottom: '1px dashed var(--theme-border)', paddingBottom: 1, fontWeight: row.par > 0 ? 600 : 400 }}>
+                              {/* A real button: the par level is the page's one editable figure and a
+                                  <span onClick> could not be reached by keyboard (S682). */}
+                              <button type="button" onClick={() => startEditPar(row.item.id, row.par)}
+                                aria-label={`Set par level for ${row.item.name}`}
+                                style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', color: row.par > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)', borderBottom: '1px dashed var(--theme-border)', paddingBottom: 1, fontWeight: row.par > 0 ? 600 : 400 }}>
                                 {isSaving ? '…' : row.par > 0 ? row.par.toLocaleString() : 'Set par'}
-                              </span>
+                              </button>
                             </Tip>
                           )}
                         </td>
