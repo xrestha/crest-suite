@@ -1554,10 +1554,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     </div>
                     <div className="form-field">
                       <label htmlFor={fid('s-vatreg')}><Tip text="On = POS bills print as a Tax Invoice with VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD.">VAT Registered</Tip></label>
-                      <label htmlFor={fid('s-vatreg')} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
+                      <label htmlFor={fid('s-vatreg')} className="form-check">
                         <input id={fid('s-vatreg')} type="checkbox" checked={clientSettings.is_vat_registered ?? true}
-                          onChange={e => setClientSettings({ ...clientSettings, is_vat_registered: e.target.checked })}
-                          style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
+                          onChange={e => setClientSettings({ ...clientSettings, is_vat_registered: e.target.checked })} />
                         <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(clientSettings.is_vat_registered ?? true) ? 'Yes — issues Tax Invoices' : 'No — PAN Bill only'}</span>
                       </label>
                     </div>

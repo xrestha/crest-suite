@@ -2047,6 +2047,43 @@ textarea:focus-visible {
   width: 100%;
 }
 
+/* A checkbox or radio inside a .form-field is NOT a text field (S684). The descendant rule above
+   matched `type="checkbox"` too, so every such box computed `width: 100%` with text-field padding:
+   the Settings → Support emergency switch measured 454×13 with its tick centred in the column and
+   the sentence beside it squeezed into a 64px strip, five words on five lines, in both presets.
+   Nothing in the stylesheet had ever said what a checkbox in a field looks like — only the
+   coarse-pointer size rule further up — so each site either carried an inline `width: 16` or
+   rendered like that. This is the one rule; do not re-add the inline workaround. */
+.form-field input[type="checkbox"],
+.form-field input[type="radio"] {
+  width: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  accent-color: var(--theme-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* The row a checkbox sits in when the caption above it is the field's name and the text beside
+   it is a sentence: plain weight and colour on purpose, since `.form-field label` styles a
+   12px uppercase-tracked caption and this is not one. 36px so the row lines up with an input
+   beside it in a .form-grid. */
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--theme-text1);
+  cursor: pointer;
+  min-height: 36px;
+  margin: 0;
+}
+
 .form-input:focus,
 .form-field input:focus,
 .form-field select:focus,
