@@ -11,7 +11,9 @@ import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerRepo
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
 import { closingCountNote } from './periods/closingCountNote'
-import { errorText } from '../shared/errorText'
+import { errorInfo } from '../shared/errorText'
+import ActionError from '../components/ActionError'
+import ReportLoadError from '../components/ReportLoadError'
 
 export default function Periods() {
   const { isAdmin, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()
@@ -25,6 +27,17 @@ export default function Periods() {
   // { title, body, confirmLabel, danger, run }. Rendered in BOTH returns below — this page has two.
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null) // a failed periods read is not "no periods yet"
+  // One page-level notice for the outcome of a period action (close, reopen, resync, POS backfill).
+  // These were ten window.alert()s until S682 — a blocking native box with no theme, no
+  // role="status", and a Postgres message where an owner needs a consequence. `fail()` writes the
+  // consequence as the headline and keeps the raw detail as ActionError's fine print.
+  const [notice, setNotice] = useState(null) // { kind: 'ok' | 'error', text, detail }
+  const fail = (text, err) => setNotice({
+    kind: 'error', text,
+    detail: !err ? '' : typeof err === 'string' ? err : errorInfo(err, 'operator').detail,
+  })
+  const ok = text => setNotice({ kind: 'ok', text })
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ bs_year: 2082, bs_month: 1 })
   const [showForm, setShowForm] = useState(false)
@@ -62,12 +75,20 @@ export default function Periods() {
 
   async function loadAllClientPeriods() {
     setAllLoading(true)
-    const [{ data: clients }, { data: allPeriods }] = await Promise.all([
+    const results = await Promise.all([
       supabase.from('clients').select('id, name, is_active').order('name'),
       supabase.from('monthly_periods').select('*')
         .order('bs_year', { ascending: false })
         .order('bs_month', { ascending: false }),
     ])
+    const failed = results.find(r => r && r.error)
+    if (failed) {
+      // A failed read is not "no clients" — keep the last-good list and say so.
+      fail('Could not load the clients and their periods — the list below is from the last successful load.', failed.error)
+      setAllLoading(false)
+      return
+    }
+    const [{ data: clients }, { data: allPeriods }] = results
     setAllClients(clients || [])
     const map = {}
     for (const p of (allPeriods || [])) {
@@ -179,7 +200,7 @@ export default function Periods() {
     // from recording data with no explanation anywhere (S613, the silent-data-loss class). 23505
     // means the next period already exists (a retried click) and is benign.
     if (newErr && newErr.code !== '23505') {
-      window.alert(`${BS_MONTHS[period.bs_month - 1]} closed, but the next period could not be created: ${newErr.message}\n\nUse "+ Create Period" for this client, then "Resync Opening Stock" to carry the closing count forward.`)
+      fail(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} closed, but the next period could not be created. Use "+ Create Period" for this client, then "Resync Opening Stock" to carry the closing count forward.`, newErr)
     }
     if (newPeriod?.id) await carryForwardOpeningStock(period.id, newPeriod.id)
     await generateReportBestEffort(cid, { ...period, status: 'closed' })
@@ -219,7 +240,7 @@ export default function Periods() {
       const { error } = await scopedInsertRaw('monthly_periods', cid, {
         bs_year: bsToday.year, bs_month: bsToday.month, status: 'open'
       })
-      if (error) alert(error.message)
+      if (error) fail('The period was not created.', error)
     }
     await loadAllClientPeriods()
     setActionClientId(null)
@@ -241,9 +262,13 @@ export default function Periods() {
 
   async function loadPeriods() {
     setLoading(true)
-    const { data } = await scopedFrom('monthly_periods')
+    const { data, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
+    // A failed read used to render the "No periods yet" empty state — on the page every empty
+    // IMS page links to, so an auth stall told a new owner they had no periods (S682).
+    if (error) { setLoadError(error); setLoading(false); return }
+    setLoadError(null)
     setPeriods(data || [])
     setLoading(false)
   }
@@ -306,11 +331,12 @@ export default function Periods() {
         // owner cannot recover on their own. S613 surfaced this on the ADMIN close path and left
         // this one — the one an owner actually clicks, from the "has ended" banner — still silent.
         console.error('Could not create next period:', error)
-        window.alert(
-          `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} was closed, but ${BS_MONTHS[nextMonth - 1]} ${nextYear} could not be opened: ${error.message}\n\n` +
+        fail(
+          `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} was closed, but ${BS_MONTHS[nextMonth - 1]} ${nextYear} could not be opened. ` +
           (isAdmin
             ? 'Use "+ Create Period" for this client, then "Resync Opening Stock" to carry the closing count forward.'
-            : 'Until the new month is opened you will not be able to record purchases, sales or stock. Please contact your Crest consultant.')
+            : 'Until the new month is opened you will not be able to record purchases, sales or stock. Please contact your Crest consultant.'),
+          error
         )
       }
     }
@@ -318,10 +344,11 @@ export default function Periods() {
       const { error: cfErr } = await carryForwardOpeningStock(period.id, nextPeriodId)
       if (cfErr) {
         console.error('Opening-stock carry-forward failed:', cfErr)
-        window.alert(
+        fail(
           `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} was closed and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opened, but the closing count could not be carried into it as opening stock — ` +
-          `${BS_MONTHS[nextMonth - 1]}'s Stock Count currently opens with no opening figures.\n\n` +
-          `Use "Resync Opening Stock" on the ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} row to carry it forward before anyone enters purchases or sales.\n\n${errorText(cfErr, 'operator')}`
+          `${BS_MONTHS[nextMonth - 1]}'s Stock Count currently opens with no opening figures. ` +
+          `Use "Resync Opening Stock" on the ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} row to carry it forward before anyone enters purchases or sales.`,
+          cfErr
         )
       }
     }
@@ -337,13 +364,14 @@ export default function Periods() {
     // already moved on to the current one. Previously this error was silently swallowed, so the
     // button looked broken with zero explanation. Surfaced here; "Resync Opening Stock" below is
     // the actual fix for that scenario — it doesn't touch status at all, so it can never hit this.
+    setNotice(null)
     const { error } = await scopedUpdate('monthly_periods', { status: 'open' }).eq('id', id)
     if (error) {
-      window.alert(
-        error.code === '23505' || error.message?.includes('one_open_per_client')
-          ? 'Can\'t reopen — a more recent period is already open for this client (only one period can be open at a time). You do not need to: as admin, a closed period is still editable. Use "Add missing bills" on this row for a purchase bill that was missed, edit Stock Count or Sales for this month directly, and use "Resync Opening Stock" to push a corrected closing count into whatever period comes next. Reopening is only needed to hand entry back to the client\'s own logins.'
-          : `Failed to reopen: ${error.message}`
-      )
+      if (error.code === '23505' || error.message?.includes('one_open_per_client')) {
+        fail('Can\'t reopen — a more recent period is already open for this client (only one period can be open at a time). You do not need to: as admin, a closed period is still editable. Use "Add missing bills" on this row for a purchase bill that was missed, edit Stock Count or Sales for this month directly, and use "Resync Opening Stock" to push a corrected closing count into whatever period comes next. Reopening is only needed to hand entry back to the client\'s own logins.')
+      } else {
+        fail('This period was not reopened — it is still closed.', error)
+      }
       return
     }
     loadPeriods()
@@ -367,7 +395,7 @@ export default function Periods() {
       const waiting = await withTimeout(
         countUnpostedForPeriod({ supabase, scopedFrom, period }), 20000, 'Checking for unposted bills')
       if (waiting === 0) {
-        window.alert(`No unposted POS bills for ${label}.`)
+        ok(`No unposted POS bills for ${label} — everything the till sold that month is already in Inventory.`)
         return
       }
       setPendingConfirm({
@@ -378,7 +406,7 @@ export default function Periods() {
       })
     } catch (err) {
       console.error('POS backfill failed:', err)
-      window.alert(`Could not post POS bills for ${label}: ${err?.message || err}\n\nNothing was left half-written — a bill is only stamped once its revenue has landed, so re-running picks up wherever it stopped.`)
+      fail(`Could not post POS bills for ${label}. Nothing was left half-written — a bill is only stamped once its revenue has landed, so re-running picks up wherever it stopped.`, err)
     } finally {
       setBackfillBusy(null)
     }
@@ -392,14 +420,14 @@ export default function Periods() {
       const { posted, skipped, error } = await withTimeout(
         backfillPosOrdersToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }),
         120000, 'Posting POS bills')
-      if (error) { window.alert('Could not post: ' + error); return }
-      window.alert(
+      if (error) { fail(`The POS bills for ${label} were not posted — re-running picks up wherever it stopped.`, error); return }
+      ok(
         `Posted ${posted} bill${posted === 1 ? '' : 's'} into ${label}.` +
-        (skipped > 0 ? `\n\n${skipped} skipped (nothing to post, or the write failed — check the browser console).` : '')
+        (skipped > 0 ? ` ${skipped} skipped (nothing to post, or the write failed — check the browser console).` : '')
       )
     } catch (err) {
       console.error('POS backfill failed:', err)
-      window.alert(`Could not post POS bills for ${label}: ${err?.message || err}\n\nNothing was left half-written — a bill is only stamped once its revenue has landed, so re-running picks up wherever it stopped.`)
+      fail(`Could not post POS bills for ${label}. Nothing was left half-written — a bill is only stamped once its revenue has landed, so re-running picks up wherever it stopped.`, err)
     } finally {
       setBackfillBusy(null)
     }
@@ -413,11 +441,11 @@ export default function Periods() {
     // A failed read is not "no period exists" — that sentence is a confident claim about the data,
     // and it was being made on a dropped connection (S682).
     if (nextErr) {
-      window.alert(`Could not check whether a ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists, so nothing was synced. Try again.\n\n${errorText(nextErr, 'operator')}`)
+      fail(`Could not check whether a ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists, so nothing was synced. Try again.`, nextErr)
       return
     }
     if (!nextPeriod) {
-      window.alert(`No ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists yet for this client — nothing to sync into.`)
+      fail(`No ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists yet for this client — nothing to sync into.`)
       return
     }
     const fromLabel = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
@@ -428,8 +456,9 @@ export default function Periods() {
       danger: true,
       body: `${fromLabel}'s closing stock copies into ${toLabel}'s opening stock. ${toLabel}'s existing opening stock is overwritten for every item that has a closing count in ${fromLabel}.`,
       run: async () => {
-        await carryForwardOpeningStock(period.id, nextPeriod.id)
-        window.alert(`Opening stock re-synced into ${toLabel}.`)
+        const { error } = await carryForwardOpeningStock(period.id, nextPeriod.id)
+        if (error) fail(`${toLabel}'s opening stock was not re-synced — it still holds whatever it had before. Try again.`, error)
+        else ok(`Opening stock re-synced into ${toLabel} from ${fromLabel}'s closing count.`)
       },
     })
   }
@@ -513,6 +542,15 @@ export default function Periods() {
     </ConfirmModal>
   )
 
+  const noticeEl = !notice ? null : notice.kind === 'error'
+    ? <ActionError error={{ text: notice.text, detail: notice.detail }} />
+    : (
+      <div className="card" role="status" style={{ marginBottom: 16, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, fontSize: 13, color: 'var(--theme-text1)' }}>
+        <span style={{ flex: 1 }}>{notice.text}</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotice(null)}>Dismiss</button>
+      </div>
+    )
+
   // ── Admin all-clients view ───────────────────────────────────────────────
   if (isAdmin && !clientId) {
     const needsAttention = allClients.filter(c => {
@@ -538,6 +576,8 @@ export default function Periods() {
             </p>
           </div>
         </div>
+
+        {noticeEl}
 
         <div className="card" style={{ padding: 0 }}>
           {allLoading ? (
@@ -583,12 +623,12 @@ export default function Periods() {
                                 type="number" value={editAllForm.bs_year}
                                 onChange={e => setEditAllForm(f => ({ ...f, bs_year: e.target.value }))}
                                 min="2070" max="2100"
-                                style={{ width: 90, padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, color: 'var(--theme-text1)' }}
+                                style={{ width: 90, padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)' }}
                               />
                               <select aria-label="BS month"
                                 value={editAllForm.bs_month}
                                 onChange={e => setEditAllForm(f => ({ ...f, bs_month: parseInt(e.target.value) }))}
-                                style={{ padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, color: 'var(--theme-text1)' }}
+                                style={{ padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)' }}
                               >
                                 {BS_MONTHS.map((m, i) => <option key={i} value={i + 1}>{i + 1} — {m}</option>)}
                               </select>
@@ -603,7 +643,7 @@ export default function Periods() {
                             <td>
                               {openPeriod
                                 ? expired
-                                  ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: 'var(--theme-amber-text)', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)' }}>EXPIRED</span>
+                                  ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-xs)', color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)' }}>EXPIRED</span>
                                   : <span className="badge badge-green">OPEN</span>
                                 : <span className="badge badge-gray">NO PERIOD</span>
                               }
@@ -633,14 +673,14 @@ export default function Periods() {
                                   <button
                                     title="Edit period"
                                     onClick={() => { setEditingAllClientId(c.id); setEditAllForm({ bs_year: openPeriod.bs_year, bs_month: openPeriod.bs_month }); setEditAllError('') }}
-                                    style={{ fontSize: 13, padding: '4px 9px', borderRadius: 5, cursor: 'pointer', background: 'rgba(201,168,76,0.07)', border: '1px solid rgba(201,168,76,0.35)', color: 'var(--theme-accent-ink)' }}
+                                    style={{ fontSize: 13, padding: '4px 9px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent)', color: 'var(--theme-accent-ink)' }}
                                   >✏</button>
                                 )}
                                 {openPeriod ? (
                                   <>
                                     <button
                                       onClick={() => adminCloseAndAdvance(openPeriod, c.id)}
-                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 5, cursor: 'pointer', background: 'rgba(248,113,113,0.07)', border: '1px solid rgba(248,113,113,0.3)', color: 'var(--theme-red-text)' }}
+                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', color: 'var(--theme-red-text)' }}
                                     >
                                       Close & Start Next
                                     </button>
@@ -658,7 +698,7 @@ export default function Periods() {
                                 ) : (
                                   <button
                                     onClick={() => adminCreatePeriod(c.id)}
-                                    style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 5, cursor: 'pointer', background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.3)', color: 'var(--theme-green-text)' }}
+                                    style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-green) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 30%, transparent)', color: 'var(--theme-green-text)' }}
                                   >
                                     + Create Period
                                   </button>
@@ -735,7 +775,7 @@ export default function Periods() {
       )}
 
       {periodExpired && (
-        <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.04)' }}>
+        <div className="card" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 4%, transparent)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
             <div>
               <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 14, fontWeight: 600 }}>
@@ -748,9 +788,9 @@ export default function Periods() {
             <button
               onClick={() => closeAndAdvance(openPeriod)}
               style={{
-                flexShrink: 0, background: 'rgba(251,191,36,0.12)',
-                border: '1px solid rgba(251,191,36,0.4)', color: 'var(--theme-amber-text)',
-                borderRadius: 6, padding: '8px 18px', cursor: 'pointer',
+                flexShrink: 0, background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent)', color: 'var(--theme-amber-text)',
+                borderRadius: 'var(--radius-sm)', padding: '8px 18px', cursor: 'pointer',
                 fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap'
               }}
             >
@@ -777,16 +817,20 @@ export default function Periods() {
       )}
 
       {openCount > 1 && (
-        <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(251,191,36,0.3)' }}>
+        <div className="card" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)' }}>
           <p style={{ color: 'var(--theme-amber-text)', fontSize: 13, margin: 0 }}>
             ⚠ You have {openCount} open periods. It's recommended to keep only one open at a time.
           </p>
         </div>
       )}
 
+      {noticeEl}
+
       <div className="card">
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+        ) : loadError ? (
+          <ReportLoadError error={loadError} />
         ) : periods.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">◷</div>
@@ -825,7 +869,7 @@ export default function Periods() {
                                 style={{
                                   width: 90, padding: '4px 8px', fontSize: 13,
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
-                                  borderRadius: 6, color: 'var(--theme-text1)'
+                                  borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)'
                                 }}
                               />
                               <select aria-label="BS month"
@@ -834,7 +878,7 @@ export default function Periods() {
                                 style={{
                                   padding: '4px 8px', fontSize: 13,
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
-                                  borderRadius: 6, color: 'var(--theme-text1)'
+                                  borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)'
                                 }}
                               >
                                 {BS_MONTHS.map((m, i) => (
@@ -897,7 +941,7 @@ export default function Periods() {
                                 <button
                                   className="btn btn-ghost"
                                   title="Edit period"
-                                  style={{ fontSize: 13, padding: '5px 10px', lineHeight: 1, color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.35)', background: 'rgba(201,168,76,0.07)' }}
+                                  style={{ fontSize: 13, padding: '5px 10px', lineHeight: 1, color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' }}
                                   onClick={() => startEdit(p)}
                                 >
                                   ✏
@@ -923,7 +967,7 @@ export default function Periods() {
                               {isAdmin && (p.status === 'open' ? (
                                 <button
                                   className="btn btn-ghost"
-                                  style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
+                                  style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
                                   onClick={() => closeAndAdvance(p)}
                                 >
                                   Close &amp; Start Next
@@ -952,7 +996,7 @@ export default function Periods() {
                                   <Tip text="Fix a mistake in this closed period directly (Stock Count already lets admin edit a closed period), then use this to push the correction into the next period's opening stock — no reopening needed.">
                                     <button
                                       className="btn btn-ghost"
-                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.35)', background: 'rgba(201,168,76,0.07)' }}
+                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' }}
                                       onClick={() => resyncOpeningStock(p)}
                                     >
                                       Resync Opening Stock →
@@ -961,7 +1005,7 @@ export default function Periods() {
                                   <Tip text="Hands data entry for this month back to the CLIENT'S own logins — blocked whenever a later period is already open (only one period can be open per client). Admin does not need it: use Add missing bills for a purchase that was missed, or Resync Opening Stock for a corrected count." width={300}>
                                     <button
                                       className="btn btn-ghost"
-                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-green-text)', borderColor: 'rgba(52,211,153,0.35)', background: 'rgba(52,211,153,0.07)' }}
+                                      style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-green-text)', borderColor: 'color-mix(in srgb, var(--theme-green) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-green) 7%, transparent)' }}
                                       onClick={() => reopenPeriod(p.id)}
                                     >
                                       Reopen
