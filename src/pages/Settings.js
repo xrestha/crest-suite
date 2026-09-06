@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
@@ -66,7 +66,19 @@ export default function Settings() {
   const [platformForm, setPlatformForm] = useState({ ...DEFAULT_SUPPORT_CONTACT })
   const [platformSaving, setPlatformSaving] = useState(false)
   const [platformMsg, setPlatformMsg] = useState('')
-  useEffect(() => { setPlatformForm({ ...DEFAULT_SUPPORT_CONTACT, ...(platformSupport || {}) }) }, [platformSupport])
+  // Reseed only when the STORED value changes, compared by value (S684). `loadSettings()` runs
+  // after every page-level save and on every client switch, and each run produces a fresh
+  // `platformSupport` object — so a reference-keyed effect reseeded this form from the row on
+  // both, wiping whatever the admin had typed here while the header button said "✓ Saved". The
+  // seed is keyed on the serialised row instead: the same stored value arriving again is a no-op.
+  const platformSeedRef = useRef(null)
+  useEffect(() => {
+    const next = { ...DEFAULT_SUPPORT_CONTACT, ...(platformSupport || {}) }
+    const key = JSON.stringify(next)
+    if (key === platformSeedRef.current) return
+    platformSeedRef.current = key
+    setPlatformForm(next)
+  }, [platformSupport])
   function updatePlatform(key, val) { setPlatformForm(f => ({ ...f, [key]: val })) }
 
   useEffect(() => {
@@ -119,6 +131,7 @@ export default function Settings() {
   }
 
   async function savePlatform() {
+    if (platformSaving) return  // the button stays enabled while busy (DESIGN.md), so this is the guard
     setPlatformSaving(true); setPlatformMsg('')
     try {
       const trimmed = Object.fromEntries(Object.entries(platformForm).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]))
@@ -338,9 +351,14 @@ export default function Settings() {
           <h1 className="page-title">Settings</h1>
           <p className="page-subtitle">Configure branding, property details and operational thresholds</p>
         </div>
-        <button className="btn btn-primary" onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
-        </button>
+        {/* Support is the one tab whose cards each commit their own row, so the page-level button
+            does not render there: measured, the nearest Save to the consultant fields was the OTHER
+            card's, 243px away, while the button that saved them sat 1,345px up (S684). */}
+        {activeTab !== 'Support' && (
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
+          </button>
+        )}
       </div>
 
       {/* Read-only branding for client users */}
@@ -793,10 +811,10 @@ export default function Settings() {
                   <span className="field-label" id="sup-emergency-label"><Tip text="Switch on only if someone genuinely answers outside the hours above. While on, Help → Support prints: 'If your outlet can't take orders or bill guests, <channel> <number> is answered any time.' Off, that sentence does not exist.">Outlet-down emergencies</Tip></span>
                   {/* Plain weight/colour on purpose: `.form-field label` styles a caption, and this is a sentence beside a checkbox. */}
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 400, letterSpacing: 0, textTransform: 'none', color: 'var(--theme-text1)', cursor: 'pointer', minHeight: 36, margin: 0 }}>
-                    <input type="checkbox" checked={!!platformForm.emergency_enabled} onChange={e => updatePlatform('emergency_enabled', e.target.checked)} style={{ margin: 0, flexShrink: 0 }} />
+                    <input type="checkbox" aria-describedby="sup-emergency-label" checked={!!platformForm.emergency_enabled} onChange={e => updatePlatform('emergency_enabled', e.target.checked)} style={{ margin: 0, flexShrink: 0 }} />
                     <span>Answered any time, outside the hours above</span>
                   </label>
-                  <select id="sup-emergency-channel" className="form-select" aria-labelledby="sup-emergency-label" aria-label="Which line is answered for outlet-down emergencies" value={platformForm.emergency_channel} disabled={!platformForm.emergency_enabled} onChange={e => updatePlatform('emergency_channel', e.target.value)}>
+                  <select id="sup-emergency-channel" className="form-select" aria-label="Which line is answered for outlet-down emergencies" value={platformForm.emergency_channel} disabled={!platformForm.emergency_enabled} onChange={e => updatePlatform('emergency_channel', e.target.value)}>
                     {EMERGENCY_CHANNELS.map(c => (
                       <option key={c.key} value={c.key} disabled={!preview[c.key]}>{c.label}{preview[c.key] ? ` — ${preview[c.key]}` : ' — no number'}</option>
                     ))}
@@ -811,7 +829,7 @@ export default function Settings() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20, flexWrap: 'wrap' }}>
-                <button className="btn btn-primary" onClick={savePlatform} disabled={platformSaving} aria-busy={platformSaving || undefined}>
+                <button className="btn btn-primary" onClick={savePlatform} aria-busy={platformSaving || undefined}>
                   {platformSaving ? 'Saving…' : 'Save Support Contact'}
                 </button>
                 {platformMsg && (
@@ -829,7 +847,7 @@ export default function Settings() {
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
                 Optional, per client. When set, it replaces the Crest line above for this client only — on the upgrade
                 prompts, the lock screen and Help → Support — so the client reaches the person who looks after them.
-                Saved with the page's Save button below. Blank means they see Crest Support.
+                Blank means they see Crest Support.
               </p>
               {clientId ? (
                 <div className="form-grid form-grid-2">
@@ -854,6 +872,15 @@ export default function Settings() {
                   Choose a client from the sidebar's client switcher to set their consultant. The Crest line above
                   applies to everyone until then.
                 </p>
+              )}
+              {clientId && (
+                // This card's own Save — the same save() the header button runs on every other tab,
+                // placed beside the fields it commits so the two cards never share a button (S684).
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20, flexWrap: 'wrap' }}>
+                  <button className="btn btn-primary" onClick={() => { if (!saving) save() }} aria-busy={saving || undefined}>
+                    {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Consultant'}
+                  </button>
+                </div>
               )}
             </div>
           </div>
