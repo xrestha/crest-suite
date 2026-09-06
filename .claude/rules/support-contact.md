@@ -69,6 +69,14 @@ block variant — the S673 hardcoded `Tip` gloss was removed so it cannot drift 
 It defaults ON with the mobile, mirroring the promise the S673 string had already made, so
 filling the row never silently withdraws it.
 
+**Where a client finds it.** The sidebar's bottom rail carries a **Support** button (`LifeBuoy`)
+beside Help, landing on `/help?section=support`; `Help.js` reads `?section=` against
+`HELP_SECTIONS` and follows it on change, so a link can name the section — before S683 it lived
+only in component state, six tabs in, and "where is support?" was the first question asked once
+the contact became editable. The Settings → Support form's Mobile field names the built-in floor in
+its own placeholder and hint while blank, because the emergency dropdown and the preview show a
+resolved number, and a number the reader can see but cannot find a box for reads as "not editable".
+
 **Don't reach for `SUPPORT_PHONE_RAW` directly anywhere else** — it is module-private, read only
 inside `supportPhone()`. Every call site goes through `useSupportContact()`, which is now one line
 over `resolveSupportContact()`.
