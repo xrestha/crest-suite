@@ -131,7 +131,7 @@ export const OCCASIONS = ['Birthday', 'Anniversary', 'Business', 'Family gatheri
 export const RESERVATION_SELECT =
   'id, customer_name, phone, party_size, reserved_for, duration_minutes, status, source, occasion, notes, ' +
   'cancel_reason, order_id, confirmed_at, arrived_at, seated_at, completed_at, no_show_at, cancelled_at, ' +
-  'created_by, created_at, pos_reservation_tables(id, table_id)'
+  'created_by, created_at, updated_at, pos_reservation_tables(id, table_id)'
 
 /** Millisecond window a booking occupies: [reserved_for, reserved_for + duration). */
 export function windowOf(res) {

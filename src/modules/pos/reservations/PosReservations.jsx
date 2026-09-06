@@ -26,6 +26,8 @@ import {
   RESERVATION_SELECT, SOURCE_LABEL, CANCEL_REASONS, DECLINE_REASONS,
 } from './reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from './reservationSettings'
+import { activityEvent, agoLabel, isNewSince, groupByDay } from './reservationActivity'
+import { readSeenStamp, writeSeenStamp } from '../../../shared/reservationSeen'
 import { bookedCoversByHour, overSeatsHours } from './reservationCapacity'
 import { fillTemplate, openWhatsApp } from './whatsappLink'
 import ReservationModal from './ReservationModal'
@@ -37,6 +39,8 @@ const REQUEST_POLL_MS = 15000
 const LIST_POLL_MS = 30000
 const NOTICE_MS = 8000
 const NOTE_PREVIEW = 60
+// The Activity view is the latest changes, not the whole history: the newest hundred by updated_at.
+const ACTIVITY_LIMIT = 100
 
 const todayIso = () => formatAd(nepalCivilDate(new Date()))
 const plusDaysIso = (iso, n) => { const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return formatAd(d) }
@@ -59,7 +63,7 @@ const displayPhone = p => normalizePhone(p) || p || ''
 // nested, so it is folded in by hand.
 const rowsSig = rows => rowsSignature(rows, [
   'id', 'status', 'reserved_for', 'party_size', 'customer_name', 'phone', 'notes', 'occasion',
-  'duration_minutes', 'cancel_reason', 'source', 'arrived_at', 'order_id',
+  'duration_minutes', 'cancel_reason', 'source', 'arrived_at', 'order_id', 'updated_at', 'created_by',
 ]) + '#' + (rows || []).map(r => tableIdsOf(r).join('+')).join(',')
 const idsSig = set => [...set].sort().join(',')
 
@@ -85,7 +89,15 @@ export default function PosReservations() {
   const dayReq = useLatestRequest()
 
   const [dayIso,   setDayIso]   = useState(todayIso)
-  const [filter,   setFilter]   = useState('day') // 'day' | 'unconfirmed' | 'upcoming'
+  // Opens on Upcoming (S687): a booking a colleague took for next week must be on screen without
+  // anyone picking the date. Day is the service view; Unconfirmed and Upcoming read from today
+  // onward; Activity is the latest changes newest first.
+  const [filter,   setFilter]   = useState('upcoming') // 'upcoming' | 'day' | 'unconfirmed' | 'activity'
+  const [staffNames, setStaffNames] = useState({})
+  const [newCount, setNewCount] = useState(0)
+  // When this device last looked at this page — read at mount, written on leaving, so the "new"
+  // marks stay put while the page is open and clear on the next visit.
+  const [seenStamp, setSeenStamp] = useState(() => readSeenStamp(clientId))
   const [rows,     setRows]     = useState([])
   const [requests, setRequests] = useState([])
   const [tables,   setTables]   = useState([])
@@ -123,19 +135,28 @@ export default function PosReservations() {
     const key = `${dayIso}|${filter}`
     dayReq.begin(key)
     if (!quiet) { setLoading(true); setLoadError(null) }
-    const from = filter === 'upcoming' ? dayBoundsOf(todayIso()) : dayBoundsOf(dayIso)
-    const to   = filter === 'upcoming' ? dayBoundsOf(plusDaysIso(todayIso(), 7)) : from
+    const from = filter === 'day' ? dayBoundsOf(dayIso) : dayBoundsOf(todayIso())
+    // One day, the future book, or the newest hundred changes. Deliberately not paged: a single
+    // outlet's future bookings cannot approach the 1000-row cap, and Activity is LIMITed. Requests
+    // are excluded here and read below.
+    let listQuery = scopedFrom('pos_reservations', RESERVATION_SELECT).neq('status', 'requested')
+    if (filter === 'activity')  listQuery = listQuery.order('updated_at', { ascending: false }).order('id').limit(ACTIVITY_LIMIT)
+    else if (filter === 'day')  listQuery = listQuery.gte('reserved_for', from.start).lte('reserved_for', from.end).order('reserved_for').order('id')
+    else                        listQuery = listQuery.gte('reserved_for', from.start).order('reserved_for').order('id')
     const results = await Promise.all([
-      // Bounded to one day (or seven), so deliberately not paged: a single outlet's bookings for
-      // a week cannot approach the 1000-row cap. Requests are excluded here and read below.
-      scopedFrom('pos_reservations', RESERVATION_SELECT)
-        .neq('status', 'requested')
-        .gte('reserved_for', from.start).lte('reserved_for', to.end)
-        .order('reserved_for').order('id'),
+      listQuery,
       scopedFrom('pos_reservations', RESERVATION_SELECT).eq('status', 'requested').order('reserved_for').order('id'),
       scopedFrom('pos_tables', 'id, name, section, capacity, status').order('sort_order').order('name'),
       scopedFrom('pos_orders', 'id, table_id').eq('status', 'open'),
       supabase.from('settings').select('pos_reservation_settings, pos_open_time, pos_close_time').eq('client_id', clientId).maybeSingle(),
+      // Changed since this device last looked — the same count the sidebar chip shows, so the two
+      // never disagree. No stamp (first visit here) counts nothing.
+      seenStamp
+        ? scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).neq('status', 'requested').gt('updated_at', seenStamp)
+        : Promise.resolve({ count: 0, error: null }),
+      // Raw `profiles` reads are RLS-limited to the caller's own row; other staff members' names
+      // come from get_client_profile_names(). Only the Activity view prints them.
+      filter === 'activity' ? supabase.rpc('get_client_profile_names', { p_client_id: clientId }) : Promise.resolve({ data: null, error: null }),
     ])
     if (!dayReq.isCurrent(key)) return
     // A failed read is not an empty day, and must never render as one (S594). A failed QUIET
@@ -145,7 +166,7 @@ export default function PosReservations() {
       if (quiet) { console.error('reservation list refresh failed, keeping last known:', failed); return }
       setLoadError(failed); setLoading(false); return
     }
-    const [{ data: dayRows }, { data: reqRows }, { data: tbls }, { data: open }, { data: s }] = results
+    const [{ data: dayRows }, { data: reqRows }, { data: tbls }, { data: open }, { data: s }, { count: changed }, { data: names }] = results
     // setIfChanged throughout: this runs on a 30 s timer for as long as the book is open, and the
     // usual answer is "nothing moved" — a bare setter would re-render the whole table each tick.
     setIfChanged(setRows, dayRows || [], rowsSig)
@@ -154,10 +175,23 @@ export default function PosReservations() {
     setIfChanged(setOpenTableIds, new Set((open || []).map(o => o.table_id).filter(Boolean)), idsSig)
     setIfChanged(setSettings, normalizeReservationSettings(s?.pos_reservation_settings), v => JSON.stringify(v))
     setIfChanged(setHours, { open: s?.pos_open_time || '', close: s?.pos_close_time || '' }, v => `${v.open}|${v.close}`)
+    setNewCount(changed || 0)
+    if (names) setIfChanged(setStaffNames, Object.fromEntries(names.map(p => [p.id, p.full_name])), v => JSON.stringify(v))
     setLoading(false)
-  }, [clientId, dayIso, filter, scopedFrom, commitRequests]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, dayIso, filter, seenStamp, scopedFrom, commitRequests]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load() }, [load])
+
+  // The seen stamp: read for this client on arrival, written when the page is left or the tab
+  // hidden. Written on leaving rather than on every poll so that what is "new" stays marked for
+  // the whole visit.
+  useEffect(() => {
+    setSeenStamp(readSeenStamp(clientId))
+    const mark = () => writeSeenStamp(clientId)
+    const onVisibility = () => { if (document.visibilityState === 'hidden') mark() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { document.removeEventListener('visibilitychange', onVisibility); mark() }
+  }, [clientId])
 
   // Public requests arrive on their own clock. Polled, not realtime — nothing in this app is.
   useEffect(() => {
@@ -196,6 +230,8 @@ export default function PosReservations() {
 
   const liveRows = useMemo(() => rows.filter(r => LIVE_STATUSES.includes(r.status)), [rows])
   const visibleRows = useMemo(() => (filter === 'unconfirmed' ? rows.filter(r => r.status === 'booked') : rows), [rows, filter])
+  // Upcoming and Unconfirmed read under day headers; Day is one day and needs none.
+  const dayGroups = useMemo(() => (filter === 'upcoming' || filter === 'unconfirmed' ? groupByDay(visibleRows, rowDayIso) : null), [visibleRows, filter])
   const tableName = useMemo(() => Object.fromEntries(tables.map(t => [t.id, t.name])), [tables])
   const totalSeats = useMemo(() => tables.filter(t => t.status !== 'inactive').reduce((s, t) => s + (Number(t.capacity) || 0), 0), [tables])
 
@@ -208,7 +244,7 @@ export default function PosReservations() {
 
   // Guests expected per hour against the room, for a single day.
   const capacity = useMemo(() => {
-    if (filter === 'upcoming') return null
+    if (filter !== 'day') return null
     const buckets = bookedCoversByHour(liveRows)
     const over = new Set(overSeatsHours(buckets, totalSeats))
     let first = parseHour(hours.open) ?? 10
@@ -256,7 +292,7 @@ export default function PosReservations() {
     const verb = to === 'cancelled' ? (row.status === 'requested' ? 'declined' : 'cancelled') : VERB[to]
     if (verb) {
       const iso = rowDayIso(row)
-      const elsewhere = to !== 'cancelled' && to !== 'no_show' && iso && (filter === 'upcoming' ? false : iso !== dayIso)
+      const elsewhere = to !== 'cancelled' && to !== 'no_show' && iso && (filter === 'day' ? iso !== dayIso : false)
       setNotice({
         text: `${row.customer_name} ×${row.party_size} ${verb}${elsewhere ? ` — ${bsLabelOf(dayBoundsOf(iso).bs)} at ${nepalTime(row.reserved_for)}` : ''}.`,
         jumpIso: elsewhere ? iso : null,
@@ -312,7 +348,12 @@ export default function PosReservations() {
 
   const dayBs = dayBoundsOf(dayIso).bs
   const isToday = dayIso === todayIso()
-  const scopeLabel = filter === 'upcoming' ? 'Next 7 days' : `${bsLabelOf(dayBs)}${isToday ? ' (today)' : ''}`
+  const todayBs = dayBoundsOf(todayIso()).bs
+  const scopeLabel = filter === 'upcoming' ? `from ${bsLabelOf(todayBs)} (today)`
+    : filter === 'unconfirmed' ? 'unconfirmed, from today'
+    : filter === 'activity' ? `latest ${ACTIVITY_LIMIT} changes`
+    : `${bsLabelOf(dayBs)}${isToday ? ' (today)' : ''}`
+  const dayScoped = filter === 'day'
 
   // The ONE inline step for a row. The busy row's buttons stay ENABLED and wear aria-busy:
   // disabling the one the keyboard user just pressed drops focus to <body>, and the transition()
@@ -393,19 +434,25 @@ export default function PosReservations() {
           <p className="page-subtitle">{scopeLabel} · Tap a name to edit.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDayIso(d => plusDaysIso(d, -1))} aria-label="Previous day" disabled={filter === 'upcoming'}>‹</button>
-          <BsCalendarPicker id="resv-day" value={dayIso} onChange={v => { setDayIso(v); if (filter === 'upcoming') setFilter('day') }} ariaLabel="Day" disabled={filter === 'upcoming'} />
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDayIso(d => plusDaysIso(d, 1))} aria-label="Next day" disabled={filter === 'upcoming'}>›</button>
-          {!isToday && filter !== 'upcoming' && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDayIso(d => plusDaysIso(d, -1))} aria-label="Previous day" disabled={!dayScoped}>‹</button>
+          <BsCalendarPicker id="resv-day" value={dayIso} onChange={v => { setDayIso(v); if (!dayScoped) setFilter('day') }} ariaLabel="Day" disabled={!dayScoped} />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDayIso(d => plusDaysIso(d, 1))} aria-label="Next day" disabled={!dayScoped}>›</button>
+          {!isToday && dayScoped && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDayIso(todayIso())}>Today</button>
           )}
         </div>
       </div>
 
       <div className="tab-bar" style={{ marginBottom: 16 }}>
+        <button type="button" className={`tab-btn${filter === 'upcoming' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'upcoming'} onClick={() => setFilter('upcoming')}>Upcoming</button>
         <button type="button" className={`tab-btn${filter === 'day' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'day'} onClick={() => setFilter('day')}>Day</button>
         <button type="button" className={`tab-btn${filter === 'unconfirmed' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'unconfirmed'} onClick={() => setFilter('unconfirmed')}>Unconfirmed</button>
-        <button type="button" className={`tab-btn${filter === 'upcoming' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'upcoming'} onClick={() => setFilter('upcoming')}>Next 7 days</button>
+        <button type="button" className={`tab-btn${filter === 'activity' ? ' tab-btn--active' : ''}`} aria-pressed={filter === 'activity'} onClick={() => setFilter('activity')}>
+          Activity
+          {newCount > 0 && (
+            <> <span className="badge badge-yellow badge-sentence" aria-label={`${newCount} changed since you last looked`}>{newCount > 99 ? '99+' : newCount} new</span></>
+          )}
+        </button>
       </div>
 
       {/* Public booking requests — an outlet with the link switched off never sees this band. A queue,
@@ -465,7 +512,7 @@ export default function PosReservations() {
         <ReportLoadError error={loadError} />
       ) : (
         <>
-          <div className="stat-grid" style={{ marginBottom: 16 }}>
+          {filter !== 'activity' && <div className="stat-grid" style={{ marginBottom: 16 }}>
             <div className="stat-card">
               <div className="stat-label">Bookings</div>
               <div className="stat-value">{stats.bookings}</div>
@@ -486,7 +533,7 @@ export default function PosReservations() {
               <div className="stat-value">{stats.waiting}</div>
               <div className="stat-sub">{stats.waiting > 0 ? 'arrived, no table yet' : 'nobody waiting'}</div>
             </div>
-          </div>
+          </div>}
 
           {capacity && capacity.cells.some(c => c.covers > 0) && (
             <div className="card" style={{ padding: '12px 16px', marginBottom: 16 }}>
@@ -516,10 +563,10 @@ export default function PosReservations() {
           {weekOver && liveRows.length > 0 && (
             <div className="card" style={{ padding: '12px 16px', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text2)' }}>Hours over seats this week</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text2)' }}>Hours over seats, upcoming</span>
                 <Tip text={`Each day's booked guests per hour against the room's ${totalSeats} seats. Pick a day to see its hour-by-hour strip. A warning never blocks a booking.`} width={280}>ⓘ</Tip>
                 {weekOver.length === 0
-                  ? <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>none in the next 7 days</span>
+                  ? <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>none upcoming</span>
                   : weekOver.map(d => (
                     <button key={d.iso} type="button" className="badge badge-amber badge-sentence" style={{ border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
                       onClick={() => { setFilter('day'); setDayIso(d.iso) }} title={`Open ${d.label}`}>
@@ -534,9 +581,12 @@ export default function PosReservations() {
             <div className="card empty-state">
               <div className="empty-state-icon" aria-hidden="true">🕗</div>
               <div className="empty-state-text">
-                {filter === 'unconfirmed' ? 'Nothing waiting on a confirmation.' : `No bookings — ${scopeLabel}.`}
+                {filter === 'unconfirmed' ? 'Nothing waiting on a confirmation.'
+                  : filter === 'activity' ? 'No changes yet — a booking taken, confirmed, seated or cancelled will show here.'
+                  : filter === 'upcoming' ? 'No upcoming bookings.'
+                  : `No bookings — ${scopeLabel}.`}
               </div>
-              {filter !== 'unconfirmed' && (
+              {(filter === 'day' || filter === 'upcoming') && (
                 <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '10px auto 0', maxWidth: 440, lineHeight: 1.6 }}>
                   Add one with <strong>+ New booking</strong>.{' '}
                   {settings.public_booking_enabled
@@ -544,6 +594,56 @@ export default function PosReservations() {
                     : <>Or switch on the booking link under {tablesLink}, so guests can ask from their phone.</>}
                 </p>
               )}
+            </div>
+          ) : filter === 'activity' ? (
+            <div className="table-wrap table-wrap--fab-clear">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>What <Tip text="The booking's latest change. Who took a booking is recorded; who confirmed, seated or cancelled it is not." width={240}>ⓘ</Tip></th>
+                    <th>Guest</th>
+                    <th>For</th>
+                    <th style={{ textAlign: 'right' }}>Party</th>
+                    <th>Status</th>
+                    <th><span className="visually-hidden">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleRows.map(r => {
+                    const ev = activityEvent(r)
+                    const evBs = nepalBs(ev.at)
+                    const forBs = nepalBs(r.reserved_for)
+                    const fresh = isNewSince(r, seenStamp)
+                    const by = r.status === 'booked' || ev.label === 'Edited' || ev.label === 'Accepted' || ev.label === 'Declined'
+                      ? (r.source === 'website' ? 'guest, online' : staffNames[r.created_by] || null)
+                      : null
+                    return (
+                      <tr key={r.id} className={fresh ? 'resv-row--new' : undefined}>
+                        <td style={{ whiteSpace: 'nowrap', fontWeight: 600, color: 'var(--theme-text1)' }}>
+                          {agoLabel(ev.at, now)}
+                          <span className="cell-sub" style={{ fontWeight: 400 }}>{evBs ? `${bsLabelOf(evBs)} · ` : ''}{nepalTime(ev.at)}</span>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <span className={`badge ${RESERVATION_STATUS_BADGE[r.status] || 'badge-gray'}`}>{ev.label}</span>
+                          {by && <span className="cell-sub">by {by}</span>}
+                          {fresh && <> <span className="badge badge-yellow badge-sentence">new</span></>}
+                        </td>
+                        <td>
+                          <button type="button" className="btn-linklike" onClick={e => { e.stopPropagation(); setModal({ row: r }) }}>{r.customer_name}</button>
+                          <span className="cell-sub">{displayPhone(r.phone)}</span>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{forBs ? bsLabelOf(forBs) : nepalDateLong(r.reserved_for)} · {nepalTime(r.reserved_for)}</td>
+                        <td style={{ textAlign: 'right' }}>×{r.party_size}</td>
+                        <td>{statusChip(r)}</td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>{rowActions(r)}</div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           ) : (
             <div className="table-wrap table-wrap--fab-clear">
@@ -560,8 +660,16 @@ export default function PosReservations() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRows.map(r => {
-                    const bs = filter === 'upcoming' ? nepalBs(r.reserved_for) : null
+                  {(dayGroups || [{ iso: null, rows: visibleRows }]).map(group => [
+                    group.iso && (
+                      <tr key={`day-${group.iso}`} className="resv-dayhead">
+                        <td colSpan={7}>
+                          {bsLabelOf(dayBoundsOf(group.iso).bs)}{group.iso === todayIso() ? ' · Today' : ''} · {nepalDateLong(group.rows[0].reserved_for)}
+                          <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · {group.rows.length} booking{group.rows.length === 1 ? '' : 's'}</span>
+                        </td>
+                      </tr>
+                    ),
+                    ...group.rows.map(r => {
                     const late = isLate(r, now, settings.arrival_grace_minutes)
                     const waiting = waitingMinutes(r, now)
                     const preview = notePreview(r.notes)
@@ -573,7 +681,7 @@ export default function PosReservations() {
                         <tr>
                           <td style={{ whiteSpace: 'nowrap', fontWeight: 600, color: 'var(--theme-text1)' }}>
                             {nepalTime(r.reserved_for)}
-                            <span className="cell-sub" style={{ fontWeight: 400 }}>{bs ? `${bsLabelOf(bs)} · ` : ''}{r.duration_minutes} min</span>
+                            <span className="cell-sub" style={{ fontWeight: 400 }}>{r.duration_minutes} min</span>
                           </td>
                           <td>
                             {hasMore && (
@@ -607,7 +715,8 @@ export default function PosReservations() {
                         )}
                       </Fragment>
                     )
-                  })}
+                  }),
+                  ])}
                 </tbody>
               </table>
             </div>
@@ -620,7 +729,7 @@ export default function PosReservations() {
           row={modal.row}
           tables={tables}
           settings={settings}
-          dayIso={filter === 'upcoming' ? todayIso() : dayIso}
+          dayIso={dayScoped ? dayIso : todayIso()}
           onClose={() => setModal(null)}
           onSaved={({ partial } = {}) => { if (!partial) setModal(null); load({ quiet: true }) }}
         />

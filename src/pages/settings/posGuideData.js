@@ -180,6 +180,7 @@ export const POS_GUIDE_GROUPS = [
           'Undo: a no-show who turns up is put back to Arrived (⋯ → They turned up), which clears the mark from their phone number; a cancelled booking is reinstated to Booked. Both only on the booking\'s own day — after that it is a record, not a guest at the door.',
           'Decline vs cancel: a request from the booking link is DECLINED with its own reason list (No table at that time, Closed that day, Party too large), because that reason is shown on the guest\'s phone. Cancel reasons are for the book.',
           'Online requests: an amber band at the top of the page, polled every 15 s with a chime — Accept confirms, Decline needs a reason, and the guest\'s phone shows the answer within seconds.',
+          'Views: Upcoming (the default — every future booking under day headers, so a colleague\'s booking for next week is on screen without picking the date), Day (one day, with the hour-by-hour strip), Unconfirmed (from today), Activity (the newest hundred changes, newest first, with who took each booking; changes since this device last opened the page are marked new, and that count also sits on the Reservations row in the sidebar).',
         ],
         fields: [
           { label: 'Status ladder', desc: 'Requested (online only) → Booked → Confirmed → Arrived → Seated → Completed; No-show and Cancelled are terminal. Seated MEANS the order exists — the database refuses a seated row with no order_id.' },

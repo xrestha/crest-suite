@@ -1821,6 +1821,18 @@ table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
 /* What the last status move did — "Sharma ×4 confirmed — 5th Bhadra at 7:30 PM. Show that day".
    Sits where ActionError sits and reads in the success colour AS TEXT; it is a sentence, not a
    card, for the same reason .action-error is not one. */
+/* Reservations: day header rows in the Upcoming list, and the "new since you last looked" row
+   tint on Activity. Both take the table-hover ground: a grouping, not a signal. */
+.resv-dayhead td {
+  background: var(--theme-table-hover);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--theme-text2);
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.resv-row--new td { background: color-mix(in srgb, var(--theme-yellow) 6%, transparent); }
+
 .resv-notice {
   margin: 0 0 12px;
   font-size: 13px;

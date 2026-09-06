@@ -666,6 +666,15 @@ are load-bearing, each with the reason it exists:
   dashboard tile's second line, was reported as "no notification" by an owner on the IMS
   dashboard. `posRequests` (reservations `status = 'requested'`) is the first POS entry; keep a
   failed count at its last value rather than zero.
+- **The Reservations page opens on the whole future book, and Activity is the only view that
+  says what changed (S687).** Upcoming = `reserved_for >= today`, unpaged, under day headers;
+  Day is the service view. Activity orders by `updated_at DESC LIMIT 100` — `updated_at` is
+  trigger-maintained on this table and on no other, which is why it can be trusted here. Only
+  `created_by` is stored: the Activity label carries no actor for a confirm/seat/cancel, and a
+  future `updated_by` must be set from `auth.uid()` in the trigger, never a parameter. The "new
+  since you last looked" stamp is per device (`src/shared/reservationSeen.js`); the page and
+  `useNavBadgeCounts` must keep counting from the SAME stamp with the SAME predicate, or the
+  sidebar chip and the tab disagree.
 
 ## Server-assigned numbers, the offline queue, and `settings` RLS
 

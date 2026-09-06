@@ -425,7 +425,8 @@ export default function Layout() {
 
   function renderNavItem(item, { pinnable = true, style } = {}) {
     const isPinned = pins.includes(item.to)
-    const count = navCounts[item.to] || 0
+    const nc = navCounts[item.to]
+    const count = nc?.count || 0
     return (
       <NavLink key={item.to} to={item.to}
         className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
@@ -434,10 +435,9 @@ export default function Layout() {
         <span className="sidebar-icon"><item.icon size={16} strokeWidth={1.75} /></span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
         {count > 0 && (
-          <span className="badge-amber badge-sentence" style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4, flexShrink: 0 }}
-            aria-label={`${count} booking request${count === 1 ? '' : 's'} waiting`}
-            title={`${count} booking request${count === 1 ? '' : 's'} waiting for Accept`}>
-            {count}
+          <span className={`${nc.tone} badge-sentence`} style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4, flexShrink: 0 }}
+            aria-label={nc.label} title={nc.label}>
+            {count > 99 ? '99+' : count}
           </span>
         )}
         {/* Pins are the shell's own answer to a 41-destination nav, so they cannot be mouse-only.
@@ -579,10 +579,20 @@ export default function Layout() {
   ].filter(Boolean)
   const panel = panelOrder.includes(activePanel) ? activePanel : panelOrder[0]
   const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS' }
-  const { hrPending, posPending, posRequests } = useNavBadgeCounts(hrVisible, posVisible)
+  const { hrPending, posPending, posRequests, posNew } = useNavBadgeCounts(hrVisible, posVisible)
   // Per-route counts rendered on the nav row itself, so a number waiting on one page is visible
   // from every other page in the module. Keyed by route because NAV is a module-level constant.
-  const navCounts = { '/pos/reservations': posRequests }
+  // Amber while something needs a decision (a request); grey when it is only news (S687).
+  const navCounts = {
+    '/pos/reservations': {
+      count: posRequests + posNew,
+      tone: posRequests > 0 ? 'badge-amber' : 'badge-gray',
+      label: [
+        posRequests > 0 ? `${posRequests} booking request${posRequests === 1 ? '' : 's'} waiting for Accept` : null,
+        posNew > 0 ? `${posNew} booking${posNew === 1 ? '' : 's'} changed since you last looked` : null,
+      ].filter(Boolean).join(' · '),
+    },
+  }
 
   // Top "Dashboard" nav label — mirrors ClientDashboard.jsx's own dashTitle exactly (admin always
   // sees "Admin Dashboard"; a real client with 2-3 modules sees generic "Dashboard"; a client with

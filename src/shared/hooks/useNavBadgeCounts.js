@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useScopedDb } from './useScopedDb'
+import { readSeenStamp } from '../reservationSeen'
 
 const POLL_MS = 60000
 
@@ -17,6 +18,9 @@ export function useNavBadgeCounts(hrVisible, posVisible) {
   // page (amber band + chime) and the dashboard tile was reported as "no notification" by an
   // owner sitting on the IMS dashboard (S686).
   const [posRequests, setPosRequests] = useState(0)
+  // Bookings changed since this device last opened the Reservations page (S687) — the same count
+  // that page's Activity tab shows, from the same per-device stamp. No stamp = nothing counted.
+  const [posNew, setPosNew] = useState(0)
 
   useEffect(() => {
     if (!clientId || !hrVisible) { setHrPending(0); return }
@@ -37,12 +41,16 @@ export function useNavBadgeCounts(hrVisible, posVisible) {
   }, [clientId, hrVisible, scopedFrom])
 
   useEffect(() => {
-    if (!clientId || !posVisible) { setPosPending(0); setPosRequests(0); return }
+    if (!clientId || !posVisible) { setPosPending(0); setPosRequests(0); setPosNew(0); return }
     let cancelled = false
     async function load() {
-      const [{ data }, { count, error: reqErr }] = await Promise.all([
+      const stamp = readSeenStamp(clientId)
+      const [{ data }, { count, error: reqErr }, { count: changed, error: newErr }] = await Promise.all([
         scopedFrom('pos_orders', 'id, pos_order_items(sent_to_kot)').eq('status', 'open'),
         scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).eq('status', 'requested'),
+        stamp
+          ? scopedFrom('pos_reservations', 'id', { count: 'exact', head: true }).neq('status', 'requested').gt('updated_at', stamp)
+          : Promise.resolve({ count: 0, error: null }),
       ])
       if (cancelled) return
       const total = (data || []).reduce((s, o) => s + (o.pos_order_items || []).filter(i => !i.sent_to_kot).length, 0)
@@ -50,11 +58,12 @@ export function useNavBadgeCounts(hrVisible, posVisible) {
       // A failed count keeps the last value — a badge that vanishes on a dropped poll reads as
       // "the request was handled", not as a failed read.
       if (!reqErr) setPosRequests(count || 0)
+      if (!newErr) setPosNew(changed || 0)
     }
     load()
     const id = setInterval(load, POLL_MS)
     return () => { cancelled = true; clearInterval(id) }
   }, [clientId, posVisible, scopedFrom])
 
-  return { hrPending, posPending, posRequests }
+  return { hrPending, posPending, posRequests, posNew }
 }
