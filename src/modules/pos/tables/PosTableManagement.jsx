@@ -183,7 +183,7 @@ export default function PosTableManagement() {
       sort_order: start + i,
     }))
     const { error } = await scopedInsert('pos_tables', rows)
-    if (error) { setQsMsg('error:' + error.message); setQsSaving(false); return }
+    if (error) { setQsMsg('error:The quick-service setting was not saved. ' + errorLine(error)); setQsSaving(false); return }
     await load()
     setQsMsg(`ok:Created ${count} table${count !== 1 ? 's' : ''}.`)
     setQsSaving(false)
@@ -217,7 +217,7 @@ export default function PosTableManagement() {
     const { error } = target
       ? await scopedUpdate('pos_tables', payload).eq('id', target.id)
       : await scopedInsert('pos_tables', payload)
-    if (error) { setMsg('error:' + error.message); setSaving(false); return }
+    if (error) { setMsg('error:' + (target ? 'The table was not updated.' : 'The table was not added.') + ' ' + errorLine(error)); setSaving(false); return }
     await load(); closeModal(); setSaving(false)
   }
 
@@ -288,13 +288,13 @@ export default function PosTableManagement() {
     setFloorMsg('')
     const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(t.status) + 1) % STATUS_CYCLE.length]
     const { error } = await scopedUpdate('pos_tables', { status: next }).eq('id', t.id)
-    if (error) { setFloorMsg('error:Could not update ' + t.name + ' — ' + error.message); return }
+    if (error) { setFloorMsg('error:' + t.name + ' was not updated — the floor still shows its previous state. ' + errorLine(error)); return }
     setTables(prev => prev.map(r => r.id === t.id ? { ...r, status: next } : r))
   }
 
   async function handleStatusChange(val) {
     const { error } = await scopedUpdate('pos_tables', { status: val }).eq('id', target.id)
-    if (error) { setMsg('error:' + error.message); return }
+    if (error) { setMsg('error:The table status was not changed — the floor still shows its previous state. ' + errorLine(error)); return }
     setTables(prev => prev.map(r => r.id === target.id ? { ...r, status: val } : r))
     setTarget(t => ({ ...t, status: val }))
   }
@@ -345,7 +345,7 @@ export default function PosTableManagement() {
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_bot_categories: botArr }))
     }
     setRoutingSaving(false)
-    setRoutingMsg(error ? 'error:' + error.message : 'ok:Routing saved.')
+    setRoutingMsg(error ? 'error:The ticket routing was not saved — kitchen and bar still print as before. ' + errorLine(error) : 'ok:Routing saved.')
   }
 
   // ── Quick Notes ──────────────────────────────────────────────────────────────
@@ -401,7 +401,7 @@ export default function PosTableManagement() {
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_note_presets: notePresets }))
     }
     setNotesSaving(false)
-    setNotesMsg(error ? 'error:' + error.message : 'ok:Quick notes saved.')
+    setNotesMsg(error ? 'error:The quick notes were not saved — the till still offers the previous list. ' + errorLine(error) : 'ok:Quick notes saved.')
   }
 
   // ── HSC Codes ────────────────────────────────────────────────────────────────
@@ -482,7 +482,7 @@ export default function PosTableManagement() {
       ;({ error } = await supabase.from('settings').insert({ client_id: clientId, pos_discount_reasons: discReasons }))
     }
     setDiscSaving(false)
-    setDiscMsg(error ? 'error:' + error.message : 'ok:Discount reasons saved.')
+    setDiscMsg(error ? 'error:The discount reasons were not saved — the till still offers the previous list. ' + errorLine(error) : 'ok:Discount reasons saved.')
   }
 
   // ── Delivery Partners ────────────────────────────────────────────────────────
@@ -553,7 +553,7 @@ export default function PosTableManagement() {
     }
     setPartners(cleaned)
     setDeliverySaving(false)
-    setDeliveryMsg(error ? 'error:' + error.message : 'ok:Delivery partner settings saved.')
+    setDeliveryMsg(error ? 'error:The delivery partners were not saved — settling a platform bill still uses the previous commission rates. ' + errorLine(error) : 'ok:Delivery partner settings saved.')
   }
 
   // ── Reservations ──────────────────────────────────────────────────────────────
@@ -632,7 +632,7 @@ export default function PosTableManagement() {
     }
     setResv(cleaned)
     setResvSaving(false)
-    setResvMsg(error ? 'error:' + error.message : 'ok:Reservation settings saved.')
+    setResvMsg(error ? 'error:The reservation settings were not saved — the public booking page still uses the previous hours and closures. ' + errorLine(error) : 'ok:Reservation settings saved.')
   }
 
   async function copyBookingUrl() {

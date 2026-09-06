@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient'
 import Tip from '../components/Tip'
 import { errorLine } from '../shared/errorText'
 import ReportLoadError from '../components/ReportLoadError'
+import { useConfirm } from '../shared/hooks/useConfirm'
 
 const PAGE_SIZE = 500
 
@@ -184,6 +185,7 @@ export default function AuditLog() {
   const [filterTime, setFilterTime]     = useState('7d')
   const [filterUser, setFilterUser]     = useState('all')
   const [clearMsg, setClearMsg]         = useState('')
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [search, setSearch]             = useState('')
   const [helpOpen, setHelpOpen]         = useState(false)
   const [expandedId, setExpandedId]     = useState(null)
@@ -254,10 +256,31 @@ export default function AuditLog() {
     const ignoredNote = (filterUser !== 'all' || search.trim())
       ? '\n\n⚠ The User filter and search box do NOT narrow what is deleted — everything in the range above goes.'
       : ''
-    if (!window.confirm(
-      `Delete ${logs.length}${hasMore ? '+' : ''} audit log entries (${timeLabel}, ${clientLabel}${areaLabel})?${ignoredNote}\n\nThis cannot be undone.`
-    )) return
+    // The audit trail is the record of who did what, so clearing it is irreversible — and the
+    // warning is the whole point of the dialog. A native box renders it as one wall of text with
+    // the ⚠ line indistinguishable from the rest (S682).
+    askConfirm({
+      title: `Delete ${logs.length}${hasMore ? '+' : ''} audit log entries?`,
+      confirmLabel: 'Delete Entries', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            Everything in <strong>{timeLabel}</strong>, {clientLabel}{areaLabel} is permanently removed from the
+            audit trail. This cannot be undone.
+          </p>
+          {ignoredNote && (
+            <p style={{ margin: 0, color: 'var(--theme-amber-text)' }}>
+              The User filter and the search box do <strong>not</strong> narrow what is deleted — everything in
+              that range goes, not just the rows on screen.
+            </p>
+          )}
+        </>
+      ),
+      run: () => runClear(timeLabel, clientLabel, areaLabel),
+    })
+  }
 
+  async function runClear(timeLabel, clientLabel, areaLabel) {
     let cutoff = null
     if (filterTime !== 'all') {
       const start = new Date()
@@ -514,6 +537,7 @@ export default function AuditLog() {
           </div>
         )}
       </div>
+      {confirmEl}
     </div>
   )
 }

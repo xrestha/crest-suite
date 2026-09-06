@@ -7,6 +7,7 @@ import { useTheme, PRESETS } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 import { MODULE_COLORS, DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
 import { assignMissingProductCodes } from '../shared/productCode'
+import { useConfirm } from '../shared/hooks/useConfirm'
 import { Navigate } from 'react-router-dom'
 
 // Lazy so the three module guides' prose (several thousand lines of admin-only strings) lives in
@@ -24,6 +25,7 @@ function deriveInvoicePrefix(name) {
 
 export default function Settings() {
   const { settings, saveSettings, loadSettings, recipeCategories } = useSettings()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const { clientId, isAdmin, hasFeature, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
@@ -130,10 +132,24 @@ export default function Settings() {
 
   async function regenerateAllCodes() {
     const prefix = (form.item_code_prefix || 'ITM').trim().toUpperCase() || 'ITM'
-    if (!window.confirm(
-      `This will renumber ALL items sequentially as ${prefix}-001, ${prefix}-002, etc. ` +
-      `Use this to close gaps left by deleted items. Continue?`
-    )) return
+    askConfirm({
+      title: 'Renumber every item?',
+      confirmLabel: 'Renumber All', danger: true, busyLabel: 'Renumbering…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            Every item is given a new sequential code — <strong>{prefix}-001</strong>, <strong>{prefix}-002</strong> and
+            so on — closing the gaps left by deletions. Codes already printed on past bills, stock sheets and
+            reports will no longer match what this list shows.
+          </p>
+          <p style={{ margin: 0 }}>This cannot be undone.</p>
+        </>
+      ),
+      run: () => runRegenerateAllCodes(prefix),
+    })
+  }
+
+  async function runRegenerateAllCodes(prefix) {
 
     setRegenerating(true)
     setRegenerateMsg('')
@@ -162,10 +178,24 @@ export default function Settings() {
 
   async function regenerateAllVendorCodes() {
     const prefix = (form.vendor_code_prefix || 'VND').trim().toUpperCase() || 'VND'
-    if (!window.confirm(
-      `This will renumber ALL vendors sequentially as ${prefix}-001, ${prefix}-002, etc. ` +
-      `Use this to close gaps left by deleted vendors. Continue?`
-    )) return
+    askConfirm({
+      title: 'Renumber every vendor?',
+      confirmLabel: 'Renumber All', danger: true, busyLabel: 'Renumbering…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            Every vendor is given a new sequential code — <strong>{prefix}-001</strong>, <strong>{prefix}-002</strong> and
+            so on — closing the gaps left by deletions. Codes already printed on past bills, stock sheets and
+            reports will no longer match what this list shows.
+          </p>
+          <p style={{ margin: 0 }}>This cannot be undone.</p>
+        </>
+      ),
+      run: () => runRegenerateAllVendorCodes(prefix),
+    })
+  }
+
+  async function runRegenerateAllVendorCodes(prefix) {
 
     setRegeneratingVnd(true)
     setRegenerateMsgVnd('')
@@ -193,10 +223,24 @@ export default function Settings() {
 
   async function regenerateAllSubRecipeCodes() {
     const prefix = (form.sub_recipe_code_prefix || 'SRC').trim().toUpperCase() || 'SRC'
-    if (!window.confirm(
-      `This will renumber ALL sub-recipes sequentially as ${prefix}-001, ${prefix}-002, etc. ` +
-      `Alphabetically by name. Continue?`
-    )) return
+    askConfirm({
+      title: 'Renumber every sub-recipe?',
+      confirmLabel: 'Renumber All', danger: true, busyLabel: 'Renumbering…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            Every sub-recipe is given a new sequential code — <strong>{prefix}-001</strong>, <strong>{prefix}-002</strong> and
+            so on — closing the gaps left by deletions. Codes already printed on past bills, stock sheets and
+            reports will no longer match what this list shows.
+          </p>
+          <p style={{ margin: 0 }}>This cannot be undone.</p>
+        </>
+      ),
+      run: () => runRegenerateAllSubRecipeCodes(prefix),
+    })
+  }
+
+  async function runRegenerateAllSubRecipeCodes(prefix) {
 
     setRegeneratingSrc(true)
     setRegenerateMsgSrc('')
@@ -998,6 +1042,7 @@ export default function Settings() {
           <GuidesTab />
         </Suspense>
       )}
+      {confirmEl}
     </div>
   )
 }
