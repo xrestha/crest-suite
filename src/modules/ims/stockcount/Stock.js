@@ -977,7 +977,7 @@ export default function Stock() {
         <div>
           <div className="no-print" style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', gap: 12 }}>
-              <input
+              <input aria-label="Search items"
                 style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
                 placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)}
               />
@@ -1197,7 +1197,7 @@ export default function Stock() {
 
             {isMobile ? (
               <div style={{ marginBottom: 12 }}>
-                <input
+                <input aria-label="Search items"
                   style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', marginBottom: 10 }}
                   placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)}
                 />
@@ -1211,7 +1211,7 @@ export default function Stock() {
             ) : (
               <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', gap: 12 }}>
-                  <input
+                  <input aria-label="Search items"
                     style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 200 }}
                     placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)}
                   />

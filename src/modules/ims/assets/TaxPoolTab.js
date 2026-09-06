@@ -47,7 +47,10 @@ export default function TaxPoolTab({ assets }) {
   useEffect(() => { loadRepairExpenses() }, [fyStart]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadRepairExpenses() {
-    const { data } = await scopedFrom('assets_repair_expenses').eq('fiscal_year', fyLabel).order('expense_date')
+    const { data, error } = await scopedFrom('assets_repair_expenses').eq('fiscal_year', fyLabel).order('expense_date')
+    // A failed read is not "no repairs this year": the Section 16 cap below is measured against
+    // this list, so an empty one on error understates the year's repair spend (S683).
+    if (error) { setErr(asActionError(error, 'operator')); return }
     setRepairExpenses(data || [])
   }
 

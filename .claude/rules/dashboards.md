@@ -143,3 +143,17 @@ Two things to preserve when touching them:
 
 `Roster.jsx`'s Labor Forecast tab reads `lcBand` too, so a day that reads healthy on the roster
 board reads healthy here. It used to carry its own `> 35 ? amber`, which agreed with neither.
+
+### A branch the page knows about must be said out loud (S683)
+
+Three places rendered a figure or a table while silently omitting what the page KNEW was missing.
+`ConsolidatedPnl.jsx` printed Labour as `NPR 0` with an empty annotation when HR is off — Net Profit
+overstated by exactly the labour nobody entered — and `MonthlyOwnerReport.jsx` dropped whole sections
+per `modules_included` with nothing naming the gap, so a reader took "no HR section" for "nothing to
+report". Both now say it: the P&L carries a banner (*Labour is from Overheads only — Crest HR is not
+enabled*) and the row annotation names the state, and the Owner Report lists what was not enabled
+when it was generated under its own header. `GroupDashboard.jsx` was the failed-read form of the same
+thing: its KPI strip was gated on `!error` and its table was not, so a failed `get_group_summary`
+rendered *"Nothing here is a real figure"* directly above *"No outlets in this group"* (rows is `[]`
+on failure). The table and both admin panels now wait for a successful read. **A page that branches on
+a module flag or an error owes the reader the sentence for the branch it took.**

@@ -460,7 +460,7 @@ You can put it back from "Show archived".`)) return
       )}
 
       <div className="no-print" style={{ marginBottom: 16 }}>
-        <input
+        <input aria-label="Search vendors"
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search vendor name or code…"

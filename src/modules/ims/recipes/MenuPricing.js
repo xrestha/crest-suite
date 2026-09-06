@@ -9,6 +9,9 @@ import { useSettings } from '../../../context/SettingsContext'
 import { fcBand, fcThresholds } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
+import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import Modal from '../../../components/Modal'
 
 
@@ -32,6 +35,7 @@ export default function MenuPricing() {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const [recipes, setRecipes]   = useState([])
   const [loading, setLoading]   = useState(true)
+  const [loadError, setLoadError] = useState(null) // a failed read, never rendered as an empty menu
   const [catTab, setCatTab]     = useState('All')
   const [drafts, setDrafts]     = useState({})   // { id: string (incl-VAT input) }
   const [saving, setSaving]     = useState({})   // { id: bool }
@@ -55,7 +59,8 @@ export default function MenuPricing() {
     if (!effectiveClientId) return
     setLoading(true)
 
-    const [{ data: recipeData }, { data: subRecipeData }, { data: suggData }] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, pos_enabled, cost_price')
         .eq('is_active', true)
         .neq('category', 'Sub-Recipe')
@@ -66,17 +71,23 @@ export default function MenuPricing() {
       // trip at the tail of the load.
       scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'),
     ])
+    // A failed read is not "no menu items yet" — that sentence names a button and invites the
+    // reader to start adding a menu they already have (S683, the S594 rule on a CRUD page).
+    const readErr = firstError(results)
+    if (readErr) { setLoadError(readErr); setLoading(false); return }
+    const [{ data: recipeData }, { data: subRecipeData }, { data: suggData }] = results
 
     const allIds = [
       ...(recipeData || []).map(r => r.id),
       ...(subRecipeData || []).map(r => r.id),
     ]
-    const { data: ingData } = allIds.length > 0
-      ? await supabase
+    const { data: ingData, error: ingErr } = allIds.length > 0
+      ? await fetchAllRowsChunked(allIds, ids => supabase
           .from('recipe_ingredients')
           .select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(per_uom_rate, yield_pct)')
-          .in('recipe_id', allIds)
-      : { data: [] }
+          .in('recipe_id', ids).order('id'))
+      : { data: [], error: null }
+    if (ingErr) { setLoadError(ingErr); setLoading(false); return }
 
     // Build per-sub-recipe ingredient list for recursive cost
     const subIngMap = {}
@@ -279,6 +290,8 @@ export default function MenuPricing() {
 
       {loading ? (
         <div className="loading-state">Loading…</div>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : display.length === 0 ? (
         <div className="empty-state">No menu items yet. Use <strong>+ Add Item</strong> above to add your first item.</div>
       ) : (
@@ -349,7 +362,7 @@ export default function MenuPricing() {
             <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
               Checked items appear as "Pair with" chips when staff tap this item on the POS order screen.
             </p>
-            <input
+            <input aria-label="Search items to pair"
               autoFocus
               placeholder="Search items…"
               value={pairingSearch}
@@ -689,7 +702,7 @@ export default function MenuPricing() {
             <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
               Checked items appear as "Pair with" chips when staff tap this item on the POS order screen.
             </p>
-            <input
+            <input aria-label="Search items to pair"
               autoFocus
               placeholder="Search items…"
               value={pairingSearch}

@@ -807,7 +807,7 @@ export default function PosTableManagement() {
           ) : (
             <>
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                <input
+                <input aria-label="New quick note"
                   className="form-input" style={{ flex: 1 }}
                   value={newPreset}
                   onChange={e => setNewPreset(e.target.value)}
@@ -894,7 +894,7 @@ export default function PosTableManagement() {
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{r.category}</div>
                   </div>
-                  <input
+                  <input aria-label={`HSC code for ${r.name}`}
                     className="form-input"
                     defaultValue={r.hsc_code || ''}
                     onBlur={e => saveHsc(r, e.target.value)}
@@ -924,7 +924,7 @@ export default function PosTableManagement() {
           ) : (
             <>
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                <input
+                <input aria-label="New discount reason"
                   className="form-input" style={{ flex: 1 }}
                   value={newDiscReason}
                   onChange={e => setNewDiscReason(e.target.value)}
@@ -991,7 +991,7 @@ export default function PosTableManagement() {
           ) : (
             <>
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                <input
+                <input aria-label="New delivery partner name"
                   className="form-input" style={{ flex: 1 }}
                   value={newPartnerName}
                   onChange={e => setNewPartnerName(e.target.value)}

@@ -131,7 +131,7 @@ export default function Calculator({ open, onClose }) {
 
         {/* Expression + live result */}
         <div style={{ padding: '12px 14px 10px' }}>
-          <input
+          <input aria-label="Calculation"
             ref={inputRef}
             value={expr}
             onChange={e => setExpr(e.target.value)}

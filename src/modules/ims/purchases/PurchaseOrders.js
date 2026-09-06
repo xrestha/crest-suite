@@ -522,7 +522,7 @@ ${text}`, detail })
                         {isFullyReceived ? (
                           <span style={{ color: 'var(--theme-green-text)', fontSize: 12 }}>✓ Done</span>
                         ) : (
-                          <input type="number" min="0" max={rem} value={l.receiving}
+                          <input aria-label="Quantity receiving" type="number" min="0" max={rem} value={l.receiving}
                             onChange={e => setReceiveLines(prev => prev.map((x, i) => i === idx ? { ...x, receiving: e.target.value } : x))}
                             style={{ background: 'var(--theme-bg)', border: '1px solid color-mix(in srgb, var(--theme-accent) 40%, transparent)', borderRadius: 'var(--radius-sm)',
                               padding: '6px 10px', fontSize: 13, color: 'var(--theme-text1)', width: 90, textAlign: 'right', outline: 'none' }} />
@@ -654,7 +654,7 @@ ${text}`, detail })
                       </select>
                     </td>
                     <td style={{ padding: '5px 8px' }}>
-                      <input type="number" min="0" value={row.qty_ordered}
+                      <input aria-label="Quantity ordered" type="number" min="0" value={row.qty_ordered}
                         onChange={e => updatePoItem(row._key, 'qty_ordered', e.target.value)}
                         placeholder="0"
                         style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
@@ -662,7 +662,7 @@ ${text}`, detail })
                     </td>
                     <td style={{ padding: '5px 8px', fontSize: 12, color: 'var(--theme-text2)' }}>{item?.uom || '—'}</td>
                     <td style={{ padding: '5px 8px' }}>
-                      <input type="number" min="0" value={row.unit_price}
+                      <input aria-label="Unit price" type="number" min="0" value={row.unit_price}
                         onChange={e => updatePoItem(row._key, 'unit_price', e.target.value)}
                         placeholder="0.00"
                         style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',

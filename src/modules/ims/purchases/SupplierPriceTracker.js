@@ -367,7 +367,7 @@ export default function SupplierPriceTracker() {
           ))}
         </select>
 
-        <input
+        <input aria-label="Search items"
           className="form-input" style={{ width: 200 }}
           placeholder="Search items…"
           value={search}
@@ -481,7 +481,7 @@ export default function SupplierPriceTracker() {
                       <td className="no-print" style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                         {isEditing ? (
                           <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
-                            <input
+                            <input aria-label={`New price for ${item.name}`}
                               type="number" min="0" step="0.0001"
                               value={editingPrice[item.id]}
                               onChange={e => setEditingPrice(p => ({ ...p, [item.id]: e.target.value }))}

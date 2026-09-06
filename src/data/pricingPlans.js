@@ -135,7 +135,7 @@ export const POS_PRICING = {
 // SuiteGate call sites were minTier="growth"), and Suite Pro added nothing over Suite Growth on
 // its own axis — the only difference was the bundled IMS tier. One SKU, one price, real features.
 //
-// Sold PER OUTLET. Six of the seven features are per-outlet by nature (each outlet has its own
+// Sold PER OUTLET. Five of the six features are per-outlet by nature (each outlet has its own
 // Owner Dashboard, Monthly Report, Fixed Asset Register); Multi-Outlet is the group-level one,
 // and it resolves under the same rule — the group console rolls up exactly those outlets whose
 // suite_plan = 'pro' and names the ones it excluded.

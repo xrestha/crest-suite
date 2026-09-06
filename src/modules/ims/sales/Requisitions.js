@@ -484,7 +484,7 @@ ${text}`, detail })
                         </td>
                         <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{item?.uom || '—'}</td>
                         <td>
-                          <input
+                          <input aria-label="Quantity requested"
                             type="number" min="0" step="any"
                             value={line.qty_requested}
                             onChange={e => updateFormLine(line._key, 'qty_requested', e.target.value)}
@@ -493,7 +493,7 @@ ${text}`, detail })
                           />
                         </td>
                         <td>
-                          <input
+                          <input aria-label="Quantity issued"
                             type="number" min="0" step="any"
                             value={line.qty_issued}
                             onChange={e => updateFormLine(line._key, 'qty_issued', e.target.value)}
@@ -644,7 +644,7 @@ ${text}`, detail })
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{line.items?.uom}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{Number(line.qty_requested).toLocaleString('en-IN')}</td>
                           <td>
-                            <input
+                            <input aria-label="Quantity issued"
                               type="number" min="0" step="any"
                               value={issueLines[idx].qty_issued}
                               onChange={e => setIssueLines(prev => prev.map((l, j) => j === idx ? { ...l, qty_issued: e.target.value } : l))}

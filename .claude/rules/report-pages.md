@@ -169,3 +169,10 @@ derived from state the caller set before the read, so ConsolidatedPnl's "Provisi
 still open… the statement is reliable once the period is closed" printed directly above ReportPage's
 own "Nothing here is a real figure — this is a failed read". Two contradictory sentences, one of them
 asserting a statement exists.
+
+**A fourth CRUD-page instance (S683): `MenuPricing.js`.** Three reads and the ingredients read all
+dropped `error`, so a dead connection rendered *"No menu items yet. Use + Add Item above to add your
+first item"* — an empty state that names a button and invites the reader to start re-entering a menu
+they already have. It carries `loadError` → `ReportLoadError` now, through `firstError` on the batch and
+`fetchAllRowsChunked` on the ingredients `.in()` (every recipe id in one URL). Same for
+`TaxPoolTab`'s repair-expense read, whose empty result understated the Section 16 cap.

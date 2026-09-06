@@ -470,7 +470,7 @@ export default function VendorReport() {
       {/* Vendor search — combobox */}
       <div style={{ marginBottom: 16, position: 'relative', width: 300 }}>
         <div style={{ position: 'relative' }}>
-          <input
+          <input aria-label="Search vendors"
             value={vendorSearch}
             onChange={e => { setVendorSearch(e.target.value); setShowVendorDrop(true) }}
             onFocus={() => setShowVendorDrop(true)}

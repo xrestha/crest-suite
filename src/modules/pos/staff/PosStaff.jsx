@@ -366,7 +366,7 @@ export default function PosStaff() {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexShrink: 0, flexWrap: 'wrap' }}>
-          <input
+          <input aria-label="Search staff"
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}
           />
@@ -476,7 +476,7 @@ export default function PosStaff() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input
+                        <input aria-label="Discount limit percent"
                           type="number"
                           min={0}
                           max={100}

@@ -393,6 +393,16 @@ export default function MonthlyOwnerReport() {
                 Period: {periodLabel} &nbsp;|&nbsp; Generated: {new Date(report.generated_at).toLocaleString()} by {generatorName || '—'}
                 &nbsp;|&nbsp; Source: <span style={{ textTransform: 'capitalize' }}>{report.generation_source.replace(/_/g, ' ')}</span>
               </p>
+              {/* The sections below render per the snapshot's own modules_included, so a module
+                  that was off when this was generated is simply absent — which a reader takes
+                  for "there was nothing to report". Name what is not here (S683). */}
+              {report.modules_included && ['ims', 'hr', 'pos'].some(m => report.modules_included[m] === false) && (
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--theme-amber-text)' }}>
+                  Not in this report: {['ims', 'hr', 'pos'].filter(m => report.modules_included[m] === false)
+                    .map(m => ({ ims: 'Crest IMS', hr: 'Crest HR (no payroll or labour figures)', pos: 'Crest POS' })[m]).join(', ')}
+                  {' '}— not enabled when it was generated.
+                </p>
+              )}
             </div>
 
             {/* Executive Summary — the one narrative paragraph in the report; everything below

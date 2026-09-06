@@ -316,7 +316,7 @@ export default function ImsStaff() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
-          <input
+          <input aria-label="Search staff"
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}
           />

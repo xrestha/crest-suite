@@ -503,7 +503,7 @@ export default function Overheads() {
                       <option value="__custom__">Custom…</option>
                     </select>
                     {!cfg.presets.includes(row.category) && (
-                      <input
+                      <input aria-label="Category"
                         value={row.category}
                         onChange={e => updateRow(activeBucket, idx, 'category', e.target.value)}
                         placeholder="Category name"
@@ -513,7 +513,7 @@ export default function Overheads() {
                     )}
                   </td>
                   <td>
-                    <input
+                    <input aria-label="Description"
                       value={row.description || ''}
                       onChange={e => updateRow(activeBucket, idx, 'description', e.target.value)}
                       disabled={isLocked}
@@ -522,7 +522,7 @@ export default function Overheads() {
                     />
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    <input
+                    <input aria-label="Amount"
                       type="number"
                       value={row.amount}
                       onChange={e => updateRow(activeBucket, idx, 'amount', e.target.value)}

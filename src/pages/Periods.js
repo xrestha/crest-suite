@@ -528,7 +528,7 @@ export default function Periods() {
                         {isEditingThis ? (
                           <td colSpan={2}>
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                              <input
+                              <input aria-label="BS year"
                                 type="number" value={editAllForm.bs_year}
                                 onChange={e => setEditAllForm(f => ({ ...f, bs_year: e.target.value }))}
                                 min="2070" max="2100"
@@ -770,7 +770,7 @@ export default function Periods() {
                           {/* Inline edit row */}
                           <td colSpan={3}>
                             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                              <input
+                              <input aria-label="BS year"
                                 type="number"
                                 value={editForm.bs_year}
                                 onChange={e => setEditForm({ ...editForm, bs_year: e.target.value })}

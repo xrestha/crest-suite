@@ -208,7 +208,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
           <Tip width={280} text="For branded / packaged goods (sauces, drinks, snacks). Search by product name or paste a barcode. Pulls nutrition per 100 g from the Open Food Facts database.">Fetch from Open Food Facts</Tip>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input
+          <input aria-label="Search Open Food Facts"
             value={offQuery}
             onChange={e => setOffQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchFromOFF() } }}

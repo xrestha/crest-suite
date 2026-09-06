@@ -1900,7 +1900,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9, fontSize: 12, color: 'var(--theme-text2)', cursor: 'pointer', minHeight: 24 }}>
                   {/* 16px box + 24px label height: this is the control that disables the backup
                       safety net, and it measured 13×13px — the smallest target on the page (S574). */}
-                  <input type="checkbox" checked={skipBackup} onChange={e => setSkipBackup(e.target.checked)}
+                  <input aria-label="Skip the backup" type="checkbox" checked={skipBackup} onChange={e => setSkipBackup(e.target.checked)}
                     style={{ width: 16, height: 16, accentColor: 'var(--theme-red)', flexShrink: 0 }} />
                   I have backed up elsewhere — proceed without a backup
                 </label>

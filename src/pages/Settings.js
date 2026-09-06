@@ -683,7 +683,7 @@ export default function Settings() {
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input
+            <input aria-label="New category name"
               value={newCat}
               onChange={e => setNewCat(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addCat()}

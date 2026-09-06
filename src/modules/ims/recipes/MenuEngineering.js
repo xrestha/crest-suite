@@ -307,7 +307,7 @@ export default function MenuEngineering() {
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
+        <input aria-label="Search menu items"
           placeholder="Search menu items…"
           value={search}
           onChange={e => setSearch(e.target.value)}

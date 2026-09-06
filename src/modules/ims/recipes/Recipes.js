@@ -932,7 +932,7 @@ ${text}`, detail })
         <div className={printRecipe ? 'no-print' : ''}>
           {/* Search bar */}
           <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 16, alignItems: 'center' }}>
-            <input
+            <input aria-label="Search recipes"
               style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -955,7 +955,7 @@ ${text}`, detail })
                 <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>ⓘ</span>
               </Tip>
               <div style={{ position: 'relative' }}>
-                <input
+                <input aria-label="Search ingredients"
                   style={{ background: 'var(--theme-card)', border: `1px solid ${ingQ ? 'color-mix(in srgb, var(--theme-accent) 50%, transparent)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260 }}
                   placeholder="Find ingredient in recipes…" value={ingSearch} onChange={e => setIngSearch(e.target.value)} />
                 <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
@@ -1514,7 +1514,7 @@ ${text}`, detail })
                         )}
                       </td>
                       <td style={{ padding: '6px 12px', textAlign: 'right' }}>
-                        <input type="number" min="0" value={ing.qty_per_portion}
+                        <input aria-label="Quantity per portion" type="number" min="0" value={ing.qty_per_portion}
                           onChange={e => updateIng(ing._key, 'qty_per_portion', e.target.value)}
                           placeholder="0"
                           style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 100, textAlign: 'right' }} />

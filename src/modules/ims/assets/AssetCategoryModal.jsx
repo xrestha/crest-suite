@@ -83,7 +83,7 @@ ${text}`, detail })
             {rows.map((row, idx) => (
               <tr key={row.id || `new-${idx}`}>
                 <td>
-                  <input
+                  <input aria-label="Category name"
                     value={row.name}
                     onChange={e => update(idx, 'name', e.target.value)}
                     placeholder="e.g. Kitchen Equipment"
@@ -92,7 +92,7 @@ ${text}`, detail })
                   />
                 </td>
                 <td>
-                  <input
+                  <input aria-label="Default useful life in years"
                     type="number" min="0" step="0.5"
                     value={row.default_useful_life_years}
                     onChange={e => update(idx, 'default_useful_life_years', e.target.value)}

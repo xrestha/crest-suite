@@ -414,13 +414,27 @@ export default function ConsolidatedPnl() {
     </>
   )
 
-  const banners = anyOpen ? (
-    <div style={warnStyle}>
-      <strong>Provisional — {grouped ? 'at least one outlet’s month is still open.' : 'this period is still open.'}</strong>{' '}
-      Closing stock has not been counted yet, so COGS treats closing stock as zero and
-      overstates the true figure. The statement is reliable once the period is closed.
-    </div>
-  ) : null
+  const banners = (
+    <>
+      {anyOpen && (
+        <div style={warnStyle}>
+          <strong>Provisional — {grouped ? 'at least one outlet’s month is still open.' : 'this period is still open.'}</strong>{' '}
+          Closing stock has not been counted yet, so COGS treats closing stock as zero and
+          overstates the true figure. The statement is reliable once the period is closed.
+        </div>
+      )}
+      {/* A statement that silently omits labour overstates Net Profit by exactly that much.
+          With HR off, the only labour this page can see is Overheads' Labour bucket — say so
+          above the figures rather than in an 11px annotation on one row (S683). */}
+      {!hrOn && !grouped && (
+        <div style={warnStyle}>
+          <strong>Labour is from Overheads only.</strong>{' '}
+          Crest HR is not enabled, so no payroll feeds this statement — the Labour line is whatever
+          was entered in Overheads' Labour bucket for the month{pnl?.labourSource === 'overheads' ? '' : ', which is currently nothing'}.
+        </div>
+      )}
+    </>
+  )
 
   // The headline. WHY it exists (S594): this page dropped the KPI strip its sibling reports carry
   // -- defensible for a formal statement -- but the consequence was that Net Profit, the reason an
@@ -605,7 +619,11 @@ export default function ConsolidatedPnl() {
                         <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--theme-text3)' }}>
                           {pnl.labourSource === 'payroll' ? 'from finalized payroll'
                             : pnl.labourSource === 'overheads' ? 'from Overheads entry'
-                            : hrOn ? 'no finalized payroll run' : ''}
+                            : hrOn ? 'no finalized payroll run'
+                            // HR off and no Labour bucket in Overheads: the figure is NPR 0
+                            // because nothing was entered, not because nobody was paid. Say so —
+                            // an empty annotation here read as a real zero (S683).
+                            : 'no labour entered — Crest HR is off and Overheads has no Labour line'}
                         </span>
                       )}
                     </td>

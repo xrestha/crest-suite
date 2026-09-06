@@ -736,7 +736,7 @@ export default function OutstandingPayables() {
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Note (optional)</div>
-            <input type="text" style={{ ...INPUT, width: '100%' }} placeholder="e.g. Monthly batch payment"
+            <input aria-label="Payment note" type="text" style={{ ...INPUT, width: '100%' }} placeholder="e.g. Monthly batch payment"
               value={bulkForm.note} onChange={ev => setBulkForm(f => ({ ...f, note: ev.target.value }))} />
           </div>
           <button className="btn btn-ghost" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => setSelectedBills(new Set())}>Clear</button>
@@ -993,7 +993,7 @@ export default function OutstandingPayables() {
                                           </div>
                                           <div style={{ flex: 1, minWidth: 180 }}>
                                             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Note (optional)</div>
-                                            <input type="text" style={{ ...INPUT, width: '100%' }} placeholder="e.g. Cheque #1234"
+                                            <input aria-label="Payment reference" type="text" style={{ ...INPUT, width: '100%' }} placeholder="e.g. Cheque #1234"
                                               value={payForm.note}
                                               onChange={ev => setPayForm(f => ({ ...f, note: ev.target.value }))}
                                               onClick={ev => ev.stopPropagation()} />

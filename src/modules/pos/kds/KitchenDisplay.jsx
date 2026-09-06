@@ -7,7 +7,7 @@ import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
 import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor } from '../posSignals'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorLine } from '../../../shared/errorText'
 
 const STATIONS = ['KOT', 'BOT']
 const POLL_MS = 4000
@@ -176,7 +176,9 @@ export default function KitchenDisplay() {
     const { error } = await scopedUpdate('pos_kot_log', patch).eq('id', ticket.id)
     if (error) {
       setTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, status: prevStatus } : t))
-      setKdsError(`Could not update ${ticket.table_name || 'this ticket'} — ${error.message}`)
+      // errorLine, not error.message: the reader is a cook, and "Failed to fetch" is not a
+      // sentence they can act on (S683). The ticket is back where it was; say so.
+      setKdsError(`${ticket.table_name || 'This ticket'} was not moved — it is back where it was. ${errorLine(error, 'staff')}`)
     }
     setAdvancing(prev => { const next = new Set(prev); next.delete(ticket.id); return next })
   }
@@ -254,6 +256,14 @@ export default function KitchenDisplay() {
       {loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : (
+        <>
+        {/* An empty board had no state of its own — three columns each holding a bare "—", which
+            on a wall screen reads as "is this thing on?". Say what an empty board means (S683). */}
+        {visible.length === 0 && (
+          <div className="card" style={{ padding: '20px 24px', textAlign: 'center', color: 'var(--theme-text2)', fontSize: 14, marginBottom: 16 }}>
+            Nothing on the board right now. Tickets appear here the moment a waiter sends an order — no refresh needed.
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
           {COLUMNS.map(col => {
             const colTickets = visible.filter(t => t.status === col.status)
@@ -282,6 +292,7 @@ export default function KitchenDisplay() {
             )
           })}
         </div>
+        </>
       )}
 
       {estimateTicket && (

@@ -189,7 +189,7 @@ export default function BudgetVsActual() {
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{cat.name}</td>
                       <td style={{ textAlign: 'right', width: 180 }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                          <input
+                          <input aria-label={`Budget for ${cat.name}`}
                             type="number" min="0"
                             value={budgets[cat.id] ?? ''}
                             onChange={e => updateBudget(cat.id, e.target.value)}

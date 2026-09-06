@@ -768,7 +768,7 @@ export default function Sales() {
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
-                              <input
+                              <input aria-label={`Quantity sold: ${recipe.name}`}
                                 type="number" min="0"
                                 value={qty}
                                 onChange={e => setBulkForm(f => ({ ...f, [recipe.id]: e.target.value }))}
@@ -928,7 +928,7 @@ export default function Sales() {
                               {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
-                              <input
+                              <input aria-label={`Quantity sold: ${recipe.name}`}
                                 type="number" min="0"
                                 value={rawVal}
                                 onChange={e => setDailyForm(f => ({ ...f, [recipe.id]: e.target.value }))}
@@ -943,7 +943,7 @@ export default function Sales() {
                               />
                             </td>
                             <td style={{ textAlign: 'right' }}>
-                              <input
+                              <input aria-label={`Discount: ${recipe.name}`}
                                 type="number" min="0"
                                 value={discRaw}
                                 onChange={e => setDiscountForm(f => ({ ...f, [recipe.id]: e.target.value }))}
