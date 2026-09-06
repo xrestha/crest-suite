@@ -261,20 +261,28 @@ ${text}`, detail })
     await loadPos(selectedPeriod.id)
   }
 
-  async function cancelPo(po) {
-    // Worded around the dialog's own OK/Cancel buttons: "Cancel PO 1234?" in a box whose Cancel
-    // button does the opposite is a coin toss.
-    if (!window.confirm(`Mark PO ${po.po_number} as cancelled?
-
-It stays on the list as a record, but can no longer be sent or received against. This cannot be undone.`)) return
-    setListError(null)
-    const { error } = await scopedUpdate('purchase_orders', { status: 'cancelled' }).eq('id', po.id)
-    if (error) {
-      const { text, detail } = asActionError(error)
-      setListError({ text: `PO ${po.po_number} was not cancelled and is still open. ${text}`, detail })
-      return
-    }
-    await loadPos(selectedPeriod.id)
+  function cancelPo(po) {
+    // "Cancel PO 1234?" in a box whose own Cancel button does the opposite is a coin toss. The
+    // native dialog could only be worded around it; this one labels both buttons for what they do.
+    askConfirm({
+      title: `Mark PO ${po.po_number} as cancelled?`,
+      body: (
+        <>It stays on the list as a record, but can no longer be sent or received against.{' '}
+        <strong>This cannot be undone</strong> — a cancelled PO has no way back to draft, so anything
+        still needed from this vendor has to be raised as a new PO.</>
+      ),
+      confirmLabel: 'Mark cancelled', cancelLabel: 'Keep PO open', danger: true, busyLabel: 'Cancelling…',
+      run: async () => {
+        setListError(null)
+        const { error } = await scopedUpdate('purchase_orders', { status: 'cancelled' }).eq('id', po.id)
+        if (error) {
+          const { text, detail } = asActionError(error)
+          setListError({ text: `PO ${po.po_number} was not cancelled and is still open. ${text}`, detail })
+          return
+        }
+        await loadPos(selectedPeriod.id)
+      },
+    })
   }
 
   function deletePo(po) {
@@ -877,7 +885,7 @@ ${text}`, detail })
                 const canReceive = ['draft', 'sent', 'partial'].includes(po.status)
                 const canEdit = po.status === 'draft'
                 return (
-                  <tr key={po.id} style={{ opacity: po.status === 'cancelled' ? 0.45 : 1 }}>
+                  <tr key={po.id}>
                     <td>
                       <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{po.po_number}</span>
                     </td>
