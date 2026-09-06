@@ -17,6 +17,9 @@ import { DEFAULT_SUPPORT_CONTACT, EMERGENCY_CHANNELS, SUPPORT_HOURS, resolveSupp
 // tab is admin-only, so a client can never render it.
 const GuidesTab = lazy(() => import('./settings/GuidesTab'))
 
+// A tab's DOM id, for the roving focus and the tabpanel's aria-labelledby.
+const tabSlug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+
 const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Support', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
 // Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
@@ -376,20 +379,36 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
-        {TABS.map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            padding: '10px 20px', fontSize: 13, fontWeight: 500,
-            // accent-ink, not the base accent: as TEXT the base measured 3.27:1 on Light (S682).
-            color: activeTab === tab ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
-            borderBottom: activeTab === tab ? '2px solid var(--theme-accent)' : '2px solid transparent',
-            marginBottom: -1
-          }}>{tab}</button>
-        ))}
+      {/* Tabs — .panel-tab-bar wraps and .panel-tab carries hover, the focus ring and the
+          coarse-pointer floor; roving tabIndex + arrow keys make the row ONE stop (DESIGN.md's Tabs
+          rule, the shape Help.js already has). Measured at 390px, the previous inline nowrap row ran
+          639px inside a 358px strip, and Data, Theme and Guides sat outside the viewport with no
+          way to reach them (S684). */}
+      <div role="tablist" aria-label="Settings sections" className="panel-tab-bar" style={{ marginBottom: 24 }}>
+        {TABS.map((tab, i) => {
+          const focusTab = t => { setActiveTab(t); document.getElementById(`settings-tab-${tabSlug(t)}`)?.focus() }
+          return (
+            <button
+              key={tab}
+              role="tab"
+              id={`settings-tab-${tabSlug(tab)}`}
+              aria-selected={activeTab === tab}
+              aria-controls="settings-tabpanel"
+              tabIndex={activeTab === tab ? 0 : -1}
+              onClick={() => setActiveTab(tab)}
+              onKeyDown={e => {
+                const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+                if (dir) { e.preventDefault(); focusTab(TABS[(i + dir + TABS.length) % TABS.length]) }
+                else if (e.key === 'Home') { e.preventDefault(); focusTab(TABS[0]) }
+                else if (e.key === 'End') { e.preventDefault(); focusTab(TABS[TABS.length - 1]) }
+              }}
+              className={`panel-tab${activeTab === tab ? ' panel-tab--active' : ''}`}
+            >{tab}</button>
+          )
+        })}
       </div>
 
+      <div id="settings-tabpanel" role="tabpanel" aria-labelledby={`settings-tab-${tabSlug(activeTab)}`}>
       {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
 
       {/* BRANDING */}
@@ -1199,6 +1218,7 @@ export default function Settings() {
           <GuidesTab />
         </Suspense>
       )}
+      </div>
       {confirmEl}
     </div>
   )

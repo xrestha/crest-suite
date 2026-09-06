@@ -2224,6 +2224,18 @@ textarea:focus-visible {
   grid-template-columns: 1fr 1fr 1fr;
 }
 
+/* Every multi-column form grid collapses to one column on a phone (S684). DESIGN.md's Layout
+   section had claimed this for a month; the rule did not exist. Measured at 390px, the Support
+   tab's two columns were 145px each — placeholders clipped to "Blank = built-in +9" and a switch
+   shared its row with nothing. Same reasoning as .dash-3col-*: a class rule so the collapse can
+   override the whole declaration, which an inline grid style never lets it do. */
+@media (max-width: 768px) {
+  .form-grid-2,
+  .form-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
 .form-actions {
   display: flex;
   gap: 10px;
