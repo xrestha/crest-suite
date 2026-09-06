@@ -14,7 +14,7 @@ import { leaveBalance } from '../leave/leaveBalance'
 import { tallyAttendance, calcAmount } from '../payroll/payrollCompute'
 import { fetchYtdMap } from '../payroll/payrollData'
 import { firstError } from '../../../shared/queryError'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorLine } from '../../../shared/errorText'
 import { SSF_CAP, SSF_GRATUITY_PCT, GRATUITY_VESTING_MONTHS, SSF_EMPLOYEE_PCT } from '../payrollConstants'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -103,9 +103,11 @@ export default function FinalSettlement() {
   // payroll; status/end_date/access_blocked because Finalize stamps all three and Reopen has to
   // put back exactly what was there.
   const loadEmployees = useCallback(async () => {
-    const { data } = await scopedFrom('hr_employees', 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked')
+    const { data, error } = await scopedFrom('hr_employees', 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked')
       .in('status', ['active', 'probation'])
       .order('full_name')
+    // A failed read is not an empty picker (S682): keep the last-good list and say so.
+    if (error) { setMsg('error:Could not load the employee list — the picker shows the last successful load. ' + errorLine(error)); return }
     setEmployees(data || [])
   }, [scopedFrom])
 
@@ -205,9 +207,16 @@ export default function FinalSettlement() {
       // Attendance for the final month. One row per employee per day, so it is paged — a
       // truncated read here would quietly pay a full month.
       if (!per.data?.id) { setAttendance([]); setAttendanceKnown(false); return }
-      const { data: att } = await fetchAllRows(() => scopedFrom('hr_attendance', 'bs_day, status, hours_worked, ot_hours')
+      const { data: att, error: attErr } = await fetchAllRows(() => scopedFrom('hr_attendance', 'bs_day, status, hours_worked, ot_hours')
         .eq('employee_id', empId).eq('period_id', per.data.id).order('id'))
       if (cancelled) return
+      // A failed read is not "nothing recorded": fall back to calendar proration, as an
+      // unrecorded month does, and say why (S682).
+      if (attErr) {
+        setAttendance([]); setAttendanceKnown(false)
+        setMsg('error:Could not load the final month\'s attendance, so the final month is prorated by calendar days. Reload before finalizing. ' + errorLine(attErr))
+        return
+      }
       setAttendance(att || [])
       // MISSING ATTENDANCE IS NOT ZERO ATTENDANCE. With no rows marked we fall back to calendar
       // proration and say so, rather than deducting a month nobody recorded or silently assuming
@@ -400,7 +409,7 @@ export default function FinalSettlement() {
       ? await scopedUpdate('hr_final_settlements', row).eq('id', current.id).select().single()
       : await scopedInsert('hr_final_settlements', row, { single: true })
     setBusy(false)
-    if (error) { setMsg('error:' + error.message); return }
+    if (error) { setMsg('error:The draft was not saved. ' + errorLine(error)); return }
     setCurrent(data)
     await loadSettlements()
     setMsg('ok:Draft saved.')
@@ -429,7 +438,7 @@ export default function FinalSettlement() {
     const { data: per, error: perErr } = await scopedFrom('monthly_periods', 'id')
       .eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle()
     if (perErr) {
-      out.push('Could not verify whether payroll already covers the final month (' + perErr.message + '). Try again — finalizing without this check could pay that month twice.')
+      out.push('Could not verify whether payroll already covers the final month (' + errorLine(perErr) + '). Try again — finalizing without this check could pay that month twice.')
     }
     if (per?.id) {
       const { data: slips, error: slipsErr } = await scopedFrom('hr_payslips', 'id, hr_payroll_runs!inner(status, period_id)')
@@ -437,7 +446,7 @@ export default function FinalSettlement() {
         .eq('hr_payroll_runs.period_id', per.id)
         .eq('hr_payroll_runs.status', 'finalized')
       if (slipsErr) {
-        out.push('Could not verify whether payroll already covers the final month (' + slipsErr.message + '). Try again — finalizing without this check could pay that month twice.')
+        out.push('Could not verify whether payroll already covers the final month (' + errorLine(slipsErr) + '). Try again — finalizing without this check could pay that month twice.')
       }
       if ((slips || []).length > 0) {
         out.push('A finalized payroll run already covers ' + BS_MONTHS[lastDate.month - 1] + ' ' + lastDate.year
@@ -450,7 +459,7 @@ export default function FinalSettlement() {
     if (current?.id) {
       const { data: fresh, error: freshErr } = await scopedFrom('hr_final_settlements', 'status').eq('id', current.id).maybeSingle()
       if (freshErr) {
-        out.push('Could not verify this settlement\'s current status (' + freshErr.message + '). Try again before finalizing.')
+        out.push('Could not verify this settlement\'s current status (' + errorLine(freshErr) + '). Try again before finalizing.')
       }
       if (fresh?.status === 'finalized') {
         out.push('This settlement was finalized somewhere else while it was open here. Reload the page to see it.')
@@ -479,7 +488,7 @@ export default function FinalSettlement() {
 
     const fail = (where, error) => {
       setBusy(false)
-      setMsg('error:Stopped at ' + where + ': ' + error.message
+      setMsg('error:Stopped at ' + where + ': ' + errorLine(error)
         + '. The settlement is saved as a draft and nothing after that point was written — fix the problem and finalize again.')
       loadSettlements()
     }
@@ -573,11 +582,11 @@ export default function FinalSettlement() {
     // Refuse on a failed read (S613): dropping this error meant the reopen proceeded WITHOUT
     // reactivating the advances this settlement had closed — the ledgers silently diverge.
     const { data: ownReps, error: repsErr } = await scopedFrom('hr_advance_repayments', 'advance_id').eq('final_settlement_id', row.id)
-    if (repsErr) { setBusy(false); setMsg('error:Could not read this settlement\'s advance recoveries (' + repsErr.message + '). Nothing was changed — try again.'); return }
+    if (repsErr) { setBusy(false); setMsg('error:Could not read this settlement\'s advance recoveries (' + errorLine(repsErr) + '). Nothing was changed — try again.'); return }
     const touched = [...new Set((ownReps || []).map(r => r.advance_id))]
 
     const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('final_settlement_id', row.id)
-    if (delErr) { setBusy(false); setMsg('error:Could not remove the settlement\'s advance recoveries (' + delErr.message + '). Nothing else was changed — try again.'); return }
+    if (delErr) { setBusy(false); setMsg('error:Could not remove the settlement\'s advance recoveries (' + errorLine(delErr) + '). Nothing else was changed — try again.'); return }
 
     if (touched.length > 0) {
       const [{ data: advs }, { data: reps }] = await Promise.all([
@@ -589,20 +598,26 @@ export default function FinalSettlement() {
       const reactivate = (advs || [])
         .filter(a => a.status === 'settled' && Math.max(0, parseFloat(a.amount) - (repaid[a.id] || 0)) > 0.01)
         .map(a => a.id)
-      if (reactivate.length > 0) await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivate)
+      if (reactivate.length > 0) {
+        const { error: reErr } = await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivate)
+        // The recoveries above are already removed; name what is still not back (S682).
+        if (reErr) { setBusy(false); setMsg(`error:The settlement's advance recoveries were removed, but ${reactivate.length} advance(s) could not be reactivated — reactivate them in Advances & Loans, then press Reopen again. ` + errorLine(reErr)); loadSettlements(); return }
+      }
     }
 
     // Put the employee back exactly as they were, including an end date or a login block someone
     // may have set by hand before the settlement overwrote it.
-    await scopedUpdate('hr_employees', {
+    const { error: empErr } = await scopedUpdate('hr_employees', {
       status: row.prior_status || 'active',
       end_date: row.prior_end_date || null,
       access_blocked: !!row.prior_access_blocked,
     }).eq('id', row.employee_id)
+    if (empErr) { setBusy(false); setMsg('error:Advances were reset, but the employee record was not restored — set their status, end date and login block by hand in Employees, then press Reopen again. ' + errorLine(empErr)); loadSettlements(); return }
 
-    await scopedUpdate('hr_final_settlements', {
+    const { error: stErr } = await scopedUpdate('hr_final_settlements', {
       status: 'draft', finalized_at: null, paid_at: null, paid_method: null,
     }).eq('id', row.id)
+    if (stErr) { setBusy(false); setMsg('error:Everything was reset, but the settlement still shows as finalized — press Reopen again. ' + errorLine(stErr)); loadSettlements(); return }
 
     await Promise.all([loadSettlements(), loadEmployees()])
     setBusy(false)
@@ -614,8 +629,9 @@ export default function FinalSettlement() {
     // almost certainly not in it — Finalize is what removed them. Fetch that one row and add it,
     // or opening a past settlement would resolve to no employee and render nothing.
     if (!employees.some(e => e.id === row.employee_id)) {
-      const { data } = await scopedFrom('hr_employees', 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked')
+      const { data, error } = await scopedFrom('hr_employees', 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked')
         .eq('id', row.employee_id).maybeSingle()
+      if (error) { setMsg('error:Could not load this employee\'s record, so the settlement cannot be opened — try again. ' + errorLine(error)); return }
       if (data) setEmployees(prev => [...prev, data])
     }
     const [y, m, d] = String(row.last_working_date).split('-').map(Number)
@@ -635,9 +651,10 @@ export default function FinalSettlement() {
 
   async function markPaid(row, method) {
     setBusy(true)
-    await scopedUpdate('hr_final_settlements', { paid_at: new Date().toISOString(), paid_method: method }).eq('id', row.id)
+    const { error } = await scopedUpdate('hr_final_settlements', { paid_at: new Date().toISOString(), paid_method: method }).eq('id', row.id)
     await loadSettlements()
     setBusy(false)
+    if (error) { setMsg('error:The settlement was not marked as paid — it still shows as owed. ' + errorLine(error)); return }
     setMsg('ok:Marked as paid.')
   }
 
@@ -967,7 +984,7 @@ export default function FinalSettlement() {
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4 }}>NET SETTLEMENT AMOUNT</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>Gross NPR {fmt(result.grossPayout)} − Deductions NPR {fmt(result.totalDeductions)}</div>
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: result.netPayout >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: result.netPayout >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
               NPR {fmt(Math.abs(result.netPayout))}
               {result.netPayout < 0 && <span style={{ fontSize: 13, marginLeft: 8, color: 'var(--theme-red-text)' }}>(recoverable)</span>}
             </div>

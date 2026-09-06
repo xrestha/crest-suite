@@ -6,6 +6,7 @@ import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { errorText } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
 import { HR_REQUEST_STATUS } from '../payrollConstants'
+import { errorLine } from '../../../shared/errorText'
 
 // The Shift Swaps tab: the queue of swaps waiting on a manager's sign-off, and the permanent
 // record of every one already decided.
@@ -123,14 +124,14 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
     const SENTINEL_DAY = -1
 
     const { error: e1 } = await scopedUpdate('hr_roster', { bs_day: SENTINEL_DAY }).eq('id', reqRow.id)
-    if (e1) { setMsg('Failed to swap: ' + e1.message); setBusyId(null); return }
+    if (e1) { setMsg('Failed to swap: ' + errorLine(e1)); setBusyId(null); return }
 
     const { error: e2 } = await scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id }).eq('id', tgtRow.id)
     if (e2) {
       const { error: rollbackErr } = await scopedUpdate('hr_roster', { bs_day: swap.requester_bs_day }).eq('id', reqRow.id)
       setMsg(rollbackErr
-        ? 'Swap failed and rollback also failed — please check the roster manually: ' + e2.message
-        : 'Swap failed: ' + e2.message + ' — no changes were applied, you can retry.')
+        ? 'Swap failed and rollback also failed — please check the roster manually: ' + errorLine(e2)
+        : 'Swap failed: ' + errorLine(e2) + ' — no changes were applied, you can retry.')
       setBusyId(null)
       return
     }
@@ -144,8 +145,8 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
         scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id, bs_day: swap.requester_bs_day }).eq('id', reqRow.id),
       ])
       setMsg((rb1 || rb2)
-        ? 'Swap failed and rollback also failed — please check the roster manually: ' + e3.message
-        : 'Swap failed: ' + e3.message + ' — no changes were applied, you can retry.')
+        ? 'Swap failed and rollback also failed — please check the roster manually: ' + errorLine(e3)
+        : 'Swap failed: ' + errorLine(e3) + ' — no changes were applied, you can retry.')
       setBusyId(null)
       return
     }

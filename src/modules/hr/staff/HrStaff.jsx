@@ -7,6 +7,8 @@ import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
 import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
+import { errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 // Mirrors src/modules/ims/staff/ImsStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for HR staff (S430). Distinct from HR
@@ -32,6 +34,7 @@ function passwordValid(pw) { return pw.length >= 8 }
 export default function HrStaff() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [staff,         setStaff]         = useState([])
   const [employees,     setEmployees]     = useState([]) // hr_employees, unlinked ones only
   const [eligibleUsers, setEligibleUsers] = useState([]) // existing client accounts with no pos_role/hr_self_service/ims_role/hr_role yet
@@ -134,8 +137,12 @@ export default function HrStaff() {
   async function saveRoles(roles) {
     if (!clientId) return false   // never write a client_id:null (global-defaults) settings row during the admin no-client window
     setRolesSaving(true); setRolesError('')
-    const { data: existing } = await supabase
-      .from('settings').select('id').eq('client_id', clientId).single()
+    // maybeSingle + an error check: with .single() a missing row and a failed read both arrived as
+    // an error that was dropped, so any failed read fell into the INSERT branch and wrote a second
+    // settings row for the client (the S613 trap), splitting every settings read after it.
+    const { data: existing, error: exErr } = await supabase
+      .from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    if (exErr) { setRolesError('Could not check the existing settings row, so nothing was saved. ' + errorLine(exErr)); setRolesSaving(false); return false }
     let err
     if (existing) {
       const { error } = await supabase.from('settings').update({ hr_custom_roles: roles }).eq('id', existing.id)
@@ -144,7 +151,7 @@ export default function HrStaff() {
       const { error } = await supabase.from('settings').insert({ client_id: clientId, hr_custom_roles: roles })
       err = error
     }
-    if (err) { setRolesError('Error saving roles: ' + err.message); setRolesSaving(false); return false }
+    if (err) { setRolesError('The roles were not saved. ' + errorLine(err)); setRolesSaving(false); return false }
     setCustomRoles(roles)
     setRolesSaving(false)
     return true
@@ -253,17 +260,31 @@ export default function HrStaff() {
   }
 
   // ── Delete staff ───────────────────────────────────────────────────────────
-  async function deleteStaff(p) {
-    if (!window.confirm(`Delete ${p.full_name}? This cannot be undone.`)) return
-    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'delete_hr_staff', userId: p.id },
+  // Deleting a login is irreversible, so the ask is the product's own dialog with the consequence
+  // named (S682; was window.confirm).
+  function deleteStaff(p) {
+    askConfirm({
+      title: `Delete ${p.full_name}'s HR login?`,
+      confirmLabel: 'Delete Login', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {p.full_name} can no longer sign in to Crest HR. The login and its role are removed; the employee record, payslips
+          and attendance are untouched. To give them access again later you will create a new login. This cannot be undone.
+        </p>
+      ),
+      run: async () => {
+        setMsg('')
+        const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+          body: { action: 'delete_hr_staff', userId: p.id },
+        })
+        if (error || data?.error) {
+          let detail = data?.error || error?.message || 'Failed to delete'
+          try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
+          setMsg(`Error: ${p.full_name}'s login was not deleted — it still works. ` + detail); return
+        }
+        load()
+      },
     })
-    if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to delete'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg('Error: ' + detail); return
-    }
-    load()
   }
 
   // ── Reset password ────────────────────────────────────────────────────────
@@ -710,6 +731,7 @@ export default function HrStaff() {
           </div>
         </Modal>
       )}
+      {confirmEl}
     </div>
   )
 }

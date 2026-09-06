@@ -61,12 +61,12 @@ export default function HrReports() {
       setLoadError(null)
       const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      if (pErr) { setLoadError(pErr.message); setLoading(false); return }
+      if (pErr) { setLoadError(pErr); setLoading(false); return }
       setPeriods(p || [])
       // Employee master loads independently of any payroll run (powers the Roster tab).
       const { data: emps, error: empErr } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, employment_type, supervisor_id, retirement_date, join_date, pay_basis, bank_name, bank_account_no, bank_branch, ssf_no, ssf_enrolled, pan_no, life_insurance_premium, health_insurance_premium, status')
         .order('full_name')
-      if (empErr) { setLoadError(empErr.message); setLoading(false); return }
+      if (empErr) { setLoadError(empErr); setLoading(false); return }
       setEmployees(emps || [])
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
       if (open) { setPeriod(open); await loadAll(open.id, open) }
@@ -101,7 +101,7 @@ export default function HrReports() {
       .then(({ data, error }) => {
         // S612: a failed read must not render as "no finalized payslips found for this FY" —
         // that sentence is a claim about the employee's tax record.
-        if (error) { setCertError(error.message); setCertSlips([]); setCertLoading(false); return }
+        if (error) { setCertError(error); setCertSlips([]); setCertLoading(false); return }
         const slips = (data || [])
           .filter(r => {
             const mp = r.hr_payroll_runs?.monthly_periods
@@ -130,12 +130,12 @@ export default function HrReports() {
     if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }   // superseded by a newer period selection
     // S612 silent-zero rule: a failed read here would wear the "no payroll run this period"
     // empty state — and the challan/TDS sheets on this page are figures an accountant files on.
-    if (runErr) { setLoadError(runErr.message); setRun(null); setPayslips([]); await ytdPromise; return }
+    if (runErr) { setLoadError(runErr); setRun(null); setPayslips([]); await ytdPromise; return }
     setRun(runRow || null)
     if (runRow) {
       const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
       if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }
-      if (slipErr) { setLoadError(slipErr.message); setPayslips([]); await ytdPromise; return }
+      if (slipErr) { setLoadError(slipErr); setPayslips([]); await ytdPromise; return }
       setPayslips(slips || [])
     } else {
       setPayslips([])
@@ -163,7 +163,7 @@ export default function HrReports() {
         .order('id'))
     if (periodId !== undefined && !periodReq.isCurrent(periodId)) return
     // A failed read must not zero every YTD TDS figure on the filing sheets (S612).
-    if (error) { setLoadError(error.message); setYtdTds({}); return }
+    if (error) { setLoadError(error); setYtdTds({}); return }
     const map = {}
     ;(data || []).forEach(r => {
       if (r.hr_payroll_runs?.status !== 'finalized') return
@@ -385,7 +385,7 @@ export default function HrReports() {
 
           {tab !== 'roster' && tab !== 'cert' && (!run ? (
             <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-              <div style={{ fontSize: 28, marginBottom: 12 }}>📊</div>
+              <div aria-hidden="true" style={{ fontSize: 24, marginBottom: 12 }}>📊</div>
               <div style={{ fontSize: 14, color: 'var(--theme-text1)', marginBottom: 6 }}>No payroll run for {periodLabel}</div>
               <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Generate and finalize payroll in HR → Payroll first, then its reports appear here.</div>
             </div>

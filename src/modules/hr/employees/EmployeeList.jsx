@@ -5,6 +5,8 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { supabase } from '../../../supabaseClient'
 import { errorText } from '../../../shared/errorText'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
@@ -65,6 +67,8 @@ export default function EmployeeList() {
   const { clientId, profile, hasHrAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
+  const [bulkError, setBulkError] = useState(null) // the last bulk access change that did not land
 
   // Seeded from the short-lived session cache so a revisit paints the last-known roster instantly
   // instead of a skeleton (S460 pattern). This page passes both of the tests that decide whether a
@@ -168,26 +172,35 @@ export default function EmployeeList() {
   // Deactivate bulk action above: that sets hr_employees.access_blocked and suspends login while
   // keeping the account; this removes the login entirely. The employee record and their payroll
   // history are untouched either way.
-  async function removeSelfService(emp) {
+  function removeSelfService(emp) {
     const userId = selfServiceMap[emp.id]
     if (!userId) return
-    if (!window.confirm(
-      `Remove Self-Service access for ${emp.full_name}?\n\n` +
-      'Their PIN stops working immediately and they can no longer view payslips, submit leave or see their roster.\n\n' +
-      "The employee record, payslips and leave history are NOT deleted. You can re-enable access later with a new PIN.\n\n" +
-      'To suspend access temporarily instead, use Deactivate on the selection bar.'
-    )) return
-    setSsRemoving(emp.id); setSsRemoveErr('')
-    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'delete_hr_self_service_login', userId },
+    // Four paragraphs of consequence were fighting a native confirm box (S682); the product's
+    // own dialog carries them as paragraphs.
+    askConfirm({
+      title: `Remove Self-Service access for ${emp.full_name}?`,
+      confirmLabel: 'Remove Access', danger: true, busyLabel: 'Removing…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>Their PIN stops working immediately: no payslips, no leave requests, no roster in the Crest Staff app.</p>
+          <p style={{ margin: '0 0 8px' }}>The employee record, payslips and leave history are <strong>not</strong> deleted, and access can be re-enabled later with a new PIN.</p>
+          <p style={{ margin: 0 }}>To suspend access temporarily instead, use Deactivate on the selection bar.</p>
+        </>
+      ),
+      run: async () => {
+        setSsRemoving(emp.id); setSsRemoveErr('')
+        const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+          body: { action: 'delete_hr_self_service_login', userId },
+        })
+        if (error || data?.error) {
+          let detail = data?.error || error?.message || 'Failed to remove self-service access'
+          try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
+          setSsRemoveErr(`${emp.full_name}'s access was not removed — their PIN still works. ` + detail); setSsRemoving(null); return
+        }
+        setSsRemoving(null); setSsRemoveErr('')
+        fetchSelfServiceStatus()
+      },
     })
-    if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to remove self-service access'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setSsRemoveErr(detail); setSsRemoving(null); return
-    }
-    setSsRemoving(null); setSsRemoveErr('')
-    fetchSelfServiceStatus()
   }
 
   function toggleSelect(id) {
@@ -210,8 +223,14 @@ export default function EmployeeList() {
   // a Payroll Run/Calculation/Final Settlement picker (all three filter on status alone).
   async function bulkSetAccess(blocked) {
     if (selected.size === 0) return
-    setBulkBusy(true)
-    await scopedUpdate('hr_employees', { access_blocked: blocked }).in('id', Array.from(selected))
+    setBulkBusy(true); setBulkError(null)
+    const { error } = await scopedUpdate('hr_employees', { access_blocked: blocked }).in('id', Array.from(selected))
+    if (error) {
+      const a = asActionError(error)
+      setBulkError({ text: `The ${selected.size} selected employee(s) were not ${blocked ? 'deactivated' : 'activated'} — their access is unchanged. ` + a.text, detail: a.detail })
+      setBulkBusy(false)
+      return
+    }
     setSelected(new Set())
     await fetchEmployees()
     setBulkBusy(false)
@@ -313,6 +332,7 @@ export default function EmployeeList() {
         </AlertCard>
       )}
 
+      <ActionError error={bulkError} />
       {ssRemoveErr && (
         <AlertCard onDismiss={() => setSsRemoveErr('')}>
           Couldn't remove Self-Service access: {ssRemoveErr}
@@ -602,6 +622,7 @@ export default function EmployeeList() {
           </div>
         </Modal>
       )}
+      {confirmEl}
     </div>
   )
 }

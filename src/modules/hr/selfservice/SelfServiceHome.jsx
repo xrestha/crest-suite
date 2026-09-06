@@ -479,7 +479,9 @@ export default function SelfServiceHome() {
               style={{ width: 44, minWidth: 44, padding: 0, justifyContent: 'center' }}>‹</button>
             <div style={{ textAlign: 'center', minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>{weekRangeLabel}</div>
-              <button className="btn btn-ghost" style={{ fontSize: 12, minHeight: 32, padding: '4px 10px', marginTop: 2 }}
+              {/* No inline sizing: .self-service sets a flat 44px floor on every .btn, and an
+                  inline minHeight beat it — this was the one 32px control on the phone surface. */}
+              <button className="btn btn-ghost" style={{ marginTop: 2 }}
                 onClick={() => setWeekStart(startOfWeek(new Date()))}>This week</button>
             </div>
             <button className="btn btn-ghost" onClick={() => setWeekStart(w => addDays(w, 7))} aria-label="Next week"

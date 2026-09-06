@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import Modal from '../../../components/Modal'
+import { errorLine } from '../../../shared/errorText'
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
@@ -98,7 +99,7 @@ export default function TadaSettingsModal({ clientId, vehicleRates, purposeOptio
       ? await supabase.from('settings').update(payload).eq('id', existing.id)
       : await supabase.from('settings').insert({ client_id: clientId, ...payload })
     setSaving(false)
-    if (error) { setMsg('error:' + error.message); return }
+    if (error) { setMsg('error:The settings were not saved. ' + errorLine(error)); return }
     onSaved(nextRates, options, points)
   }
 

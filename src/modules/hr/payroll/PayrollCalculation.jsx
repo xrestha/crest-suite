@@ -12,6 +12,7 @@ import { ATTENDANCE_STATUSES, OT_MULTIPLIER } from '../payrollConstants'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
+import RowDisclosure from '../../../components/RowDisclosure'
 import ReportLoadError from '../../../components/ReportLoadError'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
@@ -212,8 +213,9 @@ export default function PayrollCalculation() {
     if (!clientId) return
     async function init() {
       setLoading(true)
-      const { data: p } = await scopedFrom('monthly_periods')
+      const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+      if (pErr) { setLoadError(pErr); setLoading(false); return }
       setPeriods(p || [])
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
       if (open) { setPeriod(open); await loadAll(open) }
@@ -269,7 +271,7 @@ export default function PayrollCalculation() {
     setRun(runRow || null)
     if (runRow) {
       const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
-      if (slipErr) { setLoadError(slipErr.message || String(slipErr)); setPayslips([]); return }
+      if (slipErr) { setLoadError(slipErr); setPayslips([]); return }
       setPayslips(slips || [])
     } else {
       setPayslips([])
@@ -449,7 +451,12 @@ export default function PayrollCalculation() {
                     return (
                       <Fragment key={emp.id}>
                         <tr style={{ cursor: 'pointer' }} onClick={() => setExpandedId(expanded ? null : emp.id)}>
-                          <td style={{ color: 'var(--theme-text3)', textAlign: 'center' }}>{expanded ? '▾' : '▸'}</td>
+                          {/* The row click stays for the mouse; the disclosure button is the
+                              keyboard and screen-reader path into the calculation (S682). */}
+                          <td style={{ textAlign: 'center' }}>
+                            <RowDisclosure expanded={expanded} onToggle={() => setExpandedId(expanded ? null : emp.id)}
+                              label={`${expanded ? 'Hide' : 'Show'} calculation for ${emp.full_name}`} />
+                          </td>
                           <td>
                             <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
                             <div style={{ display: 'flex', gap: 6, marginTop: 2, alignItems: 'center' }}>

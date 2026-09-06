@@ -142,7 +142,7 @@ export default function PaySetup() {
         {tabs.map(t => (
           <button key={t.key} className={`tab-btn${statusFilter === t.key ? ' tab-btn--active' : ''}`} onClick={() => setStatusFilter(t.key)}>
             {t.label}
-            <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.7 }}>
+            <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>
               {employees.filter(e => t.key === 'all' || e.status === t.key).length}
             </span>
           </button>

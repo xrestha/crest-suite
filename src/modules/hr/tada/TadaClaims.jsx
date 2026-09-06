@@ -9,7 +9,10 @@ import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import TadaSettingsModal from './TadaSettingsModal'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import RowDisclosure from '../../../components/RowDisclosure'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount } from './tadaShared'
 import { TADA_REQUEST_STATUS } from '../payrollConstants'
@@ -48,6 +51,8 @@ export default function TadaClaims() {
   const { clientId, profile, isAdmin, isOwner, hasHrAccess } = useAuth()
   const canManageSettings = isAdmin || isOwner || hasHrAccess('manager')
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
+  const [actionError, setActionError] = useState(null) // an approve/reject/pay/delete that did not land
 
   const [employees, setEmployees] = useState([])
   const [vendors,   setVendors]   = useState([])
@@ -215,46 +220,74 @@ export default function TadaClaims() {
       submitted_by:  profile?.id || null,
       notes:         addForm.notes || null,
     }, { single: true })
-    if (err) { setError(err.message); setSaving(false); return }
+    if (err) { setError('The claim was not saved. ' + errorLine(err)); setSaving(false); return }
 
     const { error: itemErr } = await supabase.from('hr_tada_claim_items').insert(validItems.map(it => ({
       claim_id: claim.id, category: it.category, description: it.description || null, amount: parseFloat(it.amount),
     })))
     setSaving(false)
-    if (itemErr) { setError(itemErr.message); return }
+    // The claim header is already committed at this point, so say what state it is in.
+    if (itemErr) { setError('The claim was created but its expense lines were not saved — it shows the total with no lines. Delete it from the list and enter it again. ' + errorLine(itemErr)); return }
     setShowAdd(false); setAddForm(emptyAddForm()); setPurposeMode('preset'); setStartPointMode('preset'); load()
   }
 
+  // Each decision is a write to a money ledger; before S682 all four ran bare and the queue
+  // simply reloaded, so a refused approve looked like a claim nobody had touched.
+  const decisionFailed = (what, error) => setActionError({ ...asActionError(error, 'operator'), text: what + ' ' + asActionError(error, 'operator').text })
+
   async function handleApprove(claimId) {
-    await scopedUpdate('hr_tada_claims', {
+    setActionError(null)
+    const { error } = await scopedUpdate('hr_tada_claims', {
       status: 'approved', approved_by: profile?.id || null, approved_at: new Date().toISOString(),
     }).eq('id', claimId)
+    if (error) { decisionFailed('The claim was not approved — it still shows Pending.', error); return }
     load()
   }
 
   async function handleReject() {
     if (!rejectTarget) return
-    await scopedUpdate('hr_tada_claims', { status: 'rejected' }).eq('id', rejectTarget.id)
+    setActionError(null)
+    const { error } = await scopedUpdate('hr_tada_claims', { status: 'rejected' }).eq('id', rejectTarget.id)
     setRejectTarget(null)
+    if (error) { decisionFailed('The claim was not rejected — it still shows its previous status.', error); return }
     if (selected === rejectTarget.id) setSelected(null)
     load()
   }
 
   async function handleMarkPaid() {
     if (!payTarget) return
-    await scopedUpdate('hr_tada_claims', {
+    setActionError(null)
+    const { error } = await scopedUpdate('hr_tada_claims', {
       status: 'paid', paid_at: new Date().toISOString(), paid_method: payMethod,
     }).eq('id', payTarget.id)
     setPayTarget(null)
+    if (error) { decisionFailed('The claim was not marked Paid — it still shows Approved, so it is still owed.', error); return }
     load()
   }
 
-  async function handleDelete(claimId) {
-    if (!window.confirm('Delete this TADA claim? This cannot be undone.')) return
-    await supabase.from('hr_tada_claim_items').delete().eq('claim_id', claimId)
-    await scopedDelete('hr_tada_claims').eq('id', claimId)
-    if (selected === claimId) setSelected(null)
-    load()
+  function handleDelete(claimId) {
+    const c = claims.find(x => x.id === claimId)
+    const emp = c ? (employees.find(e => e.id === c.employee_id) || {}) : {}
+    askConfirm({
+      title: 'Delete this TADA claim?',
+      confirmLabel: 'Delete Claim', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {emp.full_name ? `${emp.full_name}'s` : 'The'} claim for NPR {fmt(c?.total_amount)}{c?.destination ? ` (${c.destination})` : ''} and all its
+          expense lines are removed{c?.status === 'approved' ? ' — it is approved and still owed, so the reimbursement disappears with it' : ''}.
+          This cannot be undone.
+        </p>
+      ),
+      run: async () => {
+        setActionError(null)
+        const { error: itemsErr } = await supabase.from('hr_tada_claim_items').delete().eq('claim_id', claimId)
+        if (itemsErr) { decisionFailed('The claim was not deleted — nothing has changed.', itemsErr); return }
+        const { error } = await scopedDelete('hr_tada_claims').eq('id', claimId)
+        if (error) { decisionFailed('The claim\'s expense lines were removed but the claim itself is still listed — delete it again.', error); load(); return }
+        if (selected === claimId) setSelected(null)
+        load()
+      },
+    })
   }
 
   // The decision buttons live on the table row and nowhere else. They were briefly rendered a
@@ -358,6 +391,7 @@ export default function TadaClaims() {
       </div>
 
       <ActionError error={loadError} />
+      <ActionError error={actionError} />
 
       {/* Summary cards */}
       <div className="stat-grid">
@@ -414,8 +448,16 @@ export default function TadaClaims() {
                   <tr onClick={() => setSelected(isSel ? null : c.id)}
                     style={{ cursor: 'pointer', background: isSel ? 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' : undefined }}>
                     <td>
-                      <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{emp.full_name || '—'}</div>
-                      {emp.employee_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{emp.employee_code}</div>}
+                      {/* The row click stays for the mouse; the disclosure button is the keyboard
+                          and screen-reader path into the expense lines (S682). */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <RowDisclosure expanded={isSel} onToggle={() => setSelected(isSel ? null : c.id)}
+                          label={`${isSel ? 'Hide' : 'Show'} expense lines for ${emp.full_name || 'this claim'}`} />
+                        <div>
+                          <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{emp.full_name || '—'}</div>
+                          {emp.employee_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{emp.employee_code}</div>}
+                        </div>
+                      </div>
                     </td>
                     <td style={{ color: 'var(--theme-text2)', fontSize: 13 }}>
                       {c.start_point ? `${c.start_point} → ${c.destination || '—'}` : (c.destination || '—')}
@@ -638,6 +680,7 @@ export default function TadaClaims() {
           onClose={() => setShowSettings(false)}
         />
       )}
+      {confirmEl}
     </div>
   )
 }

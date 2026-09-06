@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
+import { errorLine } from '../../../shared/errorText'
 import {
   SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT,
   MIN_WAGE_MONTHLY, MIN_BASIC_MONTHLY,
@@ -24,7 +25,7 @@ const TABS = [
 ]
 
 const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6,
+  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
   padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%',
   fontFamily: 'inherit',
 }
@@ -101,10 +102,13 @@ export default function PayForm({ employee, onSave, onClose }) {
       life_insurance_premium:   parseFloat(form.life_insurance_premium) || 0,
       health_insurance_premium: parseFloat(form.health_insurance_premium) || 0,
     }).eq('id', employee.id)
-    if (err) { setError(err.message); setSaving(false); return }
+    if (err) { setError('The pay details were not saved. ' + errorLine(err)); setSaving(false); return }
 
-    // Build component rows — dearness first (if set), then the rest.
-    await scopedDelete('hr_salary_components').eq('employee_id', employee.id)
+    // Build component rows — dearness first (if set), then the rest. Delete-then-insert: once the
+    // delete has landed the employee has NO components until the insert does, so each half names
+    // the state it leaves behind (S682).
+    const { error: delErr } = await scopedDelete('hr_salary_components').eq('employee_id', employee.id)
+    if (delErr) { setError('Basic pay and bank details were saved, but the salary components were not updated — they are still the previous set. Save again. ' + errorLine(delErr)); setSaving(false); return }
     const dearnessVal = parseFloat(dearness) || 0
     const rows = [
       ...(dearnessVal > 0 ? [{
@@ -121,7 +125,7 @@ export default function PayForm({ employee, onSave, onClose }) {
     ]
     if (rows.length > 0) {
       const { error: compErr } = await scopedInsert('hr_salary_components', rows)
-      if (compErr) { setError(compErr.message); setSaving(false); return }
+      if (compErr) { setError('The salary components were cleared but could not be re-saved — this employee currently has NO allowances or deductions on record. Save again now. ' + errorLine(compErr)); setSaving(false); return }
     }
 
     setSaving(false)
@@ -261,7 +265,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                   <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Other Allowances</span>
-                      <button onClick={() => addComponent('earning')} style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 5, color: 'var(--theme-text3)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>+ Add</button>
+                      <button onClick={() => addComponent('earning')} style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text3)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>+ Add</button>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                       {QUICK_EARNINGS.filter(n => !earnings.find(c => c.name === n)).map(n => (
@@ -304,7 +308,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                   <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-red-text)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Deductions</span>
-                      <button onClick={() => addComponent('deduction')} style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 5, color: 'var(--theme-text3)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>+ Add</button>
+                      <button onClick={() => addComponent('deduction')} style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text3)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>+ Add</button>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                       {QUICK_DEDUCTIONS.filter(n => !deductions.find(c => c.name === n)).map(n => {

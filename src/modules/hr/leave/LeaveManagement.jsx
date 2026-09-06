@@ -9,7 +9,8 @@ import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } fr
 import { leaveBalance } from './leaveBalance'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 
@@ -45,6 +46,7 @@ function bsLabel(iso) {
 export default function LeaveManagement() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const today = adToBs(new Date())
   const [bsYear,    setBsYear]    = useState(today.year)
   const [tab,       setTab]       = useState('requests')
@@ -136,7 +138,7 @@ export default function LeaveManagement() {
       start_date: fStart.slice(0, 10), end_date: fEnd.slice(0, 10),
       days: previewDaysCount, reason: fReason || null, status: 'pending', day_type: fDayType,
     })
-    if (error) { setMsg('error:' + error.message); setBusy(false); return }
+    if (error) { setMsg('error:The request was not submitted. ' + errorLine(error)); setBusy(false); return }
     setFEmp(''); setFType(''); setFStart(''); setFEnd(''); setFReason(''); setFDayType('full')
     await load(); setMsg('ok:Request submitted'); setBusy(false)
   }
@@ -160,9 +162,10 @@ export default function LeaveManagement() {
       })
     })
     if (rows.length) {
-      await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
+      const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
+      if (error) return { missing, error }
     }
-    return missing
+    return { missing, error: null }
   }
 
   // Undo an approved request's attendance marks by deleting those hr_attendance rows, rather
@@ -187,9 +190,10 @@ export default function LeaveManagement() {
       if (!daysByPeriod.has(p.id)) daysByPeriod.set(p.id, [])
       daysByPeriod.get(p.id).push(d.bsDay)
     }
-    await Promise.all([...daysByPeriod.entries()].map(([periodId, bsDays]) =>
+    const results = await Promise.all([...daysByPeriod.entries()].map(([periodId, bsDays]) =>
       scopedDelete('hr_attendance')
         .eq('employee_id', req.employee_id).eq('period_id', periodId).in('bs_day', bsDays)))
+    return results.find(r => r && r.error)?.error || null
   }
 
   async function approveRequest(req) {
@@ -201,7 +205,12 @@ export default function LeaveManagement() {
     const status = type.paid
       ? (isHalf ? 'half_paid_leave' : 'paid_leave')
       : (isHalf ? 'half_unpaid_leave' : 'unpaid_leave')
-    const missing = await syncAttendance(req, status)
+    const { missing, error: syncErr } = await syncAttendance(req, status)
+    if (syncErr) {
+      setMsg('error:The leave days could not be marked on the attendance sheet, so the request was NOT approved. Try again. ' + errorLine(syncErr))
+      setBusy(false)
+      return
+    }
     const { error: apprErr } = await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id)
     if (apprErr) {
       // The attendance rows are already written (upserted, so re-approving is safe); the request
@@ -221,7 +230,25 @@ export default function LeaveManagement() {
   async function decideRequest(req, newStatus) {
     if (!clientId) { setMsg('error:No client selected'); return }
     const verb = newStatus === 'rejected' ? 'Reject' : 'Cancel'
-    if (!window.confirm(`${verb} this leave request?`)) return
+    const emp = empMap[req.employee_id]
+    // Deciding an APPROVED request reverts its attendance marks — pay for daily staff — so the
+    // ask names that (S682; was window.confirm).
+    askConfirm({
+      title: `${verb} this leave request?`,
+      confirmLabel: `${verb} Request`, danger: true, busyLabel: `${verb === 'Reject' ? 'Rejecting' : 'Cancelling'}…`,
+      body: (
+        <p style={{ margin: 0 }}>
+          {emp?.full_name || 'The employee'}'s {req.days} day{req.days === 1 ? '' : 's'} from {req.start_date} to {req.end_date}{' '}
+          {req.status === 'approved'
+            ? 'are already approved and marked on the attendance sheet — those days go back to unmarked and the leave balance is restored.'
+            : 'are marked ' + verb.toLowerCase() + 'ed and the balance is untouched.'}
+        </p>
+      ),
+      run: async () => { await decideRequestNow(req, newStatus, verb) },
+    })
+  }
+
+  async function decideRequestNow(req, newStatus, verb) {
     setBusy(true); setMsg('')
     // Re-check the request's current status from the DB rather than trusting the client-cached
     // `req` — another admin session may have approved/decided it since our last load(), and
@@ -231,7 +258,10 @@ export default function LeaveManagement() {
     // marked (and paid). Refuse before writing anything.
     const { data: fresh, error: freshErr } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
     if (freshErr) { setMsg('error:Could not check this request\'s current status, so nothing was changed — try again. ' + errorText(freshErr, 'operator')); setBusy(false); return }
-    if (fresh?.status === 'approved') await revertAttendance(req)
+    if (fresh?.status === 'approved') {
+      const revErr = await revertAttendance(req)
+      if (revErr) { setMsg(`error:The attendance days could not be reverted, so the request was not ${verb.toLowerCase()}ed — it is still approved. Try again. ` + errorLine(revErr)); setBusy(false); return }
+    }
     const { error: decErr } = await scopedUpdate('hr_leave_requests', { status: newStatus, decided_at: new Date().toISOString() }).eq('id', req.id)
     if (decErr) {
       await load()
@@ -273,7 +303,10 @@ export default function LeaveManagement() {
   // ── Leave types editing ───────────────────────────────────────────────────
   async function updateType(id, patch) {
     setTypes(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t))
-    await scopedUpdate('hr_leave_types', patch).eq('id', id)
+    const { error } = await scopedUpdate('hr_leave_types', patch).eq('id', id)
+    // Optimistic; a refused write reloads the stored value and says so — a quota or paid flag
+    // that looks saved and is not changes what payroll pays.
+    if (error) { setMsg('error:That leave-type change was not saved — the table shows what is stored. ' + errorLine(error)); await load() }
   }
   async function addType() {
     if (!clientId) { setMsg('error:No client selected'); return }
@@ -282,8 +315,8 @@ export default function LeaveManagement() {
       name: 'New Leave Type', code: `custom_${Date.now().toString(36)}`,
       paid: true, annual_quota: 0, carry_forward: false, sort_order: (types.length + 1) * 10,
     })
-    if (error) setMsg('error:' + error.message)
     await load(); setBusy(false)
+    if (error) setMsg('error:The leave type was not added. ' + errorLine(error))
   }
 
   const filteredRequests = requests.filter(r => adToBs(new Date(r.start_date)).year === bsYear)
@@ -558,6 +591,7 @@ export default function LeaveManagement() {
           </div>
         </div>
       )}
+      {confirmEl}
     </div>
   )
 }

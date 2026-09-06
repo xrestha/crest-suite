@@ -15,12 +15,12 @@ import PayslipBody from './PayslipBody'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorLine } from '../../../shared/errorText'
 
 const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
 
 const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6,
+  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
   padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit',
 }
 
@@ -73,8 +73,9 @@ export default function PayrollRun() {
     if (!clientId) return
     async function init() {
       setLoading(true)
-      const { data: p } = await scopedFrom('monthly_periods')
+      const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+      if (pErr) { setMsg('error:Could not load the periods — nothing on this page is a real figure. ' + errorLine(pErr)); setLoading(false); return }
       setPeriods(p || [])
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
       if (open) { setPeriod(open); await loadAll(open.id, open.bs_year, open.bs_month) }
@@ -279,9 +280,13 @@ export default function PayrollRun() {
     if (mapsFailed) { setMsg('error:' + errorText(mapsFailed, 'operator')); setBusy(false); return }
     const [{ data: ytdMap }, { data: tadaMap }] = maps
     const { data: runRow, error: rErr } = await scopedInsert('hr_payroll_runs', { period_id: period.id, status: 'draft' }, { single: true })
-    if (rErr) { setMsg('error:' + rErr.message); setBusy(false); return }
+    if (rErr) { setMsg('error:The payroll run was not created — nothing has changed. ' + errorLine(rErr)); setBusy(false); return }
     const { error: pErr } = await scopedInsert('hr_payslips', buildRows(runRow.id, ytdMap, tadaMap))
-    if (pErr) { setMsg('error:' + pErr.message); setBusy(false); return }
+    if (pErr) {
+      // The run row is committed at this point; Regenerate rebuilds its payslips.
+      await loadAll(period.id, period.bs_year, period.bs_month)
+      setMsg('error:The run was created but its payslips were not — press Regenerate to build them. ' + errorLine(pErr)); setBusy(false); return
+    }
     await loadAll(period.id, period.bs_year, period.bs_month)
     setMsg('ok:Payroll generated'); setBusy(false)
   }
@@ -300,11 +305,27 @@ export default function PayrollRun() {
     const mapsFailed = firstError(maps)
     if (mapsFailed) { setMsg('error:' + errorText(mapsFailed, 'operator')); setBusy(false); return }
     const [{ data: ytdMap }, { data: tadaMap }] = maps
-    await scopedDelete('hr_payslips').eq('run_id', run.id)
+    // Delete-then-insert: once the delete has landed the run has NO payslips until the insert
+    // does, so each half names the state it leaves behind (S682).
+    const { error: delErr } = await scopedDelete('hr_payslips').eq('run_id', run.id)
+    if (delErr) { setMsg('error:The run was not recomputed — its payslips are unchanged. ' + errorLine(delErr)); setBusy(false); return }
     const { error } = await scopedInsert('hr_payslips', buildRows(run.id, ytdMap, tadaMap))
-    if (error) { setMsg('error:' + error.message); setBusy(false); return }
+    if (error) {
+      await loadAll(period.id, period.bs_year, period.bs_month)
+      setMsg('error:The run\'s payslips were cleared but could not be rebuilt — press Regenerate again now. ' + errorLine(error)); setBusy(false); return
+    }
     await loadAll(period.id, period.bs_year, period.bs_month)
     setMsg('ok:Recomputed'); setBusy(false)
+  }
+
+  // Both inline edits are optimistic; a refused write reloads so the register shows what is
+  // stored, and the message names the figure that did not land.
+  async function slipWrite(slip, patch, what) {
+    const { error } = await scopedUpdate('hr_payslips', patch).eq('id', slip.id)
+    if (error) {
+      setMsg(`error:${what} for ${nameOf(slip)} was not saved — the register shows what is stored. ` + errorLine(error))
+      await loadAll(period.id, period.bs_year, period.bs_month)
+    }
   }
 
   async function updateTds(slip, value) {
@@ -312,7 +333,7 @@ export default function PayrollRun() {
     const tds = parseFloat(value) || 0
     const net = slip.gross + slip.ot_amount - slip.absence_deduction - slip.ssf_employee - slip.other_deductions - (slip.advance_deduction || 0) - tds + (slip.tada_amount || 0)
     setPayslips(ps => ps.map(s => s.id === slip.id ? { ...s, tds, net_pay: net } : s))
-    await scopedUpdate('hr_payslips', { tds, net_pay: net }).eq('id', slip.id)
+    await slipWrite(slip, { tds, net_pay: net }, 'The TDS override')
   }
 
   // TADA (travel/daily allowance) is a non-taxable reimbursement — added after TDS,
@@ -322,7 +343,7 @@ export default function PayrollRun() {
     const tada = parseFloat(value) || 0
     const net = slip.gross + slip.ot_amount - slip.absence_deduction - slip.ssf_employee - slip.other_deductions - (slip.advance_deduction || 0) - slip.tds + tada
     setPayslips(ps => ps.map(s => s.id === slip.id ? { ...s, tada_amount: tada, net_pay: net } : s))
-    await scopedUpdate('hr_payslips', { tada_amount: tada, net_pay: net }).eq('id', slip.id)
+    await slipWrite(slip, { tada_amount: tada, net_pay: net }, 'The TADA amount')
   }
 
   // The ask half of Finalize. When the draft is stale, finalize()'s own refusal path runs
@@ -640,7 +661,7 @@ export default function PayrollRun() {
           <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No active employees. Add employees in HR → Employees first.</div>
         ) : !run ? (
           <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-            <div style={{ fontSize: 28, marginBottom: 12 }}>💵</div>
+            <div aria-hidden="true" style={{ fontSize: 24, marginBottom: 12 }}>💵</div>
             <div style={{ fontSize: 14, color: 'var(--theme-text1)', marginBottom: 6 }}>No payroll run for {periodLabel} yet</div>
             <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 18 }}>Generates a draft from each employee's salary structure and {periodLabel} attendance. You can review and edit before finalizing.</div>
             <button className="btn btn-primary" onClick={generate} disabled={busy}>{busy ? 'Generating…' : 'Generate Payroll'}</button>

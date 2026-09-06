@@ -14,6 +14,8 @@ import {
 } from './laborForecast'
 import { fmtTime, shiftTextColor } from './rosterHelpers'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { errorLine } from '../../../shared/errorText'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import ShiftPicker from './ShiftPicker'
 import SuggestPopover from './SuggestPopover'
 import ShiftSettingsPanel from './ShiftSettingsPanel'
@@ -157,10 +159,11 @@ export default function Roster() {
       const results = await Promise.all([...months.values()].map(bs =>
         scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, generated_at, holiday_name, holiday_multiplier')
           .is('recipe_id', null).eq('bs_year', bs.year).eq('bs_month', bs.month)))
-      for (const { data } of results) all.push(...(data || []))
+      for (const r of results) { if (r && r.error) { setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
     } else {
-      const { data } = await scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, generated_at, holiday_name, holiday_multiplier')
+      const { data, error } = await scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, generated_at, holiday_name, holiday_multiplier')
         .is('recipe_id', null).eq('bs_year', bsYear).eq('bs_month', bsMonth)
+      if (error) { setBoardError(boardLoadFailed(error)); return }
       all = data || []
     }
     const map = {}
@@ -250,7 +253,10 @@ export default function Roster() {
         }
       }
       if (toDelete.length > 0) {
-        await scopedDelete('hr_shift_types').in('id', toDelete)
+        // Best-effort housekeeping: a failed cleanup leaves the duplicates, which the name-keyed
+        // map above already hides from the board.
+        const { error: dupErr } = await scopedDelete('hr_shift_types').in('id', toDelete)
+        if (dupErr) console.error('duplicate shift-type cleanup failed:', dupErr)
         shifts = Object.values(byName).sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))
       }
 
@@ -258,7 +264,11 @@ export default function Roster() {
         const { data: seeded, error: seedErr } = await scopedInsert('hr_shift_types', DEFAULT_SHIFTS)
         // A dropped WRITE error is silent data loss, not a silent zero (S613): a failed seed left
         // the board with no shift types and nothing painted, with no explanation anywhere.
-        if (seedErr) { console.error('shift-type seed failed:', seedErr); window.alert('Could not set up the default shift types: ' + seedErr.message) }
+        if (seedErr) {
+          console.error('shift-type seed failed:', seedErr)
+          const a = asActionError(seedErr)
+          setBoardError({ text: 'Could not set up the default shift types — the board has nothing to assign until they exist. Reload to try again. ' + a.text, detail: a.detail })
+        }
         shifts = seeded || []
       }
       setShiftTypes(shifts)
@@ -293,9 +303,10 @@ export default function Roster() {
         if (!months.has(k)) months.set(k, bs)
       })
       const results = await Promise.all([...months.values()].map(bs => monthRosterRows(bs.year, bs.month)))
-      for (const { data } of results) all.push(...(data || []))
+      for (const r of results) { if (r && r.error) { setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
     } else {
-      const { data } = await monthRosterRows(bsYear, bsMonth)
+      const { data, error } = await monthRosterRows(bsYear, bsMonth)
+      if (error) { setBoardError(boardLoadFailed(error)); return }
       all = data || []
     }
 
@@ -328,10 +339,11 @@ export default function Roster() {
       const results = await Promise.all([...months.values()].map(bs =>
         scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
           .eq('bs_year', bs.year).eq('bs_month', bs.month)))
-      for (const { data } of results) all.push(...(data || []))
+      for (const r of results) { if (r && r.error) { setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
     } else {
-      const { data } = await scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
+      const { data, error } = await scopedFrom('hr_roster_publish_state', 'bs_year, bs_month, bs_day')
         .eq('bs_year', bsYear).eq('bs_month', bsMonth)
+      if (error) { setBoardError(boardLoadFailed(error)); return }
       all = data || []
     }
     setPublishedDays(new Set(all.map(r => `${r.bs_year}:${r.bs_month}:${r.bs_day}`)))
@@ -389,6 +401,14 @@ export default function Roster() {
   // True when the read failed: the guard is advisory, so it says on the board that conflicts
   // cannot be checked rather than silently letting a scheduled-on-leave day through.
   const [leaveGuardUnavailable, setLeaveGuardUnavailable] = useState(false)
+  // A board read or write that did not land. Before S682 a failed roster read painted a blank
+  // board, a failed publish-state read showed every day as unpublished, and a failed paint was a
+  // window.alert.
+  const [boardError, setBoardError] = useState(null)
+  const boardLoadFailed = err => {
+    const a = asActionError(err)
+    return { text: 'Could not load part of the roster board — what is shown is from the last successful load. ' + a.text, detail: a.detail }
+  }
   useEffect(() => {
     if (!clientId) return
     // Paged (S682): "small table" stops being true after a couple of years — every approved
@@ -463,7 +483,7 @@ export default function Roster() {
         const { error: clearErr } = await scopedDelete('hr_roster').in('id', ids)
         if (clearErr) {
           console.error('roster clear failed:', clearErr)
-          window.alert('Could not clear that shift: ' + clearErr.message)
+          { const a = asActionError(clearErr); setBoardError({ text: 'That shift was not cleared — the board shows what is stored. ' + a.text, detail: a.detail }) }
           loadRoster()
           return
         }
@@ -479,7 +499,7 @@ export default function Roster() {
       // while nothing was written (S613, the silent-data-loss class). Say so and reload the truth.
       if (paintErr) {
         console.error('roster paint failed:', paintErr)
-        window.alert('Could not save that roster change: ' + paintErr.message)
+        { const a = asActionError(paintErr); setBoardError({ text: 'That roster change was not saved — the board shows what is stored. ' + a.text, detail: a.detail }) }
         loadRoster()
         return
       }
@@ -682,7 +702,7 @@ export default function Roster() {
         targetLabel: weekLabelFor(targetStart),
       })
     } catch (e) {
-      setCopyError(e?.message || 'Could not read next week — nothing was copied.')
+      setCopyError('Could not read next week — nothing was copied. ' + errorLine(e))
     } finally {
       setCopyBusy(false)
     }
@@ -716,7 +736,7 @@ export default function Roster() {
       d.setDate(d.getDate() + 7)
       setWeekStart(d)
     } catch (e) {
-      setCopyError(e?.message || 'The copy did not finish — check next week before running it again.')
+      setCopyError('The copy did not finish — check next week before running it again. ' + errorLine(e))
     } finally {
       setCopyBusy(false)
     }
@@ -776,6 +796,7 @@ export default function Roster() {
       </div>
 
       {/* Top tab bar */}
+      <ActionError error={boardError} className="no-print" />
       {leaveGuardUnavailable && (
         <p role="status" className="no-print" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>
           Approved-leave conflicts cannot be checked right now — the leave requests could not be loaded. Reload to try again.
@@ -814,7 +835,7 @@ export default function Roster() {
                 const hrs = s.hours ?? calcHours(s.start_time, s.end_time)
                 return (
                   <span key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: s.color }} />
+                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 'var(--radius-xs)', background: s.color }} />
                     {s.name}{s.start_time ? ` ${fmtTime(s.start_time)}–${fmtTime(s.end_time)}` : ''}{hrs != null ? ` (${hrs}h)` : ''}
                   </span>
                 )
@@ -921,7 +942,7 @@ export default function Roster() {
                 const hrs = s.hours ?? calcHours(s.start_time, s.end_time)
                 return (
                   <span key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--theme-text2)' }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
+                    <span style={{ width: 10, height: 10, borderRadius: 'var(--radius-xs)', background: s.color, flexShrink: 0 }} />
                     {s.name}{hrs != null ? ` ${hrs}h` : ''}
                   </span>
                 )

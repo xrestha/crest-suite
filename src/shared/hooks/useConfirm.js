@@ -37,8 +37,12 @@ export function useConfirm() {
 
   async function run() {
     if (!pending) return
+    const current = pending
     setBusy(true)
-    try { await pending.run() } finally { setBusy(false); setPending(null) }
+    // Clear only the ask that just ran: a run() that itself asks a follow-up question (Items'
+    // delete discovering hidden references and offering a force-delete) must not have that
+    // second dialog wiped by the first one's cleanup.
+    try { await current.run() } finally { setBusy(false); setPending(p => (p === current ? null : p)) }
   }
 
   const confirmEl = pending ? (

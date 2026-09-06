@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { errorLine } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
@@ -127,7 +128,10 @@ export default function AttendanceSheet() {
   const loadAttendance = useCallback(async (periodId) => {
     // Paged: one row per employee per day, so the grid itself silently loses whole employees'
     // rows past the 1000-row cap at ~34 staff — and this sheet is what payroll then reads (S529).
-    const { data } = await fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', periodId).order('id'))
+    const { data, error } = await fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', periodId).order('id'))
+    // A failed read is not a blank sheet (S682): this grid batch-saves what is on screen, so
+    // painting it empty and letting a Save through would write blanks over real days.
+    if (error) { setSavedMsg('error:Could not load this month\'s attendance — the sheet shows the last successful load. Reload before saving. ' + errorLine(error)); return }
     const map = {}
     // Postgres's `time` column reads back as "08:00:00" — normalize to the display convention
     // ("8:00") on load rather than waiting for the admin to focus/blur each cell once.
@@ -216,7 +220,7 @@ export default function AttendanceSheet() {
     })
     if (!period) return
     const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id).eq('bs_day', day)
-    if (error) setSavedMsg('error:' + error.message)
+    if (error) setSavedMsg('error:' + errorLine(error))
   }
   // Unpaid break/lunch minutes, subtracted from the raw Start-to-End span before it becomes Hours
   // Worked — otherwise a clocked-out lunch break would inflate both Hours and OT. Clamped at 0 so
@@ -384,7 +388,7 @@ export default function AttendanceSheet() {
       return
     }
     const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
-    if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
+    if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
     await loadAttendance(period.id)
     setSavedMsg(`ok:Saved Day ${selectedDay} (${rows.length} of ${employees.length} staff)`)
     setSaving(false)
@@ -408,7 +412,7 @@ export default function AttendanceSheet() {
     setConfirmClear(null)
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).eq('bs_day', selectedDay)
-    if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
+    if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
     await loadAttendance(period.id)
     setSavedMsg(`ok:Cleared Day ${selectedDay}`)
     setSaving(false)
@@ -439,7 +443,7 @@ export default function AttendanceSheet() {
     )
     if (!ok) { setGenerating(false); return }
     const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
-    if (error) { setSavedMsg('error:' + error.message); setGenerating(false); return }
+    if (error) { setSavedMsg('error:' + errorLine(error)); setGenerating(false); return }
     await loadAttendance(period.id)
     setSavedMsg(`ok:Generated ${rows.length} entr${rows.length === 1 ? 'y' : 'ies'} from roster`)
     setGenerating(false)
@@ -477,7 +481,7 @@ export default function AttendanceSheet() {
       return
     }
     const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
-    if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
+    if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
     await loadAttendance(period.id)
     setSavedMsg(`ok:Saved ${rows.length} day${rows.length === 1 ? '' : 's'} for ${name}`)
     setSaving(false)
@@ -502,7 +506,7 @@ export default function AttendanceSheet() {
     setConfirmClear(null)
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id)
-    if (error) { setSavedMsg('error:' + error.message); setSaving(false); return }
+    if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
     await loadAttendance(period.id)
     setSavedMsg(`ok:Cleared ${name}'s records for ${periodLabel}`)
     setSaving(false)
@@ -527,7 +531,7 @@ export default function AttendanceSheet() {
     const ok = window.confirm(`Generate attendance for ${rows.length} day(s) from the roster for this employee?`)
     if (!ok) { setGenerating(false); return }
     const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
-    if (error) { setSavedMsg('error:' + error.message); setGenerating(false); return }
+    if (error) { setSavedMsg('error:' + errorLine(error)); setGenerating(false); return }
     await loadAttendance(period.id)
     setSavedMsg(`ok:Generated ${rows.length} day${rows.length === 1 ? '' : 's'} from roster`)
     setGenerating(false)

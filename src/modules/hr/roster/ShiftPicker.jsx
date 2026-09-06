@@ -36,7 +36,7 @@ export default function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cell
     <div ref={ref} role="menu" aria-label={cellCount > 1 ? `Assign a shift to ${cellCount} cells` : 'Assign a shift'} style={{
       position: 'fixed', top, left, zIndex: 2100,
       background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
-      borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+      borderRadius: 'var(--radius-md)', boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
       minWidth: 200, overflow: 'hidden',
     }}>
       {cellCount > 1 && (
@@ -55,7 +55,7 @@ export default function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cell
             onMouseEnter={e => e.currentTarget.style.background = 'var(--theme-table-hover)'}
             onMouseLeave={e => e.currentTarget.style.background = 'none'}
           >
-            <span style={{ width: 12, height: 12, borderRadius: 3, background: s.color, flexShrink: 0 }} />
+            <span style={{ width: 12, height: 12, borderRadius: 'var(--radius-xs)', background: s.color, flexShrink: 0 }} />
             <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
             {s.start_time && <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{fmtTime(s.start_time)}</span>}
             {hrs != null && <span style={{ fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600 }}>{hrs}h</span>}

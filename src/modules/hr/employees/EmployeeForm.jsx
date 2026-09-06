@@ -4,6 +4,8 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
+import { errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const EMPTY = {
   employee_code: '',
@@ -80,6 +82,7 @@ const col = { flex: 1, display: 'flex', flexDirection: 'column' }
 
 export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const isEdit = !!employee
   const [tab, setTab]         = useState('personal')
   const [form, setForm]       = useState(isEdit ? { ...EMPTY, ...employee } : { ...EMPTY })
@@ -155,25 +158,29 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
 
     if (isEdit) {
       const { error: err } = await scopedUpdate('hr_employees', payload).eq('id', employee.id)
-      if (err) { setError(err.message); setSaving(false); return }
+      if (err) { setError('The changes were not saved. ' + errorLine(err)); setSaving(false); return }
     } else {
       const { error: err } = await scopedInsert('hr_employees', payload)
-      if (err) { setError(err.message); setSaving(false); return }
+      if (err) { setError('The employee was not added. ' + errorLine(err)); setSaving(false); return }
     }
 
     setSaving(false)
     onSave()
   }
 
+  // Both status flips are reversible from the same button, so the native confirm stays; the
+  // write's error no longer does (S682).
   async function handleDeactivate() {
     if (!window.confirm(`Mark ${employee.full_name} as inactive?`)) return
-    await scopedUpdate('hr_employees', { status: 'inactive' }).eq('id', employee.id)
+    const { error: err } = await scopedUpdate('hr_employees', { status: 'inactive' }).eq('id', employee.id)
+    if (err) { setError(`${employee.full_name} is still active — the change was not saved. ` + errorLine(err)); return }
     onSave()
   }
 
   async function handleActivate() {
     if (!window.confirm(`Reactivate ${employee.full_name}?`)) return
-    await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id)
+    const { error: err } = await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id)
+    if (err) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + errorLine(err)); return }
     onSave()
   }
 
@@ -183,16 +190,26 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   // raw Postgres foreign-key error ("violates foreign key constraint ...") shown verbatim in the
   // form — accurate, unreadable, and with no hint that Deactivate is what the user actually
   // wanted. Checking first lets the block be explained in the user's own terms.
+  //
+  // The pre-check runs FIRST, then one ConfirmModal carries the consequence. It used to be two
+  // native confirms in a row ("Delete?" then "Are you sure?") — a doubled window.confirm is the
+  // tell that the box could not carry what deleting actually does (S682). A failed count is a
+  // check that did not run, so it refuses rather than treating null as zero.
   async function handleDelete() {
-    if (!window.confirm(`Delete ${employee.full_name}? This cannot be undone.`)) return
     setError('')
 
-    const [{ count: tadaCount }, { count: incentiveCount }, { count: swapReqCount }, { count: swapTgtCount }] = await Promise.all([
+    const counts = await Promise.all([
       scopedFrom('hr_tada_claims', 'id', { count: 'exact', head: true }).eq('employee_id', employee.id),
       scopedFrom('hr_incentives', 'id', { count: 'exact', head: true }).eq('employee_id', employee.id),
       scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('requester_employee_id', employee.id),
       scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('target_employee_id', employee.id),
     ])
+    const countFailed = counts.find(r => r && r.error)
+    if (countFailed) {
+      setError(`Could not check whether ${employee.full_name} still has TADA, incentive or shift-swap records, so nothing was deleted. Try again. ` + errorLine(countFailed.error))
+      return
+    }
+    const [{ count: tadaCount }, { count: incentiveCount }, { count: swapReqCount }, { count: swapTgtCount }] = counts
     const blockers = [
       tadaCount      ? `${tadaCount} TADA claim${tadaCount === 1 ? '' : 's'}` : '',
       incentiveCount ? `${incentiveCount} incentive/bonus record${incentiveCount === 1 ? '' : 's'}` : '',
@@ -209,17 +226,32 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       return
     }
 
-    if (!window.confirm(`Are you sure? All data for ${employee.full_name} will be permanently deleted.`)) return
-    const { error: err } = await scopedDelete('hr_employees').eq('id', employee.id)
-    if (err) {
-      // Backstop: a table added later with a non-cascading FK would land here rather than showing
-      // raw Postgres text. Add it to the pre-check above when that happens.
-      setError(err.code === '23503'
-        ? `${employee.full_name} still has linked records elsewhere in HR and can't be deleted. Use Deactivate instead, or remove those entries first.`
-        : err.message)
-      return
-    }
-    onSave()
+    askConfirm({
+      title: `Delete ${employee.full_name}?`,
+      confirmLabel: 'Delete Employee', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            The employee record and everything that cascades from it — attendance, leave requests, payslips, advances,
+            roster assignments and the Self-Service login — are permanently deleted. Finalized payroll runs keep their
+            totals but lose this person's payslip.
+          </p>
+          <p style={{ margin: 0 }}>To keep the history, use Deactivate instead. This cannot be undone.</p>
+        </>
+      ),
+      run: async () => {
+        const { error: err } = await scopedDelete('hr_employees').eq('id', employee.id)
+        if (err) {
+          // Backstop: a table added later with a non-cascading FK would land here rather than showing
+          // raw Postgres text. Add it to the pre-check above when that happens.
+          setError(err.code === '23503'
+            ? `${employee.full_name} still has linked records elsewhere in HR and can't be deleted. Use Deactivate instead, or remove those entries first.`
+            : `${employee.full_name} was not deleted — the record is unchanged. ` + errorLine(err))
+          return
+        }
+        onSave()
+      },
+    })
   }
 
   return (
@@ -376,7 +408,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                   onClick={calcRetirement}
                   disabled={!form.date_of_birth}
                   title={form.date_of_birth ? 'Set to date of birth + 60 years' : 'Enter Date of Birth first (Personal tab)'}
-                  style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 5, color: form.date_of_birth ? 'var(--theme-text3)' : 'var(--theme-text2)', fontSize: 11, padding: '8px 10px', cursor: form.date_of_birth ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>
+                  style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: form.date_of_birth ? 'var(--theme-text3)' : 'var(--theme-text2)', fontSize: 11, padding: '8px 10px', cursor: form.date_of_birth ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>
                   ↻ Age 60
                 </button>
               </div>
@@ -561,6 +593,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         </div>
 
       </div>
+      {confirmEl}
     </Modal>
   )
 }
