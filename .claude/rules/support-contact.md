@@ -59,7 +59,7 @@ stays whatever the per-client field holds, possibly empty.
 ## `SupportContactLine` — three variants, one component
 
 `inline` (one text line, · separated — the login footer, the two offline banners), `buttons`
-(`btn btn-ghost` Call/WhatsApp/Email — the crash page, `SubscriptionLock`, `PremiumGate`), `block`
+(`btn btn-ghost` Call/WhatsApp/Email — the crash page, `SubscriptionLock`, and since S683 `ModuleMissingCard` behind `ModuleGate` and `SuiteGate`; `PremiumGate` renders its own labelled rows from the hook), `block`
 (labelled rows plus the hours line — Help's Support tab). Reach for one of these before hand-rolling
 a contact row a fourth time.
 

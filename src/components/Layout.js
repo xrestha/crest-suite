@@ -683,7 +683,9 @@ export default function Layout() {
   }
 
   function renderUpgradeTeaser() {
-    if (isAdmin || plan === 'pro') return null
+    // Only the buyer sees the upsell: a staff login cannot upgrade anything, and a sidebar that
+    // sells to a waiter is noise where a manager needs the nav (S683).
+    if (isAdmin || plan === 'pro' || !isOwner) return null
     const nextTier  = plan === 'growth' ? 'pro' : 'growth'
     const tierLabel = nextTier === 'growth' ? 'Growth' : 'Pro'
     // Tokens, not the Dark preset's own hex — this CTA was painting brass/green literals on all
@@ -1097,7 +1099,7 @@ export default function Layout() {
           )}
         </nav>
 
-        {!isAdmin && plan !== 'pro' && (
+        {isOwner && plan !== 'pro' && (
           <div className="sidebar-footer">
             <button
               onClick={() => navigate('/pricing')}

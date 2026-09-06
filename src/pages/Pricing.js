@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Hexagon, Check, Mail, Calculator, Users, CalendarDays } from 'lucide-react'
 import { useSettings } from '../context/SettingsContext'
+import { useAuth } from '../context/AuthContext'
 import { MODULE_COLORS, MODULE_INK, moduleTint, TRIAL_DAYS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
 // The registered entity, from the one place it is pinned against the published legal documents.
 import { COMPANY } from '../legal'
@@ -80,6 +81,11 @@ export default function Pricing() {
   const [showFaq, setShowFaq] = useState(false)
   const { settings } = useSettings()
   const navigate = useNavigate()
+  // A signed-in reader is an OWNER comparing plans, not a visitor deciding whether to sign up.
+  // "Login →" and "Start Free Trial →" used to eject them onto the signed-out funnel, with
+  // "← Back" the only way home (S683). Signed in, every CTA becomes a request to switch.
+  const { session } = useAuth()
+  const askAbout = label => { window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(`Crest Suite: ${label}`)}` }
 
   // Escape closes the FAQ dialog — a hand-rolled fixed-overlay modal (not the shared Modal/native
   // <dialog>), so keyboard dismissal isn't free; the backdrop-click already closes it for pointer users.
@@ -114,9 +120,9 @@ export default function Pricing() {
           <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{settings?.app_name || 'Crest Suite'}</span>
         </div>
         <button
-          onClick={() => navigate('/login')}
+          onClick={() => navigate(session ? '/dashboard' : '/login')}
           style={{ background: brassTint(10), border: `1px solid ${brassTint(35)}`, color: GOLD_INK, padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
-          Login →
+          {session ? 'Back to Crest →' : 'Login →'}
         </button>
       </nav>
 
@@ -238,9 +244,9 @@ export default function Pricing() {
               </div>
 
               <button
-                onClick={() => plan.key === 'starter' ? navigate('/login?trial=1') : navigate('/login')}
+                onClick={() => session ? askAbout(plan.label) : plan.key === 'starter' ? navigate('/login?trial=1') : navigate('/login')}
                 style={{ background: highlight ? MODULE_COLORS.ims : moduleTint('ims', 8), border: `1px solid ${highlight ? MODULE_COLORS.ims : moduleTint('ims', 25)}`, color: highlight ? 'var(--theme-accent-text)' : MODULE_INK.ims, padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
-                {plan.key === 'starter' ? 'Start Free Trial' : `Get ${plan.label}`} →
+                {session ? `Ask about ${plan.label}` : plan.key === 'starter' ? 'Start Free Trial' : `Get ${plan.label}`} →
               </button>
 
               <div style={{ flex: 1 }}>
@@ -286,9 +292,9 @@ export default function Pricing() {
               </div>
 
               <button
-                onClick={() => navigate('/login')}
+                onClick={() => session ? askAbout(mod.name) : navigate('/login')}
                 style={{ background: moduleTint(mod.key, 8), border: `1px solid ${moduleTint(mod.key, 25)}`, color: MODULE_INK[mod.key], padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
-                Get {mod.name} →
+                {session ? 'Ask about' : 'Get'} {mod.name} →
               </button>
 
               <FeatureList features={mod.pricing.features} color={MODULE_INK[mod.key]} />
@@ -324,9 +330,9 @@ export default function Pricing() {
                 {SUITE_ADDON.requiresLabel}
               </div>
               <button
-                onClick={() => navigate('/login')}
+                onClick={() => session ? askAbout(SUITE_ADDON.label) : navigate('/login')}
                 style={{ background: GOLD, border: `1px solid ${GOLD}`, color: 'var(--theme-accent-text)', padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
-                Add {SUITE_ADDON.label} →
+                {session ? 'Ask about' : 'Add'} {SUITE_ADDON.label} →
               </button>
             </div>
             <div style={{ gridColumn: 'span 2', minWidth: 0 }}>
@@ -375,22 +381,26 @@ export default function Pricing() {
       {/* Footer CTA */}
       <div style={{ background: CARD, borderTop: `1px solid ${BORDER}`, padding: '64px 32px', textAlign: 'center' }}>
         <h2 style={{ fontSize: 28, margin: '0 0 12px', color: 'var(--theme-text1)' }}>
-          Ready to take control of your food costs?
+          {session ? 'Want to add a module or move up a plan?' : 'Ready to take control of your food costs?'}
         </h2>
         <p style={{ fontSize: 14, color: 'var(--theme-text2)', margin: '0 0 36px', lineHeight: 1.6 }}>
-          Start free today. No credit card. No commitment. Cancel any time.
+          {session
+            ? 'Email us what you want switched on. It is done on the account, and nothing you already record changes.'
+            : 'Start free today. No credit card. No commitment. Cancel any time.'}
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 48 }}>
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => session ? navigate('/dashboard') : navigate(-1)}
             style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 24px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
-            ← Back
+            {session ? '← Back to Crest' : '← Back'}
           </button>
-          <button
-            onClick={() => navigate('/login?trial=1')}
-            style={{ background: GOLD, border: 'none', color: 'var(--theme-accent-text)', padding: '13px 32px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
-            Start Free Trial →
-          </button>
+          {!session && (
+            <button
+              onClick={() => navigate('/login?trial=1')}
+              style={{ background: GOLD, border: 'none', color: 'var(--theme-accent-text)', padding: '13px 32px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
+              Start Free Trial →
+            </button>
+          )}
           <a
             href={`mailto:${CONTACT_EMAIL}`}
             style={{ background: 'none', border: `1px solid ${BORDER}`, color: 'var(--theme-text2)', padding: '13px 28px', borderRadius: 'var(--radius-md)', textDecoration: 'none', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
