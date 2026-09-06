@@ -330,11 +330,17 @@ Four hues, each with a paired `*-text` variant. The base token is a **fill** (ch
 tint, border, dot, a floor-tile strip); the `*-text` variant is **type**. On Dark they resolve to
 the same value; on Light they diverge, and that divergence is the entire reason the pair exists.
 
-- **Green** (fill `#34d399`; text `#137538` on Light): finished, and finished right.
+- **Green** (fill `#34d399`; text `#116b33` on Light): finished, and finished right.
 - **Red** (fill `#f87171`; text `#8f2440` on Light): wrong, and it costs money or breaks a rule.
-- **Amber** (fill `#fbbf24`; text `#a85200` on Light): open — something is still required of
+- **Amber** (fill `#fbbf24`; text `#964900` on Light): open — something is still required of
   someone, right now.
-- **Violet** (fill `#a78bfa`; text `#7c3aed` on Light): the rationed category, as above.
+- **Violet** (fill `#a78bfa`; text `#6d28d9` on Light): the rationed category, as above.
+
+The Light text values moved one step darker on 2026-09-06 (S683) for a ground S608 never measured:
+a `*-text` variant is also what a `.badge-*` prints on a 10–12% tint of its own hue, and a badge is
+not always on a card. Probed on the built page, amber measured 4.19:1 and violet 4.33:1 on the page
+ground, and violet had never been tuned for Light at all. **Probe a text variant on
+`document.body`, not on a card, before trusting it.**
 
 Two more colour-shaped tokens. `focus-ring` (`rgba(201,168,76,0.15)`) is a **tint** that doubles as
 the active-state background for nav links, module tabs and rail buttons, so its alpha must stay
@@ -390,7 +396,9 @@ next to `var(--theme-accent)` as a near-certain instance of this bug on sight.
 **without hue**, measured under deuteranopia (~6% of men) and protanopia (~2%), not judged by eye.
 Light's danger and warning text shipped at ΔE 3.2 — one colour for a red-green colour-blind
 reader — and were retuned to `#8f2440` / `#a85200`, the only pair of 120 searched that clears both
-axes while every variant still holds 4.5:1 on card and page. Tritanopia is deliberately not
+axes while every variant still holds 4.5:1 on card and page (amber has since moved to `#964900`
+for the badge-on-page ground above; the pair re-measured at ΔE 13.5 deuteranopia / 17.6
+protanopia, still over the floor of 8). Tritanopia is deliberately not
 chased: separating on the blue-yellow axis fights separating on red-green, and it is ~0.01%
 against ~8%.
 
