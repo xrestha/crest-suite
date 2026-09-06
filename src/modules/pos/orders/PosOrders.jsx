@@ -18,6 +18,11 @@ import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/rec
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
+// The floor view's six window.alert()s are deliberately NOT converted (S616, re-affirmed S682):
+// setMsg renders only inside the `view === 'order'` tree, so the floor has no banner of its own,
+// and each of these is a refusal a waiter must not be able to walk past mid-service. The audit
+// called them unstyled; being un-missable is the property that was chosen, and it still wins.
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import {
   cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
@@ -48,6 +53,9 @@ function isMissingPosSaveFn(error) {
 export default function PosOrders() {
   const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
+  // Rendered in the FLOOR return (this file has two — S578): the only caller is the admin
+  // clear-all-tables tool, which lives on the floor.
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const { colors } = useTheme()
   // Solid-amber badges (offline-pending dot, pending-items count, writeoff button) were hardcoded
   // to black text — passes on Dark but computes to 4.18:1 (fails WCAG AA) on Light's
@@ -2318,9 +2326,29 @@ export default function PosOrders() {
     setRecentBills(prev => prev.map(o => o.id === orderRow.id ? { ...o, print_count: (o.print_count || 0) + 1 } : o))
   }
 
-  async function clearAllOccupiedTables() {
+  function clearAllOccupiedTables() {
     if (!isAdmin || !clientId) return
-    if (!window.confirm('Clear ALL occupied tables? This permanently deletes every open order and its items for this client. Use only for testing.')) return
+    // The most destructive action on the floor, and it is reached mid-service; the ask names what
+    // goes rather than fitting into an OS box (S682; was window.confirm).
+    const occupied = tables.filter(t => t.status === 'occupied').length
+    askConfirm({
+      title: 'Clear every occupied table?',
+      confirmLabel: 'Delete Open Orders', danger: true, busyLabel: 'Clearing…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            Every open order for this client is <strong>permanently deleted</strong> along with its items —
+            {occupied > 0 ? ` ${occupied} table${occupied === 1 ? '' : 's'} currently occupied` : ' no tables are occupied right now'}.
+            Nothing is billed, so no revenue, KOT or stock movement is recorded for what those orders held.
+          </p>
+          <p style={{ margin: 0 }}>This is a testing tool. If a single table is stuck, open it and void the order instead.</p>
+        </>
+      ),
+      run: () => clearAllOccupiedTablesNow(),
+    })
+  }
+
+  async function clearAllOccupiedTablesNow() {
     setFloorLoad(true)
     const { data: openOrders, error: openErr } = await scopedFrom('pos_orders', 'id').eq('status', 'open')
     // A dropped error gave ids = [], skipped both deletes, and then still flipped every occupied
@@ -2400,7 +2428,7 @@ The tables were left occupied rather than freed with their orders still open.`)
       }}>
         <button onClick={backToFloor} style={{
           background: 'none', border: '1px solid var(--theme-border)',
-          borderRadius: 7, padding: '6px 14px',
+          borderRadius: 'var(--radius-sm)', padding: '6px 14px',
           color: 'var(--theme-text2)', cursor: 'pointer', fontSize: 14,
         }}>
           ← {activeTable ? activeTable.name : 'Takeaway'}
@@ -2414,7 +2442,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           <Tip text="Order number — printed on every KOT/BOT ticket so the kitchen, bar and bill all reference the same order">
             <span style={{
               fontSize: 12, fontWeight: 700, color: 'var(--theme-accent-ink)',
-              border: '1px solid var(--theme-accent)', borderRadius: 5,
+              border: '1px solid var(--theme-accent)', borderRadius: 'var(--radius-sm)',
               padding: '2px 7px', cursor: 'default',
             }}>#{orderNo}</span>
           </Tip>
@@ -2424,7 +2452,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           <Tip text="This order was saved offline — it will get a real order number once this device reconnects and syncs">
             <span style={{
               fontSize: 12, fontWeight: 700, color: 'var(--theme-amber-text)',
-              border: '1px solid var(--theme-amber)', borderRadius: 5,
+              border: '1px solid var(--theme-amber)', borderRadius: 'var(--radius-sm)',
               padding: '2px 7px', cursor: 'default',
             }}>#— (pending)</span>
           </Tip>
@@ -2434,7 +2462,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           <Tip text="Offline — this order is saved on this device and will sync when you reconnect">
             <span style={{
               fontSize: 12, fontWeight: 700, color: 'var(--theme-amber-text)',
-              background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', borderRadius: 5,
+              background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', borderRadius: 'var(--radius-sm)',
               padding: '2px 7px', cursor: 'default',
             }}>📵 Offline</span>
           </Tip>
@@ -2510,7 +2538,7 @@ The tables were left occupied rather than freed with their orders still open.`)
               style={{
                 marginLeft: 'auto', flexShrink: 0, width: 160,
                 background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-                borderRadius: 6, padding: '6px 10px', fontSize: 12,
+                borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12,
                 color: 'var(--theme-text1)', outline: 'none',
               }}
             />
@@ -2544,7 +2572,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                         ? 'color-mix(in srgb, var(--theme-accent) 12%, var(--theme-card))'
                         : 'var(--theme-card)',
                       border: `1px solid ${inOrd ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                      borderRadius: 10, padding: '12px 10px',
+                      borderRadius: 'var(--radius-md)', padding: '12px 10px',
                       cursor: 'pointer', textAlign: 'left',
                       display: 'flex', flexDirection: 'column', gap: 6,
                       position: 'relative', transition: 'border-color 0.12s',
@@ -2553,7 +2581,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                         <span style={{
                           position: 'absolute', top: 6, right: 8,
                           background: 'var(--theme-accent)', color: 'var(--theme-accent-text)',
-                          borderRadius: 10, fontSize: 11, fontWeight: 700, padding: '1px 7px',
+                          borderRadius: 'var(--radius-full)', fontSize: 11, fontWeight: 700, padding: '1px 7px',
                         }}>{inOrd.qty}</span>
                       )}
                       <span style={{
@@ -2673,7 +2701,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                           onMouseDown={e => e.preventDefault()}
                           onClick={() => addPresetToNote(idx, p)}
                           style={{
-                            fontSize: 10, padding: '2px 8px', borderRadius: 10,
+                            fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-full)',
                             border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)',
                             color: 'var(--theme-text2)', cursor: 'pointer',
                           }}
@@ -2714,7 +2742,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                         // takes brass at half strength — never amber, which on this same screen already
                         // means "unfired lines" and "a guest order waiting" (One Signal Meaning Rule).
                         border: `1px solid ${r._manual ? 'var(--theme-accent)' : isChefsPick ? 'color-mix(in srgb, var(--theme-accent) 55%, transparent)' : 'var(--theme-border)'}`,
-                        borderRadius: 14, padding: '5px 10px', fontSize: 12, cursor: 'pointer',
+                        borderRadius: 'var(--radius-md)', padding: '5px 10px', fontSize: 12, cursor: 'pointer',
                         color: 'var(--theme-text1)', display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'left',
                       }}
                     >
@@ -2803,7 +2831,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       <span style={{
                         position: 'absolute', top: -6, right: -4,
                         background: 'var(--theme-amber)', color: amberBadgeText,
-                        borderRadius: 10, fontSize: 10, fontWeight: 700,
+                        borderRadius: 'var(--radius-full)', fontSize: 10, fontWeight: 700,
                         padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
                       }}>{kotCount}</span>
                     )}
@@ -2824,7 +2852,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       <span style={{
                         position: 'absolute', top: -6, right: -4,
                         background: 'var(--theme-amber)', color: amberBadgeText,
-                        borderRadius: 10, fontSize: 10, fontWeight: 700,
+                        borderRadius: 'var(--radius-full)', fontSize: 10, fontWeight: 700,
                         padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
                       }}>{botCount}</span>
                     )}
@@ -2844,7 +2872,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           onClose={() => { if (!closing) setBillingOpen(false) }}
           zIndex={1100}
           unstyled
-          panelStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 14, width: 'min(1060px, 96vw)', maxHeight: '92vh', boxShadow: '0 16px 48px rgba(0,0,0,0.4)', display: 'flex', overflow: 'hidden' }}
+          panelStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)', width: 'min(1060px, 96vw)', maxHeight: '92vh', boxShadow: '0 16px 48px rgba(0,0,0,0.4)', display: 'flex', overflow: 'hidden' }}
         >
           <div style={{ width: 418, flexShrink: 0, background: 'var(--theme-sidebar)', borderRight: '1px solid var(--theme-border)', padding: '24px 20px', overflowY: 'auto' }}>
             <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 10px' }}>
@@ -2881,7 +2909,7 @@ The tables were left occupied rather than freed with their orders still open.`)
             </div>
 
             {(kotCount + botCount) > 0 && (
-              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 6, padding: '8px 10px' }}>
+              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
                 ⚠ {kotCount + botCount} item{kotCount + botCount !== 1 ? 's' : ''} not yet sent to the kitchen/bar.
               </p>
             )}
@@ -3015,7 +3043,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                   )}
                 </button>
                 {allItemsComped && (
-                  <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 6, padding: '8px 10px' }}>
+                  <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
                     ⚠ Every item is comped — nothing left to bill. Switch to the Complimentary tab to close this table instead of issuing a ₨0 Tax Invoice/PAN Bill.
                   </p>
                 )}
@@ -3028,7 +3056,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     const setQty = next => setCompQtyByRecipe(prev => ({ ...prev, [i.recipe_id]: Math.max(0, Math.min(i.qty, next)) }))
                     return (
                       <div key={i.recipe_id} style={{
-                        display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '5px 8px', borderRadius: 6,
+                        display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '5px 8px', borderRadius: 'var(--radius-sm)',
                         background: comped ? 'var(--theme-input-bg)' : 'transparent',
                         color: comped ? 'var(--theme-amber-text)' : 'var(--theme-text2)',
                         fontWeight: comped ? 600 : 400,
@@ -3134,14 +3162,14 @@ The tables were left occupied rather than freed with their orders still open.`)
                 </p>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
                   <button onClick={() => setDiscountMode('amount')} style={{
-                    padding: '7px 12px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
+                    padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
                     fontWeight: discountMode === 'amount' ? 700 : 400,
                     background: discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                     color: discountMode === 'amount' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                     border: `1px solid ${discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                   }}>₨</button>
                   <button onClick={() => setDiscountMode('percent')} style={{
-                    padding: '7px 12px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
+                    padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: 'pointer',
                     fontWeight: discountMode === 'percent' ? 700 : 400,
                     background: discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                     color: discountMode === 'percent' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
@@ -3193,7 +3221,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     )}
                     {QR_PAY_METHODS.includes(payMethod) && billQrUrl && (
                       <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
-                        <img src={billQrUrl} alt="Scan to pay" style={{ width: 110, height: 110, background: '#fff', borderRadius: 6, padding: 4, flexShrink: 0 }} />
+                        <img src={billQrUrl} alt="Scan to pay" style={{ width: 110, height: 110, background: '#fff', borderRadius: 'var(--radius-sm)', padding: 4, flexShrink: 0 }} />
                         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.6 }}>
                           Customer scans to pay <strong>{fmtNpr(payTotal)}</strong> — the amount arrives pre-filled and locked
                           in their app, so it can't be mistyped. Confirm once you see the payment land on your merchant app.
@@ -3260,7 +3288,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                         )}
                         {QR_PAY_METHODS.includes(tenderMethod) && billQrUrl && (
                           <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
-                            <img src={billQrUrl} alt="Scan to pay" style={{ width: 100, height: 100, background: '#fff', borderRadius: 6, padding: 4, flexShrink: 0 }} />
+                            <img src={billQrUrl} alt="Scan to pay" style={{ width: 100, height: 100, background: '#fff', borderRadius: 'var(--radius-sm)', padding: 4, flexShrink: 0 }} />
                             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.6 }}>
                               Customer scans to pay <strong>{fmtNpr(parseFloat(tenderAmtStr) || remaining)}</strong> for this portion.
                             </p>
@@ -3403,7 +3431,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           </div>
 
           {(() => {
-            const pad = { width: 72, height: 52, borderRadius: 10, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', fontSize: 20, fontWeight: 600, cursor: 'pointer' }
+            const pad = { width: 72, height: 52, borderRadius: 'var(--radius-md)', border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', fontSize: 20, fontWeight: 600, cursor: 'pointer' }
             return (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 20 }}>
                 {[1,2,3,4,5,6,7,8,9].map(d => (
@@ -3561,7 +3589,7 @@ The tables were left occupied rather than freed with their orders still open.`)
             <span>📵</span>
             <span><strong>Offline</strong> — orders are saved on this device and will sync when you reconnect. Billing stays disabled until then.</span>
             {pendingOrderIds.size > 0 && (
-              <span style={{ marginLeft: 'auto', background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', borderRadius: 20, padding: '2px 10px', fontWeight: 600, flexShrink: 0 }}>
+              <span style={{ marginLeft: 'auto', background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', borderRadius: 'var(--radius-full)', padding: '2px 10px', fontWeight: 600, flexShrink: 0 }}>
                 {pendingOrderIds.size} pending
               </span>
             )}
@@ -3861,6 +3889,9 @@ The tables were left occupied rather than freed with their orders still open.`)
         }}
       />
     )}
+    {/* The floor return, not the order screen: the only asker is the admin clear-all tool above
+        it. PosOrders has two returns and a dialog placed in the wrong one never renders (S578). */}
+    {confirmEl}
     </>
   )
 }

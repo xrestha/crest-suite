@@ -18,6 +18,7 @@ import { chartMotion } from '../../../shared/chartMotion'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
@@ -88,6 +89,7 @@ export default function MenuEngineering() {
   const { settings } = useSettings()
   const clientId = authClientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
+  const periodReq = useLatestRequest()
   const { colors } = useTheme()
 
   const [periods, setPeriods]     = useState([])
@@ -122,6 +124,7 @@ export default function MenuEngineering() {
   }
 
   async function loadData() {
+    const key = periodReq.begin(periodId)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
 
@@ -141,9 +144,10 @@ export default function MenuEngineering() {
         .neq('source', 'pos_comp'),
     ])
     // S612 silent-zero rule: a failed read must not render the "no menu items found" empty state.
-    if (recErr) { setLoadError(recErr.message); setItems([]); setLoading(false); return }
+    if (!periodReq.isCurrent(key)) return   // superseded by a newer period selection
+    if (recErr) { setLoadError(recErr); setItems([]); setLoading(false); return }
     // A failed sales read would classify every dish as a zero-sale Dog (S612).
-    if (salesErr) { setLoadError(salesErr.message); setItems([]); setLoading(false); return }
+    if (salesErr) { setLoadError(salesErr); setItems([]); setLoading(false); return }
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
     // hand-rolled ingMap reading only direct item_id ingredients (as this used to) silently

@@ -26,6 +26,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
   const [billOrderId, setBillOrderId] = useState('')
   const [todaysBills, setTodaysBills] = useState([])
   const [billsLoading, setBillsLoading] = useState(true)
+  const [billsError, setBillsError] = useState(false) // a failed read is not "no bills today"
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
   // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
@@ -43,7 +44,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
       .not('invoice_no', 'is', null)
       .gte('closed_at', startOfDay.toISOString())
       .order('closed_at', { ascending: false })
-      .then(({ data }) => { setTodaysBills(data || []); setBillsLoading(false) })
+      .then(({ data, error }) => { setBillsError(!!error); setTodaysBills(data || []); setBillsLoading(false) })
   }, [scopedFrom])
 
   if (!hasPosAccess('supervisor')) {
@@ -89,7 +90,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
           <span className="field-label">Date</span>
           <div style={{
             background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-            borderRadius: 6, padding: '8px 12px', fontSize: 13, color: 'var(--theme-text2)',
+            borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text2)',
           }}>
             {dateLabel}
           </div>
@@ -138,7 +139,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
             value={billOrderId}
             onChange={setBillOrderId}
             options={billOptions}
-            placeholder={billsLoading ? 'Loading…' : todaysBills.length === 0 ? 'No bills issued today yet' : '— None —'}
+            placeholder={billsLoading ? 'Loading…' : billsError ? 'Could not load today\'s bills — close and reopen to retry' : todaysBills.length === 0 ? 'No bills issued today yet' : '— None —'}
           />
         </div>
         <div className="form-field">
@@ -150,7 +151,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
             placeholder="Optional"
             rows={2}
             style={{
-              width: '100%', resize: 'vertical', borderRadius: 6, boxSizing: 'border-box',
+              width: '100%', resize: 'vertical', borderRadius: 'var(--radius-sm)', boxSizing: 'border-box',
               border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)',
               color: 'var(--theme-text1)', padding: '8px 10px', fontSize: 13,
             }}

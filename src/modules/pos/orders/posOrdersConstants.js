@@ -113,7 +113,7 @@ export const btnSm = {
 
 export const billInput = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 6, padding: '7px 10px', fontSize: 13,
+  borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13,
   color: 'var(--theme-text1)', outline: 'none',
 }
 

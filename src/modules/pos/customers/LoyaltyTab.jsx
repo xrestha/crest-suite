@@ -4,6 +4,8 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { pointsValue } from './loyaltyPoints'
+import { errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 // Loyalty & Rewards — schemes, who is enrolled, and each member's balance (S618).
 //
@@ -21,6 +23,7 @@ import { pointsValue } from './loyaltyPoints'
 //     directions is a thing no cashier can explain at the till.
 export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
 
   const [schemes, setSchemes] = useState([])
   const [members, setMembers] = useState([])
@@ -78,7 +81,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
       min_spend_to_earn: Number(newMin) || 0,
     })
     setSavingScheme(false)
-    if (error) { setMsg(`error:Couldn't add the scheme — ${error.message}`); return }
+    if (error) { setMsg(`error:The scheme was not added. ${errorLine(error)}`); return }
     setNewName(''); setNewRate('1'); setNewMin('0')
     await load()
   }
@@ -87,21 +90,35 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
     setMsg('')
     const { error } = await scopedUpdate('pos_loyalty_schemes', patch).eq('id', id)
     // An optimistic paint that drops the error shows as saved what the database refused (S613).
-    if (error) { setMsg(`error:Couldn't save — ${error.message}`); return }
+    if (error) { setMsg(`error:That change was not saved — the list shows what is stored. ${errorLine(error)}`); return }
     await load()
   }
 
-  async function removeScheme(s) {
-    if (!window.confirm(`Delete "${s.name}"? Anyone tagged to it stops earning, and their existing points are kept.`)) return
-    const { error } = await scopedDelete('pos_loyalty_schemes').eq('id', s.id)
-    if (error) { setMsg(`error:Couldn't delete — ${error.message}`); return }
-    await load()
+  function removeScheme(s) {
+    const enrolled = members.filter(m => m.loyalty_scheme_id === s.id).length
+    askConfirm({
+      title: `Delete the "${s.name}" scheme?`,
+      confirmLabel: 'Delete Scheme', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {enrolled > 0
+            ? <>The <strong>{enrolled} customer{enrolled === 1 ? '' : 's'}</strong> enrolled in it stop earning points from their next bill.</>
+            : 'No customers are enrolled in it.'}{' '}
+          Points already earned are kept and can still be redeemed. This cannot be undone.
+        </p>
+      ),
+      run: async () => {
+        const { error } = await scopedDelete('pos_loyalty_schemes').eq('id', s.id)
+        if (error) { setMsg(`error:"${s.name}" was not deleted — it is still active. ${errorLine(error)}`); return }
+        await load()
+      },
+    })
   }
 
   async function tag(customerId, schemeId) {
     setMsg('')
     const { error } = await scopedUpdate('pos_customers', { loyalty_scheme_id: schemeId || null }).eq('id', customerId)
-    if (error) { setMsg(`error:Couldn't change enrolment — ${error.message}`); return }
+    if (error) { setMsg(`error:The enrolment was not changed. ${errorLine(error)}`); return }
     setMembers(prev => prev.map(m => m.id === customerId ? { ...m, loyalty_scheme_id: schemeId || null } : m))
   }
 
@@ -179,7 +196,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
                   <tbody>
                     {schemes.map(s => (
                       <tr key={s.id}>
-                        <td style={{ whiteSpace: 'nowrap' }}>{s.name}</td>
+                        <td>{s.name}</td>
                         <td style={{ textAlign: 'right' }}>
                           <input
                             type="number" min="0" step="0.1" defaultValue={s.points_per_100}
@@ -262,7 +279,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
                       const bal = balances[m.id] || 0
                       return (
                         <tr key={m.id}>
-                          <td style={{ whiteSpace: 'nowrap' }}>{m.name}</td>
+                          <td>{m.name}</td>
                           <td style={{ whiteSpace: 'nowrap' }}>{m.phone}</td>
                           <td>
                             <select
@@ -289,6 +306,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
           </div>
         </>
       )}
+      {confirmEl}
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
@@ -19,6 +20,7 @@ export default function DeadStock() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods, setPeriods]           = useState([])
   const [selectedPeriod, setSelected]   = useState(null)
   const [rows, setRows]                 = useState([])
@@ -44,6 +46,7 @@ export default function DeadStock() {
   }, [selectedPeriod]) // eslint-disable-line
 
   async function fetchData(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
     const results = await Promise.all([
@@ -59,6 +62,7 @@ export default function DeadStock() {
     ])
     // A failed read must never flow through the `|| []`s below — every item would read as "Dead"
     // or vanish, both believable (S612 silent-zero rule).
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
     const [

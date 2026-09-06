@@ -6,6 +6,7 @@ import { getBsToday, getBsFiscalYear, adToBs, BS_MONTHS } from '../../../utils/b
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { printCreditNote } from './creditNoteHtml'
 import Modal from '../../../components/Modal'
+import { errorLine } from '../../../shared/errorText'
 
 // A credit note here always credits the WHOLE bill (decision 2026-08-18 — partial credits are not
 // supported). 'Price correction' and 'Billing error' were removed from these chips because both
@@ -123,14 +124,14 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     }
 
     const { data: created, error } = await scopedInsert('pos_credit_notes', payload, { single: true })
-    if (error) { setMsg('error:' + error.message); setSubmitting(false); return }
+    if (error) { setMsg('error:The credit note was not issued — nothing has changed. ' + errorLine(error)); setSubmitting(false); return }
 
     // This link is what stops the same bill being credited twice — CreditNotes.jsx offers only
     // orders with `credit_note_id IS NULL`. Its error used to go unchecked, so a failed write left
     // a real credit note issued against a bill the list still presented as un-credited.
     const { error: linkErr } = await scopedUpdate('pos_orders', { credit_note_id: created.id }).eq('id', order.id)
     if (linkErr) {
-      setMsg(`error:Credit note ${created.credit_note_no ?? ''} was created, but linking it to the bill failed (${linkErr.message}). Do NOT issue another one for this bill — contact support to link it, or the same bill can be credited twice.`)
+      setMsg(`error:Credit note ${created.credit_note_no ?? ''} was created, but linking it to the bill failed (${errorLine(linkErr)}). Do NOT issue another one for this bill — contact support to link it, or the same bill can be credited twice.`)
       setSubmitting(false)
       return
     }

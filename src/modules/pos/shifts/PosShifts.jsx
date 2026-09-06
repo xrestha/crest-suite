@@ -6,6 +6,7 @@ import { scopedFrom as scopedFromRaw } from '../../../shared/scopedDb'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import { errorLine } from '../../../shared/errorText'
 import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -427,7 +428,10 @@ export default function PosShifts() {
   if (!hasPosAccess('supervisor')) return <Navigate to="/pos" replace />
 
   async function loadOpenShift() {
-    const { data } = await scopedFrom('pos_shifts').eq('status', 'open').maybeSingle()
+    const { data, error } = await scopedFrom('pos_shifts').eq('status', 'open').maybeSingle()
+    // A failed read is not "no shift is open" — that offered Open Shift over a shift already
+    // running (S682). Keep the last-known state and say so.
+    if (error) { setMsg('error:Could not check whether a shift is open — the page shows the last known state. ' + errorLine(error)); return }
     setOpenShift(data || null)
     if (data) {
       setReportLoading(true)
@@ -496,7 +500,7 @@ export default function PosShifts() {
       created_by: profile?.id || null,
     })
     setCashMoveSaving(false)
-    if (error) { setCashMoveMsg('Error: ' + error.message); return }
+    if (error) { setCashMoveMsg('The cash movement was not recorded — the drawer count is unchanged. ' + errorLine(error)); return }
     setCashMoveAmount(''); setCashMoveReason(''); setCashMoveOpen(false)
     await loadOpenShift()
   }
@@ -512,7 +516,7 @@ export default function PosShifts() {
     })
     setSaving(false)
     if (error) {
-      setMsg(error.code === '23505' ? 'error:A shift is already open — refresh the page.' : 'error:' + error.message)
+      setMsg(error.code === '23505' ? 'error:A shift is already open — refresh the page.' : 'error:The shift was not opened. ' + errorLine(error))
       return
     }
     printHtml(buildShiftSlipHtml({
@@ -585,7 +589,7 @@ export default function PosShifts() {
       },
     }).eq('id', openShift.id).eq('status', 'open').select()
     setSaving(false)
-    if (error) { setMsg('error:' + error.message); return }
+    if (error) { setMsg('error:That was not saved. ' + errorLine(error)); return }
     if (!closed || closed.length === 0) {
       setMsg('error:This shift was already closed — refresh to see the latest reconciliation.')
       setModal(null)
@@ -831,7 +835,7 @@ export default function PosShifts() {
               const material = Math.abs(diff) >= 100
               return (
                 <div style={{
-                  marginTop: 14, padding: '10px 14px', borderRadius: 10,
+                  marginTop: 14, padding: '10px 14px', borderRadius: 'var(--radius-md)',
                   border: `1px solid color-mix(in srgb, ${material ? 'var(--theme-red)' : 'var(--theme-green)'} 30%, transparent)`,
                   background: `color-mix(in srgb, ${material ? 'var(--theme-red)' : 'var(--theme-green)'} 8%, transparent)`,
                 }}>

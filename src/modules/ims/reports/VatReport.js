@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
@@ -60,6 +61,7 @@ export default function VatReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods, setPeriods]         = useState([])
   const [selectedPeriod, setSelected] = useState(null)
   const [entries, setEntries]         = useState([])
@@ -86,6 +88,7 @@ export default function VatReport() {
   }, [selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchData(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
     const results = await Promise.all([
@@ -103,6 +106,7 @@ export default function VatReport() {
     // A failed read must never reach the arithmetic below: everything flows through `|| []`, so an
     // RLS rejection or a stalled token would render a complete, confident VAT return of NPR 0 —
     // and this is a figure an accountant files on. See shared/queryError.js.
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setEntries([]); setVatReturns([]); setLoading(false); return }
     const [{ data: entData }, { data: retData }] = results

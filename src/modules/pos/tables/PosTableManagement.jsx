@@ -15,7 +15,8 @@ import { adToBs, formatBsDay, formatAd } from '../../../utils/bsCalendar'
 import { turnoverByBand, PARTY_BANDS } from '../reports/coversMath'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS, DEFAULT_WHATSAPP_TEMPLATE } from '../reservations/reservationSettings'
 import ActionError, { asActionError } from '../../../components/ActionError'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const STATUS_CYCLE = ['available', 'reserved', 'occupied', 'inactive']
 // This file used to carry its own byte-identical copy of the status badge/label/colour maps, which
@@ -32,6 +33,7 @@ const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Ma
 export default function PosTableManagement() {
   const { clientId, hasPosAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
 
   const [mainTab, setMainTab] = useState('tables') // 'tables' | 'routing' | 'notes' | 'hsc' | 'discounts'
 
@@ -219,11 +221,28 @@ export default function PosTableManagement() {
     await load(); closeModal(); setSaving(false)
   }
 
-  async function handleDelete() {
-    if (!target || !window.confirm(`Delete "${target.name}"? This cannot be undone.`)) return
-    const { error } = await scopedDelete('pos_tables').eq('id', target.id)
-    if (error) { setMsg('error:' + error.message); return }
-    await load(); closeModal()
+  function handleDelete() {
+    if (!target) return
+    // pos_reservations cascades on this delete and guest_orders blocks it — the two FKs behave
+    // oppositely and neither is visible from the button, so the ask says both (S682).
+    askConfirm({
+      title: `Delete "${target.name}"?`,
+      confirmLabel: 'Delete Table', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            The table leaves the floor plan and its QR code stops working. <strong>Every reservation booked on it is deleted
+            with it</strong> — move those to another table first if they are still coming.
+          </p>
+          <p style={{ margin: 0 }}>Past bills keep the table name they were closed under. This cannot be undone.</p>
+        </>
+      ),
+      run: async () => {
+        const { error } = await scopedDelete('pos_tables').eq('id', target.id)
+        if (error) { setMsg('error:"' + target.name + '" was not deleted — it is still on the floor. ' + errorLine(error)); return }
+        await load(); closeModal()
+      },
+    })
   }
 
   // ── Guest Menu QR ────────────────────────────────────────────────────────────
@@ -255,7 +274,7 @@ export default function PosTableManagement() {
       <html><head><title>${esc(qrTable.name)} — Menu QR</title></head>
       <body style="font-family:sans-serif;text-align:center;padding:24px">
         <h2 style="margin:0 0 4px">${esc(qrTable.name)}</h2>
-        <p style="margin:0 0 20px;color:#666;font-size:13px">Scan for our menu</p>
+        <p style="margin:0 0 20px;color:#555;font-size:13px">Scan for our menu</p>
         <img src="${qrDataUrl}" style="width:240px;height:240px" />
       </body></html>
     `)
@@ -632,9 +651,9 @@ export default function PosTableManagement() {
       <html><head><title>${esc(outletName)} — Book a table</title></head>
       <body style="font-family:sans-serif;text-align:center;padding:24px">
         <h2 style="margin:0 0 4px">${esc(outletName)}</h2>
-        <p style="margin:0 0 20px;color:#666;font-size:13px">Scan to book a table</p>
+        <p style="margin:0 0 20px;color:#555;font-size:13px">Scan to book a table</p>
         <img src="${bookingQrUrl}" style="width:240px;height:240px" />
-        <p style="margin:16px 0 0;color:#666;font-size:11px;word-break:break-all">${esc(bookingUrl())}</p>
+        <p style="margin:16px 0 0;color:#555;font-size:11px;word-break:break-all">${esc(bookingUrl())}</p>
       </body></html>
     `)
     w.document.close()
@@ -743,7 +762,7 @@ export default function PosTableManagement() {
                           const active = station === 'BOT' ? isBot : !isBot
                           return (
                             <button key={station} onClick={() => toggleCat(cat, station)} style={{
-                              padding: '5px 18px', borderRadius: 6, fontSize: 12,
+                              padding: '5px 18px', borderRadius: 'var(--radius-sm)', fontSize: 12,
                               fontWeight: active ? 700 : 400, cursor: 'pointer',
                               background: active ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                               color: active ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
@@ -807,7 +826,7 @@ export default function PosTableManagement() {
                   {notePresets.map(p => (
                     <span key={p} style={{
                       display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '6px 8px 6px 12px', borderRadius: 14, fontSize: 12,
+                      padding: '6px 8px 6px 12px', borderRadius: 'var(--radius-lg)', fontSize: 12,
                       background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
                       color: 'var(--theme-text1)',
                     }}>
@@ -924,7 +943,7 @@ export default function PosTableManagement() {
                   {discReasons.map(r => (
                     <span key={r} style={{
                       display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '6px 8px 6px 12px', borderRadius: 14, fontSize: 12,
+                      padding: '6px 8px 6px 12px', borderRadius: 'var(--radius-lg)', fontSize: 12,
                       background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
                       color: 'var(--theme-text1)',
                     }}>
@@ -1121,7 +1140,7 @@ export default function PosTableManagement() {
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                     {s.tip ? <Tip text={s.tip}>{s.label}</Tip> : s.label}
                   </div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: s.color, marginTop: 4 }}>{s.value}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: s.color, marginTop: 4 }}>{s.value}</div>
                 </div>
               ))}
             </div>
@@ -1438,7 +1457,7 @@ export default function PosTableManagement() {
                   Section <Tip text="Groups tables by area — type a new name or pick an existing one." />
                 </label>
                 <input id="pos-table-management-section-2"
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, color: 'var(--theme-text1)', fontSize: 13, outline: 'none' }}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '7px 10px', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)', fontSize: 13, outline: 'none' }}
                   value={form.section} onChange={e => setForm(f => ({ ...f, section: e.target.value }))}
                   placeholder="e.g. Indoor, Outdoor, Bar…" list="modal-section-list"
                 />
@@ -1520,6 +1539,7 @@ export default function PosTableManagement() {
           </div>
         </Modal>
       )}
+      {confirmEl}
     </div>
   )
 }

@@ -7,6 +7,8 @@ import Tip from '../../../components/Tip'
 import { POS_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../posSignals'
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
+import { errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const PERMISSION_LEVELS = [
   { value: 'staff',      label: 'Staff',      desc: 'Take orders, view floor' },
@@ -41,6 +43,7 @@ function pinValid(pin) { return /^\d{4,6}$/.test(pin) }
 export default function PosStaff() {
   const { clientId, hasPosAccess, hrEnabled } = useAuth()
   const { scopedFrom } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [staff,       setStaff]       = useState([])
   const [employees,   setEmployees]   = useState([]) // hr_employees, only fetched when hrEnabled
   const [loading,     setLoading]     = useState(true)
@@ -130,15 +133,21 @@ export default function PosStaff() {
   }
 
   async function load() {
-    const { data } = await supabase.rpc('get_pos_staff_list', { p_client_id: clientId })
+    const { data, error } = await supabase.rpc('get_pos_staff_list', { p_client_id: clientId })
+    // A failed read is not "no POS staff" (S682): keep the last-good list and say so.
+    if (error) { setMsg('Could not load the staff list — what is shown is from the last successful load. ' + errorLine(error)); return }
     setStaff(data || [])
   }
 
   async function saveRoles(roles) {
     if (!clientId) return false   // never write a client_id:null (global-defaults) settings row during the admin no-client window
     setRolesSaving(true); setRolesError('')
-    const { data: existing } = await supabase
-      .from('settings').select('id').eq('client_id', clientId).single()
+    // maybeSingle + an error check: with .single() a missing row and a failed read both arrived as
+    // an error that was dropped, so any failed read fell into the INSERT branch and wrote a second
+    // settings row for the client (the S613 trap), splitting every settings read after it.
+    const { data: existing, error: exErr } = await supabase
+      .from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    if (exErr) { setRolesError('Could not check the existing settings row, so nothing was saved. ' + errorLine(exErr)); setRolesSaving(false); return false }
     let err
     if (existing) {
       const { error } = await supabase.from('settings').update({ pos_custom_roles: roles }).eq('id', existing.id)
@@ -216,17 +225,31 @@ export default function PosStaff() {
   }
 
   // ── Delete staff ───────────────────────────────────────────────────────────
-  async function deleteStaff(p) {
-    if (!window.confirm(`Delete ${p.full_name}? This cannot be undone.`)) return
-    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'delete_pos_staff', userId: p.id },
+  // Deleting a PIN login is irreversible, so the ask is the product's own dialog (S682).
+  function deleteStaff(p) {
+    askConfirm({
+      title: `Delete ${p.full_name}'s POS login?`,
+      confirmLabel: 'Delete Login', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {p.full_name}'s PIN stops working at the till immediately. Bills they closed keep their name on the audit trail and
+          the Sales Exception Report. To give them access again later you will create a new login with a new PIN. This
+          cannot be undone.
+        </p>
+      ),
+      run: async () => {
+        setMsg('')
+        const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+          body: { action: 'delete_pos_staff', userId: p.id },
+        })
+        if (error || data?.error) {
+          let detail = data?.error || error?.message || 'Failed to delete'
+          try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
+          setMsg(`${p.full_name}'s login was not deleted — their PIN still works. ` + detail); return
+        }
+        load()
+      },
     })
-    if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to delete'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg('Error: ' + detail); return
-    }
-    load()
   }
 
   // ── Reset PIN ──────────────────────────────────────────────────────────────
@@ -328,7 +351,7 @@ export default function PosStaff() {
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', padding: '8px 10px',
     background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-    borderRadius: 6, color: 'var(--theme-text1)', fontSize: 13, outline: 'none',
+    borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)', fontSize: 13, outline: 'none',
   }
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
 
@@ -369,6 +392,7 @@ export default function PosStaff() {
       </div>
 
       {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red-text)', marginBottom: 16 }}>{msg}</p>}
+      {confirmEl}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>

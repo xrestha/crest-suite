@@ -3,6 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
@@ -32,6 +33,7 @@ export default function BestSellers() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods, setPeriods]         = useState([])
   const [selectedPeriod, setSelected] = useState(null)
   const [rows, setRows]               = useState([])
@@ -57,6 +59,7 @@ export default function BestSellers() {
   }, [selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchData(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
     const results = await Promise.all([
@@ -67,6 +70,7 @@ export default function BestSellers() {
       scopedFrom('recipes', 'id, name, category, selling_price').neq('category', 'Sub-Recipe'),
     ])
     // A failed read must not rank a confident NPR 0 (S612 silent-zero rule).
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
     const [{ data: entries }, { data: recipes }] = results

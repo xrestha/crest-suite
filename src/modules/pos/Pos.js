@@ -58,7 +58,7 @@ export default function Pos() {
   if (!canManage) return <Navigate to="/dashboard" replace />
 
   return (
-    <div style={{ maxWidth: 520 }}>
+    <div>
       <div className="page-header">
         <h1 className="page-title">Crest POS</h1>
         <p className="page-subtitle">

@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
+import Modal from '../../../components/Modal'
 import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -67,18 +68,8 @@ export default function ImsStaff() {
 
   useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line
 
-  // Escape-to-close — none of this file's 3 hand-rolled overlays use the shared Modal.js
-  // component, so each needs its own listener; only one is ever open at a time in practice.
-  useEffect(() => {
-    function onKeyDown(e) {
-      if (e.key !== 'Escape') return
-      if (rolesModal) setRolesModal(false)
-      else if (addModal && !adding) setAddModal(false)
-      else if (pwTarget && !resetting) setPwTarget(null)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [rolesModal, addModal, adding, pwTarget, resetting])
+  // The three dialogs below are on the shared Modal since S682 (Escape, focus trap, focus return,
+  // role="dialog"); the document-level Escape listener that stood in for it is gone with them.
 
   async function init() {
     setLoading(true)
@@ -447,10 +438,7 @@ export default function ImsStaff() {
 
       {/* ── Manage Roles modal ───────────────────────────────────────────────── */}
       {rolesModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget) setRolesModal(false) }}>
-          <div className="card" style={{ width: 480, padding: 28, maxHeight: '80vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Manage IMS Roles</h3>
+        <Modal onClose={() => setRolesModal(false)} title="Manage IMS Roles" maxWidth={480} panelStyle={{ maxHeight: '80vh', overflowY: 'auto' }}>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)' }}>
               Define custom role names for your team. Each maps to a permission level.
             </p>
@@ -540,16 +528,12 @@ export default function ImsStaff() {
                 Done
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ── Add Staff modal ──────────────────────────────────────────────────── */}
       {addModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget && !adding) setAddModal(false) }}>
-          <div className="card" style={{ width: 380, padding: 28 }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Add Staff Member</h3>
+        <Modal onClose={() => { if (!adding) setAddModal(false) }} title="Add Staff Member" maxWidth={380}>
 
             {(hrEnabled || eligibleUsers.length > 0) && (
               <div className="tab-bar" style={{ marginBottom: 16 }}>
@@ -672,16 +656,12 @@ export default function ImsStaff() {
                 {adding ? 'Creating…' : 'Add Staff'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ── Reset Password modal ─────────────────────────────────────────────── */}
       {pwTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-          onClick={e => { if (e.target === e.currentTarget && !resetting) setPwTarget(null) }}>
-          <div className="card" style={{ width: 340, padding: 28 }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--theme-text1)' }}>Reset Password</h3>
+        <Modal onClose={() => { if (!resetting) setPwTarget(null) }} title="Reset Password" maxWidth={340}>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)' }}>
               New password for <strong style={{ color: 'var(--theme-text1)' }}>{pwTarget.full_name}</strong>
             </p>
@@ -704,8 +684,7 @@ export default function ImsStaff() {
                 {resetting ? 'Saving…' : 'Save Password'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

@@ -8,6 +8,7 @@ import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { getBsFiscalYear } from '../../../utils/bsCalendar'
 import { buildVendorSummary } from './VatReport'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { Navigate } from 'react-router-dom'
 
 const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
@@ -17,6 +18,7 @@ export default function PurchaseOneLakhAboveReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const fyReq = useLatestRequest()
 
   const [periods, setPeriods] = useState([])
   const [fyOptions, setFyOptions] = useState([])
@@ -41,6 +43,7 @@ export default function PurchaseOneLakhAboveReport() {
 
   const load = useCallback(async () => {
     if (!effectiveClientId || !selectedFy || periods.length === 0) return
+    const key = fyReq.begin(selectedFy)   // claim the page before any await (S601)
     setLoading(true)
     const periodIds = periods
       .filter(p => getBsFiscalYear(p.bs_year, p.bs_month) === selectedFy)
@@ -77,9 +80,10 @@ export default function PurchaseOneLakhAboveReport() {
     // silently dropped every non-VAT bill from the vendor total, understating or fully omitting
     // a vendor who should have been disclosed. Pass every entry, with the bill-level discount
     // prorated across the whole bill (discountScope:'all') rather than just its VAT-taxable lines.
+    if (!fyReq.isCurrent(key)) return   // superseded by a newer FY selection
     setVendors(buildVendorSummary(entries, retData || [], billGroups, { discountScope: 'all' }))
     setLoading(false)
-  }, [effectiveClientId, selectedFy, periods, scopedFrom])
+  }, [effectiveClientId, selectedFy, periods, scopedFrom, fyReq])
 
   useEffect(() => { load() }, [load])
 

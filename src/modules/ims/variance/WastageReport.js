@@ -8,11 +8,13 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 export default function WastageReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const [periods, setPeriods]           = useState([])
   const [selectedPeriod, setSelected]   = useState(null)
   const [rows, setRows]                 = useState([])
@@ -38,6 +40,7 @@ export default function WastageReport() {
   }, [selectedPeriod]) // eslint-disable-line
 
   async function fetchData(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
     const { data, error } = await supabase
@@ -45,7 +48,8 @@ export default function WastageReport() {
       .select('item_id, qty, bs_day, reason, items(name, uom, per_uom_rate, categories(name))')
       .eq('period_id', periodId)
     // A failed read must never flow through the `|| []` below into a confident NPR-0 report (S612 silent-zero rule).
-    if (error) { setLoadError(error.message); setRows([]); setReasons([]); setLoading(false); return }
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    if (error) { setLoadError(error); setRows([]); setReasons([]); setLoading(false); return }
 
     // Aggregate by item — an item can now have many rows (monthly catch-all + dated daily entries).
     const byItem = {}

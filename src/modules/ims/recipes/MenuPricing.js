@@ -9,6 +9,7 @@ import { useSettings } from '../../../context/SettingsContext'
 import { fcBand, fcThresholds } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import Modal from '../../../components/Modal'
 
 
 function vatOf(r) {
@@ -341,10 +342,10 @@ export default function MenuPricing() {
 
       {/* ── Pair With Modal (POS-only clients) ── */}
       {suggestModal && (
-        <div onClick={e => { if (e.target === e.currentTarget) setSuggestModal(null) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', width: 'min(480px, 96vw)', padding: '24px 28px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 16, color: 'var(--theme-text1)' }}>Pair with — {suggestModal.name}</h3>
+        // On the shared Modal since S682 — Escape, focus trap, focus return, role="dialog"; the
+        // hand-rolled overlay had none of them. Same conversion in both branches.
+        <Modal onClose={() => setSuggestModal(null)} title={`Pair with — ${suggestModal.name}`} maxWidth={480}
+          panelStyle={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
               Checked items appear as "Pair with" chips when staff tap this item on the POS order screen.
             </p>
@@ -377,15 +378,11 @@ export default function MenuPricing() {
                 {pairingSaving ? 'Saving…' : `Save${pairingDraft.size > 0 ? ` (${pairingDraft.size})` : ''}`}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {addModal && (
-        <div onClick={e => { if (e.target === e.currentTarget) { setAddModal(false); setEditingId(null) } }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', width: 'min(440px, 96vw)', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
-            <h3 style={{ margin: '0 0 20px', fontSize: 16, color: 'var(--theme-text1)' }}>{editingId ? 'Edit Menu Item' : 'Add Menu Item'}</h3>
+        <Modal onClose={() => { setAddModal(false); setEditingId(null) }} title={editingId ? 'Edit Menu Item' : 'Add Menu Item'} maxWidth={440}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <label style={{ fontSize: 12, color: 'var(--theme-text2)', display: 'block', marginBottom: 5 }} htmlFor="menupr-f1">Item Name *</label>
@@ -450,8 +447,7 @@ export default function MenuPricing() {
                 {addSaving ? 'Saving…' : editingId ? 'Save Changes' : 'Add to Menu'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )
@@ -686,10 +682,10 @@ export default function MenuPricing() {
 
       {/* ── Pair With Modal ── */}
       {suggestModal && (
-        <div onClick={e => { if (e.target === e.currentTarget) setSuggestModal(null) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', width: 'min(480px, 96vw)', padding: '24px 28px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 16, color: 'var(--theme-text1)' }}>Pair with — {suggestModal.name}</h3>
+        // On the shared Modal since S682 — Escape, focus trap, focus return, role="dialog"; the
+        // hand-rolled overlay had none of them. Same conversion in both branches.
+        <Modal onClose={() => setSuggestModal(null)} title={`Pair with — ${suggestModal.name}`} maxWidth={480}
+          panelStyle={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
               Checked items appear as "Pair with" chips when staff tap this item on the POS order screen.
             </p>
@@ -722,16 +718,12 @@ export default function MenuPricing() {
                 {pairingSaving ? 'Saving…' : `Save${pairingDraft.size > 0 ? ` (${pairingDraft.size})` : ''}`}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* ── Add Item Modal ── */}
       {addModal && (
-        <div onClick={e => { if (e.target === e.currentTarget) { setAddModal(false); setEditingId(null) } }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', width: 'min(440px, 96vw)', padding: '24px 28px', boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
-            <h3 style={{ margin: '0 0 20px', fontSize: 16, color: 'var(--theme-text1)' }}>Add Menu Item</h3>
+        <Modal onClose={() => { setAddModal(false); setEditingId(null) }} title="Add Menu Item" maxWidth={440}>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
@@ -806,8 +798,7 @@ export default function MenuPricing() {
                 {addSaving ? 'Saving…' : 'Add to Menu'}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

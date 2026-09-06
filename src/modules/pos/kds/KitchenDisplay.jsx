@@ -215,9 +215,11 @@ export default function KitchenDisplay() {
             ← Exit
           </button>
           <div>
-            <h2 style={{ margin: 0, color: 'var(--theme-text1)', fontSize: 26 }}>
+            {/* The page's one h1, on the title step — it was an h2 at 26px, off the ramp, with
+                no h1 anywhere on the board (S682). */}
+            <h1 className="page-title" style={{ margin: 0 }}>
               {isTeamLocked ? (station === 'KOT' ? 'Kitchen Display' : 'Bar Display') : 'Kitchen Display'}
-            </h2>
+            </h1>
             <p style={{ margin: '4px 0 0', fontSize: 14, color: 'var(--theme-text3)' }}>
               Live view of today's {station === 'KOT' ? 'kitchen' : 'bar'} tickets — printing still happens as normal, this just mirrors it on screen.
             </p>

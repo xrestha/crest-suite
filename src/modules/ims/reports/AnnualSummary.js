@@ -12,6 +12,7 @@ import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared
 import { useSettings } from '../../../context/SettingsContext'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 // Nepal fiscal year starts Shrawan (month 4)
 // bs_month >= 4 → fiscal year = bs_year; else fiscal year = bs_year - 1
@@ -24,6 +25,7 @@ export default function AnnualSummary() {
   const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const yearReq = useLatestRequest()
 
   const [allPeriods, setAllPeriods]     = useState([])
   const [fiscalMode, setFiscalMode]     = useState(false)
@@ -66,6 +68,7 @@ export default function AnnualSummary() {
 
   async function buildReport() {
     if (selectedYear === null) return
+    const key = yearReq.begin(selectedYear)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
 
@@ -94,6 +97,7 @@ export default function AnnualSummary() {
       scopedFrom('recipes', 'id, selling_price'),
     ])
     // A failed read must not render as a quiet year of NPR 0 (S612 silent-zero rule).
+    if (!yearReq.isCurrent(key)) return   // superseded by a newer year selection
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setReport(null); setLoading(false); return }
     const [

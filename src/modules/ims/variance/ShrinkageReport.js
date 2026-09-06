@@ -8,6 +8,7 @@ import { selectDepletingSales } from '../sales/salesDepletion'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { Navigate } from 'react-router-dom'
 
 // `badge` rather than a hand-rolled chip: the previous inline version built its border as
@@ -26,6 +27,7 @@ export default function ShrinkageReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const windowReq = useLatestRequest()
 
   const [periods, setPeriods]         = useState([])
   const [periodCount, setPeriodCount] = useState(6)
@@ -58,6 +60,7 @@ export default function ShrinkageReport() {
   }
 
   async function buildReport() {
+    const key = windowReq.begin(periodCount)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
     const selected = periods.slice(0, periodCount)
@@ -79,6 +82,7 @@ export default function ShrinkageReport() {
       scopedFrom('recipes', 'id'),
     ])
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
+    if (!windowReq.isCurrent(key)) return   // superseded by a newer window selection
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setReport([]); setSummary(null); setLoading(false); return }
     const [
@@ -214,6 +218,7 @@ export default function ShrinkageReport() {
     const anyFlagged    = rows.filter(r => r.shrinkCount > 0).length
     const totalLossVal  = rows.reduce((s, r) => s + r.totalShrinkValue, 0)
 
+    if (!windowReq.isCurrent(key)) return   // a second await (recipe explosion) sits above this
     setSummary({ consistent, anyFlagged, totalLossVal, totalTracked: rows.length })
     setReport(rows)
     setLoading(false)

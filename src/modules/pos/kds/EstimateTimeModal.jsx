@@ -38,13 +38,13 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
     <Modal onClose={onClose} title="Estimated Prep Time" maxWidth={360}>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 2 }}>
-          {ticket.table_name || 'Takeaway'} <span style={{ opacity: 0.7 }}>#{ticket.order_no}</span>
+          {ticket.table_name || 'Takeaway'} <span style={{ color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
         </div>
         <div style={{ fontSize: 13, color: 'var(--theme-text2)', marginBottom: 8 }}>
           {(ticket.items || []).map(i => `${i.qty}× ${i.name}`).join(', ')}
         </div>
 
-        <div style={{ fontSize: 34, fontWeight: 700, color: value ? 'var(--theme-text1)' : 'var(--theme-text3)', marginBottom: 10, fontVariantNumeric: 'tabular-nums' }}>
+        <div style={{ fontSize: 32, fontWeight: 700, color: value ? 'var(--theme-text1)' : 'var(--theme-text3)', marginBottom: 10, fontVariantNumeric: 'tabular-nums' }}>
           {value || '0'} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--theme-text3)' }}>min</span>
         </div>
 

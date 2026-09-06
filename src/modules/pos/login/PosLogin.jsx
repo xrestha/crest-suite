@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useTheme } from '../../../context/ThemeContext'
+import { errorText } from '../../../shared/errorText'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
 
 const KEYS = [
@@ -104,7 +105,9 @@ export default function PosLogin() {
       })
       navigate('/pos', { replace: true })
     } catch (e) {
-      setError(e.message || 'Something went wrong. Check your connection and try again.')
+      // The staff audience: a waiter can only escalate, and "TypeError: Failed to fetch" is not
+      // a sentence they can act on (S682).
+      setError(errorText(e, 'staff'))
       setPin('')
     } finally {
       setSigningIn(false)

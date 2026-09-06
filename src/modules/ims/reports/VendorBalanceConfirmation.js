@@ -11,6 +11,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { getFiscalYearAdRange, computeVendorBalance } from './vendorBalanceHelpers'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import VendorBalanceConfirmationPrint from './VendorBalanceConfirmationPrint'
 
 // Nepal IRD Annexure 13 (अनुसूची १३) balance confirmation — per-vendor, per-fiscal-year printable
@@ -20,6 +21,7 @@ export default function VendorBalanceConfirmation() {
   const effectiveClientId = clientId || profile?.client_id
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
+  const scopeReq = useLatestRequest()
   const [searchParams] = useSearchParams()
 
   const [vendors, setVendors] = useState([])
@@ -65,6 +67,7 @@ export default function VendorBalanceConfirmation() {
 
   const load = useCallback(async () => {
     if (!effectiveClientId || !selectedVendorId || !selectedFy || periods.length === 0) { setResult(null); return }
+    const key = scopeReq.begin(`${selectedVendorId}|${selectedFy}`)   // claim the page before any await (S601)
     setComputing(true)
     setLoadError(null)
 
@@ -126,9 +129,10 @@ export default function VendorBalanceConfirmation() {
     returns = retsRes.data || []
 
     const computed = computeVendorBalance({ creditEntries, cashEntries, payments, returns, fyStart, fyEnd })
+    if (!scopeReq.isCurrent(key)) return   // superseded by a newer vendor/FY selection
     setResult({ ...computed, fyStart, fyEnd })
     setComputing(false)
-  }, [effectiveClientId, selectedVendorId, selectedFy, periods, scopedFrom])
+  }, [effectiveClientId, selectedVendorId, selectedFy, periods, scopedFrom, scopeReq])
 
   useEffect(() => { load() }, [load])
 
