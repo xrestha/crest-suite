@@ -1018,11 +1018,13 @@ export default function Help() {
     return (
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px',
-        background: 'var(--theme-card)', border: '1px solid var(--theme-border-lt)', borderRadius: 8, marginBottom: 4,
-        opacity: 0.45,
+        background: 'var(--theme-card)', border: '1px solid var(--theme-border-lt)', borderRadius: 'var(--radius-sm)', marginBottom: 4,
       }}>
-        <span style={{ fontSize: 14, width: 22, textAlign: 'center', flexShrink: 0 }}>{feat.icon}</span>
+        {/* Label the state, never dim the row: opacity multiplies through the text colour and took
+            these below AA — on the names of the features an owner would upgrade FOR (S682). */}
+        <span aria-hidden="true" style={{ fontSize: 14, width: 22, textAlign: 'center', flexShrink: 0 }}>{feat.icon}</span>
         <span style={{ fontSize: 13, color: 'var(--theme-text3)' }}>{feat.name}</span>
+        <span className="badge badge-gray" style={{ marginLeft: 'auto', flexShrink: 0 }}>Not on your plan</span>
       </div>
     )
   }
@@ -1661,7 +1663,7 @@ export default function Help() {
             <span style={{ color: 'var(--theme-text3)' }}> &amp; </span>
             <span style={{ color: MODULE_INK.pos }}>Crest POS</span>
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
             {[
               { key: 'hr',  name: 'Crest HR',  color: MODULE_INK.hr,  pricing: HR_PRICING },
               { key: 'pos', name: 'Crest POS', color: MODULE_INK.pos, pricing: POS_PRICING },

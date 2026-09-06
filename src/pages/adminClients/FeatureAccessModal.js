@@ -360,7 +360,7 @@ export default function FeatureAccessModal({ client, onClose }) {
          Self-Ordering") can force this grid (and the whole modal, since nothing above it
          constrains width otherwise) wider than the viewport instead of letting columns
          shrink. minmax(0, 1fr) lets each column actually shrink to fit. */
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '0 14px', alignItems: 'start', overflowX: 'auto' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0 14px', alignItems: 'start', overflowX: 'auto' }}>
         {loading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13, gridColumn: '1/-1' }}>Loading…</p> : FEATURE_GROUPS.map(group => {
           const planIncluded = isPlanIncluded(group.tier, clientPlan, client.pos_enabled)
           return (

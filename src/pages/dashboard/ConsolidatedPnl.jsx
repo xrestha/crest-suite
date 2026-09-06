@@ -134,7 +134,7 @@ export default function ConsolidatedPnl() {
     setLoadError(null)
     const { data: p, error } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    if (error) { setLoadError(error.message); setPeriods([]); setLoading(false); return }
+    if (error) { setLoadError(error); setPeriods([]); setLoading(false); return }
     setPeriods(p || [])
     // Closed-period default — COGS subtracts a closing count that an open period does not have.
     const target = (p || []).find(x => x.status === 'closed') || (p || [])[0]
@@ -165,7 +165,7 @@ export default function ConsolidatedPnl() {
     if (!periodReq.isCurrent(period.id)) return   // superseded by a newer period selection
     // A failed RPC must not masquerade as the no-Suite-Pro empty state — 'nothing to show' and
     // 'could not load' are different facts, and only one of them should send someone to billing.
-    if (error) { console.error('get_group_pnl failed:', error); setGroupCols([]); setLoadError(error.message || 'Could not load the group statement.'); return }
+    if (error) { console.error('get_group_pnl failed:', error); setGroupCols([]); setLoadError(error || 'Could not load the group statement.'); return }
     const rows = data || []
     setExcludedNames(rows.filter(r => !r.is_included).map(r => r.client_name))
     setGroupCols(rows.filter(r => r.is_included).map(r => ({

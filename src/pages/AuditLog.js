@@ -2,6 +2,8 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import Tip from '../components/Tip'
+import { errorLine } from '../shared/errorText'
+import ReportLoadError from '../components/ReportLoadError'
 
 const PAGE_SIZE = 500
 
@@ -174,6 +176,7 @@ export default function AuditLog() {
   const [logs, setLogs]             = useState([])
   const [clients, setClients]       = useState([])
   const [loading, setLoading]       = useState(true)
+  const [loadError, setLoadError]   = useState(null) // a failed read is not an empty trail
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore]       = useState(false)
   const [filterClient, setFilterClient] = useState('all')
@@ -210,17 +213,22 @@ export default function AuditLog() {
   async function fetchLogs(client, area, time) {
     setLoading(true)
     setExpandedId(null)
-    const { data } = await baseQuery(client, area, time).limit(PAGE_SIZE)
+    const { data, error } = await baseQuery(client, area, time).limit(PAGE_SIZE)
+    setLoading(false)
+    // A failed read is not "No entries found for the selected filters" — on the audit trail that
+    // reads as an assurance that nothing happened (S682).
+    if (error) { setLoadError(error); return }
+    setLoadError(null)
     setLogs(data || [])
     setHasMore((data || []).length === PAGE_SIZE)
-    setLoading(false)
   }
 
   async function loadMore() {
     if (!logs.length) return
     setLoadingMore(true)
     const cursor = logs[logs.length - 1].created_at
-    const { data } = await baseQuery(filterClient, filterArea, filterTime).lt('created_at', cursor).limit(PAGE_SIZE)
+    const { data, error } = await baseQuery(filterClient, filterArea, filterTime).lt('created_at', cursor).limit(PAGE_SIZE)
+    if (error) { setLoadError(error); setLoadingMore(false); return }
     setLogs(prev => [...prev, ...(data || [])])
     setHasMore((data || []).length === PAGE_SIZE)
     setLoadingMore(false)
@@ -266,7 +274,7 @@ export default function AuditLog() {
     // Inline like every other failure on this page — this was the scope's only bare alert().
     // And the RPC returns how many rows went; discarding it left the operator with no statement
     // of what a destructive action on the audit trail actually did.
-    if (error) { setClearMsg('error:Clear failed: ' + error.message); return }
+    if (error) { setClearMsg('error:Nothing was deleted — the audit trail is unchanged. ' + errorLine(error)); return }
     setClearMsg(`ok:${(deletedCount ?? 0).toLocaleString()} audit log entries deleted (${timeLabel}, ${clientLabel}${areaLabel}).`)
     await fetchLogs(filterClient, filterArea, filterTime)
   }
@@ -431,7 +439,12 @@ export default function AuditLog() {
               </tr>
             </thead>
             <tbody>
-              {!loading && visibleLogs.length === 0 && (
+              {!loading && loadError && (
+                <tr>
+                  <td colSpan={6} style={{ padding: 0 }}><ReportLoadError error={loadError} /></td>
+                </tr>
+              )}
+              {!loading && !loadError && visibleLogs.length === 0 && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 32 }}>
                     No entries found for the selected filters.

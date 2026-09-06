@@ -11,6 +11,8 @@ import { DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
 import { clientMrrBreakdown } from '../shared/clientMrr'
 import ClientDrawer from './adminClients/ClientDrawer'
 import FeatureAccessModal from './adminClients/FeatureAccessModal'
+import { errorLine } from '../shared/errorText'
+import ReportLoadError from '../components/ReportLoadError'
 
 // ── Subscription badge ────────────────────────────────────────────────────────
 function SubBadge({ client }) {
@@ -53,6 +55,7 @@ export default function AdminClients() {
   const planPrices = settings.plan_prices || DEFAULT_PLAN_PRICES
   const [clients, setClients]         = useState([])
   const [loading, setLoading]         = useState(true)
+  const [listError, setListError]     = useState(null) // a failed read is not "no clients yet"
   const [showNewForm, setShowNewForm] = useState(false)
   const [newForm, setNewForm]         = useState(EMPTY_CLIENT_FORM)
   const [saving, setSaving]           = useState(false)
@@ -100,7 +103,11 @@ export default function AdminClients() {
 
   async function loadClients() {
     setLoading(true)
-    const { data } = await supabase.from('clients').select('*').order('name')
+    const { data, error: listErr } = await supabase.from('clients').select('*').order('name')
+    // A failed read must not render "No clients yet" on the operator's own client book, and must
+    // not let the deactivation sweep below run against an empty list (S682).
+    if (listErr) { setListError(listErr); setLoading(false); return }
+    setListError(null)
     // Auto-deactivation waits out the same GRACE_DAYS the lock screen honours. Without this the
     // grace period would be defeated by the admin simply opening this page: is_active=false is an
     // immediate lock in getAccessState, so sweeping at the raw expiry date would cut a client off
@@ -157,7 +164,7 @@ export default function AdminClients() {
       trial_expires_at: trialEnd.toISOString(),
       trial_purge_at: trialPurge.toISOString(),
     }).select('id').single()
-    if (error) { setFormError(error.message); setSaving(false); return }
+    if (error) { setFormError('The client was not created. ' + errorLine(error)); setSaving(false); return }
 
     if (clientData?.id) {
       const { year: bsYear, month: bsMonth } = getBsToday()
@@ -354,7 +361,7 @@ export default function AdminClients() {
                     {/* Subscribe badge */}
                     {wantsToSub && (
                       <div style={{ position: 'relative', flexShrink: 0 }}>
-                        <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: 'var(--theme-red)', boxShadow: '0 0 0 0 rgba(248,113,113,0.5)', animation: 'pulse-dot 1.5s infinite' }} />
+                        <span className="pulse-dot" style={{ color: 'var(--theme-red)' }} />
                       </div>
                     )}
                     {/* Info */}
@@ -432,6 +439,8 @@ export default function AdminClients() {
       {/* Client cards */}
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p></div>
+      ) : listError ? (
+        <ReportLoadError error={listError} />
       ) : clients.length === 0 ? (
         <div className="card">
           <div className="empty-state">

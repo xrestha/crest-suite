@@ -31,6 +31,19 @@
   animation: pulse-dot 1.5s infinite;
 }
 
+/* The same pulse without the sidebar's cut-out border, for a dot sitting on an ordinary card —
+   the admin client list's "wants to subscribe" marker. It was an inline `style={{ animation }}`
+   until S682, which no media query can reach, so it pulsed forever for a reader who had asked
+   their OS for less motion. `color` on the element drives the fill and the ring together. */
+.pulse-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  animation: pulse-dot 1.5s infinite;
+}
+
 /* ChartCard (src/components/ChartCard.js) — the expand sequence.
    These were inline `style={{ animation }}` literals until 2026-08-11. Moved to classes for one
    reason beyond tidiness: an inline animation cannot be switched off by a media query, so the
@@ -160,7 +173,12 @@
   .chart-modal-backdrop,
   .chart-modal-panel,
   .chart-stat-strip > *,
-  .modal-sheet {
+  .modal-sheet,
+  /* Both attention dots. `.module-tab-dot` predates this block and was never added to it, so the
+     sidebar's own badge pulsed indefinitely under reduced motion (found S682); its resting state
+     is a plain visible dot, so killing the animation costs nothing. */
+  .module-tab-dot,
+  .pulse-dot {
     animation: none !important;
   }
   .chart-icon-btn,

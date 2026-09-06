@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { useAuth } from './AuthContext'
 import { DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
+import { errorLine } from '../shared/errorText'
 
 const SettingsContext = createContext({})
 
@@ -111,48 +112,58 @@ export function SettingsProvider({ children }) {
 
     let query = supabase.from('settings').select('id')
     query = cid ? query.eq('client_id', cid) : query.is('client_id', null)
-    const { data: existing } = await query.maybeSingle()
+    const { data: existing, error: exErr } = await query.maybeSingle()
+    // A guard that drops its read error passes vacuously (S682): a failed read used to fall into
+    // the INSERT branch and write a SECOND settings row for the client, which then splits every
+    // settings read after it — the S613 trap, in the context every settings screen goes through.
+    if (exErr) throw new Error(errorLine(exErr))
 
     if (existing?.id) {
       const { error } = await supabase.from('settings')
         .update({ ...payload, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
-      if (error) throw new Error(error.message)
+      if (error) throw new Error(errorLine(error))
     } else {
       const { error } = await supabase.from('settings')
         .insert({ ...payload, client_id: cid })
-      if (error) throw new Error(error.message)
+      if (error) throw new Error(errorLine(error))
     }
     await loadSettings(cid)
   }
 
+  // Same guard as saveSettings, and both writes now report: this is the admin's "save this
+  // client's settings" path, and it used to return successfully whatever the database did (S682).
   async function saveClientSettings(cid, updates) {
-    const { data: existing } = await supabase
+    const { data: existing, error: exErr } = await supabase
       .from('settings')
       .select('id')
       .eq('client_id', cid)
       .maybeSingle()
+    if (exErr) throw new Error(errorLine(exErr))
 
     if (existing?.id) {
-      await supabase.from('settings').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      const { error } = await supabase.from('settings').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      if (error) throw new Error(errorLine(error))
     } else {
-      await supabase.from('settings').insert({ ...updates, client_id: cid })
+      const { error } = await supabase.from('settings').insert({ ...updates, client_id: cid })
+      if (error) throw new Error(errorLine(error))
     }
   }
 
   async function saveFeatureFlags(cid, flags) {
-    const { data: existing } = await supabase
+    const { data: existing, error: exErr } = await supabase
       .from('feature_flags')
       .select('id')
       .eq('client_id', cid)
       .maybeSingle()
+    if (exErr) throw new Error(errorLine(exErr))
 
     if (existing?.id) {
       const { error } = await supabase.from('feature_flags').update({ ...flags, updated_at: new Date().toISOString() }).eq('id', existing.id)
-      if (error) throw new Error(error.message)
+      if (error) throw new Error(errorLine(error))
     } else {
       const { error } = await supabase.from('feature_flags').insert({ client_id: cid, ...flags })
-      if (error) throw new Error(error.message)
+      if (error) throw new Error(errorLine(error))
     }
     if (cid === clientId) await loadFeatureFlags(cid)
   }

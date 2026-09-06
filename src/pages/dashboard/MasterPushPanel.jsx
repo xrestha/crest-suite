@@ -3,6 +3,7 @@ import { supabase } from '../../supabaseClient'
 import Tip from '../../components/Tip'
 import ConfirmModal from '../../components/ConfirmModal'
 import ReportLoadError from '../../components/ReportLoadError'
+import { errorLine } from '../../shared/errorText'
 
 // HQ -> branch master-data push (S617). The UI half of push_master_data().
 //
@@ -64,7 +65,7 @@ export default function MasterPushPanel({ outlets, groupId }) {
       .maybeSingle()
     // A failed read must not render as "no HQ configured" — that is a different fact and would
     // send an owner to support to fix something that is already set (S594).
-    if (error) setPlanError(error.message)
+    if (error) setPlanError('Could not read which outlet is the HQ, so nothing can be pushed yet. Reload to try again. ' + errorLine(error))
     else setHq(data?.hq_client_id || null)
     setHqLoading(false)
   }, [groupId])
@@ -91,7 +92,7 @@ export default function MasterPushPanel({ outlets, groupId }) {
     })
     setBusy(false)
     setConfirmOpen(false)
-    if (error) { setPlanError(error.message); setPlan(null); return }
+    if (error) { setPlanError((dryRun ? 'The preview could not be built, so nothing was pushed. ' : 'The push did not run — the branches are unchanged. ') + errorLine(error)); setPlan(null); return }
     setPlan(data || [])
     setApplied(!dryRun)
   }

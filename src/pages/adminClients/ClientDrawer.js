@@ -18,6 +18,7 @@ import { restoreClientData } from '../../modules/admin/dataExport/restoreClientD
 import {
   pickBackupDirectory, ensureBackupDirectory, isFileSystemAccessSupported,
 } from '../../modules/admin/dataExport/backupDirectory'
+import { errorLine } from '../../shared/errorText'
 
 const EMPTY_USER = { email: '', password: '', full_name: '' }
 
@@ -331,7 +332,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         setUserError('That email already exists but could not be located to reassign.')
         setSavingUser(false); return
       }
-      const { data: prof } = await supabase.from('profiles').select('role').eq('id', existingId).maybeSingle()
+      // A check that could not run has not passed (S682): on a failed read this used to skip the
+      // "is this a platform admin" refusal and reassign an operator's own account to a client.
+      const { data: prof, error: profErr } = await supabase.from('profiles').select('role').eq('id', existingId).maybeSingle()
+      if (profErr) {
+        setUserError('Could not check whether that email is a platform-admin account, so nothing was changed. Try again. ' + errorLine(profErr))
+        setSavingUser(false); return
+      }
       if (prof?.role === 'admin') {
         setUserError('That email is a platform-admin account — use a different email for a client login.')
         setSavingUser(false); return
@@ -389,15 +396,20 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       contact_person: editForm.contact_person.trim(),
       contact_phone: editForm.contact_phone.trim()
     }).eq('id', client.id)
-    if (error) { setSavingClient(false); setClientMsg('error:' + error.message); return }
+    if (error) { setSavingClient(false); setClientMsg('error:The client details were not saved — the drawer still shows what you typed, the record does not. ' + errorLine(error)); return }
 
     // Keep settings.app_name in sync with client name
     if (editForm.name.trim() !== client.name) {
-      const { data: existing } = await supabase.from('settings').select('id').eq('client_id', client.id).maybeSingle()
-      if (existing?.id) {
-        await supabase.from('settings').update({ app_name: editForm.name.trim() }).eq('id', existing.id)
-      } else {
-        await supabase.from('settings').insert({ client_id: client.id, app_name: editForm.name.trim() })
+      // The S613 second-settings-row trap: a failed existing-row read must not fall into INSERT.
+      // The client rename itself has already committed, so this reports rather than refusing.
+      const { data: existing, error: exErr } = await supabase.from('settings').select('id').eq('client_id', client.id).maybeSingle()
+      const nameErr = exErr || (existing?.id
+        ? (await supabase.from('settings').update({ app_name: editForm.name.trim() }).eq('id', existing.id)).error
+        : (await supabase.from('settings').insert({ client_id: client.id, app_name: editForm.name.trim() })).error)
+      if (nameErr) {
+        setSavingClient(false)
+        setClientMsg('error:The client was renamed, but its white-label app name still shows the old name — open Settings → Branding and save it there. ' + errorLine(nameErr))
+        return
       }
     }
 
@@ -490,7 +502,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setSavingGroup(true)
     const { error } = await supabase.from('clients').update({ group_id: nextGroupId }).eq('id', client.id)
     setSavingGroup(false)
-    if (error) { setSubMsg('error:' + error.message); return }
+    if (error) { setSubMsg('error:The outlet group was not changed — this client is still in its previous group. ' + errorLine(error)); return }
     setGroupId(nextGroupId)
     setSubMsg('ok:' + (nextGroupId ? 'Outlet added to group.' : 'Outlet removed from its group.'))
     onClientUpdated()
@@ -502,7 +514,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setSavingGroup(true)
     const { data, error } = await supabase.from('client_groups')
       .insert({ name, hq_client_id: client.id }).select().single()
-    if (error) { setSavingGroup(false); setSubMsg('error:' + error.message); return }
+    if (error) { setSavingGroup(false); setSubMsg('error:The group was not created, so this client has not been grouped. ' + errorLine(error)); return }
     const { error: linkErr } = await supabase.from('clients').update({ group_id: data.id }).eq('id', client.id)
     setSavingGroup(false)
     if (linkErr) { setSubMsg('error:' + linkErr.message); return }
@@ -541,7 +553,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       suite_plan:    suitePlan,
       billing_cycle: billingCycle,
     }).eq('id', client.id)
-    if (error) { setSubMsg('error:' + error.message) }
+    if (error) { setSubMsg('error:The plan and billing changes were not saved — this client is still on its previous plan, and its MRR is unchanged. ' + errorLine(error)) }
     else {
       setSubMsg('ok:Subscription saved.')
       onClientUpdated()

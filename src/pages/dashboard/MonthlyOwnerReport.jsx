@@ -13,6 +13,7 @@ import Tip from '../../components/Tip'
 import ConfirmModal from '../../components/ConfirmModal'
 import { printWithTitle } from '../../utils/printTitle'
 import { errorText } from '../../shared/errorText'
+import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 import './MonthlyOwnerReport.css'
@@ -110,6 +111,7 @@ export default function MonthlyOwnerReport() {
   const { clientId, profile, isAdmin, isOwner, hasFeature } = useAuth()
   const canOverheads = hasFeature('overheads')
   const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
   const { settings } = useSettings()
 
   const [periods, setPeriods] = useState([])
@@ -155,10 +157,15 @@ export default function MonthlyOwnerReport() {
   const loadReport = useCallback(async () => {
     const period = periods.find(p => p.id === selectedPeriodId)
     if (!period) { setReport(null); setLoading(false); return }
+    // Arrowing the period <select> starts one load per keypress and the last to land used to win
+    // the figures while the label said another month (S601) — on the one report that is printed
+    // and handed to an accountant, where the label is also the print title and the filename.
+    const key = periodReq.begin(selectedPeriodId)
     setLoading(true)
     setGenError('')
 
     const { data: existing, error: existingErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
+    if (!periodReq.isCurrent(key)) return   // superseded by a newer period selection
     // A failed read here used to fall straight through to the lazy-generate path — treating
     // "could not read the snapshot" as "no snapshot exists" (S612). Refuse instead.
     if (existingErr) { setGenError(`Could not load the report: ${existingErr.message}`); setReport(null); setLoading(false); return }
@@ -184,6 +191,7 @@ export default function MonthlyOwnerReport() {
       await saveGeneratedReport({ clientId, period, snapshot, modulesIncluded, actorId: profile?.id, source: 'backfill' })
       const { data: fresh, error: freshErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
       if (freshErr) throw new Error(freshErr.message)
+      if (!periodReq.isCurrent(key)) return
       setReport(fresh)
       setGeneratorName(profile?.full_name || '—')
     } catch (e) {
