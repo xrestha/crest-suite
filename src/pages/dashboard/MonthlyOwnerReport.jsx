@@ -1,3 +1,4 @@
+import { nprOrDash } from '../../shared/nepalMoney'
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { TriangleAlert, Check } from 'lucide-react'
@@ -18,9 +19,9 @@ import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '..
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 import './MonthlyOwnerReport.css'
 
-const fmt = n => (n == null ? '—' : `NPR ${Math.round(n).toLocaleString('en-NP')}`)
+const fmt = nprOrDash
 const pct = n => (n == null ? '—' : `${n.toFixed(1)}%`)
-const num = n => (n == null ? '—' : Math.round(n).toLocaleString('en-NP'))
+const num = n => (n == null ? '—' : Math.round(n).toLocaleString('en-IN'))
 
 const sectionTitleStyle = {
   fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',

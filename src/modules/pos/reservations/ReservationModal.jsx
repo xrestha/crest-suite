@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -12,7 +13,7 @@ import { normalizePhone } from '../../../utils/phone'
 import { SOURCES, OCCASIONS, tableIdsOf } from './reservationStatus'
 import { durationFor } from './reservationSettings'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 
 // The instant a booking is for, from the BS-picked day (which the picker hands back as an AD
 // 'YYYY-MM-DD') and an 'HH:MM' clock time. Pinned to +05:45 explicitly: this is the bsDayBoundaryIso

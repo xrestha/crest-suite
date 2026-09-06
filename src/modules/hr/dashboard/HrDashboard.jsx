@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -7,8 +8,8 @@ import Tip from '../../../components/Tip'
 import { BS_MONTHS, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { useHrApprovalCounts } from './useHrApprovalCounts'
 
-const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
-const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-NP', { day: 'numeric', month: 'short' }) : '—'
+const fmt = nprInt
+const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
 
 function nextMonthLabel(bs_year, bs_month) {
   if (!bs_year || !bs_month) return '—'

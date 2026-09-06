@@ -154,7 +154,7 @@ export default function Calculator({ open, onClose }) {
               cursor: live !== null ? 'pointer' : 'default',
             }}
           >
-            {live === null ? (expr.trim() ? '—' : '') : (copied === live ? '✓ copied' : live.toLocaleString())}
+            {live === null ? (expr.trim() ? '—' : '') : (copied === live ? '✓ copied' : live.toLocaleString('en-IN'))}
           </div>
         </div>
 
@@ -195,7 +195,7 @@ export default function Calculator({ open, onClose }) {
                   title="Click to copy"
                   style={{ color: 'var(--theme-text1)', fontWeight: 600 }}
                 >
-                  {copied === t.result ? '✓' : t.result.toLocaleString()}
+                  {copied === t.result ? '✓' : t.result.toLocaleString('en-IN')}
                 </span>
               </div>
             ))}
@@ -206,7 +206,7 @@ export default function Calculator({ open, onClose }) {
         {tape.length > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: '1px solid var(--theme-border)', fontSize: 13 }}>
             <span style={{ flex: 1, color: 'var(--theme-text3)' }}>Sum of tape</span>
-            <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{tapeSum.toLocaleString()}</span>
+            <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{tapeSum.toLocaleString('en-IN')}</span>
             <button
               onClick={() => setTape([])}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--theme-text3)', fontSize: 12, fontFamily: 'inherit', padding: 0 }}

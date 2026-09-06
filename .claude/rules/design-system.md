@@ -588,6 +588,43 @@ follows. Where two timestamps come from *different clocks* (POS `opened_at` is t
 `closed_at` is the till's), show both exactly as recorded and flag an inversion past a minute's
 tolerance; never clamp and never swap.
 
+## Money is rendered by `nepalMoney.js`, and `en-NP` is not a Nepali locale (S683)
+
+`src/shared/nepalMoney.js` is the one place a number becomes a rupee figure a person reads:
+`npr(n)` → `NPR 12,48,650`, `nprInt(n)` → `12,48,650`, `npr2(n)` → `3,42,500.00`,
+`nprExact(n)`, `nprOrDash(n)` (a missing figure is `—`, never `NPR 0`), and `nprWords(n)` for the
+words beside the digits on a bill. Reach for one of these; do not write a local `fmt`.
+
+**The rule exists because 261 sites were wrong in a way nothing surfaced.** Every one formatted
+with the `en-NP` locale believing that made the number Nepali. It does not — resolve `en-NP`
+through Intl and the locale that comes back is plain `en`, so the product rendered `1,248,650`
+everywhere while `numberToWords.js` said "Three Lakh" beside it, and `DESIGN.md` derived the
+`.stat-grid` floor from "a Nepali-grouped `NPR 12,48,650`" that nothing rendered. A further 146
+sites passed **no locale at all** and rendered in the VIEWER's browser locale — `1.248.650` on a
+German laptop, on `/pricing`. `en-IN` is the locale whose Latin-digit grouping matches Nepal's
+(`ne-NP` groups correctly but prints Devanagari digits). Verified in the runtime, not assumed:
+`(1248650).toLocaleString('en-IN') === '12,48,650'`.
+
+Three things the sweep settled:
+
+- **A locale string that looks right is a claim, and this one had never once been run.** The
+  test is one line in Node. Ask the same of any `Intl` locale, `timeZone` or currency code before
+  trusting the name.
+- **`nepalMoney.test.js` reads the source** (the S675 technique): any `toLocaleString` or
+  `Intl.NumberFormat` naming `en-NP`/`en-US`, or any bare `toLocaleString()` not on a `new Date(`
+  construct, fails the suite. A clock render stays on `nepalTime()`; a bare `toLocaleString()` on
+  a Date is the one legitimate form, and there are three of them.
+- **The 52 local one-liners were replaced by aliases, not by call-site edits.** `const fmt =
+  nprInt` keeps every call site as it was and puts the definition in one file — 48 definitions
+  across 46 files, the same one-line change each. A shape with different rounding (`Number(v)`
+  under `maximumFractionDigits: 0` rounds half away from zero; `Math.round` rounds half up) was
+  locale-swapped and left local, because "precision over polish" includes not moving a paisa on
+  a negative variance for the sake of tidiness.
+
+Print surfaces group too: the POS bill and the shift slip formatted every figure with
+`.toFixed(2)`, so an IRD tax invoice read `342500.00` four lines under "Three Lakh Forty-Two
+Thousand Five Hundred only". Both now go through `npr2()`.
+
 ## A saved theme pins the user to the preset as it was, so a corrected token never ships (S620)
 
 `switchPreset` persists the **full** colours object to `localStorage`, and `loadSaved` merged

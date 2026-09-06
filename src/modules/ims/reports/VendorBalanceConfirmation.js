@@ -141,7 +141,7 @@ export default function VendorBalanceConfirmation() {
   const vendor = vendors.find(v => v.id === selectedVendorId)
   const isEmpty = !result || (result.schedule.length <= 1 && Math.abs(result.openingBalance) < 0.01)
 
-  const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const fmtBs = date => { const { year, month, day } = adToBs(date); return `${day} ${BS_MONTHS[month - 1]} ${year}` }
 
   // Plain text, WhatsApp's own markdown (*bold*) — no HTML, matches ReorderReport.js's convention.

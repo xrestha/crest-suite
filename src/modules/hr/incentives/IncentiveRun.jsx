@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -16,7 +17,7 @@ const SSF_CAP_MONTHLY = 100000
 const SSF_EMP_PCT     = 0.11
 const RETIREMENT_CAP  = 500000
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6,
@@ -194,7 +195,7 @@ export default function IncentiveRun() {
       confirmLabel: `${verb} Run`, busyLabel: `${verb === 'Finalize' ? 'Finalizing' : 'Reopening'}…`,
       danger: status !== 'finalized',
       body: status === 'finalized'
-        ? <p style={{ margin: 0 }}>{rows.length} incentive{rows.length === 1 ? '' : 's'}, NPR {total.toLocaleString('en-NP')} in total, lock as a permanent record and stop accepting edits. This can be undone with Reopen.</p>
+        ? <p style={{ margin: 0 }}>{rows.length} incentive{rows.length === 1 ? '' : 's'}, NPR {total.toLocaleString('en-IN')} in total, lock as a permanent record and stop accepting edits. This can be undone with Reopen.</p>
         : <p style={{ margin: 0 }}>The run goes back to draft: amounts and TDS become editable again, and it stops being a finalized record until it is finalized once more.</p>,
       run: async () => {
         setBusy(true); setMsg('')

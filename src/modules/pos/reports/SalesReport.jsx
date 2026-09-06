@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
@@ -19,7 +20,7 @@ import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { IDENTITY_BADGE, CLOSE_TYPE_BADGE } from '../posSignals'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 const WALKIN_KEY = '__CASH_SALES__'
 const THRESHOLD = 100000
 const GOLD  = '#c9a84c'

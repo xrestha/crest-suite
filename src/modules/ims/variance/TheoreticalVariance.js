@@ -259,8 +259,8 @@ export default function TheoreticalVariance() {
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
     : '—'
 
-  const fmtNPR  = v => `NPR ${Math.abs(Math.round(v)).toLocaleString('en-NP')}`
-  const fmtQty  = v => v === 0 ? '—' : v.toLocaleString('en-NP', { maximumFractionDigits: 3 })
+  const fmtNPR  = v => `NPR ${Math.abs(Math.round(v)).toLocaleString('en-IN')}`
+  const fmtQty  = v => v === 0 ? '—' : v.toLocaleString('en-IN', { maximumFractionDigits: 3 })
   const fmtPct  = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
 
   // Was a private ladder hardcoding ±5, so the tolerance the client configures in
@@ -435,7 +435,7 @@ export default function TheoreticalVariance() {
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtQty(theor)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtQty(actual)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: b.color }}>
-                        {variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toLocaleString('en-NP', { maximumFractionDigits: 3 })}`}
+                        {variance === 0 ? '—' : `${variance > 0 ? '+' : ''}${variance.toLocaleString('en-IN', { maximumFractionDigits: 3 })}`}
                       </td>
                       {/* The mark rides the PERCENTAGE, which is the figure the eye lands on when
                           scanning this column — it used to sit only on the rupee value, so the

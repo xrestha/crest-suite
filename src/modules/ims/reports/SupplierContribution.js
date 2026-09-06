@@ -36,7 +36,7 @@ import {
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
-const npr = n => `NPR ${(n || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`
+const npr = n => `NPR ${(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const pct = (part, whole) => (whole > 0 ? (part / whole) * 100 : 0)
 
 // How many detail lines an expanded supplier shows before offering the rest. The cap exists so an

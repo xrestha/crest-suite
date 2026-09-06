@@ -60,7 +60,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
 
   const billOptions = todaysBills.map(o => ({
     value: o.id,
-    label: `Bill #${o.invoice_no} — ${o.table_name || o.buyer_name || 'Takeaway'} — NPR ${Math.round(o.paid_amount || 0).toLocaleString()}`,
+    label: `Bill #${o.invoice_no} — ${o.table_name || o.buyer_name || 'Takeaway'} — NPR ${Math.round(o.paid_amount || 0).toLocaleString('en-IN')}`,
   }))
 
   async function handleSave() {

@@ -174,7 +174,7 @@ function TrendTooltipContent({ active, payload, label, big }) {
           : { glyph: gap > 0 ? '▲' : '▼', color: good ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }
         return (
           <p key={en.dataKey} style={{ margin: '4px 0 0' }}>
-            <span style={{ color: en.color }}>●</span> {en.name} : NPR {Math.round(value).toLocaleString()}
+            <span style={{ color: en.color }}>●</span> {en.name} : NPR {Math.round(value).toLocaleString('en-IN')}
             {mark && (
               <span style={{ color: mark.color }}>
                 {' '}{mark.glyph}{gapPct != null && ` ${gapPct < 1 ? gapPct.toFixed(1) : Math.round(gapPct)}%`}
@@ -1046,7 +1046,7 @@ export default function ClientDashboard() {
   // extra grid item the way a sibling element would).
   const categorySpendSummary = categorySpend.length === 0
     ? 'No purchase data for this period.'
-    : `Top spend category: ${categorySpend[0].name} at NPR ${categorySpend[0].value.toLocaleString('en-NP')}${categorySpendTotal > 0 ? ` (${Math.round((categorySpend[0].value / categorySpendTotal) * 100)}% of total purchases)` : ''}.`
+    : `Top spend category: ${categorySpend[0].name} at NPR ${categorySpend[0].value.toLocaleString('en-IN')}${categorySpendTotal > 0 ? ` (${Math.round((categorySpend[0].value / categorySpendTotal) * 100)}% of total purchases)` : ''}.`
   // Compact card window — 6 days back → 3 days ahead of today, sliced out of the full-month
   // `dailyTrend` array so the small glanceable card stays readable; the expanded modal (`big`
   // in renderChart below) uses the full `dailyTrend` array instead.
@@ -1061,10 +1061,10 @@ export default function ClientDashboard() {
   const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales || 0), 0)
   const dailyTrendSummary = dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
-    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-NP')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-NP')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}${salesTargetSnap ? ` Sales target locked on Day ${salesTargetSnap.capturedDay}: NPR ${salesTargetSnap.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}${purchTargetSnap ? ` Purchase target locked on Day ${purchTargetSnap.capturedDay}: NPR ${purchTargetSnap.projectedMonthEnd.toLocaleString('en-NP')}.` : ''}`
+    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTargetSnap ? ` Sales target locked on Day ${salesTargetSnap.capturedDay}: NPR ${salesTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTargetSnap ? ` Purchase target locked on Day ${purchTargetSnap.capturedDay}: NPR ${purchTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}`
   const topItemSpendSummary = topItemSpend.length === 0
     ? 'No purchase data for this period.'
-    : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-NP')}`).join(', ')}.`
+    : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-IN')}`).join(', ')}.`
   // ── Food Cost % trend: an unfinished month is not a data point ──────────────────────────────
   //
   // The KPI card above refuses to paint a verdict colour on the open period before SETTLE_DAY,
@@ -1171,7 +1171,7 @@ export default function ClientDashboard() {
   const laborBucketMissing = clientModules.hr && hrStats?.payroll > 0 && ohBuckets && !(ohBuckets.labor > 0)
   const costBreakdownSummary = costBreakdown.length === 0
     ? 'No cost data for this period.'
-    : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${Math.round(r.value).toLocaleString('en-NP')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.${laborBucketMissing ? ` Labor is not included — the Overheads page's Labor bucket is empty for this period, though HR payroll is NPR ${Math.round(hrStats.payroll).toLocaleString('en-NP')}.` : ''}`
+    : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${Math.round(r.value).toLocaleString('en-IN')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.${laborBucketMissing ? ` Labor is not included — the Overheads page's Labor bucket is empty for this period, though HR payroll is NPR ${Math.round(hrStats.payroll).toLocaleString('en-IN')}.` : ''}`
 
   // Shared mini card style + a11y — returns a spreadable props object so every KPI card gets
   // keyboard support (role/tabIndex/onKeyDown) and a visible focus ring for free, instead of each
@@ -1314,7 +1314,7 @@ export default function ClientDashboard() {
   })()
   const salesMixSummary = salesMixTotal <= 0
     ? 'No sales data for this period.'
-    : `Sales mix this period: ${salesMixCategories.map(c => `${c} NPR ${Math.round(salesMixBuckets[c]).toLocaleString('en-NP')} (${((salesMixBuckets[c] / salesMixTotal) * 100).toFixed(0)}%)`).join(', ')}.`
+    : `Sales mix this period: ${salesMixCategories.map(c => `${c} NPR ${Math.round(salesMixBuckets[c]).toLocaleString('en-IN')} (${((salesMixBuckets[c] / salesMixTotal) * 100).toFixed(0)}%)`).join(', ')}.`
   // Whether each half of the merged card has anything to offer at all — "available" means
   // entitled/configured to see that view, not "has data this period" (an empty period still gets
   // the tab, with its own inline empty state, same as the Spend by Category / Top Items tabs).
@@ -1330,7 +1330,7 @@ export default function ClientDashboard() {
     <div {...kpiCard(() => navigate('/purchases'))}>
       <div style={kpiLabelStyle}>Net Purchases</div>
       <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent-ink)' }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
       </div>
       <div style={kpiSubtextStyle}>Gross − returns · {periodLabel} →</div>
     </div>
@@ -1340,7 +1340,7 @@ export default function ClientDashboard() {
     <div {...kpiCard(() => navigate('/sales'))}>
       <div style={kpiLabelStyle}>Revenue</div>
       <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green-text)' }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`}
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
       </div>
       <div style={kpiSubtextStyle}>From sales entries →</div>
     </div>
@@ -1386,7 +1386,7 @@ export default function ClientDashboard() {
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : ohPct != null ? `${ohPct.toFixed(1)}%` : '—'}
       </div>
       <div style={kpiSubtextStyle}>
-        {stats?.overheadTotal ? `NPR ${stats.overheadTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })} total →` : 'No overhead data'}
+        {stats?.overheadTotal ? `NPR ${stats.overheadTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} total →` : 'No overhead data'}
       </div>
     </div>
   ) : (
@@ -1458,7 +1458,7 @@ export default function ClientDashboard() {
       <div style={{ ...kpiSubtextStyle, color: stats?.menuOpportunityTotal > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
         {loading ? 'under target →'
           : stats?.menuOpportunityTotal > 0
-            ? `NPR ${Math.round(stats.menuOpportunityTotal).toLocaleString('en-NP')}/mo opportunity →`
+            ? `NPR ${Math.round(stats.menuOpportunityTotal).toLocaleString('en-IN')}/mo opportunity →`
             : 'dishes under target →'}
       </div>
     </div>
@@ -1472,7 +1472,7 @@ export default function ClientDashboard() {
         <Tip text="Total NPR value of wastage recorded this period — qty wasted × unit rate per item." width={220}>Wastage Value</Tip>
       </div>
       <div style={{ ...kpiValueStyle(18), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-NP')}`}
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-IN')}`}
       </div>
       <div style={kpiSubtextStyle}>This period →</div>
     </div>
@@ -1521,7 +1521,7 @@ export default function ClientDashboard() {
         <div style={{ ...kpiValueStyle(18, 800), color: 'var(--theme-accent-ink)' }}>
           {!hrStats
             ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
-            : `NPR ${Math.round(hrStats.payroll).toLocaleString('en-NP')}`}
+            : `NPR ${Math.round(hrStats.payroll).toLocaleString('en-IN')}`}
         </div>
         <div style={kpiSubtextStyle}>Basic salary only</div>
       </div>
@@ -1580,7 +1580,7 @@ export default function ClientDashboard() {
     <div {...kpiCard(() => navigate('/pos/sales-report'))}>
       <div style={kpiLabelStyle}>Revenue</div>
       <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green-text)' }}>
-        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-NP')}`}
+        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-IN')}`}
       </div>
       <div style={kpiSubtextStyle}>{periodLabel} · billed →</div>
     </div>
@@ -1604,7 +1604,7 @@ export default function ClientDashboard() {
       <div {...kpiCard(null)}>
         <div style={kpiLabelStyle}>Avg Check</div>
         <div style={kpiValueStyle(18)}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-NP')}`}
+          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-IN')}`}
         </div>
         <div style={kpiSubtextStyle}>Revenue ÷ bills</div>
       </div>
@@ -1697,7 +1697,7 @@ export default function ClientDashboard() {
                   {panel(<>
                   {big && (
                     <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                      <StatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString()}`} />
+                      <StatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString('en-IN')}`} />
                       <StatPill label="Top category" value={`${categorySpend[0].name} (${((categorySpend[0].value / categorySpendTotal) * 100).toFixed(0)}%)`} color={CHART_COLORS[0]} />
                       <StatPill label="Categories" value={categorySpend.length} />
                     </div>
@@ -1719,7 +1719,7 @@ export default function ClientDashboard() {
                       </Pie>
                       <Tooltip
                         contentStyle={TOOLTIP_CHROME}
-                        formatter={(v, name) => [`NPR ${Number(v).toLocaleString()} (${((v / categorySpendTotal) * 100).toFixed(1)}%)`, name]}
+                        formatter={(v, name) => [`NPR ${Number(v).toLocaleString('en-IN')} (${((v / categorySpendTotal) * 100).toFixed(1)}%)`, name]}
                         labelFormatter={name => name}
                       />
                     </PieChart>
@@ -1730,7 +1730,7 @@ export default function ClientDashboard() {
                         <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                           <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
                           <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{entry.name}</span>
-                          {big && <span style={{ fontSize: 11, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString()}</span>}
+                          {big && <span style={{ fontSize: 11, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-IN')}</span>}
                           <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{categorySpendTotal > 0 ? `${((entry.value / categorySpendTotal) * 100).toFixed(0)}%` : ''}</span>
                         </div>
                       )
@@ -1761,7 +1761,7 @@ export default function ClientDashboard() {
                 {panel(<>
                 {big && (
                   <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                    <StatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString()}`} color={colors.accent} />
+                    <StatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString('en-IN')}`} color={colors.accent} />
                     <StatPill label="Top item" value={shown[0].fullName || shown[0].name} color={CHART_COLORS[0]} />
                     {purchaseTotal > 0 && <StatPill label="Share of net purchases" value={`${((shownTotal / purchaseTotal) * 100).toFixed(0)}%`} />}
                   </div>
@@ -1772,7 +1772,7 @@ export default function ClientDashboard() {
                     <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
                     <Tooltip
                       contentStyle={TOOLTIP_CHROME}
-                      formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString()}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
+                      formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString('en-IN')}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
                       labelFormatter={() => ''}
                     />
                     <Bar dataKey="value" fill={colors.accent} radius={[0, 3, 3, 0]} barSize={big ? 18 : 10} {...chartMotion()}>
@@ -1833,22 +1833,22 @@ export default function ClientDashboard() {
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '2px 16px' }}>
                 {salesProjection && (
                   <span>
-                    Projected month-end revenue: <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString()}</strong>
+                    Projected month-end revenue: <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {purchProjection && (
                   <span>
-                    Projected month-end purchases: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString()}</strong>
+                    Projected month-end purchases: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {salesTargetSnap && (
                   <span>
-                    Sales target (locked Day {salesTargetSnap.capturedDay}): <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesTargetSnap.projectedMonthEnd.toLocaleString()}</strong>
+                    Sales target (locked Day {salesTargetSnap.capturedDay}): <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {purchTargetSnap && (
                   <span>
-                    Purchase target (locked Day {purchTargetSnap.capturedDay}): <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchTargetSnap.projectedMonthEnd.toLocaleString()}</strong>
+                    Purchase target (locked Day {purchTargetSnap.capturedDay}): <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 <span style={{ color: 'var(--theme-text3)' }}>· trend estimate</span>
@@ -1944,12 +1944,12 @@ export default function ClientDashboard() {
               <>
                 {big && (
                   <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                    <StatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString()}`} color={DAILY_TREND_COLORS.purchases} />
-                    {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString()}`} color={DAILY_TREND_COLORS.sales} />}
-                    {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.sales} />}
-                    {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.purchases} />}
-                    {salesTargetSnap && <StatPill label="Sales target" value={`NPR ${salesTargetSnap.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.salesTarget} />}
-                    {purchTargetSnap && <StatPill label="Purchase target" value={`NPR ${purchTargetSnap.projectedMonthEnd.toLocaleString()}`} color={DAILY_TREND_COLORS.purchTarget} />}
+                    <StatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchases} />
+                    {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
+                    {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
+                    {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchases} />}
+                    {salesTargetSnap && <StatPill label="Sales target" value={`NPR ${salesTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.salesTarget} />}
+                    {purchTargetSnap && <StatPill label="Purchase target" value={`NPR ${purchTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchTarget} />}
                     <StatPill label="Period" value={periodLabel} />
                   </div>
                 )}
@@ -2018,8 +2018,8 @@ export default function ClientDashboard() {
                             const p = props.payload
                             const so = p.open ? ' so far' : ''
                             const lines = [`${v}%${p.open ? ' · part-month' : ''}`]
-                            if (p.purchases != null) lines.push(`Purchases${so}: NPR ${p.purchases.toLocaleString('en-NP')}`)
-                            if (p.revenue != null)   lines.push(`Revenue${so}: NPR ${p.revenue.toLocaleString('en-NP')}`)
+                            if (p.purchases != null) lines.push(`Purchases${so}: NPR ${p.purchases.toLocaleString('en-IN')}`)
+                            if (p.revenue != null)   lines.push(`Revenue${so}: NPR ${p.revenue.toLocaleString('en-IN')}`)
                             return [lines.join(' · '), 'Food Cost %']
                           }}
                         />
@@ -2068,7 +2068,7 @@ export default function ClientDashboard() {
                   </div>
                   {laborBucketMissing && (
                     <div style={{ fontSize: 11, marginTop: 4, color: 'var(--theme-amber-text)' }}>
-                      Labor not included — the Labor bucket on Overheads is empty this period, but HR payroll is NPR {Math.round(hrStats.payroll).toLocaleString('en-NP')}.
+                      Labor not included — the Labor bucket on Overheads is empty this period, but HR payroll is NPR {Math.round(hrStats.payroll).toLocaleString('en-IN')}.
                     </div>
                   )}
                   <p className="sr-only">{costBreakdownSummary}</p>
@@ -2110,7 +2110,7 @@ export default function ClientDashboard() {
                       {panel(<>
                       {big && (
                         <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                          <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`} />
+                          <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} />
                           {/* Matches the Food Cost slice, not colors.accent — on a preset where accent
                               isn't gold the pill would otherwise disagree with the slice it summarizes. */}
                           {fcPct != null && <StatPill label="Food cost %" value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
@@ -2137,7 +2137,7 @@ export default function ClientDashboard() {
                           </Pie>
                           <Tooltip
                             contentStyle={TOOLTIP_CHROME}
-                            formatter={(v, name) => [`NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
+                            formatter={(v, name) => [`NPR ${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })} (${(v / costBreakdownTotal * 100).toFixed(1)}%)`, name]}
                           />
                         </PieChart>
                       </ResponsiveContainer>
@@ -2146,7 +2146,7 @@ export default function ClientDashboard() {
                           <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                             <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
                             <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
-                              {entry.name} <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</span>
+                              {entry.name} <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
                               {' '}<span style={{ color: 'var(--theme-text3)' }}>({(entry.value / costBreakdownTotal * 100).toFixed(1)}%)</span>
                             </span>
                           </div>
@@ -2183,7 +2183,7 @@ export default function ClientDashboard() {
                     {panel(<>
                     {big && (
                       <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-                        <StatPill label="Total revenue" value={`NPR ${Math.round(salesMixTotal).toLocaleString('en-NP')}`} />
+                        <StatPill label="Total revenue" value={`NPR ${Math.round(salesMixTotal).toLocaleString('en-IN')}`} />
                         <StatPill label="Top category" value={`${salesMixCategories[0]} (${((salesMixBuckets[salesMixCategories[0]] / salesMixTotal) * 100).toFixed(0)}%)`} color={salesMixColorOf(salesMixCategories[0])} />
                         <StatPill label="Categories" value={salesMixCategories.length} />
                       </div>
@@ -2205,7 +2205,7 @@ export default function ClientDashboard() {
                         </Pie>
                         <Tooltip
                           contentStyle={TOOLTIP_CHROME}
-                          formatter={(v, name) => [`NPR ${Math.round(v).toLocaleString('en-NP')} (${((v / salesMixTotal) * 100).toFixed(1)}%)`, name]}
+                          formatter={(v, name) => [`NPR ${Math.round(v).toLocaleString('en-IN')} (${((v / salesMixTotal) * 100).toFixed(1)}%)`, name]}
                         />
                       </PieChart>
                     </ResponsiveContainer>
@@ -2219,7 +2219,7 @@ export default function ClientDashboard() {
                               <span style={{ width: 8, height: 8, borderRadius: '50%', background: salesMixColorOf(cat), flexShrink: 0 }} />
                               {cat}
                             </span>
-                            <span style={{ color: 'var(--theme-text2)' }}>NPR {Math.round(amount).toLocaleString('en-NP')} · {pct.toFixed(0)}%</span>
+                            <span style={{ color: 'var(--theme-text2)' }}>NPR {Math.round(amount).toLocaleString('en-IN')} · {pct.toFixed(0)}%</span>
                           </div>
                         )
                       })}
@@ -2265,8 +2265,8 @@ export default function ClientDashboard() {
                   {topVariance.map((row, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid var(--theme-bg)' }}>
                       <td style={{ padding: '5px 0', fontWeight: 600, color: 'var(--theme-text1)' }}>{row.name}</td>
-                      <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--theme-red-text)' }}>+{Number(row.variance.toFixed(1)).toLocaleString()} {row.uom}</td>
-                      <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
+                      <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--theme-red-text)' }}>+{Number(row.variance.toFixed(1)).toLocaleString('en-IN')} {row.uom}</td>
+                      <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString('en-IN')}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2303,7 +2303,7 @@ export default function ClientDashboard() {
                     </div>
                     <div style={{ textAlign: 'right', marginLeft: 12, flexShrink: 0 }}>
                       <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}><ArrowDown size={11} aria-hidden="true" /> {item.shortfall} {item.uom}</div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString('en-IN')}</div>
                     </div>
                   </div>
                 ))}

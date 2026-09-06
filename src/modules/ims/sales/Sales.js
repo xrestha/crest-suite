@@ -605,7 +605,7 @@ export default function Sales() {
               it), and it is the denominator of average spend per head — so an owner dividing
               revenue by this got roughly revenue-per-dish and called it their average check. */}
           <div className="stat-label"><Tip text="Total number of menu items sold this period — dishes, not guests. Guest counts (covers) come from POS bills, not from sales entry." width={260}>Items Sold</Tip></div>
-          <div className="stat-value">{totalQty.toLocaleString()}</div>
+          <div className="stat-value">{totalQty.toLocaleString('en-IN')}</div>
           <div className="stat-sub">across all menu items</div>
         </div>
         <div className="stat-card">
@@ -616,7 +616,7 @@ export default function Sales() {
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total ex-VAT revenue for the period = sum of (Qty Sold × Selling Price) across all items. Used as the denominator for Food Cost %." width={280}>Period Revenue</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 18 }}>
-            NPR {totalRevenue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+            NPR {totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </div>
           <div className="stat-sub">Excl. VAT</div>
         </div>
@@ -765,7 +765,7 @@ export default function Sales() {
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
                             <td><span className="badge badge-yellow">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString()}` : '—'}
+                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               <input
@@ -783,7 +783,7 @@ export default function Sales() {
                               />
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
-                              {rev > 0 ? `NPR ${rev.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                              {rev > 0 ? `NPR ${rev.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                             </td>
                           </tr>
                         )
@@ -890,11 +890,11 @@ export default function Sales() {
                     const totRev = totGross - totDiscount
                     return (
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, marginBottom: 12, fontSize: 13, flexWrap: 'wrap' }}>
-                        <span style={{ color: 'var(--theme-text2)' }}>Total qty sold ({formatBsDay(selectedDay, selectedPeriod?.bs_month)}): <strong style={{ color: 'var(--theme-text1)' }}>{totQty.toLocaleString()}</strong></span>
+                        <span style={{ color: 'var(--theme-text2)' }}>Total qty sold ({formatBsDay(selectedDay, selectedPeriod?.bs_month)}): <strong style={{ color: 'var(--theme-text1)' }}>{totQty.toLocaleString('en-IN')}</strong></span>
                         {totDiscount > 0 && (
-                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {totDiscount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                          <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {totDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
                         )}
-                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue: <strong style={{ color: 'var(--theme-accent-ink)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
+                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue: <strong style={{ color: 'var(--theme-accent-ink)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
                       </div>
                     )
                   })()}
@@ -925,7 +925,7 @@ export default function Sales() {
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
                             <td><span className="badge badge-yellow">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString()}` : '—'}
+                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               <input
@@ -958,7 +958,7 @@ export default function Sales() {
                               />
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: rev > 0 ? 600 : 400 }}>
-                              {qty > 0 || disc > 0 ? `NPR ${rev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                              {qty > 0 || disc > 0 ? `NPR ${rev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                           </tr>
                         )
@@ -1012,7 +1012,7 @@ export default function Sales() {
             const colTotal = (day) => colTotals[day] || 0
             const rowTotal = (recipeId) => rowTotals[recipeId] || 0
 
-            const fmtQty = (n) => n > 0 ? n.toLocaleString() : <span style={{ color: 'var(--theme-border)' }}>—</span>
+            const fmtQty = (n) => n > 0 ? n.toLocaleString('en-IN') : <span style={{ color: 'var(--theme-border)' }}>—</span>
 
             return (
               <div className="card">
@@ -1057,7 +1057,7 @@ export default function Sales() {
                               </td>
                             )}
                             <td style={{ textAlign: 'right', fontWeight: 700, color: total > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
-                              {total > 0 ? total.toLocaleString() : '—'}
+                              {total > 0 ? total.toLocaleString('en-IN') : '—'}
                             </td>
                           </tr>
                         )
@@ -1066,15 +1066,15 @@ export default function Sales() {
                         <td style={{ position: 'sticky', left: 0, background: 'var(--theme-bg)', color: 'var(--theme-text2)', fontSize: 12 }} colSpan={2}>DAY TOTAL</td>
                         {activeDays.map(d => (
                           <td key={d} style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
-                            {colTotal(d) > 0 ? colTotal(d).toLocaleString() : '—'}
+                            {colTotal(d) > 0 ? colTotal(d).toLocaleString('en-IN') : '—'}
                           </td>
                         ))}
                         {hasBulk && (
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
-                            {bulkColTotal > 0 ? bulkColTotal.toLocaleString() : '—'}
+                            {bulkColTotal > 0 ? bulkColTotal.toLocaleString('en-IN') : '—'}
                           </td>
                         )}
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 14 }}>{grandTotal.toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 14 }}>{grandTotal.toLocaleString('en-IN')}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1147,16 +1147,16 @@ export default function Sales() {
                             <td style={{ fontWeight: 600, color: sold === 0 ? 'var(--theme-text3)' : 'var(--theme-text1)' }}>{recipe.name}</td>
                             <td><span className="badge badge-yellow">{recipe.category}</span></td>
                             <td style={{ textAlign: 'right', color: sold > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
-                              {sold > 0 ? sold.toLocaleString() : '—'}
+                              {sold > 0 ? sold.toLocaleString('en-IN') : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString()}` : '—'}
+                              {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toLocaleString('en-IN')}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: disc > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>
-                              {disc > 0 ? `NPR ${disc.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                              {disc > 0 ? `NPR ${disc.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right', color: rev > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', fontWeight: 600 }}>
-                              {rev > 0 ? `NPR ${rev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                              {rev > 0 ? `NPR ${rev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               {revPct > 0 ? (
@@ -1173,13 +1173,13 @@ export default function Sales() {
                       })}
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                         <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{footerLabel}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{sumTotalQty.toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{sumTotalQty.toLocaleString('en-IN')}</td>
                         <td></td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>
-                          {sumTotalDiscount > 0 ? `NPR ${sumTotalDiscount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                          {sumTotalDiscount > 0 ? `NPR ${sumTotalDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
-                          NPR {sumTotalRev.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          NPR {sumTotalRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                         <td></td>
                       </tr>

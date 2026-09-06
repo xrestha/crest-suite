@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -44,7 +45,7 @@ function cellsFrom(start, count) {
   })
 }
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 
 // A stored date goes through adToBsSafe, not adToBs: outside the verified BS table adToBs does not
 // throw, it returns a confident wrong date, and a leave request is exactly the kind of arbitrary

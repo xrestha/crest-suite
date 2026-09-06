@@ -306,7 +306,7 @@ export default function Overheads() {
   }
 
   function fmt(val) {
-    return `NPR ${Number(val || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`
+    return `NPR ${Number(val || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
   }
 
   // P&L rows
@@ -563,7 +563,7 @@ export default function Overheads() {
             <div>
               <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>P&L Summary</h3>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text3)' }}>
-                Revenue: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(covers).toLocaleString()} covers &nbsp;·&nbsp; {period?.label || '—'}
+                Revenue: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(covers).toLocaleString('en-IN')} covers &nbsp;·&nbsp; {period?.label || '—'}
               </p>
             </div>
             <Tip text="Food cost uses net purchases ÷ revenue (purchase-based). For COGS-based food cost, see Monthly Summary." width={240}>
@@ -763,7 +763,7 @@ export default function Overheads() {
                           </td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.category}</td>
                           <td style={{ color: 'var(--theme-text2)', maxWidth: 220 }}>{item.description || '—'}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{item.amount.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{item.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{item.pctOfTotal.toFixed(1)}%</td>
                           {revenue > 0 && (
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
@@ -784,7 +784,7 @@ export default function Overheads() {
                   <tfoot>
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                       <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10, fontSize: 12 }}>TOTAL FIXED COSTS</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 10 }}>{totalFixed.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 10 }}>{totalFixed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 10 }}>100%</td>
                       {revenue > 0 && (
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10 }}>
@@ -820,7 +820,7 @@ export default function Overheads() {
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Need (Covers)</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{breakEvenCovers ? breakEvenCovers.toLocaleString() : '—'}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{breakEvenCovers ? breakEvenCovers.toLocaleString('en-IN') : '—'}</div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Revenue</div>
@@ -828,7 +828,7 @@ export default function Overheads() {
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Covers</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{Math.round(covers).toLocaleString()}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{Math.round(covers).toLocaleString('en-IN')}</div>
               </div>
             </div>
             <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700,

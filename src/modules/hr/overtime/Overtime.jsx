@@ -296,7 +296,7 @@ export default function Overtime() {
             </Tip>
           </div>
           <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>
-            {approvedAmt > 0 ? `NPR ${approvedAmt.toLocaleString('en-NP')}` : '—'}
+            {approvedAmt > 0 ? `NPR ${approvedAmt.toLocaleString('en-IN')}` : '—'}
           </div>
           <div className="stat-sub">approved entries</div>
         </div>
@@ -369,7 +369,7 @@ export default function Overtime() {
                         {otLabel(e.ot_type, e.ot_hours)}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)', fontSize: 13 }}>
-                        {(() => { const a = otAmt(e, emp); return a !== null ? `NPR ${a.toLocaleString('en-NP')}` : <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>—</span> })()}
+                        {(() => { const a = otAmt(e, emp); return a !== null ? `NPR ${a.toLocaleString('en-IN')}` : <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>—</span> })()}
                       </td>
                       <td>
                         {/* Which multiplier applies is a CATEGORY, not a status — brass, so amber can keep

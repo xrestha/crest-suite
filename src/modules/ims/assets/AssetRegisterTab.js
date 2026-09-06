@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -12,8 +13,8 @@ import AssetFormModal from './AssetFormModal'
 import AssetCategoryModal from './AssetCategoryModal'
 import AssetCard from './AssetCard'
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
-const fmtDate = d => d ? new Date(d).toLocaleDateString('en-NP', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+const fmt = nprInt
+const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
 
 export default function AssetRegisterTab({ categories, assets, onReload }) {
   const { clientId, isAdmin } = useAuth()

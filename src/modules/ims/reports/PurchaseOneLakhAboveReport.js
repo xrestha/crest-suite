@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -11,7 +12,7 @@ import { buildVendorSummary } from './VatReport'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { Navigate } from 'react-router-dom'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 const THRESHOLD = 100000
 
 export default function PurchaseOneLakhAboveReport() {

@@ -234,7 +234,7 @@ export default function ShrinkageReport() {
     })
     .sort((a, b) => b.totalShrinkValue - a.totalShrinkValue)
 
-  function fmt(v) { return `NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })}` }
+  function fmt(v) { return `NPR ${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -356,7 +356,7 @@ export default function ShrinkageReport() {
                     </td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.coveredPeriods}</td>
                     <td style={{ textAlign: 'right', color: row.shrinkCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
-                      {row.avgShrinkQty > 0 ? Number(row.avgShrinkQty.toFixed(3)).toLocaleString() : '—'}
+                      {row.avgShrinkQty > 0 ? Number(row.avgShrinkQty.toFixed(3)).toLocaleString('en-IN') : '—'}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: row.totalShrinkValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
                       {row.totalShrinkValue > 0 ? fmt(row.totalShrinkValue) : '—'}

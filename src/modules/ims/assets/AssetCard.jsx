@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useEffect, useState } from 'react'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
@@ -7,8 +8,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { computeDisposalGainLoss } from './depreciationCompute'
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
-const fmtDate = d => d ? new Date(d).toLocaleDateString('en-NP', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+const fmt = nprInt
+const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
 
 // Full detail view for one asset: header stats, complete posted depreciation schedule history,
 // and a Dispose/Write Off action that freezes further depreciation and computes gain/loss.

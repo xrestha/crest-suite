@@ -136,7 +136,7 @@ export default function QtyInput({
             color: preview === null ? 'var(--theme-red)' : 'var(--theme-accent)',
           }}
         >
-          {preview === null ? '⌫ incomplete' : `= ${preview.toLocaleString()}`}
+          {preview === null ? '⌫ incomplete' : `= ${preview.toLocaleString('en-IN')}`}
         </span>
       )}
     </span>

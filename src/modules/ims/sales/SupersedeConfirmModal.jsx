@@ -45,7 +45,7 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
               <tr key={e.recipeId}>
                 <td style={{ fontWeight: 600 }}>{recipeNames[e.recipeId] || 'Unknown item'}</td>
                 <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>{e.count}</td>
-                <td style={{ textAlign: 'right' }}>{e.qty.toLocaleString()}</td>
+                <td style={{ textAlign: 'right' }}>{e.qty.toLocaleString('en-IN')}</td>
                 {isBulk && (
                   <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--theme-text3)' }}>
                     {e.days.join(', ')}

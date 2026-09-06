@@ -95,7 +95,7 @@ export default function WastageReport() {
 
   function fmt(n) {
     if (!n) return '—'
-    return 'NPR ' + Number(n).toLocaleString('en-NP', { maximumFractionDigits: 0 })
+    return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
   }
 
   async function exportExcel() {
@@ -194,7 +194,7 @@ export default function WastageReport() {
                 {reasons.map(r => (
                   <tr key={r.reason}>
                     <td><span className="badge badge-yellow">{r.reason}</span></td>
-                    <td style={{ textAlign: 'right' }}>{Number(r.qty).toLocaleString()}</td>
+                    <td style={{ textAlign: 'right' }}>{Number(r.qty).toLocaleString('en-IN')}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(r.value)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{totalValue ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '—'}</td>
                   </tr>
@@ -243,7 +243,7 @@ export default function WastageReport() {
                   <td><strong>{r.name}</strong></td>
                   <td>{r.category}</td>
                   <td>{r.uom}</td>
-                  <td style={{ textAlign: 'right' }}>{Number(r.qty).toLocaleString()}</td>
+                  <td style={{ textAlign: 'right' }}>{Number(r.qty).toLocaleString('en-IN')}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(r.value)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                     {totalValue ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '—'}

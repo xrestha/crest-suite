@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -7,8 +8,8 @@ import { calcGratuity } from './gratuityCompute'
 import { fetchSsfStartMap, ssfMonthsFrom } from './ssfEnrolment'
 import ReportLoadError from '../../../components/ReportLoadError'
 
-const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
-const fmtD = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-NP', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+const fmt = nprInt
+const fmtD = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
 
 // Format service duration as "X yr Y mo"
 function fmtService(months) {

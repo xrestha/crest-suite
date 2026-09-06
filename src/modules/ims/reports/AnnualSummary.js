@@ -149,7 +149,7 @@ export default function AnnualSummary() {
     setLoading(false)
   }
 
-  function fmt(v) { return `NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })}` }
+  function fmt(v) { return `NPR ${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
 
   // Client-configured thresholds, same as every other FC% surface (src/shared/imsFormulas.js).
   const fcColor = pct => fcBand(pct, settings).color

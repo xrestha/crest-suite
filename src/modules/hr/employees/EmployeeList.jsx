@@ -39,7 +39,7 @@ function retireInfo(dateStr) {
 }
 
 function fmtDate(dateStr) {
-  return dateStr ? new Date(dateStr).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+  return dateStr ? new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
 }
 
 // Three separate failures on this page each need the same page-level red card, so it lives here
@@ -357,7 +357,7 @@ export default function EmployeeList() {
             </Tip>
           </div>
           <div className="stat-value" style={{ fontSize: 16 }}>
-            NPR {Math.round(payrollAmt).toLocaleString('en-NP')}
+            NPR {Math.round(payrollAmt).toLocaleString('en-IN')}
           </div>
           <div className="stat-sub">basic salary only</div>
         </div>
@@ -527,7 +527,7 @@ export default function EmployeeList() {
                       })()}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
-                      {parseFloat(e.basic_salary || 0).toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                      {parseFloat(e.basic_salary || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span style={{

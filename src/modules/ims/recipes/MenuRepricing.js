@@ -138,7 +138,7 @@ export default function MenuRepricing() {
 
   function fmtNPR(n) {
     if (!n && n !== 0) return '—'
-    return 'NPR ' + Number(n).toLocaleString('en-NP', { maximumFractionDigits: 0 })
+    return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
   }
 
   async function exportExcel() {
@@ -289,7 +289,7 @@ export default function MenuRepricing() {
                   <td style={{ color: 'var(--theme-text2)' }}>{i + 1}</td>
                   <td><strong>{r.name}</strong></td>
                   <td>{r.category}</td>
-                  <td style={{ textAlign: 'right' }}>{r.qty ? Number(r.qty).toLocaleString() : '—'}</td>
+                  <td style={{ textAlign: 'right' }}>{r.qty ? Number(r.qty).toLocaleString('en-IN') : '—'}</td>
                   <td style={{ textAlign: 'right' }}>NPR {r.cost.toFixed(2)}</td>
                   <td style={{ textAlign: 'right' }}>NPR {r.price.toFixed(0)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(r.currentFcPct) }} title={fcLabel(r.currentFcPct)}>{r.currentFcPct.toFixed(1)}% {fcMark(r.currentFcPct)}</td>

@@ -552,7 +552,7 @@ export default function OutstandingPayables() {
     load(activeTab)
   }
 
-  function fmt(v) { return `NPR ${Number(v).toLocaleString('en-NP', { maximumFractionDigits: 0 })}` }
+  function fmt(v) { return `NPR ${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
 
   const AGING_LABELS = ['Current', '31–60 days', '61–90 days', '90+ days']
 
@@ -884,8 +884,8 @@ export default function OutstandingPayables() {
                                         {b.entries.map(e => (
                                           <tr key={e.id}>
                                             <td style={{ padding: '4px 16px 4px 0', color: 'var(--theme-text1)' }}>{e.items?.name}</td>
-                                            <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.qty).toLocaleString()} {e.items?.uom}</td>
-                                            <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.rate).toLocaleString()}</td>
+                                            <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.qty).toLocaleString('en-IN')} {e.items?.uom}</td>
+                                            <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.rate).toLocaleString('en-IN')}</td>
                                             <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(e.value)}</td>
                                           </tr>
                                         ))}

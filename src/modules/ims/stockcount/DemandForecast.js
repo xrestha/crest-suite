@@ -1,3 +1,4 @@
+import { nprOrDash } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -13,7 +14,7 @@ import SuiteGate from '../../../components/SuiteGate'
 import { Navigate } from 'react-router-dom'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const fmtNpr = n => n == null ? '—' : `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = nprOrDash
 
 export default function DemandForecast() {
   const { clientId, hasImsAccess } = useAuth()

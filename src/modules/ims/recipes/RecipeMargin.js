@@ -128,7 +128,7 @@ export default function RecipeMargin() {
 
   function fmtNPR(n) {
     if (!n && n !== 0) return '—'
-    return 'NPR ' + Number(n).toLocaleString('en-NP', { maximumFractionDigits: 0 })
+    return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
   }
 
   async function exportExcel() {
@@ -270,7 +270,7 @@ export default function RecipeMargin() {
                   <td style={{ textAlign: 'right', fontWeight: 600, color: r.margin >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     NPR {r.margin.toFixed(2)}
                   </td>
-                  <td style={{ textAlign: 'right' }}>{r.qty ? Number(r.qty).toLocaleString() : '—'}</td>
+                  <td style={{ textAlign: 'right' }}>{r.qty ? Number(r.qty).toLocaleString('en-IN') : '—'}</td>
                   <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>
                     {r.totalContribution ? fmtNPR(r.totalContribution) : '—'}
                   </td>
@@ -283,7 +283,7 @@ export default function RecipeMargin() {
             <tfoot>
               <tr style={{ fontWeight: 700 }}>
                 <td colSpan={6}>Total ({withSales.length} recipes sold)</td>
-                <td style={{ textAlign: 'right' }}>{withSales.reduce((s, r) => s + r.qty, 0).toLocaleString()}</td>
+                <td style={{ textAlign: 'right' }}>{withSales.reduce((s, r) => s + r.qty, 0).toLocaleString('en-IN')}</td>
                 <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(totalContrib)}</td>
                 <td style={{ textAlign: 'right', color: fcColor(avgFcPct) }} title={fcLabel(avgFcPct)}>{avgFcPct.toFixed(1)}% {fcMark(avgFcPct)}</td>
               </tr>

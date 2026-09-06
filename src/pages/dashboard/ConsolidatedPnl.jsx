@@ -22,6 +22,7 @@
 // Defaults to the most recent CLOSED period: COGS subtracts closing stock, so an open period
 // (closing = 0 for every item) paints a structurally wrong figure — the same rule Variance and
 // Shrinkage follow. An open period can still be selected; it renders flagged as provisional.
+import { npr } from '../../shared/nepalMoney'
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
@@ -40,7 +41,6 @@ import { printWithTitle } from '../../utils/printTitle'
 import { computeUsed, COGS_FORMULA } from '../../shared/imsFormulas'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 
-const npr = n => `NPR ${Math.round(n || 0).toLocaleString('en-NP')}`
 const pctOf = (part, whole) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : '—')
 
 // One definition of the statement's lines, shared by the single-outlet table, the group matrix

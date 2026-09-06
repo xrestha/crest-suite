@@ -1,10 +1,11 @@
+import { npr } from '../../shared/nepalMoney'
 // Auto-generated Executive Summary prose for the Monthly Owner/Manager Report — the "written"
 // part of the hybrid report format (one narrative paragraph up top, pure data tables below).
 // Pure function: no React, no Supabase — takes a computeMonthlyReport() snapshot + a period
 // label, returns a short paragraph. Same threshold bands as the report page's table coloring
 // (Food Cost 35/45, Labor Cost 37/45, Prime Cost 60/65) so the prose and the numbers never
 // disagree about what counts as "healthy."
-const fmt = n => `NPR ${Math.round(n || 0).toLocaleString('en-NP')}`
+const fmt = npr
 
 export function buildExecutiveSummary(snapshot, periodLabel) {
   const { combined, ims, hr } = snapshot

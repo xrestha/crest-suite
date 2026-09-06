@@ -274,11 +274,11 @@ export default function AdminDashboardOverview() {
             <div style={statCard()}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Est. Monthly Revenue</div>
               <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--theme-accent-ink)', lineHeight: 1.1 }}>
-                NPR {estMRR.toLocaleString('en-NP')}
+                NPR {estMRR.toLocaleString('en-IN')}
               </div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
                 {payingCount} paying · ARR{' '}
-                <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estARR.toLocaleString('en-NP')}</span>
+                <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estARR.toLocaleString('en-IN')}</span>
               </div>
             </div>
 
@@ -325,7 +325,7 @@ export default function AdminDashboardOverview() {
                 </button>
               )}
               <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                MRR: <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estMRR.toLocaleString('en-NP')}</span>
+                MRR: <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estMRR.toLocaleString('en-IN')}</span>
                 {' '}· {payingCount} paying
               </span>
             </div>
@@ -484,7 +484,7 @@ export default function AdminDashboardOverview() {
                         <td style={{ textAlign: 'right', fontWeight: mrr > 0 && c.is_active ? 700 : 400, color: mrr > 0 && c.is_active ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
                           {mrr > 0 ? (
                             <>
-                              NPR {mrr.toLocaleString('en-NP')}
+                              NPR {mrr.toLocaleString('en-IN')}
                               <span style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--theme-text3)', marginTop: 2 }}>
                                 {c.is_active ? (c.billing_cycle === 'annual' ? 'Annual' : 'Monthly') : 'inactive — not billed'}
                               </span>
@@ -575,10 +575,10 @@ export default function AdminDashboardOverview() {
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                         <td colSpan={3} style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--theme-text2)', fontSize: 12 }}>
                           {narrowed ? 'Shown' : 'Total'} — {shownPaying} paying · {shownActive.length - shownPaying} non-paying
-                          {narrowed && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · platform NPR {estMRR.toLocaleString('en-NP')}</span>}
+                          {narrowed && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · platform NPR {estMRR.toLocaleString('en-IN')}</span>}
                         </td>
                         <td style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 15 }}>
-                          NPR {shownMRR.toLocaleString('en-NP')}
+                          NPR {shownMRR.toLocaleString('en-IN')}
                         </td>
                         <td colSpan={5} />
                       </tr>

@@ -318,12 +318,12 @@ export default function StockMovements() {
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total batches across every sub-recipe below — a rough measure of how much prep work this period's sales required." width={260}>Batches Used</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple-text)' }}>{subBatchTotal.toLocaleString('en-NP', { maximumFractionDigits: 1 })}</div>
+            <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple-text)' }}>{subBatchTotal.toLocaleString('en-IN', { maximumFractionDigits: 1 })}</div>
             <div className="stat-sub">summed across all sub-recipes</div>
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Batches used × cost per batch. This is a slice of the raw-item value on the Raw Items tab, not an addition to it — the same ingredients, grouped by the prep item they went through." width={280}>Value</Tip></div>
-            <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {subValueTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+            <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {subValueTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
             <div className="stat-sub">at ingredient cost</div>
           </div>
         </div>
@@ -336,12 +336,12 @@ export default function StockMovements() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Sum of qty depleted × per-unit rate across every movement below — the food-cost value POS activity consumed this period." width={260}>Value Depleted</Tip></div>
-          <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {totalValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">POS sale + comp, at cost</div>
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Same calc, restricted to POS Comp rows — the food-cost value of dishes given away complimentary, with zero revenue collected." width={260}>Comp Value</Tip></div>
-          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple-text)' }}>NPR {compValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-purple-text)' }}>NPR {compValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">value given away</div>
         </div>
         <div className="stat-card">
@@ -488,8 +488,8 @@ export default function StockMovements() {
 
         {showRecon && (
           <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber-text)' }}>
-            These figures imply NPR {usage.derivedItemValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })} of raw ingredients, but the ledger recorded NPR {ledgerTotalValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
-            {' '}({reconGap > 0 ? '+' : '−'}NPR {Math.abs(reconGap).toLocaleString('en-NP', { maximumFractionDigits: 0 })} difference).
+            These figures imply NPR {usage.derivedItemValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of raw ingredients, but the ledger recorded NPR {ledgerTotalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            {' '}({reconGap > 0 ? '+' : '−'}NPR {Math.abs(reconGap).toLocaleString('en-IN', { maximumFractionDigits: 0 })} difference).
             {' '}Usual causes: a recipe edited after a sale — the ledger froze each depletion at the ingredients in force when it was sold, while this view re-walks the recipe as it stands today, so the two part ways permanently for anything sold before the edit; manual Sales Entry only started depleting stock on 2026-07-30 and earlier saves were never backfilled; POS credit notes reverse revenue but never restore stock; and recipes with no ingredients linked deplete nothing (see the banner above when that applies).
           </div>
         )}
@@ -520,11 +520,11 @@ export default function StockMovements() {
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>⚙ {r.name}</td>
                     <td style={{ color: 'var(--theme-text2)' }}>{r.yieldQty ? `${r.yieldQty} ${r.yieldUom}` : '—'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
-                      {r.qty.toLocaleString('en-NP', { maximumFractionDigits: 3 })} <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>{r.yieldUom}</span>
+                      {r.qty.toLocaleString('en-IN', { maximumFractionDigits: 3 })} <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>{r.yieldUom}</span>
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-purple-text)' }}>{r.batches.toLocaleString('en-NP', { maximumFractionDigits: 2 })}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.batchCost.toLocaleString('en-NP', { maximumFractionDigits: 2 })}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-purple-text)' }}>{r.batches.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.batchCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                   </tr>
                 ))}
               </tbody>
@@ -538,15 +538,15 @@ export default function StockMovements() {
                       dash instead (same rule as Purchases' Qty total across mixed units). */}
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12, fontSize: 13 }}>
                     {subQtyIsComparable && subRows.length > 0
-                      ? `${subRows.reduce((s, r) => s + r.qty, 0).toLocaleString('en-NP', { maximumFractionDigits: 2 })} ${subRows[0].yieldUom}`
+                      ? `${subRows.reduce((s, r) => s + r.qty, 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ${subRows[0].yieldUom}`
                       : '—'}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-purple-text)', paddingTop: 12, fontSize: 13 }}>
-                    {subBatchTotal.toLocaleString('en-NP', { maximumFractionDigits: 2 })}
+                    {subBatchTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </td>
                   <td style={{ paddingTop: 12 }} />
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12, fontSize: 14 }}>
-                    {subValueTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                    {subValueTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </td>
                 </tr>
               </tfoot>
@@ -605,7 +605,7 @@ export default function StockMovements() {
                       ) : '—'}
                     </td>
                     <td style={{ color: 'var(--theme-text2)' }}>{(r.order && staffNames[r.order.closed_by]) || '—'}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.value.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                   </tr>
                 ))}
               </tbody>
@@ -622,7 +622,7 @@ export default function StockMovements() {
                   <td style={{ textAlign: 'right', color: 'var(--theme-text3)', paddingTop: 12 }}>—</td>
                   <td colSpan={3} style={{ paddingTop: 12 }} />
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12, fontSize: 14 }}>
-                    {totalValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                    {totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </td>
                 </tr>
               </tfoot>

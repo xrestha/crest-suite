@@ -245,7 +245,7 @@ export default function FifoReport() {
             <Tip text="Total NPR value of stock that is expired or expiring soon. This is the potential loss if not used or returned in time." width={240}>Value at Risk</Tip>
           </div>
           <div className="stat-value" style={{ fontSize: 18, color: totalAtRisk > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-            NPR {totalAtRisk.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+            NPR {totalAtRisk.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </div>
         </div>
       </div>
@@ -295,13 +295,13 @@ export default function FifoReport() {
                       <tr key={row.id} style={{ background: row.flag === 'expired' ? 'rgba(248,113,113,0.04)' : row.flag === 'warning' ? 'rgba(201,168,76,0.04)' : 'transparent' }}>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.itemName}</td>
                         <td><span className="badge badge-yellow">{row.category}</span></td>
-                        <td style={{ textAlign: 'right' }}>{Number(row.qty).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right' }}>{Number(row.qty).toLocaleString('en-IN')}</td>
                         <td style={{ textAlign: 'right', color: row.returnedQty > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>
-                          {row.returnedQty > 0 ? `−${Number(row.returnedQty).toLocaleString()}` : '—'}
+                          {row.returnedQty > 0 ? `−${Number(row.returnedQty).toLocaleString('en-IN')}` : '—'}
                         </td>
                         <td style={{ color: 'var(--theme-text2)' }}>{row.uom}</td>
-                        <td style={{ textAlign: 'right' }}>{Number(row.rate).toLocaleString()}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>NPR {Number(row.value.toFixed(0)).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right' }}>{Number(row.rate).toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>NPR {Number(row.value.toFixed(0)).toLocaleString('en-IN')}</td>
                         <td style={{ color: fs.color }}>{row.expiryDate}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: fs.color }}>
                           {row.daysUntilExpiry < 0 ? `${Math.abs(row.daysUntilExpiry)}d ago` : `${row.daysUntilExpiry}d`}

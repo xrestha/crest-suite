@@ -14,7 +14,7 @@ function fmtBs(date) {
   return `${day} ${BS_MONTHS[month - 1]} ${year}`
 }
 
-const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 // Same "− " (en dash + space) convention used everywhere a negative can appear in this letter —
 // a bare locale minus sign reads inconsistently next to the styled amounts around it.
 const fmtSigned = n => `${n < -0.005 ? '− ' : ''}${fmt(Math.abs(n))}`
@@ -74,7 +74,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
         <p style={{ margin: '0 0 10px' }}>Dear Sir/Madam,</p>
         <p style={{ margin: '0 0 10px' }}>
           As per our books of accounts, your {isAdvance ? 'advance / credit balance' : 'balance payable'} as of{' '}
-          <strong>{fmtBs(fyEnd)} (BS)</strong> is <strong>NPR {roundedClosingAbs.toLocaleString('en-NP')}</strong> ({numberToWordsNpr(roundedClosingAbs)} only).
+          <strong>{fmtBs(fyEnd)} (BS)</strong> is <strong>NPR {roundedClosingAbs.toLocaleString('en-IN')}</strong> ({numberToWordsNpr(roundedClosingAbs)} only).
         </p>
         <p style={{ margin: '0 0 10px' }}>
           Opening Balance NPR {fmt(openingBalance)} + Purchases NPR {fmt(totals.totalPurchasesFy)} − Payments NPR {fmt(totals.totalPaymentsFy)} − Returns NPR {fmt(totals.totalReturnsFy)} = {balanceLabel} NPR {fmt(Math.abs(closingBalance))}.

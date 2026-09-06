@@ -130,7 +130,7 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
           {/* A computed figure, never typed into. The inline `color: text2` this used to carry was a
               per-site guess at a disabled treatment that did not exist; `.form-select:disabled` in
               Layout.css owns it now, and keeps the number readable rather than dimming it. */}
-          <input id="assetf-f6" className="form-input" value={totalCost.toLocaleString('en-NP')} disabled />
+          <input id="assetf-f6" className="form-input" value={totalCost.toLocaleString('en-IN')} disabled />
         </div>
 
         <div className="form-field">

@@ -1,3 +1,4 @@
+import { npr, npr2 } from '../../../shared/nepalMoney'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -27,9 +28,9 @@ function dispPurch(baseQty, item) {
   const cf = parseFloat(item.conversion_factor) || 1
   if (cf > 1 && item.purchase_unit) {
     const puQty = (baseQty / cf).toLocaleString(undefined, { maximumFractionDigits: 3 })
-    return `${puQty} ${item.purchase_unit} (${Number(baseQty).toLocaleString()} ${item.uom})`
+    return `${puQty} ${item.purchase_unit} (${Number(baseQty).toLocaleString('en-IN')} ${item.uom})`
   }
-  return Number(baseQty).toLocaleString()
+  return Number(baseQty).toLocaleString('en-IN')
 }
 
 export default function Stock() {
@@ -795,7 +796,7 @@ export default function Stock() {
                 staffMeals: rows.reduce((s, r) => s + (r.staffMeals || 0), 0),
                 cogs:       rows.reduce((s, r) => s + r.cogs,               0),
               }
-              const fmt = v => v.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+              const fmt = npr2
               const thStyle = { textAlign: 'right', whiteSpace: 'nowrap' }
               const tdStyle = (color) => ({ textAlign: 'right', color: color || 'var(--theme-text1)', whiteSpace: 'nowrap' })
               return (
@@ -926,7 +927,7 @@ export default function Stock() {
                     // COGS as "—" while the rollup above still added its negative COGS in.
                     const hasData  = row.opening !== '' || row.closing !== '' || purchases[item.id] || wastQty > 0 || staffQty > 0
                     const fmtVal   = (qty) => rate > 0 && qty !== 0
-                      ? `NPR ${Math.round(qty * rate).toLocaleString('en-NP')}`
+                      ? `NPR ${Math.round(qty * rate).toLocaleString('en-IN')}`
                       : '—'
                     // No-activity rows are muted by WEIGHT and the anchor cells' colour, never by row
                     // opacity — DESIGN.md's own Don't: opacity multiplies through every cell's text
@@ -941,17 +942,17 @@ export default function Stock() {
                         <td style={{ fontWeight: hasData ? 600 : 400, color: hasData ? 'var(--theme-text1)' : 'var(--theme-text3)', position: 'sticky', left: 0, zIndex: 1, background: stickyBg }}>{item.name}</td>
                         <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
                         <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
-                        <td style={{ textAlign: 'right' }}>{row.opening !== '' ? Number(row.opening).toLocaleString() : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>{row.opening !== '' ? Number(row.opening).toLocaleString('en-IN') : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{purchQty > 0 ? dispPurch(purchQty, item) : '—'}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{returned > 0 ? `−${Number(returned).toLocaleString()}` : '—'}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{wastQty > 0 ? Number(wastQty).toLocaleString() : '—'}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>{staffQty > 0 ? Number(staffQty).toLocaleString() : '—'}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{row.closing !== '' ? Number(row.closing).toLocaleString() : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{returned > 0 ? `−${Number(returned).toLocaleString('en-IN')}` : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{wastQty > 0 ? Number(wastQty).toLocaleString('en-IN') : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>{staffQty > 0 ? Number(staffQty).toLocaleString('en-IN') : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{row.closing !== '' ? Number(row.closing).toLocaleString('en-IN') : '—'}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: used < 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
-                          {hasData ? Number(used).toLocaleString() : '—'}
+                          {hasData ? Number(used).toLocaleString('en-IN') : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                          {requisitioned[item.id] ? Number(requisitioned[item.id]).toLocaleString() : '—'}
+                          {requisitioned[item.id] ? Number(requisitioned[item.id]).toLocaleString('en-IN') : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)' }}>{fmtVal(openQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtVal(purchQty)}</td>
@@ -1030,7 +1031,7 @@ export default function Stock() {
                           <td style={{ textAlign: 'center', color: 'var(--theme-accent-ink)' }}>{flagged.has(item.id) ? '★' : ''}</td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.name}</td>
                           <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
-                          <td style={{ textAlign: 'right' }}>{Number(getSystemRefQty(item.id)).toLocaleString()}</td>
+                          <td style={{ textAlign: 'right' }}>{Number(getSystemRefQty(item.id)).toLocaleString('en-IN')}</td>
                           <td className="print-sheet-blank"></td>
                         </tr>
                       ))}
@@ -1056,7 +1057,7 @@ export default function Stock() {
         const perDay = {}
         dailyRows.forEach(r => { perDay[r.bs_day] = (perDay[r.bs_day] || 0) + valOf(r) })
         const monthValue = Object.values(perDay).reduce((s, v) => s + v, 0)
-        const fmtNpr = n => `NPR ${Math.round(n).toLocaleString('en-NP')}`
+        const fmtNpr = npr
         return (
           <div>
             <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
@@ -1141,7 +1142,7 @@ export default function Stock() {
                       <tr key={r.id}>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.items?.name || '—'}</td>
                         <td><span className="badge badge-yellow">{r.reason || 'Other'}</span></td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{Number(r.qty).toLocaleString()} {r.items?.uom || ''}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{Number(r.qty).toLocaleString('en-IN')} {r.items?.uom || ''}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>{valOf(r) > 0 ? fmtNpr(valOf(r)) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>
                           {!isLocked && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteDailyWastage(r.id)} disabled={wBusy}>Del</button>}
@@ -1153,7 +1154,7 @@ export default function Stock() {
                     <tfoot>
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                         <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{formatBsDay(wDay, selectedPeriod?.bs_month)} total</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>{Number(dayQty).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>{Number(dayQty).toLocaleString('en-IN')}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', fontSize: 14, paddingTop: 12 }}>{fmtNpr(dayValue)}</td>
                         <td></td>
                       </tr>
@@ -1273,7 +1274,7 @@ export default function Stock() {
                           <span className="mobile-stock-ref">Purchased: {dispPurch(Number(purchases[item.id]), item)}</span>
                         )}
                         {returned > 0 && (
-                          <span className="mobile-stock-ref" style={{ color: 'var(--theme-red-text)' }}>Returned: −{Number(returned).toLocaleString()}</span>
+                          <span className="mobile-stock-ref" style={{ color: 'var(--theme-red-text)' }}>Returned: −{Number(returned).toLocaleString('en-IN')}</span>
                         )}
                       </div>
                       <div className="mobile-stock-card-input-row">
@@ -1288,7 +1289,7 @@ export default function Stock() {
                         />
                         <span className="mobile-stock-unit">{item.uom}</span>
                         {lineValue != null && (
-                          <span className="mobile-stock-value">NPR {lineValue.toLocaleString('en-NP')}</span>
+                          <span className="mobile-stock-value">NPR {lineValue.toLocaleString('en-IN')}</span>
                         )}
                         {saving[item.id] && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>…</span>}
                       </div>
@@ -1299,8 +1300,8 @@ export default function Stock() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', marginTop: 10, background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontWeight: 700 }}>
                 <span style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Total — {visible.length} item{visible.length !== 1 ? 's' : ''}</span>
                 <span style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-                  <span style={{ color: 'var(--theme-text1)', fontSize: 13 }}>{totalQty > 0 ? Number(totalQty).toLocaleString() : '—'}</span>
-                  <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>{totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-NP')}` : '—'}</span>
+                  <span style={{ color: 'var(--theme-text1)', fontSize: 13 }}>{totalQty > 0 ? Number(totalQty).toLocaleString('en-IN') : '—'}</span>
+                  <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>{totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}</span>
                 </span>
               </div>
               </>
@@ -1359,13 +1360,13 @@ export default function Stock() {
                                 />
                               </td>
                               <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 13 }}>
-                                {purchases[item.id] ? `${Number(purchases[item.id]).toLocaleString()} ${item.uom}` : '—'}
+                                {purchases[item.id] ? `${Number(purchases[item.id]).toLocaleString('en-IN')} ${item.uom}` : '—'}
                               </td>
                               <td style={{ textAlign: 'right', color: returned > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)', fontSize: 13 }}>
-                                {returned > 0 ? `−${Number(returned).toLocaleString()} ${item.uom}` : '—'}
+                                {returned > 0 ? `−${Number(returned).toLocaleString('en-IN')} ${item.uom}` : '—'}
                               </td>
                               <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 13, fontWeight: lineValue ? 600 : 400 }}>
-                                {lineValue != null ? `NPR ${lineValue.toLocaleString('en-NP')}` : '—'}
+                                {lineValue != null ? `NPR ${lineValue.toLocaleString('en-IN')}` : '—'}
                               </td>
                               <td style={{ width: 40, textAlign: 'center' }}>
                                 {isSaving && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>…</span>}
@@ -1380,11 +1381,11 @@ export default function Stock() {
                             Total — {visible.length} item{visible.length !== 1 ? 's' : ''}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>
-                            {totalQty > 0 ? Number(totalQty).toLocaleString() : '—'}
+                            {totalQty > 0 ? Number(totalQty).toLocaleString('en-IN') : '—'}
                           </td>
                           <td colSpan={2}></td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
-                            {totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-NP')}` : '—'}
+                            {totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}
                           </td>
                           <td></td>
                         </tr>

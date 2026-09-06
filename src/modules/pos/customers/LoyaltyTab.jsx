@@ -294,7 +294,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: bal > 0 ? 700 : 400, color: bal > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text3)' }}>{bal}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                            {bal > 0 ? `NPR ${pointsValue(bal, pointValue).toLocaleString('en-NP')}` : '—'}
+                            {bal > 0 ? `NPR ${pointsValue(bal, pointValue).toLocaleString('en-IN')}` : '—'}
                           </td>
                         </tr>
                       )

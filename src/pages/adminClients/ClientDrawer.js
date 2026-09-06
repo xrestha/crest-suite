@@ -592,7 +592,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         onProgress: (label, done, total) => setBackupProgress(`${label} (${done}/${total})`),
       })
       setLastBackupAt(new Date().toISOString())
-      setBackupMsg(`ok:${manifest.totalRows.toLocaleString()} rows written to ${location}${method === 'download' ? ' (downloaded — file it manually)' : ''}`)
+      setBackupMsg(`ok:${manifest.totalRows.toLocaleString('en-IN')} rows written to ${location}${method === 'download' ? ' (downloaded — file it manually)' : ''}`)
       onClientUpdated()
       return { ok: true, method }
     } catch (err) {
@@ -671,7 +671,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         }
       }
 
-      setRestoreMsg(`ok:Restored ${result.inserted.toLocaleString()} rows across ${result.tables} tables.${note}` +
+      setRestoreMsg(`ok:Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}` +
         (result.skipped.length ? ` Skipped: ${result.skipped.join(', ')}.` : ''))
       onClientUpdated()
     } catch (err) {
@@ -1260,7 +1260,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         <div>{opt.label}</div>
                         {opt.on && (
                           <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>
-                            +NPR {(billingCycle === 'annual' ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-NP')}/mo
+                            +NPR {(billingCycle === 'annual' ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-IN')}/mo
                           </div>
                         )}
                       </button>
@@ -1413,11 +1413,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                            silently raise the IMS tier). */
                         <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', border: `1px solid ${moduleTint(mod.key, 25)}`, background: moduleTint(mod.key, 7), marginBottom: 12 }}>
                           <div style={{ fontSize: 15, fontWeight: 700, color: accentInk }}>
-                            NPR {(billingCycle === 'annual' ? flatPricing.annual : flatPricing.monthly).toLocaleString('en-NP')}/mo
+                            NPR {(billingCycle === 'annual' ? flatPricing.annual : flatPricing.monthly).toLocaleString('en-IN')}/mo
                           </div>
                           {billingCycle === 'annual' && (
                             <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 2 }}>
-                              NPR {flatPricing.annual.toLocaleString('en-NP')}/mo × 12 = NPR {(flatPricing.annual * 12).toLocaleString('en-NP')}/yr
+                              NPR {flatPricing.annual.toLocaleString('en-IN')}/mo × 12 = NPR {(flatPricing.annual * 12).toLocaleString('en-IN')}/yr
                             </div>
                           )}
                         </div>
@@ -1436,7 +1436,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                                   color: active ? MODULE_INK.ims : 'var(--theme-text3)',
                                 }}>
                                   <div>{p.label}</div>
-                                  <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>NPR {price.toLocaleString('en-NP')}/mo</div>
+                                  <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>NPR {price.toLocaleString('en-IN')}/mo</div>
                                 </button>
                               )
                             })}
@@ -1445,8 +1445,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                             {(() => {
                               const tier = IMS_TIERS.find(p => p.key === mod.plan) || IMS_TIERS[0]
                               return billingCycle === 'annual'
-                                ? `Annual · NPR ${tier.annual.toLocaleString('en-NP')}/mo × 12 = NPR ${(tier.annual * 12).toLocaleString('en-NP')}/yr`
-                                : `Monthly · NPR ${tier.monthly.toLocaleString('en-NP')}/mo`
+                                ? `Annual · NPR ${tier.annual.toLocaleString('en-IN')}/mo × 12 = NPR ${(tier.annual * 12).toLocaleString('en-IN')}/yr`
+                                : `Monthly · NPR ${tier.monthly.toLocaleString('en-IN')}/mo`
                             })()}
                           </p>
                         </>

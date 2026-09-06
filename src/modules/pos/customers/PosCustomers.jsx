@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { Fragment, useState, useEffect, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -15,7 +16,7 @@ import { errorText } from '../../../shared/errorText'
 // Cheque + Bank Transfer are settlement-only (how a receivable is remitted) — not counter-payment
 // methods, so they're not in PAYMENT_METHODS. Foodmandu/Pathao typically remit by Bank Transfer.
 const SETTLE_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay', 'Cheque', 'Bank Transfer']
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 
 function invoiceLabel(order, vatReg, prefix) {
   if (order.invoice_no == null) return `#${order.order_no ?? ''}`

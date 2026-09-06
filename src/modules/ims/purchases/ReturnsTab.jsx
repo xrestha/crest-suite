@@ -157,13 +157,13 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                     {linked && (
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>
                         Original: {cf > 1
-                          ? `${(linked.qty / cf).toLocaleString(undefined, { maximumFractionDigits: 3 })} ${linked.items.purchase_unit} (${Number(linked.qty).toLocaleString()} ${linked.items?.uom})`
-                          : `${Number(linked.qty).toLocaleString()} ${linked.items?.uom}`}
+                          ? `${(linked.qty / cf).toLocaleString(undefined, { maximumFractionDigits: 3 })} ${linked.items.purchase_unit} (${Number(linked.qty).toLocaleString('en-IN')} ${linked.items?.uom})`
+                          : `${Number(linked.qty).toLocaleString('en-IN')} ${linked.items?.uom}`}
                       </div>
                     )}
                     {cf > 1 && returnForm.qty && (
                       <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 2 }}>
-                        = {(parseFloat(returnForm.qty) * cf).toLocaleString()} {linked?.items?.uom}
+                        = {(parseFloat(returnForm.qty) * cf).toLocaleString('en-IN')} {linked?.items?.uom}
                       </div>
                     )}
                   </>
@@ -195,7 +195,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                 <span>Rate: <strong style={{ color: 'var(--theme-text1)' }}>NPR {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}/{displayRateUnit}</strong></span>
                 <span>Vendor: <strong style={{ color: 'var(--theme-text1)' }}>{linked.vendors?.name || '—'}</strong></span>
                 <span>Payment: <strong style={{ color: 'var(--theme-text1)' }}>{linked.payment_method || 'Cash'}</strong></span>
-                {retValue > 0 && <span>Return Value: <strong style={{ color: 'var(--theme-red-text)' }}>−NPR {retValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</strong></span>}
+                {retValue > 0 && <span>Return Value: <strong style={{ color: 'var(--theme-red-text)' }}>−NPR {retValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>}
                 <span style={{ color: 'var(--theme-text3)', fontSize: 11 }}>Rate, vendor & payment inherited from original purchase</span>
               </div>
             )
@@ -251,7 +251,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                         <>
                           <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>
                             −{Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
-                            {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{Number(ret.qty).toLocaleString()} {ret.items?.uom}</div>}
+                            {cf > 1 && <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{Number(ret.qty).toLocaleString('en-IN')} {ret.items?.uom}</div>}
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                           <td style={{ textAlign: 'right' }}>{Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
@@ -259,7 +259,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                       )
                     })()}
                     <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 700 }}>
-                      −NPR {(ret.qty * ret.rate).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      −NPR {(ret.qty * ret.rate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td>
                       <span className={`badge ${ret.payment_method === 'Cash' ? 'badge-green' : ret.payment_method === 'Credit' ? 'badge-red' : 'badge-purple'}`}>
@@ -280,7 +280,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td colSpan={6} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total Returns</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', fontSize: 14, paddingTop: 12 }}>
-                    −NPR {returnTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    −NPR {returnTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td colSpan={3}></td>
                 </tr>

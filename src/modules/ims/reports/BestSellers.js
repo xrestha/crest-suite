@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -125,7 +126,7 @@ export default function BestSellers() {
     value: sortBy === 'qty' ? r.qty : sortBy === 'margin' ? parseFloat(r.margin.toFixed(1)) : Math.round(r.revenue),
   }))
 
-  const fmt = (n) => `NPR ${Math.round(n).toLocaleString('en-NP')}`
+  const fmt = npr
   const periodLabel = (p) => p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : ''
 
   // Top-10 chart footer stat — shown inside the ChartCard modal too, so the "how does the top 10
@@ -208,7 +209,7 @@ export default function BestSellers() {
                   <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{fmt(top10Revenue)}</strong> · <span style={{ color: GOLD, fontWeight: 600 }}>{((top10Revenue / totalRevenueAll) * 100).toFixed(0)}%</span> of total revenue</>
                 )}
                 {sortBy === 'qty' && totalQtyAll > 0 && (
-                  <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{Math.round(top10Qty).toLocaleString()} units</strong> · <span style={{ color: GOLD, fontWeight: 600 }}>{((top10Qty / totalQtyAll) * 100).toFixed(0)}%</span> of total volume sold</>
+                  <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{Math.round(top10Qty).toLocaleString('en-IN')} units</strong> · <span style={{ color: GOLD, fontWeight: 600 }}>{((top10Qty / totalQtyAll) * 100).toFixed(0)}%</span> of total volume sold</>
                 )}
                 {sortBy === 'margin' && (
                   <>Top 10 average margin <strong style={{ color: 'var(--theme-text1)' }}>{top10AvgMargin.toFixed(1)}%</strong> vs <span style={{ color: MUTED }}>{overallAvgMargin.toFixed(1)}%</span> across all {rows.length} items</>
@@ -257,7 +258,7 @@ export default function BestSellers() {
                           {r.name}
                           <div style={{ fontSize: 11, color: MUTED, fontWeight: 400 }}>{r.category}</div>
                         </td>
-                        <td style={{ textAlign: 'right', color: MUTED }}>{Math.round(r.qty).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', color: MUTED }}>{Math.round(r.qty).toLocaleString('en-IN')}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.revenue)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: r.margin >= 60 ? GREEN : r.margin >= 40 ? GOLD : RED }}>
                           {r.margin.toFixed(1)}%
@@ -291,7 +292,7 @@ export default function BestSellers() {
                           {r.name}
                           <div style={{ fontSize: 11, color: MUTED, fontWeight: 400 }}>{r.category}</div>
                         </td>
-                        <td style={{ textAlign: 'right', color: MUTED }}>{Math.round(r.qty).toLocaleString()}</td>
+                        <td style={{ textAlign: 'right', color: MUTED }}>{Math.round(r.qty).toLocaleString('en-IN')}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.revenue)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: r.margin >= 60 ? GREEN : r.margin >= 40 ? GOLD : RED }}>
                           {r.margin.toFixed(1)}%

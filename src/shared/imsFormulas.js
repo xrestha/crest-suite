@@ -159,7 +159,7 @@ export function varianceBand(pct, value, settings, opts = {}) {
   if (value != null && isFinite(value) && Math.abs(value) < floorValue) {
     return {
       key: 'immaterial',
-      label: `Immaterial (under NPR ${floorValue.toLocaleString('en-NP')})`,
+      label: `Immaterial (under NPR ${floorValue.toLocaleString('en-IN')})`,
       mark: '≈', color: 'var(--theme-text3)', tolerancePct, floorValue,
     }
   }

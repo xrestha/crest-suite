@@ -23,7 +23,7 @@ export function fmtRate(v) {
   const n = parseFloat(v)
   if (!isFinite(n) || n <= 0) return '—'
   if (n < 0.01) return parseFloat(n.toFixed(6)).toString()
-  return n.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 // Bill-level totals: taxable/non-taxable base, discount, VAT, grand total. Discount is spread

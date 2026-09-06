@@ -212,7 +212,7 @@ export default function PeriodComparison() {
 
   function fmt(n) {
     if (!n) return '—'
-    return 'NPR ' + Number(n).toLocaleString('en-NP', { maximumFractionDigits: 0 })
+    return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
   }
 
   function trendIcon(curr, prev) {
@@ -443,7 +443,7 @@ export default function PeriodComparison() {
                     <RTooltip
                       contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11 }}
                       labelStyle={{ color: colors.text1 }}
-                      formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
+                      formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString('en-IN')}`, name]}
                     />
                     {big ? (
                       <Area type="monotone" dataKey="purchases" name="Purchases" stroke={colors.accent} strokeWidth={2.5} fill="url(#pcPurchasesFill)" connectNulls dot={{ r: 3, fill: colors.accent, strokeWidth: 0 }} activeDot={{ r: 5, fill: colors.accent }} {...chartMotion()} />
@@ -503,8 +503,8 @@ export default function PeriodComparison() {
                     formatter={(v, _n, props) => {
                       const p = props.payload
                       const lines = [`${v}%`]
-                      if (p.purchases != null) lines.push(`Purchases: NPR ${p.purchases.toLocaleString('en-NP')}`)
-                      if (p.revenue != null)   lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-NP')}`)
+                      if (p.purchases != null) lines.push(`Purchases: NPR ${p.purchases.toLocaleString('en-IN')}`)
+                      if (p.revenue != null)   lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-IN')}`)
                       return [lines.join(' · '), 'Food Cost %']
                     }}
                   />
@@ -539,7 +539,7 @@ export default function PeriodComparison() {
                   <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={36} />
                   <RTooltip
                     contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}
-                    formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString()}`, name]}
+                    formatter={(value, name) => [`NPR ${Math.round(Number(value)).toLocaleString('en-IN')}`, name]}
                   />
                   {categories.map(c => (
                     <Bar key={c} dataKey={c} name={c} stackId="rev" fill={colorOf(c)} radius={c === categories[categories.length - 1] ? [3, 3, 0, 0] : 0} {...chartMotion()} />

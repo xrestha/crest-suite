@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -6,7 +7,7 @@ import Tip from '../../../components/Tip'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, PAY_BASES, EMPLOYEE_STATUS_COLORS as STATUS_COLORS } from '../payrollConstants'
 import PayForm from './PayForm'
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 const payUnitOf = emp => (PAY_BASES.find(p => p.key === (emp.pay_basis || 'monthly')) || PAY_BASES[0]).unit
 
 function calcAmount(comp, basic) {

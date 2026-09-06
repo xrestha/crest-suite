@@ -185,7 +185,7 @@ export default function Purchases() {
     askConfirm({
       title: 'Delete this bill?',
       confirmLabel: 'Delete Bill', danger: true, busyLabel: 'Deleting…',
-      body: <p style={{ margin: 0 }}>{n} item{n !== 1 ? 's' : ''}, NPR {Math.round(groupTotal).toLocaleString('en-NP')}, come off this period's purchases and the vendor's payable. Any returns linked to these entries are unlinked and stay on the returns list. This cannot be undone.</p>,
+      body: <p style={{ margin: 0 }}>{n} item{n !== 1 ? 's' : ''}, NPR {Math.round(groupTotal).toLocaleString('en-IN')}, come off this period's purchases and the vendor's payable. Any returns linked to these entries are unlinked and stay on the returns list. This cannot be undone.</p>,
       run: () => deleteGroupNow(groupId, groupEntries),
     })
   }
@@ -452,18 +452,18 @@ export default function Purchases() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Goods value at qty × rate, before bill discounts and excluding VAT. Matches what Stock Count and COGS consume; the payable figure including VAT is in the table footer." width={270}>Gross Purchases (ex-VAT)</Tip></div>
-          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {grossTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Returns</div>
           <div className="stat-value" style={{ fontSize: 16, color: returnTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
-            {returnTotal > 0 ? `−NPR ${returnTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+            {returnTotal > 0 ? `−NPR ${returnTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
           </div>
           <div className="stat-sub">{returns.length} entr{returns.length !== 1 ? 'ies' : 'y'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Net Purchases</div>
-          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {netTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {netTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Period Status</div>
@@ -575,7 +575,7 @@ export default function Purchases() {
               )}
               {filterVendor !== 'all' && (
                 <span style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
-                  Vendor Total: NPR {vendorTotal.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  Vendor Total: NPR {vendorTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               )}
               {(filterDay !== 'all' || filterItem !== 'all' || filterVendor !== 'all' || filterPayment !== 'all' || filterRef !== '') && (
@@ -718,7 +718,7 @@ export default function Purchases() {
                               </td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                 {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
-                                {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
+                                {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString('en-IN')} {entry.items?.uom}</div>}
                               </td>
                               <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -726,9 +726,9 @@ export default function Purchases() {
                                 {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>NPR {Number(entry.rate).toFixed(4)}/{entry.items?.uom}</div>}
                               </td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
-                                {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                                {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
                                 {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
@@ -757,9 +757,9 @@ export default function Purchases() {
                             </td>
                             <td colSpan={3}></td>
                             <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 13, verticalAlign: 'middle' }}>
-                              {groupGrand.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                              {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                             </td>
                             <td></td>
                             {actionsCell}
@@ -781,7 +781,7 @@ export default function Purchases() {
                                   <>
                                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                       {Number(displayQty).toLocaleString(undefined, { maximumFractionDigits: 3 })}
-                                      {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString()} {entry.items?.uom}</div>}
+                                      {cf > 1 && <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{Number(entry.qty).toLocaleString('en-IN')} {entry.items?.uom}</div>}
                                     </td>
                                     <td style={{ color: 'var(--theme-text2)' }}>{displayUnit}</td>
                                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -792,7 +792,7 @@ export default function Purchases() {
                                 )
                               })()}
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--theme-accent-ink)' }}>
-                                {(entry.qty * entry.rate).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {(entry.qty * entry.rate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
                                 {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
@@ -813,7 +813,7 @@ export default function Purchases() {
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12, paddingTop: 12 }}>{filteredQtyUnit}</td>
                       <td></td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
-                        NPR {filteredValue.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        NPR {filteredValue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td colSpan={2}></td>
                     </tr>
@@ -822,7 +822,7 @@ export default function Purchases() {
                         <Tip text="The same bills after their discounts and with VAT added — what actually leaves the bank. This is the figure the Bill Total column adds up to." width={270}>Total payable (incl. VAT)</Tip>
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14 }}>
-                        NPR {filteredPayable.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        NPR {filteredPayable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td colSpan={2}></td>
                     </tr>
@@ -972,12 +972,12 @@ export default function Purchases() {
                                 const qty = dayMatrix[item.id]?.[d]
                                 return (
                                   <td key={d} style={{ ...tdStyle, color: qty ? 'var(--theme-text1)' : 'var(--theme-border)', background: qty ? 'rgba(201,168,76,0.06)' : undefined, fontWeight: qty ? 600 : 400 }}>
-                                    {qty ? qty.toLocaleString('en-NP', { maximumFractionDigits: 2 }) : '·'}
+                                    {qty ? qty.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '·'}
                                   </td>
                                 )
                               })}
                               <td style={{ ...tdStyle, color: 'var(--theme-accent-ink)', fontWeight: 700, borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, background: rowBg }}>
-                                {total.toLocaleString('en-NP', { maximumFractionDigits: 2 })}
+                                {total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                               </td>
                             </tr>
                           )

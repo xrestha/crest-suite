@@ -15,7 +15,7 @@ import { Navigate } from 'react-router-dom'
 const VAT_RATE = 0.13
 
 function fmtNPR(n) {
-  return `NPR ${Number(n).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 // entries: the purchase_entries rows to aggregate (caller decides which — VatReport wants only
@@ -255,17 +255,17 @@ export default function VatReport() {
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total net purchases this period (non-VAT + VAT-inclusive net of returns)." width={240}>Total Net Purchases</Tip></div>
-          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {Math.round(totalNet).toLocaleString('en-NP')}</div>
+          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {Math.round(totalNet).toLocaleString('en-IN')}</div>
           <div className="stat-sub">{entries.length} purchase entries</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Non-VAT Purchases</div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(nonVatTotal).toLocaleString('en-NP')}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(nonVatTotal).toLocaleString('en-IN')}</div>
           <div className="stat-sub">{nonVatEntries.length} entries</div>
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Gross VAT-inclusive purchases minus VAT-inclusive returns (incl. VAT)." width={260}>Net VAT Purchases</Tip></div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-amber-text)' }}>NPR {Math.round(netVatTotal).toLocaleString('en-NP')}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-amber-text)' }}>NPR {Math.round(netVatTotal).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
             {vatEntries.length} purchases
             {vatReturns.length > 0 && <span style={{ color: 'var(--theme-red-text)' }}> − {vatReturns.length} returns</span>}
@@ -273,7 +273,7 @@ export default function VatReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Net input VAT claimable = (Gross VAT purchases − VAT returns) × 13%. Use this for your IRD VAT return." width={270}>Net Input VAT (13%)</Tip></div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-green-text)' }}>NPR {Math.round(netVatAmt).toLocaleString('en-NP')}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-green-text)' }}>NPR {Math.round(netVatAmt).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
             {vatReturns.length > 0
               ? <span>Gross {fmtNPR(vatAmtGross)} − {fmtNPR(retVatTotal)}</span>
@@ -282,7 +282,7 @@ export default function VatReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Net cost basis excluding VAT — actual expense recorded for accounting." width={230}>Net (ex-VAT)</Tip></div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(nonVatTotal + netVatBase).toLocaleString('en-NP')}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(nonVatTotal + netVatBase).toLocaleString('en-IN')}</div>
           <div className="stat-sub">Actual cost basis</div>
         </div>
       </div>

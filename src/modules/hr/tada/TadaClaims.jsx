@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { Fragment, useState, useEffect, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -17,7 +18,7 @@ import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount } from './tadaShared'
 import { TADA_REQUEST_STATUS } from '../payrollConstants'
 
-const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 const fmtD = iso => {
   if (!iso) return '—'
   const bs = adToBs(new Date(iso + 'T00:00:00'))

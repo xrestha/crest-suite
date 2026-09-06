@@ -1,8 +1,9 @@
+import { npr } from '../../shared/nepalMoney'
 import { useNavigate } from 'react-router-dom'
 import PivotTable from '../../components/PivotTable'
 import { useSalesPivotData } from './useSalesPivotData'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString('en-NP')}`
+const fmtNpr = npr
 
 // Dashboard-card wrapper around the generic PivotTable — Category × Day, top 6 categories by
 // revenue × the most recent 7 days that actually have data (not necessarily the last 7 calendar

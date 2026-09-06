@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -17,7 +18,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import { errorText, errorLine } from '../../../shared/errorText'
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',

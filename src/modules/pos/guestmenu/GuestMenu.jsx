@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
@@ -7,7 +8,7 @@ import Modal from '../../../components/Modal'
 // public menu must not read the global theme tokens.
 import './guestMenu.css'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 const fmtNutrient = (def, value) => `${(Number(value) || 0).toFixed(def.dp)} ${def.unit}`
 // The price a guest will actually be charged for one of these.
 //

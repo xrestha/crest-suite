@@ -167,14 +167,14 @@ export default function PaymentReport() {
           <div className="stat-label">
             <Tip text="Total purchase spend for the period, before returns. This is money paid to suppliers — not sales revenue." width={260}>Gross Purchases</Tip>
           </div>
-          <div className="stat-value gold" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value gold" style={{ fontSize: 17 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
             <Tip text="Value of goods returned to suppliers, subtracted from gross to get net spend." width={250}>Total Returns</Tip>
           </div>
           <div className="stat-value" style={{ fontSize: 17, color: 'var(--theme-red-text)' }}>
-            {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+            {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
           </div>
         </div>
         {summary.map(s => (
@@ -183,7 +183,7 @@ export default function PaymentReport() {
               <Tip text={`Net purchase spend paid via ${s.method} (gross − returns) for this period.`} width={240}>{s.method} (Net)</Tip>
             </div>
             <div className="stat-value" style={{ fontSize: 17, color: METHOD_TEXT[s.method] || METHOD_COLORS[s.method] }}>
-              NPR {s.net.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+              NPR {s.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </div>
             <div className="stat-sub">
               {grandNet > 0 ? ((s.net / grandNet) * 100).toFixed(1) : 0}% · {s.count} entries
@@ -259,11 +259,11 @@ export default function PaymentReport() {
                 {summary.map(s => (
                   <tr key={s.method}>
                     <td style={{ fontWeight: 600, color: METHOD_TEXT[s.method] || METHOD_COLORS[s.method] }}>{s.method}</td>
-                    <td style={{ textAlign: 'right' }}>NPR {s.gross.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                    <td style={{ textAlign: 'right' }}>NPR {s.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
-                      {s.returnAmt > 0 ? `−NPR ${s.returnAmt.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                      {s.returnAmt > 0 ? `−NPR ${s.returnAmt.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>NPR {s.net.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>NPR {s.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                       {grandNet > 0 ? ((s.net / grandNet) * 100).toFixed(1) : 0}%
                     </td>
@@ -272,11 +272,11 @@ export default function PaymentReport() {
                 ))}
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td style={{ fontWeight: 700, paddingTop: 12 }}>Total</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>NPR {grandGross.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>
-                    {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                    {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>NPR {grandNet.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                   <td style={{ textAlign: 'right', paddingTop: 12 }}>100%</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{purchases.length}</td>
                 </tr>
@@ -299,10 +299,10 @@ export default function PaymentReport() {
                     <td style={{ fontWeight: 600, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(d.day, selectedPeriod?.bs_month)}</td>
                     {METHODS.map(m => (
                       <td key={m} style={{ textAlign: 'right', color: d.byMethod[m] !== 0 ? METHOD_COLORS[m] : 'var(--theme-text3)' }}>
-                        {d.byMethod[m] !== 0 ? `NPR ${d.byMethod[m].toLocaleString('en-NP', { maximumFractionDigits: 0 })}` : '—'}
+                        {d.byMethod[m] !== 0 ? `NPR ${d.byMethod[m].toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                       </td>
                     ))}
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>NPR {d.dayTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>NPR {d.dayTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                   </tr>
                 ))}
               </tbody>

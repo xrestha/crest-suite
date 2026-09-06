@@ -1,3 +1,4 @@
+import { npr } from '../../shared/nepalMoney'
 import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { TriangleAlert } from 'lucide-react'
@@ -365,7 +366,7 @@ export default function OwnerDashboard() {
     : null
 
   const periodLabel = activePeriod ? `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}` : '—'
-  const fmt = n => `NPR ${Math.round(n || 0).toLocaleString('en-NP')}`
+  const fmt = npr
 
   const trendChartData = trendReports.map(r => {
     const c = r.snapshot?.combined || {}

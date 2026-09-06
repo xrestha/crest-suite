@@ -1,3 +1,4 @@
+import { npr2 } from '../../../shared/nepalMoney'
 import { useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
@@ -385,7 +386,7 @@ ${text}`, detail })
                           wrapperStyle={{ width: '100%' }}
                           style={{ ...cellInput, boxSizing: 'border-box', fontFamily: 'inherit', paddingLeft: inputUnit ? 34 : cellInput.padding.split(' ')[1] }} />
                       </div>
-                      {cf > 1 && line.qty && <div style={{ fontSize: 10, color: 'var(--theme-text3)', textAlign: 'right', marginTop: 2 }}>= {(parseFloat(line.qty) * cf).toLocaleString()} {selItem?.uom}</div>}
+                      {cf > 1 && line.qty && <div style={{ fontSize: 10, color: 'var(--theme-text3)', textAlign: 'right', marginTop: 2 }}>= {(parseFloat(line.qty) * cf).toLocaleString('en-IN')} {selItem?.uom}</div>}
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
                       <QtyInput value={line.rate} placeholder="0"
@@ -422,7 +423,7 @@ ${text}`, detail })
                       {lineAmount > 0 && (
                         <>
                           <div style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600, paddingTop: 7 }}>
-                            {lineAmount.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {lineAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                           {line.vat_inclusive && parseFloat(line.rate) > 0 && (
                             <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2 }}>
@@ -462,7 +463,7 @@ ${text}`, detail })
         {(() => {
           const { taxableBase, nonTaxableBase, subTotal, discount, vatTotal, grandTotal } = calcBillTotals(billLines, billHeader.discount)
           if (subTotal === 0) return null
-          const fmt = n => n.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          const fmt = npr2
           const itemCount = billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0).length
           return (
             <div style={{ textAlign: 'right', fontSize: 13, minWidth: 300 }}>

@@ -293,7 +293,7 @@ export default function ReorderReport() {
   function buildWhatsAppText() {
     const lines = [
       `*Reorder List — ${periodLabel}*`,
-      `${reorderPrintRows.length} item${reorderPrintRows.length !== 1 ? 's' : ''} · Est. total NPR ${Math.round(reorderPrintTotal).toLocaleString('en-NP')}`,
+      `${reorderPrintRows.length} item${reorderPrintRows.length !== 1 ? 's' : ''} · Est. total NPR ${Math.round(reorderPrintTotal).toLocaleString('en-IN')}`,
       '',
     ]
     reorderPrintGroups.forEach(g => {
@@ -427,7 +427,7 @@ export default function ReorderReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Reorder Value</div>
-          <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {totalShortfallValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</div>
+          <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {totalShortfallValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
           <div className="stat-sub">estimated purchase needed</div>
         </div>
         <div className="stat-card">
@@ -547,7 +547,7 @@ export default function ReorderReport() {
                               <button type="button" onClick={() => startEditPar(row.item.id, row.par)}
                                 aria-label={`Set par level for ${row.item.name}`}
                                 style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', color: row.par > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)', borderBottom: '1px dashed var(--theme-border)', paddingBottom: 1, fontWeight: row.par > 0 ? 600 : 400 }}>
-                                {isSaving ? '…' : row.par > 0 ? row.par.toLocaleString() : 'Set par'}
+                                {isSaving ? '…' : row.par > 0 ? row.par.toLocaleString('en-IN') : 'Set par'}
                               </button>
                             </Tip>
                           )}
@@ -580,7 +580,7 @@ export default function ReorderReport() {
                           {row.shortfall > 0 ? row.shortfall.toFixed(2) : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: row.shortfallValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)', fontWeight: row.shortfallValue > 0 ? 600 : 400 }}>
-                          {row.shortfallValue > 0 ? row.shortfallValue.toLocaleString('en-NP', { maximumFractionDigits: 0 }) : '—'}
+                          {row.shortfallValue > 0 ? row.shortfallValue.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
                         </td>
                         <td>
                           {row.par === 0
@@ -598,7 +598,7 @@ export default function ReorderReport() {
                   <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                     <td colSpan={9} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total estimated purchase needed</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', fontSize: 14, paddingTop: 12 }}>
-                      NPR {totalShortfallValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+                      NPR {totalShortfallValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </td>
                     <td></td>
                   </tr>
@@ -674,10 +674,10 @@ export default function ReorderReport() {
                     <tr key={r.item.id}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</td>
                       <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
-                      <td style={{ textAlign: 'right' }}>{r.par.toLocaleString()}</td>
+                      <td style={{ textAlign: 'right' }}>{r.par.toLocaleString('en-IN')}</td>
                       <td style={{ textAlign: 'right' }}>{r.currentStock.toFixed(2)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700 }}>{r.shortfall.toFixed(2)}</td>
-                      <td style={{ textAlign: 'right' }}>{r.shortfallValue.toLocaleString('en-NP', { maximumFractionDigits: 0 })}</td>
+                      <td style={{ textAlign: 'right' }}>{r.shortfallValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -686,7 +686,7 @@ export default function ReorderReport() {
           ))}
           {reorderPrintRows.length > 0 && (
             <p style={{ textAlign: 'right', fontWeight: 700, fontSize: 14, color: 'var(--theme-text1)', marginTop: 8 }}>
-              Total estimated purchase needed: NPR {reorderPrintTotal.toLocaleString('en-NP', { maximumFractionDigits: 0 })}
+              Total estimated purchase needed: NPR {reorderPrintTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </p>
           )}
         </div>

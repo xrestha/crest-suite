@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
@@ -15,7 +16,7 @@ import { errorLine } from '../../../shared/errorText'
 // whole-bill situations by nature.
 const REASON_CHIPS = ['Wrong customer', 'Tax correction', 'Duplicate bill']
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 
 function invoiceLabel(order, vatReg, prefix) {
   return `${vatReg ? 'TI' : 'PB'}${order.invoice_no}-${prefix}${prefix ? '-' : ''}${order.invoice_fy || ''}`

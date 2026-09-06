@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -6,7 +7,7 @@ import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { Navigate } from 'react-router-dom'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 const WINDOW_OPTIONS = [30, 90, 180]
 
 export default function ComboBuilder() {

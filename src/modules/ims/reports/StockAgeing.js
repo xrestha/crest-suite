@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -19,7 +20,6 @@ import {
 } from '../../../utils/bsCalendar'
 import { AGE_BANDS, buildAgeing } from './stockAgeingCalc'
 
-const npr = n => `NPR ${Math.round(n || 0).toLocaleString('en-NP')}`
 
 // How old stock has to be before the page calls it capital worth acting on. Matches the last
 // band's floor so the headline figure and the column a user clicks through to always agree.
@@ -333,7 +333,7 @@ export default function StockAgeing() {
           <Tip width={320} text="Quantity still on hand that was already in stock when this fiscal year began. Its true age is unknown and at least this old — it is aged from the start of the window, never guessed at.">Carried Into This FY</Tip>
         </div>
         <div className="stat-value" style={{ fontSize: 18, color: carriedForwardTotal > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
-          {carriedForwardTotal > 0 ? Number(carriedForwardTotal.toFixed(1)).toLocaleString() : '—'}
+          {carriedForwardTotal > 0 ? Number(carriedForwardTotal.toFixed(1)).toLocaleString('en-IN') : '—'}
         </div>
         <div className="stat-sub">units, age ≥ FY start</div>
       </div>
@@ -449,7 +449,7 @@ export default function StockAgeing() {
                     </td>
                     <td><span className="badge badge-yellow">{meta.categories?.name || 'Uncategorised'}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{meta.uom}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{Number(r.qty.toFixed(2)).toLocaleString()}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{Number(r.qty.toFixed(2)).toLocaleString('en-IN')}</td>
                     {AGE_BANDS.map(b => {
                       const cell = r.bands[b.key]
                       const isStaleBand = b.key === '90+'
@@ -460,7 +460,7 @@ export default function StockAgeing() {
                             : isStaleBand ? 'var(--theme-amber-text)' : 'var(--theme-text2)',
                           fontWeight: cell.qty > 0 && isStaleBand ? 700 : 400,
                         }}>
-                          {cell.qty > 0 ? Number(cell.qty.toFixed(2)).toLocaleString() : '—'}
+                          {cell.qty > 0 ? Number(cell.qty.toFixed(2)).toLocaleString('en-IN') : '—'}
                         </td>
                       )
                     })}

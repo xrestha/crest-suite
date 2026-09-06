@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -14,7 +15,7 @@ import { viewPosBill } from '../../../utils/viewPosBill'
 import { CLOSE_TYPE_BADGE } from '../posSignals'
 import { nepalTime, nepalTime24 } from '../../../shared/nepalTime'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 
 const TYPE_META = {
   discount: { label: 'Discount', badge: CLOSE_TYPE_BADGE.discount },

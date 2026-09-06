@@ -7,7 +7,7 @@
 // total to cover the whole period. Omit them and totals are derived from `values` as before.
 // `totalsHeader` lets that column say something other than the corner label ("Period" vs "Total"),
 // which matters precisely when the two differ.
-export default function PivotTable({ rows, cols, values, rowHeader = 'Row', totalsLabel = 'Total', totalsHeader, formatValue = n => n.toLocaleString(), emptyDash = '—', rowTotals, grandTotal: grandTotalProp }) {
+export default function PivotTable({ rows, cols, values, rowHeader = 'Row', totalsLabel = 'Total', totalsHeader, formatValue = n => n.toLocaleString('en-IN'), emptyDash = '—', rowTotals, grandTotal: grandTotalProp }) {
   const rowTotal = rowKey => (
     rowTotals ? (rowTotals[rowKey] || 0) : Object.values(values[rowKey] || {}).reduce((s, v) => s + (v || 0), 0)
   )

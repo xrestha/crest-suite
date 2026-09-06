@@ -171,7 +171,7 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
 
   function decidedOn(r) {
     const dt = r.admin_decided_at || r.target_responded_at || r.created_at
-    return dt ? new Date(dt).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+    return dt ? new Date(dt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
   }
 
   // A coworker's decline and a requester's cancellation never reach a manager, so there is no

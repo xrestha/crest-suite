@@ -245,7 +245,7 @@ export default function AdminClients() {
               text={`Monthly recurring revenue across every active property, summed from the same per-client figure shown on each card. ${payingCount} of ${activeCount} active ${payingCount === 1 ? 'property is' : 'properties are'} billing — a property with every module window closed counts as zero, not as missing.`}
               width={280}
             >
-              <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {platformMRR.toLocaleString('en-NP')}</strong> MRR
+              <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {platformMRR.toLocaleString('en-IN')}</strong> MRR
             </Tip>
             {' · '}{payingCount} paying
           </p>
@@ -526,11 +526,11 @@ export default function AdminClients() {
                         }
                         return (
                           <Tip
-                            text={`${lines.map(l => `${l.label} NPR ${l.amount.toLocaleString('en-NP')}`).join('  ·  ')}${c.billing_cycle === 'annual' ? '  ·  billed annually, so each module is at the 25%-off rate' : ''}`}
+                            text={`${lines.map(l => `${l.label} NPR ${l.amount.toLocaleString('en-IN')}`).join('  ·  ')}${c.billing_cycle === 'annual' ? '  ·  billed annually, so each module is at the 25%-off rate' : ''}`}
                             width={280}
                           >
                             <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>
-                              NPR {total.toLocaleString('en-NP')}/mo
+                              NPR {total.toLocaleString('en-IN')}/mo
                             </span>
                           </Tip>
                         )

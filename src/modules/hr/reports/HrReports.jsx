@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
@@ -12,8 +13,8 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
-const fmtDate = d => d ? new Date(d).toLocaleDateString('en-NP', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+const fmt = nprInt
+const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
 
 const RETIRE_SOON_DAYS = 180
 // Retirement status from a retirement_date (AD): retired (past) / soon (≤180d) / null.
@@ -582,7 +583,7 @@ export default function HrReports() {
 }
 
 function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
-  const fmtN = n => Math.round(n || 0).toLocaleString('en-NP')
+  const fmtN = nprInt
   const today = getBsToday()
   const issuedDate = `${BS_MONTHS[today.month - 1]} ${today.day}, ${today.year} B.S.`
 

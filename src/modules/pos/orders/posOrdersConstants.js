@@ -1,8 +1,9 @@
+import { npr } from '../../../shared/nepalMoney'
 // Pure constants and tiny pure helpers for PosOrders.jsx — no React, no Supabase, no closures.
 // Split out so the main component file is just state + data flow.
 
 export const vatOf  = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
-export const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+export const fmtNpr = npr
 
 // Shared shape for a pos_order_items row, whether it's about to go straight to Supabase or into
 // the offline queue (enqueuePosOrder) — keeps the two write paths from drifting apart.

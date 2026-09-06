@@ -1,3 +1,4 @@
+import { npr, npr2 } from '../../../shared/nepalMoney'
 import { useState, useEffect, Fragment } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -16,7 +17,7 @@ import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { nepalTime } from '../../../shared/nepalTime'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 // Was its own hardcoded copy of the tender-type list (drifted from posOrdersConstants.js) — a
 // new payment method added there would have silently vanished from this shift report. Now
 // derived from the same source of truth, plus 'Credit' (a shift-reporting-only bucket, not an
@@ -103,7 +104,7 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   // signed slip whose Variance disagreed with its own Expected Cash line and with the screen.
   const expected = mode === 'close' ? expectedCashOf({ opening_cash: opening }, report) : 0
   const variance = mode === 'close' ? closing - expected : 0
-  const varianceLabel = Math.abs(variance) < 1 ? 'Balanced' : `${variance > 0 ? '+' : ''}NPR ${variance.toFixed(2)} (${variance > 0 ? 'over' : 'short'})`
+  const varianceLabel = Math.abs(variance) < 1 ? 'Balanced' : `${variance > 0 ? '+' : ''}NPR ${npr2(variance)} (${variance > 0 ? 'over' : 'short'})`
 
   return `<!DOCTYPE html>
 <html><head><title>${mode === 'open' ? 'Shift Opening' : 'Cash Settlement'}</title>
@@ -132,29 +133,29 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   <hr>
   <!-- "Total Sales", not "Total Collection": salesTotal includes Credit bills, which are billed
        but not collected. The screen already labelled this honestly; the signed paper slip did not. -->
-  <div class="row tot"><span>Total Sales:</span><span>NPR ${report.salesTotal.toFixed(2)}</span></div>
-  ${PAY_METHODS.filter(m => report.byMethod[m]).map(m => `<div class="row ind"><span>${m}</span><span>${report.byMethod[m].toFixed(2)}</span></div>`).join('')}
+  <div class="row tot"><span>Total Sales:</span><span>NPR ${npr2(report.salesTotal)}</span></div>
+  ${PAY_METHODS.filter(m => report.byMethod[m]).map(m => `<div class="row ind"><span>${m}</span><span>${npr2(report.byMethod[m])}</span></div>`).join('')}
   <hr>
   <div class="row"><span>Bills (Paid):</span><span>${report.paidCount}</span></div>
   <div class="row"><span>Voided:</span><span>${report.voidCount}</span></div>
   <div class="row"><span>Complimentary:</span><span>${report.compCount}</span></div>
   <hr>
-  <div class="row"><span>Opening Cash:</span><span>${opening.toFixed(2)}</span></div>
-  <div class="row"><span>Cash Sales:</span><span>${report.cashSales.toFixed(2)}</span></div>
-  ${report.cashIn  ? `<div class="row"><span>Cash In${report.creditSettlementsCash ? ` (incl. ${report.creditSettlementsCash.toFixed(2)} credit settled)` : ''}:</span><span>+${report.cashIn.toFixed(2)}</span></div>` : ''}
-  ${report.cashOut ? `<div class="row"><span>Cash Out:</span><span>-${report.cashOut.toFixed(2)}</span></div>` : ''}
-  <div class="row tot"><span>Expected Cash:</span><span>${expected.toFixed(2)}</span></div>
-  <div class="row"><span>Counted Cash:</span><span>${closing.toFixed(2)}</span></div>
+  <div class="row"><span>Opening Cash:</span><span>${npr2(opening)}</span></div>
+  <div class="row"><span>Cash Sales:</span><span>${npr2(report.cashSales)}</span></div>
+  ${report.cashIn  ? `<div class="row"><span>Cash In${report.creditSettlementsCash ? ` (incl. ${npr2(report.creditSettlementsCash)} credit settled)` : ''}:</span><span>+${npr2(report.cashIn)}</span></div>` : ''}
+  ${report.cashOut ? `<div class="row"><span>Cash Out:</span><span>-${npr2(report.cashOut)}</span></div>` : ''}
+  <div class="row tot"><span>Expected Cash:</span><span>${npr2(expected)}</span></div>
+  <div class="row"><span>Counted Cash:</span><span>${npr2(closing)}</span></div>
   <div class="row tot"><span>Variance:</span><span>${varianceLabel}</span></div>
   ` : ''}
   <hr>
   <div class="c b" style="margin:2px 0">DENOMINATION</div>
   ${DENOMINATIONS.map(d => {
     const qty = parseInt(denomCounts[d]) || 0
-    return `<div class="row"><span>₨${d} × ${qty}</span><span>${(d * qty).toFixed(2)}</span></div>`
+    return `<div class="row"><span>₨${d} × ${qty}</span><span>${npr2(d * qty)}</span></div>`
   }).join('')}
   <hr>
-  <div class="row tot"><span>Total</span><span>NPR ${total.toFixed(2)}</span></div>
+  <div class="row tot"><span>Total</span><span>NPR ${npr2(total)}</span></div>
   <hr>
   <div class="row" style="font-size:11px"><span>Print Time:</span><span>${nowStr}</span></div>
   <div style="margin-top:14px">

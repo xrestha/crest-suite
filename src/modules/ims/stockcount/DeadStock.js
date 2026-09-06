@@ -142,11 +142,11 @@ export default function DeadStock() {
 
   function fmt(n) {
     if (!n) return '—'
-    return 'NPR ' + Number(n).toLocaleString('en-NP', { maximumFractionDigits: 0 })
+    return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
   }
 
   function fmtQty(n) {
-    return n ? Number(n).toLocaleString() : '—'
+    return n ? Number(n).toLocaleString('en-IN') : '—'
   }
 
   async function exportExcel() {

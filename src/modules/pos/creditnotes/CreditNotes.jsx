@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -10,7 +11,7 @@ import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { printCreditNote } from './creditNoteHtml'
 import IssueCreditNoteModal from './IssueCreditNoteModal'
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 
 export default function CreditNotes() {
   const { clientId, hasPosAccess } = useAuth()

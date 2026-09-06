@@ -174,7 +174,7 @@ export default function MonthlySummary() {
   }
 
   function fmt(val) {
-    return `NPR ${Number(val).toLocaleString('en-NP', { maximumFractionDigits: 0 })}`
+    return `NPR ${Number(val).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
   }
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'

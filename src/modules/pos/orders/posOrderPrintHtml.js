@@ -1,6 +1,7 @@
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalTime, nepalBs, nepalCivilDate, nepalDateAd } from '../../../shared/nepalTime'
 import { numberToWordsNpr } from '../../../utils/numberToWords'
+import { npr2 } from '../../../shared/nepalMoney'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 
@@ -123,23 +124,23 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   <table>
     <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
     <tbody>
-      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${i.unit_price.toFixed(2)}</td><td>${(i.qty * i.unit_price).toFixed(2)}</td></tr>`).join('')}
+      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${npr2(i.unit_price)}</td><td>${npr2(i.qty * i.unit_price)}</td></tr>`).join('')}
     </tbody>
   </table>
   <hr>
-  <div class="row"><span>Gross Amount:</span><span>${grossAmt.toFixed(2)}</span></div>
-  <div class="row"><span>Discount:</span><span>${discount.toFixed(2)}</span></div>
+  <div class="row"><span>Gross Amount:</span><span>${npr2(grossAmt)}</span></div>
+  <div class="row"><span>Discount:</span><span>${npr2(discount)}</span></div>
   ${vatReg ? `
-  <div class="row"><span>Taxable:</span><span>${taxableBase.toFixed(2)}</span></div>
-  <div class="row"><span>Nontaxable:</span><span>${nonTaxableBase.toFixed(2)}</span></div>
-  <div class="row"><span>VAT 13%:</span><span>${netVatAmt.toFixed(2)}</span></div>
-  <div class="row"><span>Round Off:</span><span>${roundOff >= 0 ? '+' : ''}${roundOff.toFixed(2)}</span></div>
+  <div class="row"><span>Taxable:</span><span>${npr2(taxableBase)}</span></div>
+  <div class="row"><span>Nontaxable:</span><span>${npr2(nonTaxableBase)}</span></div>
+  <div class="row"><span>VAT 13%:</span><span>${npr2(netVatAmt)}</span></div>
+  <div class="row"><span>Round Off:</span><span>${roundOff >= 0 ? '+' : ''}${npr2(roundOff)}</span></div>
   ` : ''}
-  <div class="row tot"><span>Net Amount:</span><span>${net.toFixed(2)}</span></div>
+  <div class="row tot"><span>Net Amount:</span><span>${npr2(net)}</span></div>
   <hr>
-  ${isSplitBill ? payments.map(p => `<div class="row"><span>${esc(p.method)}:</span><span>${p.amount.toFixed(2)}</span></div>`).join('') : `
-  <div class="row"><span>Tender:</span><span>${tendered.toFixed(2)}</span></div>
-  <div class="row"><span>Change:</span><span>${change.toFixed(2)}</span></div>
+  ${isSplitBill ? payments.map(p => `<div class="row"><span>${esc(p.method)}:</span><span>${npr2(p.amount)}</span></div>`).join('') : `
+  <div class="row"><span>Tender:</span><span>${npr2(tendered)}</span></div>
+  <div class="row"><span>Change:</span><span>${npr2(change)}</span></div>
   `}
   <hr>
   <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
@@ -192,13 +193,13 @@ export function buildTenderSlipHtml({ tender, remainingAfter, outletName, tableN
   <hr>
   <div class="row"><span>Table:</span><span>${esc(tableName)}</span></div>
   <div class="row"><span>Method:</span><span class="b">${esc(tender.method)}</span></div>
-  <div class="row tot"><span>Amount:</span><span>NPR ${tender.amount.toFixed(2)}</span></div>
+  <div class="row tot"><span>Amount:</span><span>NPR ${npr2(tender.amount)}</span></div>
   ${tender.tenderedAmount != null ? `
-  <div class="row"><span>Tendered:</span><span>${tender.tenderedAmount.toFixed(2)}</span></div>
-  <div class="row"><span>Change:</span><span>${change.toFixed(2)}</span></div>
+  <div class="row"><span>Tendered:</span><span>${npr2(tender.tenderedAmount)}</span></div>
+  <div class="row"><span>Change:</span><span>${npr2(change)}</span></div>
   ` : ''}
   <hr>
-  <div class="row"><span>Remaining on bill:</span><span>${remainingAfter > 0 ? `NPR ${remainingAfter.toFixed(2)}` : 'Paid in full'}</span></div>
+  <div class="row"><span>Remaining on bill:</span><span>${remainingAfter > 0 ? `NPR ${npr2(remainingAfter)}` : 'Paid in full'}</span></div>
   <div class="row" style="font-size:10px; margin-top:6px"><span>Not a Tax Invoice / PAN Bill</span><span>${nowStr}</span></div>
   <hr>
   <div class="c" style="font-size:11px">Thank you for stopping by! We hope to see you again soon.</div>
@@ -257,12 +258,12 @@ export function buildCompSlipHtml({ order, items, costMap, copyLabel, outletName
   <table>
     <thead><tr><th>Item</th><th>Qty</th><th>Cost</th></tr></thead>
     <tbody>
-      ${items.map(i => `<tr><td>${esc(i.name)}</td><td>${i.qty}</td><td>${(i.qty * (costMap[i.recipe_id] || 0)).toFixed(2)}</td></tr>`).join('')}
+      ${items.map(i => `<tr><td>${esc(i.name)}</td><td>${i.qty}</td><td>${npr2(i.qty * (costMap[i.recipe_id] || 0))}</td></tr>`).join('')}
     </tbody>
   </table>
   <hr>
   <div class="row"><span>Total Qty:</span><span>${totalQty}</span></div>
-  <div class="row tot"><span>Total Food Cost:</span><span>NPR ${totalCost.toFixed(2)}</span></div>
+  <div class="row tot"><span>Total Food Cost:</span><span>NPR ${npr2(totalCost)}</span></div>
   <hr>
   <div class="row" style="font-size:11px;color:#000"><span>Table: ${esc(tableName)}</span><span>${nowStr}</span></div>
   <div style="margin-top:16px">

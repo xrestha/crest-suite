@@ -1,3 +1,4 @@
+import { nprOrDash } from '../../shared/nepalMoney'
 import { useEffect, useState, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
@@ -33,7 +34,7 @@ import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../ut
 // period it names is the failure ReportPage's own contract exists to prevent.
 const StatSkeleton = () => <span className="skeleton" style={{ display: 'inline-block', width: '3.5em', height: '0.8em', verticalAlign: 'middle' }} />
 
-const fmtNpr = n => n == null ? '—' : `NPR ${Math.round(n).toLocaleString('en-NP')}`
+const fmtNpr = nprOrDash
 const fmtPct = n => n == null || !isFinite(n) ? '—' : `${n.toFixed(1)}%`
 
 // Every percentage on this page is TEXT, so these are the -text variants, not the base tokens.
@@ -207,7 +208,7 @@ export default function GroupDashboard() {
               </div>
               <div className="card">
                 <div className="stat-label"><Tip text="Covers across included outlets, from paid POS bills closed within this BS month's AD date range. Outlets without POS contribute zero.">Group Covers</Tip></div>
-                <div className="stat-value">{loading ? <StatSkeleton /> : groupCovers ? groupCovers.toLocaleString('en-NP') : '—'}</div>
+                <div className="stat-value">{loading ? <StatSkeleton /> : groupCovers ? groupCovers.toLocaleString('en-IN') : '—'}</div>
               </div>
             </div>}
 
@@ -258,7 +259,7 @@ export default function GroupDashboard() {
                         <td style={{ textAlign: 'right', color: pctColor(fc, 35, 45) }}>{fmtPct(fc)}</td>
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.payroll) : '—'}</td>
                         <td style={{ textAlign: 'right', color: pctColor(lab, 25, 35) }}>{fmtPct(lab)}</td>
-                        <td style={{ textAlign: 'right' }}>{r.is_included ? (Number(r.covers) || 0).toLocaleString('en-NP') : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>{r.is_included ? (Number(r.covers) || 0).toLocaleString('en-IN') : '—'}</td>
                       </tr>
                     )
                   })}
@@ -274,7 +275,7 @@ export default function GroupDashboard() {
                       <td style={{ textAlign: 'right', color: pctColor(groupFc, 35, 45) }}>{fmtPct(groupFc)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupPayroll)}</td>
                       <td style={{ textAlign: 'right', color: pctColor(groupLabour, 25, 35) }}>{fmtPct(groupLabour)}</td>
-                      <td style={{ textAlign: 'right' }}>{groupCovers ? groupCovers.toLocaleString('en-NP') : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{groupCovers ? groupCovers.toLocaleString('en-IN') : '—'}</td>
                     </tr>
                   </tfoot>
                 )}

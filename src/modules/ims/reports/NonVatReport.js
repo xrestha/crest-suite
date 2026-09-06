@@ -13,7 +13,7 @@ import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 
 function fmtNPR(n) {
-  return `NPR ${Number(n).toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 // `returns` mirrors VatReport's own buildVendorSummary, which has always netted them. This page
@@ -192,8 +192,8 @@ export default function NonVatReport() {
           <div className="stat-label">
             <Tip text="Net value of all non-VAT purchases this period, after any bill-level discounts and after deducting goods returned to the vendor." width={260}>Total Non-VAT Purchases</Tip>
           </div>
-          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {Math.round(total).toLocaleString('en-NP')}</div>
-          <div className="stat-sub">{entries.length} entr{entries.length !== 1 ? 'ies' : 'y'}{totalDiscount > 0 ? ` · −NPR ${Math.round(totalDiscount).toLocaleString('en-NP')} disc.` : ''}{returnTotal > 0 ? ` · −NPR ${Math.round(returnTotal).toLocaleString('en-NP')} returns` : ''}</div>
+          <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {Math.round(total).toLocaleString('en-IN')}</div>
+          <div className="stat-sub">{entries.length} entr{entries.length !== 1 ? 'ies' : 'y'}{totalDiscount > 0 ? ` · −NPR ${Math.round(totalDiscount).toLocaleString('en-IN')} disc.` : ''}{returnTotal > 0 ? ` · −NPR ${Math.round(returnTotal).toLocaleString('en-IN')} returns` : ''}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
@@ -206,7 +206,7 @@ export default function NonVatReport() {
           <div className="stat-label">
             <Tip text="Average value per non-VAT purchase entry this period.">Avg per Entry</Tip>
           </div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(avgPerEntry).toLocaleString('en-NP')}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(avgPerEntry).toLocaleString('en-IN')}</div>
           <div className="stat-sub">per line item</div>
         </div>
         <div className="stat-card">

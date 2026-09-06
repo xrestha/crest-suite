@@ -1,3 +1,4 @@
+import { npr2 } from '../../../shared/nepalMoney'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -120,7 +121,7 @@ export default function BudgetVsActual() {
   const totalActual   = categories.reduce((s, c) => s + (actuals[c.id] || 0), 0)
   const totalVariance = totalBudget - totalActual
 
-  const fmt    = v => v.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const fmt = npr2
   const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />

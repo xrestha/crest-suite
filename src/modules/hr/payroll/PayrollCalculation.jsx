@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, Fragment, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -15,7 +16,7 @@ import { firstError } from '../../../shared/queryError'
 import RowDisclosure from '../../../components/RowDisclosure'
 import ReportLoadError from '../../../components/ReportLoadError'
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 
 function Section({ title, children }) {
   return (
@@ -540,7 +541,7 @@ export default function PayrollCalculation() {
         <div className="print-only" style={{ padding: '28px 36px' }}>
           <h1 style={{ fontSize: 20, marginBottom: 2 }}>Payroll Calculation</h1>
           <div style={{ fontSize: 13, marginBottom: 2 }}>{printRow.emp.full_name}{printRow.emp.employee_code ? ` (${printRow.emp.employee_code})` : ''}</div>
-          <div style={{ fontSize: 12, color: '#555', marginBottom: 14 }}>{periodLabel} — generated {new Date().toLocaleDateString('en-NP')}</div>
+          <div style={{ fontSize: 12, color: '#555', marginBottom: 14 }}>{periodLabel} — generated {new Date().toLocaleDateString('en-IN')}</div>
           <CalcDetail row={printRow} monthDays={monthDays} advances={advances} />
         </div>
       )}

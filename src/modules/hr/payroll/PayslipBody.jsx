@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 // The payslip document itself — letterhead, earnings, deductions, reimbursement, net pay.
 // Shared deliberately: it backs the owner's Payroll → Payslip modal, that modal's print view,
 // AND the employee's own copy in HR Self-Service. Those last two used to be different renderers,
@@ -11,7 +12,7 @@
 export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint }) {
   const c1 = forPrint ? '#000' : 'var(--theme-text3)'
   const c2 = forPrint ? '#000' : 'var(--theme-text1)'
-  const fmtn = n => `NPR ${Math.round(n || 0).toLocaleString('en-NP')}`
+  const fmtn = npr
   const Row = ({ label, value, strong, neg }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, fontWeight: strong ? 700 : 400 }}>
       <span style={{ color: strong ? c2 : c1 }}>{label}</span>

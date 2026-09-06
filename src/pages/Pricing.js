@@ -219,18 +219,18 @@ export default function Pricing() {
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
                 {plan.key === 'starter' && !annual ? (
                   <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                    NPR {plan.monthly.toLocaleString()}
+                    NPR {plan.monthly.toLocaleString('en-IN')}
                     <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after trial</span>
                   </div>
                 ) : (
                   <>
                     <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                      NPR {price.toLocaleString()}
+                      NPR {price.toLocaleString('en-IN')}
                       <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
                     </div>
                     {annual && (
                       <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
-                        Billed annually · NPR {(price * 12).toLocaleString()}/yr
+                        Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr
                       </div>
                     )}
                   </>
@@ -275,12 +275,12 @@ export default function Pricing() {
 
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
                 <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                  NPR {price.toLocaleString()}
+                  NPR {price.toLocaleString('en-IN')}
                   <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
                 </div>
                 {annual && (
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
-                    Billed annually · NPR {(price * 12).toLocaleString()}/yr
+                    Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr
                   </div>
                 )}
               </div>
@@ -312,12 +312,12 @@ export default function Pricing() {
                 {SUITE_ADDON.label}
               </div>
               <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
-                +NPR {(annual ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString()}
+                +NPR {(annual ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-IN')}
                 <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo per outlet</span>
               </div>
               {annual && (
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 10 }}>
-                  Billed annually · NPR {(SUITE_ADDON.annual * 12).toLocaleString()}/yr
+                  Billed annually · NPR {(SUITE_ADDON.annual * 12).toLocaleString('en-IN')}/yr
                 </div>
               )}
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 20, lineHeight: 1.5 }}>

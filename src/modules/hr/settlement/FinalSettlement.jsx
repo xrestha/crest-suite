@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
@@ -17,7 +18,7 @@ import { firstError } from '../../../shared/queryError'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { SSF_CAP, SSF_GRATUITY_PCT, GRATUITY_VESTING_MONTHS, SSF_EMPLOYEE_PCT } from '../payrollConstants'
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 
 // Labour Act convention: leave encashment and notice pay are both a day-rate of basic ÷ 26,
 // deliberately NOT the calendar length of the month (which is what partial salary divides by).

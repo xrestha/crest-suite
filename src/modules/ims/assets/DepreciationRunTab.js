@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -7,7 +8,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import QtyInput from '../../../components/QtyInput'
 import { computeDepreciationPreview } from './depreciationCompute'
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 
 // Preview (pure computation, writes nothing) -> Post (manager-only, writes via one atomic RPC,
 // locks the resulting rows). Deliberately never uses sessionDataCache — a preview must always

@@ -20,9 +20,9 @@ function dispPurch(baseQty, item) {
   const cf = parseFloat(item.conversion_factor) || 1
   if (cf > 1 && item.purchase_unit) {
     const puQty = (baseQty / cf).toLocaleString(undefined, { maximumFractionDigits: 3 })
-    return `${puQty} ${item.purchase_unit} (${Number(baseQty).toLocaleString()} ${item.uom})`
+    return `${puQty} ${item.purchase_unit} (${Number(baseQty).toLocaleString('en-IN')} ${item.uom})`
   }
-  return Number(baseQty).toLocaleString()
+  return Number(baseQty).toLocaleString('en-IN')
 }
 
 export default function Variance() {
@@ -323,7 +323,7 @@ export default function Variance() {
                 one or the other, so the tile's colour never actually told anyone anything. */}
             <div className="stat-value" style={{ fontSize: 18, color: totalBand.color }} title={totalBand.label !== '—' ? totalBand.label : undefined}>
               {hasClosing
-                ? `NPR ${Math.abs(summary.totalVarianceValue).toLocaleString('en-NP', { maximumFractionDigits: 0 })}${totalBand.mark ? ` ${totalBand.mark}` : ''}`
+                ? `NPR ${Math.abs(summary.totalVarianceValue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}${totalBand.mark ? ` ${totalBand.mark}` : ''}`
                 : 'Not measurable yet'}
             </div>
             <div className="stat-sub">
@@ -420,7 +420,7 @@ export default function Variance() {
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</td>
                       <td><span className="badge badge-yellow">{row.category}</span></td>
                       <td style={{ color: 'var(--theme-text2)' }}>{row.item.uom}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.openQty > 0 ? row.openQty.toLocaleString() : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.openQty > 0 ? row.openQty.toLocaleString('en-IN') : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{row.purchQty !== 0 ? dispPurch(row.purchQty, row.item) : '—'}</td>
                       {/* These two were permanently red and permanently green. Neither is a
                           verdict: a closing count is not good news and 0.05 kg of wastage is not
@@ -429,12 +429,12 @@ export default function Variance() {
                           Spending the danger colour on a whole column is what makes it stop
                           reading as danger anywhere. Wastage keeps a quiet accent tie to the
                           Purchases column it is measured against; both are now ordinary figures. */}
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.wasteQty > 0 ? row.wasteQty.toLocaleString() : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.closeQty > 0 ? row.closeQty.toLocaleString() : '—'}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{row.actualUsed !== 0 ? Number(row.actualUsed.toFixed(3)).toLocaleString() : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.theoreticalUsed > 0 ? Number(row.theoreticalUsed.toFixed(3)).toLocaleString() : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.wasteQty > 0 ? row.wasteQty.toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.closeQty > 0 ? row.closeQty.toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{row.actualUsed !== 0 ? Number(row.actualUsed.toFixed(3)).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.theoreticalUsed > 0 ? Number(row.theoreticalUsed.toFixed(3)).toLocaleString('en-IN') : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: b.color }}>
-                        {row.variance !== 0 ? (row.variance > 0 ? '+' : '') + Number(row.variance.toFixed(3)).toLocaleString() : '—'}
+                        {row.variance !== 0 ? (row.variance > 0 ? '+' : '') + Number(row.variance.toFixed(3)).toLocaleString('en-IN') : '—'}
                       </td>
                       {/* The mark is the non-colour half of the band. Light collapses red/amber to
                           ΔE 3.1 under deuteranopia, so over-used and under-used — the two states
@@ -446,7 +446,7 @@ export default function Variance() {
                           : '—'}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: b.color }}>
-                        {row.value !== 0 ? `${row.value > 0 ? '+' : ''}${Number(row.value.toFixed(0)).toLocaleString()}` : '—'}
+                        {row.value !== 0 ? `${row.value > 0 ? '+' : ''}${Number(row.value.toFixed(0)).toLocaleString('en-IN')}` : '—'}
                       </td>
                       <td>{hasClosing ? flagBadge(row.flag) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                     </tr>

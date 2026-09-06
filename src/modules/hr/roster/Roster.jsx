@@ -1,3 +1,4 @@
+import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
@@ -47,7 +48,7 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const fmtNpr = n => `NPR ${Math.round(n).toLocaleString()}`
+const fmtNpr = npr
 
 function weekSunday(date) {
   const d = new Date(date)

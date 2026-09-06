@@ -1,3 +1,4 @@
+import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
@@ -39,7 +40,7 @@ function calcAmount(comp, basic) {
   return Math.round(v)
 }
 
-const fmt = n => Math.round(n || 0).toLocaleString('en-NP')
+const fmt = nprInt
 
 // Edits one employee's pay (basic / dearness / allowances / deductions / SSF) + bank details.
 // Dearness Allowance is surfaced as its own dedicated field but stored as a salary component.
@@ -214,17 +215,17 @@ export default function PayForm({ employee, onSave, onClose }) {
                     onChange={e => set('basic_salary', e.target.value)} />
                   {basicBelowMin && (
                     <span style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>
-                      ⚠ Below minimum basic — Nepal requires at least NPR {MIN_BASIC_MONTHLY.toLocaleString('en-NP')} / month.
+                      ⚠ Below minimum basic — Nepal requires at least NPR {MIN_BASIC_MONTHLY.toLocaleString('en-IN')} / month.
                     </span>
                   )}
                   {rateBelowMin && (
                     <span style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>
-                      ⚠ Below minimum wage — Nepal requires at least NPR {minRate.toLocaleString('en-NP')} / {payUnit}.
+                      ⚠ Below minimum wage — Nepal requires at least NPR {minRate.toLocaleString('en-IN')} / {payUnit}.
                     </span>
                   )}
                   {basicTooLow && !basicBelowMin && (
                     <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
-                      ⚠ Basic is below 60% of gross (NPR {Math.round(gross * 0.6).toLocaleString('en-NP')}). Labour Act requires basic ≥ 60% of total pay.
+                      ⚠ Basic is below 60% of gross (NPR {Math.round(gross * 0.6).toLocaleString('en-IN')}). Labour Act requires basic ≥ 60% of total pay.
                     </span>
                   )}
                 </div>
@@ -243,12 +244,12 @@ export default function PayForm({ employee, onSave, onClose }) {
                       onChange={e => setDearness(e.target.value)} />
                     {dearnessBelowMin && (
                       <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
-                        ⚠ Below minimum dearness allowance — Nepal requires at least NPR {DEARNESS_MIN.toLocaleString('en-NP')} / month.
+                        ⚠ Below minimum dearness allowance — Nepal requires at least NPR {DEARNESS_MIN.toLocaleString('en-IN')} / month.
                       </span>
                     )}
                     {grossBelowMin && !dearnessBelowMin && (
                       <span style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>
-                        ⚠ Total gross (NPR {fmt(gross)}) is below the minimum wage of NPR {MIN_WAGE_MONTHLY.toLocaleString('en-NP')} / month.
+                        ⚠ Total gross (NPR {fmt(gross)}) is below the minimum wage of NPR {MIN_WAGE_MONTHLY.toLocaleString('en-IN')} / month.
                       </span>
                     )}
                   </div>
@@ -294,7 +295,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                             value={comp.value}
                             onChange={e => updateComponent(globalIdx, 'value', e.target.value)} />
                           {comp.calc_type === 'percent_of_basic' && basic > 0 && (
-                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap', minWidth: 56, textAlign: 'right' }}>= {computed.toLocaleString()}</span>
+                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap', minWidth: 56, textAlign: 'right' }}>= {computed.toLocaleString('en-IN')}</span>
                           )}
                           <button onClick={() => removeComponent(globalIdx)} aria-label={`Remove allowance ${comp.name || i + 1}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 16, cursor: 'pointer', flexShrink: 0, padding: '0 4px' }}>✕</button>
                         </div>
@@ -331,7 +332,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                             SSF — Employee (11%){basic > SSF_CAP ? ' · capped' : ''} · auto
                           </Tip>
                         </span>
-                        <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 500 }}>NPR {ssf_employee.toLocaleString('en-NP')}</span>
+                        <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 500 }}>NPR {ssf_employee.toLocaleString('en-IN')}</span>
                       </div>
                     )}
                     {basic > 0 && !form.ssf_enrolled && (
@@ -357,7 +358,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                             value={comp.value}
                             onChange={e => updateComponent(globalIdx, 'value', e.target.value)} />
                           {comp.calc_type === 'percent_of_basic' && basic > 0 && (
-                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap', minWidth: 56, textAlign: 'right' }}>= {computed.toLocaleString()}</span>
+                            <span style={{ fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap', minWidth: 56, textAlign: 'right' }}>= {computed.toLocaleString('en-IN')}</span>
                           )}
                           <button onClick={() => removeComponent(globalIdx)} aria-label={`Remove deduction ${comp.name || i + 1}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 16, cursor: 'pointer', flexShrink: 0, padding: '0 4px' }}>✕</button>
                         </div>
@@ -393,7 +394,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                           {r.label}{r.note ? <span style={{ fontSize: 10, color: 'var(--theme-text2)', marginLeft: 6 }}>({r.note})</span> : null}
                         </span>
                         <span style={{ fontSize: r.big ? 15 : 13, color: r.color, fontWeight: r.bold ? 700 : 400 }}>
-                          {r.value < 0 ? '− ' : ''}NPR {Math.abs(r.value).toLocaleString('en-NP')}
+                          {r.value < 0 ? '− ' : ''}NPR {Math.abs(r.value).toLocaleString('en-IN')}
                         </span>
                       </div>
                     ))}
@@ -405,7 +406,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                       <strong>Minimum wage check (FY 2083/84)</strong>
                       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ color: basic >= MIN_BASIC_MONTHLY ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                          {basic >= MIN_BASIC_MONTHLY ? '✓' : '✗'} Basic ≥ NPR {MIN_BASIC_MONTHLY.toLocaleString('en-NP')} &nbsp;
+                          {basic >= MIN_BASIC_MONTHLY ? '✓' : '✗'} Basic ≥ NPR {MIN_BASIC_MONTHLY.toLocaleString('en-IN')} &nbsp;
                           <span style={{ color: 'var(--theme-text2)' }}>(yours: {fmt(basic)})</span>
                         </div>
                         <div style={{ color: dearnessAmt >= 7380 ? 'var(--theme-green-text)' : 'var(--theme-amber-text)' }}>
@@ -413,7 +414,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                           <span style={{ color: 'var(--theme-text2)' }}>(yours: {fmt(dearnessAmt)})</span>
                         </div>
                         <div style={{ color: gross >= MIN_WAGE_MONTHLY ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                          {gross >= MIN_WAGE_MONTHLY ? '✓' : '✗'} Gross ≥ NPR {MIN_WAGE_MONTHLY.toLocaleString('en-NP')} &nbsp;
+                          {gross >= MIN_WAGE_MONTHLY ? '✓' : '✗'} Gross ≥ NPR {MIN_WAGE_MONTHLY.toLocaleString('en-IN')} &nbsp;
                           <span style={{ color: 'var(--theme-text2)' }}>(yours: {fmt(gross)})</span>
                         </div>
                       </div>

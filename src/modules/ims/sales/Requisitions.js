@@ -502,10 +502,10 @@ ${text}`, detail })
                           />
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                          {rate > 0 ? `NPR ${rate.toLocaleString('en-NP', { maximumFractionDigits: 2 })}` : '—'}
+                          {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', fontSize: 12 }}>
-                          {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-NP')}` : '—'}
+                          {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
                         </td>
                         <td>
                           <button
@@ -642,7 +642,7 @@ ${text}`, detail })
                         <tr key={line.id}>
                           <td style={{ fontWeight: 600 }}>{line.items?.name}</td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{line.items?.uom}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{Number(line.qty_requested).toLocaleString()}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{Number(line.qty_requested).toLocaleString('en-IN')}</td>
                           <td>
                             <input
                               type="number" min="0" step="any"
@@ -652,10 +652,10 @@ ${text}`, detail })
                             />
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                            {rate > 0 ? `NPR ${rate.toLocaleString('en-NP', { maximumFractionDigits: 2 })}` : '—'}
+                            {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>
-                            {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-NP')}` : '—'}
+                            {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
                           </td>
                         </tr>
                       )
@@ -705,16 +705,16 @@ ${text}`, detail })
                               : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                           </td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{line.items?.uom}</td>
-                          <td style={{ textAlign: 'right' }}>{Number(reqQty).toLocaleString()}</td>
+                          <td style={{ textAlign: 'right' }}>{Number(reqQty).toLocaleString('en-IN')}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: selectedReq.status === 'issued' ? (partial ? 'var(--theme-red-text)' : 'var(--theme-green-text)') : 'var(--theme-text2)' }}>
-                            {selectedReq.status === 'issued' ? Number(issdQty).toLocaleString() : '—'}
+                            {selectedReq.status === 'issued' ? Number(issdQty).toLocaleString('en-IN') : '—'}
                             {partial && <span style={{ fontSize: 10, marginLeft: 4 }}>partial</span>}
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                            {rate > 0 ? `NPR ${rate.toLocaleString('en-NP', { maximumFractionDigits: 2 })}` : '—'}
+                            {rate > 0 ? `NPR ${rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
-                            {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-NP')}` : '—'}
+                            {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
                           </td>
                         </tr>
                       )
@@ -731,7 +731,7 @@ ${text}`, detail })
                             {selectedReq.status === 'issued' ? 'Total Issued Value' : 'Total Requested Value'}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>
-                            NPR {Math.round(total).toLocaleString('en-NP')}
+                            NPR {Math.round(total).toLocaleString('en-IN')}
                           </td>
                         </tr>
                       ) : null
@@ -763,7 +763,7 @@ ${text}`, detail })
             <div className="stat-card">
               <div className="stat-label">Total Issued Value</div>
               <div className="stat-value gold" style={{ fontSize: 16 }}>
-                {totalIssuedValue > 0 ? `NPR ${Math.round(totalIssuedValue).toLocaleString('en-NP')}` : '—'}
+                {totalIssuedValue > 0 ? `NPR ${Math.round(totalIssuedValue).toLocaleString('en-IN')}` : '—'}
               </div>
             </div>
           </div>
@@ -828,7 +828,7 @@ ${text}`, detail })
                           </td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{req.notes || '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
-                            {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-NP')}` : '—'}
+                            {value > 0 ? `NPR ${Math.round(value).toLocaleString('en-IN')}` : '—'}
                           </td>
                           <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
                             <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => viewReq(req)}>View</button>

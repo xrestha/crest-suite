@@ -1,3 +1,4 @@
+import { npr2 } from '../../../shared/nepalMoney'
 import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { getCf, calcBillTotals } from './purchasesHelpers'
@@ -10,7 +11,7 @@ import { getCf, calcBillTotals } from './purchasesHelpers'
 export default function PurchaseBillPrint({ header, lines, items, vendorName, period, bizInfo, enteredBy, enteredAt }) {
   const totals = calcBillTotals(lines, header.discount)
   const bsDateStr = period && header.bs_day ? `${header.bs_day} ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : ''
-  const fmt = n => n.toLocaleString('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const fmt = npr2
   const entryStamp = enteredAt || new Date()
   const entryBs = nepalBs(entryStamp)
   const enteredOnStr = entryBs

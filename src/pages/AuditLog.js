@@ -90,7 +90,7 @@ function formatValue(key, val) {
   if (typeof val === 'boolean') return val ? 'Yes' : 'No'
   if (typeof val === 'number') {
     if (CURRENCY_KEY.test(key)) return `NPR ${val.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-    return val.toLocaleString()
+    return val.toLocaleString('en-IN')
   }
   if (typeof val === 'string') {
     if (DATE_KEY.test(key) && !isNaN(Date.parse(val))) return fmtTime(val)
@@ -298,7 +298,7 @@ export default function AuditLog() {
     // And the RPC returns how many rows went; discarding it left the operator with no statement
     // of what a destructive action on the audit trail actually did.
     if (error) { setClearMsg('error:Nothing was deleted — the audit trail is unchanged. ' + errorLine(error)); return }
-    setClearMsg(`ok:${(deletedCount ?? 0).toLocaleString()} audit log entries deleted (${timeLabel}, ${clientLabel}${areaLabel}).`)
+    setClearMsg(`ok:${(deletedCount ?? 0).toLocaleString('en-IN')} audit log entries deleted (${timeLabel}, ${clientLabel}${areaLabel}).`)
     await fetchLogs(filterClient, filterArea, filterTime)
   }
 

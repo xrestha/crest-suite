@@ -318,7 +318,7 @@ export default function MenuEngineering() {
           {Object.keys(QUADRANTS).map(q => <option key={q} value={q}>{q}</option>)}
         </select>
         <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 'auto' }}>
-          {filtered.length} item{filtered.length !== 1 ? 's' : ''} · Revenue: NPR {totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Qty: {totalQty.toLocaleString()}
+          {filtered.length} item{filtered.length !== 1 ? 's' : ''} · Revenue: NPR {totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })} · Qty: {totalQty.toLocaleString('en-IN')}
         </span>
       </div>
 
@@ -498,7 +498,7 @@ export default function MenuEngineering() {
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.name}</td>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{r.category || '—'}</td>
-                      <td style={{ textAlign: 'right' }}>{r.sellingPrice > 0 ? r.sellingPrice.toLocaleString() : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{r.sellingPrice > 0 ? r.sellingPrice.toLocaleString('en-IN') : '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.ingredientCost.toFixed(2)}</td>
                       <td style={{ textAlign: 'right' }}>
                         <span title={r.sellingPrice > 0 ? fcBand(r.fcPct, settings).label : undefined} style={{
@@ -508,7 +508,7 @@ export default function MenuEngineering() {
                           {r.sellingPrice > 0 ? `${r.fcPct.toFixed(1)}% ${fcBand(r.fcPct, settings).mark}` : '—'}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right' }}>{r.qtySold > 0 ? r.qtySold.toLocaleString() : <span style={{ color: 'var(--theme-text3)' }}>0</span>}</td>
+                      <td style={{ textAlign: 'right' }}>{r.qtySold > 0 ? r.qtySold.toLocaleString('en-IN') : <span style={{ color: 'var(--theme-text3)' }}>0</span>}</td>
                       <td style={{ textAlign: 'right' }}>{r.revenue > 0 ? r.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}</td>
                       <td>
                         <span style={{
