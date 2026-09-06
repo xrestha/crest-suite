@@ -151,7 +151,7 @@ export default function BudgetVsActual() {
         </select>
       </div>
 
-      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+      <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
         Enter a budget for each category — the app compares it against net purchases (purchases − returns) for the selected period. Budgets are saved automatically.
       </div>
 
@@ -197,7 +197,7 @@ export default function BudgetVsActual() {
                             placeholder="Set budget…"
                             style={{
                               background: 'var(--theme-bg)', border: '1px solid',
-                              borderColor: budget > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)',
+                              borderColor: budget > 0 ? 'color-mix(in srgb, var(--theme-accent) 40%, transparent)' : 'var(--theme-border)',
                               borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13,
                               color: 'var(--theme-text1)', outline: 'none', width: 130, textAlign: 'right',
                             }}
@@ -218,8 +218,8 @@ export default function BudgetVsActual() {
                         {noBudget
                           ? <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>No Budget</span>
                           : isOver
-                          ? <span style={{ fontSize: 11, color: 'var(--theme-red-text)', background: 'rgba(248,113,113,0.12)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Over Budget</span>
-                          : <span style={{ fontSize: 11, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.12)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Under Budget</span>
+                          ? <span style={{ fontSize: 11, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Over Budget</span>
+                          : <span style={{ fontSize: 11, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Under Budget</span>
                         }
                       </td>
                     </tr>

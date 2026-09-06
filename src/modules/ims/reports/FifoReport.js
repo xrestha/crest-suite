@@ -292,7 +292,7 @@ export default function FifoReport() {
                   {filtered.map(row => {
                     const fs = flagStyle(row.flag)
                     return (
-                      <tr key={row.id} style={{ background: row.flag === 'expired' ? 'rgba(248,113,113,0.04)' : row.flag === 'warning' ? 'rgba(201,168,76,0.04)' : 'transparent' }}>
+                      <tr key={row.id} style={{ background: row.flag === 'expired' ? 'color-mix(in srgb, var(--theme-red) 4%, transparent)' : row.flag === 'warning' ? 'color-mix(in srgb, var(--theme-accent) 4%, transparent)' : 'transparent' }}>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.itemName}</td>
                         <td><span className="badge badge-yellow">{row.category}</span></td>
                         <td style={{ textAlign: 'right' }}>{Number(row.qty).toLocaleString('en-IN')}</td>

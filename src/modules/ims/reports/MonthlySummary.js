@@ -241,11 +241,11 @@ export default function MonthlySummary() {
           {/* Food cost summary box */}
           <div style={{
             background: report.fcPct == null ? 'color-mix(in srgb, var(--theme-text2) 8%, transparent)' :
-              report.fcPct <= 35 ? 'rgba(52,211,153,0.06)' :
-              report.fcPct <= 45 ? 'rgba(201,168,76,0.06)' : 'rgba(248,113,113,0.06)',
+              report.fcPct <= 35 ? 'color-mix(in srgb, var(--theme-green) 6%, transparent)' :
+              report.fcPct <= 45 ? 'color-mix(in srgb, var(--theme-accent) 6%, transparent)' : 'color-mix(in srgb, var(--theme-red) 6%, transparent)',
             border: `1px solid ${report.fcPct == null ? 'var(--theme-border)' :
-              report.fcPct <= 35 ? 'rgba(52,211,153,0.2)' :
-              report.fcPct <= 45 ? 'rgba(201,168,76,0.2)' : 'rgba(248,113,113,0.2)'}`,
+              report.fcPct <= 35 ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' :
+              report.fcPct <= 45 ? 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' : 'color-mix(in srgb, var(--theme-red) 20%, transparent)'}`,
             borderRadius: 'var(--radius-md)', padding: '20px 24px', marginBottom: 24,
             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px,1fr))', gap: 20
           }}>

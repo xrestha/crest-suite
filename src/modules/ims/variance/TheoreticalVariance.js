@@ -305,7 +305,7 @@ export default function TheoreticalVariance() {
 
       {!loadError && <>
       {!loading && !computing && selectedPeriod && !hasClosing && (
-        <div style={{ background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.30)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.6 }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>Closing stock hasn’t been counted for {periodLabel} yet.</strong>{' '}
           The “Actual” column subtracts the closing count, so until it exists everything still on
           your shelves is counted as consumed and every item looks over-used. Finish the Stock
@@ -314,7 +314,7 @@ export default function TheoreticalVariance() {
       )}
 
       {/* Explanation banner */}
-      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
+      <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what your recipes say you should have used based on sales.
         Actual = {COGS_FORMULA}. The gap reveals over-portioning, theft, or data entry errors.
         Red rows need investigation. Green = within the ±{varianceFlagPct(settings)}% tolerance set in
@@ -363,7 +363,7 @@ export default function TheoreticalVariance() {
           <div style={{ display: 'flex', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
             {[['all', 'All'], ['over', '🔴 Over-consumed'], ['under', '🟡 Under-consumed']].map(([val, lbl]) => (
               <button key={val} onClick={() => setFilterType(val)} style={{
-                background: filterType === val ? 'rgba(201,168,76,0.12)' : 'none',
+                background: filterType === val ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)' : 'none',
                 border: 'none', borderRight: '1px solid var(--theme-border)', cursor: 'pointer',
                 padding: '7px 14px', fontSize: 12, fontWeight: 600,
                 color: filterType === val ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',

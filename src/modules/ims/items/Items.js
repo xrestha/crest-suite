@@ -528,7 +528,7 @@ ${text}`, detail })
           {isAdmin && items.some(i => i.purchase_unit) && (
             <button
               className="btn btn-ghost"
-              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
               onClick={clearAllConversions}
             >
               ✕ Clear All Conversions
@@ -539,7 +539,7 @@ ${text}`, detail })
       </div>
 
       {categories.length === 0 && !loading && (
-        <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(201,168,76,0.3)' }}>
+        <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
           <p style={{ color: 'var(--theme-accent-ink)', fontSize: 13, margin: 0 }}>
             You have no item categories yet, so there is nothing to file a new item under. Click <strong>⚡ Load Default Categories</strong> to add the {DEFAULT_CATEGORIES.length} Crest starts with — {DEFAULT_CATEGORIES.slice(0, -1).join(', ')} and {DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1]}. Rename them or add your own afterwards.
           </p>
@@ -712,7 +712,7 @@ ${text}`, detail })
               {conversionPreview(form.purchase_unit, form.base_unit, form.conversion_factor) && (
                 <div style={{
                   marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 10,
-                  background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.25)',
+                  background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)',
                   borderRadius: 'var(--radius-sm)', padding: '10px 18px'
                 }}>
                   <span style={{ fontSize: 18 }}>🔄</span>
@@ -734,7 +734,7 @@ ${text}`, detail })
                 <div style={{ marginTop: 12 }}>
                   <button
                     className="btn btn-ghost"
-                    style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+                    style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                     onClick={() => setForm(f({ purchase_unit: '', base_unit: '', conversion_factor: '' }))}
                   >
                     ✕ Clear Conversion
@@ -832,7 +832,7 @@ ${text}`, detail })
                 : tab.name}
               <span style={{
                 fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-sm)',
-                background: active ? 'rgba(201,168,76,0.12)' : 'color-mix(in srgb, var(--theme-text2) 12%, transparent)',
+                background: active ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)' : 'color-mix(in srgb, var(--theme-text2) 12%, transparent)',
                 color: active ? 'var(--theme-accent-ink)' : 'var(--theme-text2)'
               }}>{count}</span>
             </button>
@@ -901,8 +901,8 @@ ${text}`, detail })
                       <td>
                         {hasConversion ? (
                           <span style={{
-                            fontSize: 11, background: 'rgba(52,211,153,0.08)',
-                            color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.25)',
+                            fontSize: 11, background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
+                            color: 'var(--theme-green-text)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)',
                             borderRadius: 'var(--radius-xs)', padding: '2px 7px', whiteSpace: 'nowrap'
                           }}>
                             🔄 1 {item.purchase_unit} = {item.conversion_factor} {item.base_unit}
@@ -931,7 +931,7 @@ ${text}`, detail })
                           onClick={() => toggleActive(item)}>
                           {item.is_active ? 'Hide' : 'Show'}
                         </button>
-                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                           onClick={() => deleteItem(item)}>Del</button>
                       </td>
                     </tr>

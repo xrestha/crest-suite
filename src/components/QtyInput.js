@@ -132,8 +132,8 @@ export default function QtyInput({
             padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap',
             pointerEvents: 'none', zIndex: 5,
             background: 'var(--theme-card)',
-            border: `1px solid ${preview === null ? 'rgba(248,113,113,0.45)' : 'rgba(201,168,76,0.45)'}`,
-            color: preview === null ? 'var(--theme-red)' : 'var(--theme-accent)',
+            border: `1px solid ${preview === null ? 'color-mix(in srgb, var(--theme-red) 45%, transparent)' : 'color-mix(in srgb, var(--theme-accent) 45%, transparent)'}`,
+            color: preview === null ? 'var(--theme-red-text)' : 'var(--theme-accent-ink)',
           }}
         >
           {preview === null ? '⌫ incomplete' : `= ${preview.toLocaleString('en-IN')}`}

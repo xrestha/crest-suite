@@ -592,7 +592,7 @@ export default function PeriodComparison() {
                     <td>
                       <strong>{periodLabel(p)}</strong>
                       {p.status === 'open' && (
-                        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 'var(--radius-xs)', padding: '1px 5px' }}>
+                        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 'var(--radius-xs)', padding: '1px 5px' }}>
                           OPEN
                         </span>
                       )}

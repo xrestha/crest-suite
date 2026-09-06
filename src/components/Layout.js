@@ -1030,8 +1030,8 @@ export default function Layout() {
               <NavLink to="/admin/clients"
                 className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
                 style={newTrialCount > 0 && pendingTrialCount === 0 ? {
-                  background: 'rgba(251,191,36,0.10)',
-                  boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.35)',
+                  background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',
+                  boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--theme-amber) 35%, transparent)',
                 } : {}}
                 onClick={() => setMobileSidebarOpen(false)}>
                 <span className="sidebar-icon"><Building2 size={16} strokeWidth={1.75} /></span>
@@ -1041,13 +1041,13 @@ export default function Layout() {
                       DESIGN.md's badge spec — the previous solid fills paired hardcoded #fff /
                       #000 foregrounds that failed contrast on several presets. */}
                   {pendingTrialCount > 0 && (
-                    <span style={{ fontSize: 11, fontWeight: 800, background: 'rgba(248,113,113,0.15)', color: 'var(--theme-red-text)', border: '1px solid rgba(248,113,113,0.35)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'color-mix(in srgb, var(--theme-red) 15%, transparent)', color: 'var(--theme-red-text)', border: '1px solid color-mix(in srgb, var(--theme-red) 35%, transparent)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
                       title="Clients requesting to subscribe">
                       {pendingTrialCount} want to sub
                     </span>
                   )}
                   {newTrialCount > 0 && (
-                    <span style={{ fontSize: 11, fontWeight: 800, background: 'rgba(251,191,36,0.15)', color: 'var(--theme-amber-text)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', color: 'var(--theme-amber-text)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
                       title="New trial signups in the last 7 days">
                       {newTrialCount} NEW
                     </span>
@@ -1161,7 +1161,7 @@ export default function Layout() {
             so it states the exact date access stops rather than just "expired". */}
         {accessReason === 'grace' && (
           <div style={{
-            background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.4)',
+            background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 40%, transparent)',
             borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
           }} role="status">
@@ -1189,7 +1189,7 @@ export default function Layout() {
         {/* Trial banners — shown from day 4 onwards and after expiry */}
         {isTrial && !trialExpired && trialDaysLeft <= 4 && (
           <div style={{
-            background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.35)',
+            background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
             borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
           }} role="status">

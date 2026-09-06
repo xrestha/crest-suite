@@ -301,8 +301,8 @@ export default function DeadStock() {
                     <span style={{
                       fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-xs)',
                       color:      r.status === 'Dead' ? 'var(--theme-red-text)' : 'var(--theme-amber-text)',
-                      background: r.status === 'Dead' ? 'rgba(248,113,113,0.1)' : 'rgba(251,191,36,0.1)',
-                      border:     `1px solid ${r.status === 'Dead' ? 'rgba(248,113,113,0.25)' : 'rgba(251,191,36,0.25)'}`,
+                      background: r.status === 'Dead' ? 'color-mix(in srgb, var(--theme-red) 10%, transparent)' : 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',
+                      border:     `1px solid ${r.status === 'Dead' ? 'color-mix(in srgb, var(--theme-red) 25%, transparent)' : 'color-mix(in srgb, var(--theme-amber) 25%, transparent)'}`,
                     }}>
                       {r.status}
                     </span>

@@ -21,10 +21,10 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const QUADRANTS = {
-  Star:      { color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.30)', icon: '★', desc: 'High profit · High popularity' },
+  Star:      { color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-green) 30%, transparent)', icon: '★', desc: 'High profit · High popularity' },
   Plowhorse: { color: 'var(--theme-purple-text)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)', icon: '🐴', desc: 'High profit · Low popularity' },
   Puzzle:    { color: 'var(--theme-amber-text)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)',  icon: '?', desc: 'Low profit · High popularity' },
-  Dog:       { color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.30)', icon: '✕', desc: 'Low profit · Low popularity' },
+  Dog:       { color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 30%, transparent)', icon: '✕', desc: 'Low profit · Low popularity' },
 }
 
 const FC_CUTOFF = 35 // %

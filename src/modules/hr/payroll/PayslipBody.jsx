@@ -16,7 +16,7 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
   const Row = ({ label, value, strong, neg }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, fontWeight: strong ? 700 : 400 }}>
       <span style={{ color: strong ? c2 : c1 }}>{label}</span>
-      <span style={{ color: strong ? (forPrint ? '#000' : 'var(--theme-accent)') : (neg ? 'var(--theme-red)' : c2) }}>{neg ? '− ' : ''}{fmtn(value)}</span>
+      <span style={{ color: strong ? (forPrint ? '#000' : 'var(--theme-accent-ink)') : (neg ? 'var(--theme-red-text)' : c2) }}>{neg ? '− ' : ''}{fmtn(value)}</span>
     </div>
   )
   const isMonthly = slip.pay_basis === 'monthly'

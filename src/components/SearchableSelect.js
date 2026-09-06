@@ -164,7 +164,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
                   fontSize: touch ? 15 : 13, cursor: 'pointer',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                   background: i === highlight ? 'var(--theme-table-hover)' : 'transparent',
-                  color: opt.value === value ? 'var(--theme-accent)' : 'var(--theme-text1)',
+                  color: opt.value === value ? 'var(--theme-accent-ink)' : 'var(--theme-text1)',
                 }}
               >
                 {opt.label}

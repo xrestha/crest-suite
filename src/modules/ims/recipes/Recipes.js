@@ -956,7 +956,7 @@ ${text}`, detail })
               </Tip>
               <div style={{ position: 'relative' }}>
                 <input
-                  style={{ background: 'var(--theme-card)', border: `1px solid ${ingQ ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260 }}
+                  style={{ background: 'var(--theme-card)', border: `1px solid ${ingQ ? 'color-mix(in srgb, var(--theme-accent) 50%, transparent)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260 }}
                   placeholder="Find ingredient in recipes…" value={ingSearch} onChange={e => setIngSearch(e.target.value)} />
                 <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
                 {ingSearch && (
@@ -1024,7 +1024,7 @@ ${text}`, detail })
                 >
                   {tab.label}
                   <span style={{
-                    background: isActive ? (isSubTab ? 'rgba(201,168,76,0.15)' : 'color-mix(in srgb, var(--theme-purple) 10%, transparent)') : 'var(--theme-border-lt)',
+                    background: isActive ? (isSubTab ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'color-mix(in srgb, var(--theme-purple) 10%, transparent)') : 'var(--theme-border-lt)',
                     // text2 on the lighter border tint: text3 on --theme-border measured 3.97:1.
                     color: isActive ? (isSubTab ? 'var(--theme-accent-ink)' : 'var(--theme-text1)') : 'var(--theme-text2)',
                     borderRadius: 'var(--radius-md)',
@@ -1339,7 +1339,7 @@ ${text}`, detail })
           {/* Live cost panel */}
           {liveCost > 0 && (
             <div style={{
-              background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)',
+              background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)',
               borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 20,
               display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 16
             }}>
@@ -1533,7 +1533,7 @@ ${text}`, detail })
                             const has = hasNutrition(it?.nutrition)
                             return (
                               <button onClick={() => setNutriItemId(ing.item_id)}
-                                style={{ background: 'none', border: `1px solid ${has ? 'rgba(52,211,153,0.4)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 11, color: has ? 'var(--theme-green-text)' : 'var(--theme-text2)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                style={{ background: 'none', border: `1px solid ${has ? 'color-mix(in srgb, var(--theme-green) 40%, transparent)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 11, color: has ? 'var(--theme-green-text)' : 'var(--theme-text2)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                                 {has ? '● Edit' : '+ Add'}
                               </button>
                             )
@@ -1613,7 +1613,7 @@ ${text}`, detail })
               </div>
             )}
             {isSubRec && (
-              <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+              <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
                 ⚙ Sub-Recipe — Yield: {selectedRecipe.yield_qty} {selectedRecipe.yield_uom} · Cost per {selectedRecipe.yield_uom}: NPR {costPerUnit.toFixed(2)}
               </div>
             )}
@@ -1648,7 +1648,7 @@ ${text}`, detail })
               const suggestedVat = Math.ceil((suggestedRaw * (1 + vat)) / 5) * 5
               return (
                 <div style={{
-                  background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.2)',
+                  background: 'color-mix(in srgb, var(--theme-green) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)',
                   borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 20
                 }}>
                   <div style={{ fontSize: 11, color: 'var(--theme-green-text)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14, fontWeight: 600 }}>
@@ -1716,7 +1716,7 @@ ${text}`, detail })
                   <span style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Allergens</span>
                   {nutri.allergens.length > 0
                     ? nutri.allergens.map(a => (
-                        <span key={a} className="badge" style={{ background: 'rgba(248,113,113,0.12)', color: 'var(--theme-red-text)', textTransform: 'capitalize' }}>{a}</span>
+                        <span key={a} className="badge" style={{ background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', color: 'var(--theme-red-text)', textTransform: 'capitalize' }}>{a}</span>
                       ))
                     : <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>None tagged</span>}
                 </div>

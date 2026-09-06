@@ -438,7 +438,7 @@ export default function StockMovements() {
           </Tip>
           <div style={{ position: 'relative' }}>
             <input
-              style={{ background: 'var(--theme-card)', border: `1px solid ${ingSearch.trim() ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
+              style={{ background: 'var(--theme-card)', border: `1px solid ${ingSearch.trim() ? 'color-mix(in srgb, var(--theme-accent) 50%, transparent)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '8px 12px 8px 30px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Find ingredient in sub-recipes…" value={ingSearch} onChange={e => setIngSearch(e.target.value)} />
             <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
             {ingSearch && (

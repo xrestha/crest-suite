@@ -255,7 +255,7 @@ export default function ShrinkageReport() {
       {loadError && <ReportLoadError error={loadError} />}
 
       {!loadError && <>
-      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+      <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
         Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red-text)' }}>unexplained</em>. Possible causes: theft, over-portioning, unlogged spillage, or data entry errors.
         Only items linked to recipes (with sales data) are analysed.
@@ -347,7 +347,7 @@ export default function ShrinkageReport() {
               </thead>
               <tbody>
                 {filtered.map(row => (
-                  <tr key={row.item.id} style={{ background: row.status.label === 'Consistent' ? 'rgba(248,113,113,0.03)' : 'transparent' }}>
+                  <tr key={row.item.id} style={{ background: row.status.label === 'Consistent' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{row.item.name}</td>
                     <td><span className="badge badge-yellow">{row.category}</span></td>
                     <td style={{ color: 'var(--theme-text2)' }}>{row.item.uom}</td>

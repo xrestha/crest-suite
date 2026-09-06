@@ -203,7 +203,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       )}
 
       {/* Open Food Facts — branded / packaged products */}
-      <div style={{ marginBottom: 16, padding: '12px 14px', background: 'rgba(52,211,153,0.05)', border: '1px solid rgba(52,211,153,0.18)', borderRadius: 'var(--radius-sm)' }}>
+      <div style={{ marginBottom: 16, padding: '12px 14px', background: 'color-mix(in srgb, var(--theme-green) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 18%, transparent)', borderRadius: 'var(--radius-sm)' }}>
         <div style={{ fontSize: 11, color: 'var(--theme-green-text)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
           <Tip width={280} text="For branded / packaged goods (sauces, drinks, snacks). Search by product name or paste a barcode. Pulls nutrition per 100 g from the Open Food Facts database.">Fetch from Open Food Facts</Tip>
         </div>

@@ -197,7 +197,7 @@ export default function FeatureAccessModal({ client, onClose }) {
             {/* Flat accent wash + border, the same treatment ClientDrawer's Archive panel uses.
                 No gradient — Cards rule. */}
             <div style={{
-              background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)',
+              background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 25%, transparent)',
               borderRadius: 'var(--radius-lg)', padding: '12px 14px',
             }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 9 }}>

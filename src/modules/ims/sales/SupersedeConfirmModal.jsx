@@ -22,7 +22,7 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
   return (
     <Modal onClose={onCancel} title={`Delete ${superseded.total} ${what}?`} maxWidth={620}>
       <div style={{
-        background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)',
+        background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)',
         borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 16, fontSize: 13, color: 'var(--theme-red-text)',
       }}>
         This cannot be undone. Deleted sales entries are not recoverable.
@@ -82,8 +82,8 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
           disabled={!armed}
           style={{
             color: armed ? 'var(--theme-red-text)' : 'var(--theme-text3)',
-            borderColor: armed ? 'rgba(248,113,113,0.5)' : 'var(--theme-border)',
-            background: armed ? 'rgba(248,113,113,0.10)' : 'transparent',
+            borderColor: armed ? 'color-mix(in srgb, var(--theme-red) 50%, transparent)' : 'var(--theme-border)',
+            background: armed ? 'color-mix(in srgb, var(--theme-red) 10%, transparent)' : 'transparent',
           }}
         >Delete {superseded.total} & Save</button>
       </div>

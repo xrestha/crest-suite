@@ -368,7 +368,7 @@ export default function VatReport() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(totalVatDiscount * (1 + VAT_RATE))}</td>
                         <td></td>
                       </tr>
-                      <tr style={{ fontWeight: 700, background: 'rgba(201,168,76,0.05)' }}>
+                      <tr style={{ fontWeight: 700, background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' }}>
                         <td colSpan={6} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>TAXABLE TOTALS</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseGross)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{fmtNPR(vatAmtGross)}</td>
@@ -384,7 +384,7 @@ export default function VatReport() {
 
           {/* VAT Returns */}
           {vatReturns.length > 0 && (
-            <div className="card" style={{ marginBottom: 16, border: '1px solid rgba(248,113,113,0.2)' }}>
+            <div className="card" style={{ marginBottom: 16, border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
               <h3 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-red-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>VAT-Inclusive Returns <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', marginLeft: 8 }}>Input VAT reversed on returned goods</span></span>
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)', fontWeight: 400 }}>{vatReturns.length} return{vatReturns.length !== 1 ? 's' : ''}</span>
@@ -429,7 +429,7 @@ export default function VatReport() {
                         </tr>
                       )
                     })}
-                    <tr style={{ borderTop: '2px solid rgba(248,113,113,0.3)', fontWeight: 700 }}>
+                    <tr style={{ borderTop: '2px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', fontWeight: 700 }}>
                       <td colSpan={6} style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>TOTAL RETURNS</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(retBaseTotal)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(retVatTotal)}</td>

@@ -299,7 +299,7 @@ export default function PurchaseBillPage() {
       {/* Rate update prompt */}
       {rateUpdateItems.length > 0 && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--theme-card)', border: '1px solid rgba(201,168,76,0.3)', borderRadius: 'var(--radius-md)', padding: '24px 28px', maxWidth: 520, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: 'var(--theme-card)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', borderRadius: 'var(--radius-md)', padding: '24px 28px', maxWidth: 520, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 4 }}>📦 Rate changes detected</div>
             <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 16 }}>Select items to update in the Item Master. This affects recipe costing going forward.</div>
 

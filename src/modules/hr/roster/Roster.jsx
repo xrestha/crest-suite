@@ -1140,9 +1140,9 @@ export default function Roster() {
                                         width: '100%',
                                         minHeight: viewMode === 'weekly' ? 56 : 30,
                                         background: onLeave
-                                          ? 'repeating-linear-gradient(45deg, rgba(248,113,113,0.18), rgba(248,113,113,0.18) 4px, rgba(248,113,113,0.06) 4px, rgba(248,113,113,0.06) 8px)'
+                                          ? 'repeating-linear-gradient(45deg, color-mix(in srgb, var(--theme-red) 18%, transparent), color-mix(in srgb, var(--theme-red) 18%, transparent) 4px, color-mix(in srgb, var(--theme-red) 6%, transparent) 4px, color-mix(in srgb, var(--theme-red) 6%, transparent) 8px)'
                                           : shift ? shift.color + '22' : 'transparent',
-                                        border:     onLeave ? '1px solid rgba(248,113,113,0.55)' : shift ? `1px solid ${shift.color}55` : '1px dashed var(--theme-border)',
+                                        border:     onLeave ? '1px solid color-mix(in srgb, var(--theme-red) 55%, transparent)' : shift ? `1px solid ${shift.color}55` : '1px dashed var(--theme-border)',
                                         borderRadius: 6, cursor: 'pointer',
                                         padding: viewMode === 'weekly' ? '6px 6px' : '2px',
                                         display: 'flex', flexDirection: 'column',

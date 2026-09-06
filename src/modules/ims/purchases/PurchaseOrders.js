@@ -18,9 +18,9 @@ import { PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 const STATUS_META = {
   draft:     { label: 'Draft',     color: 'var(--theme-text2)', bg: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' },
   sent:      { label: 'Sent',      color: 'var(--theme-purple-text)', bg: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-purple) 30%, transparent)' },
-  partial:   { label: 'Partial',   color: 'var(--theme-accent-ink)', bg: 'rgba(201,168,76,0.1)',  border: 'rgba(201,168,76,0.3)' },
-  received:  { label: 'Received',  color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.1)',  border: 'rgba(52,211,153,0.3)' },
-  cancelled: { label: 'Cancelled', color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.3)' },
+  partial:   { label: 'Partial',   color: 'var(--theme-accent-ink)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' },
+  received:  { label: 'Received',  color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 10%, transparent)',  border: 'color-mix(in srgb, var(--theme-green) 30%, transparent)' },
+  cancelled: { label: 'Cancelled', color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' },
 }
 
 function StatusBadge({ status }) {
@@ -524,7 +524,7 @@ ${text}`, detail })
                         ) : (
                           <input type="number" min="0" max={rem} value={l.receiving}
                             onChange={e => setReceiveLines(prev => prev.map((x, i) => i === idx ? { ...x, receiving: e.target.value } : x))}
-                            style={{ background: 'var(--theme-bg)', border: '1px solid rgba(201,168,76,0.4)', borderRadius: 'var(--radius-sm)',
+                            style={{ background: 'var(--theme-bg)', border: '1px solid color-mix(in srgb, var(--theme-accent) 40%, transparent)', borderRadius: 'var(--radius-sm)',
                               padding: '6px 10px', fontSize: 13, color: 'var(--theme-text1)', width: 90, textAlign: 'right', outline: 'none' }} />
                         )}
                       </td>

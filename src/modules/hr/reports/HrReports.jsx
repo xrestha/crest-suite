@@ -23,8 +23,8 @@ function retireInfo(dateStr) {
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const d = new Date(dateStr); d.setHours(0, 0, 0, 0)
   const days = Math.round((d - today) / 86400000)
-  if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' }
-  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent-ink)', bg: 'rgba(201,168,76,0.1)', border: 'rgba(201,168,76,0.2)' }
+  if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' }
+  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent-ink)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' }
   return null
 }
 
@@ -393,7 +393,7 @@ export default function HrReports() {
           ) : (
             <>
               {!finalized && (
-                <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 8, fontSize: 12, color: 'var(--theme-accent-ink)' }}>
+                <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 25%, transparent)', borderRadius: 8, fontSize: 12, color: 'var(--theme-accent-ink)' }}>
                   ⚠ This payroll is still a draft — figures may change. Finalize it in Payroll before filing or paying.
                 </div>
               )}
@@ -522,8 +522,8 @@ export default function HrReports() {
                       return (
                         <tr key={s.id}>
                           <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{emp.full_name}</td>
-                          <td style={{ color: missing ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>{emp.bank_name || '⚠ missing'}</td>
-                          <td style={{ color: missing ? 'var(--theme-accent)' : 'var(--theme-text3)' }}>{emp.bank_account_no || '⚠ missing'}</td>
+                          <td style={{ color: missing ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{emp.bank_name || '⚠ missing'}</td>
+                          <td style={{ color: missing ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{emp.bank_account_no || '⚠ missing'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontWeight: 600 }}>{fmt(s.net_pay)}</td>
                         </tr>
                       )
@@ -626,7 +626,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
             </div>
           )}
           {emp.employee_code && <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Code: {emp.employee_code}</div>}
-          <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>PAN: <span style={{ color: emp.pan_no ? 'var(--theme-text2)' : 'var(--theme-accent)' }}>{emp.pan_no || '⚠ not on file'}</span></div>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>PAN: <span style={{ color: emp.pan_no ? 'var(--theme-text2)' : 'var(--theme-accent-ink)' }}>{emp.pan_no || '⚠ not on file'}</span></div>
         </div>
       </div>
 

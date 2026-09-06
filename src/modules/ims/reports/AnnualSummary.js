@@ -208,7 +208,7 @@ export default function AnnualSummary() {
               {[false, true].map(fm => (
                 <button key={String(fm)} onClick={() => setFiscalMode(fm)}
                   style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
-                    background: fiscalMode === fm ? 'rgba(201,168,76,0.15)' : 'transparent',
+                    background: fiscalMode === fm ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'transparent',
                     color: fiscalMode === fm ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
                   {fm ? 'Fiscal Year' : 'Calendar Year'}
                 </button>

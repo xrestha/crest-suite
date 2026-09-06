@@ -153,8 +153,8 @@ export default function AdminDashboardOverview() {
   const planBadge = (plan) => ({
     fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)',
     color:       plan === 'pro' ? 'var(--theme-accent-ink)'  : plan === 'growth' ? 'var(--theme-green-text)'               : 'var(--theme-text2)',
-    background:  plan === 'pro' ? 'rgba(201,168,76,0.12)': plan === 'growth' ? 'rgba(52,211,153,0.10)'            : 'rgba(138,146,163,0.10)',
-    border: `1px solid ${plan === 'pro' ? 'rgba(201,168,76,0.25)' : plan === 'growth' ? 'rgba(52,211,153,0.20)' : 'rgba(138,146,163,0.20)'}`,
+    background:  plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)': plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)'            : 'rgba(138,146,163,0.10)',
+    border: `1px solid ${plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'rgba(138,146,163,0.20)'}`,
   })
 
   return (
@@ -211,23 +211,23 @@ export default function AdminDashboardOverview() {
                   module name. That measures ~155px, so it fits with a little headroom.
                   flexWrap stays as the safety net: a narrower viewport should wrap, never clip. */}
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                <span title={`${imsCount} properties with Crest IMS enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)' }}>IMS {imsCount}</span>
-                <span title={`${hrCount} properties with Crest HR enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)' }}>HR {hrCount}</span>
-                <span title={`${posCount} properties with Crest POS enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)' }}>POS {posCount}</span>
+                <span title={`${imsCount} properties with Crest IMS enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', color: 'var(--theme-accent-ink)' }}>IMS {imsCount}</span>
+                <span title={`${hrCount} properties with Crest HR enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', color: 'var(--theme-green-text)' }}>HR {hrCount}</span>
+                <span title={`${posCount} properties with Crest POS enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', color: 'var(--theme-purple-text)' }}>POS {posCount}</span>
                 {suiteCount > 0 && (
                   // The word is dropped, not the axis: S552's rule is that a billed axis must be
                   // visible on the screens that bill it, and the star keeps its accent fill, its
                   // heavier weight and a Tip naming it. The full "★ SUITE" pill still renders per
                   // row in the table below, where there is width for it.
                   <Tip text={`Crest Suite Pro is on ${suiteCount} ${suiteCount === 1 ? 'property' : 'properties'} — the owner layer sold per outlet on top of the modules.`} width={250}>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'rgba(201,168,76,0.20)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.45)' }}>★ {suiteCount}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)', color: 'var(--theme-accent-ink)', border: '1px solid color-mix(in srgb, var(--theme-accent) 45%, transparent)' }}>★ {suiteCount}</span>
                   </Tip>
                 )}
               </div>
             </div>
 
             {/* 2 — Active Today */}
-            <button {...filterCard('activeToday', activeTodayClients.length > 0 ? 'rgba(52,211,153,0.25)' : undefined)}>
+            <button {...filterCard('activeToday', activeTodayClients.length > 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-border)', flexShrink: 0 }} />
                 Active Today
@@ -251,7 +251,7 @@ export default function AdminDashboardOverview() {
             </button>
 
             {/* 3 — Expiring ≤30 days + churn risk sub-count */}
-            <button {...filterCard(churnRisk.length > 0 ? 'churn' : 'expiring', churnRisk.length > 0 ? 'rgba(248,113,113,0.30)' : expiring30.length > 0 ? 'rgba(217,119,6,0.15)' : undefined)}>
+            <button {...filterCard(churnRisk.length > 0 ? 'churn' : 'expiring', churnRisk.length > 0 ? 'color-mix(in srgb, var(--theme-red) 30%, transparent)' : expiring30.length > 0 ? 'rgba(217,119,6,0.15)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Expiring ≤30 Days</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: churnRisk.length > 0 ? 'var(--theme-red-text)' : expiring30.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>
                 {expiring30.length}
@@ -264,7 +264,7 @@ export default function AdminDashboardOverview() {
             </button>
 
             {/* 4 — No Open Period */}
-            <button {...filterCard('noPeriod', noPeriod.length > 0 ? 'rgba(248,113,113,0.35)' : undefined)}>
+            <button {...filterCard('noPeriod', noPeriod.length > 0 ? 'color-mix(in srgb, var(--theme-red) 35%, transparent)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>No Open Period</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>{noPeriod.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Active clients — need setup</div>
@@ -284,7 +284,7 @@ export default function AdminDashboardOverview() {
 
             {/* 6 — Trial Signups */}
             <div
-              style={{ ...statCard(wantToSub.length > 0 ? 'rgba(248,113,113,0.5)' : trialSignups.length > 0 ? 'rgba(201,168,76,0.25)' : undefined), cursor: 'pointer' }}
+              style={{ ...statCard(wantToSub.length > 0 ? 'color-mix(in srgb, var(--theme-red) 50%, transparent)' : trialSignups.length > 0 ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : undefined), cursor: 'pointer' }}
               onClick={() => navigate('/admin/clients')}
             >
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Trial Signups</div>
@@ -441,13 +441,13 @@ export default function AdminDashboardOverview() {
                         <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             {c.ims_enabled !== false && (
-                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(201,168,76,0.10)', color: 'var(--theme-accent-ink)', border: '1px solid rgba(201,168,76,0.25)' }}>IMS</span>
+                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', color: 'var(--theme-accent-ink)', border: '1px solid color-mix(in srgb, var(--theme-accent) 25%, transparent)' }}>IMS</span>
                             )}
                             {c.hr_enabled && (
-                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(52,211,153,0.08)', color: 'var(--theme-green-text)', border: '1px solid rgba(52,211,153,0.18)' }}>HR</span>
+                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', color: 'var(--theme-green-text)', border: '1px solid color-mix(in srgb, var(--theme-green) 18%, transparent)' }}>HR</span>
                             )}
                             {c.pos_enabled && (
-                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(167,139,250,0.10)', color: 'var(--theme-purple-text)', border: '1px solid rgba(167,139,250,0.2)' }}>POS</span>
+                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', color: 'var(--theme-purple-text)', border: '1px solid color-mix(in srgb, var(--theme-purple) 20%, transparent)' }}>POS</span>
                             )}
                             {/* Suite is an add-on ABOVE the modules, not a fourth one, so it takes
                                 the accent rather than a fourth hue — the star and the heavier fill
@@ -459,9 +459,9 @@ export default function AdminDashboardOverview() {
                                 : 'Crest Suite Pro has lapsed — the Suite features are locked and this outlet is no longer counted in the Suite MRR.'} width={280}>
                                 <span style={{
                                   fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-sm)',
-                                  background: suiteLive ? 'rgba(201,168,76,0.20)' : 'transparent',
+                                  background: suiteLive ? 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' : 'transparent',
                                   color: suiteLive ? 'var(--theme-accent-ink)' : 'var(--theme-text3)',
-                                  border: `1px solid ${suiteLive ? 'rgba(201,168,76,0.45)' : 'var(--theme-border)'}`,
+                                  border: `1px solid ${suiteLive ? 'color-mix(in srgb, var(--theme-accent) 45%, transparent)' : 'var(--theme-border)'}`,
                                 }}>★ SUITE</span>
                               </Tip>
                             )}
@@ -550,7 +550,7 @@ export default function AdminDashboardOverview() {
                               onClick={() => { switchAdminClient(c.id, c.name); navigate('/periods') }}>
                               Periods
                             </button>
-                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.3)' }}
+                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
                               onClick={() => navigate('/admin/clients')}>
                               Manage →
                             </button>

@@ -865,7 +865,7 @@ textarea,
 
 .sidebar-signout:hover {
   color: var(--theme-red);
-  border-color: rgba(248,113,113,0.45);
+  border-color: color-mix(in srgb, var(--theme-red) 45%, transparent);
 }
 
 /* ── MAIN CONTENT ────────────────────────── */
@@ -1289,7 +1289,7 @@ tr.interactive-row:focus-visible {
   /* Signal colour as TEXT takes the -text variant; the base token stays on the border, where it
      is a fill and reads correctly on every preset. */
   color: var(--theme-red-text);
-  border: 1px solid rgba(248,113,113,0.45);
+  border: 1px solid color-mix(in srgb, var(--theme-red) 45%, transparent);
 }
 
 /* A square icon-only button for a row's Actions column, worn over .btn plus a variant
@@ -1351,7 +1351,7 @@ tr.interactive-row:focus-visible {
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: rgba(248,113,113,0.12);
+  background: color-mix(in srgb, var(--theme-red) 12%, transparent);
   border-color: var(--theme-red);
 }
 
@@ -1361,13 +1361,13 @@ tr.interactive-row:focus-visible {
    ranges from light to dark across the two presets, so no single foreground contrasts on both of
    them, and there is no --theme-red-text token to pair with a fill. */
 .btn-danger--strong {
-  background: rgba(248,113,113,0.16);
-  border-color: rgba(248,113,113,0.55);
+  background: color-mix(in srgb, var(--theme-red) 16%, transparent);
+  border-color: color-mix(in srgb, var(--theme-red) 55%, transparent);
   font-weight: 700;
 }
 
 .btn-danger--strong:hover:not(:disabled) {
-  background: rgba(248,113,113,0.24);
+  background: color-mix(in srgb, var(--theme-red) 24%, transparent);
   border-color: var(--theme-red);
 }
 
@@ -1928,12 +1928,12 @@ textarea:focus-visible {
    — see the block comment above PRESETS in ThemeContext.js. This one line covers most status text
    in the product, since these classes back the badges on nearly every page. */
 .badge-green {
-  background: rgba(52,211,153,0.10);
+  background: color-mix(in srgb, var(--theme-green) 10%, transparent);
   color: var(--theme-green-text);
 }
 
 .badge-yellow {
-  background: rgba(201,168,76,0.12);
+  background: color-mix(in srgb, var(--theme-accent) 12%, transparent);
   color: var(--theme-accent-ink);
 }
 
@@ -1950,25 +1950,25 @@ textarea:focus-visible {
   animation: guest-order-pulse 1.4s ease-in-out infinite;
 }
 @keyframes guest-order-glow-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0.5); }
-  50% { box-shadow: 0 0 0 6px rgba(251,191,36,0.18); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--theme-amber) 50%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--theme-amber) 18%, transparent); }
 }
 .guest-order-glow {
   animation: guest-order-glow-pulse 1.4s ease-in-out infinite;
 }
 
 .badge-amber {
-  background: rgba(251,191,36,0.12);
+  background: color-mix(in srgb, var(--theme-amber) 12%, transparent);
   color: var(--theme-amber-text);
 }
 
 .badge-purple {
-  background: rgba(167,139,250,0.12);
+  background: color-mix(in srgb, var(--theme-purple) 12%, transparent);
   color: var(--theme-purple-text);
 }
 
 .badge-red {
-  background: rgba(248,113,113,0.10);
+  background: color-mix(in srgb, var(--theme-red) 10%, transparent);
   color: var(--theme-red-text);
 }
 
@@ -2230,7 +2230,7 @@ textarea:focus-visible {
    The previous rgba(255,255,255,0.2) was invisible on the five light presets. */
 .tab-btn:hover {
   color: var(--theme-text1);
-  border-color: rgba(201,168,76,0.25);
+  border-color: color-mix(in srgb, var(--theme-accent) 25%, transparent);
 }
 
 /* accent-ink, not accent: this is the accent used AS text, on a tinted fill. Measured live (S551)
@@ -2238,7 +2238,7 @@ textarea:focus-visible {
    rule renders on 19 IMS routes alone. */
 .tab-btn--active {
   color: var(--theme-accent-ink);
-  border-color: rgba(201,168,76,0.5);
+  border-color: color-mix(in srgb, var(--theme-accent) 50%, transparent);
   background: var(--theme-focus-ring);
   font-weight: 600;
 }
@@ -2301,7 +2301,7 @@ textarea:focus-visible {
    on all ten — the previous #fff failed on four. A tint sidesteps the pairing problem entirely. */
 .pay-method-btn--credit:hover,
 .pay-method-btn--credit:active {
-  background: rgba(248,113,113,0.15);
+  background: color-mix(in srgb, var(--theme-red) 15%, transparent);
   color: var(--theme-red);
   border-color: var(--theme-red);
 }

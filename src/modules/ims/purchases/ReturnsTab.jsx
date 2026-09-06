@@ -109,7 +109,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
   return (
     <>
       {purchases.length === 0 && (
-        <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
           No purchases exist for this period yet. Add purchases first before recording returns.
         </div>
       )}
@@ -191,7 +191,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
             const baseRetQty = returnForm.qty ? parseFloat(returnForm.qty) * cf : 0
             const retValue = baseRetQty * linked.rate
             return (
-              <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-text2)', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+              <div style={{ marginTop: 12, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-red) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 15%, transparent)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--theme-text2)', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
                 <span>Rate: <strong style={{ color: 'var(--theme-text1)' }}>NPR {Number(displayRate).toLocaleString(undefined, { maximumFractionDigits: 2 })}/{displayRateUnit}</strong></span>
                 <span>Vendor: <strong style={{ color: 'var(--theme-text1)' }}>{linked.vendors?.name || '—'}</strong></span>
                 <span>Payment: <strong style={{ color: 'var(--theme-text1)' }}>{linked.payment_method || 'Cash'}</strong></span>

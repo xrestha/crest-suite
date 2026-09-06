@@ -39,9 +39,9 @@ const TABLE_LABELS = {
 // base tokens measured 3.04–3.61:1 at 11px/700 on Rosé Dawn (S574). The bg tints stay literal
 // rgba per DESIGN.md's documented pattern (alpha fill + full-opacity signal text).
 const ACTION_STYLE = {
-  INSERT: { label: 'Added',   color: 'var(--theme-green-text)', bg: 'rgba(52,211,153,0.12)' },
-  UPDATE: { label: 'Updated', color: 'var(--theme-purple-text)', bg: 'rgba(167,139,250,0.12)' },
-  DELETE: { label: 'Deleted', color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.12)' },
+  INSERT: { label: 'Added',   color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 12%, transparent)' },
+  UPDATE: { label: 'Updated', color: 'var(--theme-purple-text)', bg: 'color-mix(in srgb, var(--theme-purple) 12%, transparent)' },
+  DELETE: { label: 'Deleted', color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 12%, transparent)' },
 }
 
 // Columns that churn on nearly every write (housekeeping timestamps, PIN-lockout counters
@@ -347,7 +347,7 @@ export default function AuditLog() {
           {logs.length > 0 && (
             <button
               className="btn btn-ghost"
-              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
               onClick={clearLogs}
             >
               ✕ Clear Logs
@@ -388,7 +388,7 @@ export default function AuditLog() {
                 {HELP_ITEMS.map((h, i) => (
                   <tr key={h.area} style={{ borderBottom: i < HELP_ITEMS.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
                     <td style={{ padding: '9px 14px', color: 'var(--theme-text1)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                      <span style={{ marginRight: 7, color: 'var(--theme-accent)' }}>{h.icon}</span>{h.area}
+                      <span style={{ marginRight: 7, color: 'var(--theme-accent-ink)' }}>{h.icon}</span>{h.area}
                     </td>
                     <td style={{ padding: '9px 14px', color: 'var(--theme-green-text)', fontFamily: 'monospace', fontSize: 12 }}>{h.ops}</td>
                     <td style={{ padding: '9px 14px', color: 'var(--theme-text3)' }}>{h.note}</td>

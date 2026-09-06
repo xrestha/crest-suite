@@ -33,8 +33,8 @@ function retireInfo(dateStr) {
   const days = Math.round((d - today) / 86400000)
   // `color` is only ever used as the badge's TEXT (the tint + border are the fill), so it takes
   // the *-text contrast variants per the S549 rule.
-  if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red-text)', bg: 'rgba(248,113,113,0.1)', border: 'rgba(248,113,113,0.2)' }
-  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent-ink)', bg: 'rgba(201,168,76,0.1)', border: 'rgba(201,168,76,0.2)', days }
+  if (days < 0)               return { retired: true, label: 'Retired',       color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' }
+  if (days <= RETIRE_SOON_DAYS) return { soon: true,  label: 'Retiring soon', color: 'var(--theme-accent-ink)', bg: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)', days }
   return { future: true, days }
 }
 
@@ -422,7 +422,7 @@ export default function EmployeeList() {
         }}>
           <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{selected.size} selected</span>
           <Tip text="Blocks Self-Service PIN login for the selected employees only. Does not change their Status, so they stay fully visible to Payroll Run, Payroll Calculation and Final Settlement.">
-            <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(true)}>
+            <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(true)}>
               {bulkBusy ? 'Working…' : 'Deactivate (block login)'}
             </button>
           </Tip>

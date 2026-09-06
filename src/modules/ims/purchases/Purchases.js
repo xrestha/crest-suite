@@ -385,7 +385,7 @@ export default function Purchases() {
 
       {/* Locked banner */}
       {isLocked && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
         </div>
       )}
@@ -493,7 +493,7 @@ export default function Purchases() {
         {!isLocked && !loadError && activeTab !== 'register' && (
           <button
             className="btn btn-ghost"
-            style={{ fontSize: 12, padding: '5px 12px', marginBottom: 4, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.07)' }}
+            style={{ fontSize: 12, padding: '5px 12px', marginBottom: 4, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
             onClick={() => setDeleteAllTarget(activeTab === 'purchases' ? 'purchases' : 'returns')}
             disabled={activeTab === 'purchases' ? purchases.length === 0 : returns.length === 0}
           >
@@ -706,7 +706,7 @@ export default function Purchases() {
                           const displayUnit = cf > 1 ? entry.items.purchase_unit : entry.items?.uom
                           const displayRate = cf > 1 ? entry.rate * cf : entry.rate
                           return [
-                            <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
+                            <tr key={`gh-${gid}`} style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
                               {dayCell}
                               <td style={{ fontWeight: 500, color: 'var(--theme-text1)', fontSize: 13 }}>
                                 {entry.items?.name}
@@ -740,7 +740,7 @@ export default function Purchases() {
 
                         return [
                           // Group header row
-                          <tr key={`gh-${gid}`} style={{ background: 'rgba(201,168,76,0.04)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
+                          <tr key={`gh-${gid}`} style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderTop: gIdx > 0 ? '2px solid var(--theme-card)' : undefined }}>
                             {dayCell}
                             <td></td>
                             {/* Invoice ref and line count on a second line under the vendor name, not trailing
@@ -971,7 +971,7 @@ export default function Purchases() {
                               {days.map(d => {
                                 const qty = dayMatrix[item.id]?.[d]
                                 return (
-                                  <td key={d} style={{ ...tdStyle, color: qty ? 'var(--theme-text1)' : 'var(--theme-border)', background: qty ? 'rgba(201,168,76,0.06)' : undefined, fontWeight: qty ? 600 : 400 }}>
+                                  <td key={d} style={{ ...tdStyle, color: qty ? 'var(--theme-text1)' : 'var(--theme-border)', background: qty ? 'color-mix(in srgb, var(--theme-accent) 6%, transparent)' : undefined, fontWeight: qty ? 600 : 400 }}>
                                     {qty ? qty.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '·'}
                                   </td>
                                 )

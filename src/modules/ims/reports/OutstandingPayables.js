@@ -634,7 +634,7 @@ export default function OutstandingPayables() {
       {loadError && <ReportLoadError error={loadError} />}
 
       {setupNeeded && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 24, fontSize: 13 }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 24, fontSize: 13 }}>
           <div style={{ fontWeight: 700, color: 'var(--theme-red-text)', marginBottom: 8 }}>⚠ One-time setup required</div>
           <div style={{ color: 'var(--theme-text3)', marginBottom: 10 }}>Run this SQL in Supabase → SQL Editor, then refresh:</div>
           <code style={{ display: 'block', background: 'var(--theme-bg)', padding: '10px 14px', borderRadius: 'var(--radius-sm)', color: 'var(--theme-accent-ink)', fontSize: 12, userSelect: 'all' }}>

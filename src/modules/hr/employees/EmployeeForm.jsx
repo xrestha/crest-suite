@@ -568,7 +568,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             {isEdit && employee.status === 'active' && (
-              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleDeactivate}>
+              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} onClick={handleDeactivate}>
                 Deactivate
               </button>
             )}
@@ -578,7 +578,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
               </button>
             )}
             {isEdit && (
-              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleDelete}>
+              <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} onClick={handleDelete}>
                 Delete
               </button>
             )}

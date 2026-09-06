@@ -384,7 +384,7 @@ export default function Overheads() {
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
       {isLocked && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
         </div>
       )}
@@ -615,8 +615,8 @@ export default function Overheads() {
           {netProfit != null && (
             <div style={{
               marginTop: 20, padding: '12px 16px', borderRadius: 'var(--radius-sm)',
-              background: netProfit >= 0 ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
-              border: `1px solid ${netProfit >= 0 ? 'rgba(52,211,153,0.25)' : 'rgba(248,113,113,0.25)'}`,
+              background: netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 8%, transparent)' : 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+              border: `1px solid ${netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : 'color-mix(in srgb, var(--theme-red) 25%, transparent)'}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center'
             }}>
               <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
@@ -629,7 +629,7 @@ export default function Overheads() {
           )}
         </div>
       ) : (
-        <div className="card" style={{ marginBottom: 16, background: 'rgba(201,168,76,0.04)', borderColor: 'rgba(201,168,76,0.15)' }}>
+        <div className="card" style={{ marginBottom: 16, background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderColor: 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' }}>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
             💡 Add sales entries for this period to unlock the <strong style={{ color: 'var(--theme-accent-ink)' }}>P&L Summary</strong>, <strong style={{ color: 'var(--theme-accent-ink)' }}>Break-Even</strong>, and <strong style={{ color: 'var(--theme-accent-ink)' }}>Overhead per Cover</strong> panels.
           </p>
@@ -807,8 +807,8 @@ export default function Overheads() {
 
           {/* Break-even */}
           <div className="card" style={{
-            background: isAboveBreakEven ? 'rgba(52,211,153,0.04)' : 'rgba(248,113,113,0.04)',
-            borderColor: isAboveBreakEven ? 'rgba(52,211,153,0.2)' : 'rgba(248,113,113,0.2)'
+            background: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 4%, transparent)' : 'color-mix(in srgb, var(--theme-red) 4%, transparent)',
+            borderColor: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'color-mix(in srgb, var(--theme-red) 20%, transparent)'
           }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
               <Tip text="The minimum revenue / covers needed to cover all fixed costs. Below this = loss. Above = profit begins." width={230}>Break-Even Analysis</Tip>
@@ -832,7 +832,7 @@ export default function Overheads() {
               </div>
             </div>
             <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700,
-              background: isAboveBreakEven ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)',
+              background: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'color-mix(in srgb, var(--theme-red) 10%, transparent)',
               color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
             }}>
               {isAboveBreakEven && breakEvenRev
@@ -891,7 +891,7 @@ export default function Overheads() {
       )}
 
       {/* Footer note */}
-      <div className="card" style={{ background: 'rgba(201,168,76,0.04)', borderColor: 'rgba(201,168,76,0.15)' }}>
+      <div className="card" style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderColor: 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' }}>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.7 }}>
           💡 <strong style={{ color: 'var(--theme-accent-ink)' }}>How overhead is allocated to recipes:</strong> Only <strong style={{ color: 'var(--theme-text1)' }}>Fixed Overheads</strong> (not labor or tax) are distributed across menu items proportionally by each item's share of period revenue. This gives you the true overhead-per-portion in Recipe Costing. Labor and Tax & Fees are period-level costs tracked separately.
         </p>

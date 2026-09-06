@@ -187,7 +187,7 @@ ${text}`, detail })
 
   return (
     <div>
-      <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 12, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+      <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 12, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         ⚠ {DISCLAIMER_TEXT}
       </div>
 

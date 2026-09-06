@@ -586,14 +586,14 @@ export default function Sales() {
 
       {/* Period locked banner */}
       {isLocked && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
         </div>
       )}
       {/* POS-supersedes-manual banner. Accent rather than red — this is how the product is meant
           to work for a two-module client, not an error or a lockout they need to resolve. */}
       {posOwnsSales && (
-        <div style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.35)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-text1)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-text1)' }}>
           🛈 <span><strong>Sales come from Crest POS.</strong> Every bill closed at the till posts its own sales automatically, so Bulk Entry and Daily Entry are disabled — manual figures would duplicate or contradict the till. These views stay live and read-only.</span>
         </div>
       )}
@@ -657,7 +657,7 @@ export default function Sales() {
                 value={menuSearch}
                 onChange={e => setMenuSearch(e.target.value)}
                 placeholder="Search menu item…"
-                style={{ background: 'var(--theme-card)', border: `1px solid ${menuSearch ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '6px 10px 6px 28px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: 170, display: 'block' }}
+                style={{ background: 'var(--theme-card)', border: `1px solid ${menuSearch ? 'color-mix(in srgb, var(--theme-accent) 50%, transparent)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '6px 10px 6px 28px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: 170, display: 'block' }}
               />
               <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
               {menuSearch && (
@@ -701,7 +701,7 @@ export default function Sales() {
           {loadError && <ReportLoadError error={loadError} />}
           {!loadError && viewMode === 'bulk' && (
             <>
-              <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+              <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
                 Enter total qty sold for the entire period per menu item. Sub-recipes are excluded.
               </div>
               <div className="card">
@@ -719,7 +719,7 @@ export default function Sales() {
                         recipes.forEach(r => { cleared[r.id] = '' })
                         setBulkForm(cleared)
                       }}
-                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                     >
                       Clear All
                     </button>
@@ -733,7 +733,7 @@ export default function Sales() {
                   </div>
                 </div>
                 {bulkSaveError && (
-                  <div className="no-print" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--theme-red-text)' }}>
+                  <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--theme-red-text)' }}>
                     ⚠ {bulkSaveError}
                   </div>
                 )}
@@ -778,7 +778,7 @@ export default function Sales() {
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
-                                  borderColor: parseFloat(qty) > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)'
+                                  borderColor: parseFloat(qty) > 0 ? 'color-mix(in srgb, var(--theme-accent) 40%, transparent)' : 'var(--theme-border)'
                                 }, isLocked)}
                               />
                             </td>
@@ -799,7 +799,7 @@ export default function Sales() {
           {/* DAILY ENTRY */}
           {!loadError && viewMode === 'daily' && (
             <>
-              <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+              <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
                 Enter qty sold per menu item for a single day. Use Bulk Entry for period totals instead.
               </div>
               <div className="card">
@@ -841,7 +841,7 @@ export default function Sales() {
                             <button
                               className="btn btn-ghost"
                               onClick={() => setSelectedDay(today.day)}
-                              style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.3)' }}
+                              style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
                             >Today (day {today.day})</button>
                           )}
                         </>
@@ -859,7 +859,7 @@ export default function Sales() {
                         setDailyForm(cleared)
                         setDiscountForm(cleared)
                       }}
-                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                     >Clear</button>
                     <button
                       className="btn btn-primary"
@@ -869,7 +869,7 @@ export default function Sales() {
                   </div>
                 </div>
                 {dailySaveError && (
-                  <div className="no-print" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--theme-red-text)' }}>
+                  <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--theme-red-text)' }}>
                     ⚠ {dailySaveError}
                   </div>
                 )}
@@ -938,7 +938,7 @@ export default function Sales() {
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 110, textAlign: 'right',
-                                  borderColor: qty > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)'
+                                  borderColor: qty > 0 ? 'color-mix(in srgb, var(--theme-accent) 40%, transparent)' : 'var(--theme-border)'
                                 }, isLocked)}
                               />
                             </td>
@@ -953,7 +953,7 @@ export default function Sales() {
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
                                   borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                   color: 'var(--theme-text1)', outline: 'none', width: 100, textAlign: 'right',
-                                  borderColor: disc > 0 ? 'rgba(248,113,113,0.4)' : 'var(--theme-border)'
+                                  borderColor: disc > 0 ? 'color-mix(in srgb, var(--theme-red) 40%, transparent)' : 'var(--theme-border)'
                                 }, isLocked)}
                               />
                             </td>
@@ -976,7 +976,7 @@ export default function Sales() {
                         setDailyForm(cleared)
                         setDiscountForm(cleared)
                       }}
-                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+                      style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                     >Clear</button>
                     <button
                       className="btn btn-primary"

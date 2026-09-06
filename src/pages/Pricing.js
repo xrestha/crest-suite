@@ -132,7 +132,7 @@ export default function Pricing() {
 
       {/* Hero */}
       <div style={{ textAlign: 'center', padding: '72px 32px 52px' }}>
-        <div style={{ display: 'inline-block', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 'var(--radius-full)', padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
+        <div style={{ display: 'inline-block', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 'var(--radius-full)', padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
           {TRIAL_DAYS}-day free trial · No credit card required
         </div>
         <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
@@ -154,7 +154,7 @@ export default function Pricing() {
             onClick={() => setAnnual(true)} aria-pressed={annual}
             style={{ background: annual ? brassTint(15) : 'none', border: annual ? `1px solid ${brassTint(30)}` : '1px solid transparent', color: annual ? GOLD_INK : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
             Annual
-            <span style={{ background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)', color: GREEN, fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 700, letterSpacing: '0.04em' }}>
+            <span style={{ background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', color: GREEN, fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 700, letterSpacing: '0.04em' }}>
               Save 25%
             </span>
           </button>
@@ -311,7 +311,7 @@ export default function Pricing() {
         <SectionHeading color={GOLD} title="Crest Suite Pro" subtitle="The owner layer — added on top of your modules, not a separate product" />
       </div>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px' }}>
-        <div style={{ background: CARD, border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 'var(--radius-lg)', padding: '32px 28px', position: 'relative' }}>
+        <div style={{ background: CARD, border: `1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)`, borderRadius: 'var(--radius-lg)', padding: '32px 28px', position: 'relative' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 28, alignItems: 'start' }}>
             <div>
               <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 10 }}>

@@ -603,7 +603,7 @@ ${text}`, detail })
                     <button
                       className="btn btn-ghost"
                       onClick={() => deleteReq(selectedReq.id)}
-                      style={{ color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+                      style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                     >Delete</button>
                     <button className="btn btn-primary" onClick={startIssuing}>Issue</button>
                   </>

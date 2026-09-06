@@ -6,7 +6,7 @@ import Tip from './Tip'
  * this is that same chip, promoted out of `Items.js` when Vendors needed it beside the vendor name.
  *
  * It reads as one mark rather than two because it is literally one definition. The version in
- * `Items.js` was a hand-rolled `.badge-yellow`: byte-identical fill (`rgba(201,168,76,0.12)`) and
+ * `Items.js` was a hand-rolled `.badge-yellow`: byte-identical fill (`color-mix(in srgb, var(--theme-accent) 12%, transparent)`) and
  * foreground (`--theme-accent-ink`), plus a 1px border and one pixel less padding. Copying those
  * inline styles to a second page is how a "matching" chip drifts — so the class is what both pages
  * now wear, which also gets them the accent-tinted CATEGORICAL treatment on purpose: a row having

@@ -914,9 +914,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         {client.location || 'No location'}
       </span>
       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-full)',
-        color: client.plan === 'pro' ? 'var(--theme-accent)' : client.plan === 'growth' ? 'var(--theme-green)' : 'var(--theme-text2)',
-        background: client.plan === 'pro' ? 'rgba(201,168,76,0.12)' : client.plan === 'growth' ? 'rgba(52,211,153,0.10)' : 'rgba(138,146,163,0.10)',
-        border: `1px solid ${client.plan === 'pro' ? 'rgba(201,168,76,0.25)' : client.plan === 'growth' ? 'rgba(52,211,153,0.20)' : 'rgba(138,146,163,0.25)'}`,
+        color: client.plan === 'pro' ? 'var(--theme-accent-ink)' : client.plan === 'growth' ? 'var(--theme-green-text)' : 'var(--theme-text2)',
+        background: client.plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)' : client.plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'rgba(138,146,163,0.10)',
+        border: `1px solid ${client.plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : client.plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'rgba(138,146,163,0.25)'}`,
       }}>
         {client.plan === 'pro' ? 'Pro' : client.plan === 'growth' ? 'Growth' : 'Starter'}
       </span>
@@ -1347,7 +1347,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                           <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(setSuiteEndsAt, days)}>{label}</button>
                         ))}
                         {suiteEndsAt && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => setSuiteEndsAt('')}>Clear</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)', marginLeft: 'auto' }} onClick={() => setSuiteEndsAt('')}>Clear</button>
                         )}
                       </div>
                     </div>
@@ -1463,7 +1463,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                           <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(mod.setEndsAt, days)}>{label}</button>
                         ))}
                         {mod.endsAt && (
-                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)', marginLeft: 'auto' }} onClick={() => mod.setEndsAt('')}>Clear</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)', marginLeft: 'auto' }} onClick={() => mod.setEndsAt('')}>Clear</button>
                         )}
                       </div>
                     </div>
@@ -1787,7 +1787,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         Backup folder
                       </Tip>
                     </div>
-                    <div style={{ fontSize: 11, color: backupState === 'granted' ? 'var(--theme-green)' : 'var(--theme-text3)', marginTop: 3 }}>
+                    <div style={{ fontSize: 11, color: backupState === 'granted' ? 'var(--theme-green-text)' : 'var(--theme-text3)', marginTop: 3 }}>
                       {!isFileSystemAccessSupported()
                         ? 'This browser cannot write to a folder — exports will download instead.'
                         : backupState === 'granted' ? '✓ Ready'
@@ -1867,7 +1867,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 </button>
                 {restoreMsg && (
                   <p role={restoreMsg.startsWith('error:') ? 'alert' : 'status'}
-                    style={{ fontSize: 12, margin: '10px 0 0', color: restoreMsg.startsWith('ok:') ? 'var(--theme-green)' : restoreMsg.startsWith('info:') ? 'var(--theme-text2)' : 'var(--theme-red)' }}>
+                    style={{ fontSize: 12, margin: '10px 0 0', color: restoreMsg.startsWith('ok:') ? 'var(--theme-green-text)' : restoreMsg.startsWith('info:') ? 'var(--theme-text2)' : 'var(--theme-red-text)' }}>
                     {restoreMsg.replace(/^(ok|error|info):/, '')}
                   </p>
                 )}
@@ -1888,8 +1888,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               {/* Pre-flight backup status — every action below takes a backup first. */}
               <div style={{
                 padding: '12px 14px', marginBottom: 16,
-                background: skipBackup ? 'rgba(248,113,113,0.06)' : 'rgba(52,211,153,0.06)',
-                border: `1px solid ${skipBackup ? 'rgba(248,113,113,0.25)' : 'rgba(52,211,153,0.25)'}`,
+                background: skipBackup ? 'color-mix(in srgb, var(--theme-red) 6%, transparent)' : 'color-mix(in srgb, var(--theme-green) 6%, transparent)',
+                border: `1px solid ${skipBackup ? 'color-mix(in srgb, var(--theme-red) 25%, transparent)' : 'color-mix(in srgb, var(--theme-green) 25%, transparent)'}`,
                 borderRadius: 'var(--radius-lg)',
               }}>
                 <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
@@ -1909,7 +1909,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               {/* Archive — presented above Delete because it is the right answer far more often. */}
               <div style={{
                 padding: '14px 16px', marginBottom: 24,
-                background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 'var(--radius-lg)'
+                background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 25%, transparent)', borderRadius: 'var(--radius-lg)'
               }}>
                 <p style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 700, margin: '0 0 6px' }}>Archive Client</p>
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px', lineHeight: 1.65 }}>
@@ -1929,7 +1929,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
               <div style={{
                 padding: '14px 16px', marginBottom: 24,
-                background: 'rgba(248,113,113,0.04)', border: '1px solid rgba(248,113,113,0.15)', borderRadius: 'var(--radius-lg)'
+                background: 'color-mix(in srgb, var(--theme-red) 4%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 15%, transparent)', borderRadius: 'var(--radius-lg)'
               }}>
                 <p style={{ fontSize: 13, color: 'var(--theme-red-text)', fontWeight: 700, margin: '0 0 6px' }}>⚠ Danger Zone</p>
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.65 }}>

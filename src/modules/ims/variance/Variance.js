@@ -286,7 +286,7 @@ export default function Variance() {
 
       {!loadError && <>
       {!loading && selectedPeriod && !hasClosing && (
-        <div style={{ background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.30)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.6 }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.6 }}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>Closing stock hasn’t been counted for {periodLabel} yet.</strong>{' '}
           Variance can’t be measured until it is — until then the figures below count everything
           still sitting on your shelves as “used”, which makes every item look over-consumed.
@@ -350,7 +350,7 @@ export default function Variance() {
       {/* Note + filters wait for the load, same as the KPI strip above — the S594 rule ReportPage
           enforces for its adopters, applied by hand here (S613). */}
       {!loading && (
-      <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+      <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> Theoretical = what should have been used based on sales × recipe qty. Actual = {COGS_FORMULA}.
         <span style={{ color: 'var(--theme-red-text)' }}> Over variance</span> = more used than sold (waste, theft, over-portioning).
         <span style={{ color: 'var(--theme-amber-text)' }}> Under variance</span> = less used than expected (under-portioning or data gap).

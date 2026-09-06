@@ -271,7 +271,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                       {QUICK_EARNINGS.filter(n => !earnings.find(c => c.name === n)).map(n => (
                         <button key={n} onClick={() => addComponent('earning', n)}
-                          style={{ background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 12, color: 'var(--theme-green-text)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
+                          style={{ background: 'color-mix(in srgb, var(--theme-green) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 12, color: 'var(--theme-green-text)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
                           + {n}
                         </button>
                       ))}
@@ -315,7 +315,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                       {QUICK_DEDUCTIONS.filter(n => !deductions.find(c => c.name === n)).map(n => {
                         const chip = (
                           <button onClick={() => addComponent('deduction', n)}
-                            style={{ background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 12, color: 'var(--theme-red-text)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
+                            style={{ background: 'color-mix(in srgb, var(--theme-red) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)', borderRadius: 12, color: 'var(--theme-red-text)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
                             + {n}
                           </button>
                         )
@@ -388,7 +388,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         padding: r.big ? '12px 16px' : '7px 16px',
                         borderTop: r.separator ? '1px solid var(--theme-border)' : 'none',
-                        background: r.bg || (r.big ? 'rgba(201,168,76,0.05)' : 'transparent'),
+                        background: r.bg || (r.big ? 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' : 'transparent'),
                       }}>
                         <span style={{ fontSize: r.big ? 13 : 12, color: r.indent ? 'var(--theme-text2)' : 'var(--theme-text3)', paddingLeft: r.indent ? 12 : 0, fontWeight: r.bold ? 700 : 400 }}>
                           {r.label}{r.note ? <span style={{ fontSize: 10, color: 'var(--theme-text2)', marginLeft: 6 }}>({r.note})</span> : null}
@@ -402,7 +402,7 @@ export default function PayForm({ employee, onSave, onClose }) {
 
                   {/* Compliance notice */}
                   {(basicBelowMin || dearnessBelowMin || grossBelowMin) && (
-                    <div style={{ padding: '12px 14px', background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 8, fontSize: 12, color: 'var(--theme-red-text)', lineHeight: 1.6 }}>
+                    <div style={{ padding: '12px 14px', background: 'color-mix(in srgb, var(--theme-red) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)', borderRadius: 8, fontSize: 12, color: 'var(--theme-red-text)', lineHeight: 1.6 }}>
                       <strong>Minimum wage check (FY 2083/84)</strong>
                       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ color: basic >= MIN_BASIC_MONTHLY ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
@@ -423,7 +423,7 @@ export default function PayForm({ employee, onSave, onClose }) {
 
                   {/* All clear */}
                   {!basicBelowMin && !dearnessBelowMin && !grossBelowMin && gross > 0 && (
-                    <div style={{ padding: '10px 14px', background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.15)', borderRadius: 8, fontSize: 12, color: 'var(--theme-green-text)' }}>
+                    <div style={{ padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-green) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 15%, transparent)', borderRadius: 8, fontSize: 12, color: 'var(--theme-green-text)' }}>
                       ✓ Meets Nepal minimum wage requirements (FY 2083/84)
                     </div>
                   )}

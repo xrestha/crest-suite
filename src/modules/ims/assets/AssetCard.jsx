@@ -133,7 +133,7 @@ The asset is still on the register as active.`, detail })
       )}
 
       {asset.status !== 'active' ? (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: 13 }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: 13 }}>
           <strong style={{ color: 'var(--theme-red-text)' }}>{asset.status === 'disposed' ? 'Disposed' : 'Written Off'}</strong> on {fmtDate(asset.disposal_date)} —
           {' '}Proceeds NPR {fmt(asset.disposal_proceeds)}, {asset.disposal_gain_loss >= 0 ? 'Gain' : 'Loss'} of NPR {fmt(Math.abs(asset.disposal_gain_loss))}.
           {asset.disposal_reason && <div style={{ marginTop: 4, color: 'var(--theme-text2)' }}>{asset.disposal_reason}</div>}

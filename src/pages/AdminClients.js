@@ -296,8 +296,8 @@ export default function AdminClients() {
       {(autoBackup.pending.length > 0 || autoBackup.busy) && (
         <div style={{
           padding: '12px 16px', marginBottom: 20, borderRadius: 8,
-          background: autoBackup.blocked ? 'rgba(251,191,36,0.1)' : 'rgba(52,211,153,0.08)',
-          border: `1px solid ${autoBackup.blocked ? 'rgba(251,191,36,0.35)' : 'rgba(52,211,153,0.3)'}`,
+          background: autoBackup.blocked ? 'color-mix(in srgb, var(--theme-amber) 10%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
+          border: `1px solid ${autoBackup.blocked ? 'color-mix(in srgb, var(--theme-amber) 35%, transparent)' : 'color-mix(in srgb, var(--theme-green) 30%, transparent)'}`,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
         }} role="status">
           <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
@@ -329,12 +329,12 @@ export default function AdminClients() {
         return (
           <div style={{ marginBottom: 28, border: '2px solid var(--theme-red)', borderRadius: 12, overflow: 'hidden' }}>
             {/* Header — flat alpha-tint wash, not a gradient (DESIGN.md: cards never gradient/tint toward the accent) */}
-            <div style={{ background: 'rgba(248,113,113,0.10)', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{ fontSize: 18 }}>🧪</span>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-red-text)', letterSpacing: 0.3 }}>
                   Trial Accounts
-                  <span style={{ marginLeft: 8, background: 'rgba(248,113,113,0.18)', color: 'var(--theme-red-text)', borderRadius: 'var(--radius-md)', padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
+                  <span style={{ marginLeft: 8, background: 'color-mix(in srgb, var(--theme-red) 18%, transparent)', color: 'var(--theme-red-text)', borderRadius: 'var(--radius-md)', padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                   {trialClients.filter(c => c.subscribe_requested).length > 0
@@ -344,7 +344,7 @@ export default function AdminClients() {
               </div>
             </div>
             {/* Rows */}
-            <div style={{ background: 'rgba(248,113,113,0.04)' }}>
+            <div style={{ background: 'color-mix(in srgb, var(--theme-red) 4%, transparent)' }}>
               {trialClients.map(c => {
                 const expAt   = c.trial_expires_at ? new Date(c.trial_expires_at) : null
                 const purgeAt = c.trial_purge_at   ? new Date(c.trial_purge_at)   : null
@@ -355,8 +355,8 @@ export default function AdminClients() {
                 return (
                   <div key={c.id} style={{
                     display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px',
-                    borderBottom: '1px solid rgba(248,113,113,0.12)',
-                    background: wantsToSub ? 'rgba(248,113,113,0.06)' : 'transparent',
+                    borderBottom: '1px solid color-mix(in srgb, var(--theme-red) 12%, transparent)',
+                    background: wantsToSub ? 'color-mix(in srgb, var(--theme-red) 6%, transparent)' : 'transparent',
                   }}>
                     {/* Subscribe badge */}
                     {wantsToSub && (
@@ -553,8 +553,8 @@ export default function AdminClients() {
                       // variants, not the base tokens (S549/S551 — the base tokens fail AA on the
                       // light preset).
                       { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan, color: 'var(--theme-accent-ink)', borderRgba: 'var(--theme-focus-ring)' },
-                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: null,   color: 'var(--theme-green-text)', borderRgba: 'rgba(52,211,153,0.35)' },
-                      { key: 'POS', enabled: !!c.pos_enabled,         plan: null,   color: 'var(--theme-purple-text)', borderRgba: 'rgba(167,139,250,0.35)' },
+                      { key: 'HR',  enabled: !!c.hr_enabled,          plan: null,   color: 'var(--theme-green-text)', borderRgba: 'color-mix(in srgb, var(--theme-green) 35%, transparent)' },
+                      { key: 'POS', enabled: !!c.pos_enabled,         plan: null,   color: 'var(--theme-purple-text)', borderRgba: 'color-mix(in srgb, var(--theme-purple) 35%, transparent)' },
                     ].map(m => (
                       // minWidth + centred text so IMS/HR/POS line up as three columns down the
                       // list. Without it the pills are content-width, so "IMS · Starter" and
@@ -580,7 +580,7 @@ export default function AdminClients() {
                     {c.suite_plan && (
                       <span style={{
                         fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)',
-                        border: '1px solid rgba(201,168,76,0.45)', background: 'rgba(201,168,76,0.20)',
+                        border: '1px solid color-mix(in srgb, var(--theme-accent) 45%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)',
                         color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap',
                         minWidth: 100, textAlign: 'center', boxSizing: 'border-box',
                       }}>★ SUITE</span>

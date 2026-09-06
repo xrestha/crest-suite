@@ -244,7 +244,7 @@ export default function StockReport() {
       )}
 
       {negativeCount > 0 && (
-        <div className="no-print" style={{ background: 'rgba(248,113,113,0.06)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
+        <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-red) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
           <strong style={{ color: 'var(--theme-red-text)' }}>⚠ {negativeCount} item{negativeCount !== 1 ? 's show' : ' shows'} negative theoretical stock</strong> — usage/wastage exceeds recorded purchases + opening. Check for missing purchase entries or over-recorded usage. Shown as 0 on hand.
         </div>
       )}
@@ -292,7 +292,7 @@ export default function StockReport() {
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.item.id} style={{ background: r.status === 'out' ? 'rgba(248,113,113,0.03)' : 'transparent' }}>
+                  <tr key={r.item.id} style={{ background: r.status === 'out' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.item.name}</div>
                       {r.item.item_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{r.item.item_code}</div>}

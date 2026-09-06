@@ -401,7 +401,7 @@ export default function Settings() {
                     </span>
                   </label>
                   {form.logo_url && (
-                    <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.25)' }} onClick={handleLogoRemove}>
+                    <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} onClick={handleLogoRemove}>
                       Remove
                     </button>
                   )}
@@ -776,7 +776,7 @@ export default function Settings() {
                   <button key={opt.key} onClick={() => setPricingCycle(opt.key)} style={{
                     background: 'none', border: 'none', cursor: 'pointer',
                     padding: '8px 16px', fontSize: 12, fontWeight: 600,
-                    color: pricingCycle === opt.key ? 'var(--theme-accent)' : 'var(--theme-text2)',
+                    color: pricingCycle === opt.key ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
                     borderBottom: pricingCycle === opt.key ? '2px solid var(--theme-accent)' : '2px solid transparent',
                     marginBottom: -1
                   }}>{opt.label}</button>
@@ -861,7 +861,7 @@ export default function Settings() {
                     display: 'flex', alignItems: 'center', gap: 12,
                     padding: '14px 20px', borderRadius: 10, cursor: 'pointer',
                     border: themeKey === key ? `2px solid ${colors.accent}` : '2px solid var(--theme-border)',
-                    background: themeKey === key ? 'rgba(201,168,76,0.08)' : 'var(--theme-card)',
+                    background: themeKey === key ? 'color-mix(in srgb, var(--theme-accent) 8%, transparent)' : 'var(--theme-card)',
                     minWidth: 180
                   }}
                 >
@@ -888,7 +888,7 @@ export default function Settings() {
                 </button>
               ))}
               {themeKey === 'custom' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderRadius: 10, border: '2px solid var(--theme-accent)', background: 'rgba(201,168,76,0.06)', minWidth: 180 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderRadius: 10, border: '2px solid var(--theme-accent)', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', minWidth: 180 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <div style={{ display: 'flex', gap: 3 }}>
                       <div style={{ width: 14, height: 14, borderRadius: 3, background: colors.bg, border: '1px solid rgba(255,255,255,0.1)' }} />
@@ -1023,7 +1023,7 @@ export default function Settings() {
           </div>
 
           {isAdmin && (
-            <div className="card" style={{ borderColor: 'rgba(248,113,113,0.2)' }}>
+            <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
               <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-red-text)' }}>Danger Zone</h3>
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 16px' }}>
                 Destructive actions. These cannot be undone.

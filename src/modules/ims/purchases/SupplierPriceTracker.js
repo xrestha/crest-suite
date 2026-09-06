@@ -325,7 +325,7 @@ export default function SupplierPriceTracker() {
 
       {/* Recipe impact banner */}
       {affectedRecipes && (
-        <div className="card no-print" style={{ marginBottom: 16, borderColor: 'rgba(201,168,76,0.4)', background: 'rgba(201,168,76,0.05)' }}>
+        <div className="card no-print" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-accent) 40%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
             <div>
               <p style={{ fontSize: 13, color: 'var(--theme-accent-ink)', margin: '0 0 6px', fontWeight: 600 }}>
@@ -452,7 +452,7 @@ export default function SupplierPriceTracker() {
                         table's structure and its cells stop being associated with their column headers.
                         The control lives in a cell instead — see components/RowDisclosure.jsx (S595). */}
                     <tr
-                      style={{ background: trend === 'up' ? 'rgba(248,113,113,0.03)' : 'transparent', cursor: 'pointer' }}
+                      style={{ background: trend === 'up' ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent', cursor: 'pointer' }}
                       onClick={() => setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }))}
                     >
                       <td style={{ textAlign: 'center', color: 'var(--theme-text2)', fontSize: 12, userSelect: 'none' }}>

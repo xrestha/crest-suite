@@ -443,7 +443,7 @@ export default function ReorderReport() {
       </div>
 
       {noPar > 0 && (
-        <div className="no-print" style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.15)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
+        <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
           <strong style={{ color: 'var(--theme-accent-ink)' }}>Tip:</strong> {noPar} item{noPar !== 1 ? 's have' : ' has'} no par level set. Click the par field in any row to set it inline — press Enter to save.
         </div>
       )}
@@ -463,7 +463,7 @@ export default function ReorderReport() {
         <button
           className="btn btn-ghost"
           onClick={resetAllPar}
-          style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)', marginLeft: 'auto' }}
+          style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)', marginLeft: 'auto' }}
         >
           ✕ Clear All Par
         </button>
@@ -472,7 +472,7 @@ export default function ReorderReport() {
             <button
               className="btn btn-ghost"
               onClick={clearBookStock}
-              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }}
+              style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
             >
               ✕ Clear Book Stock
             </button>
@@ -519,7 +519,7 @@ export default function ReorderReport() {
                     const isEditing = row.item.id in editingPar
                     const isSaving  = savingPar[row.item.id]
                     return (
-                      <tr key={row.item.id} style={{ background: row.needsReorder ? 'rgba(248,113,113,0.03)' : 'transparent' }}>
+                      <tr key={row.item.id} style={{ background: row.needsReorder ? 'color-mix(in srgb, var(--theme-red) 3%, transparent)' : 'transparent' }}>
                         <td>
                           <input type="checkbox" checked={selectedIds.has(row.item.id)} onChange={() => toggleSelectItem(row.item.id)}
                             aria-label={`Select ${row.item.name}`} />

@@ -174,7 +174,7 @@ export default function GroupDashboard() {
                 worse than no total, so the reader is told what this figure covers before they
                 read it. */}
             {!loading && !error && (excluded.length > 0 || noPeriod.length > 0) && (
-              <div className="card" style={{ marginBottom: 16, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)' }}>
+              <div className="card" style={{ marginBottom: 16, background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)' }}>
                 <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
                   Showing {included.length} of {rows.length} outlets
                 </p>
@@ -212,7 +212,10 @@ export default function GroupDashboard() {
               </div>
             </div>}
 
-            <div className="table-wrap">
+            {/* Same gate as the KPI strip. Without it a failed read rendered ReportLoadError —
+                "nothing here is a real figure" — directly above a table body reading "No outlets
+                in this group" (rows is [] on failure), two contradictory sentences (S683). */}
+            {!error && <div className="table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -280,14 +283,18 @@ export default function GroupDashboard() {
                   </tfoot>
                 )}
               </table>
-            </div>
+            </div>}
 
             {/* Rendered from `rows`, not from AuthContext's `outlets`: this matrix must list every
                 outlet in the group, including ones excluded from the figures above for want of
                 Suite Pro. Access is about where someone may work, not about what the group is
-                billed for — omitting an unpaid outlet would silently make it un-staffable. */}
-            <OutletAccessPanel outlets={rows.map(r => ({ id: r.client_id, name: r.client_name }))} />
-            <MasterPushPanel outlets={rows.map(r => ({ id: r.client_id, name: r.client_name }))} groupId={groupId} />
+                billed for — omitting an unpaid outlet would silently make it un-staffable.
+                Both wait for a successful read: an outlet list built from a failed one is empty,
+                and an empty access matrix reads as "nobody may work anywhere". */}
+            {!loading && !error && <>
+              <OutletAccessPanel outlets={rows.map(r => ({ id: r.client_id, name: r.client_name }))} />
+              <MasterPushPanel outlets={rows.map(r => ({ id: r.client_id, name: r.client_name }))} groupId={groupId} />
+            </>}
           </>
         )}
       </SuiteGate>

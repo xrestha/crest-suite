@@ -739,24 +739,24 @@ export default function Stock() {
       <ActionError error={saveError} className="no-print" />
 
       {isLocked && (
-        <div style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
         </div>
       )}
 
       {!isOnline && (
-        <div style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, color: 'var(--theme-amber-text)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span>📵</span>
             <span><strong>Offline</strong> — entries are saved locally and will sync when you reconnect.</span>
-            {pendingSync > 0 && <span style={{ marginLeft: 'auto', background: 'rgba(251,191,36,0.15)', borderRadius: 'var(--radius-lg)', padding: '2px 10px', fontWeight: 600 }}>{pendingSync} pending</span>}
+            {pendingSync > 0 && <span style={{ marginLeft: 'auto', background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', borderRadius: 'var(--radius-lg)', padding: '2px 10px', fontWeight: 600 }}>{pendingSync} pending</span>}
           </div>
           {/* S673: a broken app needs a phone number, not just a network. */}
           <SupportContactLine variant="inline" />
         </div>
       )}
       {syncing && (
-        <div style={{ background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green-text)' }}>
+        <div style={{ background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green-text)' }}>
           ⟳ Syncing {pendingSync} {pendingSync === 1 ? 'entry' : 'entries'}…
         </div>
       )}
@@ -992,7 +992,7 @@ export default function Stock() {
             <button className="btn btn-primary" onClick={() => printWithTitle(`Stock Count Sheet - ${periodLabel}`)}>🖨 Print Sheet</button>
           </div>
 
-          <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }} className="no-print">
+          <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }} className="no-print">
             System Ref Qty = Opening Stock + Purchases − Returns recorded this period. ★ marks high-value, fast-moving items — count these first and double-check the figures.
           </div>
 
@@ -1060,7 +1060,7 @@ export default function Stock() {
         const fmtNpr = npr
         return (
           <div>
-            <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+            <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
               Log spoilage and waste as it happens, by day and reason. These entries roll into the period's total wastage and COGS — alongside the monthly catch-all on the Wastage tab.
             </div>
 
@@ -1169,7 +1169,7 @@ export default function Stock() {
               <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <span style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 4 }}>Days with wastage</span>
                 {Object.keys(perDay).map(Number).sort((a, b) => a - b).map(d => (
-                  <button key={d} onClick={() => setWDay(d)} className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px', borderColor: d === wDay ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)', color: d === wDay ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
+                  <button key={d} onClick={() => setWDay(d)} className="btn btn-ghost" style={{ fontSize: 11, padding: '5px 10px', borderColor: d === wDay ? 'color-mix(in srgb, var(--theme-accent) 50%, transparent)' : 'var(--theme-border)', color: d === wDay ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
                     Day {d} · {fmtNpr(perDay[d])}
                   </button>
                 ))}
@@ -1191,7 +1191,7 @@ export default function Stock() {
         }, 0)
         return (
           <>
-            <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.2)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
+            <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
               {TABS.find(t => t.id === activeTab)?.desc} — enter quantities in the item's UOM, then click Save All.
             </div>
 
@@ -1229,14 +1229,14 @@ export default function Stock() {
                       <button
                         className="btn btn-ghost"
                         title="Copies last month's counted closing stock into this period's opening — 'this month's closing IS next month's opening'. Existing opening entries for those items are overwritten."
-                        style={{ color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.35)' }}
+                        style={{ color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 35%, transparent)' }}
                         onClick={pullFromLastMonthClosing}
                         disabled={saveAllLoading || isLocked}
                       >
                         ↩ Pull from last month
                       </button>
                     )}
-                    <button className="btn btn-ghost" style={{ color: 'var(--theme-red-text)', borderColor: 'rgba(248,113,113,0.3)' }} onClick={clearAll} disabled={saveAllLoading || isLocked}>Clear All</button>
+                    <button className="btn btn-ghost" style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }} onClick={clearAll} disabled={saveAllLoading || isLocked}>Clear All</button>
                   </div>
                   <button className="btn btn-primary" onClick={saveAll} disabled={saveAllLoading || isLocked}>
                     {saveAllLoading ? 'Saving…' : saved ? '✓ Saved' : 'Save All'}
@@ -1355,7 +1355,7 @@ export default function Stock() {
                                     borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 13,
                                     color: 'var(--theme-text1)', outline: 'none', width: '100%',
                                     textAlign: 'right', fontFamily: 'inherit', boxSizing: 'border-box',
-                                    borderColor: val > 0 ? 'rgba(201,168,76,0.4)' : 'var(--theme-border)'
+                                    borderColor: val > 0 ? 'color-mix(in srgb, var(--theme-accent) 40%, transparent)' : 'var(--theme-border)'
                                   }}
                                 />
                               </td>
@@ -1399,7 +1399,7 @@ export default function Stock() {
             {isMobile && (
               <div className="mobile-save-bar">
                 {activeTab === 'opening' && (
-                  <button className="btn btn-ghost" style={{ flex: 1, color: 'var(--theme-accent-ink)', borderColor: 'rgba(201,168,76,0.35)' }} onClick={pullFromLastMonthClosing} disabled={saveAllLoading || isLocked}>
+                  <button className="btn btn-ghost" style={{ flex: 1, color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 35%, transparent)' }} onClick={pullFromLastMonthClosing} disabled={saveAllLoading || isLocked}>
                     ↩ Last month
                   </button>
                 )}

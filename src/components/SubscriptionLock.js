@@ -59,7 +59,7 @@ export default function SubscriptionLock() {
         <div style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           width: 52, height: 52, borderRadius: 'var(--radius-full)',
-          background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)',
+          background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)',
           marginBottom: 18, color: 'var(--theme-red-text)',
         }}><Lock size={22} strokeWidth={2} aria-hidden="true" /></div>
 
