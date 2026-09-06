@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-05T07:23:29.322Z",
+  "generatedAt": "2026-09-05T10:18:38.405Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -842,6 +842,10 @@
       "mono": {
         "displayName": "Mono",
         "purpose": "Code, and the technical detail line under a failed action. Never a costume."
+      },
+      "readout": {
+        "displayName": "Readout",
+        "purpose": "The till keypad readout (covers count, estimate minutes) read at arm’s length on a tablet. The one step above figure-lg; not a KPI size (S682)."
       }
     },
     "shadows": [
@@ -1305,6 +1309,21 @@
         "name": "A row’s actions are one next step plus an overflow, never a bar of equals",
         "section": "components",
         "body": "When a row’s actions are a column width rather than a control, show the move made every time (Confirm → Arrived → Seat), the contact button, and a ⋯ `RowMenu` for the rest, with the destructive items last under a separator in the red text variant. Six identical ghost pills per row, the irreversible ones interleaved with the routine ones, is how a Saturday book became a wall of 120 look-alike buttons."
+      },
+      {
+        "name": "Readout is a till step, not a KPI step",
+        "section": "typography",
+        "body": "The 48px covers readout on the order screen is the one size the product genuinely needs above figure-lg, and it is named so it stops living as an inline literal. It belongs to a keypad a cook or waiter reads with their hands busy. Every other working screen keeps figure / figure-lg as its ceiling; the 34px estimate readout that shipped beside it was drift and is 32 now (S682)."
+      },
+      {
+        "name": "A switch’s off-track is slate and its knob is the card colour",
+        "section": "components",
+        "body": "Both hand-rolled switches shipped a white knob on a --theme-border track — on Light that measured ~1.2:1 and the off state was unreadable. Track: accent (or amber) on, --theme-text3 off; knob: --theme-card. The state label beside it is text and takes the *-text variant or fog, never the track’s token (S682)."
+      },
+      {
+        "name": "ReportLoadError is the one channel that converts at render",
+        "section": "components",
+        "body": "Every one of its ~70 callers handed it a Supabase error object or the raw error.message string, so the card printed “TypeError: Failed to fetch” as a report body. A report is only ever read by the operator, so the audience decision the call-site rule protects is the same at every site; the component runs errorInfo(error, ‘operator’) itself and keeps the raw text as the monospace fine-print line. ActionError still converts at the call site because it renders hand-written validation copy verbatim (S682)."
       }
     ],
     "dos": [

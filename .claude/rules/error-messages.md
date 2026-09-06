@@ -34,6 +34,17 @@ into `error.message` rather than rethrowing, so it flows through every ordinary
   "that didn't work", so a plain string passes through untouched. Do not hand-roll
   `{error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>{error}</p>}` — that shape
   stood at ~20 sites in IMS and at most of them was handed `error.message` verbatim.
+- **`ReportLoadError` is the one channel that converts at RENDER (S682).** The product-wide audit
+  found every one of its ~70 callers handing it either the Supabase error object or the raw
+  `error.message` string (`firstError()` returns the latter), so the card printed "TypeError:
+  Failed to fetch" as the body of a report. The call-site rule exists because the AUDIENCE is a
+  fact about who is looking; a report is only ever read by the operator, so that decision is the
+  same at every site and making it inside the component closed all of them at once instead of the
+  ones a grep happened to find. It runs `errorInfo(error, 'operator')` on whatever it is handed and
+  keeps the raw text as the `.action-error-detail` fine-print line. Pass the error OBJECT where you
+  can (the code survives into the detail); a string still works. `ActionError` does NOT do this —
+  it renders hand-written validation copy verbatim, which is why its conversion stays at the call
+  site.
 - **A message names the CONSEQUENCE, not the constraint.** Most of what S658 replaced were two-write
   sequences where the FIRST write had already committed — a purchase bill left holding both versions
   of its lines and double-counted in every purchase figure, a requisition header with no items, an

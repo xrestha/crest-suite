@@ -14,6 +14,16 @@ import { computeRecipeCosts } from './recipeCost'
 //   - a whole-order Complimentary row: { id, close_type: 'writeoff' }   → Complimentary Slip
 //   - an item-level comp row: { isItemComp: true, parentOrderId, compNo } → mini Complimentary
 //     Slip for just the comped item(s) sharing that compNo
+// A failed read must not become a blank "VIEW ONLY" invoice: an items read that fails yields zero
+// lines and NPR 0, a payments read that fails yields a Split bill with no breakdown, and both are
+// indistinguishable from a real empty bill (S682). One line in the popup instead of a document.
+function writeLoadFailure(w) {
+  if (!w) return
+  w.document.open()
+  w.document.write('<p style="font-family:sans-serif;color:#c00;padding:24px">Couldn\'t load this bill. Close this tab and open it again from the report.</p>')
+  w.document.close()
+}
+
 export async function viewPosBill(clientId, row) {
   const orderId = row.isItemComp ? row.parentOrderId : row.id
   if (!clientId || !orderId) return
@@ -25,13 +35,13 @@ export async function viewPosBill(clientId, row) {
   const w = window.open('', '_blank')
   if (w) w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">Loading…</p>')
 
-  const [{ data: order }, { data: settings }, { data: client }] = await Promise.all([
+  const [{ data: order, error: orderErr }, { data: settings }, { data: client }] = await Promise.all([
     scopedFrom('pos_orders', clientId).eq('id', orderId).single(),
     supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
     supabase.from('clients').select('name').eq('id', clientId).single(),
   ])
-  if (!order) {
-    if (w) { w.document.write('<p style="font-family:sans-serif;color:#c00;padding:24px">Could not load this bill.</p>'); w.document.close() }
+  if (orderErr || !order) {
+    writeLoadFailure(w)
     return
   }
 
@@ -45,7 +55,8 @@ export async function viewPosBill(clientId, row) {
   const outletName = client?.name || ''
   const tableName = order.table_name || 'Takeaway'
 
-  const { data: allItems } = await scopedFrom('pos_order_items', clientId).eq('order_id', orderId)
+  const { data: allItems, error: itemsErr } = await scopedFrom('pos_order_items', clientId).eq('order_id', orderId)
+  if (itemsErr) { writeLoadFailure(w); return }
   const items = allItems || []
 
   // Whichever staff member actually acted — comped_by for an item-level comp, closed_by for
@@ -88,12 +99,14 @@ export async function viewPosBill(clientId, row) {
     const recipeIds = payableItems.map(i => i.recipe_id).filter(Boolean)
     let hscMap = {}
     if (recipeIds.length > 0) {
-      const { data: recipes } = await scopedFrom('recipes', clientId, 'id, hsc_code').in('id', recipeIds)
+      const { data: recipes, error: recErr } = await scopedFrom('recipes', clientId, 'id, hsc_code').in('id', recipeIds)
+      if (recErr) { writeLoadFailure(w); return }
       hscMap = Object.fromEntries((recipes || []).map(r => [r.id, r.hsc_code]))
     }
     let payments
     if (order.payment_method === 'Split') {
-      const { data } = await scopedFrom('pos_order_payments', clientId, 'payment_method, amount').eq('order_id', orderId).order('recorded_at')
+      const { data, error: payErr } = await scopedFrom('pos_order_payments', clientId, 'payment_method, amount').eq('order_id', orderId).order('recorded_at')
+      if (payErr) { writeLoadFailure(w); return }
       payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
     }
     html = buildBillHtml({

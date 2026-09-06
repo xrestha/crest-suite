@@ -73,15 +73,23 @@ colors:
 typography:
   # The prose Hierarchy below names the nine roles a designer reasons in. This block is the
   # COMPLETE ramp, because it is also what tooling checks a literal against — measured across the
-  # source, the scale in use is 9/10/11/12/13/14/15/16/17/18/20/22/24/32 and a size off it is
-  # drift. Documenting only the readable subset is what turns a real tokenised size (the sidebar's
-  # own --font-size-micro, --font-size-chevron) into a false "outside the type ramp" finding.
+  # source, the scale in use is 9/10/11/12/13/14/15/16/17/18/20/22/24/32 (+48, the till readout)
+  # and a size off it is drift. Documenting only the readable subset is what turns a real
+  # tokenised size (the sidebar's own --font-size-micro, --font-size-chevron) into a false
+  # "outside the type ramp" finding.
   display:
     fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "clamp(24px, 3.4vw, 32px)"
     fontWeight: 800
     lineHeight: 1.1
     letterSpacing: "-0.025em"
+  # The one step above figure-lg, and it exists for exactly one surface: a keypad readout on the
+  # till (covers, estimate minutes) read at arm's length on a tablet. Not a KPI size (S682).
+  readout:
+    fontSize: "48px"
+    fontWeight: 700
+    lineHeight: 1.1
+    fontFeature: "tabular-nums"
   figure-lg:
     fontSize: "32px"
     fontWeight: 700
@@ -459,6 +467,11 @@ only ever appears where the product is speaking as itself rather than showing yo
 - **Wordmark** (Georgia 700, 16px sidebar / 20px signed-out, 1.2, `0.04em`): the client's own
   white-labelled brand name. This is the customer's identity, not ours.
 - **Title** (600, 22px): `.page-title`, one per route.
+- **Readout** (700, 48px, tabular): the till's keypad readout — the covers count and the estimate
+  minutes a cook or waiter reads at arm's length on a tablet while their hands are busy. Added S682
+  as a named step so the one size the till genuinely needs stops sitting off the ramp as a literal.
+  It is not a KPI size: `figure` / `figure-lg` remain the ceiling on every working screen, and the
+  34px estimate readout that shipped beside the 48 was a drift, not a second step — it is 32 now.
 - **Figure** (600, 24px, 1.15, tabular): `.stat-value` — the headline number on a KPI card. The
   line-height is explicit because inheriting body's 1.5 puts a 24px numeral in a 36px box, so the
   8px and 4px margins the class declares are never the intervals that render.
@@ -842,6 +855,13 @@ four of which live on the class and none of which announce their absence.
   `cursor: pointer`, so a text field wearing it announces itself as a menu — 60 inputs across 22
   files had done exactly that. `.form-input--auto` is the width escape hatch for a filter toolbar,
   because width is layout, not control identity.
+- **A switch's off-track is slate and its knob is the card colour.** Both hand-rolled switches
+  (SSF Enrolled on the pay form, the VAT toggle on a purchase bill) shipped a white knob on a
+  `--theme-border` track — on Light the border is `#ddd6cf`, so the off state measured ~1.2:1 and
+  the switch's position was unreadable (S682). The track is the accent (or amber) when on and
+  `--theme-text3` when off; the knob is `--theme-card`, which contrasts with both tracks on both
+  presets. The state LABEL beside it is text and takes the `*-text` variant or fog — never the
+  track's own token, which put "No VAT" at 1.44:1.
 - **Focus:** accent border plus the soft ring on `:focus`, and the solid indicator layered on top
   for `:focus-visible`. Both are needed: the `:focus` rule's specificity would otherwise shadow the
   bare backstop and leave a keyboard user with only the 1.15:1 tint.
@@ -868,7 +888,11 @@ four of which live on the class and none of which announce their absence.
   message for whoever eventually diagnoses it. `.action-error--top` places it above the fields
   where the message must be read first.
 - **`ReportLoadError`** speaks for a whole report that could not be read and has to outweigh a page
-  of figures.
+  of figures. Since S682 it is the one channel that converts at RENDER: every one of its ~70
+  callers handed it either a Supabase error object or the raw `error.message` string, and a
+  report is only ever read by the operator, so the audience decision the call-site rule protects
+  is the same at every site — converting once here fixed all of them, with the raw text kept as
+  the same 11px monospace fine print `ActionError` uses.
 
 Convert an error to a sentence at the **call site**, via `shared/errorText.js`, which has two
 audiences: `staff` (someone who can only escalate) and `operator` (the person who fixes it).

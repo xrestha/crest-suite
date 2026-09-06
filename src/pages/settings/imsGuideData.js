@@ -241,6 +241,7 @@ export const IMS_GUIDE_GROUPS = [
           'Daily Entry tab: pick a specific BS day, enter qty per recipe for just that day (bs_day > 0).',
           'Daily Breakdown tab: read-only Item × Day pivot with totals.',
           'Period Summary tab: read-only ranked list — Total Sold, Selling Price, Total Revenue, % of Revenue.',
+          'A "Search menu item" box sits above the tabs and applies on all four (S682). It narrows which rows are drawn and nothing else: the three stat cards sum every recipe, a Bulk save writes every recipe (buildBulkRows reads the full recipe list, not the filtered rows), and Period Summary\'s % of Revenue keeps its full denominator — its footer reads "Total (N of M items shown)" when a search hides rows. Bulk Entry has no category filter, so the search is its only way to find one item.',
         ],
         fields: [
           { label: 'unit_price / vat_rate (snapshotted)', desc: 'Captured from the recipe\'s current selling_price/vat_rate at the moment the sale is saved — deliberately, so a later menu price change never retroactively distorts past periods\' revenue/FC% history. Reports prefer the row\'s own unit_price over the recipe\'s live price whenever it\'s present.' },

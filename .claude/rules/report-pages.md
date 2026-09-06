@@ -77,7 +77,10 @@ Three rules came out of it:
   audiences, and no message that claims a failed write did not land. Before S619 the only such
   table lived inside HR Self-Service and no IMS or POS screen could reach it, so a dead connection
   reached an Owner as a bare `TypeError: Failed to fetch`. Pass the error object through it rather
-  than `error.message`, and keep `detail` as fine print. **Since S658 `ActionError` renders that
+  than `error.message`, and keep `detail` as fine print. (Since S682 `ReportLoadError` runs that
+  conversion itself on whatever it is handed — the product-wide audit found all ~70 callers still
+  passing the raw string — so a report page gets the sentence for free; pass the object anyway so
+  the code reaches the detail line.) **Since S658 `ActionError` renders that
   pair for you** (`src/components/ActionError.jsx` + `asActionError`) — the third channel beside
   `FieldError` (one control) and `ReportLoadError` (a whole failed read), for the button just
   pressed. Convert at the call site, and name the CONSEQUENCE before the cause: on the two-write

@@ -68,7 +68,7 @@ export default function Sales() {
   const [viewMode, setViewMode]     = useState('bulk') // bulk | summary
   const [sortBy, setSortBy]         = useState('rev_desc')
   const [categoryFilter, setCategoryFilter] = useState('all')
-  const [menuSearch, setMenuSearch] = useState('') // Daily Entry / Daily Breakdown only
+  const [menuSearch, setMenuSearch] = useState('') // all four tabs — narrows drawn rows only, never a save or a figure
   const [onlyWithSales, setOnlyWithSales] = useState(false) // Bulk Entry / Daily Entry only
   const [selectedDay, setSelectedDay] = useState(1)
   const [dailySales, setDailySales] = useState({})
@@ -482,18 +482,22 @@ export default function Sales() {
 
   const categories = [...new Set(recipes.map(r => r.category).filter(Boolean))].sort()
 
-  // Daily Entry / Daily Breakdown only — a quick way to find one item among 90+ recipes. Totals
-  // on those tabs still sum every recipe regardless of this filter; it only narrows which rows
-  // are drawn, so it never looks like data quietly went missing from the day/period total.
+  // The menu search runs on all four tabs — a quick way to find one item among 90+ recipes. It
+  // only narrows which rows are DRAWN: the stat cards still sum every recipe, a Bulk save still
+  // writes every recipe (buildBulkRows reads `recipes`, not `bulkRows`), and Period Summary's
+  // % of Revenue keeps its denominator, so it never looks like data quietly went missing.
+  // Bulk Entry has no category control, so it must use the search alone — applying the category
+  // there would let a category picked on another tab silently hide Bulk rows with nothing on
+  // screen to explain it.
   const menuSearchLc = menuSearch.trim().toLowerCase()
+  const matchesMenuSearch = r => !menuSearchLc || r.name.toLowerCase().includes(menuSearchLc)
   const matchesMenuFilter = r =>
-    (categoryFilter === 'all' || r.category === categoryFilter) &&
-    (!menuSearchLc || r.name.toLowerCase().includes(menuSearchLc))
+    (categoryFilter === 'all' || r.category === categoryFilter) && matchesMenuSearch(r)
 
   // Each list was written out twice in the JSX (once for the empty check, once for the .map), so
   // every filter ran twice per render. Computed once here instead. The drafts (bulkForm/dailyForm)
   // stay part of the "has sales" test on purpose — that is the filter's meaning.
-  const bulkRows = sortedRecipes.filter(r => !onlyWithSales || getQtyNum(r.id) > 0)
+  const bulkRows = sortedRecipes.filter(r => matchesMenuSearch(r) && (!onlyWithSales || getQtyNum(r.id) > 0))
   const dailyRows = recipes.filter(r => matchesMenuFilter(r) && (!onlyWithSales || parseFloat(getDailyQty(r.id)) > 0))
 
   // Daily Breakdown pivot — one row per recipe × one column per day (~9,000 cells on a real
@@ -634,21 +638,20 @@ export default function Sales() {
                 Only items with sales
               </label>
             )}
-            {(viewMode === 'daily' || viewMode === 'breakdown') && (
-              <div style={{ position: 'relative', marginBottom: 6 }}>
-                <input
-                  value={menuSearch}
-                  onChange={e => setMenuSearch(e.target.value)}
-                  placeholder="Search menu item…"
-                  style={{ background: 'var(--theme-card)', border: `1px solid ${menuSearch ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '6px 10px 6px 28px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: 170, display: 'block' }}
-                />
-                <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
-                {menuSearch && (
-                  <button onClick={() => setMenuSearch('')} title="Clear"
-                    style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 4px' }}>×</button>
-                )}
-              </div>
-            )}
+            <div style={{ position: 'relative', marginBottom: 6 }}>
+              <input
+                aria-label="Search menu item"
+                value={menuSearch}
+                onChange={e => setMenuSearch(e.target.value)}
+                placeholder="Search menu item…"
+                style={{ background: 'var(--theme-card)', border: `1px solid ${menuSearch ? 'rgba(201,168,76,0.5)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '6px 10px 6px 28px', fontSize: 12, color: 'var(--theme-text1)', outline: 'none', width: 170, display: 'block' }}
+              />
+              <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--theme-text2)', pointerEvents: 'none' }}>🔍</span>
+              {menuSearch && (
+                <button type="button" onClick={() => setMenuSearch('')} title="Clear" aria-label="Clear search"
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 4px' }}>×</button>
+              )}
+            </div>
             {(viewMode === 'daily' || viewMode === 'breakdown' || viewMode === 'summary') && (
               <select aria-label="Filter by category"
                 value={categoryFilter}
@@ -730,7 +733,7 @@ export default function Sales() {
                     <thead>
                       <tr>
                         <th>Menu Item</th>
-                        <th><Tip text="Recipe category — Food, Beverage, Dessert, etc. Filter by category using the tabs above." width={240}>Category</Tip></th>
+                        <th><Tip text="Recipe category — Food, Beverage, Dessert, etc. Use the search box above to find one item." width={240}>Category</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="Ex-VAT selling price per portion as set in Recipe Costing." width={230}>Selling Price</Tip></th>
                         <th style={{ textAlign: 'right', width: 160 }}><Tip text="Total portions sold across the entire period. Enter or edit in the Qty Sold column." width={240}>Total Qty Sold</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="Total revenue = Qty Sold × Selling Price (ex-VAT). Used in food cost % and variance calculations." width={260}>Period Revenue</Tip></th>
@@ -738,7 +741,7 @@ export default function Sales() {
                     </thead>
                     <tbody>
                       {bulkRows.length === 0 && (
-                        <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No items with sales entered yet.</td></tr>
+                        <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>{menuSearchLc ? 'No menu items match this filter.' : 'No items with sales entered yet.'}</td></tr>
                       )}
                       {bulkRows.map(recipe => {
                         const qty = getQty(recipe.id)
@@ -1068,7 +1071,11 @@ export default function Sales() {
 
           {/* PERIOD SUMMARY */}
           {viewMode === 'summary' && (() => {
-            const summaryRecipes = recipes
+            // summaryBase is the category-scoped list the figures are measured against; the search
+            // only picks which of those rows are drawn. % of Revenue therefore keeps meaning "share
+            // of this category's period revenue" whether or not a search is typed — otherwise
+            // searching "momo" would make each variant read as a share of momo revenue only.
+            const summaryBase = recipes
               .filter(r => categoryFilter === 'all' || r.category === categoryFilter)
               .sort((a, b) => {
                 const aqty = allDaySums[a.id] || 0
@@ -1085,9 +1092,16 @@ export default function Sales() {
                   default:           return 0
                 }
               })
+            const summaryRecipes = summaryBase.filter(matchesMenuSearch)
+            const baseTotalRev = summaryBase.reduce((s, r) => s + recipeRevenue(r), 0)
+            // The footer sums the rows actually on screen (as Daily Breakdown's does), and says so
+            // whenever a search has hidden some of them.
             const sumTotalQty = summaryRecipes.reduce((s, r) => s + (allDaySums[r.id] || 0), 0)
             const sumTotalDiscount = summaryRecipes.reduce((s, r) => s + (allDayDiscounts[r.id] || 0), 0)
             const sumTotalRev = summaryRecipes.reduce((s, r) => s + recipeRevenue(r), 0)
+            const footerLabel = menuSearchLc && summaryRecipes.length !== summaryBase.length
+              ? `Total (${summaryRecipes.length} of ${summaryBase.length} items shown)`
+              : 'Total'
             return (
               <div className="card">
                 <div className="table-wrap">
@@ -1104,11 +1118,14 @@ export default function Sales() {
                       </tr>
                     </thead>
                     <tbody>
+                      {summaryRecipes.length === 0 && (
+                        <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No menu items match this filter.</td></tr>
+                      )}
                       {summaryRecipes.map(recipe => {
                         const sold = allDaySums[recipe.id] || 0
                         const disc = allDayDiscounts[recipe.id] || 0
                         const rev  = recipeRevenue(recipe)
-                        const revPct = sumTotalRev > 0 ? (rev / sumTotalRev) * 100 : 0
+                        const revPct = baseTotalRev > 0 ? (rev / baseTotalRev) * 100 : 0
                         // An unsold item is labelled by its "—" sold count and a slate name, never by
                         // opacity: at 0.4 the name measured 2.5:1 and the figure 1.9:1 (S682).
                         return (
@@ -1141,7 +1158,7 @@ export default function Sales() {
                         )
                       })}
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                        <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                        <td colSpan={2} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{footerLabel}</td>
                         <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{sumTotalQty.toLocaleString()}</td>
                         <td></td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>
