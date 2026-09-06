@@ -352,7 +352,11 @@ export default function Settings() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Settings</h1>
-          <p className="page-subtitle">Configure branding, property details and operational thresholds</p>
+          <p className="page-subtitle">
+            {isAdmin
+              ? 'Branding, property, the support contact, plan pricing, data and theme for the client you are viewing'
+              : 'Operational thresholds, code formats, recipe categories and your theme'}
+          </p>
         </div>
         {/* Support is the one tab whose cards each commit their own row, so the page-level button
             does not render there: measured, the nearest Save to the consultant fields was the OTHER
@@ -777,6 +781,8 @@ export default function Settings() {
         const preview = resolveSupportContact({ platform: platformForm, client: null })
         const emergencyOptions = EMERGENCY_CHANNELS.filter(c => preview[c.key])
         const phoneOn = platformForm.phone_enabled !== false
+        // The preview renders the FORM, not the row — so it says so while the two differ.
+        const platformDirty = JSON.stringify(platformForm) !== platformSeedRef.current
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card">
@@ -810,7 +816,7 @@ export default function Settings() {
                 <div className="form-field">
                   <label htmlFor="sup-email">Email</label>
                   <input id="sup-email" className="form-input" type="email" autoComplete="off" value={platformForm.email} onChange={e => updatePlatform('email', e.target.value)} placeholder={`Blank = ${preview.email}`} />
-                  <span style={hint}>Blank keeps the legal support address</span>
+                  <span style={hint}>Blank = the address printed on the Terms page</span>
                 </div>
                 <div className="form-field">
                   <label htmlFor="sup-website">Website</label>
@@ -851,7 +857,13 @@ export default function Settings() {
               </div>
 
               <div style={{ marginTop: 20, padding: '14px 18px', background: 'var(--theme-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--theme-border)' }}>
-                <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>What a client sees on Help → Support</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>What a client sees on Help → Support</div>
+                  {/* Amber = open, waiting on a person (the One Signal Meaning Rule): unsaved edits are exactly that. */}
+                  {platformDirty
+                    ? <span className="badge-amber">Unsaved — clients still see the saved version</span>
+                    : <span className="badge-gray">As saved</span>}
+                </div>
                 <SupportContactLine variant="block" contact={preview} />
               </div>
 
@@ -869,7 +881,7 @@ export default function Settings() {
 
             <div className="card">
               <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                This client's consultant{clientId ? '' : ' — pick a client first'}
+                This client's consultant
               </h3>
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
                 Optional, per client. When set, it replaces the Crest line above for this client only — on the upgrade
