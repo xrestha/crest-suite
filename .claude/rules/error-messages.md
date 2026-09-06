@@ -16,6 +16,14 @@ supabase-js hands back for any dead connection (PostgrestBuilder stringifies the
 into `error.message` rather than rethrowing, so it flows through every ordinary
 `if (error) setError(error.message)` path untouched).
 
+**`errorLine(err, audience = 'operator')` is the third form, added S682** — `text` plus the detail
+in parentheses, as one string. It exists for the pages built on the `setMsg('error:' + ...)`
+convention, which have exactly one status line and nowhere to put `ActionError`'s fine print; HR is
+almost entirely that shape, and ~40 sites there were rendering a raw Postgres string into it. Reach
+for `errorInfo`/`ActionError` wherever there is room for two lines and `errorLine` only where there
+is not -- the detail must survive either way. Its audience defaults to `'operator'` rather than
+`'staff'`, because every page on that convention is a manager's screen.
+
 - **Two audiences, because the same failure has two different next steps.** `'staff'` (default —
   the HR Self-Service wording, which is why `employeeError.js` is now a four-line delegate) speaks
   to someone who can only escalate; `'operator'` speaks to the Owner/manager who *is* the person

@@ -476,6 +476,23 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
   the co-occurrence suggestions and the Recent Bills comp lookup log and move on. The test is
   whether there is an action the user could take.
 
+## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682)
+
+`PosOrders.jsx` has two returns, and `setMsg` renders only inside the `view === 'order'` tree — so
+the **floor view has no message banner at all**. Its six refusals therefore use `window.alert`:
+could not check whether this table already has an open order, could not load a bill to reprint,
+could not read the split payment lines, and the three clear-all-tables failures. Each is a refusal
+a waiter must not be able to walk past mid-service.
+
+A product-wide audit flagged them as P2 — unstyled, and modal to the whole tab on a tablet. Both
+true. **Being un-missable is the property that was chosen** (S616), and it still wins: the
+alternative is a non-blocking banner on the one screen where the cost of a missed refusal is a dish
+cooked twice or a bill reprinted with no lines. Left as found, with the reasoning now at the import
+that would otherwise look like a missing conversion.
+
+If the floor ever grows a real banner of its own, revisit this — that is the thing that changes the
+answer, not the styling.
+
 ## Anything that takes money off a bill is a TENDER or a DISCOUNT, and the choice is not cosmetic (S618)
 
 Loyalty redemption was the first thing to face this and it will not be the last — a gift card, a

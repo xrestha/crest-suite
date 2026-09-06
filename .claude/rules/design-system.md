@@ -479,6 +479,27 @@ it got reported. Margin gives byte-identical clearance (a margin on the last chi
 padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**
 
 
+## An inline style is how a rule stops reaching the elements that need it (S682)
+
+Two instances found in one pass, opposite directions, same cause.
+
+**An inline `animation` cannot be switched off by a media query.** The rule was already written
+here for `ChartCard`; the admin client list had `style={{ animation: 'pulse-dot 1.5s infinite' }}`
+on its "wants to subscribe" dot anyway. It is `.pulse-dot` now. Moving it surfaced the second
+half: **`.module-tab-dot` had never been in the reduced-motion block either**, so the sidebar's own
+badge had been pulsing indefinitely for a reader who asked their OS for less motion, on a class
+that predates the block. When you add an element to a guard block, grep the block for its
+siblings — a keyframe with two users is a keyframe where one of them was probably forgotten.
+
+**A coarse-pointer floor reaches only the controls that did not opt out.** `Layout.css` already
+gave `input[type=checkbox]` 20px under `pointer: coarse`, and eleven checkboxes across IMS and POS
+set `width: 15, height: 15` in an inline style object — so the rule applied to exactly the
+controls that already had no inline size, and skipped every one it was written for. `!important`
+is the answer here for the same reason the 16px font floor carries it, and the reason is worth
+restating: **no selector beats an inline style, so a floor written without `!important` is a floor
+that silently exempts the worst offenders.** Before trusting any `pointer: coarse` rule, grep for
+an inline `width`/`height`/`font-size` on the same element type.
+
 ## `.btn` with no colour variant renders as browser chrome (S678)
 
 `.btn` is the BOX — padding, radius, 13px/500, cursor, transition, focus ring, `:disabled`. It

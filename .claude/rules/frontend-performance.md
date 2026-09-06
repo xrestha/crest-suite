@@ -296,7 +296,16 @@ rendering permanently blank. Of the two possible mistakes only one is recoverabl
 is also why a page's own `init()` needs no `begin()`: once the handler claims, init's stale load is
 correctly rejected on its own.
 
-**Not swept:** `AttendanceSheet.jsx` and `Overtime.jsx`, and
+**S682 took it to 38 pages (measured by grep) and closed the report tail.** The twelve period-driven IMS reports that
+had never been swept — VAT, Non-VAT, Purchase 1L+, Annual Summary, Vendor Balance Confirmation,
+Wastage, Dead Stock, Shrinkage, Best Sellers, Menu Engineering, Menu Repricing, Recipe Margin —
+plus `MonthlyOwnerReport` and `Overtime`. Two of those are **statutory filings** whose selected
+period is also the print title, the workbook scope line and the filename, which is the case this
+rule was written about. `Overtime` was on the not-swept list below for taking `(bsYear, bsMonth)`
+rather than one id; it uses a `${bsYear}-${bsMonth}` composite key, exactly as `GroupDashboard`
+does, so that reason is now spent everywhere it was given.
+
+**Not swept:** `AttendanceSheet.jsx`, and
 `SupplierPriceTracker.js`/`MonthlyOwnerReport.jsx`, which select an id and derive rather than load.
 The first two were skipped because their loaders take `(bsYear, bsMonth)` rather than one id and
 "would need a composite key" — S657 built exactly that on `GroupDashboard` (a `bsYear-bsMonth` key),

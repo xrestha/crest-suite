@@ -80,6 +80,26 @@ block Finalize (that would strand the run with no legal move); it gates Regenera
 
 **`hr_tada_claims` has no `bs_year`/`bs_month` and is not plumbed through `monthly_periods` at all** — it's a standalone ledger keyed on plain AD `start_date`/`end_date`, which is why `fetchApprovedTadaMap` converts the BS period to an AD range rather than filtering on period columns, and why TADA Claims' own month filter (S564) buckets client-side via `adToBs(start_date)` instead of a `.eq()`. Don't reach for `period_id` on this table; it isn't there.
 
+### Finalize and Reopen write to four ledgers, and each one names what did not move (S682)
+
+S613 fixed Final Settlement's gates. `PayrollRun`'s own money flows were the same shape and were
+not touched: **finalize ran five writes bare** — the run to `finalized`, delete then re-insert
+`hr_advance_repayments`, `hr_advances` to `settled`, `hr_tada_claims` to `paid` — and then printed
+"Finalized" whatever had landed. A dropped write left the run finalized with no repayment rows, or
+repayments recorded and advances still active, or **TADA claims still Approved and therefore
+payable a second time**. `reopen()` dropped the error on the read of its own tagged repayment rows,
+so a failed read deleted them and reactivated nothing: exactly the divergence the S600 comment
+above it says the code exists to prevent.
+
+Both now stop at the first failure and say **which ledger did not move**, reloading first so the
+register shows the true state rather than the intended one. Two properties make that safe to write
+this way: reopen-then-finalize is idempotent by construction (the delete-then-insert above), so
+"reopen and finalize again" is always a legal recovery and the message says so; and the failure
+message names the state the run is in now, never the constraint that rejected the write.
+
+The same pass gave leave approve/decide the same treatment — a failed freshness read used to skip
+`revertAttendance` and reject the request while the paid-leave days stayed marked and paid.
+
 ### A finalize gate that drops its read error passes vacuously (S613)
 
 Final Settlement's three refusal checks — a finalized payslip already covering the final month, an
