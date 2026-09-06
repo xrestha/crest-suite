@@ -5,7 +5,8 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { FIXED_HOLIDAYS, SIGHTED_HOLIDAYS, resolveYear, movableForFy } from './holidayData'
 import { fiscalYearOf } from '../payroll/tds'
 
@@ -37,6 +38,7 @@ const inp = {
 export default function HolidayCalendar() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [holidays, setHolidays] = useState([])
   const [loading,  setLoading]  = useState(true)
   const [fyYear,   setFyYear]   = useState(() => {
@@ -53,10 +55,13 @@ export default function HolidayCalendar() {
   const load = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
-    const { data } = await scopedFrom('hr_holiday_calendar')
+    const { data, error } = await scopedFrom('hr_holiday_calendar')
       .order('bs_year').order('bs_month').order('bs_day')
-    setHolidays(data || [])
     setLoading(false)
+    // A failed read is not "no holidays" — that is the difference between the 1× and 2× OT rate
+    // for every day in the table (S682). Keep the last-good list and say so.
+    if (error) { setMsg('error:Could not load the holiday calendar — the list is from the last successful load. ' + errorLine(error)); return }
+    setHolidays(data || [])
   }, [clientId, scopedFrom])
 
   useEffect(() => { load() }, [load])
@@ -96,14 +101,30 @@ export default function HolidayCalendar() {
     const { error } = form.editing
       ? await scopedUpdate('hr_holiday_calendar', payload).eq('id', form.editing.id)
       : await scopedInsert('hr_holiday_calendar', payload)
-    if (error) { setMsg('error:' + error.message); setBusy(false); return }
+    if (error) { setMsg('error:This holiday was not saved. ' + errorLine(error)); setBusy(false); return }
     await load(); closeForm(); setMsg('ok:Saved'); setBusy(false)
   }
 
-  async function del(id) {
-    if (!window.confirm('Delete this holiday?')) return
-    await scopedDelete('hr_holiday_calendar').eq('id', id)
-    await load()
+  // A holiday drives the 2× OT rate for its date and the demand-forecast multiplier, so the ask
+  // names both (S682; was window.confirm).
+  function del(h) {
+    askConfirm({
+      title: `Delete "${h.name}"?`,
+      confirmLabel: 'Delete Holiday', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {BS_MONTHS[h.bs_month - 1]} {h.bs_day}, {h.bs_year} becomes an ordinary working day: overtime on it is paid at the
+          normal rate instead of the holiday rate{h.demand_multiplier != null ? `, and the ×${h.demand_multiplier} demand-forecast multiplier is dropped` : ''}.
+          Attendance already generated for that day is not changed. This cannot be undone.
+        </p>
+      ),
+      run: async () => {
+        setMsg('')
+        const { error } = await scopedDelete('hr_holiday_calendar').eq('id', h.id)
+        if (error) { setMsg('error:This holiday was not deleted — it is still in the calendar. ' + errorLine(error)); return }
+        await load()
+      },
+    })
   }
 
   // Seed one fiscal year from both tables. Deliberately additive and name-keyed: a client who has
@@ -331,8 +352,8 @@ export default function HolidayCalendar() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEdit(h)}>Edit</button>
-                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red-text)' }} onClick={() => del(h.id)}>Delete</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(h)}>Edit</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => del(h)}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -462,6 +483,7 @@ export default function HolidayCalendar() {
           </div>
         </Modal>
       )}
+      {confirmEl}
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { calcGratuity } from './gratuityCompute'
 import { fetchSsfStartMap, ssfMonthsFrom } from './ssfEnrolment'
+import ReportLoadError from '../../../components/ReportLoadError'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtD = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-NP', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -26,6 +27,7 @@ export default function GratuityTracker() {
   // assumed from the join date. See ssfEnrolment.js for why that distinction is worth six figures.
   const [ssfStart,  setSsfStart]  = useState({})
   const [loading,   setLoading]   = useState(true)
+  const [loadError, setLoadError] = useState(null) // a failed read is not "no active employees"
   const [filter,    setFilter]    = useState('all')   // all | vested | vesting
   const [dept,      setDept]      = useState('all')
 
@@ -38,9 +40,11 @@ export default function GratuityTracker() {
     setLoading(true)
     // ssf_no is selected because the SSF gate is `ssf_enrolled AND ssf_no`, matching payroll — a
     // flagged employee with a blank number had nothing contributed on their behalf.
-    const { data } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, status')
+    const { data, error } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, status')
       .in('status', ['active', 'probation'])
       .order('full_name')
+    if (error) { setLoadError(error); setLoading(false); return }
+    setLoadError(null)
     setEmployees(data || [])
     // Best-effort: without it every employee reads as "coverage unknown", which shows no offset
     // rather than a wrong one.
@@ -129,6 +133,8 @@ export default function GratuityTracker() {
 
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
+      ) : loadError ? (
+        <ReportLoadError error={loadError} />
       ) : employees.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No active employees found.</div>
       ) : (

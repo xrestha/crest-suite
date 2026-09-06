@@ -3,6 +3,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Modal from '../../../components/Modal'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { invalidStyle } from '../../../shared/inlineFieldState'
+import { errorLine } from '../../../shared/errorText'
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
@@ -39,18 +40,23 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
       default_value: parseFloat(form.default_value) || 0,
     })
     setSaving(false)
-    if (err) { setError(err.message); return }
+    if (err) { setError('The incentive type was not added. ' + errorLine(err)); return }
     setForm(EMPTY); onChanged()
   }
 
   async function toggleActive(cfg) {
-    await scopedUpdate('hr_incentive_configs', { active: !cfg.active }).eq('id', cfg.id)
+    setError('')
+    const { error: err } = await scopedUpdate('hr_incentive_configs', { active: !cfg.active }).eq('id', cfg.id)
+    if (err) { setError(`"${cfg.name}" was not ${cfg.active ? 'deactivated' : 'activated'}. ` + errorLine(err)); return }
     onChanged()
   }
 
   async function handleDelete(cfg) {
+    // Reversible in effect (past runs keep their snapshot), so the native confirm stays.
     if (!window.confirm(`Delete "${cfg.name}"? Past runs using it keep their own snapshot and are unaffected.`)) return
-    await scopedDelete('hr_incentive_configs').eq('id', cfg.id)
+    setError('')
+    const { error: err } = await scopedDelete('hr_incentive_configs').eq('id', cfg.id)
+    if (err) { setError(`"${cfg.name}" was not deleted. ` + errorLine(err)); return }
     onChanged()
   }
 

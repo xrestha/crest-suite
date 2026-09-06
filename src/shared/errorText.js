@@ -92,3 +92,12 @@ export function errorInfo(err, audience = 'staff') {
 
 // Convenience for the call sites that only have room for one string.
 export const errorText = (err, audience = 'staff') => errorInfo(err, audience).text
+
+// The one-string form that still keeps the detail: `text (code · message)`. For the pages that
+// carry a single status line (HR's `setMsg('error:' + …)` convention) and have no ActionError
+// slot — the sentence leads, the raw detail rides along in parentheses, never destroyed (S619).
+// Defaults to the operator audience, because every page on that convention is a manager's screen.
+export const errorLine = (err, audience = 'operator') => {
+  const { text, detail } = errorInfo(err, audience)
+  return detail ? `${text} (${detail})` : text
+}

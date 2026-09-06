@@ -10,6 +10,9 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { invalidStyle } from '../../../shared/inlineFieldState'
 import { adToBs } from '../../../utils/bsCalendar'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const fmt  = n => Math.round(n || 0).toLocaleString('en-NP')
 const fmtD = iso => {
@@ -33,6 +36,9 @@ const EMPTY_REPAY = { repaid_date: '', amount: '', notes: '' }
 export default function Advances() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
+  // A page-level action failure (settle, delete) — the modal-scoped `error` cannot show it.
+  const [pageError, setPageError] = useState(null)
   const [employees,  setEmployees]  = useState([])
   const [advances,   setAdvances]   = useState([])
   const [repayments, setRepayments] = useState([])
@@ -136,7 +142,7 @@ export default function Advances() {
       notes:              addForm.notes || null,
     })
     setSaving(false)
-    if (err) { setError(err.message); return }
+    if (err) { setError('The advance was not recorded. ' + errorLine(err)); return }
     setShowAdd(false); setAddForm(EMPTY_ADD); load()
   }
 
@@ -158,24 +164,43 @@ export default function Advances() {
       notes:       repayForm.notes || null,
     })
     setSaving(false)
-    if (err) { setError(err.message); return }
+    if (err) { setError('The repayment was not recorded. ' + errorLine(err)); return }
     setShowRepay(false); setRepayForm(EMPTY_REPAY); load()
   }
 
   async function handleSettle(advId) {
-    await scopedUpdate('hr_advances', { status: 'settled' }).eq('id', advId)
+    setPageError(null)
+    const { error: err } = await scopedUpdate('hr_advances', { status: 'settled' }).eq('id', advId)
     setSettleTarget(null)
+    if (err) { setPageError({ ...asActionError(err), text: 'This advance was not settled — it is still active. ' + asActionError(err).text }); return }
     if (selected === advId) setSelected(null)
     load()
   }
 
-  async function handleDelete(advId) {
+  // A loan ledger row: the confirm names the amount and the date rather than asking "are you
+  // sure?" (S682; was window.confirm).
+  function handleDelete(advId) {
     const hasReps = (repayMap[advId]?.rows || []).length > 0
     if (hasReps) return // button shouldn't show if repayments exist
-    if (!window.confirm('Delete this advance? This cannot be undone.')) return
-    await scopedDelete('hr_advances').eq('id', advId)
-    if (selected === advId) setSelected(null)
-    load()
+    const adv = advances.find(a => a.id === advId)
+    const emp = adv ? empMap[adv.employee_id] : null
+    askConfirm({
+      title: `Delete this ${adv?.type === 'loan' ? 'loan' : 'advance'}?`,
+      confirmLabel: 'Delete', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <p style={{ margin: 0 }}>
+          NPR {fmt(adv?.amount)}{emp ? ` issued to ${emp.full_name}` : ''}{adv?.issued_date ? ` on ${adv.issued_date}` : ''} is removed from the
+          ledger, and the payroll deduction it drives stops. This cannot be undone.
+        </p>
+      ),
+      run: async () => {
+        setPageError(null)
+        const { error: err } = await scopedDelete('hr_advances').eq('id', advId)
+        if (err) { const a = asActionError(err); setPageError({ text: 'This advance was not deleted — it is still on the ledger. ' + a.text, detail: a.detail }); return }
+        if (selected === advId) setSelected(null)
+        load()
+      },
+    })
   }
 
   const selectedAdv = selected ? advances.find(a => a.id === selected) : null
@@ -202,6 +227,8 @@ export default function Advances() {
           + Issue Advance / Loan
         </button>
       </div>
+
+      <ActionError error={pageError} />
 
       {/* Summary cards */}
       <div className="stat-grid">
@@ -342,9 +369,9 @@ export default function Advances() {
               <span>Repaid: NPR {fmt(selectedRepaid)}</span>
               <span>Outstanding: NPR {fmt(selectedOutstanding)}</span>
             </div>
-            <div style={{ height: 6, borderRadius: 3, background: 'var(--theme-border)', overflow: 'hidden' }}>
+            <div style={{ height: 6, borderRadius: 'var(--radius-full)', background: 'var(--theme-border)', overflow: 'hidden' }}>
               <div style={{
-                width: '100%', height: '100%', borderRadius: 3,
+                width: '100%', height: '100%', borderRadius: 'var(--radius-full)',
                 transform: `scaleX(${Math.min(100, (selectedRepaid / parseFloat(selectedAdv.amount)) * 100) / 100})`,
                 transformOrigin: 'left',
                 background: selectedOutstanding === 0 ? 'var(--theme-green)' : 'var(--theme-accent)',
@@ -496,6 +523,7 @@ export default function Advances() {
           </div>
         </Modal>
       )}
+      {confirmEl}
     </div>
   )
 }

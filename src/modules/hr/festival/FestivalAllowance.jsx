@@ -6,6 +6,8 @@ import Tip from '../../../components/Tip'
 import { bsToAd, getBsToday } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const LIFE_INS_CAP    = 40000
 const HEALTH_INS_CAP  = 20000
@@ -55,6 +57,7 @@ function calcFestivalTds({ emp, amount, ytd, fyStart }) {
 export default function FestivalAllowance() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedUpsert, scopedUpdate } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const today = getBsToday()
   const [bsYear,    setBsYear]    = useState(today.year)
   const [festival,  setFestival]  = useState('Dashain')
@@ -133,18 +136,36 @@ export default function FestivalAllowance() {
     if (employees.length === 0) return
     setBusy(true); setMsg('')
     const { error } = await scopedUpsert('hr_festival_allowances', buildRows(), { onConflict: 'client_id,employee_id,bs_year,festival_name' })
-    if (error) { setMsg('error:' + error.message); setBusy(false); return }
+    if (error) { setMsg('error:The allowance was not generated. ' + errorLine(error)); setBusy(false); return }
     await load(); setMsg('ok:Generated'); setBusy(false)
   }
 
-  async function regenerate() {
+  // Recompute wipes every hand-entered amount and TDS override — a consequence dialog, not
+  // window.confirm (S682).
+  function regenerate() {
     if (!clientId) { setMsg('error:No client selected'); return }
     if (finalized) return
-    if (!window.confirm('Recompute all festival amounts from current salaries? Manual edits will be reset.')) return
-    setBusy(true); setMsg('')
-    const { error } = await scopedUpsert('hr_festival_allowances', buildRows(), { onConflict: 'client_id,employee_id,bs_year,festival_name' })
-    if (error) { setMsg('error:' + error.message); setBusy(false); return }
-    await load(); setMsg('ok:Recomputed'); setBusy(false)
+    askConfirm({
+      title: `Recompute the ${festival} ${bsYear} allowance?`,
+      confirmLabel: 'Recompute', danger: true, busyLabel: 'Recomputing…',
+      body: <p style={{ margin: 0 }}>Every amount and TDS figure is rebuilt from current salaries and months worked. Any amount or TDS you entered by hand — including the daily and hourly staff you filled in manually — is lost.</p>,
+      run: async () => {
+        setBusy(true); setMsg('')
+        const { error } = await scopedUpsert('hr_festival_allowances', buildRows(), { onConflict: 'client_id,employee_id,bs_year,festival_name' })
+        if (error) { setMsg('error:The allowance was not recomputed — the figures on screen are unchanged. ' + errorLine(error)); setBusy(false); return }
+        await load(); setMsg('ok:Recomputed'); setBusy(false)
+      },
+    })
+  }
+
+  // The three inline edits are optimistic; a refused write reloads so the register shows what is
+  // actually stored, and the message names the figure that did not land.
+  async function inlineWrite(row, patch, what) {
+    const { error } = await scopedUpdate('hr_festival_allowances', patch).eq('id', row.id)
+    if (error) {
+      setMsg(`error:${what} for ${empMap[row.employee_id]?.full_name || 'this employee'} was not saved — the register shows what is stored. ` + errorLine(error))
+      await load()
+    }
   }
 
   async function updateAmount(row, value) {
@@ -153,29 +174,39 @@ export default function FestivalAllowance() {
     const emp    = empMap[row.employee_id] || {}
     const tds    = calcFestivalTds({ emp, amount, ytd: ytdMap[row.employee_id], fyStart })
     setRows(rs => rs.map(r => r.id === row.id ? { ...r, amount, tds } : r))
-    await scopedUpdate('hr_festival_allowances', { amount, tds }).eq('id', row.id)
+    await inlineWrite(row, { amount, tds }, 'The amount')
   }
 
   async function updateTds(row, value) {
     if (finalized) return
     const tds = parseFloat(value) || 0
     setRows(rs => rs.map(r => r.id === row.id ? { ...r, tds } : r))
-    await scopedUpdate('hr_festival_allowances', { tds }).eq('id', row.id)
+    await inlineWrite(row, { tds }, 'The TDS override')
   }
 
   async function updateNote(row, value) {
     if (finalized) return
     setRows(rs => rs.map(r => r.id === row.id ? { ...r, note: value } : r))
-    await scopedUpdate('hr_festival_allowances', { note: value || null }).eq('id', row.id)
+    await inlineWrite(row, { note: value || null }, 'The note')
   }
 
-  async function setStatus(status) {
+  function setStatus(status) {
     const verb = status === 'finalized' ? 'Finalize' : 'Reopen'
-    if (!window.confirm(`${verb} this festival allowance?`)) return
-    setBusy(true)
-    await scopedUpdate('hr_festival_allowances', { status })
-      .eq('bs_year', bsYear).eq('festival_name', festival)
-    await load(); setMsg(`ok:${verb}d`); setBusy(false)
+    askConfirm({
+      title: `${verb} the ${festival} ${bsYear} allowance?`,
+      confirmLabel: `${verb} Allowance`, busyLabel: `${verb === 'Finalize' ? 'Finalizing' : 'Reopening'}…`,
+      danger: status !== 'finalized',
+      body: status === 'finalized'
+        ? <p style={{ margin: 0 }}>{rows.length} allowance{rows.length === 1 ? '' : 's'}, NPR {total.toLocaleString('en-NP')} in total, lock as a permanent record and stop accepting edits. This can be undone with Reopen.</p>
+        : <p style={{ margin: 0 }}>The allowance goes back to draft: amounts and TDS become editable again, and it stops being a finalized record until it is finalized once more.</p>,
+      run: async () => {
+        setBusy(true); setMsg('')
+        const { error } = await scopedUpdate('hr_festival_allowances', { status })
+          .eq('bs_year', bsYear).eq('festival_name', festival)
+        if (error) { setMsg(`error:The allowance was not ${verb.toLowerCase()}d — it still shows its previous status. ` + errorLine(error)); setBusy(false); return }
+        await load(); setMsg(`ok:${verb}d`); setBusy(false)
+      },
+    })
   }
 
   const total    = rows.reduce((a, r) => a + (r.amount || 0), 0)
@@ -219,7 +250,7 @@ export default function FestivalAllowance() {
           <p className="page-subtitle">
             Annual festival bonus (Dashain / पर्व खर्च) — {festival} {bsYear}
             {rows.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>
+              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
                 {finalized ? 'Finalized' : 'Draft'}
               </span>
             )}
@@ -240,7 +271,7 @@ export default function FestivalAllowance() {
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No active employees. Add employees in HR → Employees first.</div>
       ) : rows.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-          <div style={{ fontSize: 28, marginBottom: 12 }}>🎉</div>
+          <div aria-hidden="true" style={{ fontSize: 24, marginBottom: 12 }}>🎉</div>
           <div style={{ fontSize: 14, color: 'var(--theme-text1)', marginBottom: 6 }}>No {festival} allowance for BS {bsYear} yet</div>
           <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 18 }}>Computes one month's basic per employee, pro-rated by months worked. Daily/hourly staff start at 0 — enter their amounts manually.</div>
           <button className="btn btn-primary" onClick={generate} disabled={busy}>{busy ? 'Generating…' : 'Generate Allowance'}</button>
@@ -369,6 +400,7 @@ export default function FestivalAllowance() {
           </div>
         </>
       )}
+      {confirmEl}
     </div>
   )
 }

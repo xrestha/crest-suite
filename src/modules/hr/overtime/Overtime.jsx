@@ -7,6 +7,9 @@ import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, HR_REQUEST_STATUS } from '../payrollConstants'
+import { errorLine } from '../../../shared/errorText'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 // One ladder for all five HR approval queues (S660) — Pending was brass here and on Leave, grey on
 // TADA and amber on the dashboard and in the employee app, for the same word. `tint` already
@@ -40,6 +43,8 @@ const BLANK = {
 export default function Overtime() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
+  const monthReq = useLatestRequest()
 
   const [periods,   setPeriods]   = useState([])
   const [period,    setPeriod]    = useState(null)
@@ -85,12 +90,19 @@ export default function Overtime() {
   }, [clientId]) // eslint-disable-line
 
   const loadEntries = useCallback(async (bsYear, bsMonth) => {
-    const { data } = await scopedFrom('hr_overtime_entries')
+    // Month-driven from a native <select>: arrowing the list fires a load per keypress and the
+    // last response to land used to win the figures under the wrong label (S601). Keyed on the
+    // month, so a reload of the current month after a save always passes.
+    const key = monthReq.begin(`${bsYear}-${bsMonth}`)
+    const { data, error } = await scopedFrom('hr_overtime_entries')
       .eq('bs_year', bsYear)
       .eq('bs_month', bsMonth)
       .order('bs_day').order('created_at')
+    if (!monthReq.isCurrent(key)) return
+    // A failed read is not "no OT this month" (S682): keep the last-good list and say so.
+    if (error) { setMsg('error:Could not load this month\'s overtime — the list is from the last successful load. ' + errorLine(error)); return }
     setEntries(data || [])
-  }, [scopedFrom])
+  }, [scopedFrom, monthReq])
 
   async function handlePeriodChange(id) {
     const p = periods.find(x => x.id === id); if (!p) return
@@ -150,20 +162,41 @@ export default function Overtime() {
     const { error } = form.editing
       ? await scopedUpdate('hr_overtime_entries', { ...payload, status: form.editing.status }).eq('id', form.editing.id)
       : await scopedInsert('hr_overtime_entries', payload)
-    if (error) { setMsg('error:' + error.message); setBusy(false); return }
+    if (error) { setMsg('error:This overtime entry was not saved. ' + errorLine(error)); setBusy(false); return }
     await loadEntries(form.bs_year, form.bs_month)
     closeDrawer(); setMsg('ok:Saved'); setBusy(false)
   }
 
   async function setStatus(id, status) {
-    await scopedUpdate('hr_overtime_entries', { status }).eq('id', id)
+    setMsg('')
+    const { error } = await scopedUpdate('hr_overtime_entries', { status }).eq('id', id)
+    if (error) { setMsg(`error:The entry was not marked ${status} — it still shows its previous status. ` + errorLine(error)); return }
     await loadEntries(period?.bs_year, period?.bs_month)
   }
 
-  async function del(id) {
-    if (!window.confirm('Delete this OT entry?')) return
-    await scopedDelete('hr_overtime_entries').eq('id', id)
-    await loadEntries(period?.bs_year, period?.bs_month)
+  // An approved OT entry is pay: deleting it removes hours from the payroll run. A consequence
+  // dialog rather than window.confirm (S682).
+  function del(entry) {
+    const emp = employees.find(e => e.id === entry.employee_id)
+    askConfirm({
+      title: 'Delete this overtime entry?',
+      confirmLabel: 'Delete Entry', danger: true, busyLabel: 'Deleting…',
+      body: (
+        <p style={{ margin: 0 }}>
+          <strong>{entry.ot_hours}h</strong> on {formatBsDay(entry.bs_day, entry.bs_month)}{emp ? ` for ${emp.full_name}` : ''}{' '}
+          {entry.status === 'approved'
+            ? 'is approved, so it is pay — deleting it removes those hours from this month\'s payroll run.'
+            : 'is removed from this month\'s list.'}{' '}
+          This cannot be undone.
+        </p>
+      ),
+      run: async () => {
+        setMsg('')
+        const { error } = await scopedDelete('hr_overtime_entries').eq('id', entry.id)
+        if (error) { setMsg('error:This entry was not deleted — it is still recorded. ' + errorLine(error)); return }
+        await loadEntries(period?.bs_year, period?.bs_month)
+      },
+    })
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────────
@@ -275,7 +308,7 @@ export default function Overtime() {
           <button key={s} className={`tab-btn${statusTab === s ? ' tab-btn--active' : ''}`} onClick={() => setStatusTab(s)}>
             {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
             {s !== 'all' && (
-              <span style={{ marginLeft: 5, fontSize: 10, opacity: 0.7 }}>
+              <span style={{ marginLeft: 5, fontSize: 11, color: 'var(--theme-text3)' }}>
                 ({entries.filter(e => e.status === s).length})
               </span>
             )}
@@ -365,7 +398,7 @@ export default function Overtime() {
                             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setStatus(e.id, 'pending')}>Undo</button>
                           )}
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEdit(e)}>Edit</button>
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red-text)' }} onClick={() => del(e.id)}>Del</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => del(e)}>Del</button>
                         </div>
                       </td>
                     </tr>
@@ -484,6 +517,7 @@ export default function Overtime() {
       )}
 
       <Fab onClick={openAdd} label="+ Log OT" show={!drawerOpen} />
+      {confirmEl}
     </div>
   )
 }
