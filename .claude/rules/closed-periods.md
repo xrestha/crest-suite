@@ -1,6 +1,8 @@
 ---
 paths:
   - "src/pages/Periods.js"
+  - "src/pages/periods/**"
+  - "src/pages/dashboard/ClientDashboard.jsx"
   - "src/modules/ims/purchases/**"
   - "src/modules/ims/sales/**"
   - "src/modules/ims/stockcount/**"
@@ -21,6 +23,60 @@ const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
 `Purchases.js`, `PurchaseBillPage.jsx`, `Sales.js`, `Stock.js` and `Overheads.js` — five copies, all
 agreeing. **The `!isAdmin` carve-out is the feature, not an oversight**: an admin correcting history
 is a real, expected job, and the alternative (reopen the month) is structurally unavailable.
+
+## HR is deliberately NOT locked by the close, and the dialog must say so (S683)
+
+`grep -rn "status === 'closed'\|isClosed" src/modules/hr` returns nothing, and that is a decision,
+not a gap. HR does its month's work AFTER the stock month closes — the count is on the 1st, OT is
+approved and payroll finalized by the 5th — so an IMS-style `isLocked` on Attendance, Overtime or
+Payroll Run would block every HR client's payroll for the month just ended. **HR's lock is Payroll
+Run's own finalize**, and an attendance edit after that is surfaced as `⚠ Stale` on
+`/hr/calculation`, not prevented.
+
+What was wrong was the sentence. Both close dialogs said *"entry pages become read-only"* with no
+qualifier, so the frozen Monthly Report's labour figure could move after a month the Owner had
+been told was locked. Every close dialog now names what locks — *IMS entry pages (Purchases,
+Sales, Stock Count, Overheads)* — and, when HR is on, says HR stays open. A **payroll preflight**
+(`payrollPreflight()` / `payrollNote()`) sits beside the closing-count one: amber when payroll is
+not finalized, because the frozen report then carries an ESTIMATED labour cost
+(`computeMonthlyReport.js` prefers a finalized run and falls back to an estimate, labelled
+`payrollSource: 'estimated'`) until an admin runs Regenerate Snapshot. It informs and never blocks,
+on the same contract as the closing-count note. **Do not add a period-close lock to an HR page**
+without re-reading this; if the product ever wants one, it has to be "closed AND payroll
+finalized", which is just the payroll lock that already exists.
+
+## The close is ONE routine — `performPeriodClose()` — and the Dashboard uses it too (S683)
+
+Until S683 the product had two closes. `Periods.js`'s three paths closed the month, opened the
+next one, carried the closing count forward, minted the frozen report, and (since S613) ran the
+closing-count preflight. The Dashboard's **"End Bhadra & Start Ashwin →"** — the button an Owner
+actually presses, from the "has ended" banner — updated the status and inserted the next row, and
+did nothing else, under a dialog promising all three. The IMS module guide had noticed (*"the
+Dashboard's shortcut does NOT carry forward… always close from Periods"*) and taught the workaround
+instead of the fix — **a guide that documents a defect as advice is the tell that the defect is
+old.** Every month closed from the Dashboard before S683 opened with no opening stock and no
+snapshot until someone visited the report; "Resync Opening Stock" is the repair.
+
+`src/pages/periods/closePeriod.js` now holds the whole thing: both preflights, the carry-forward,
+`performPeriodClose({ clientId, period, openNext, actorId })`, and `closeFailureText()`.
+`CloseConfirmBody` renders every close dialog's notes. Four ASKS with four framings (Owner on the
+Dashboard, client on Periods, admin close-and-advance, admin End Period), one COMMIT. Three
+properties of the commit are load-bearing:
+
+- **It never throws; each stage records its failure and the later stages still run where they
+  can.** A failed carry-forward must not stop the report; a failed report must never stop the
+  close. The one exception is the close itself — if the status update fails, nothing else runs.
+- **`failures` is ordered by how much the reader has to do about it**, and callers surface
+  `failures[0]` through `closeFailureText()` — a consequence sentence (what state the month is in
+  now, and the repair), never `error.message`. The `close` stage says *"may not have closed"*: a
+  dead fetch does not prove the update did not land, and inviting a retry over a month that is
+  already closed is worse than sending them to look.
+- **"Report is ready" renders only when `reportSaved` is true.** `Periods.js` used to show that
+  banner after a failed generation.
+
+`closePeriod.test.js` pins all of it against a mocked db, including the `23505`-on-retry branch
+and the S682 "failed closing_stock read is a failure, not an empty count" rule. Change the commit
+there, not in a page.
 
 ## Reopen is not the admin path, and cannot become one
 

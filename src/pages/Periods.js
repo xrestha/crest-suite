@@ -7,7 +7,8 @@ import { BS_MONTHS, getBsToday } from '../utils/bsCalendar'
 import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
 import ConfirmModal from '../components/ConfirmModal'
-import { generateMonthlyReport, saveGeneratedReport } from '../modules/ownerReport/generateMonthlyReport'
+import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText, carryForwardOpeningStock } from './periods/closePeriod'
+import CloseConfirmBody from './periods/CloseConfirmBody'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
 import { closingCountNote } from './periods/closingCountNote'
@@ -76,7 +77,7 @@ export default function Periods() {
   async function loadAllClientPeriods() {
     setAllLoading(true)
     const results = await Promise.all([
-      supabase.from('clients').select('id, name, is_active').order('name'),
+      supabase.from('clients').select('id, name, is_active, hr_enabled').order('name'),
       supabase.from('monthly_periods').select('*')
         .order('bs_year', { ascending: false })
         .order('bs_month', { ascending: false }),
@@ -99,132 +100,77 @@ export default function Periods() {
     setAllLoading(false)
   }
 
-  // Copies each item's counted closing qty (closing_stock.physical_qty) into the new period's
-  // opening_stock — "this month's closing IS next month's opening," a real physical count, not
-  // recomputed. Only ever adds a row for an item that was actually counted (no closing_stock row
-  // = nothing carried, same as never entering it manually); upserts rather than plain-inserts so
-  // re-running this (e.g. a retried close after a network blip) can't fail on a conflict. Both
-  // tables are period-scoped, not client-scoped (see CLAUDE.md), so this stays on raw
-  // supabase.from() like the rest of Stock.js's opening/closing reads and writes.
-  //
-  // Returns `{ error }` rather than dropping it (S682): a failed closing_stock read used to look
-  // like "nothing was counted" and open the new month with NO opening stock and no message —
-  // every variance and COGS figure for that month wrong from day one, with "Resync Opening Stock"
-  // the only recovery and nothing to say it was needed.
-  async function carryForwardOpeningStock(closedPeriodId, newPeriodId) {
-    if (!closedPeriodId || !newPeriodId) return { error: null }
-    const { data: closingRows, error: readErr } = await supabase.from('closing_stock')
-      .select('item_id, physical_qty').eq('period_id', closedPeriodId)
-    if (readErr) return { error: readErr }
-    const rows = (closingRows || [])
-      .filter(r => r.physical_qty != null)
-      .map(r => ({ period_id: newPeriodId, item_id: r.item_id, qty: r.physical_qty }))
-    if (rows.length === 0) return { error: null }
-    const { error: writeErr } = await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' })
-    return { error: writeErr || null }
+  // The close itself — carry-forward, report minting, both preflights — lives in
+  // ./periods/closePeriod.js since S683, shared with the Dashboard. Nothing period-closing is local.
+
+  // All four closes — the two admin ones here, the client's below, and the Dashboard's — share
+  // ONE commit, performPeriodClose(), and one pair of preflights (S683). The framing differs per
+  // ask; the notes and the write do not. See .claude/rules/closed-periods.md.
+  async function closeNotes(period, cid, hrOn) {
+    const [count, payroll] = await Promise.all([
+      closingCountPreflight(period.id, cid),
+      hrOn ? payrollPreflight(period.id, cid) : Promise.resolve(undefined),
+    ])
+    const label = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
+    return [closingCountNote(count), hrOn ? payrollNote(payroll, label) : null]
   }
 
-  // Best-effort, non-blocking — report generation touches ~10 tables across 3 modules and must
-  // never prevent the period itself from actually closing. Swallowed to console.error; the
-  // lazy-generate fallback on MonthlyOwnerReport.jsx covers a failed attempt on next view.
-  async function generateReportBestEffort(cid, closedPeriod) {
-    try {
-      const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId: cid, period: closedPeriod })
-      await saveGeneratedReport({ clientId: cid, period: closedPeriod, snapshot, modulesIncluded, actorId: profile?.id, source: 'period_close' })
-    } catch (e) {
-      console.error('Monthly owner report generation failed (non-blocking):', e)
-    }
+  // HR pages are deliberately NOT locked by the close — payroll is finalized after the stock
+  // month closes — so the sentence names exactly what locks, for whoever is reading it.
+  const locksSentence = (period, hrOn, audience) =>
+    `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}'s IMS entry pages lock for ` +
+    (audience === 'admin' ? "the client's own logins" : 'your team') +
+    (hrOn ? ' (HR pages stay open — Payroll Run locks itself once finalized)' : '')
+
+  function surfaceCloseFailures(result, period) {
+    const first = result.failures[0]
+    if (first) fail(closeFailureText({ stage: first.stage, period, isAdmin }), first.error)
   }
 
-  // ── Closing-count preflight ────────────────────────────────────────────────
-  // Closing a period is the product's highest-stakes action: it locks the month AND mints the
-  // frozen Monthly Report, and COGS subtracts closing stock — so a period closed without a count
-  // freezes "closing = 0 for every item" into the immutable artifact. Payroll Finalize earned a
-  // data-derived gate (S570); the close only ever had advisory prose. This is that gate (S613):
-  // the confirm now states how much of the month's count exists, in red when none does. It never
-  // BLOCKS — an admin correcting history legitimately closes uncounted months — it makes the
-  // consequence unmissable at the moment of commitment.
-  async function closingCountPreflight(periodId, cid) {
-    try {
-      const [countedRes, itemsRes] = await withTimeout(Promise.all([
-        // Rows with a real physical count only — carryForwardOpeningStock uses the same test.
-        supabase.from('closing_stock').select('item_id', { count: 'exact', head: true })
-          .eq('period_id', periodId).not('physical_qty', 'is', null),
-        // NO is_sub_recipe filter, deliberately: Stock.js counts active items WITHOUT that
-        // filter, so sub-recipe mirror items get closing_stock rows like any other. Excluding
-        // them here measured the two sides against different populations — a client with 200
-        // raw items and 30 sub-recipes who counted every sub-recipe and 170 raw items scored
-        // 200 of 200 and was told "All 200 active items have a closing count", with 30 items
-        // heading into the frozen report at zero. Both sides must mean what the count screen
-        // means, or the all-clear is the one branch that can be wrong (S616).
-        supabase.from('items').select('id', { count: 'exact', head: true })
-          .eq('client_id', cid).eq('is_active', true),
-      ]), 10000, 'Checking closing counts')
-      if (countedRes.error || itemsRes.error) return null
-      return { counted: countedRes.count ?? 0, items: itemsRes.count ?? 0 }
-    } catch {
-      return null // a failed preflight must not block the close — the note says it couldn't check
-    }
-  }
-
-  // Body = main consequence copy + the preflight line (red when the count is missing entirely).
-  const closeBody = (main, note) => (
-    <>
-      <p style={{ margin: 0 }}>{main}</p>
-      <p style={{ margin: '10px 0 0', fontWeight: note.danger ? 700 : 400, color: note.danger ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
-        {note.text}
-      </p>
-    </>
-  )
+  const adminHrOn = cid => !!allClients.find(c => c.id === cid)?.hr_enabled
 
   async function adminCloseAndAdvance(period, cid) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
+    const hrOn = adminHrOn(cid)
     setActionClientId(cid)
-    const note = closingCountNote(await closingCountPreflight(period.id, cid))
+    const notes = await closeNotes(period, cid, hrOn)
     setActionClientId(null)
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'Close & Start Next',
-      danger: note.danger,
-      body: closeBody(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} locks for the client's own logins and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`, note),
-      run: () => performAdminCloseAndAdvance(period, cid, nextYear, nextMonth),
+      danger: notes.some(n => n?.danger),
+      body: <CloseConfirmBody main={`${locksSentence(period, hrOn, 'admin')} and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`} notes={notes} />,
+      run: () => performAdminCloseAndAdvance(period, cid),
     })
   }
 
-  async function performAdminCloseAndAdvance(period, cid, nextYear, nextMonth) {
+  async function performAdminCloseAndAdvance(period, cid) {
     setActionClientId(cid)
-    await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
-    const { data: newPeriod, error: newErr } = await scopedInsertRaw('monthly_periods', cid, { bs_year: nextYear, bs_month: nextMonth, status: 'open' }, { single: true })
-    // A dropped error here closed the month and silently opened NOTHING — the client is blocked
-    // from recording data with no explanation anywhere (S613, the silent-data-loss class). 23505
-    // means the next period already exists (a retried click) and is benign.
-    if (newErr && newErr.code !== '23505') {
-      fail(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} closed, but the next period could not be created. Use "+ Create Period" for this client, then "Resync Opening Stock" to carry the closing count forward.`, newErr)
-    }
-    if (newPeriod?.id) await carryForwardOpeningStock(period.id, newPeriod.id)
-    await generateReportBestEffort(cid, { ...period, status: 'closed' })
+    const result = await performPeriodClose({ clientId: cid, period, openNext: true, actorId: profile?.id })
+    surfaceCloseFailures(result, period)
     await loadAllClientPeriods()
     setActionClientId(null)
   }
 
   async function adminEndPeriod(period, cid) {
+    const hrOn = adminHrOn(cid)
     setActionClientId(cid)
-    const note = closingCountNote(await closingCountPreflight(period.id, cid))
+    const notes = await closeNotes(period, cid, hrOn)
     setActionClientId(null)
     setPendingConfirm({
       title: `End ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'End Period',
       danger: true,
-      body: closeBody(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} closes with no new period started — the client is blocked from recording any data until one is created. The frozen Monthly Report is generated from the figures as they stand now.`, note),
+      body: <CloseConfirmBody main={`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} closes with no new period started — the client is blocked from recording any data until one is created. The frozen Monthly Report is generated from the figures as they stand now.`} notes={notes} />,
       run: () => performAdminEndPeriod(period, cid),
     })
   }
 
   async function performAdminEndPeriod(period, cid) {
     setActionClientId(cid)
-    await scopedUpdateRaw('monthly_periods', cid, { status: 'closed' }).eq('id', period.id)
-    await generateReportBestEffort(cid, { ...period, status: 'closed' })
+    const result = await performPeriodClose({ clientId: cid, period, openNext: false, actorId: profile?.id })
+    surfaceCloseFailures(result, period)
     await loadAllClientPeriods()
     setActionClientId(null)
   }
@@ -301,59 +247,22 @@ export default function Periods() {
   async function closeAndAdvance(period) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
-    const note = closingCountNote(await closingCountPreflight(period.id, clientId || profile?.client_id))
+    const hrOn = !!clientModules?.hr
+    const notes = await closeNotes(period, clientId || profile?.client_id, hrOn)
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'Close & Start Next',
-      danger: note.danger,
-      body: closeBody(`${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} locks and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`, note),
-      run: () => performCloseAndAdvance(period, nextYear, nextMonth),
+      danger: notes.some(n => n?.danger),
+      body: <CloseConfirmBody main={`${locksSentence(period, hrOn, 'client')} and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`} notes={notes} />,
+      run: () => performCloseAndAdvance(period),
     })
   }
 
-  async function performCloseAndAdvance(period, nextYear, nextMonth) {
-    await scopedUpdate('monthly_periods', { status: 'closed' }).eq('id', period.id)
-    const { data: newPeriod, error } = await scopedInsert('monthly_periods', {
-      bs_year: nextYear,
-      bs_month: nextMonth,
-      status: 'open'
-    }, { single: true })
-    let nextPeriodId = newPeriod?.id
-    if (error) {
-      if (error.message.includes('unique') || error.code === '23505') {
-        // Next period already existed (e.g. a retried click) — still carry forward into it.
-        const { data: existing } = await scopedFrom('monthly_periods', 'id')
-          .eq('bs_year', nextYear).eq('bs_month', nextMonth).maybeSingle()
-        nextPeriodId = existing?.id
-      } else {
-        // A dropped error here closed the month and opened NOTHING — every entry page then reads
-        // "no open period" with no explanation, and "+ Create Period" is admin-only, so a client
-        // owner cannot recover on their own. S613 surfaced this on the ADMIN close path and left
-        // this one — the one an owner actually clicks, from the "has ended" banner — still silent.
-        console.error('Could not create next period:', error)
-        fail(
-          `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} was closed, but ${BS_MONTHS[nextMonth - 1]} ${nextYear} could not be opened. ` +
-          (isAdmin
-            ? 'Use "+ Create Period" for this client, then "Resync Opening Stock" to carry the closing count forward.'
-            : 'Until the new month is opened you will not be able to record purchases, sales or stock. Please contact your Crest consultant.'),
-          error
-        )
-      }
-    }
-    if (nextPeriodId) {
-      const { error: cfErr } = await carryForwardOpeningStock(period.id, nextPeriodId)
-      if (cfErr) {
-        console.error('Opening-stock carry-forward failed:', cfErr)
-        fail(
-          `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} was closed and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opened, but the closing count could not be carried into it as opening stock — ` +
-          `${BS_MONTHS[nextMonth - 1]}'s Stock Count currently opens with no opening figures. ` +
-          `Use "Resync Opening Stock" on the ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} row to carry it forward before anyone enters purchases or sales.`,
-          cfErr
-        )
-      }
-    }
-    await generateReportBestEffort(clientId, { ...period, status: 'closed' })
-    setJustClosedReport({ bsYear: period.bs_year, bsMonth: period.bs_month })
+  async function performCloseAndAdvance(period) {
+    const result = await performPeriodClose({ clientId: clientId || profile?.client_id, period, openNext: true, actorId: profile?.id })
+    surfaceCloseFailures(result, period)
+    // "Report is ready" only when it is — a failed generation used to show this banner anyway.
+    if (result.reportSaved) setJustClosedReport({ bsYear: period.bs_year, bsMonth: period.bs_month })
     loadPeriods()
   }
 

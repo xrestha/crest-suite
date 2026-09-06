@@ -19,6 +19,9 @@ import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
 import ConfirmModal from '../../components/ConfirmModal'
+import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText } from '../periods/closePeriod'
+import { closingCountNote } from '../periods/closingCountNote'
+import CloseConfirmBody from '../periods/CloseConfirmBody'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { nepalBs } from '../../shared/nepalTime'
 import { getSubStatus } from '../../utils/subscription'
@@ -237,7 +240,7 @@ export default function ClientDashboard() {
   const { colors } = useTheme()
   const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
-  const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
+  const { scopedFrom, scopedUpdate } = useScopedDb()
   const hrApprovals = useHrApprovalCounts() // shared with HrDashboard.jsx's own Approvals row
   const navigate = useNavigate()
   const location = useLocation()
@@ -304,6 +307,8 @@ export default function ClientDashboard() {
   const [advancingPeriod, setAdvancingPeriod] = useState(false)
   const [periodCloseError, setPeriodCloseError] = useState('')
   const [confirmPeriodClose, setConfirmPeriodClose] = useState(false)
+  const [closeNotes, setCloseNotes] = useState([])       // the two preflights' sentences, for the dialog
+  const [checkingClose, setCheckingClose] = useState(false)
   // Every load function used to destructure only { data } from each Supabase call and silently
   // discard { error } — a failed query either zeroed out a KPI (indistinguishable from "this
   // client genuinely has none") or, for the period fetch specifically, showed the misleading
@@ -865,30 +870,41 @@ export default function ClientDashboard() {
     setAndCache(setPosStats, 'posStats', { kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday })
   }
 
-  // The commit half of period close — the ConfirmModal below (rendered next to the button) is
-  // the ask, with the consequences spelled out; window.confirm's OS chrome used to carry this
-  // sentence and stated none of them (S575).
+  // The ASK half of period close: run both preflights, then open the ConfirmModal below with
+  // their sentences. The COMMIT half is performPeriodClose(), shared with Periods.js since S683.
+  // Until then this button updated the status and inserted the next row and did nothing else —
+  // no opening-stock carry-forward, no frozen report — under a dialog promising all three; the
+  // IMS module guide had noticed and taught "always close from Periods" instead of the fix.
+  async function askPeriodClose() {
+    if (!activePeriod || !effectiveClientId || checkingClose || advancingPeriod) return
+    setCheckingClose(true)
+    setPeriodCloseError('')
+    const hrOn = !!clientModules?.hr
+    const [count, payroll] = await Promise.all([
+      closingCountPreflight(activePeriod.id, effectiveClientId),
+      hrOn ? payrollPreflight(activePeriod.id, effectiveClientId) : Promise.resolve(undefined),
+    ])
+    setCloseNotes([
+      closingCountNote(count),
+      hrOn ? payrollNote(payroll, `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}`) : null,
+    ])
+    setCheckingClose(false)
+    setConfirmPeriodClose(true)
+  }
+
   async function closeAndAdvancePeriod() {
     if (!activePeriod || !effectiveClientId || advancingPeriod) return
-    const nextMonth = activePeriod.bs_month === 12 ? 1 : activePeriod.bs_month + 1
-    const nextYear  = activePeriod.bs_month === 12 ? activePeriod.bs_year + 1 : activePeriod.bs_year
     setAdvancingPeriod(true)
     setPeriodCloseError('')
     try {
-      const { error: closeError } = await scopedUpdate('monthly_periods', { status: 'closed' }).eq('id', activePeriod.id)
-      if (closeError) throw closeError
-      const { error: insertError } = await scopedInsert('monthly_periods', {
-        bs_year: nextYear,
-        bs_month: nextMonth,
-        status: 'open'
-      })
-      // A duplicate here means the next period already exists (e.g. a retried click after a
-      // slow response) — the close above still succeeded, so this isn't a real failure.
-      if (insertError && insertError.code !== '23505' && !insertError.message?.includes('unique')) throw insertError
-      loadStats(loadIdRef.current)
-    } catch (err) {
-      console.error('Failed to close period:', err)
-      setPeriodCloseError(err?.message || 'Something went wrong closing the period. Please try again.')
+      const result = await performPeriodClose({ clientId: effectiveClientId, period: activePeriod, openNext: true, actorId: profile?.id })
+      const first = result.failures[0]
+      if (first) {
+        console.error('Period close:', first.stage, first.error)
+        // A consequence sentence, never err.message — what state the month is in now, and what to do.
+        setPeriodCloseError(closeFailureText({ stage: first.stage, period: activePeriod, isAdmin }))
+      }
+      if (result.closed) loadStats(loadIdRef.current)
     } finally {
       setAdvancingPeriod(false)
       setConfirmPeriodClose(false)
@@ -2434,8 +2450,8 @@ export default function ClientDashboard() {
                 Go to Periods →
               </button>
             ) : (
-              <button className="amber-action-btn" onClick={() => setConfirmPeriodClose(true)} disabled={advancingPeriod}>
-                {advancingPeriod ? 'Closing…' : `End ${BS_MONTHS[activePeriod.bs_month - 1]} & Start ${BS_MONTHS[nextAdvMonth - 1]} →`}
+              <button className="amber-action-btn" onClick={askPeriodClose} disabled={advancingPeriod || checkingClose}>
+                {checkingClose ? 'Checking…' : advancingPeriod ? 'Closing…' : `End ${BS_MONTHS[activePeriod.bs_month - 1]} & Start ${BS_MONTHS[nextAdvMonth - 1]} →`}
               </button>
             )}
           </div>
@@ -2450,18 +2466,23 @@ export default function ClientDashboard() {
               confirmLabel={`Close ${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}`}
               busy={advancingPeriod}
               busyLabel="Closing…"
+              danger={closeNotes.some(n => n?.danger)}
               onConfirm={closeAndAdvancePeriod}
               onCancel={() => setConfirmPeriodClose(false)}
             >
-              <p style={{ margin: '0 0 10px' }}>Closing the month is how its figures become final:</p>
-              <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
-                <li>Entry pages for {BS_MONTHS[activePeriod.bs_month - 1]} become read-only for your team (Crest admin can still correct figures later).</li>
-                <li>Closing stock carries forward as {BS_MONTHS[nextAdvMonth - 1]}&apos;s opening stock.</li>
-                <li>The Monthly Owner Report snapshot is captured from the figures as they stand now.</li>
-              </ul>
-              <p style={{ margin: 0 }}>
-                Make sure the month-end stock count is saved first — COGS, Variance and the frozen report all read it.
-              </p>
+              <CloseConfirmBody notes={closeNotes}>
+                <p style={{ margin: '0 0 10px' }}>Closing the month is how its figures become final:</p>
+                <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+                  {/* HR is deliberately NOT locked by the close — payroll is finalized after the
+                      stock month closes — so the sentence names exactly what locks. */}
+                  <li>Purchases, Sales, Stock Count and Overheads for {BS_MONTHS[activePeriod.bs_month - 1]} become read-only for your team (Crest admin can still correct figures later).{clientModules?.hr ? ' HR pages stay open — Payroll Run locks itself once finalized.' : ''}</li>
+                  <li>Closing stock carries forward as {BS_MONTHS[nextAdvMonth - 1]}&apos;s opening stock.</li>
+                  <li>The Monthly Owner Report snapshot is captured from the figures as they stand now.</li>
+                </ul>
+                <p style={{ margin: 0 }}>
+                  Make sure the month-end stock count is saved first — COGS, Variance and the frozen report all read it.
+                </p>
+              </CloseConfirmBody>
             </ConfirmModal>
           )}
         </div>

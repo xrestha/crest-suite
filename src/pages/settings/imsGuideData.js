@@ -71,7 +71,8 @@ export const IMS_GUIDE_GROUPS = [
         ],
         gotchas: [
           'Gated tiles (Variance, Recipe Costing, Menu Repricing, Reorder, Overheads — all Growth+) don\'t just hide the number on a lower plan — the underlying query is skipped entirely, so a Starter browser never even holds the Growth-tier figures in memory.',
-          'The Dashboard\'s own "Close & Start Next" shortcut does NOT carry forward physical closing counts into next month\'s opening stock — only Periods\' own Close button does that. Always close periods from Periods, not this shortcut, if the physical count matters (it almost always does).',
+          'The Dashboard\'s "End <month> & Start <next>" button and Periods\' own Close button are the SAME close (since S683): both carry the physical closing count forward as next month\'s opening stock, mint the frozen Monthly Report, and show the closing-count preflight (red when nothing is counted) plus, with HR on, whether payroll is finalized. Before S683 the Dashboard shortcut did neither carry-forward nor report, so any month closed from there before then may need "Resync Opening Stock" on Periods.',
+          'Closing a month locks IMS entry (Purchases, Sales, Stock Count, Overheads) for the client\'s logins. HR pages deliberately stay open — payroll is finalized after the stock month closes, and Payroll Run has its own lock once finalized. The frozen report carries an ESTIMATED labour cost if payroll was not finalized at close; an admin can Regenerate Snapshot after Finalize.',
         ],
         connections: 'Reads from Periods, Purchases, Sales Entry, Recipe Costing, Stock Count, and Overheads. Links out to all of them plus Variance Report and Reorder Report.',
       },
