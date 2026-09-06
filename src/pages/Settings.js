@@ -856,7 +856,7 @@ export default function Settings() {
                 </div>
               </div>
 
-              <div style={{ marginTop: 20, padding: '14px 18px', background: 'var(--theme-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--theme-border)' }}>
+              <div style={{ marginTop: 20, padding: '14px 18px', background: 'var(--theme-card)', borderRadius: 'var(--radius-md)', border: '1px dashed var(--theme-border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>What a client sees on Help → Support</div>
                   {/* Amber = open, waiting on a person (the One Signal Meaning Rule): unsaved edits are exactly that. */}
