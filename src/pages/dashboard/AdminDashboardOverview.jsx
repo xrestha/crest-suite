@@ -142,6 +142,28 @@ export default function AdminDashboardOverview() {
     borderRadius: 'var(--radius-lg)', boxShadow: 'var(--theme-card-shadow)', padding: '12px 14px'
   })
 
+  // One box for the four module-adoption pills in the Active Properties tile.
+  //
+  // It exists because they had drifted into three different boxes and the drift showed: a 1px
+  // border adds 2px of height, and only the Suite pill had one, so the pill meant to sit as a peer
+  // of IMS/HR/POS was visibly taller than all three. Stating the box once is the same move
+  // `statCard` above makes, and the same reason `.page-header` exists rather than 78 hand-rolled
+  // rows: an identical style object repeated four times has four chances to drift.
+  //
+  // Only the BOX is shared. `fill` is a `<token> <pct>` pair fed to color-mix; `border` defaults to
+  // transparent so the three module pills match the Suite pill's height without taking its ring,
+  // and `bold` is off by default because a heavier weight is one of the two things that mark Suite
+  // out (the other is the star). Weight is not size, so unifying it would have flattened a
+  // distinction this file deliberately draws while fixing one it never meant to.
+  const adoptionPill = (fill, ink, { border = 'transparent', bold = false } = {}) => ({
+    fontSize: 10, lineHeight: 1.5,
+    ...(bold ? { fontWeight: 700 } : null),
+    padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
+    background: `color-mix(in srgb, ${fill}, transparent)`,
+    color: ink,
+    border: `1px solid ${border}`,
+  })
+
   // Props that turn an attention card into a real filter control. A card naming a count the
   // operator cannot act on is a dead end, and these are the counts the whole page exists for.
   const filterCard = (key, borderColor) => ({
@@ -202,25 +224,41 @@ export default function AdminDashboardOverview() {
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Active Properties</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>{inactive.length} inactive · {adminClients.length} total</div>
-              {/* Four adoption pills on ONE row. The card's inner width is ~161px (a 190px grid
-                  floor less statCard's 36px of horizontal padding), so at the previous 11px/2px-7px
-                  sizing "★ SUITE n" wrapped to a second line — which made this the tallest tile in
-                  the strip and pushed the whole properties table down by a row's worth of height.
-                  Shrunk to 10px/1px-5px with a 4px gap, and the Suite pill trimmed to its star and
-                  count, which is the only one of the four whose label could go without losing the
-                  module name. That measures ~155px, so it fits with a little headroom.
-                  flexWrap stays as the safety net: a narrower viewport should wrap, never clip. */}
+              {/* Four adoption pills on ONE row, and ONE box shared by all four.
+                  They had drifted into three different boxes: the module pills at `1px 4px` with no
+                  border, the Suite pill at `1px 5px` WITH a 1px border — and a border adds 2px of
+                  height, so the one pill meant to read as a peer of the other three stood taller
+                  than all of them. `adoptionPill()` states the box once; only COLOUR varies. The
+                  three module pills carry a TRANSPARENT border so they match Suite's height without
+                  gaining its ring, and Suite keeps every distinction it is meant to have — a stronger
+                  fill, a real border, a heavier weight and the star — none of which is the box size.
+
+                  Width is the constraint that shaped these: the card's inner width is ~128px (the
+                  158px grid floor above, less statCard's 28px of padding and 2px of border). The
+                  previous 11px/2px-7px sizing wrapped ★ SUITE n to a second line, which made this
+                  the tallest tile in the strip and pushed the properties table down by a row. Hence
+                  10px type, a 3px gap, and the Suite pill trimmed to its star and count — the only
+                  one of the four whose label could go without losing a module name.
+
+                  Measured, because the arithmetic here is easy to get wrong: the row is 140.7px
+                  wide (was 133.4), so it needs a card of ~171px and fits on one line from about a
+                  1030px viewport up — at 1440 these cards are ~221px. At the 158px grid floor it
+                  wraps to two rows, and DID before this change too, so the 7px the borders cost
+                  changed nothing about where it breaks. flexWrap is the safety net for that: a
+                  narrow viewport should wrap, never clip. Note the old heights were only equal
+                  while the row fitted on ONE line — flex stretch was hiding the difference, and the
+                  moment it wrapped they measured 13/13/13/18. Now they are 19 everywhere. */}
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                <span title={`${imsCount} properties with Crest IMS enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', color: 'var(--theme-accent-ink)' }}>IMS {imsCount}</span>
-                <span title={`${hrCount} properties with Crest HR enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', color: 'var(--theme-green-text)' }}>HR {hrCount}</span>
-                <span title={`${posCount} properties with Crest POS enabled`} style={{ fontSize: 10, padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', color: 'var(--theme-purple-text)' }}>POS {posCount}</span>
+                <span title={`${imsCount} properties with Crest IMS enabled`} style={adoptionPill('var(--theme-accent) 10%', 'var(--theme-accent-ink)')}>IMS {imsCount}</span>
+                <span title={`${hrCount} properties with Crest HR enabled`} style={adoptionPill('var(--theme-green) 8%', 'var(--theme-green-text)')}>HR {hrCount}</span>
+                <span title={`${posCount} properties with Crest POS enabled`} style={adoptionPill('var(--theme-purple) 10%', 'var(--theme-purple-text)')}>POS {posCount}</span>
                 {suiteCount > 0 && (
                   // The word is dropped, not the axis: S552's rule is that a billed axis must be
                   // visible on the screens that bill it, and the star keeps its accent fill, its
                   // heavier weight and a Tip naming it. The full "★ SUITE" pill still renders per
                   // row in the table below, where there is width for it.
                   <Tip text={`Crest Suite Pro is on ${suiteCount} ${suiteCount === 1 ? 'property' : 'properties'} — the owner layer sold per outlet on top of the modules.`} width={250}>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap', background: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)', color: 'var(--theme-accent-ink)', border: '1px solid color-mix(in srgb, var(--theme-accent) 45%, transparent)' }}>★ {suiteCount}</span>
+                    <span style={adoptionPill('var(--theme-accent) 20%', 'var(--theme-accent-ink)', { border: 'color-mix(in srgb, var(--theme-accent) 45%, transparent)', bold: true })}>★ {suiteCount}</span>
                   </Tip>
                 )}
               </div>
