@@ -150,18 +150,28 @@ export default function AdminDashboardOverview() {
   // `statCard` above makes, and the same reason `.page-header` exists rather than 78 hand-rolled
   // rows: an identical style object repeated four times has four chances to drift.
   //
-  // Only the BOX is shared. `fill` is a `<token> <pct>` pair fed to color-mix; `border` defaults to
-  // transparent so the three module pills match the Suite pill's height without taking its ring,
-  // and `bold` is off by default because a heavier weight is one of the two things that mark Suite
-  // out (the other is the star). Weight is not size, so unifying it would have flattened a
-  // distinction this file deliberately draws while fixing one it never meant to.
-  const adoptionPill = (fill, ink, { border = 'transparent', bold = false } = {}) => ({
+  // Only the BOX is shared, and now it is shared completely: no pill carries a visible border.
+  // The first pass kept the Suite pill's ring and equalised only the HEIGHTS, which was the wrong
+  // read of the request. A flex row's default `align-items: stretch` was already painting all four
+  // fills to the tallest, so the heights had never been the visible problem on one line — the RING
+  // was. Equalising a difference nobody could see, while keeping the one they could, is why the
+  // change looked like no change at all.
+  //
+  // `fill` is a `<token> <pct>` pair fed to color-mix. Suite still reads as its own thing through
+  // three cues that are not the box: a stronger fill (20% against the module pills' 8-10%), a
+  // heavier weight, and the ★ glyph. S552's rule is that a billed axis stays VISIBLE on the screens
+  // that bill it, and it does — it just no longer wears a different-shaped box to do it.
+  //
+  // The transparent border stays on all four rather than being dropped: it pins the box geometry,
+  // so adding a visible border to any one of them later cannot silently make it 2px taller than
+  // its neighbours, which is exactly the bug this helper was written to fix.
+  const adoptionPill = (fill, ink, bold = false) => ({
     fontSize: 10, lineHeight: 1.5,
     ...(bold ? { fontWeight: 700 } : null),
     padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
     background: `color-mix(in srgb, ${fill}, transparent)`,
     color: ink,
-    border: `1px solid ${border}`,
+    border: '1px solid transparent',
   })
 
   // Props that turn an attention card into a real filter control. A card naming a count the
@@ -229,9 +239,9 @@ export default function AdminDashboardOverview() {
                   border, the Suite pill at `1px 5px` WITH a 1px border — and a border adds 2px of
                   height, so the one pill meant to read as a peer of the other three stood taller
                   than all of them. `adoptionPill()` states the box once; only COLOUR varies. The
-                  three module pills carry a TRANSPARENT border so they match Suite's height without
-                  gaining its ring, and Suite keeps every distinction it is meant to have — a stronger
-                  fill, a real border, a heavier weight and the star — none of which is the box size.
+                  four pills now share the box completely — same type, same padding, same transparent
+                  border — and Suite is marked out only by things that are not the box: a stronger fill, a
+                  heavier weight and the star.
 
                   Width is the constraint that shaped these: the card's inner width is ~128px (the
                   158px grid floor above, less statCard's 28px of padding and 2px of border). The
@@ -258,7 +268,7 @@ export default function AdminDashboardOverview() {
                   // heavier weight and a Tip naming it. The full "★ SUITE" pill still renders per
                   // row in the table below, where there is width for it.
                   <Tip text={`Crest Suite Pro is on ${suiteCount} ${suiteCount === 1 ? 'property' : 'properties'} — the owner layer sold per outlet on top of the modules.`} width={250}>
-                    <span style={adoptionPill('var(--theme-accent) 20%', 'var(--theme-accent-ink)', { border: 'color-mix(in srgb, var(--theme-accent) 45%, transparent)', bold: true })}>★ {suiteCount}</span>
+                    <span style={adoptionPill('var(--theme-accent) 20%', 'var(--theme-accent-ink)', true)}>★ {suiteCount}</span>
                   </Tip>
                 )}
               </div>

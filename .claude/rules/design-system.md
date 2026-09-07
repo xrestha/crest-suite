@@ -552,6 +552,14 @@ Three things generalise:
 - **Do not flatten a deliberate difference while fixing an accidental one.** A first pass also
   unified `fontWeight`, which had been 700 on the Suite pill on purpose — weight and a ★ are what
   mark that axis out. Weight is not size. Only the box was shared in the end.
+- **But check WHICH difference the reporter can actually see, or the fix reads as no fix.** The
+  first pass equalised the heights and kept the Suite pill's border, on the reasoning that the ring
+  was a deliberate mark. Both halves of that were defensible and the result was still wrong: on one
+  line `stretch` had already made the heights agree, so the only thing that had ever looked
+  different was the ring — and the ring was the half that survived. Shipped, it was a ~1px change
+  nobody could point at, and the next screenshot asked *where is the change*. When a difference is
+  reported by eye, name the cue that is carrying it before choosing what to equalise; a measurement
+  that says two things now agree is not evidence that anyone can tell.
 
 A stale number came out of the same block: its comment cited a 190px grid floor when S642 had
 lowered it to 158, so its whole fit argument was computed against an inner width 33px wider than
