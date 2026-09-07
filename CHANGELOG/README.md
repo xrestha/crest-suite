@@ -7,12 +7,12 @@ its job as a map.
 
 ## Session Log
 
-667 entries, S023 to S687, across 17 files. **Newest first**, both inside each file and
+668 entries, S023 to S688, across 17 files. **Newest first**, both inside each file and
 down this table.
 
 | Range | Entries | Dates | Size |
 | --- | ---: | --- | ---: |
-| [S675–S687](S675-S699.md) | 13 | 2026-09-04 → 2026-09-06 | 95 KB |
+| [S675–S688](S675-S699.md) | 14 | 2026-09-04 → 2026-09-07 | 101 KB |
 | [S650–S674](S650-S674.md) | 24 | 2026-08-30 → 2026-09-04 | 150 KB |
 | [S625–S649](S625-S649.md) | 25 | 2026-08-28 → 2026-08-30 | 84 KB |
 | [S600–S624](S600-S624.md) | 27 | 2026-08-22 → 2026-08-28 | 124 KB |
