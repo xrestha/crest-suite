@@ -187,8 +187,16 @@ export default function AdminDashboardOverview() {
 
   // Props that turn an attention card into a real filter control. A card naming a count the
   // operator cannot act on is a dead end, and these are the counts the whole page exists for.
+  // display:flex column, pinned to the top — because this is a <button>, and a button vertically
+  // CENTRES its content. That was invisible while every card sat at its own content height; the
+  // moment the strip's grid stretched all six to one height, the three button cards' labels sank
+  // to 23px and 31px from the top against the div cards' 13px, and the strip read as three
+  // baselines. A column flex pinned with justifyContent:'flex-start' lays the label / figure /
+  // sub-lines out top-down exactly as the div cards' block flow does; alignItems:'stretch' keeps
+  // each child full-width like a block. Same rectangle outside, same starting line inside.
   const filterCard = (key, borderColor) => ({
-    style: { ...statCard(borderColor), cursor: 'pointer', textAlign: 'left', width: '100%', font: 'inherit' },
+    style: { ...statCard(borderColor), cursor: 'pointer', textAlign: 'left', width: '100%', font: 'inherit',
+             display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start' },
     className: 'interactive-card',
     onClick: () => setFilter(filter === key ? null : key),
     'aria-pressed': filter === key,
@@ -238,7 +246,16 @@ export default function AdminDashboardOverview() {
               Everything inside the tiles came down to match — statCard's padding, the headline
               numbers and the adoption pills — because narrowing a column without narrowing its
               contents only moves the wrapping somewhere else. */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(158px, 1fr))', gap: 10, marginBottom: 20, alignItems: 'start' }}>
+          {/* No `alignItems: 'start'` here, and that is deliberate. It told every card to take only
+              its own content's height, so the two tiles with more inside (Active Properties with
+              its pill row, Active Today with its two names) stood taller than the four beside
+              them and the strip had a ragged bottom edge. The grid's default is `stretch`: every
+              card in the row is the height of the tallest, so all six are the same rectangle —
+              same width from the 1fr columns, same height from stretch. The shorter cards simply
+              carry empty space below their figure, which is what "the same size" costs and means.
+              Same lesson as the adoption pills: same size is BOTH dimensions, not just the one
+              that happened to match already. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(158px, 1fr))', gap: 10, marginBottom: 20 }}>
 
             {/* 1 — Active Properties + module adoption */}
             <div style={statCard()}>

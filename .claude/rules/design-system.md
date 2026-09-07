@@ -575,6 +575,13 @@ Three things generalise:
   set to the measured widest label (40px, `border-box`, centred) is what "same size" costs, and it
   is a min, not a width, so a longer label grows rather than clips. When a reader says size, ask
   which dimension they mean before deciding one of them does not count.
+- **Equalising a strip's card heights is only half the job when some cards are `<button>`s.** A
+  button vertically CENTRES its content. At content height that is invisible; the moment a grid
+  stretches every card to the tallest, the button cards' labels sink (23px and 31px from the top
+  against the div cards' 13px on the admin strip) and the row reads as several baselines. Give
+  a button card `display: flex; flexDirection: column; justifyContent: flex-start` so it lays out
+  top-down like the div beside it. Measure the LABEL offset inside each card, not just the card's
+  outer rectangle — the outer boxes agreeing is exactly the state in which this shows.
 
 A stale number came out of the same block: its comment cited a 190px grid floor when S642 had
 lowered it to 158, so its whole fit argument was computed against an inner width 33px wider than
