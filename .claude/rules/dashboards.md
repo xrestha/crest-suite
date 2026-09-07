@@ -147,6 +147,13 @@ board reads healthy here. It used to carry its own `> 35 ? amber`, which agreed 
 this page counts gross + OT + employer SSF, so the same band told two stories; `loadedHourlyRateOf`
 in `laborForecast.js` now mirrors `computeMonthlyReport.js`'s estimate per hour, and its past days
 divide by `sales_entries` revenue — this page's own denominator. Detail in `hr-payroll.md`.
+**Sales per Labour Hour now has a second home, and they must keep meaning the same thing (S693).**
+The Monthly Owner Report computes it for one closed period as `ims.revenueTotal / actualHoursWorked`;
+Roster's Labor Forecast learns it over a trailing 120 days to say how many hours a day NEEDS. Same
+unit, same revenue definition, deliberately — so an owner can read one against the other. Two real
+differences to state rather than smooth over: the roster figure includes days whose hours came from
+the roster because Attendance had not arrived (scaled by a measured bias), and it excludes outlier
+days. If either definition moves, move both.
 
 ### A branch the page knows about must be said out loud (S683)
 

@@ -250,6 +250,14 @@ Items and Vendors pass both (their saves write only the record being edited, and
 page). Purchase Orders and Variance fail both and are deliberately unwired, with the reasoning left
 in a comment at the state declarations so the next sweep doesn't re-attempt it.
 
+**A DERIVED figure is the best thing this cache ever holds (S693).** Roster's Labor Forecast caches
+the labour standard — one small object — and never the ~15k rows of attendance, roster and sales it
+was computed from, which would blow sessionStorage's budget on its own. It passes both tests
+cleanly: the tab batch-saves nothing from on-screen state, and the standard IS the content of the
+cells it fills, so a revisit genuinely skips a second load rather than shortening a skeleton that
+was waiting on something else anyway. The 10-minute max age is generous for it — a figure learned
+from 120 days does not move in ten minutes.
+
 ## Page-revisit caching (`src/shared/sessionDataCache.js`, added S460)
 
 Migrated from the root `CLAUDE.md` (S663).
@@ -305,6 +313,14 @@ rule was written about. `Overtime` was on the not-swept list below for taking `(
 rather than one id; it uses a `${bsYear}-${bsMonth}` composite key, exactly as `GroupDashboard`
 does, so that reason is now spent everywhere it was given.
 
+**S693 added a 39th, and it is the first that is not period-driven.** Roster's Labor Forecast tab
+now runs TWO guarded loaders side by side: the actuals loader keyed on the visible range, and the
+labour-standard loader keyed on `clientId`. The second one needs the guard for a different reason
+from every other adopter — not arrowing through periods, but an ADMIN SWITCHING CLIENTS with the
+tab open, which would otherwise let one outlet's 120-day history land on another outlet's rows.
+Two loaders on one page is fine; each holds its own `useLatestRequest`, since a shared one would
+have them cancelling each other.
+
 **Not swept:** `AttendanceSheet.jsx`, and
 `SupplierPriceTracker.js`/`MonthlyOwnerReport.jsx`, which select an id and derive rather than load.
 The first two were skipped because their loaders take `(bsYear, bsMonth)` rather than one id and
@@ -342,6 +358,15 @@ happily over a short one. Details and the HR-specific consequences are in
 `.claude/rules/frontend-performance.md`.
 
 **Two traps when doing a sweep like this**, both hit live: (1) if the original chain continued past the line you're editing, the closing paren lands too early and the trailing `.order(...)` gets applied to fetchAllRows' *result* — a plain `{data,error}`, not a builder — which is a runtime `TypeError`, not a build error, so only actually loading the page catches it (`Purchases.js`, found exactly this way). (2) A CRA dev server left running shares `node_modules/.cache` with `npm run build` and will keep rewriting stale ESLint entries underneath it, producing phantom errors on files where the import and the usage are both plainly present — `'fetchAllRows' is defined but never used`, and equally `'X' is not defined` on an import sitting at the top of the file. **The one file that matters is `node_modules/.cache/.eslintcache`** (deleting the whole `.cache` directory fails while the dev server holds `babel-loader` open, which reads as the fix not working). **`npm run build:verify` is the packaged answer** — `scripts/build-verify.mjs` removes that one file and then runs the build with `CI=true`, without disturbing a running dev server; if it still reports the error, the error is real. Zero dependencies and Node-based on purpose: `rimraf` is present only transitively here and would vanish on an install, and `rm -f` plus a `VAR=value` prefix is POSIX-only on a Windows machine. `npm run build` stays a plain `react-scripts build` because that is what Vercel runs. Verify the import really is present with a grep before assuming a phantom — the two look identical in the build output.
+
+**Never read a build's exit code through a pipe (S693).** `npm run build:verify 2>&1 | tail -8` is
+the natural way to run it, and in a POSIX shell a pipeline's status is the status of the LAST
+command — `tail`, which always succeeds. So a build that printed `Failed to compile` and a build
+that printed `The build folder is ready to be deployed` both reported exit 0, and a background task
+runner reported "completed (exit code 0)" for the failure. `scripts/build-verify.mjs` propagates
+the real status correctly; the pipe is what discards it. Redirect to a file and echo `$?`, or read
+the tail of the output for the success line, but do not report a build as passing on a piped exit
+code alone.
 
 ## The `xlsx` dynamic-import sweep (S522)
 
