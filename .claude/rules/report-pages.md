@@ -121,7 +121,8 @@ that does not state what it covers cannot be reconciled a month later by the per
 `.data-table tfoot` and `font-variant-numeric: tabular-nums` are now rules in `Layout.css` rather
 than per-call-site inline styles. `tfoot` had **no rule at all**, so every totals row in the product
 was hand-styled; `tabular-nums` appeared on exactly one page (`ConsolidatedPnl` found it
-independently) while Poppins' proportional figures left every other currency column ragged.
+independently) while the body font's proportional figures left every other currency column ragged
+(true of Poppins then and of Archivo now — it is a property of most UI faces, not of one).
 `.data-table--sticky-first` is opt-in, for a wide matrix whose first column is the row label.
 
 ### The gate must be INSIDE the branch, not merely present on the page (S616)

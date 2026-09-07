@@ -94,7 +94,7 @@ export default function Calculator({ open, onClose }) {
   const keyBtn = {
     padding: '12px 0', fontSize: 18, fontWeight: 600, cursor: 'pointer',
     background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
-    borderRadius: 6, color: 'var(--theme-text1)', fontFamily: 'inherit',
+    borderRadius: 0, color: 'var(--theme-text1)', fontFamily: 'inherit',
   }
   const opBtn = { ...keyBtn, color: 'var(--theme-accent-ink)' }
 
@@ -110,7 +110,7 @@ export default function Calculator({ open, onClose }) {
         onClick={e => e.stopPropagation()}
         style={{
           width: '100%', maxWidth: 380, background: 'var(--theme-card)',
-          border: '1px solid var(--theme-border)', borderRadius: 10,
+          border: '1px solid var(--theme-border)', borderRadius: 0,
           boxShadow: '0 24px 64px rgba(0,0,0,0.4)', overflow: 'hidden',
         }}
       >
@@ -119,7 +119,7 @@ export default function Calculator({ open, onClose }) {
             future nesting quirk, same pattern as Modal.js's own close button. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--theme-border)' }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)', flex: 1 }}>Quick Calculator</span>
-          <span style={{ fontSize: 'var(--font-size-micro)', color: 'var(--theme-text3)', border: '1px solid var(--theme-border)', borderRadius: 4, padding: '1px 5px' }}>Esc</span>
+          <span style={{ fontSize: 'var(--font-size-micro)', color: 'var(--theme-text3)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '1px 5px' }}>Esc</span>
           <button
             className="btn btn-ghost"
             onClick={onClose}
@@ -141,7 +141,7 @@ export default function Calculator({ open, onClose }) {
             autoComplete="off"
             style={{
               width: '100%', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-              borderRadius: 6, padding: '10px 12px', fontSize: 18, color: 'var(--theme-text1)',
+              borderRadius: 0, padding: '10px 12px', fontSize: 18, color: 'var(--theme-text1)',
               outline: 'none', textAlign: 'right', fontFamily: 'inherit',
             }}
           />

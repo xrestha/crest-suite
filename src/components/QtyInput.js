@@ -129,7 +129,7 @@ export default function QtyInput({
           style={{
             position: 'absolute', right: 0, bottom: '100%', marginBottom: 3,
             fontSize: 11, fontWeight: 700, lineHeight: 1.4,
-            padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap',
+            padding: '2px 7px', borderRadius: 0, whiteSpace: 'nowrap',
             pointerEvents: 'none', zIndex: 5,
             background: 'var(--theme-card)',
             border: `1px solid ${preview === null ? 'color-mix(in srgb, var(--theme-red) 45%, transparent)' : 'color-mix(in srgb, var(--theme-accent) 45%, transparent)'}`,

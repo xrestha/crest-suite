@@ -23,7 +23,7 @@ export default function RailTip({ label, children }) {
         <span className="rail-tip" style={{
           position: 'fixed', left: pos.x, top: pos.y, transform: 'translateY(-50%)',
           background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
-          borderRadius: 6, padding: '5px 10px', fontSize: 'var(--font-size-nav-item)', fontWeight: 600,
+          borderRadius: 0, padding: '5px 10px', fontSize: 'var(--font-size-nav-item)', fontWeight: 600,
           color: 'var(--theme-text1)', whiteSpace: 'nowrap', zIndex: 9999, pointerEvents: 'none',
           boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
         }}>

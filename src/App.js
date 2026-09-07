@@ -16,6 +16,7 @@ import RouteFallback from './components/RouteFallback'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import './components/Layout.css'
 const Login = lazy(() => import('./pages/Login'))
+const Signup = lazy(() => import('./pages/Signup'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const OwnerDashboard = lazy(() => import('./pages/dashboard/OwnerDashboard'))
@@ -131,6 +132,10 @@ export default function App() {
           <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login"     element={<Login />} />
+            {/* Account creation, split out of /login (Modernist). Public by necessity: it is where
+                a client is created. /login?trial=1 forwards here, so every old inbound link and
+                both of Pricing's CTAs still land on the form. */}
+            <Route path="/signup"    element={<Signup />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/pricing"   element={<Pricing />} />
             {/* Public and unauthenticated on purpose: the trial signup checkbox links here, and

@@ -125,12 +125,12 @@ export default class AppErrorBoundary extends Component {
     return (
       <div style={{
         minHeight: this.props.fullPage === false ? '60vh' : '100vh',
-        background: 'var(--theme-bg, #0f1117)',
+        background: 'var(--theme-bg, #191817)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}>
         <div style={{
-          maxWidth: 520, width: '100%', background: 'var(--theme-card, #181c27)',
-          border: '1px solid var(--theme-border, #2a2f3d)', borderRadius: 'var(--radius-lg, 18px)',
+          maxWidth: 520, width: '100%', background: 'var(--theme-card, #242221)',
+          border: '1px solid var(--theme-border, #3a3836)', borderRadius: 'var(--radius-lg, 0)',
           padding: '32px 34px', textAlign: 'center',
         }}>
           {/* Alpha tint + full-opacity signal text, same reasoning as SubscriptionLock's icon
@@ -138,17 +138,17 @@ export default class AppErrorBoundary extends Component {
               across presets, so a solid fill is unreadable on one of them (DESIGN.md). */}
           <div style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 52, height: 52, borderRadius: 'var(--radius-full, 999px)',
+            width: 52, height: 52, borderRadius: 'var(--radius-full, 0)',
             background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)',
             marginBottom: 18, color: 'var(--theme-red-text, #f87171)',
           }}><TriangleAlert size={22} strokeWidth={2} aria-hidden="true" /></div>
 
           <h1 style={{
             margin: '0 0 8px', fontSize: 20, fontWeight: 700,
-            color: 'var(--theme-text1, #e8e0d0)', fontFamily: 'Georgia, serif',
+            color: 'var(--theme-text1, #f3f2f2)', fontFamily: 'Georgia, serif',
           }}>Something went wrong on this screen</h1>
 
-          <p style={{ margin: '0 0 20px', fontSize: 13, lineHeight: 1.65, color: 'var(--theme-text2, #9ca3af)' }}>
+          <p style={{ margin: '0 0 20px', fontSize: 13, lineHeight: 1.65, color: 'var(--theme-text2, #bab6b6)' }}>
             Nothing you had already saved is affected. Reloading usually fixes it — if it keeps
             happening, copy the details below and send them to support.
           </p>
@@ -169,8 +169,8 @@ export default class AppErrorBoundary extends Component {
               onFocus={(e) => e.target.select()}
               style={{
                 width: '100%', minHeight: 100, marginBottom: 20, fontSize: 11, fontFamily: 'monospace',
-                background: 'var(--theme-input-bg, #0f1117)', color: 'var(--theme-text2, #9ca3af)',
-                border: '1px solid var(--theme-border, #2a2f3d)', borderRadius: 'var(--radius-sm, 8px)',
+                background: 'var(--theme-input-bg, #1e1d1c)', color: 'var(--theme-text2, #bab6b6)',
+                border: '1px solid var(--theme-border, #3a3836)', borderRadius: 'var(--radius-sm, 0)',
                 padding: 10, boxSizing: 'border-box',
               }}
             />
@@ -180,7 +180,7 @@ export default class AppErrorBoundary extends Component {
             <SupportContactLine variant="buttons" />
           </div>
 
-          <details style={{ textAlign: 'left', fontSize: 11, color: 'var(--theme-text3, #8a92a3)' }}>
+          <details style={{ textAlign: 'left', fontSize: 11, color: 'var(--theme-text3, #9b9797)' }}>
             <summary style={{ cursor: 'pointer', marginBottom: 6 }}>Technical detail</summary>
             <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {redact(error?.message || String(error))}

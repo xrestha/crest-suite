@@ -47,7 +47,7 @@ export default function SuggestPopover({ candidates, shiftTypes, anchorRef, onAs
     <div ref={ref} role="menu" aria-label="Suggest who to schedule" style={{
       position: 'fixed', top, left, zIndex: 2100,
       background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
-      borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
+      borderRadius: 0, boxShadow: '0 8px 32px rgba(0,0,0,0.55)',
       minWidth: 230, maxHeight: 340, overflowY: 'auto',
     }}>
       {!pickedEmp ? (
@@ -93,7 +93,7 @@ export default function SuggestPopover({ candidates, shiftTypes, anchorRef, onAs
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--theme-table-hover)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'none'}
               >
-                <span style={{ width: 12, height: 12, borderRadius: 3, background: s.color, flexShrink: 0 }} />
+                <span style={{ width: 12, height: 12, borderRadius: 0, background: s.color, flexShrink: 0 }} />
                 <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
                 {hrs != null && <span style={{ fontSize: 11, color: 'var(--theme-text3)', fontWeight: 600 }}>{hrs}h</span>}
               </button>

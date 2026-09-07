@@ -81,7 +81,7 @@ function ChartTabs({ idBase, label, tabs, active, onChange }) {
 // metric, reusing two colours already in this file's own CHART_COLORS palette (so nothing foreign
 // enters the page), and keeps the dotted glyph on top of that so it's told apart two ways at once.
 const DAILY_TREND_COLORS = {
-  purchases: '#c9a84c', // gold — ties to the Food Cost card and the FC% trend line
+  purchases: '#c9a84c', // gold — one identity for Food Cost across every surface that draws it
   sales:     '#34d399', // green
   purchTarget: '#fb923c', // orange — frozen Purch. Target, deliberately not gold
   salesTarget: '#60a5fa', // blue — frozen Sales Target, deliberately not green
@@ -1141,7 +1141,7 @@ export default function ClientDashboard() {
   // that was UI chrome, where the one-accent rule applies; this is a chart series hue, the same
   // exemption CHART_COLORS already relies on.
   const COST_BREAKDOWN_COLORS = {
-    'Food Cost':  '#c9a84c', // gold — kept, so the slice ties to the Food Cost % card/trend line
+    'Food Cost':  '#c9a84c', // gold — kept, so the slice matches the FC% line and the Owner Dashboard
     'Labor':      '#60a5fa', // blue
     'Overheads':  '#8b5cf6', // violet
     'Tax & Fees': '#ec4899', // pink
@@ -2216,7 +2216,7 @@ export default function ClientDashboard() {
                         return (
                           <div key={cat} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12.5 }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--theme-text1)' }}>
-                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: salesMixColorOf(cat), flexShrink: 0 }} />
+                              <span style={{ width: 8, height: 8, borderRadius: 0, background: salesMixColorOf(cat), flexShrink: 0 }} />
                               {cat}
                             </span>
                             <span style={{ color: 'var(--theme-text2)' }}>NPR {Math.round(amount).toLocaleString('en-IN')} · {pct.toFixed(0)}%</span>

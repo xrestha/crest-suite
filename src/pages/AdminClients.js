@@ -295,7 +295,7 @@ export default function AdminClients() {
           running — a backup that did not happen must be visible, never a silent no-op. */}
       {(autoBackup.pending.length > 0 || autoBackup.busy) && (
         <div style={{
-          padding: '12px 16px', marginBottom: 20, borderRadius: 8,
+          padding: '12px 16px', marginBottom: 20, borderRadius: 0,
           background: autoBackup.blocked ? 'color-mix(in srgb, var(--theme-amber) 10%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
           border: `1px solid ${autoBackup.blocked ? 'color-mix(in srgb, var(--theme-amber) 35%, transparent)' : 'color-mix(in srgb, var(--theme-green) 30%, transparent)'}`,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
@@ -327,7 +327,7 @@ export default function AdminClients() {
         if (trialClients.length === 0) return null
         const now = new Date()
         return (
-          <div style={{ marginBottom: 28, border: '2px solid var(--theme-red)', borderRadius: 12, overflow: 'hidden' }}>
+          <div style={{ marginBottom: 28, border: '2px solid var(--theme-red)', borderRadius: 0, overflow: 'hidden' }}>
             {/* Header — flat alpha-tint wash, not a gradient (DESIGN.md: cards never gradient/tint toward the accent) */}
             <div style={{ background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{ fontSize: 18 }}>🧪</span>
@@ -478,7 +478,7 @@ export default function AdminClients() {
                 key={c.id}
                 onClick={() => setActiveDrawer(c)}
                 style={{
-                  background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8,
+                  background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
                   overflow: 'hidden', cursor: 'pointer', transition: 'border-color 0.15s',
                 }}
                 // Hover border steps to the accent-alpha token, not a hardcoded dark slate —

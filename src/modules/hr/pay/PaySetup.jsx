@@ -200,7 +200,7 @@ export default function PaySetup() {
                         <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
                         <div style={{ display: 'flex', gap: 6, marginTop: 3, alignItems: 'center' }}>
                           {emp.employee_code && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{emp.employee_code}</span>}
-                          <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, border: `1px solid ${st.border}`, borderRadius: 8, padding: '1px 6px' }}>{emp.status}</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: st.color, background: st.bg, border: `1px solid ${st.border}`, borderRadius: 0, padding: '1px 6px' }}>{emp.status}</span>
                           {!s.monthly && (
                             <span className="badge badge-gray" style={{ fontSize: 10, fontWeight: 700 }}>per {s.unit}</span>
                           )}

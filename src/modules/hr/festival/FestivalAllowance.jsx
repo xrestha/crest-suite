@@ -19,7 +19,7 @@ const RETIREMENT_CAP  = 500000
 const fmt = nprInt
 
 const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6,
+  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
   padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit',
 }
 

@@ -30,7 +30,7 @@ const typeTint = (c, pct) => `color-mix(in srgb, ${typeFill(c)} ${pct}%, transpa
 const typeText = c => `color-mix(in srgb, ${typeFill(c)} 45%, var(--theme-text1))`
 
 const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6,
+  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
   padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit',
 }
 
@@ -434,7 +434,7 @@ export default function LeaveManagement() {
                           {e.employee_code && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{e.employee_code}</div>}
                         </td>
                         <td>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: typeText(t?.color), background: typeTint(t?.color, 10), border: `1px solid ${typeTint(t?.color, 20)}`, borderRadius: 8, padding: '2px 8px' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: typeText(t?.color), background: typeTint(t?.color, 10), border: `1px solid ${typeTint(t?.color, 20)}`, borderRadius: 0, padding: '2px 8px' }}>
                             {t?.name || 'Unknown'}{t && !t.paid ? ' · unpaid' : ''}
                           </span>
                         </td>

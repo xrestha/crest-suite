@@ -65,7 +65,7 @@
     /* One row, not two. At the default sizes the three actions measured 140 + 124 + 92 + two
        10px gaps = 376px against 358px of room, so "Sign in" wrapped alone onto a third header
        row and the header stood 145px tall. Tightened to fit the narrowest common phone
-       (360px viewport, 328px of room) with the label widths Poppins actually produces. */
+       (360px viewport, 328px of room) with the label widths the body font actually produces. */
     flex-wrap: nowrap;
     gap: 8px;
   }
@@ -568,7 +568,7 @@ a.legal-summary-ref:focus-visible {
    end to end, not a working surface.
 
    60ch, and on the CHILDREN rather than the container, for two measured reasons. `ch` is the
-   width of the font's zero, and Poppins' zero is wide against its average letter: the previous
+   width of the font's zero, and the body font's zero is wide against its average letter: the previous
    76ch box was 668px and held about 95 characters per line — well past the 75-character ceiling
    for comfortable reading, on the one surface in the product that is pure reading. 60ch lands
    the real count in the low seventies. And a measure on the container capped the tables with it,
@@ -580,7 +580,7 @@ a.legal-summary-ref:focus-visible {
 
 /* A document's own `# ` heading. Legal.jsx strips it before render, because it duplicates the page
    title — but LegalMarkdown will emit `legal-h1` for any H1 it is given, and a class with no rule
-   is the failure that has no error: it rendered in Poppins 21px with scroll-margin-top 0, the one
+   is the failure that has no error: it rendered in the body font at 21px with scroll-margin-top 0, the one
    sans-serif heading among Georgia ones, and nothing anywhere said so. Styled defensively so a
    future document that opens differently cannot reintroduce it. */
 .legal-body .legal-h1 {

@@ -24,7 +24,14 @@ import { BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
 // semantic colors) — mirrors the Dashboard's Sales Mix convention (ClientDashboard.jsx) so a
 // category reads the same color everywhere in the app, duplicated locally since that constant
 // lives in a page file.
-const FALLBACK_HEX = ['#c9a84c', '#60a5fa', '#f87171', '#fb923c', '#22d3ee', '#f472b6', '#facc15', '#818cf8']
+//
+// It said that and DID NOT DO IT (found S689). Slots 2-8 were a different set entirely, so a
+// category drew one colour on the Dashboard and another here — the exact failure the comment
+// claims to prevent. It also introduced #818cf8, one of the two indigos DESIGN.md's One Accent
+// Rule names as a seven-time violator, and dropped three slots that had been measured. Now a
+// byte-for-byte copy of CHART_COLORS. If you change one, change both; the duplication is
+// deliberate (that constant lives in a page file) but it is only safe while they are identical.
+const FALLBACK_HEX = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
 
 // `short` feeds the X axis and tooltip header of all three charts on this page. It used to be
 // `m.slice(0, 3)`, which renders Ashadh AND Ashwin as "Ash" — two different months under one tick,

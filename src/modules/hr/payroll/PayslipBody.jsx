@@ -88,7 +88,7 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
         // Background tint only on screen — light fills are unreliable on B&W printers and the
         // bold border + accent-colored figure already carry the emphasis on paper.
         background: forPrint ? 'transparent' : 'color-mix(in srgb, var(--theme-accent) 8%, transparent)',
-        borderRadius: forPrint ? 0 : 6, padding: forPrint ? '12px 0 0' : '10px 10px 6px',
+        borderRadius: 0, padding: forPrint ? '12px 0 0' : '10px 10px 6px',
         marginLeft: forPrint ? 0 : -10, marginRight: forPrint ? 0 : -10,
       }}>
         <Row label="Net Pay" value={slip.net_pay} strong />

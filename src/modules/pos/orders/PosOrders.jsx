@@ -2637,7 +2637,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                             fontSize: 9, fontWeight: 700, flexShrink: 0,
                             background: 'color-mix(in srgb, var(--theme-accent) 18%, transparent)',
                             color: 'var(--theme-accent-ink)',
-                            borderRadius: 4, padding: '1px 5px', cursor: 'default',
+                            borderRadius: 0, padding: '1px 5px', cursor: 'default',
                           }}>
                             ✓ {botCategories.has(item.category || 'Other') ? 'BOT' : 'KOT'}
                           </span>
@@ -2655,7 +2655,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                           <span style={{
                             fontSize: 9, fontWeight: 700, flexShrink: 0,
                             background: 'var(--theme-amber)', color: amberBadgeText,
-                            borderRadius: 4, padding: '1px 5px', cursor: 'default',
+                            borderRadius: 0, padding: '1px 5px', cursor: 'default',
                           }}>
                             +{item.qty - item.sent_qty}
                           </span>
@@ -3066,11 +3066,11 @@ The tables were left occupied rather than freed with their orders still open.`)
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <button type="button" onClick={() => setQty(compQty - 1)} disabled={compQty <= 0}
                             aria-label={`Comp one fewer ${i.name}`}
-                            style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 4, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 ? 'default' : 'pointer', opacity: compQty <= 0 ? 0.4 : 1 }}>−</button>
+                            style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 ? 'default' : 'pointer', opacity: compQty <= 0 ? 0.4 : 1 }}>−</button>
                           <span style={{ minWidth: 14, textAlign: 'center' }}>{compQty}</span>
                           <button type="button" onClick={() => setQty(compQty + 1)} disabled={compQty >= i.qty}
                             aria-label={`Comp one more ${i.name}`}
-                            style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 4, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty ? 'default' : 'pointer', opacity: compQty >= i.qty ? 0.4 : 1 }}>+</button>
+                            style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty ? 'default' : 'pointer', opacity: compQty >= i.qty ? 0.4 : 1 }}>+</button>
                           <span style={{ fontSize: 10, minWidth: 44 }}>{comped ? `/${i.qty} comped` : 'comped'}</span>
                         </div>
                       </div>
@@ -3527,7 +3527,7 @@ The tables were left occupied rather than freed with their orders still open.`)
             <Tip text="Tables with items added but not yet sent to the kitchen/bar — tap the table to review and send">
               <span style={{
                 fontSize: 12, fontWeight: 700, color: amberBadgeText,
-                background: 'var(--theme-amber)', borderRadius: 12,
+                background: 'var(--theme-amber)', borderRadius: 0,
                 padding: '4px 10px', cursor: 'default', whiteSpace: 'nowrap',
               }}>
                 ⚠ {pendingTableCount} table{pendingTableCount !== 1 ? 's' : ''} · {pendingItemCount} item{pendingItemCount !== 1 ? 's' : ''} pending
@@ -3764,7 +3764,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       <Tip text="Not yet synced to the server — will upload automatically once this device reconnects">
                         <span style={{
                           fontSize: 9, fontWeight: 700, color: amberBadgeText,
-                          background: 'var(--theme-amber)', borderRadius: '50%',
+                          background: 'var(--theme-amber)', borderRadius: 0,
                           width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
                           cursor: 'default',
                         }}>
@@ -3776,7 +3776,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       <Tip text="Items added but not sent to the kitchen/bar yet — tap to open and send">
                         <span style={{
                           fontSize: 9, fontWeight: 700, color: amberBadgeText,
-                          background: 'var(--theme-amber)', borderRadius: 4,
+                          background: 'var(--theme-amber)', borderRadius: 0,
                           padding: '1px 6px', cursor: 'default', whiteSpace: 'nowrap',
                         }}>
                           ⚠ {ord.pending}

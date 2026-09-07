@@ -15,7 +15,7 @@ const STATUS_MAP = Object.fromEntries(ATTENDANCE_STATUSES.map(s => [s.key, s]))
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6,
+  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
   padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none',
   fontFamily: 'inherit',
 }
@@ -993,7 +993,7 @@ export default function AttendanceSheet() {
                     readable *-text variant. color-mix, not `${s.color}22` — a `var()` can't carry
                     a concatenated alpha suffix, so that produced invalid CSS (i.e. no tint at all)
                     for every status already on a token. */}
-                <span style={{ width: 18, height: 18, borderRadius: 4, background: `color-mix(in srgb, ${s.color} 13%, transparent)`, border: `1px solid color-mix(in srgb, ${s.color} 33%, transparent)`, color: s.textColor, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{s.short}</span>
+                <span style={{ width: 18, height: 18, borderRadius: 0, background: `color-mix(in srgb, ${s.color} 13%, transparent)`, border: `1px solid color-mix(in srgb, ${s.color} 33%, transparent)`, color: s.textColor, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{s.short}</span>
                 {s.label}
               </span>
             ))}

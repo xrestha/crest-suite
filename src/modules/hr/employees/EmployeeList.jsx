@@ -418,7 +418,7 @@ export default function EmployeeList() {
       {selected.size > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
-          padding: '8px 12px', borderRadius: 8, background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
+          padding: '8px 12px', borderRadius: 0, background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
         }}>
           <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{selected.size} selected</span>
           <Tip text="Blocks Self-Service PIN login for the selected employees only. Does not change their Status, so they stay fully visible to Payroll Run, Payroll Calculation and Final Settlement.">
@@ -518,7 +518,7 @@ export default function EmployeeList() {
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                             <span style={{ color: 'var(--theme-text3)' }}>{fmtDate(e.retirement_date)}</span>
                             {r && (r.soon || r.retired) && (
-                              <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, color: r.color, background: r.bg, border: `1px solid ${r.border}` }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 0, color: r.color, background: r.bg, border: `1px solid ${r.border}` }}>
                                 {r.label}
                               </span>
                             )}
@@ -531,7 +531,7 @@ export default function EmployeeList() {
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span style={{
-                        fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+                        fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 0,
                         color: s.color, background: s.bg, border: `1px solid ${s.border}`,
                       }}>
                         {e.status.charAt(0).toUpperCase() + e.status.slice(1)}
@@ -610,7 +610,7 @@ export default function EmployeeList() {
               <label htmlFor="emp-ss-pin" style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }}>PIN (4–6 digits)</label>
               <input
                 id="emp-ss-pin"
-                style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
+                style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }}
                 type="password" autoComplete="new-password" inputMode="numeric" maxLength={6} value={ssPin} onChange={e => setSsPin(e.target.value.replace(/\D/g, ''))}
               />
             </div>

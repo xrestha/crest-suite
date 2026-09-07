@@ -10,6 +10,7 @@ paths:
   - "src/components/AppErrorBoundary.jsx"
   - "src/components/AppErrorBoundary.test.jsx"
   - "src/pages/Login.js"
+  - "src/pages/Signup.js"
   - "src/pages/Legal.jsx"
   - "src/components/SubscriptionLock.js"
   - "src/components/PremiumGate.js"

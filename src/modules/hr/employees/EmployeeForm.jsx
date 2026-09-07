@@ -73,7 +73,7 @@ const MARITAL    = ['single', 'married', 'divorced', 'widowed']
 const NOMINEE_RELATIONS = ['Spouse', 'Father', 'Mother', 'Son', 'Daughter', 'Brother', 'Sister', 'Other']
 
 // `inp` used to live here — a hand-rolled copy of `.form-input` on 33 controls, including a
-// `borderRadius: 6` that is off the closed 8/12/18/24 scale. Replaced with the real classes
+// `borderRadius: 6` that was off the closed radius scale of the day. Replaced with the real classes
 // 2026-08-23/S603, which also wins these fields the `[aria-invalid]` and `:disabled` hooks and the
 // coarse-pointer 16px floor, none of which can reach an inline style.
 const lbl = { fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4, display: 'block', letterSpacing: '0.02em' }
@@ -430,7 +430,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
           {/* ── ADDRESS ── */}
           {tab === 'address' && <>
             {isEdit && form.address && (
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '8px 12px' }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '8px 12px' }}>
                 On file (legacy): <span style={{ color: 'var(--theme-text3)' }}>{form.address}</span>
               </div>
             )}

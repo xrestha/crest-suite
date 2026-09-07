@@ -23,6 +23,10 @@ import { IDENTITY_BADGE, CLOSE_TYPE_BADGE } from '../posSignals'
 const fmtNpr = npr
 const WALKIN_KEY = '__CASH_SALES__'
 const THRESHOLD = 100000
+// SVG presentation attributes only (tick fills, Bar fill) — var() does not resolve there. Never
+// as HTML text: as 11px caption text MUTED measured 3.9:1 on the dark card, and GOLD is a chart
+// hue rather than a theme token. Text takes the tokens. (This pair was a silent copy of
+// CoversReport.jsx's, carrying neither the comment nor the reason — restored S689.)
 const GOLD  = '#c9a84c'
 const MUTED = '#6b7280'
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`

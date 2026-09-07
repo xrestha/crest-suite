@@ -205,17 +205,23 @@
   background: var(--theme-text2);
 }
 
-/* Text selection and the caret. Both shipped as browser defaults until now - a blue highlight
+/* Text selection and the caret. Both shipped as browser defaults until 2026 - a blue highlight
    and a black bar belonging to no design system, on a product whose whole surface is themed.
-   The pair is deliberately `--theme-accent` / `--theme-accent-text` rather than a hand-mixed
-   tint: accent-text is DEFINED as the foreground that sits on an accent fill and is resolved
-   per preset, so this contrast is correct on all ten by construction rather than by a
-   measurement that would have to be redone for every new preset. Selecting a figure to copy it
-   into a challan or a bank sheet is a real, frequent action here, so the highlight is a solid
-   fill and not a wash - a tint over the ten different text colours in a payslip has ten
-   different contrast outcomes; a fill has one. */
+   Selecting a figure to copy it into a challan or a bank sheet is a real, frequent action here,
+   so the highlight is a solid fill and not a wash: a tint over the many text colours in a payslip
+   has as many contrast outcomes; a fill has one.
+
+   The fill is `--theme-accent-HOVER`, not `--theme-accent`, and this is the one place in the
+   product where that distinction is a contrast fix rather than an interaction state. Selection
+   inherits the size of whatever it lands on — including 11px badges and 10px micro-captions — so
+   unlike a button it cannot be given a 15px large-text floor. On Modernist Light the base accent
+   carries white at 4.20:1, under AA at those sizes; accent-hover is #dd2b0f, where white clears
+   4.74:1. On Night accent-hover runs the other way (lighter, #ff9783), which RAISES contrast
+   against that preset's ink accent-text rather than lowering it. So one declaration is correct on
+   both grounds, and it stays a token — a literal would be right on one preset and wrong on the
+   other. */
 ::selection {
-  background: var(--theme-accent);
+  background: var(--theme-accent-hover);
   color: var(--theme-accent-text);
 }
 
@@ -256,31 +262,36 @@ textarea,
    token name beside it is correct, and only shows for the instant nobody is looking hard.
 ────────────────────────────────────────────────────────────────────────────── */
 :root {
-  --theme-bg:           #0f1117;
-  --theme-card:         #181c27;
-  --theme-border:       #2a2f3d;
-  --theme-border-lt:    #1e2330;
-  --theme-sidebar:      #0e1117;
-  --theme-text1:        #e8e0d0;
-  --theme-text2:        #9ca3af;
-  --theme-text3:        #8a92a3;
-  --theme-accent:       #c9a84c;
-  --theme-accent-hover: #d4b96a;
-  --theme-accent-text:  #0f1117;
-  --theme-input-bg:     #0f1117;
-  --theme-table-hover:  rgba(255,255,255,0.03);
-  --theme-focus-ring:   rgba(201,168,76,0.15);
+  --theme-bg:           #191817;
+  --theme-card:         #242221;
+  --theme-border:       #3a3836;
+  --theme-border-lt:    #2c2a29;
+  --theme-sidebar:      #141312;
+  --theme-text1:        #f3f2f2;
+  --theme-text2:        #bab6b6;
+  --theme-text3:        #9b9797;
+  --theme-accent:       #ff563c;
+  --theme-accent-hover: #ff9783;
+  --theme-accent-text:  #201e1d;
+  --theme-input-bg:     #1e1d1c;
+  --theme-table-hover:  rgba(255,255,255,0.04);
+  --theme-focus-ring:   rgba(255,86,60,0.15);
+  /* The accent used AS text, rather than as a fill under text. Declared here as well as in
+     PRESETS because applyTheme writes it and :root is the pre-hydration copy — a token applyTheme
+     sets but :root never declares has no pre-hydration value at all. Modernist Night's is
+     accent-300 rather than accent-400: see the measurement note in ThemeContext.js. */
+  --theme-accent-ink:   #ffc4b8;
   /* Solid keyboard-focus indicator. --theme-focus-ring is a low-alpha TINT that doubles as the
      active-state background for rail buttons / module tabs / sidebar links, so it cannot be
-     brightened for focus without flooding those surfaces — on Rosé Dawn the ring alone measured
-     1.15:1, 2.6× below WCAG 2.2's 3:1 floor. Focus rules pair the soft ring with this solid
-     colour; ThemeContext resolves it per preset (accentInk on light, accent on dark). S574. */
-  --theme-focus-outline: #c9a84c;
+     brightened for focus without flooding those surfaces — measured on an earlier light preset the
+     ring alone came to 1.15:1, 2.6× below WCAG 2.2's 3:1 floor. Focus rules pair the soft ring with
+     this solid colour; ThemeContext resolves it per preset from accentInk. S574. */
+  --theme-focus-outline: #ffc4b8;
   --theme-green:        #34d399;
   --theme-red:          #f87171;
   --theme-amber:        #fbbf24;
   --theme-purple:       #a78bfa;
-  --theme-card-shadow:  inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4);
+  --theme-card-shadow:  inset 0 1px 0 0 rgba(243,242,242,0.05), 0 10px 24px -8px rgba(0,0,0,0.55), 0 3px 8px -3px rgba(0,0,0,0.4);
 
   /* Sidebar type scale — formalized from sizes already in use across Layout.css/Layout.js,
      nothing new invented. Lets every sidebar element share one source of truth instead of
@@ -306,21 +317,28 @@ textarea,
   --motion-fast:   160ms;
   --motion-slow:   260ms;
 
-  /* Shape scale — theme-invariant (radius does not vary per preset, unlike color/shadow above).
-     xs: micro-elements, sm: badges/small controls, md: buttons/inputs/tabs, lg: cards/panels,
-     xl: hero surfaces (login card, chart expand-modal). */
-  /* xs was added 2026-08-13 (S551) rather than rounding 38 real sites up to sm: at 10×10 a legend
-     swatch or a 4px-tall progress bar reads as a circle at 8px radius, which is why every one of
-     those sites had independently reached for a 2–4px literal. A step the system was missing, not
-     drift — added to DESIGN.md at the same time, per the closed-scale rule. */
-  --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
-  /* Fully-rounded. The sidebar module switcher's pill signature (see DESIGN.md → Navigation)
-     and the 6px scrollbar thumb, whose "3px" was really just half its own width. */
-  --radius-full: 999px;
+  /* Shape scale — Modernist is a ZERO-RADIUS system. Every step resolves to 0: containers and
+     signals alike, with no size classes and no exceptions inside the app. See DESIGN.md → Shapes.
+
+     The six names are KEPT rather than deleted because ~420 call sites read them, and a scale with
+     a home can be re-tuned in one edit where 420 hardcoded zeroes cannot. They are no longer a
+     ladder, so do not reach for one over another to mean anything — pick whichever describes the
+     element's size class, exactly as before, and it will paint square either way. That keeps the
+     call sites meaningful if the corner ever comes back.
+
+     Two exemptions live OUTSIDE these tokens and are not affected by them: print templates (the
+     @media print block below already forces 0 on the classed elements, and the generated
+     print-HTML strings never see this stylesheet) and the scoped guest surfaces, which carry
+     their own shape language for the same reason they carry their own palette. */
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  /* Was 999px, for the sidebar module switcher's pill signature and the scrollbar thumb. Both are
+     square now — a lone pill in a system where nothing else is rounded reads as a leftover, not as
+     a signature. Kept as a distinct token so those two sites still say what they mean. */
+  --radius-full: 0;
 }
 
 @keyframes rail-tip-in {
@@ -886,8 +904,14 @@ textarea,
 }
 
 /* ── SHARED PAGE COMPONENTS ─────────────── */
+/* The 2px section rule. With the corner gone, rule WEIGHT is what carries hierarchy (DESIGN.md →
+   Shapes), and this is the product's most-repeated section break: 78 pages open with it. Structural
+   weight (--theme-border), not the internal one — a page title separated by a row-divider weight
+   reads as the first row of a table. */
 .page-header {
   margin-bottom: 28px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--theme-border);
 }
 
 /* Title block on the left, page actions on the right - the shape that ~50 of the 78
@@ -1202,17 +1226,37 @@ tr.interactive-row:focus-visible {
   }
 }
 
+/* 15px/600 is a CONTRAST FLOOR, not a density choice, and it is the one number in this file that
+   must not be "tidied" back down. White on Modernist Light's accent (#ec3013) measures 4.20:1 —
+   over AA for LARGE text, under it for normal text — and 15px/600 is exactly where WCAG's
+   large-text threshold begins. Every .btn-primary in the product is a label on that fill, so
+   dropping this to 13px reintroduces a real contrast failure on every commit action at once.
+   Where a smaller label on an accent fill is unavoidable the FILL moves to #dd2b0f (white clears
+   4.74:1) rather than the label shrinking — see ::selection above, which inherits whatever size
+   it lands on and so cannot be given a floor at all. DESIGN.md → Components → Buttons. */
 .btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
   border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
   border: none;
   transition: background 0.13s, color 0.13s;
+}
+
+/* Flush-left labels. A square button with a centred label reads as a generic dialog control; the
+   label sitting on the same left edge as everything else in the column is what makes it part of
+   this system. .btn stays inline-flex with default justification (a shrink-to-fit button has no
+   free space to distribute, so left/centre are identical there) — this modifier is for the wide
+   and block cases, where the label goes left and a trailing glyph goes right.
+   .btn-icon overrides back to centre below: it has no label to align. */
+.btn--block {
+  width: 100%;
+  justify-content: space-between;
+  text-align: left;
 }
 
 /* The small step. Until S680 this class had NO base rule — only the coarse-pointer min-height
@@ -1224,6 +1268,16 @@ tr.interactive-row:focus-visible {
   padding: 5px 10px;
   font-size: 12px;
   gap: 4px;
+}
+
+/* .btn-sm's 12px sits BELOW the 15px accent-fill contrast floor, so the small PRIMARY keeps the
+   full label size and only the tighter padding. Five sites in the product wear this pair; without
+   this rule each is a 12px white label at 4.20:1 on the accent. Shrinking the fill instead would
+   need a preset-aware token — Night's accent is already safe at any size, so a single darker hex
+   would be wrong there — and a new token is not worth five buttons. */
+.btn-sm.btn-primary {
+  font-size: 15px;
+  font-weight: 600;
 }
 
 /* A button whose write is in flight. Disabling the button a keyboard user just pressed drops
@@ -1262,10 +1316,14 @@ tr.interactive-row:focus-visible {
   border-color: var(--theme-accent);
 }
 
+/* No weight override. .btn is 15px/600 and that pair is the contrast floor (see above); a
+   heavier primary was how the old 13px button bought emphasis it could not get from size, and at
+   15px it no longer needs to. 600 is also the Modernist label weight — the vocabulary is 400/600/
+   800, and 700 is not in it. .btn-danger--strong keeps its 700 deliberately: that one IS an
+   escalation above its own peers, which is a different claim. */
 .btn-primary {
   background: var(--theme-accent);
   color: var(--theme-accent-text);
-  font-weight: 700;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -1616,11 +1674,15 @@ table.data-table th {
   text-align: left;
   padding: 10px 5px;
   color: var(--theme-text2);
-  font-weight: 500;
+  font-weight: 600;
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  border-bottom: 1px solid var(--theme-border);
+  /* 2px, matching the totals rule below and the page-header rule above: a header and a totals row
+     are the table's two SECTION breaks, and its row dividers are the 1px internal weight. Before
+     Modernist the header rule was 1px structural and the totals rule 2px, which said the totals
+     row was a bigger break than the header. It is not; they are peers. */
+  border-bottom: 2px solid var(--theme-border);
   white-space: nowrap;
 }
 
@@ -1672,9 +1734,9 @@ table.data-table tfoot tr:hover td {
   background: transparent;
 }
 
-/* Lining figures in every numeric cell. Poppins' default figures are PROPORTIONAL, so a right-
-   aligned currency column does not line up digit-for-digit — a 1 is narrower than a 7, and a
-   column of money reads ragged. ConsolidatedPnl.jsx found this independently and set it inline on
+/* Lining figures in every numeric cell. The body font's default figures are PROPORTIONAL — this
+   was true of Poppins and is true of Archivo — so a right-aligned currency column does not line up
+   digit-for-digit without help: a 1 is narrower than a 7, and a column of money reads ragged. ConsolidatedPnl.jsx found this independently and set it inline on
    its own cells; a repo-wide grep found zero other occurrences, so every other currency column in
    the product had the problem. It belongs here, once, where every table gets it. Only digits are
    affected, so text cells are unchanged. */
@@ -2433,10 +2495,18 @@ textarea:focus-visible {
    cards sit in a row; lowering the type changes what the number looks like everywhere. Prefer
    the former. If a future card needs a longer figure than this, raise the floor again — do not
    let the value wrap. */
+/* A KPI strip is ONE DRAWN GRID, not a row of floating cards. gap: 0 plus the negative margins on
+   .stat-card below collapse each pair of adjacent borders into a single line, in both axes, so
+   four cells share three rules instead of showing eight edges with gaps between them. This is the
+   clearest statement of the whole system: structure by rule, not by container.
+
+   auto-fit + 1fr is what makes it safe to wrap — tracks always stretch to fill the row, so even a
+   partial last row reaches the right edge and no cell is left with a dangling border. Keep both;
+   pinning the column count breaks the phone (S613) and pinning the width breaks the seam. */
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
+  gap: 0;
   margin-bottom: 28px;
 }
 
@@ -2488,12 +2558,16 @@ textarea:focus-visible {
   }
 }
 
+/* The -1px right/bottom margins are the mechanism: each cell pulls its neighbour over its own
+   border so the two draw as one line. No shadow — a shared-edge grid that also floats is two
+   depth models arguing, and the cells are not separate objects any more. */
 .stat-card {
   background: var(--theme-card);
   border: 1px solid var(--theme-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--theme-card-shadow);
+  box-shadow: none;
   padding: 20px;
+  margin: 0 -1px -1px 0;
 }
 
 .stat-label {

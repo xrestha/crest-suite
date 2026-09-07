@@ -823,7 +823,7 @@ export default function Layout() {
           <div className="sidebar-brand">
             <div className="sidebar-brand-icon" title={settings?.app_name || 'Crest'}>
               {settings?.logo_url
-                ? <img src={settings.logo_url} alt="logo" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4 }} />
+                ? <img src={settings.logo_url} alt="logo" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 0 }} />
                 /* aria-hidden, not aria-label — the visible wordmark right next to it already
                    names the brand; a labeled icon plus adjacent text double-announces it. */
                 : <Hexagon size={22} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--theme-accent-ink)' }} />}
@@ -1067,13 +1067,13 @@ export default function Layout() {
                       DESIGN.md's badge spec — the previous solid fills paired hardcoded #fff /
                       #000 foregrounds that failed contrast on several presets. */}
                   {pendingTrialCount > 0 && (
-                    <span style={{ fontSize: 11, fontWeight: 800, background: 'color-mix(in srgb, var(--theme-red) 15%, transparent)', color: 'var(--theme-red-text)', border: '1px solid color-mix(in srgb, var(--theme-red) 35%, transparent)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'color-mix(in srgb, var(--theme-red) 15%, transparent)', color: 'var(--theme-red-text)', border: '1px solid color-mix(in srgb, var(--theme-red) 35%, transparent)', borderRadius: 0, padding: '2px 8px', lineHeight: 1.4 }}
                       title="Clients requesting to subscribe">
                       {pendingTrialCount} want to sub
                     </span>
                   )}
                   {newTrialCount > 0 && (
-                    <span style={{ fontSize: 11, fontWeight: 800, background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', color: 'var(--theme-amber-text)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 10, padding: '2px 8px', lineHeight: 1.4 }}
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', color: 'var(--theme-amber-text)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 0, padding: '2px 8px', lineHeight: 1.4 }}
                       title="New trial signups in the last 7 days">
                       {newTrialCount} NEW
                     </span>

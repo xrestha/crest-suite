@@ -40,7 +40,7 @@ import { explodeRecipeIngredients } from '../../utils/recipeCost'
 // peer measure, and it previously took red — which on the KPI cards directly above means "over
 // threshold", so the Prime line read as permanently alarming whatever its value.
 const TREND_COLORS = {
-  fc:     '#c9a84c', // gold — same as the Food Cost slice and the FC% trend line
+  fc:     '#c9a84c', // gold — same as the Food Cost slice and the FC% trend line (see below)
   labor:  '#60a5fa', // blue — same as the Labor slice
   prime:  '#8b5cf6', // violet, dashed (a derived total, not a peer)
   margin: '#34d399', // green — profit reads as good

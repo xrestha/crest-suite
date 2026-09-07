@@ -34,6 +34,7 @@ const TOKEN_OF = {
   accent: '--theme-accent',
   accentHover: '--theme-accent-hover',
   accentText: '--theme-accent-text',
+  accentInk: '--theme-accent-ink',
   inputBg: '--theme-input-bg',
   tableHover: '--theme-table-hover',
   focusRing: '--theme-focus-ring',
@@ -65,13 +66,24 @@ describe(':root pre-hydration tokens match PRESETS.dark', () => {
     })
   }
 
-  // The pair that actually drifted, asserted as a role rather than as two values: text2 is the
-  // SECONDARY tier and text3 the quietest, and on this preset's own card they measure 6.70:1 and
-  // 5.45:1 respectively. Both clear AA, which is why the inversion was invisible to every contrast
-  // audit — the ladder was wrong, not the contrast. A swap in either file alone fails this.
+  // The pair that actually drifted, asserted as a ROLE rather than as two values: text2 is the
+  // SECONDARY tier and text3 the quietest. Both clear AA, which is why the S620 inversion was
+  // invisible to every contrast audit — the ladder was wrong, not the contrast — and why asserting
+  // the ordering is worth more than asserting the hexes. A swap in either file alone fails this.
+  //
+  // Values updated for Modernist Night (they were #9ca3af / #8a92a3 on the pre-Modernist charcoal
+  // palette, measured 6.70:1 and 5.45:1 on that preset's card). The assertion is deliberately
+  // written as "text2 is lighter than text3 on a dark ground" rather than as two literals, so the
+  // next palette change cannot silently re-invert the ladder the way the last one did.
   it('keeps the text ladder in the same order in both files', () => {
-    expect(PRESETS.dark.text2).toBe('#9ca3af')
-    expect(PRESETS.dark.text3).toBe('#8a92a3')
+    const lum = (hex) => {
+      const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+        .map(v => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)))
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    }
+    // On a DARK ground the secondary tier is the LIGHTER of the two — it has to outrank the
+    // quietest tier, which is exactly what the inversion broke.
+    expect(lum(PRESETS.dark.text2)).toBeGreaterThan(lum(PRESETS.dark.text3))
     expect(declared(root, '--theme-text2')).toBe(PRESETS.dark.text2)
     expect(declared(root, '--theme-text3')).toBe(PRESETS.dark.text3)
   })

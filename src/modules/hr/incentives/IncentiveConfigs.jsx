@@ -7,7 +7,7 @@ import { errorLine } from '../../../shared/errorText'
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 6, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
+  borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
   outline: 'none', width: '100%', fontFamily: 'inherit',
 }
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
@@ -66,7 +66,7 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {configs.length === 0 && <p style={{ fontSize: 13, color: 'var(--theme-text3)' }}>No incentive types yet — add one below.</p>}
           {configs.map(cfg => (
-            <div key={cfg.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--theme-input-bg)', borderRadius: 6, opacity: cfg.active ? 1 : 0.5 }}>
+            <div key={cfg.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--theme-input-bg)', borderRadius: 0, opacity: cfg.active ? 1 : 0.5 }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{cfg.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>

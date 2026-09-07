@@ -5,7 +5,7 @@ import { errorLine } from '../../../shared/errorText'
 
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 6, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
+  borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
   outline: 'none', fontFamily: 'inherit',
 }
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }
@@ -47,7 +47,7 @@ function OptionListEditor({ label, hint, placeholder, addLabel, options, setOpti
         <button className="btn btn-ghost" onClick={add}>+ Add</button>
       </div>
       {options.length === 0 ? (
-        <div style={{ padding: 16, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 12, border: '1px dashed var(--theme-border)', borderRadius: 6 }}>
+        <div style={{ padding: 16, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 12, border: '1px dashed var(--theme-border)', borderRadius: 0 }}>
           None yet — add common ones above.
         </div>
       ) : (
@@ -55,7 +55,7 @@ function OptionListEditor({ label, hint, placeholder, addLabel, options, setOpti
           {options.map(o => (
             <span key={o} style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '5px 8px 5px 12px', borderRadius: 14, fontSize: 12,
+              padding: '5px 8px 5px 12px', borderRadius: 0, fontSize: 12,
               background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
               color: 'var(--theme-text1)',
             }}>

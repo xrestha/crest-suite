@@ -48,7 +48,7 @@ export default function PremiumGate({ children, featureKey, minPlan = 'growth' }
         borderRadius: 'var(--radius-lg)', boxShadow: 'var(--theme-card-shadow)', padding: '40px 36px', textAlign: 'center'
       }}>
         <div style={{
-          width: 56, height: 56, borderRadius: '50%',
+          width: 56, height: 56, borderRadius: 0,
           background: 'var(--theme-focus-ring)', border: '1px solid var(--theme-focus-ring)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           margin: '0 auto 20px', fontSize: 24

@@ -151,7 +151,7 @@ export default function SelfServiceLogin() {
         PosLogin.jsx", but the content previously floated bare on the page background instead of
         getting the same .card treatment. */}
     <div className="card" style={{
-      padding: '40px 36px', borderRadius: 10,
+      padding: '40px 36px', borderRadius: 0,
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       width: '100%', maxWidth: 540,
     }}>
@@ -184,7 +184,7 @@ export default function SelfServiceLogin() {
                     key={s.id} onClick={() => pickStaff(s)}
                     style={{
                       width: 130, height: 110, display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 12,
+                      background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 0,
                       color: 'var(--theme-text1)', fontSize: 14, fontWeight: 600, cursor: 'pointer',
                       padding: '12px 8px 10px', lineHeight: 1.3, transition: 'border-color 0.15s, background 0.15s',
                     }}
@@ -192,7 +192,7 @@ export default function SelfServiceLogin() {
                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--theme-border)'; e.currentTarget.style.background = 'var(--theme-card)' }}
                   >
                     <div style={{
-                      width: 52, height: 52, borderRadius: '50%', background: avatar.bg, color: avatar.fg,
+                      width: 52, height: 52, borderRadius: 0, background: avatar.bg, color: avatar.fg,
                       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 700,
                       marginBottom: 8, flexShrink: 0,
                     }}>
@@ -210,7 +210,7 @@ export default function SelfServiceLogin() {
           <div style={{ display: 'flex', gap: 14, justifyContent: 'center' }}>
             {Array.from({ length: pinDots }).map((_, i) => (
               <div key={i} style={{
-                width: 14, height: 14, borderRadius: '50%',
+                width: 14, height: 14, borderRadius: 0,
                 background: i < pin.length ? 'var(--theme-accent)' : 'var(--theme-border)',
                 transition: 'background 0.15s', boxShadow: i < pin.length ? '0 0 6px var(--theme-accent)' : 'none',
               }} />
@@ -223,7 +223,7 @@ export default function SelfServiceLogin() {
                 key={i} onClick={() => pressKey(k)} disabled={!k || signingIn}
                 style={{
                   width: 72, height: 72, background: k ? 'var(--theme-card)' : 'transparent',
-                  border: k ? '1px solid var(--theme-border)' : 'none', borderRadius: '50%',
+                  border: k ? '1px solid var(--theme-border)' : 'none', borderRadius: 0,
                   color: k === 'C' ? 'var(--theme-text3)' : 'var(--theme-text1)',
                   fontSize: k === '⌫' ? 20 : k === 'C' ? 15 : 22,
                   fontWeight: k === 'C' ? 600 : 500,
@@ -241,7 +241,7 @@ export default function SelfServiceLogin() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%' }}>
             <button onClick={back} style={{
               width: 108, padding: '13px 0', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 8,
+              background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 0,
               color: 'var(--theme-text2)', cursor: 'pointer',
             }}>← Back</button>
             <button

@@ -7,8 +7,8 @@
   "scope": "/hr/self-service",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "theme_color": "#0f1117",
-  "background_color": "#0f1117",
+  "theme_color": "#191817",
+  "background_color": "#191817",
   "icons": [
     { "src": "staff192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
     { "src": "staff512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },

@@ -588,7 +588,7 @@ export default function PayrollRun() {
             <h1 className="page-title">Payroll</h1>
             <p className="page-subtitle">
               Monthly payroll run — {periodLabel}
-              {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 10 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
+              {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 0 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -729,12 +729,12 @@ export default function PayrollRun() {
                                   otherwise looks identical to a correctly-contributing employee. */}
                               {emp.ssf_enrolled && !String(emp.ssf_no || '').trim() && (
                                 <Tip text="This employee is marked SSF-enrolled but has no SSF registration number, so no 11% contribution is being deducted — a contribution with no number can't be filed on the SSF challan. Add the number in Pay Setup, then Regenerate." width={290}>
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ SSF no. missing</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>⚠ SSF no. missing</span>
                                 </Tip>
                               )}
                               {otBothSources && (
                                 <Tip text={`This employee has OT in both places for this period — ${attOtHrs.toFixed(1)} hr on the attendance sheet and approved Overtime entries. They are no longer added together: on any day an approved entry exists, it supersedes the attendance sheet's hours for that day, so nothing is paid twice. Days with no approved entry still pay their attendance OT at 1.5×.`} width={300}>
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>OT: 2 sources</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>OT: 2 sources</span>
                                 </Tip>
                               )}
                             </div>

@@ -12,6 +12,14 @@
  * Note this is one of very few component tests in this codebase, and it only became possible once
  * react-router 7 could resolve under Jest 27 — see the moduleNameMapper block in package.json and
  * the TextEncoder shim in src/setupTests.js.
+ *
+ * Moved from Login.trialConsent.test.jsx when the trial form moved to /signup (Modernist). It
+ * follows the FORM, not the page it used to live on — a clickwrap test rendering a page with no
+ * clickwrap on it would have passed vacuously on the assertions that merely count anchors, which
+ * is exactly the failure this file exists to prevent. The "at least two occurrences of each legal
+ * href" assertion is also why /signup keeps the footer legal links: the consent pair alone would
+ * satisfy a naive reading, and a document reachable only from a checkbox you have already ticked
+ * is not published.
  */
 
 import React from 'react'
@@ -41,13 +49,13 @@ jest.mock('../context/SettingsContext', () => ({
   useSettings: () => ({ settings: { app_name: 'Crest Suite' } }),
 }))
 
-const Login = require('./Login').default
+const Signup = require('./Signup').default
 const { LEGAL_META } = require('../legal/generated/legalMeta')
 
 function renderLogin() {
   return render(
-    <MemoryRouter initialEntries={['/login?trial=1']}>
-      <Login />
+    <MemoryRouter initialEntries={['/signup?trial=1']}>
+      <Signup />
     </MemoryRouter>
   )
 }

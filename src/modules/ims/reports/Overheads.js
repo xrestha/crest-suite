@@ -590,7 +590,7 @@ export default function Overheads() {
                 <div key={row.key}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: '50%', background: row.color, display: 'inline-block', flexShrink: 0 }} />
+                      <span style={{ width: 10, height: 10, borderRadius: 0, background: row.color, display: 'inline-block', flexShrink: 0 }} />
                       <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 90 }}>{row.label}</span>
                       <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>target {row.target}%</span>
                     </div>

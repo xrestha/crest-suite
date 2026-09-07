@@ -36,3 +36,7 @@ __pycache__/
 # /impeccable browser runs — 1440x900, 390x844). Root-scoped on purpose: every legitimate
 # image asset lives under public/ or src/, so this cannot swallow one.
 /*.png
+
+# The design handoff bundle keeps its unpacked folder (the CHANGELOG cites that path); the
+# zip is a byte-identical archive of it and would double the repo cost for nothing.
+Claude Design/*.zip

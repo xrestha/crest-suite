@@ -347,7 +347,7 @@ export default function MenuEngineering() {
               <div style={{ display: 'flex', gap: 16 }}>
                 {Object.entries(Q_HEX).map(([name, hex]) => (
                   <span key={name} style={{ fontSize: 11, color: 'var(--theme-text2)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: hex, display: 'inline-block' }} />
+                    <span style={{ width: 8, height: 8, borderRadius: 0, background: hex, display: 'inline-block' }} />
                     {name}
                   </span>
                 ))}
@@ -364,7 +364,7 @@ export default function MenuEngineering() {
                   <div key={q} style={{ background: 'var(--theme-table-hover)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: Q_HEX[q], display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5 }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: Q_HEX[q], display: 'inline-block', flexShrink: 0 }} />
+                        <span style={{ width: 8, height: 8, borderRadius: 0, background: Q_HEX[q], display: 'inline-block', flexShrink: 0 }} />
                         {QUADRANTS[q].icon} {q}
                       </span>
                       <span>{summary[q]} item{summary[q] !== 1 ? 's' : ''}</span>

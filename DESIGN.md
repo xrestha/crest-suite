@@ -2,26 +2,36 @@
 name: Crest Suite
 description: Cost intelligence and HR for Nepal's F&B operators, in one instrument
 colors:
-  # The DEFAULT (Dark) preset, which is what `:root` in Layout.css paints before ThemeContext
-  # hydrates. The product ships exactly two presets — Dark and Light — plus a `system` mode that
-  # resolves to one of them. Where a token's Light value differs materially it is named in the
-  # Colors prose below. Never resolve one of these to a literal in a component; read the token.
-  aged-brass: "#c9a84c"
-  aged-brass-hover: "#d4b96a"
-  accent-text: "#0f1117"
-  accent-ink: "#c9a84c"
-  ink-bg: "#0f1117"
-  ink-card: "#181c27"
-  ink-sidebar: "#0e1117"
-  ink-border: "#2a2f3d"
-  ink-border-lt: "#1e2330"
-  input-bg: "#0f1117"
-  table-hover: "rgba(255,255,255,0.03)"
-  focus-ring: "rgba(201,168,76,0.15)"
-  focus-outline: "#c9a84c"
-  text-primary: "#e8e0d0"
-  text-secondary: "#9ca3af"
-  text-tertiary: "#8a92a3"
+  # The DEFAULT (Modernist Night) preset, which is what `:root` in Layout.css paints before
+  # ThemeContext hydrates. The product ships exactly two presets — Modernist Night and Modernist
+  # Light — plus a `system` mode that resolves to one of them. Where a token's Light value differs
+  # materially it is named in the Colors prose below. `accent-ink` and `accent-red-hover` are
+  # LIGHTER than the accent here and DARKER on Light: a dark ground inverts which direction is
+  # legible. Never resolve one of these to a literal in a component; read the token.
+  accent-red: "#ff563c"
+  accent-red-hover: "#ff9783"
+  accent-text: "#201e1d"
+  # accent-300, not the 400 the handoff specified. Measured against this preset's own signal set,
+  # #ff9783 sat at deltaE 7.4 from --theme-red under deuteranopia and 7.8 from green under
+  # protanopia, both under the floor of 8 — the accent-as-text slot and the danger slot reading as
+  # one colour for ~8% of men. #ffc4b8 clears at 10.4 worst-pair and is still a documented ramp
+  # step. The Light half needed the same correction in the other direction (see the Colors prose).
+  accent-ink: "#ffc4b8"
+  ink-bg: "#191817"
+  ink-card: "#242221"
+  ink-sidebar: "#141312"
+  ink-border: "#3a3836"
+  ink-border-lt: "#2c2a29"
+  input-bg: "#1e1d1c"
+  table-hover: "rgba(255,255,255,0.04)"
+  focus-ring: "rgba(255,86,60,0.15)"
+  focus-outline: "#ffc4b8"
+  text-primary: "#f3f2f2"
+  text-secondary: "#bab6b6"
+  text-tertiary: "#9b9797"
+  # The four signal colours are deliberately carried over from the previous palette UNCHANGED.
+  # They were tuned for AA and for red-green colour blindness across S551/S608/S683; Modernist
+  # replaces ground, ink and accent only. Do not retune them to "match" the new accent.
   signal-success: "#34d399"
   signal-danger: "#f87171"
   signal-warning: "#fbbf24"
@@ -78,7 +88,7 @@ typography:
   # tokenised size (the sidebar's own --font-size-micro, --font-size-chevron) into a false
   # "outside the type ramp" finding.
   display:
-    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "clamp(24px, 3.4vw, 32px)"
     fontWeight: 800
     lineHeight: 1.1
@@ -107,6 +117,12 @@ typography:
   card-heading:
     fontSize: "15px"
     fontWeight: 600
+  # Every control label in the product. 15px is a CONTRAST floor, not a density choice — white on
+  # Light's accent measures 4.20:1, which is legal as large text and not as normal text, and
+  # 15px/600 is where that threshold begins. See Components -> Buttons.
+  button-label:
+    fontSize: "15px"
+    fontWeight: 600
   subtitle:
     fontSize: "14px"
     fontWeight: 600
@@ -123,28 +139,28 @@ typography:
     lineHeight: 1.2
     letterSpacing: "0.04em"
   title:
-    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "22px"
     fontWeight: 600
     lineHeight: 1.3
   figure:
-    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "24px"
     fontWeight: 600
     lineHeight: 1.15
     fontFeature: "tabular-nums"
   body:
-    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.5
   label:
-    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "12px"
     fontWeight: 500
     letterSpacing: "0.04em"
   column-header:
-    fontFamily: "Poppins, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "11px"
     fontWeight: 500
     letterSpacing: "0.08em"
@@ -153,12 +169,21 @@ typography:
     fontSize: "11px"
     lineHeight: 1.4
 rounded:
-  xs: "4px"
-  sm: "8px"
-  md: "12px"
-  lg: "18px"
-  xl: "24px"
-  full: "999px"
+  # Modernist is a zero-radius system: every corner in the product is square, containers and
+  # signals alike. The six steps are KEPT as named tokens rather than deleted because ~420 sites
+  # read them by name, and a scale that still exists can be re-tuned in one place if the corner
+  # ever comes back. They simply all resolve to 0 now.
+  #
+  # This repudiates the old Proportional Corner Rule, which sized a corner to its box. There is
+  # no longer a corner to size. The Closed-Scale Rule survives and is stricter: 0 is the only
+  # value on the scale, so any non-zero radius in the product is drift by definition — except
+  # the two exemptions named in Shapes (print templates, and the scoped guest surfaces).
+  xs: "0"
+  sm: "0"
+  md: "0"
+  lg: "0"
+  xl: "0"
+  full: "0"
 spacing:
   xs: "4px"
   sm: "8px"
@@ -167,13 +192,13 @@ spacing:
   xl: "32px"
 components:
   button-primary:
-    backgroundColor: "{colors.aged-brass}"
+    backgroundColor: "{colors.accent-red}"
     textColor: "{colors.accent-text}"
     rounded: "{rounded.md}"
     padding: "8px 16px"
-    typography: "{typography.body}"
+    typography: "{typography.button-label}"
   button-primary-hover:
-    backgroundColor: "{colors.aged-brass-hover}"
+    backgroundColor: "{colors.accent-red-hover}"
     textColor: "{colors.accent-text}"
   button-ghost:
     backgroundColor: "{colors.input-bg}"
@@ -241,10 +266,10 @@ components:
 
 **Creative North Star: "The Lit Instrument"**
 
-Crest Suite is an instrument a restaurant is run from, and it is lit by exactly one source. Aged
-Brass is that light: it falls on the thing you are working in — the active route, the live table,
-the period this report covers, the button that commits — and everything else sits in an unlit,
-even charcoal. Depth here is not a stack of shadows; it is the difference between what the light
+Crest Suite is an instrument a restaurant is run from, and it is lit by exactly one source. Signal
+Red is that light: it falls on the thing you are working in — the active route, the live table,
+the period this report covers, the button that commits — and everything else sits in an even,
+unlit neutral — ink on Night, paper on Light. Depth here is not a stack of shadows; it is the difference between what the light
 reaches and what it does not. On the signed-out pages that metaphor is literal (three warm radial
 lights over an otherwise dead ground); inside the app it is disciplined down to a single accent
 that never spends itself twice on one screen.
@@ -254,23 +279,27 @@ deciding between services, and an accountant who has to file on it. So a number 
 up, never approximated for effect, and never coloured unless the colour is a verdict the product
 is prepared to defend. Signal green, red and amber are reserved for that verdict and spent
 nowhere else — a category, a rank, a delivery partner and a close type are facts, not judgments,
-and they take brass or grey. Where a verdict is shown it carries a shape mark as well as a hue,
+and they take the accent or grey. Where a verdict is shown it carries a shape mark as well as a hue,
 because roughly one man in twelve cannot separate the hues and every one of these screens gets
 printed in monochrome eventually.
 
 Density is deliberate and non-negotiable: 13px body, 11px column headers, tight table rows, 32px
 page padding, no reading measure anywhere inside the app. This is a working surface, not a
-document. The softness that keeps it from reading as legacy Nepali ERP comes from the radius scale
-(8/12/18/24px) and the warm neutral ground, not from whitespace the data cannot spare. The one
-document in the product — the Terms and Privacy Policy at `/legal/*` — is the one place a measure
+document. What keeps it from reading as legacy Nepali ERP is no longer the radius scale — Modernist
+squares every corner — but the RULE WEIGHTS and the drawn grid: a 2px rule separates sections, a 1px
+rule separates rows, and nothing else divides anything. Legacy ERP is not square; it is undifferentiated,
+boxing every cell at one weight. Two weights used consistently is the whole discipline, and it costs
+no whitespace the data cannot spare.
+
+The one document in the product — the Terms and Privacy Policy at `/legal/*` — is the one place a measure
 is earned, and it is set at **60ch on the body's children** (measured 66–72 real characters per
-line; the 76ch it shipped with held ~95, because `ch` is the width of Poppins' wide zero, not of
+line; the 76ch it shipped with held ~95, because `ch` is the width of the body font's zero, not of
 its average letter).
 
 **Key Characteristics:**
 
-- One accent (Aged Brass), one rationed fourth-category hue (violet), four semantic signals.
-- Two presets — Dark (default) and Light — plus a `system` mode that follows the device.
+- One accent (Signal Red), one rationed fourth-category hue (violet), four semantic signals.
+- Two presets — Modernist Night (default) and Modernist Light — plus a `system` mode that follows the device.
 - Colour is never the only carrier: a band ships a `✓`/`△`/`▲` mark, a state ships a word.
 - Flat, tinted chips over solid fills; a card's elevation is uniform policy, not a highlight.
 - Five surfaces, one system: the app shell, the signed-out pages, the Crest Staff phone app, the
@@ -280,49 +309,68 @@ its average letter).
 
 ## Colors
 
-Warm metal on cold ink. The palette is one brass accent over a near-neutral charcoal (Dark) or
-warm white (Light), with four semantic signals held in reserve.
+Ink on paper, with one red held for the primary action. The palette is a single signal red over a
+near-neutral ink (Modernist Night) or paper (Modernist Light), with four semantic signals held in
+reserve. The red is rationed hard: it marks the thing you are meant to press and almost nothing else.
 
 ### Primary
 
-- **Aged Brass** (`#c9a84c` Dark / `#b07d2b` Light): the product's only brand colour. It marks the
-  active route, the live/occupied state, the primary action, a categorical tag and the period
-  chip. Hover steps to `#d4b96a` / `#946720`.
-- **Brass Ink** (`accent-ink`, `#c9a84c` Dark / `#7a561e` Light): the accent used **as text** — a
-  link, an active nav item, a `.stat-value.gold`, a `.btn-linklike` in a table cell. On Light the
-  base accent measured 4.45:1 as an active nav label: below AA, and *less* legible than the
-  inactive items around it, which inverts the one signal that state exists to send.
-- **Brass on Brass** (`accent-text`, `#0f1117` Dark / `#241a08` Light): the foreground that sits
-  **on** an accent fill. Not interchangeable with `accent-ink` — this one pairs with a filled
-  surface, that one is type on a normal ground.
+- **Signal Red** (`#ff563c` Night / `#ec3013` Light): the product's only brand colour. It marks the
+  active route, the live/occupied state, the primary action, a categorical tag and the period chip.
+  Hover steps to `#ff9783` on Night and `#dd2b0f` on Light — **lighter** on the dark ground,
+  **darker** on the light one. Night's is the ramp's 500 step rather than the `#ec3013` base, which
+  is too dark to read as an accent on ink.
+- **Accent Ink** (`accent-ink`, `#ffc4b8` Night / `#7c1405` Light): the accent used **as text** — a
+  link, an active nav item, a `.stat-value.gold`, a `.btn-linklike` in a table cell.
+
+  **Neither value is the ramp step the handoff specified, and the reason is the signal set.** A red
+  accent lands next to the danger token in a way a brass accent never did, so both ends had to move
+  one step further out and both were measured rather than picked. On Light, `#ae1800` (accent-700)
+  sat at ΔE **0.5** from `amberText` under deuteranopia and 6.5 under protanopia — the categorical
+  slot and the waiting-on-a-person slot reading as one colour for ~8% of men, which is precisely the
+  S608 failure recurring. `#7c1405` (accent-800) clears at 16.1/21.3 and still measures 8.85:1 on
+  the card and 8.11:1 on its own badge tint. On Night the same collision ran the other way: `#ff9783`
+  (accent-400) sat at ΔE 7.4 from `--theme-red` under deuteranopia, under the floor of 8; `#ffc4b8`
+  (accent-300) clears at 10.4 worst-pair. Both replacements are documented ramp steps, not invented
+  colours. **Do not "restore" either to the handoff value without re-running those pairs.**
+- **Accent Text** (`accent-text`, `#201e1d` Night / `#ffffff` Light): the foreground that sits **on**
+  an accent fill. Not interchangeable with `accent-ink` — this one pairs with a filled surface, that
+  one is type on a normal ground. Night's is ink rather than white and measures 5.26:1 on the fill.
+  Light's white measures **4.20:1** on `#ec3013`, which is why the button label floor is 15px/600
+  (see Buttons); `::selection` and any other accent fill carrying text below that size uses
+  `#dd2b0f`, where white clears 4.74:1.
 
 ### Secondary
 
-- **Violet** (`#a78bfa` Dark / `#7c3aed` Light): the rationed fourth category, for the cases where
+- **Violet** (`#a78bfa` Night / `#7c3aed` Light): the rationed fourth category, for the cases where
   green, red and amber are all spoken for and a fourth is genuinely needed — an "Updated" audit
   row beside Added and Deleted, the KOT station chip, the loyalty surfaces. It is not a second
-  brand colour and never appears beside brass as a peer.
+  brand colour and never appears beside the accent as a peer.
 
 ### Neutral
 
-- **Ink** (`#0f1117` Dark / `#f6f3ef` Light): the page ground, and also the input well — a field
-  is a recess in the card, not a raised object on it.
-- **Card** (`#181c27` Dark / `#ffffff` Light): every surface that holds content. One tone lifted
-  off the page on Dark; a distinct warm-white plane on Light.
-- **Sidebar** (`#0e1117` Dark / `#ece6dd` Light): one step *darker* than the page on Dark, so the
+- **Ink** (`#191817` Night / `#f3f2f2` Light): the page ground. Unlike the previous palette the
+  input well is a *separate* value (`#1e1d1c` / `#ffffff`) — on Light the field is the one white
+  plane on a paper page, which is what makes a recess read as a recess without a corner to help.
+- **Card** (`#242221` Night / `#eae9e9` Light): every surface that holds content. One tone lifted
+  off the page on Night; one tone *dropped* below it on Light, because the page is already paper.
+- **Sidebar** (`#141312` Night / `#eae9e9` Light): one step *darker* than the page on Night, so the
   shell recedes behind the work rather than framing it.
-- **Border** (`#2a2f3d` / `#ddd6cf`) is structural — card edges, the table header rule, input
-  outlines. **Border Light** (`#1e2330` / `#ece6df`) is internal — row dividers, ghost button
-  edges. They are not interchangeable (see Shapes).
-- **Parchment** (`text1`, `#e8e0d0` / `#1c1917`): every figure, every table cell, every value.
-- **Fog** (`text2`, `#9ca3af` / `#5c554e`): the secondary tier — labels, column headers,
-  subtitles, `badge-gray`'s foreground. Measured 6.70:1 on the Dark card.
-- **Slate** (`text3`, `#8a92a3` / `#6b655e`): the quietest tier — placeholders, stat labels,
-  micro-captions, the empty state. Measured 5.45:1 on the Dark card.
+- **Border** (`#3a3836` / `#d7d3d3`) is structural — card edges, input outlines, the 2px section
+  rule. **Border Light** (`#2c2a29` / `#e5e3e3`) is internal — row dividers, ghost button edges.
+  They are not interchangeable, and with the corner gone they carry more of the hierarchy than they
+  used to (see Shapes).
+- **Paper** (`text1`, `#f3f2f2` / `#201e1d`): every figure, every table cell, every value.
+- **Fog** (`text2`, `#bab6b6` / `#605d5d`): the secondary tier — labels, column headers,
+  subtitles, `badge-gray`'s foreground.
+- **Slate** (`text3`, `#9b9797` / `#7d7979`): the quietest tier — placeholders, stat labels,
+  micro-captions, the empty state.
 
-  The ladder is parchment > fog > slate. Both lower tiers clear AA, so the ordering is *hierarchy*
+  The ladder is paper > fog > slate. Both lower tiers clear AA, so the ordering is *hierarchy*
   rather than accessibility — which is exactly why an inversion between them once survived every
-  contrast audit unnoticed, with each quietest-tier hint outranking every secondary label.
+  contrast audit unnoticed, with each quietest-tier hint outranking every secondary label. The
+  Night pair sits at the same ratio it always did; only the hue moved off blue-grey onto the
+  neutral ramp.
 
 ### Signal colors
 
@@ -375,7 +423,7 @@ a thumb must find. Do not carry that anywhere else.
 
 ### Named Rules
 
-**The One Accent Rule.** Aged Brass is the only non-semantic colour on any screen. A second
+**The One Accent Rule.** Signal Red is the only non-semantic colour on any screen. A second
 "brand" hue is a mistake, not a design choice. This has been violated seven times by the same
 undocumented indigo (`#60a5fa` / `#818cf8`), most instructively as a drifted `var()` **fallback** —
 `var(--theme-purple, #8b5cf6)` reads as correct because the token name beside it is correct, and it
@@ -405,13 +453,19 @@ against ~8%.
 **The One Signal Meaning Rule.** A signal colour carries exactly one meaning across a module, and
 a category never takes a signal colour at all. The vocabulary is written down twice — HR's
 `HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` (`payrollConstants.js`) and POS's `posSignals.js` — and
-both say the same thing: **amber** = open, waiting on a person; **brass** = decided but the money
+both say the same thing: **amber** = open, waiting on a person; **accent** = decided but the money
 has not moved, plus every plain category (a rank, a close type, a table state, a period);
 **green** = closed and good; **red** = closed and refused, or wrong and expensive; **grey** = inert
-or a plain identity. Before this was one file, "Pending" was brass on two HR queues, grey on a
+or a plain identity. Before this was one file, "Pending" was accent on two HR queues, grey on a
 third and amber in the employee app, and amber alone carried eight distinct meanings across POS —
 including "Foodmandu" and "supervisor". A button is exempt: it is an instruction, not a verdict, so
-the Void button stays red while the *record* it writes reads as a close type in brass.
+the Void button stays red while the *record* it writes reads as a close type in the accent.
+
+**Under Modernist the accent slot and the danger slot are the same HUE, which makes the rest of
+this rule load-bearing rather than tidy.** They are still separated — measured, the two `*-text`
+variants sit ΔE 33 apart under deuteranopia — but they no longer separate by hue name the way brass
+and red did, so the LABEL and the shape mark carry more of the distinction than they used to. Do
+not add a sixth hue to recover the old separation; say the word.
 
 **Loudness tracks demand for action, not importance.** The loudest mark on a POS floor tile used to
 be "Occupied" — a full table, the outcome you want — while "you have not fired these three dishes"
@@ -419,7 +473,16 @@ was a thin pill. A tile's 6px strip now answers the one question a waiter crossi
 answer with their own eyes (`tableStripColor`), and a kitchen card's strip carries lateness rather
 than the stage it is already sorted into (`ticketStripColor`).
 
-**The Chart Palette Rule.** Chart series never come from the semantic tokens — they are five
+**The Chart Palette Rule.** Re-measured at the Modernist re-theme and UNCHANGED, which is the
+point of the rule: the palettes are theme-independent literals, so a new accent does not reach
+them. Measured, `CHART_COLORS` holds worst-pair ΔE 37.9 normal / 14.7 deuteranopia / 17.5
+protanopia and `COST_BREAKDOWN_COLORS` 56.3 / 12.4 / 30.6, all clear of the 15 and 8 floors; the
+new accent's nearest chart slot is `#ea580c` at ΔE 16–17, so chart and chrome do not collide
+either. The gold slot stays gold — it is Food Cost's identity across three surfaces, and it used
+to double as "the accent", which it no longer is. That second meaning is what the re-theme
+removed, not the colour.
+
+Chart series never come from the semantic tokens — they are five
 *roles*, not five validated hues, and nothing measures them as a series set. Use the fixed literal
 palettes (`CHART_COLORS`, `COST_BREAKDOWN_COLORS`; `var()` does not resolve in SVG presentation
 attributes anyway) and re-measure when you touch them: `CHART_COLORS` carried a **ΔE 0.4**
@@ -444,14 +507,14 @@ Purchases running under the spending pace is the outcome you wanted; painting it
 arrow points down is a lie told in the one colour the owner trusts most. Keep `▲`/`▼` literal so
 shape agrees with the line on screen, and invert the colour per metric.
 
-**Brass is a range, not one value, on the signed-out pages.** `Login.css` derives every colour on
+**The accent is a range, not one value, on the signed-out pages.** `Login.css` derives every colour on
 the page from `--theme-accent` by `color-mix` — a wash (6%), a tint (12%), a rule (24%), an edge
 (80%), and the three light layers at 34/17/11%. That is the One Accent Rule taken literally: no
 second hue anywhere, only more and less of the one that was already there.
 
 ## Typography
 
-**Body Font:** Poppins (Google Font, 400/500/600/700 + italic 400), falling back to
+**Body Font:** Archivo (Google Font, 400/500/600/700/800), falling back to
 `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`.
 **Signature Font:** Georgia, serif — the wordmark, the two full-page interstitials (`PremiumGate`,
 `SubscriptionLock`), the guest menu's brand line, and every print letterhead (gate pass, purchase
@@ -501,7 +564,7 @@ of the five surfaces that draw the lockup — the sidebar and the three signed-o
 `/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the
 client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside
 `settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the sidebar
-and on `/pricing`, `objectFit: contain` on a 4px corner. Only the sidebar carried that conditional
+and on `/pricing`, `objectFit: contain`, square. Only the sidebar carried that conditional
 for its first year; the public pages drew Crest's hexagon unconditionally *while naming the client*,
 so a white-labelled operator met their own name beside somebody else's mark on the page they log in
 through — and on the page a password-reset email lands them on, where a mismatched brand reads as a
@@ -529,7 +592,7 @@ rule in `index.css` existed: all 14 controls on the login page, all 13 pricing C
 its controls. `optgroup` is in that selector list because Firefox styles it separately from
 `select`. Do not re-add per-class `font-family: inherit` patches.
 
-**Numbers are tabular.** Poppins' default figures are proportional, so a right-aligned currency
+**Numbers are tabular.** The body font's default figures are proportional, so a right-aligned currency
 column does not line up digit for digit and a page of money reads ragged. Every
 `.data-table` cell, every `tfoot` cell and `.stat-value` carry `font-variant-numeric: tabular-nums`
 from one rule. Only digits are affected; text cells are unchanged.
@@ -701,13 +764,13 @@ meaning — a stronger shadow for "important" or "premium". If something needs t
 a job for the accent colour or for position.
 
 **The signed-out surfaces carry a light source; the app does not.** `/login` and `/pricing` are lit
-by three brass radial layers on the scrollport itself — a key breaking over the sign-in card's
+by three accent radial layers on the scrollport itself — a key breaking over the sign-in card's
 top-right shoulder, a rim grazing the right edge, a weak bounce lifting the pitch column out of
 flat black. Two things there were measured rather than guessed. **Radii are percentages of the box,
 not pixels**: in px the rim was 680px wide, which on a 390px phone is nearly two screens across —
 it stopped being a rim and flooded the lower half of the page. And a fourth "shade" layer mixing
-toward `--theme-sidebar` was removed because on Dark it was mathematically inert (`#0e1117` over
-`#0f1117`), spending half the depth budget on nothing. **Unlit ground is the shadow here.** Do not
+toward `--theme-sidebar` was removed because on the dark preset it was mathematically inert (the
+sidebar sat one hair off the page ground), spending half the depth budget on nothing. **Unlit ground is the shadow here.** Do not
 carry any of this into the app: a dense table under an atmospheric wash is worse than one on a flat
 card.
 
@@ -717,42 +780,49 @@ instead of playing once on load and never meaning anything again.
 
 ## Shapes
 
-**Six radius steps, and they are a closed set:** 4px (`--radius-xs`, micro-elements only), 8px
-(`--radius-sm`), 12px (`--radius-md`), 18px (`--radius-lg`), 24px (`--radius-xl`), 999px
-(`--radius-full`). Radius does not vary per preset — the shape scale is theme-invariant while
-colour and shadow are not.
+**Radius is zero, everywhere, with no size classes and no exceptions inside the app.** The six
+`--radius-*` tokens still exist and every one of them resolves to 0. They were kept rather than
+deleted because ~420 call sites read them by name: a scale that still has a home can be re-tuned in
+one edit, where 420 hardcoded zeroes cannot.
 
-**Radius tracks the element's size class, not its importance.** Chip-sized things take `sm` (badges,
-small icon buttons); control-sized things take `md` (buttons, inputs, selects, tab pills, nav
-links); surface-sized things take `lg` (cards, stat cards, table containers); `xl` is for the
-largest panels only (the sign-in card, the chart expand modal). This is why a badge and a card do
-not share a radius even though both are "containers": the corner has to stay proportional to the
-box, or a small chip reads as a lozenge and a large card reads as a rectangle.
+**Squareness applies to signals as well as containers.** The previous system exempted "the circular
+status dot and its pulse ring, which is a signal rather than a container" — that exemption is
+withdrawn. Status dots, toggle knobs, avatars, step markers and PIN dots are all square now. A
+signal that is round in a system where nothing else is round reads as a leftover, not as a signal,
+and the dot already carries its meaning in colour and position.
 
-**`full` (999px) is reserved, not available.** It belongs to the sidebar module switcher's pill
-signature, the period chip, and shapes whose radius is genuinely half their own height (the 6px
-scrollbar thumb). `.tab-btn` deliberately stays at `md` — two pill treatments on one screen would
-dilute the switcher from a signature into a pattern.
+**The two exemptions are both outside the app's own surfaces.** Print templates (`@media print` and
+the generated print-HTML strings) keep whatever they had, because `Layout.css`'s print block already
+forces `border-radius: 0` on the classed elements and the rest never sees an app stylesheet. And the
+**scoped guest surfaces** — `.guest-menu` and the public booking page — keep their own shape
+language, for the same reason they keep their own bone-and-pine palette: a diner is not looking at
+the staff product, and nothing there may be reached for from a staff screen.
 
-**Borders carry structure, and the two weights are not interchangeable.** `--theme-border` is
-structural (card edges, the table header rule, input outlines); `--theme-border-lt` is internal
-(row dividers, ghost button edges). Using the structural weight for a row divider makes a dense
-table read as a grid of boxes, which is precisely the legacy-ERP failure mode.
+**Borders carry structure, and now they carry ALL of it.** With the corner gone, the rule weight is
+the only thing left describing hierarchy, so the two weights matter more than they did and are not
+interchangeable. `--theme-border` is structural — card edges, input outlines, the 2px section rule
+and the 2px rule under a table header or above a totals row. `--theme-border-lt` is internal — row
+dividers and ghost button edges, at 1px. Using the structural weight for a row divider makes a
+dense table read as a grid of boxes, which is precisely the legacy-ERP failure mode; using the
+internal weight for a section break loses the section.
 
-**No clipping, no masks, no non-rectangular silhouettes.** Every surface is a rounded rectangle.
-The only recurring non-rectangular shape is the circular status dot and its pulse ring, which is a
-signal rather than a container.
+**KPI cells share their edges.** A stat strip is one drawn grid, not a row of floating cards:
+`border-right: 0` between siblings so a single line separates two cells rather than two lines
+sitting a gap apart. This is the clearest expression of the whole system — structure by rule, not
+by container.
 
 ### Named Rules
 
-**The Proportional Corner Rule.** If a new element needs a radius, pick the step by asking how big
-the box is, not how important it is. An important card does not get a larger corner; it gets the
-accent colour or a better position.
+**The Zero Corner Rule.** No element in the app takes a radius. If a shape needs to be
+distinguished from its neighbour, it takes a rule, a ground, or a position — never a corner. This
+replaces the old Proportional Corner Rule, which sized a corner to its box; there is no longer a
+corner to size.
 
 **The Closed-Scale Rule.** A radius, a type size or a spacing value that is not on its scale is
-drift. When the system is genuinely missing a step, add it to the scale and to this file — that is
-how `--radius-xs` arrived, after 38 sites had independently reached for a 2–4px literal because a
-10x10 legend swatch reads as a circle at 8px.
+drift. The radius scale is now a single value, which makes the rule easier rather than harder: any
+non-zero radius inside `src/` that is not in a print template or a scoped guest surface is drift by
+definition, and the `/impeccable` hook will say so. The rule still runs the other way too — if the
+system is genuinely missing a step, add it here first, then use it.
 
 ## Components
 
@@ -762,9 +832,21 @@ four of which live on the class and none of which announce their absence.
 
 ### Buttons
 
-- **Shape:** control-sized corners (12px, `--radius-md`), `8px 16px` padding, 13px/500, a 6px gap
-  for an icon. Transitions background and colour at 0.13s.
-- **Primary:** accent fill with `accent-text` at 700. The one filled control in the system.
+- **Shape:** square (no radius), `8px 16px` padding, **15px/600**, a 6px gap for an icon.
+  Transitions background and colour at 0.13s.
+
+  **The 15px is a contrast floor, not a taste call.** White on Light's `#ec3013` measures
+  **4.20:1** — under AA for normal text, over it for large text, and 15px/600 is where WCAG's
+  large-text threshold begins. The label size is therefore load-bearing: dropping a primary button
+  back to 13px reintroduces a real contrast failure on every commit action in the product. Where a
+  smaller label on an accent fill is genuinely unavoidable, the FILL moves to `#dd2b0f` (white
+  clears 4.74:1) rather than the label shrinking — that is what `::selection` does, since it
+  inherits the size of whatever text is selected and cannot be given a floor at all.
+- **Label alignment:** flush left. A wide or block button is `justify-content: space-between` with
+  the label left and a trailing `→` right; only `.btn-icon` centres, because it has no label to
+  align. Centred labels are the one thing that makes a square button read as a generic dialog
+  control rather than as part of this system.
+- **Primary:** accent fill with `accent-text` at 600. The one filled control in the system.
 - **Ghost:** the input ground with a `border-lt` edge; on hover it takes the table-hover tint and
   an accent border. This is the default for anything that is not the page's single commit action.
 - **Danger:** the input ground, `red-text` foreground, a 45%-alpha red border, and a 12% red tint
@@ -789,7 +871,7 @@ four of which live on the class and none of which announce their absence.
   the one naming the row. **An icon has no accessible name, so `aria-label` is required on every
   one**, with the same string on `title` for the pointer.
 - **`.btn` alone is the BOX, and carries no background and no colour.** It declares padding,
-  radius, size, weight, cursor, transition and the focus ring; a variant supplies the two things
+  size, weight, cursor, transition and the focus ring; a variant supplies the two things
   that make it visible. Written without one it inherits, which on a `<button>` means the browser's
   own chrome (`#f0f0f0` fill, black label — a light button on a charcoal card) and on an `<a>`
   means the UA link colour: the Terms page's current-document link rendered `#0000EE` underlined,
@@ -819,7 +901,7 @@ four of which live on the class and none of which announce their absence.
 
 ### Badges / Status Chips
 
-- **Shape:** 8px radius, `2px 8px`, 11px/500, capitalized.
+- **Shape:** square, `2px 8px`, 11px/500, capitalized.
 - **Style:** each colour renders as a ~10–12% alpha tint of itself as the background with the
   `*-text` variant as the foreground — never a solid fill with white text. This keeps a table full
   of status badges calm even when every row carries one.
@@ -845,7 +927,7 @@ four of which live on the class and none of which announce their absence.
 
 ### Cards / Containers
 
-- **Corner:** 18px (`--radius-lg`). **Background:** `--theme-card`. **Border:** 1px
+- **Corner:** square. **Background:** `--theme-card`. **Border:** 1px
   `--theme-border`. **Shadow:** `--theme-card-shadow`, uniform policy. **Padding:** 24px.
 - **Stat card:** the same surface at 20px padding, holding an 11px uppercase slate label, a 24px
   figure and an optional 12px sub-line.
@@ -857,7 +939,7 @@ four of which live on the class and none of which announce their absence.
 
 ### Inputs / Fields
 
-- **Style:** the input well (`--theme-input-bg`) inside a 1px `--theme-border`, 12px radius,
+- **Style:** the input well (`--theme-input-bg`) inside a 1px `--theme-border`, square,
   `9px 12px`, 13px. `.form-field` stacks a 12px/500 label over the control with a 6px gap.
 - **`.form-input` vs `.form-select`:** a text input takes `.form-input`. `.form-select` carries
   `cursor: pointer`, so a text field wearing it announces itself as a menu — 60 inputs across 22
@@ -875,7 +957,7 @@ four of which live on the class and none of which announce their absence.
   workaround.
 - **A switch's off-track is slate and its knob is the card colour.** Both hand-rolled switches
   (SSF Enrolled on the pay form, the VAT toggle on a purchase bill) shipped a white knob on a
-  `--theme-border` track — on Light the border is `#ddd6cf`, so the off state measured ~1.2:1 and
+  `--theme-border` track — on Light the border is a pale neutral, so the off state measured ~1.2:1 and
   the switch's position was unreadable (S682). The track is the accent (or amber) when on and
   `--theme-text3` when off; the knob is `--theme-card`, which contrasts with both tracks on both
   presets. The state LABEL beside it is text and takes the `*-text` variant or fog — never the
@@ -921,7 +1003,7 @@ whether their bill saved.
 ### Tabs — two families that do not mix
 
 - **`.tab-btn` (pill):** a filter or sort control that changes what one view shows. Card ground, a
-  border, 12px radius, `4px 12px`. Hover takes a 25% accent border; active takes a 50% border, the
+  border, square, `4px 12px`. Hover takes a 25% accent border; active takes a 50% border, the
   focus-ring tint as its fill and `accent-ink` as its text (the base accent failed AA here on most
   presets). Hover and active read as a progression, not two unrelated states.
 - **`.panel-tab` (underline):** a *section* within one surface, typically a modal panel. Rest is
@@ -945,7 +1027,7 @@ whether their bill saved.
 - **The module switcher** is the signature: a horizontal pill row expanded, an icon column
   collapsed, same buttons and data. Active takes `accent-ink` on the focus-ring tint with a 1px
   ring of the same tint.
-- **Nav links** are 13px fog at `4px 12px` with a 12px radius; active takes `accent-ink` on the
+- **Nav links** are 13px fog at `4px 12px`, square; active takes `accent-ink` on the
   focus-ring tint at 600. Hover is the table-hover tint. A pin-to-favourites star appears on
   `:hover` **and `:focus-within`**, since it is keyboard-reachable.
 - **The skip link** is WCAG 2.4.1 and not optional here: 41 focusable controls sit inside the
@@ -971,7 +1053,7 @@ if the positioning mechanism changes for other reasons. Both values are recorded
 
 - **Header:** 11px/500 fog, uppercase, `0.08em`, left-aligned, `10px 5px`, a structural bottom
   rule, `nowrap`.
-- **Body:** 13px parchment on `11px 5px` with `border-lt` dividers; the last row drops its
+- **Body:** 13px paper on `11px 5px` with `border-lt` dividers; the last row drops its
   divider; `tr:hover td` takes the table-hover tint.
 - **Totals:** `tfoot td` gets a 2px top rule at 700 and never takes the hover tint — it is not a
   data row. Before this rule existed, three report pages written in one week produced three

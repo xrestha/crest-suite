@@ -37,7 +37,7 @@ All colors must use CSS variables, not hardcoded hex. The full token set:
 
 Practical rules: `.badge-*` classes already point at the variants, so anything using them is covered. Reach for a variant whenever you write `color:` with a signal token. **`--theme-accent-ink` is not `--theme-accent-text`** — `accent-ink` is the accent used *as* text (a link, an active nav item); `accent-text` is the foreground that sits *on* an accent fill. And when a constant is consumed by string concatenation for alpha (`${color}22`), a `var()` breaks it — use `color-mix()` or a tint helper, as `pricingPlans.js`'s `moduleTint()` does.
 
-**Form controls do not inherit `font-family`.** `body` sets Poppins; every browser substitutes its own default into `input`/`button`/`select`/`textarea`, so before S549 every control in the app rendered in Arial. `index.css` now sets `font-family: inherit` on all four (plus `optgroup`, which Firefox styles separately). Don't re-add the per-class patches `Layout.css` had accumulated.
+**Form controls do not inherit `font-family`.** `body` sets the app font (Archivo since S689, Poppins before it); every browser substitutes its own default into `input`/`button`/`select`/`textarea`, so before S549 every control in the app rendered in Arial. `index.css` now sets `font-family: inherit` on all four (plus `optgroup`, which Firefox styles separately). Don't re-add the per-class patches `Layout.css` had accumulated.
 
 `--theme-purple` (added during the UI/UX audit pass) is for a genuine 4th/5th categorical color — e.g. Staff Meals in Stock.js/MonthlySummary.js, the sub-recipe tab underline in Recipes.js — that several files had previously hardcoded independently as the same violet hex with no shared source of truth. It is not a general-purpose semantic color like green/red/amber; reach for it only when a page already needs a distinct categorical hue beyond what accent/green/red/amber cover.
 
@@ -45,7 +45,11 @@ Practical rules: `.badge-*` classes already point at the variants, so anything u
 
 **Exception:** Recharts SVG props (`fill`, `stroke`, `tick`) must stay as literal hex — CSS `var()` does not resolve inside SVG presentation attributes. The exemption is for SVG only: a Recharts tooltip is a plain HTML `<div>`, so it takes `var()` tokens directly — no `useTheme()`-resolved hex needed — and its card chrome is `TOOLTIP_CHROME` from `src/shared/tooltipChrome.js` (S624, the `chartMotion.js` precedent). Several older chart files still carry inline copies, named in that file's comment; migrate them as touched, never add a new copy.
 
-Shape and type have their own token sets at the top of `Layout.css`: `--radius-sm|md|lg|xl|full` (8/12/18/24/999px) and `--font-size-rail-icon|brand|nav-icon|nav-item|group-label|micro|chevron`. Both scales are **closed sets** — DESIGN.md's frontmatter is the source of truth for which steps exist, and the `/impeccable` hook flags any literal off those scales. If a genuinely new step is needed, add it to DESIGN.md first, then use it.
+Shape and type have their own token sets at the top of `Layout.css`: `--radius-xs|sm|md|lg|xl|full` and `--font-size-rail-icon|brand|nav-icon|nav-item|group-label|micro|chevron`. Both scales are **closed sets** — DESIGN.md's frontmatter is the source of truth for which steps exist, and the `/impeccable` hook flags any literal off those scales. If a genuinely new step is needed, add it to DESIGN.md first, then use it.
+
+**The visual system is Modernist as of S689.** Two presets — Modernist Night (`#191817` ground, accent `#ff563c`) and Modernist Light (`#f3f2f2`, accent `#ec3013`) — plus Archivo, flat surfaces, and structure carried by rule WEIGHT rather than by corners or atmosphere. The four signal colours and Light's four `*Text` variants were carried over byte-identical; the one token a new accent genuinely forced was `accentInk`, on both presets, because a red accent lands next to the danger and warning slots in a way brass never did (Light's specified `#ae1800` measured ΔE **0.5** from `amberText` under deuteranopia). Re-run those pairs before touching either ink. `node scripts/check-design-layers.mjs` asserts `PRESETS`, DESIGN.md's frontmatter and the sidecar still agree.
+
+**Every radius step is 0 (S689, Modernist).** The six names were kept rather than deleted because ~420 sites read them, and a scale with a home can be re-tuned in one edit where 420 hardcoded zeroes cannot — so keep picking the step that describes the element's size class, exactly as before, and it will paint square either way. The practical consequence for the closed-scale rule is that it got *stricter*: any non-zero radius inside `src/` is drift by definition, with two exemptions named in DESIGN.md → Shapes (print templates, and the scoped guest surfaces, which keep their own shape language for the same reason they keep their own palette). Anything below describing the scale as 8/12/18/24/999 is an account of how a past finding was judged at the time, not the current scale.
 
 ### Motion, and the two systems that don't talk to each other (S533)
 
@@ -692,6 +696,15 @@ frontmatter value, every mapped token equals `PRESETS.dark`, the four `*-text` v
 `accent-ink` and `focus-outline` all resolve to their dark fallbacks, and the do's, don'ts and key
 characteristics were already verbatim-identical to the prose. The entire drift was **one rule the
 code had acquired and the file had never been told about**, plus two `typographyMeta` purposes.
+
+**Those checks are now a script: `node scripts/check-design-layers.mjs` (S689).** It asserts every
+frontmatter colour has a `colorMeta` entry and that its `canonical` matches, every type role has a
+`typographyMeta` entry, every mapped token equals `PRESETS.dark`, that `focus-outline` resolves from
+`accentInk` the way `applyTheme` does, and that the radius scale is closed. Written during the
+Modernist re-theme — the pass that moved every colour at once and so most needed it — and it caught
+a real gap on its first run: a new `button-label` type role with no sidecar entry. Deliberately NOT
+in `build:verify`; it reads three files an ordinary feature branch never touches, and a check that
+fails for reasons unrelated to your change is one people learn to skip. Run it after any preset move.
 
 **Write those checks as assertions, not as a reading pass.** They run in seconds against
 `DESIGN.md`'s frontmatter, the sidecar and `ThemeContext.js`, and they are the only thing that

@@ -374,7 +374,7 @@ export default function AuditLog() {
           What does the Audit Log record?
         </button>
         {helpOpen && (
-          <div style={{ marginTop: 12, background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ marginTop: 12, background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 0, overflow: 'hidden' }}>
             <div className="table-wrap">
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>

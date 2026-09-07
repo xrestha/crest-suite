@@ -14,7 +14,7 @@ const STAFF = {
   manifest: '/staff.webmanifest',
   appleIcon: '/staff180.png',
   appleTitle: 'Crest Staff',
-  themeColor: '#0f1117',
+  themeColor: '#191817',
 }
 
 function setTag(selector, attr, value) {
@@ -37,8 +37,9 @@ export function useStaffAppManifest() {
       setTag('link[rel="manifest"]', 'href', STAFF.manifest),
       setTag('link[rel="apple-touch-icon"]', 'href', STAFF.appleIcon),
       setTag('meta[name="apple-mobile-web-app-title"]', 'content', STAFF.appleTitle),
-      // The admin app's theme-color is the gold accent; on this surface the browser bar should
-      // read as part of the app's own ground, which is what the manifest declares too.
+      // Both apps now sit on the same ink ground, so this no longer CHANGES the browser bar —
+      // it pins it, so the value survives whatever the admin shell last set and matches what
+      // staff.webmanifest declares. Kept explicit for that reason, not because it differs.
       setTag('meta[name="theme-color"]', 'content', STAFF.themeColor),
     ].filter(Boolean)
     return () => restores.forEach(fn => fn())

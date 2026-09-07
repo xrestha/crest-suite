@@ -185,7 +185,7 @@ export default function BsCalendarPicker({
     color: enabled ? 'var(--theme-text2)' : 'transparent',
     fontSize: touch ? 22 : 18, lineHeight: 1,
     padding: touch ? '8px 14px' : '2px 8px', minHeight: touch ? 44 : undefined,
-    borderRadius: 4, fontFamily: 'inherit',
+    borderRadius: 0, fontFamily: 'inherit',
   })
 
   const popover = open ? createPortal(
@@ -204,7 +204,7 @@ export default function BsCalendarPicker({
         zIndex:    9999,
         background: 'var(--theme-card)',
         border:    '1px solid var(--theme-border)',
-        borderRadius: 10,
+        borderRadius: 0,
         boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
         padding:   '10px 10px 6px',
       }}
@@ -223,7 +223,7 @@ export default function BsCalendarPicker({
               onChange={e => setNavMonth(parseInt(e.target.value, 10))}
               style={{
                 flex: 1.3, minWidth: 0, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-                borderRadius: 5, padding: touch ? '10px 8px' : '4px 4px',
+                borderRadius: 0, padding: touch ? '10px 8px' : '4px 4px',
                 // 16px on touch: below it iOS zooms the viewport the moment this select is opened.
                 fontSize: touch ? 16 : 11, minHeight: touch ? 44 : undefined,
                 color: 'var(--theme-text1)',

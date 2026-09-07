@@ -62,7 +62,7 @@ function DenomGrid({ counts, onChange }) {
           ₨-label and its running subtotal squeezed onto one 82px line. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))', gap: 8 }}>
         {DENOMINATIONS.map(d => (
-          <div key={d} style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '6px 8px' }}>
+          <div key={d} style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '6px 8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>₨{d}</span>
               <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{fmtNpr(d * (parseInt(counts[d]) || 0))}</span>

@@ -1143,7 +1143,7 @@ export default function Roster() {
                                           ? 'repeating-linear-gradient(45deg, color-mix(in srgb, var(--theme-red) 18%, transparent), color-mix(in srgb, var(--theme-red) 18%, transparent) 4px, color-mix(in srgb, var(--theme-red) 6%, transparent) 4px, color-mix(in srgb, var(--theme-red) 6%, transparent) 8px)'
                                           : shift ? shift.color + '22' : 'transparent',
                                         border:     onLeave ? '1px solid color-mix(in srgb, var(--theme-red) 55%, transparent)' : shift ? `1px solid ${shift.color}55` : '1px dashed var(--theme-border)',
-                                        borderRadius: 6, cursor: 'pointer',
+                                        borderRadius: 0, cursor: 'pointer',
                                         padding: viewMode === 'weekly' ? '6px 6px' : '2px',
                                         display: 'flex', flexDirection: 'column',
                                         alignItems: 'center', justifyContent: 'center', gap: 1,

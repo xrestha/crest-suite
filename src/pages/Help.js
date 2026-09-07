@@ -1191,7 +1191,7 @@ export default function Help() {
                     <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
                       Crest tracks your ingredient purchases, stock levels, and food cost in real time. The core idea is simple:
                     </p>
-                    <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
+                    <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
                       <span style={{ fontSize: 13, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>Opening Stock + Purchases − Wastage − Closing Stock = COGS (what you actually used)</span>
                     </div>
                     <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
@@ -1216,11 +1216,11 @@ export default function Help() {
               { step: 5, title: 'Build your Recipes', desc: 'Go to Recipe Costing → New Recipe → add each menu item with its ingredients and selling price.', why: 'Required for the Variance Report and food cost % per dish. Skip this step if you are on the Starter plan.', plan: 'Growth+' },
             ].map((s, i, arr) => (
               <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border)' : 'none' }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'color-mix(in srgb, var(--theme-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
+                <div style={{ width: 32, height: 32, borderRadius: 0, background: 'color-mix(in srgb, var(--theme-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{s.title}</span>
-                    {s.plan && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '1px 7px', borderRadius: 8 }}>{s.plan}</span>}
+                    {s.plan && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '1px 7px', borderRadius: 0 }}>{s.plan}</span>}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 6 }}>{s.desc}</div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
@@ -1247,11 +1247,11 @@ export default function Help() {
               { step: 9, title: 'Close the Period',                 desc: 'Periods → Close → confirm. Locks all data. Closing stock automatically becomes opening stock for next month.' },
             ].map((s, i, arr) => (
               <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
-                <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
+                <div style={{ width: 26, height: 26, borderRadius: 0, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{s.title}</span>
-                    {s.plan && <span style={{ fontSize: 11, fontWeight: 700, color: s.plan === 'Growth+' ? 'var(--theme-green-text)' : 'var(--theme-text3)', background: s.plan === 'Growth+' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'rgba(156,163,175,0.1)', border: `1px solid ${s.plan === 'Growth+' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'rgba(156,163,175,0.2)'}`, padding: '1px 7px', borderRadius: 8 }}>{s.plan}</span>}
+                    {s.plan && <span style={{ fontSize: 11, fontWeight: 700, color: s.plan === 'Growth+' ? 'var(--theme-green-text)' : 'var(--theme-text3)', background: s.plan === 'Growth+' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'rgba(156,163,175,0.1)', border: `1px solid ${s.plan === 'Growth+' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'rgba(156,163,175,0.2)'}`, padding: '1px 7px', borderRadius: 0 }}>{s.plan}</span>}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.desc}</div>
                 </div>
@@ -1299,7 +1299,7 @@ export default function Help() {
                       <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
                         Crest HR runs payroll, attendance, and Nepal-compliant SSF/TDS deductions for your staff. The core idea is simple:
                       </p>
-                      <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
+                      <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '10px 16px', display: 'inline-block', marginBottom: 8 }}>
                         <span style={{ fontSize: 13, color: 'var(--theme-green-text)', fontWeight: 600 }}>Attendance → Payroll: what you mark each day becomes what people get paid</span>
                       </div>
                     </>
@@ -1315,7 +1315,7 @@ export default function Help() {
               <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Do this once when you first turn on Crest HR.</p>
               {HR_SETUP_STEPS.map((s, i, arr) => (
                 <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border)' : 'none' }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'color-mix(in srgb, var(--theme-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ width: 32, height: 32, borderRadius: 0, background: 'color-mix(in srgb, var(--theme-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{s.title}</div>
                     <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 6 }}>{s.desc}</div>
@@ -1333,7 +1333,7 @@ export default function Help() {
               <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Repeat this every BS month.</p>
               {HR_WORKFLOW_STEPS.map((s, i, arr) => (
                 <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
-                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ width: 26, height: 26, borderRadius: 0, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 3 }}>{s.title}</div>
                     <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.desc}</div>
@@ -1376,7 +1376,7 @@ export default function Help() {
                       <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.75 }}>
                         Crest POS runs your floor — tables, orders, billing, and shift reconciliation. The core idea is simple:
                       </p>
-                      <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '10px 16px', display: 'inline-block' }}>
+                      <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '10px 16px', display: 'inline-block' }}>
                         <span style={{ fontSize: 13, color: 'var(--theme-purple-text)', fontWeight: 600 }}>Order → Bill → Shift Close: every sale reconciles back to the cash drawer at day's end</span>
                       </div>
                     </>
@@ -1392,7 +1392,7 @@ export default function Help() {
               <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Do this once when you first turn on Crest POS.</p>
               {POS_SETUP_STEPS.map((s, i, arr) => (
                 <div key={s.step} style={{ display: 'flex', gap: 16, marginBottom: 16, paddingBottom: 16, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border)' : 'none' }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'color-mix(in srgb, var(--theme-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ width: 32, height: 32, borderRadius: 0, background: 'color-mix(in srgb, var(--theme-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 4 }}>{s.title}</div>
                     <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 6 }}>{s.desc}</div>
@@ -1410,7 +1410,7 @@ export default function Help() {
               <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--theme-text2)' }}>Repeat this every shift/day the floor is open.</p>
               {POS_WORKFLOW_STEPS.map((s, i, arr) => (
                 <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: 12, paddingBottom: 12, borderBottom: i < arr.length - 1 ? '1px solid var(--theme-border-lt)' : 'none' }}>
-                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
+                  <div style={{ width: 26, height: 26, borderRadius: 0, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>{s.step}</div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 3 }}>{s.title}</div>
                     <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{s.desc}</div>
@@ -1448,7 +1448,7 @@ export default function Help() {
               >
                 <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>▦</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest IMS</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Active</span>
                 {!isAdmin && (
                   <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginLeft: 4 }}>
                     {plan === 'pro' ? 'Pro Plan' : plan === 'growth' ? 'Growth Plan' : 'Starter Plan'}
@@ -1467,7 +1467,7 @@ export default function Help() {
                         {tier.label}
                       </span>
                       {!unlocked && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: tier.planColor, background: colorTint(tier.planColor, 8), border: `1px solid ${colorTint(tier.planColor, 19)}`, padding: '1px 7px', borderRadius: 8 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: tier.planColor, background: colorTint(tier.planColor, 8), border: `1px solid ${colorTint(tier.planColor, 19)}`, padding: '1px 7px', borderRadius: 0 }}>
                           🔒 {tier.features.length} features locked
                         </span>
                       )}
@@ -1485,14 +1485,14 @@ export default function Help() {
                       <div style={{
                         marginTop: 8, padding: '10px 14px',
                         background: colorTint(tier.planColor, 3), border: `1px dashed ${colorTint(tier.planColor, 19)}`,
-                        borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12
+                        borderRadius: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12
                       }}>
                         <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                           Upgrade to <strong style={{ color: tier.planColor }}>{tier.planLabel}</strong> to unlock {tier.features.length} features
                         </span>
                         <button
                           onClick={() => navigate('/pricing')}
-                          style={{ fontSize: 11, fontWeight: 700, color: tier.planColor, background: colorTint(tier.planColor, 8), border: `1px solid ${colorTint(tier.planColor, 21)}`, borderRadius: 5, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                          style={{ fontSize: 11, fontWeight: 700, color: tier.planColor, background: colorTint(tier.planColor, 8), border: `1px solid ${colorTint(tier.planColor, 21)}`, borderRadius: 0, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }}
                         >
                           View plans →
                         </button>
@@ -1513,7 +1513,7 @@ export default function Help() {
               >
                 <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>👤</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest HR</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Active</span>
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('hr') ? '▲' : '▼'}</span>
               </div>
               {moduleOpen('hr') && (
@@ -1538,7 +1538,7 @@ export default function Help() {
               >
                 <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>⊕</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest POS</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 10 }}>Active</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Active</span>
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('pos') ? '▲' : '▼'}</span>
               </div>
               {moduleOpen('pos') && (
@@ -1560,7 +1560,7 @@ export default function Help() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
                 <span style={{ fontSize: 18, color: 'var(--theme-red-text)' }}>⚙</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Admin Tools</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)', padding: '2px 8px', borderRadius: 10 }}>Crest Admin Only</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Crest Admin Only</span>
               </div>
               {ADMIN_FEATURES.map(feat => (
                 <FeatureCard key={feat.name} feat={feat} moduleKey="admin" />
@@ -1608,16 +1608,16 @@ export default function Help() {
         <div>
           <div style={{ textAlign: 'center', marginBottom: 28 }}>
             <div style={{ display: 'flex', justifyContent: 'center', gap: 7, marginBottom: 10 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: MODULE_COLORS.ims }} />
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: MODULE_COLORS.hr }} />
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: MODULE_COLORS.pos }} />
+              <span style={{ width: 8, height: 8, borderRadius: 0, background: MODULE_COLORS.ims }} />
+              <span style={{ width: 8, height: 8, borderRadius: 0, background: MODULE_COLORS.hr }} />
+              <span style={{ width: 8, height: 8, borderRadius: 0, background: MODULE_COLORS.pos }} />
             </div>
             <h2 style={{ fontSize: 28, fontWeight: 800, margin: '0 0 8px', fontFamily: 'Georgia, serif', color: 'var(--theme-text1)' }}>Plans & Pricing</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>One system for IMS, HR, and POS — pick a module or bundle them all</p>
-            <div style={{ display: 'inline-flex', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: 3, gap: 2 }}>
-              <button onClick={() => setPricingAnnual(false)} style={{ background: !pricingAnnual ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'none', border: !pricingAnnual ? '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)' : '1px solid transparent', color: !pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Monthly</button>
-              <button onClick={() => setPricingAnnual(true)}  style={{ background:  pricingAnnual ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'none', border:  pricingAnnual ? '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)' : '1px solid transparent', color:  pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                Annual <span style={{ background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', color: 'var(--theme-green-text)', fontSize: 9, padding: '2px 7px', borderRadius: 8, fontWeight: 700 }}>Save 25%</span>
+            <div style={{ display: 'inline-flex', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: 3, gap: 2 }}>
+              <button onClick={() => setPricingAnnual(false)} style={{ background: !pricingAnnual ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'none', border: !pricingAnnual ? '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)' : '1px solid transparent', color: !pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Monthly</button>
+              <button onClick={() => setPricingAnnual(true)}  style={{ background:  pricingAnnual ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'none', border:  pricingAnnual ? '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)' : '1px solid transparent', color:  pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                Annual <span style={{ background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', color: 'var(--theme-green-text)', fontSize: 9, padding: '2px 7px', borderRadius: 0, fontWeight: 700 }}>Save 25%</span>
               </button>
             </div>
           </div>
@@ -1631,14 +1631,14 @@ export default function Help() {
               return (
                 <div key={plan.key} className="card" style={{ border: highlight ? `1px solid ${colorTint(MODULE_COLORS.ims, 44)}` : '1px solid var(--theme-border)', position: 'relative', display: 'flex', flexDirection: 'column', padding: '32px 22px 22px', boxShadow: highlight ? `0 4px 32px ${colorTint(MODULE_COLORS.ims, 9)}` : 'none' }}>
                   {highlight && (
-                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: 'var(--theme-accent-text)', fontSize: 9, fontWeight: 800, padding: '3px 12px', borderRadius: 8, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: 'var(--theme-accent-text)', fontSize: 9, fontWeight: 800, padding: '3px 12px', borderRadius: 0, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                       Most Popular
                     </div>
                   )}
                   <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 16, fontWeight: 700, color: MODULE_INK.ims, fontFamily: 'Georgia, serif' }}>{plan.label}</span>
                     {plan.key === 'starter' && !pricingAnnual && (
-                      <span style={{ fontSize: 9, fontStyle: 'italic', fontWeight: 800, color: MODULE_INK.ims, background: colorTint(MODULE_COLORS.ims, 8), border: `1px solid ${colorTint(MODULE_COLORS.ims, 25)}`, padding: '2px 6px', borderRadius: 7, letterSpacing: '0.05em' }}>
+                      <span style={{ fontSize: 9, fontStyle: 'italic', fontWeight: 800, color: MODULE_INK.ims, background: colorTint(MODULE_COLORS.ims, 8), border: `1px solid ${colorTint(MODULE_COLORS.ims, 25)}`, padding: '2px 6px', borderRadius: 0, letterSpacing: '0.05em' }}>
                         FREE FOR 7 DAYS TRIAL
                       </span>
                     )}
@@ -1736,7 +1736,7 @@ export default function Help() {
                 {email   && <a href={`mailto:${email}`} style={{ color: 'var(--theme-accent-ink)', fontSize: 13, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>✉ {email}</a>}
                 {website && <a href={website.startsWith('http') ? website : `https://${website}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--theme-accent-ink)', fontSize: 13, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>🌐 {website}</a>}
                 {!phone && !email && !website && <span style={{ fontSize: 13, color: 'var(--theme-text3)' }}>Contact your Crest consultant to upgrade.</span>}
-                <button onClick={() => navigate('/pricing')} style={{ background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', color: 'var(--theme-accent-ink)', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                <button onClick={() => navigate('/pricing')} style={{ background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', color: 'var(--theme-accent-ink)', padding: '8px 16px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                   View full pricing page →
                 </button>
               </div>

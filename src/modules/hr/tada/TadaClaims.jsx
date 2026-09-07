@@ -26,7 +26,7 @@ const fmtD = iso => {
 }
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-  borderRadius: 6, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
+  borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)',
   outline: 'none', width: '100%', fontFamily: 'inherit',
 }
 const lbl = { fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }

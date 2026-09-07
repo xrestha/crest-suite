@@ -27,7 +27,7 @@ const lbl = {
   display: 'block', marginBottom: 4,
 }
 const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6,
+  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
   padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none',
   fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
 }
@@ -382,7 +382,7 @@ export default function Overtime() {
                         {e.reason || <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: sc.color, background: sc.bg, border: `1px solid ${sc.border}` }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 0, color: sc.color, background: sc.bg, border: `1px solid ${sc.border}` }}>
                           {e.status.charAt(0).toUpperCase() + e.status.slice(1)}
                         </span>
                       </td>

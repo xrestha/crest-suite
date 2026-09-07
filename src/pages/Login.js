@@ -4,30 +4,11 @@ import { Hexagon } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { useCapsLock } from '../shared/hooks/useCapsLock'
-import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
 import { TRIAL_DAYS } from '../data/pricingPlans'
-import { acceptancePayload, legalPath } from '../legal'
+import { legalPath } from '../legal'
 import { supabase } from '../supabaseClient'
-import FieldError, { fieldAria } from '../components/FieldError'
 import SupportContactLine from '../components/SupportContactLine'
 import './Login.css'
-
-async function edgeOp(action, params = {}) {
-  const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-    body: { action, ...params },
-  })
-  if (error) {
-    let detail = error.message || 'Error'
-    try { const b = await error.context.json(); detail = b?.error?.message || b?.error || b?.message || detail } catch (_) {}
-    throw new Error(detail)
-  }
-  if (data?.error) throw new Error(data.error.message || data.error || 'Failed')
-  return data
-}
-
-// Mirrors the `register_trial` Edge Function's own check exactly, so the form never accepts an
-// address the server is about to reject.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // Every sign-in failure used to collapse into "Invalid email or password." That generic string is
 // the right answer for a *credential* failure — it's what stops this form being used to enumerate
@@ -113,10 +94,17 @@ const DATA_PROMISE = 'Your data stays yours. Ask any time and we hand it all bac
 
 export default function Login() {
   const location = useLocation()
-  const startOnTrial = new URLSearchParams(location.search).get('trial') === '1'
+  const params = new URLSearchParams(location.search)
+  // /login?trial=1 used to scroll to the in-page signup band and focus its first field. The band
+  // is a route now, so the deep link becomes a redirect and keeps working from every place that
+  // still points at it (Pricing's two CTAs, and any link a visitor has bookmarked).
+  const wantsTrial = params.get('trial') === '1'
+  // Set by Signup's post-creation notice when auto sign-in failed, so the address does not have
+  // to be retyped on the page that was just told it exists.
+  const prefillEmail = params.get('email') || ''
 
   // Sign-in state
-  const [email, setEmail]               = useState('')
+  const [email, setEmail]               = useState(prefillEmail)
   const [password, setPassword]         = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError]               = useState('')
@@ -129,23 +117,6 @@ export default function Login() {
   const [forgotError, setForgotError]   = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
   const [forgotSent, setForgotSent]     = useState(false)
-
-  // Trial signup state
-  const [tBiz, setTBiz]         = useState('')
-  const [tName, setTName]       = useState('')
-  const [tPhone, setTPhone]     = useState('')
-  const [tEmail, setTEmail]     = useState('')
-  const [tPass, setTPass]       = useState('')
-  const [tShowPass, setTShowPass] = useState(false)
-  const [tError, setTError]     = useState('')
-  const [tFieldErr, setTFieldErr] = useState({})
-  const [tLoading, setTLoading] = useState(false)
-  // Unchecked by default and required, which is the whole difference between a clickwrap and
-  // the passive sentence this replaced. The server refuses the signup without it too --
-  // a consent control the browser can skip is not a consent control.
-  const [tLegal, setTLegal]     = useState(false)
-  const [trialSuccess, setTrialSuccess] = useState(false)
-  const [trialCaps, trialCapsHandlers] = useCapsLock()
 
   const { signIn, session, ready, profile } = useAuth()
   const { settings } = useSettings()
@@ -179,65 +150,6 @@ export default function Login() {
     setForgotSent(true)
   }
 
-  async function handleTrialSignup(e) {
-    e.preventDefault()
-    setTError('')
-
-    // Validated per field rather than as one message at the bottom of the form: a single shared
-    // error line means someone who missed Phone reads about it nowhere near Phone. The first
-    // offending field also takes focus, so keyboard and screen-reader users land on the thing
-    // they need to fix instead of hunting for it.
-    const errs = {}
-    if (!tBiz.trim())                        errs['trial-biz']   = 'Business name is required.'
-    if (!tEmail.trim())                      errs['trial-email'] = 'Email is required.'
-    else if (!EMAIL_RE.test(tEmail.trim()))  errs['trial-email'] = 'Enter a valid email address.'
-    if (!tPhone.trim())                      errs['trial-phone'] = 'Phone number is required.'
-    if (!tLegal)                             errs['trial-legal'] = 'Please accept the Terms of Service and Privacy Policy to continue.'
-    if (!tPass)                              errs['trial-password'] = 'Password is required.'
-    else if (tPass.length < MIN_PASSWORD_LENGTH) {
-      errs['trial-password'] = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
-    } else {
-      const weak = weakPasswordReason(tPass, { businessName: tBiz, email: tEmail })
-      if (weak) errs['trial-password'] = weak
-    }
-
-    setTFieldErr(errs)
-    const firstInvalid = ['trial-biz', 'trial-email', 'trial-password', 'trial-phone', 'trial-legal'].find(id => errs[id])
-    if (firstInvalid) { document.getElementById(firstInvalid)?.focus(); return }
-
-    setTLoading(true)
-    try {
-      await edgeOp('register_trial', {
-        business_name: tBiz.trim(),
-        full_name:     tName.trim() || tBiz.trim(),
-        phone:         tPhone.trim(),
-        email:         tEmail.trim().toLowerCase(),
-        password:      tPass,
-        // The version and hash of what was actually on screen, from the bundle this browser has
-        // loaded -- not what the server happens to think is current. The two can differ for as
-        // long as a cached bundle survives a deploy. No IP, no user agent, no identity: those are
-        // read server-side off the request, because a subject that supplies its own attribution
-        // has not been attributed.
-        accepted_legal: acceptancePayload(),
-      })
-      const { error: signInErr } = await signIn(tEmail.trim().toLowerCase(), tPass)
-      if (signInErr) {
-        setTrialSuccess(true)
-        setEmail(tEmail.trim().toLowerCase())
-      } else {
-        navigate('/dashboard')
-      }
-    } catch (err) {
-      const msg = err.message || 'Something went wrong. Please try again.'
-      const isAlreadyRegistered = msg.includes('already exists') || msg.includes('already registered') || msg.includes('profiles_pkey')
-      setTError(isAlreadyRegistered
-        ? 'An account with this email already exists. Use the sign-in form above.'
-        : msg)
-    } finally {
-      setTLoading(false)
-    }
-  }
-
   // Someone who is already signed in has no business being shown a sign-in form — `/` redirects
   // via RootRedirect but `/login` had no equivalent, so a stale tab or a back-button press landed
   // on an empty login form for an authenticated session. Gated on `ready` so this never fires
@@ -250,12 +162,12 @@ export default function Login() {
   // instead of ping-ponging.
   if (ready && session && profile) return <Navigate to="/dashboard" replace />
 
-  // aria-invalid tells assistive tech the field is the problem; aria-describedby points at the
-  // message explaining why. Without both, an inline error is visible but not announced. Both halves
-  // now come from the shared `FieldError` module — this page had the only copy in the product until
-  // 2026-08-23/S603, which is what made it a pattern nobody else could reach for.
-  const trialFieldError = (id) => <FieldError id={id} message={tFieldErr[id]} />
-  const trialFieldAria  = (id) => fieldAria(id, tFieldErr[id])
+  // The ?trial=1 deep link, preserved. It used to scroll to the in-page band and focus its first
+  // field; the band is a route now, so the same URL forwards there instead of landing someone on
+  // a sign-in page they did not ask for. `replace` so Back returns to wherever they came from
+  // rather than bouncing through this redirect again. Kept AFTER the signed-in check on purpose:
+  // an authenticated visitor following an old trial link wants their dashboard, not a signup form.
+  if (wantsTrial) return <Navigate to="/signup?trial=1" replace />
 
   return (
     <div className="login-page">
@@ -275,7 +187,7 @@ export default function Login() {
               already names the brand, and a labelled mark announces it twice. */}
           <div className="login-brand-mark">
             {settings?.logo_url
-              ? <img src={settings.logo_url} alt="" style={{ width: 26, height: 26, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
+              ? <img src={settings.logo_url} alt="" style={{ width: 26, height: 26, objectFit: 'contain', borderRadius: 0, flexShrink: 0 }} />
               : <Hexagon size={26} strokeWidth={2.25} aria-hidden="true" style={{ color: 'var(--theme-accent)', flexShrink: 0 }} />}
             <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
           </div>
@@ -288,9 +200,15 @@ export default function Login() {
               className="login-btn login-btn--pricing">
               Pricing
             </button>
-            <a href="#start-trial" className="login-btn login-btn--trial login-btn--nav">
-              Start free trial →
-            </a>
+            {/* A router navigation, not the `<a href="#start-trial">` in-page jump this was:
+                the band it jumped to is a route now. As a button it also stops being the one
+                underlined blue-ish thing in the header on a preset that styles links. */}
+            <button
+              type="button"
+              onClick={() => navigate('/signup')}
+              className="login-btn login-btn--trial login-btn--nav">
+              <span>Start free trial</span><span aria-hidden="true">→</span>
+            </button>
           </nav>
         </div>
       </header>
@@ -316,10 +234,15 @@ export default function Login() {
             {/* One list, one lit spine. Six module lines in POS → IMS → HR order; the seventh sits
                 outside the list below, because it is a promise about the company rather than a
                 feature of any module. */}
+            {/* Numbered rows, not bullet beads (Modernist). The number is the ordering device the
+                lit spine used to be — six lines in POS → IMS → HR order, each on its own 1px rule,
+                so the list reads as a specification rather than as marketing. `index` is a safe
+                key input here only because it is paired with the text: the array is a module-level
+                constant that never reorders. */}
             <ul className="login-highlights">
-              {HIGHLIGHT_GROUPS.flatMap(group => group.lines).map(text => (
+              {HIGHLIGHT_GROUPS.flatMap(group => group.lines).map((text, i) => (
                 <li key={text}>
-                  <span className="login-highlight-bullet" />
+                  <span className="login-highlight-num" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
                   <span>{text}</span>
                 </li>
               ))}
@@ -331,7 +254,7 @@ export default function Login() {
                 how much space sat above it. It keeps the bead: it is still one of the promises,
                 just not one a module makes. */}
             <p className="login-data-promise">
-              <span className="login-highlight-bullet" />
+              <span className="login-promise-mark" aria-hidden="true" />
               <span>{DATA_PROMISE}</span>
             </p>
           </div>
@@ -371,7 +294,7 @@ export default function Login() {
                 <form onSubmit={handleSignIn} className="login-form">
                   <div className="login-field">
                     <label htmlFor="signin-email">Email</label>
-                    <input id="signin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus={!startOnTrial} />
+                    <input id="signin-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus />
                   </div>
                   <div className="login-field">
                     {/* "Forgot password?" sits in the label row rather than on its own line below
@@ -404,12 +327,17 @@ export default function Login() {
                       for a way in, not in the header among the marketing links — and paired like
                       this it costs the page a column instead of a whole row. type="button" keeps
                       it from submitting the form it now sits inside. */}
+                  {/* Stacked and full-width, not side by side. Two 50% buttons made Staff Login
+                      read as the equal-weight alternative to signing in, which it is not — it is
+                      the way in for a till, and most visitors here are not one. Stacked, the
+                      primary owns the row and the secondary is plainly the second option.
+                      Both take the flush-left label + trailing arrow. */}
                   <div className="login-actions">
-                    <button type="submit" className="login-btn" disabled={loading}>
-                      {loading ? 'Signing in…' : 'Sign in'}
+                    <button type="submit" className="login-btn login-btn--flush" disabled={loading}>
+                      <span>{loading ? 'Signing in…' : 'Sign in'}</span><span aria-hidden="true">→</span>
                     </button>
-                    <button type="button" className="login-staff-btn" onClick={() => navigate('/pos/login')}>
-                      Staff Login →
+                    <button type="button" className="login-staff-btn login-btn--flush" onClick={() => navigate('/pos/login')}>
+                      <span>Staff Login</span><span aria-hidden="true">→</span>
                     </button>
                   </div>
                 </form>
@@ -418,110 +346,29 @@ export default function Login() {
           </div>
         </section>
 
-        {/* ── Trial signup: its own full-bleed band, so account creation reads as a distinct
-            section of the page rather than a footnote inside the sign-in card. ── */}
-        <section className="login-trial-band" id="start-trial">
-          <div className="login-trial-inner">
-          {/* A real heading, not a styled div: this block creates a live client account, and the
-              page's only heading was "Welcome back" — so the sign-in form and the account-creation
-              form were indistinguishable in the heading outline, and the conversion CTA sat under
-              the quietest text tier in the system. */}
-          <div className="login-band-head">
-            <h2 className="login-band-title">Start your free trial</h2>
-            <p className="login-band-sub">Starter plan, free for {TRIAL_DAYS} days · No credit card · Nothing to install</p>
+        {/* ── The signup band, after the form moved to /signup ─────────────────────────────
+            This used to be the whole trial form: seven fields, a consent checkbox and a submit,
+            inside a full-bleed accent-lit band. It was the page's second job, and the page could
+            not fit its own viewport budget while carrying it (measured 146px of overflow at
+            1366x768, S553/S560).
+
+            What is left is the invitation, not the form: a 2px rule, the question, the terms in
+            one line, and the way through on the right. Both this button and the header's go to
+            the same route, so there is one destination rather than an in-page jump and a link
+            that disagreed about where signing up happens. ── */}
+        <section className="login-signup-band">
+          <div className="login-signup-copy">
+            <h2 className="login-signup-title">New to {settings?.app_name || 'Crest Suite'}?</h2>
+            <p className="login-signup-sub">
+              Starter plan, free for {TRIAL_DAYS} days · No credit card · Nothing to install
+            </p>
           </div>
-
-          {trialSuccess ? (
-            <div className="login-notice" role="status">
-              Account created! Sign in above with your email and password.
-            </div>
-          ) : (
-            // noValidate so our own per-field messages are what the user sees, rather than the
-            // browser's native bubbles firing first and pre-empting them. `required` stays on the
-            // inputs regardless — it's what conveys "this field is mandatory" to assistive tech.
-            <form onSubmit={handleTrialSignup} className="login-form" noValidate>
-              {/* One grid for both rows, not two stacked grids. As two, each row's `fr` tracks
-                  resolved against its own content, so Your Name's right edge sat ~45px past
-                  Business Name's directly above it — the kind of misalignment that is obvious in
-                  a render and invisible in the source. */}
-              <div className="login-trial-grid">
-                <div className="login-field">
-                  <label htmlFor="trial-biz">Business Name *</label>
-                  <input id="trial-biz" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" required {...trialFieldAria('trial-biz')} autoFocus={startOnTrial} />
-                  {trialFieldError('trial-biz')}
-                </div>
-                <div className="login-field">
-                  {/* "Business email" / "Create a password", not "Email" / "Password": the
-                      sign-in form 300px above uses those exact labels with the same placeholder,
-                      and the two forms have opposite consequences — one signs you in, the other
-                      creates a real client record. Nothing but proximity distinguished them. */}
-                  <label htmlFor="trial-email">Business email *</label>
-                  <input id="trial-email" type="email" autoComplete="email" value={tEmail} onChange={e => setTEmail(e.target.value)} placeholder="you@restaurant.com" required {...trialFieldAria('trial-email')} />
-                  {trialFieldError('trial-email')}
-                </div>
-                <div className="login-field">
-                  <label htmlFor="trial-password">Create a password *</label>
-                  <input id="trial-password" type={tShowPass ? 'text' : 'password'} autoComplete="new-password" value={tPass} onChange={e => setTPass(e.target.value)} {...trialCapsHandlers} placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`} required {...trialFieldAria('trial-password')} />
-                  {trialCaps && <span className="login-caps-hint" role="status">Caps Lock is on</span>}
-                  {trialFieldError('trial-password')}
-                </div>
-                <label className="login-show-pw login-show-pw--inline">
-                  <input type="checkbox" checked={tShowPass} onChange={e => setTShowPass(e.target.checked)} />
-                  Show password
-                </label>
-                <div className="login-field">
-                  <label htmlFor="trial-name">Your Name <span className="login-optional">(optional)</span></label>
-                  <input id="trial-name" value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
-                </div>
-                <div className="login-field">
-                  <label htmlFor="trial-phone">Phone *</label>
-                  <input id="trial-phone" type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" required {...trialFieldAria('trial-phone')} />
-                  {trialFieldError('trial-phone')}
-                </div>
-                <button type="submit" className="login-btn login-btn--trial login-btn--inline" disabled={tLoading}>
-                  {tLoading ? 'Creating your account…' : 'Start Free Trial →'}
-                </button>
-              </div>
-              {tError && <p className="login-error" role="alert">{tError}</p>}
-
-              {/* The old "7-day free trial · Starter plan · No credit card needed" line that sat
-                  here said the same thing as the hero eyebrow and this band's own subline — three
-                  statements of one fact, on a page that has to fit a viewport. It now lives in the
-                  subline above only. */}
-              {/* This was a passive sentence — "By starting a trial you agree to our Terms of
-                  Service and Privacy Policy" — naming two documents that did not exist, as plain
-                  unlinked text, with nothing recorded anywhere. Under the Electronic Transactions
-                  Act 2063 an e-contract needs clearly expressed offer and acceptance; passive
-                  notice is the weakest form of both, and unlinked passive notice of a document
-                  nobody can read is not notice at all.
-
-                  Now: unchecked by default, required, with both documents one click away in a new
-                  tab so the form state survives the trip. The acceptance is recorded server-side
-                  against the version and hash shown here. The label wraps the checkbox, so it is
-                  associated without needing htmlFor. */}
-              <label className="login-consent login-consent--check">
-                <input
-                  id="trial-legal"
-                  type="checkbox"
-                  checked={tLegal}
-                  onChange={e => { setTLegal(e.target.checked); if (e.target.checked) setTFieldErr(p => ({ ...p, 'trial-legal': undefined })) }}
-                  {...trialFieldAria('trial-legal')}
-                />
-                <span>
-                  I have read and agree to the{' '}
-                  <a href={legalPath('terms')} target="_blank" rel="noopener noreferrer">Terms of Service</a>
-                  {' '}and{' '}
-                  <a href={legalPath('privacy')} target="_blank" rel="noopener noreferrer">Privacy Policy</a>
-                  {' '}on behalf of my business.
-                </span>
-              </label>
-              {trialFieldError('trial-legal')}
-              <p className="login-consent login-consent--sub">
-                You are creating a {TRIAL_DAYS}-day free trial. No card required.
-              </p>
-            </form>
-          )}
-          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/signup')}
+            className="login-btn login-btn--trial login-btn--flush login-signup-cta">
+            <span>Start your free trial</span><span aria-hidden="true">→</span>
+          </button>
         </section>
       </main>
 

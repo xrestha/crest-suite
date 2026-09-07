@@ -53,7 +53,7 @@ quotes as the evidence of what a signed contract incorporated by reference, so u
 | Path | What lives there |
 | --- | --- |
 | `src/modules/` | The product, one directory per area: `ims/`, `hr/`, `pos/`, `admin/`, `dashboard/`, `ownerReport/` |
-| `src/pages/` | Routes belonging to no single module — login, pricing, help, settings, periods |
+| `src/pages/` | Routes belonging to no single module — login, signup, pricing, help, settings, periods |
 | `src/shared/` | Cross-module code: the scoped data-access layer, paged reads, error text, hooks |
 | `src/components/` | Reusable UI, and the route guards every protected route stacks |
 | `src/context/` | Auth, settings and theme providers. Singular `context` — the plural is a glob that has already rotted once |
@@ -61,7 +61,7 @@ quotes as the evidence of what a signed contract incorporated by reference, so u
 | `src/data/` | `pricingPlans.js` — the single source of truth for plans and prices |
 | `src/legal/` | The published Terms and Privacy Policy as markdown, their content hashes, and the registry the acceptance flow stamps. Edit a `.md` and re-run `node scripts/hash-legal.mjs`; a test fails if you forget |
 | `supabase/` | Migrations and Edge Functions |
-| `scripts/` | Build, audit and docs-check scripts, all reachable from `package.json` |
+| `scripts/` | Build, audit and docs-check scripts, all reachable from `package.json` — except `check-design-layers.mjs`, run by hand after a theme change |
 | `public/` | PWA shell and service worker, plus the second manifest for the staff app |
 
 ---
@@ -92,7 +92,14 @@ that document, and a fourth copy of the gate model would drift from the three th
   and mangles every em dash. Use `[System.IO.File]::ReadAllText` / `WriteAllText`, or a shell that
   is not PowerShell.
 - **The service worker caches aggressively.** Any JS or CSS change that existing users must actually
-  receive needs `CACHE_NAME` bumped in `public/service-worker.js`. `CLAUDE.md` explains why a plain
-  deploy is not enough.
+  receive needs `CACHE_NAME` bumped in `public/service-worker.js` **and `APP_VERSION` in
+  `src/shared/appVersion.js` moved to match** — `appVersion.test.js` fails when they disagree.
+  They had drifted nine bumps apart before S689 noticed, so the test is doing real work.
+  `CLAUDE.md` explains why a plain deploy is not enough.
 - **Every session gets a changelog entry**, written into the newest `CHANGELOG/` range file. The
   convention, including when to start a new range, is in `CHANGELOG/README.md`.
+- **A design token lives in four layers and only one of them ships.** `PRESETS` in
+  `src/context/ThemeContext.js` is what a user sees; `DESIGN.md`'s frontmatter is the normative
+  copy the `/impeccable` hook checks literals against; its prose is what gets read; and
+  `.impeccable/design.json` is generated from both. Nothing renders from the lower three, so
+  nothing fails when they are wrong. Run `node scripts/check-design-layers.mjs` after moving one.

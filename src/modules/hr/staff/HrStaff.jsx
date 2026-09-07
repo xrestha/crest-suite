@@ -334,7 +334,7 @@ export default function HrStaff() {
   const inputStyle = {
     width: '100%', boxSizing: 'border-box', padding: '8px 10px',
     background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-    borderRadius: 6, color: 'var(--theme-text1)', fontSize: 13, outline: 'none',
+    borderRadius: 0, color: 'var(--theme-text1)', fontSize: 13, outline: 'none',
   }
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
 

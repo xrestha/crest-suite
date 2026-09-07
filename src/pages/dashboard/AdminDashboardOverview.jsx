@@ -229,7 +229,7 @@ export default function AdminDashboardOverview() {
             {/* 2 — Active Today */}
             <button {...filterCard('activeToday', activeTodayClients.length > 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-border)', flexShrink: 0 }} />
+                <span style={{ width: 6, height: 6, borderRadius: 0, background: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-border)', flexShrink: 0 }} />
                 Active Today
               </div>
               <div style={{ fontSize: 24, fontWeight: 800, color: activeTodayClients.length > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
@@ -293,7 +293,7 @@ export default function AdminDashboardOverview() {
               </div>
               {wantToSub.length > 0 ? (
                 <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--theme-red)', flexShrink: 0 }} />
+                  <span style={{ width: 6, height: 6, borderRadius: 0, background: 'var(--theme-red)', flexShrink: 0 }} />
                   {wantToSub.length} want{wantToSub.length === 1 ? 's' : ''} to subscribe
                 </div>
               ) : (
@@ -428,7 +428,7 @@ export default function AdminDashboardOverview() {
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                             {isActiveToday && (
-                              <span title="Active today" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--theme-green)', flexShrink: 0 }} />
+                              <span title="Active today" style={{ width: 7, height: 7, borderRadius: 0, background: 'var(--theme-green)', flexShrink: 0 }} />
                             )}
                             <div>
                               <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{c.name}</div>

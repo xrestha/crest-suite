@@ -4,17 +4,17 @@ html, body {
 
 body {
   margin: 0;
-  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+  font-family: 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
     'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: var(--theme-bg, #0f1117);
+  background: var(--theme-bg, #191817);
 }
 
 /* Form controls do NOT inherit font-family from body — every browser substitutes its own UA
    default instead. Measured before this rule existed: all 14 controls on the login page, all 13
-   CTAs on the pricing page and every `.btn` in the app rendered in Arial, not Poppins, so the
+   CTAs on the pricing page and every `.btn` in the app rendered in Arial, not the body font, so the
    product's own typeface reached its prose and none of its controls. `Layout.css` had been
    patching this one class at a time (10 `font-family: inherit` declarations on individual
    selectors, none of them `.btn` or `.form-field input`), which is the tell that the intent was
@@ -77,7 +77,7 @@ code {
 
 .action-error-detail {
   font-size: 11px;
-  color: var(--theme-text3, #8a92a3);
+  color: var(--theme-text3, #9b9797);
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
   line-height: 1.4;
   margin: 4px 0 0;

@@ -18,7 +18,7 @@ export default function StatPill({ label, value, color, textColor }) {
       background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)',
     }}>
       <span style={{ fontSize: 9, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 5 }}>
-        {color && <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />}
+        {color && <span style={{ width: 6, height: 6, borderRadius: 0, background: color, flexShrink: 0 }} />}
         {label}
       </span>
       <span style={{ fontSize: 13, fontWeight: 700, color: textColor || 'var(--theme-text1)' }}>{value}</span>

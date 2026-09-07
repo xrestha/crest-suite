@@ -68,7 +68,7 @@ function SectionHeading({ color, title, subtitle }) {
   return (
     <div style={{ textAlign: 'center', marginBottom: 28 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 6 }}>
-        <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
+        <span style={{ width: 10, height: 10, borderRadius: 0, background: color, flexShrink: 0 }} />
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: 'var(--theme-text1)' }}>{title}</h2>
       </div>
       {subtitle && <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>{subtitle}</p>}
@@ -115,7 +115,7 @@ export default function Pricing() {
               brand. The plan names below stay "Crest IMS" / "Crest HR" — those are product names
               and are not the client's to rebrand. */}
           {settings?.logo_url
-            ? <img src={settings.logo_url} alt="" style={{ width: 22, height: 22, objectFit: 'contain', borderRadius: 4, flexShrink: 0 }} />
+            ? <img src={settings.logo_url} alt="" style={{ width: 22, height: 22, objectFit: 'contain', borderRadius: 0, flexShrink: 0 }} />
             : <Hexagon size={22} strokeWidth={2.25} aria-hidden="true" style={{ color: GOLD, flexShrink: 0 }} />}
           <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{settings?.app_name || 'Crest Suite'}</span>
         </div>
@@ -246,7 +246,7 @@ export default function Pricing() {
               </div>
 
               <button
-                onClick={() => session ? askAbout(plan.label) : plan.key === 'starter' ? navigate('/login?trial=1') : navigate('/login')}
+                onClick={() => session ? askAbout(plan.label) : plan.key === 'starter' ? navigate('/signup') : navigate('/login')}
                 style={{ background: highlight ? MODULE_COLORS.ims : moduleTint('ims', 8), border: `1px solid ${highlight ? MODULE_COLORS.ims : moduleTint('ims', 25)}`, color: highlight ? 'var(--theme-accent-text)' : MODULE_INK.ims, padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
                 {session ? `Ask about ${plan.label}` : plan.key === 'starter' ? 'Start Free Trial' : `Get ${plan.label}`} →
               </button>
@@ -398,7 +398,7 @@ export default function Pricing() {
           </button>
           {!session && (
             <button
-              onClick={() => navigate('/login?trial=1')}
+              onClick={() => navigate('/signup')}
               style={{ background: GOLD, border: 'none', color: 'var(--theme-accent-text)', padding: '13px 32px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
               Start Free Trial →
             </button>

@@ -14,9 +14,9 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
   if (!ready || (session && !profile && loading)) {
     return (
       <div style={{
-        minHeight: '100vh', background: 'var(--theme-bg, #0f1117)',
+        minHeight: '100vh', background: 'var(--theme-bg, #191817)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: 'var(--theme-accent, #c9a84c)', fontSize: 14, letterSpacing: '0.08em'
+        color: 'var(--theme-accent, #ff563c)', fontSize: 14, letterSpacing: '0.08em'
       }}>
         Loading…
       </div>

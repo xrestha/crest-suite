@@ -170,7 +170,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
 
         {loading ? <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading bill…</p> : (
           <>
-            <div className="table-wrap" style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--theme-border)', borderRadius: 8, marginBottom: 12 }}>
+            <div className="table-wrap" style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--theme-border)', borderRadius: 0, marginBottom: 12 }}>
               <table className="data-table" style={{ fontSize: 12 }}>
                 <thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead>
                 <tbody>
@@ -225,4 +225,4 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
 }
 
 const labelStyle = { display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4 }
-const inputStyle = { background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 6, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }
+const inputStyle = { background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%' }

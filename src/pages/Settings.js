@@ -372,7 +372,7 @@ export default function Settings() {
       {!isAdmin && (
         <div className="card" style={{ marginBottom: 20, display: 'flex', gap: 18, alignItems: 'center' }}>
           {settings.logo_url
-            ? <img src={settings.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 8, flexShrink: 0 }} />
+            ? <img src={settings.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 0, flexShrink: 0 }} />
             : <span style={{ fontSize: 36, color: 'var(--theme-accent-ink)', flexShrink: 0 }}>⬢</span>
           }
           <div>
@@ -446,9 +446,9 @@ export default function Settings() {
           <div style={{ marginTop: 20 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text3)', display: 'block', marginBottom: 10 }}>Logo</span>
             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-              <div style={{ width: 64, height: 64, borderRadius: 8, border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 64, height: 64, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {form.logo_url
-                  ? <img src={form.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 6 }} />
+                  ? <img src={form.logo_url} alt="logo" style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 0 }} />
                   : <span style={{ fontSize: 26, color: 'var(--theme-accent-ink)' }}>⬢</span>
                 }
               </div>
@@ -475,11 +475,11 @@ export default function Settings() {
             </div>
           </div>
 
-          <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)' }}>
+          <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>Preview</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               {form.logo_url
-                ? <img src={form.logo_url} alt="logo" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 4 }} />
+                ? <img src={form.logo_url} alt="logo" style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 0 }} />
                 : <span style={{ fontSize: 20, color: 'var(--theme-accent-ink)' }}>⬢</span>
               }
               <div>
@@ -588,7 +588,7 @@ export default function Settings() {
             </div>
           </div>
 
-          <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)' }}>
+          <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
               If items have been deleted, codes may have gaps. Use this to renumber every item sequentially
@@ -629,7 +629,7 @@ export default function Settings() {
             </div>
           </div>
 
-          <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)' }}>
+          <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
               If vendors have been deleted, codes may have gaps. Use this to renumber every vendor sequentially
@@ -670,7 +670,7 @@ export default function Settings() {
             </div>
           </div>
 
-          <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)' }}>
+          <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
               Renumbers every sub-recipe sequentially from {(form.sub_recipe_code_prefix || 'SRC').toUpperCase()}-001, alphabetically by name. Use this to assign codes to existing sub-recipes or close gaps after deletions.
@@ -1047,7 +1047,7 @@ export default function Settings() {
                   onClick={() => switchPreset(key)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '14px 20px', borderRadius: 10, cursor: 'pointer',
+                    padding: '14px 20px', borderRadius: 0, cursor: 'pointer',
                     border: themeKey === key ? `2px solid ${colors.accent}` : '2px solid var(--theme-border)',
                     background: themeKey === key ? 'color-mix(in srgb, var(--theme-accent) 8%, transparent)' : 'var(--theme-card)',
                     minWidth: 180
@@ -1056,12 +1056,12 @@ export default function Settings() {
                   {/* Mini color swatch */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
                     <div style={{ display: 'flex', gap: 3 }}>
-                      <div style={{ width: 14, height: 14, borderRadius: 3, background: preset.bg, border: '1px solid rgba(255,255,255,0.1)' }} />
-                      <div style={{ width: 14, height: 14, borderRadius: 3, background: preset.card, border: '1px solid rgba(255,255,255,0.1)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: preset.bg, border: '1px solid rgba(255,255,255,0.1)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: preset.card, border: '1px solid rgba(255,255,255,0.1)' }} />
                     </div>
                     <div style={{ display: 'flex', gap: 3 }}>
-                      <div style={{ width: 14, height: 14, borderRadius: 3, background: preset.accent }} />
-                      <div style={{ width: 14, height: 14, borderRadius: 3, background: preset.sidebar, border: '1px solid rgba(255,255,255,0.1)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: preset.accent }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: preset.sidebar, border: '1px solid rgba(255,255,255,0.1)' }} />
                     </div>
                   </div>
                   <div style={{ textAlign: 'left' }}>
@@ -1076,15 +1076,15 @@ export default function Settings() {
                 </button>
               ))}
               {themeKey === 'custom' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderRadius: 10, border: '2px solid var(--theme-accent)', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', minWidth: 180 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderRadius: 0, border: '2px solid var(--theme-accent)', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', minWidth: 180 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <div style={{ display: 'flex', gap: 3 }}>
-                      <div style={{ width: 14, height: 14, borderRadius: 3, background: colors.bg, border: '1px solid rgba(255,255,255,0.1)' }} />
-                      <div style={{ width: 14, height: 14, borderRadius: 3, background: colors.card, border: '1px solid rgba(255,255,255,0.1)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.bg, border: '1px solid rgba(255,255,255,0.1)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.card, border: '1px solid rgba(255,255,255,0.1)' }} />
                     </div>
                     <div style={{ display: 'flex', gap: 3 }}>
-                      <div style={{ width: 14, height: 14, borderRadius: 3, background: colors.accent }} />
-                      <div style={{ width: 14, height: 14, borderRadius: 3, background: colors.sidebar, border: '1px solid rgba(255,255,255,0.1)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.accent }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.sidebar, border: '1px solid rgba(255,255,255,0.1)' }} />
                     </div>
                   </div>
                   <div>
@@ -1125,7 +1125,7 @@ export default function Settings() {
                     style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
                   />
                   <div style={{
-                    width: 36, height: 36, borderRadius: 8,
+                    width: 36, height: 36, borderRadius: 0,
                     background: colors[key],
                     border: '2px solid rgba(255,255,255,0.15)',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
@@ -1136,7 +1136,7 @@ export default function Settings() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{label}</div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 1 }}>{desc}</div>
                 </div>
-                <code style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace', background: 'var(--theme-bg)', padding: '2px 8px', borderRadius: 4 }}>
+                <code style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace', background: 'var(--theme-bg)', padding: '2px 8px', borderRadius: 0 }}>
                   {colors[key]}
                 </code>
               </div>
@@ -1156,20 +1156,20 @@ export default function Settings() {
           <div className="card">
             <h3 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Live Preview</h3>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-              <div style={{ padding: '10px 20px', borderRadius: 6, background: colors.accent, color: colors.accentText, fontSize: 13, fontWeight: 700 }}>
+              <div style={{ padding: '10px 20px', borderRadius: 0, background: colors.accent, color: colors.accentText, fontSize: 13, fontWeight: 700 }}>
                 Primary Button
               </div>
-              <div style={{ padding: '10px 20px', borderRadius: 6, background: 'transparent', color: colors.text2, border: `1px solid ${colors.border}`, fontSize: 13 }}>
+              <div style={{ padding: '10px 20px', borderRadius: 0, background: 'transparent', color: colors.text2, border: `1px solid ${colors.border}`, fontSize: 13 }}>
                 Ghost Button
               </div>
-              <div style={{ padding: '6px 14px', borderRadius: 5, background: `${colors.green}18`, color: colors.greenText, fontSize: 11, fontWeight: 700 }}>
+              <div style={{ padding: '6px 14px', borderRadius: 0, background: `${colors.green}18`, color: colors.greenText, fontSize: 11, fontWeight: 700 }}>
                 Active Badge
               </div>
-              <div style={{ padding: '6px 14px', borderRadius: 5, background: `${colors.red}18`, color: colors.redText, fontSize: 11, fontWeight: 700 }}>
+              <div style={{ padding: '6px 14px', borderRadius: 0, background: `${colors.red}18`, color: colors.redText, fontSize: 11, fontWeight: 700 }}>
                 Error Badge
               </div>
             </div>
-            <div style={{ marginTop: 16, borderRadius: 8, overflow: 'hidden', border: `1px solid ${colors.border}` }}>
+            <div style={{ marginTop: 16, borderRadius: 0, overflow: 'hidden', border: `1px solid ${colors.border}` }}>
               <div style={{ background: colors.card, padding: '10px 16px', borderBottom: `1px solid ${colors.border}`, display: 'flex', gap: 20 }}>
                 {['Column A', 'Column B', 'Column C'].map(h => (
                   <span key={h} style={{ fontSize: 11, fontWeight: 600, color: colors.text2, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{h}</span>

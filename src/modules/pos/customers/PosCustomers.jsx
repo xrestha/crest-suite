@@ -306,7 +306,7 @@ export default function PosCustomers() {
           >
             Outstanding Credit
             {creditLoaded && unsettled.length > 0 && (
-              <span className="badge-amber" style={{ marginLeft: 6, fontSize: 11, padding: '1px 7px', borderRadius: 8 }}>{unsettled.length}</span>
+              <span className="badge-amber" style={{ marginLeft: 6, fontSize: 11, padding: '1px 7px', borderRadius: 0 }}>{unsettled.length}</span>
             )}
           </button>
         </Tip>

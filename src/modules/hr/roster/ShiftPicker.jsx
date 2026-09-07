@@ -70,7 +70,7 @@ export default function ShiftPicker({ shifts, anchorRef, onSelect, onClose, cell
           onMouseEnter={e => e.currentTarget.style.background = 'var(--theme-table-hover)'}
           onMouseLeave={e => e.currentTarget.style.background = 'none'}
         >
-          <span style={{ width: 12, height: 12, borderRadius: 3, border: '1px dashed var(--theme-text3)', flexShrink: 0 }} />
+          <span style={{ width: 12, height: 12, borderRadius: 0, border: '1px dashed var(--theme-text3)', flexShrink: 0 }} />
           Clear (Unassign)
         </button>
       </div>

@@ -604,6 +604,13 @@ confirmation.
 
 ## T12 — Login page copy: headline and bullets
 
+> **Superseded in part by S689 (2026-09-07).** The Modernist re-theme removed `/login`'s lighting
+> model and replaced Aged Brass with a signal red, so the two design constraints stated further
+> down this task — "carries a real lighting model as of S659" and "Aged Brass is the only
+> non-semantic colour on the page" — describe the page as it was when T12 ran. The *rule* they
+> serve is unchanged and still binding: one accent, and no second hue introduced to separate the
+> module headings. Left as written because T12 is closed and its record should say what it decided.
+
 **DONE — S667, 2026-09-01, commit `d8ff95d`.** Copy replaced, S606 closed on all three public
 pages, service worker bumped to `crest-v179`. Two departures from the spec below, both measured
 rather than chosen:

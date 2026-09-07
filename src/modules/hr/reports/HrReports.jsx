@@ -369,7 +369,7 @@ export default function HrReports() {
                               {e.retirement_date ? (
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                                   <span style={{ color: 'var(--theme-text2)' }}>{fmtDate(e.retirement_date)}</span>
-                                  {r && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, color: r.color, background: r.bg, border: `1px solid ${r.border}` }}>{r.label}</span>}
+                                  {r && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 0, color: r.color, background: r.bg, border: `1px solid ${r.border}` }}>{r.label}</span>}
                                 </span>
                               ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                             </td>
@@ -393,7 +393,7 @@ export default function HrReports() {
           ) : (
             <>
               {!finalized && (
-                <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 25%, transparent)', borderRadius: 8, fontSize: 12, color: 'var(--theme-accent-ink)' }}>
+                <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 25%, transparent)', borderRadius: 0, fontSize: 12, color: 'var(--theme-accent-ink)' }}>
                   ⚠ This payroll is still a draft — figures may change. Finalize it in Payroll before filing or paying.
                 </div>
               )}
@@ -599,7 +599,7 @@ function TdsCertificate({ emp, slips, fy, clientName, clientPan }) {
   const insTotal  = lifeIns + healthIns
   const taxable   = Math.max(0, totals.gross - totals.ssf - insTotal)
 
-  const card = { background: 'var(--theme-bg)', borderRadius: 8, border: '1px solid var(--theme-border)', padding: '14px 16px' }
+  const card = { background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)', padding: '14px 16px' }
 
   return (
     <div className="card">

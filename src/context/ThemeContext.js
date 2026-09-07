@@ -1,86 +1,85 @@
 import { createContext, useContext, useState, useEffect, useMemo } from 'react'
 
-// Curated, trending palettes (Tokyo Night, Dracula, Nord, Catppuccin, Rosé Pine, Solarized…).
-// `sidebar` is theme-appropriate (dark sidebar for dark themes, light for light) so the sidebar
-// follows the selected theme; sidebar text uses --theme-text* which contrast accordingly.
+// ── Modernist: two presets, one signal red ───────────────────────────────────────────────────
+// The product ships exactly TWO palettes — Modernist Night (dark) and Modernist Light — plus a
+// `system` MODE that resolves to one of them. Ten curated palettes (Tokyo Night, Dracula, Nord,
+// Catppuccin, Rosé Pine, Solarized…) shipped until they were measured and cut to the two that
+// came out clean; several comments elsewhere in the codebase still name them, and those are
+// history, not live presets.
+//
+// `sidebar` is theme-appropriate (darker than the page on Night, level with the card on Light) so
+// the shell recedes behind the work; sidebar text uses --theme-text* and contrasts accordingly.
 //
 // ── The *Text variants, and why they exist (added 2026-08-12) ────────────────────────────────
 // A signal colour does two different jobs: it FILLS things (chart series, badge tints, borders,
-// dots) and it is TEXT (a status badge's label, a KPI figure, a variance number). On a dark
-// preset one value serves both, because a bright green on a near-black card clears AA easily.
-// On a LIGHT preset it cannot: measured against their own surfaces, 23 of the 25
-// signal-colour/preset combinations across the five light presets failed WCAG AA — Latte's amber
-// at 2.15:1, Rosé Dawn's at 1.87:1, its accent at 2.37:1. Every status badge and signal figure in
-// the product was affected on half the shipped themes.
-//
-// Darkening `green`/`red`/`amber` outright would have fixed the text and broken the identity:
-// Latte, Rosé Dawn and Solarized are faithful reproductions of palettes people choose *because*
-// they recognise those exact values, and the same tokens paint charts and tints where the lighter
-// value is correct. So the palettes are untouched and each light preset additionally declares a
-// darkened, hue-preserving TEXT variant, clearing 4.5:1 against that preset's worst surface (its
-// own sidebar). This mirrors the accent/accentText pairing that already exists.
+// dots) and it is TEXT (a status badge's label, a KPI figure, a variance number). On a dark preset
+// one value serves both, because a bright green on a near-black card clears AA easily. On a LIGHT
+// preset it cannot — measured, 23 of 25 signal-colour/surface combinations failed WCAG AA across
+// the light presets of the day. So each light preset declares a darkened, hue-preserving TEXT
+// variant while the base tokens stay correct for charts, tints, borders and dots.
 //
 // Note `accentInk` is NOT `accentText`, and the two are easy to confuse: `accentText` is the
 // foreground that sits ON an accent-coloured fill; `accentInk` is the accent itself used AS text.
+// Dark presets historically declared no *Text variants at all — applyTheme falls back to the base
+// colour for each, which is correct there — but BOTH presets now declare an `accentInk`, because
+// `.tab-btn--active` sets accent-as-text on a tint of that same accent and the base accent does
+// not survive that composite on either ground.
 //
-// `accentText` was plain `#ffffff` on all five light presets, and on three of them that failed:
-// measured live (S551) at 2.84:1 on Rosé Dawn, 3.61:1 on Light and 3.68:1 on Solarized — i.e.
-// every `.btn-primary` in the product, on those themes. Fixed by giving those three a dark,
-// hue-matched ink instead of darkening the accent itself, since the accent is a brand value and
-// also serves as a tint/border/dot colour where it is already correct. Latte (5.41:1) and Bright
-// (4.54:1) keep white.
-//
-// Dark presets declare none of the *Text variants — applyTheme falls back to the base colour for
-// each, which is correct there. Three of them (Tokyo Night, Dracula, Nord) DO now declare an
-// `accentInk`, for a different reason: `.tab-btn--active` sets accent-as-text on a tint of that
-// same accent, and measured against that composited surface the base accent fell to 4.19 / 3.49 /
-// 3.50:1 — a light accent on a dark card is not automatically safe once the card is tinted with
-// the accent itself. Their inks are LIGHTER than the accent; the light presets' are darker. All
-// ten now clear 4.5:1 on both card and page background (S551).
+// ── What Modernist changed, and what it deliberately did not ─────────────────────────────────
+// Ground, ink and accent are new. The four signal colours and the light preset's four *Text
+// variants are carried over BYTE-IDENTICAL from the previous palette: they were tuned for AA and
+// for red-green colour blindness over three separate passes, and none of that work is about the
+// accent. The one thing a red accent DID force is both presets' `accentInk`, which had to move a
+// ramp step further from the danger and warning slots — the per-preset comments below carry the
+// measurements and are the thing to read before touching either value.
 export const PRESETS = {
   dark: {
-    name: 'Dark', description: 'Classic charcoal & gold',
-    bg: '#0f1117', card: '#181c27', border: '#2a2f3d', borderLt: '#1e2330', sidebar: '#0e1117',
-    // Order matters and was inverted until now: measured against this preset's own card
-    // (#181c27) these two sat at text2 5.45:1 and text3 6.70:1, so every "quietest tier" hint
-    // outranked every secondary label — the ladder DESIGN.md describes, upside down. Neither
-    // value changed; they swapped into the roles they already had contrast for. Light was
-    // always correct (7.33 > 5.76), which is why this never looked obviously wrong.
-    text1: '#e8e0d0', text2: '#9ca3af', text3: '#8a92a3',
-    accent: '#c9a84c', accentHover: '#d4b96a', accentText: '#0f1117',
-    inputBg: '#0f1117', tableHover: 'rgba(255,255,255,0.03)', focusRing: 'rgba(201,168,76,0.15)',
+    name: 'Modernist Night', description: 'Ink & signal red',
+    bg: '#191817', card: '#242221', border: '#3a3836', borderLt: '#2c2a29', sidebar: '#141312',
+    text1: '#f3f2f2', text2: '#bab6b6', text3: '#9b9797',
+    accent: '#ff563c', accentHover: '#ff9783', accentText: '#201e1d',
+    // accent-300, not the accent-400 the Modernist handoff specified. Measured against this
+    // preset's OWN signal set, #ff9783 sat at ΔE 7.4 from `red` under deuteranopia and 7.8 from
+    // `green` under protanopia — both under the floor of 8, i.e. the accent-as-text slot and the
+    // danger slot reading as one colour for ~8% of men. That is the S608 failure recurring, and it
+    // is specific to a RED accent: the old brass never landed near red at all. #ffc4b8 clears at
+    // 10.4 worst-pair and still measures 10.44:1 on the card and 9.02:1 on its own accent tint
+    // (the .tab-btn--active case this token exists for). Don't restore #ff9783 without re-running
+    // those pairs. The Light half needed the same correction in the other direction.
+    accentInk: '#ffc4b8',
+    inputBg: '#1e1d1c', tableHover: 'rgba(255,255,255,0.04)', focusRing: 'rgba(255,86,60,0.15)',
+    // Deliberately carried over UNCHANGED from the previous palette. These four were tuned for AA
+    // and for red-green colour blindness across S551/S608/S683; Modernist replaces ground, ink and
+    // accent only. Retuning them to "match" the new accent would undo that work.
     green: '#34d399', red: '#f87171', amber: '#fbbf24', purple: '#a78bfa',
-    cardShadow: 'inset 0 1px 0 0 rgba(232,224,208,0.06), 0 10px 24px -8px rgba(15,17,23,0.55), 0 3px 8px -3px rgba(15,17,23,0.4)',
+    cardShadow: 'inset 0 1px 0 0 rgba(243,242,242,0.05), 0 10px 24px -8px rgba(0,0,0,0.55), 0 3px 8px -3px rgba(0,0,0,0.4)',
   },
   light: {
-    name: 'Light', description: 'Clean warm white',
-    bg: '#f6f3ef', card: '#ffffff', border: '#ddd6cf', borderLt: '#ece6df', sidebar: '#ece6dd',
-    text1: '#1c1917', text2: '#5c554e', text3: '#6b655e',
-    accent: '#b07d2b', accentHover: '#946720', accentText: '#241a08',
-    inputBg: '#fbf9f6', tableHover: '#f3ede6', focusRing: 'rgba(176,125,43,0.14)',
+    name: 'Modernist Light', description: 'Paper & signal red',
+    bg: '#f3f2f2', card: '#eae9e9', border: '#d7d3d3', borderLt: '#e5e3e3', sidebar: '#eae9e9',
+    text1: '#201e1d', text2: '#605d5d', text3: '#7d7979',
+    // accentText is plain white here and that is a MEASURED 4.20:1 on the accent — legal as large
+    // text, not as normal text. The product's answer is the label size, not a darker ink: .btn is
+    // 15px/600, which is where WCAG's large-text threshold begins. Any accent fill carrying text
+    // below that (::selection, which inherits whatever size it lands on) uses #dd2b0f instead,
+    // where white clears 4.74:1. See DESIGN.md -> Components -> Buttons.
+    accent: '#ec3013', accentHover: '#dd2b0f', accentText: '#ffffff',
+    // accent-800, not the accent-700 the handoff specified — the mirror of the Night correction
+    // above. #ae1800 measured ΔE 0.5 from amberText under deuteranopia and 6.5 under protanopia:
+    // the categorical slot ("decided, unpaid" / a rank / a close type) and the open-and-waiting
+    // slot collapsing into one colour, on exactly the HR approval queues a manager reads to tell
+    // them apart. #7c1405 clears at 16.1/21.3 and holds 8.85:1 on the card, 9.59:1 on the page and
+    // 8.11:1 on its own badge tint over the page ground (the S683 second-ground rule).
+    accentInk: '#7c1405',
+    inputBg: '#ffffff', tableHover: '#e6e4e4', focusRing: 'rgba(236,48,19,0.12)',
     green: '#15803d', red: '#dc2626', amber: '#b45309', purple: '#7c3aed',
-    // redText/amberText retuned S608 for red-green colour blindness. At #c92323/#a44c08 they
-    // measured ΔE 3.2 apart under deuteranopia — danger and warning were effectively one colour
-    // for ~6% of men, and Light is now the only light preset. These two values are the ONLY pair
-    // (of 120 searched) that clears both deuteranopia and protanopia at ≥8 while every variant
-    // still holds ≥4.5:1 on card and bg. Don't "tidy" them back toward a conventional red.
-    //
-    // Known and accepted: this puts redText and accentInk at ΔE 0 under TRITANOPIA, which was
-    // previously clear. No accentInk nudge recovers it without dropping red-green back below the
-    // floor — the palette's hue space cannot satisfy both axes. Tritanopia is ~0.01% and not
-    // sex-linked; deuteranopia and protanopia together are ~8% of men. Fixing the common case at
-    // the cost of the rare one is the deliberate trade, and the pairing matters less too: red vs
-    // accent are error text vs links, not two bands of one scale the way red vs amber are.
-    //
-    // greenText/amberText/purpleText darkened one step in S683 (polish), for a second constraint
-    // S608 did not measure: a *-text variant must clear 4.5:1 on its own 10–12% tint over the PAGE
-    // ground, not only on the card — that is what a .badge-* is, and a badge is not always on a
-    // card. Measured on the built page: amber 4.19, purple 4.33 (never tuned for Light at all — it
-    // was the bare base), green 4.60 with the sidebar chip at 4.34. Now 4.99 / 5.40 / 5.26 on the
-    // page, and the S608 pairing survives: amber vs red is ΔE 13.5 (deuteranopia) / 11.7
-    // (protanopia), both ≥8. redText and accentInk are untouched.
-    greenText: '#116b33', redText: '#8f2440', amberText: '#964900', purpleText: '#6d28d9', accentInk: '#7a561e',
-    cardShadow: '0 1px 2px rgba(28,25,23,0.06), 0 10px 24px -8px rgba(28,25,23,0.1)',
+    // Unchanged from the pre-Modernist palette, and see the S608/S683 history in git: these are
+    // the only pair (of 120 searched) clearing both deuteranopia and protanopia while every
+    // variant still holds 4.5:1 on card, page and its own badge tint. Don't tidy them toward the
+    // new accent — redText is a crimson and accentInk is an orange-red, and that ΔE 33 separation
+    // under deuteranopia is now the ONLY thing keeping "refused" apart from "decided, unpaid".
+    greenText: '#116b33', redText: '#8f2440', amberText: '#964900', purpleText: '#6d28d9',
+    cardShadow: '0 1px 2px rgba(45,43,43,0.14)',
   },
 }
 
@@ -130,9 +129,10 @@ function applyTheme(t) {
 // from every admin route — so the only theme they could ever have was whatever the hardcoded
 // default happened to be: a dark app held up in Kathmandu daylight, with no way to change it.
 //
-// The pair is `dark` ↔ `light` deliberately. Those two are the same design in two schemes (gold
-// accent on charcoal / gold accent on warm white), so following the OS changes the SCHEME and
-// nothing else. Pairing the light half with Latte or Rosé Dawn would swap the accent hue at
+// The pair is `dark` ↔ `light` deliberately. Those two are the same design in two schemes —
+// signal red on ink, signal red on paper — so following the OS changes the SCHEME and nothing
+// else. This is why Modernist was built as a PAIR rather than as one palette with a dark mode
+// bolted on: pairing the light half with a differently-hued preset would swap the accent at
 // sunset too, which reads as a different app rather than the same one in daylight.
 //
 // `system` is deliberately NOT a member of PRESETS: it has no palette of its own, and PRESETS is
@@ -166,6 +166,12 @@ function defaultKeyForSurface() {
   }
 }
 
+// Bumped when a palette change must reach users who are pinned to their own edited colours.
+// A saved blob without this exact stamp predates the change and is discarded once (see the
+// `custom` branch in loadSaved). This is the ONLY mechanism that reaches a 'custom' user — every
+// other key resolves fresh from PRESETS and needs nothing.
+const THEME_SCHEMA = 'modernist-1'
+
 function loadSaved() {
   try {
     const raw = localStorage.getItem('crest_theme')
@@ -198,8 +204,22 @@ function loadSaved() {
     // swap would have shipped to new installs only. Resolving fresh also subsumes what the merge
     // was written for (a snapshot predating a newly-added field like cardShadow).
     if (saved.key !== 'custom') return { key: saved.key, colors: resolveColors(saved.key) }
-    // `custom` IS the user's own edits, so here the saved values must win — with the preset
+    // `custom` IS the user's own edits, so here the saved values normally win — with the preset
     // underneath only to fill in fields that did not exist when the snapshot was taken.
+    //
+    // The exception, and it is deliberate: a 'custom' blob saved before the Modernist re-theme is
+    // DISCARDED. switchPreset persists the FULL colours object before updateColor overwrites any
+    // of it, so someone who once nudged a single swatch is carrying all twenty values of the old
+    // gold-on-charcoal palette — and because the saved blob wins, they would keep that palette
+    // forever, with 'Custom ✓' in the picker and no route back. That is not "preserving their
+    // edits"; it is pinning them to a product that no longer exists. Dropping it once costs at
+    // most a handful of swatch tweaks and is the only way the re-theme reaches them at all.
+    //
+    // Everything saved from here on carries THEME_SCHEMA, so this fires exactly once per user.
+    if (saved.schema !== THEME_SCHEMA) {
+      const key = defaultKeyForSurface()
+      return { key, colors: resolveColors(key) }
+    }
     return { key: 'custom', colors: { ...PRESETS.dark, ...saved.colors } }
   } catch {
     const key = defaultKeyForSurface()
@@ -223,7 +243,7 @@ export function ThemeProvider({ children }) {
     setColors(next)
     // See loadSaved: the system mode stores its key and nothing else.
     localStorage.setItem('crest_theme', JSON.stringify(
-      key === SYSTEM_KEY ? { key } : { key, colors: next },
+      key === SYSTEM_KEY ? { key, schema: THEME_SCHEMA } : { key, colors: next, schema: THEME_SCHEMA },
     ))
   }
 
@@ -244,7 +264,7 @@ export function ThemeProvider({ children }) {
     const updated = { ...colors, [colorKey]: value }
     setColors(updated)
     setThemeKey('custom')
-    localStorage.setItem('crest_theme', JSON.stringify({ key: 'custom', colors: updated }))
+    localStorage.setItem('crest_theme', JSON.stringify({ key: 'custom', colors: updated, schema: THEME_SCHEMA }))
   }
 
   function resetToPreset(key) {

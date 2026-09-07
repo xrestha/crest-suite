@@ -68,7 +68,7 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
               onClick={() => pressKey(k)}
               disabled={!k}
               style={{
-                width: 58, height: 58, borderRadius: '50%',
+                width: 58, height: 58, borderRadius: 0,
                 background: k ? 'var(--theme-card)' : 'transparent',
                 border: k ? '1px solid var(--theme-border)' : 'none',
                 color: k === 'C' ? 'var(--theme-text3)' : 'var(--theme-text1)',

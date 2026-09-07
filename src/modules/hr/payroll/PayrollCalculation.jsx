@@ -464,17 +464,17 @@ export default function PayrollCalculation() {
                               {emp.employee_code && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{emp.employee_code}</span>}
                               {(slip.breakdown.otSupersededHrs || 0) > 0 && (
                                 <Tip text={`This employee has OT in both places. ${slip.breakdown.otSupersededHrs.toFixed(1)} hr typed on the attendance sheet was superseded by an approved Overtime entry for the same day and is not paid — expand the row to see the split.`} width={300}>
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>OT superseded</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>OT superseded</span>
                                 </Tip>
                               )}
 {missing && (
                                 <Tip text="This employee has no payslip in the current Payroll run for this period — Regenerate to include them before finalizing." width={280}>
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ Missing</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>⚠ Missing</span>
                                 </Tip>
                               )}
                               {stale && (
                                 <Tip text={`Payroll's stored net pay (NPR ${fmt(stored.net_pay)}) no longer matches this live calculation (NPR ${fmt(netPay)}) — something changed since the run was last Generated/Regenerated.`} width={290}>
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>⚠ Stale</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>⚠ Stale</span>
                                 </Tip>
                               )}
                               {/* Not a warning. The stored figure differs only because someone
@@ -483,7 +483,7 @@ export default function PayrollCalculation() {
                                   it used to, which accused a correct payslip of being out of date. */}
                               {overridden && (
                                 <Tip text={`Payroll's stored payslip matches this calculation on every computed figure, but its TDS or TADA was adjusted by hand (stored net NPR ${fmt(stored.net_pay)} vs NPR ${fmt(netPay)} computed). That is a deliberate edit, not stale data.`} width={300}>
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '1px 6px', cursor: 'help' }}>Adjusted</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>Adjusted</span>
                                 </Tip>
                               )}
                             </div>

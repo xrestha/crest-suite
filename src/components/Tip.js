@@ -43,7 +43,7 @@ export default function Tip({ text, children, width = 220, style }) {
         transform: pos.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
         background: 'var(--theme-card)',
         border: '1px solid var(--theme-border)',
-        borderRadius: 6,
+        borderRadius: 0,
         padding: '7px 11px',
         fontSize: 11,
         color: 'var(--theme-text2)',

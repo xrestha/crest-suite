@@ -2,6 +2,7 @@
 paths:
   - "src/context/AuthContext.js"
   - "src/pages/Login.js"
+  - "src/pages/Signup.js"
   - "src/pages/adminClients/**"
   - "src/modules/hr/employees/**"
   - "src/modules/hr/selfservice/**"
@@ -26,7 +27,7 @@ Asked directly (S554) and answerable only by reading three files, so it belongs 
 
 IMS and HR staff share the owner's front door and are separated by role, not by entrance — which is what IMS Staff's own subtitle ("Staff log in with their email and password, same as you do") means. Only POS and Self-Service have their own PIN entrances, and **an owner never uses a PIN.**
 
-An Owner account is created by one of two paths, and they produce a byte-identical profile: `register_trial` (the public trial form on `/login` — creates the `clients` row, the auth user and a `profiles` row of `role:'client'` + `client_id`, then signs them straight in), or Admin → Clients → Manage → Users, which calls the generic `createUser` action and upserts the same `{ id, client_id, full_name, role:'client' }` (`ClientDrawer.js`). Nothing anywhere writes an "owner" flag, because there isn't one.
+An Owner account is created by one of two paths, and they produce a byte-identical profile: `register_trial` (the public trial form on `/signup`, split out of `/login` in S689 — creates the `clients` row, the auth user and a `profiles` row of `role:'client'` + `client_id`, then signs them straight in), or Admin → Clients → Manage → Users, which calls the generic `createUser` action and upserts the same `{ id, client_id, full_name, role:'client' }` (`ClientDrawer.js`). Nothing anywhere writes an "owner" flag, because there isn't one.
 
 **That is the trap worth stating plainly: Owner is the ABSENCE of staff markers, so giving the owner's own login a staff role demotes them.** `isOwner` is `role==='client'` with none of `pos_role`/`ims_role`/`hr_role`/`hr_self_service` set, which is what makes an owner resolve to `'manager'` on all three rank axes for free. Assign that same login an IMS role from `/ims-staff` and the negative test flips: they lose Owner-level access — Suite features included — and get only what that rank permits. The owner should never appear in a staff list; those rows are for staff. (Same mechanism as the `isOwner`/`isCallerOwner`/`is_client_owner()` triplet in `CLAUDE.md`'s four privilege invariants — a new marker column must be added to all three.)
 

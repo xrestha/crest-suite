@@ -274,7 +274,7 @@ export default function KitchenDisplay() {
                   color: 'var(--theme-text2)', margin: '0 0 10px',
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
-                  <span style={{ width: 11, height: 11, borderRadius: '50%', background: col.dot, flexShrink: 0 }} />
+                  <span style={{ width: 11, height: 11, borderRadius: 0, background: col.dot, flexShrink: 0 }} />
                   {col.label} <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>({colTickets.length})</span>
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

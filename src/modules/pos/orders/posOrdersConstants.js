@@ -103,7 +103,7 @@ export const COPY_LABEL = n => n <= 1 ? '' : `COPY OF ORIGINAL - (${n - 1})`
 // cart column and 52px top bar without reflowing either layout; still a large jump from the
 // 26x26 it replaced, on the single most-tapped control on the busiest screen in the app.
 export const btnSm = {
-  width: 40, height: 40, borderRadius: 8,
+  width: 40, height: 40, borderRadius: 0,
   border: '1px solid var(--theme-border)',
   background: 'var(--theme-input-bg)',
   color: 'var(--theme-text1)',

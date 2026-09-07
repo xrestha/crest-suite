@@ -164,7 +164,7 @@ const pinDots = Math.max(4, pin.length)
       padding: 24,
     }}>
     <div className="card" style={{
-      padding: '40px 36px', borderRadius: 10,
+      padding: '40px 36px', borderRadius: 0,
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       width: '100%', maxWidth: 540,
     }}>
@@ -209,7 +209,7 @@ const pinDots = Math.max(4, pin.length)
                       display: 'flex', flexDirection: 'column', alignItems: 'center',
                       background: 'var(--theme-card)',
                       border: '1px solid var(--theme-border)',
-                      borderRadius: 12,
+                      borderRadius: 0,
                       color: 'var(--theme-text1)',
                       fontSize: 14, fontWeight: 600,
                       cursor: 'pointer',
@@ -221,7 +221,7 @@ const pinDots = Math.max(4, pin.length)
                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--theme-border)'; e.currentTarget.style.background = 'var(--theme-card)' }}
                   >
                     <div style={{
-                      width: 52, height: 52, borderRadius: '50%',
+                      width: 52, height: 52, borderRadius: 0,
                       background: avatar.bg, color: avatar.fg,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 18, fontWeight: 700, letterSpacing: 0.5,
@@ -252,7 +252,7 @@ const pinDots = Math.max(4, pin.length)
                 padding: '10px 24px', fontSize: 14,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
-                borderRadius: 8, color: 'var(--theme-text2)', cursor: 'pointer',
+                borderRadius: 0, color: 'var(--theme-text2)', cursor: 'pointer',
               }}
             >
               ← Back
@@ -267,7 +267,7 @@ const pinDots = Math.max(4, pin.length)
           <div style={{ display: 'flex', gap: 14, justifyContent: 'center' }}>
             {Array.from({ length: pinDots }).map((_, i) => (
               <div key={i} style={{
-                width: 14, height: 14, borderRadius: '50%',
+                width: 14, height: 14, borderRadius: 0,
                 background: i < pin.length ? 'var(--theme-accent)' : 'var(--theme-border)',
                 transition: 'background 0.15s',
                 boxShadow: i < pin.length ? '0 0 6px var(--theme-accent)' : 'none',
@@ -286,7 +286,7 @@ const pinDots = Math.max(4, pin.length)
                   width: 72, height: 72,
                   background: k ? 'var(--theme-card)' : 'transparent',
                   border: k ? '1px solid var(--theme-border)' : 'none',
-                  borderRadius: '50%',
+                  borderRadius: 0,
                   color: k === 'C' ? 'var(--theme-text3)' : 'var(--theme-text1)',
                   fontSize: k === '⌫' ? 20 : k === 'C' ? 15 : 22,
                   fontWeight: k === 'C' ? 600 : 500,
@@ -320,7 +320,7 @@ const pinDots = Math.max(4, pin.length)
                 width: 108, padding: '13px 0', fontSize: 14,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
-                borderRadius: 8, color: 'var(--theme-text2)', cursor: 'pointer',
+                borderRadius: 0, color: 'var(--theme-text2)', cursor: 'pointer',
               }}
             >
               ← Back
