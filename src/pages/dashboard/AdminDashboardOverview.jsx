@@ -157,17 +157,18 @@ export default function AdminDashboardOverview() {
   // was. Equalising a difference nobody could see, while keeping the one they could, is why the
   // change looked like no change at all.
   //
-  // `fill` is a `<token> <pct>` pair fed to color-mix. Suite still reads as its own thing through
-  // three cues that are not the box: a stronger fill (20% against the module pills' 8-10%), a
-  // heavier weight, and the ★ glyph. S552's rule is that a billed axis stays VISIBLE on the screens
-  // that bill it, and it does — it just no longer wears a different-shaped box to do it.
+  // `fill` is a `<token> <pct>` pair fed to color-mix. All four now share the SAME intensity and
+  // the same weight; the Suite pill is told apart by the ★ glyph and its Tip, and by nothing
+  // else. It had kept a stronger fill (20%) and bold through two earlier passes on the reasoning
+  // that S552 wants a billed axis VISIBLE on the screens that bill it — but the star alone does
+  // that, and the reader asked three times for these to read as one set. Emphasis the reader keeps
+  // asking to remove is not a design distinction, it is noise wearing one's clothes.
   //
   // The transparent border stays on all four rather than being dropped: it pins the box geometry,
   // so adding a visible border to any one of them later cannot silently make it 2px taller than
   // its neighbours, which is exactly the bug this helper was written to fix.
-  const adoptionPill = (fill, ink, bold = false) => ({
+  const adoptionPill = (fill, ink) => ({
     fontSize: 10, lineHeight: 1.5,
-    ...(bold ? { fontWeight: 700 } : null),
     padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
     background: `color-mix(in srgb, ${fill}, transparent)`,
     color: ink,
@@ -239,9 +240,8 @@ export default function AdminDashboardOverview() {
                   border, the Suite pill at `1px 5px` WITH a 1px border — and a border adds 2px of
                   height, so the one pill meant to read as a peer of the other three stood taller
                   than all of them. `adoptionPill()` states the box once; only COLOUR varies. The
-                  four pills now share the box completely — same type, same padding, same transparent
-                  border — and Suite is marked out only by things that are not the box: a stronger fill, a
-                  heavier weight and the star.
+                  four pills now share everything — type, padding, transparent border, fill intensity and
+                  weight — and Suite is marked out by the star and its Tip alone.
 
                   Width is the constraint that shaped these: the card's inner width is ~128px (the
                   158px grid floor above, less statCard's 28px of padding and 2px of border). The
@@ -281,7 +281,7 @@ export default function AdminDashboardOverview() {
                   // exactly this; a badge is not a tipped word.
                   <Tip text={`Crest Suite Pro is on ${suiteCount} ${suiteCount === 1 ? 'property' : 'properties'} — the owner layer sold per outlet on top of the modules.`} width={250}
                     style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
-                    <span style={adoptionPill('var(--theme-accent) 20%', 'var(--theme-accent-ink)', true)}>★ {suiteCount}</span>
+                    <span style={adoptionPill('var(--theme-accent) 10%', 'var(--theme-accent-ink)')}>★ {suiteCount}</span>
                   </Tip>
                 )}
               </div>
