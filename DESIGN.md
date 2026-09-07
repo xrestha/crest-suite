@@ -941,6 +941,12 @@ four of which live on the class and none of which announce their absence.
   with no padding, radius or weight, and nothing in the markup said the class pair was incomplete.
   CSS has no error for a class that does half a job — which is also why there is **no
   `badge-gold`**, and never was.
+- **A SET of chips shares one box, and a border is 2px of that box.** The Admin Dashboard's four
+  adoption pills were three different boxes — the module pills `1px 4px` with no border, the Suite
+  pill `1px 5px` with one — so the pill meant to read as a peer of the other three was the only one
+  that did not match them. Measured: `13 / 13 / 13 / 18`. State the box once (`adoptionPill()`) and
+  let only COLOUR vary; give the unbordered members a **transparent** border so they match height
+  without gaining a ring. Vary emphasis with fill, weight or a glyph, never with the box.
 - **A badge carrying a SENTENCE takes `.badge-sentence`.** The box sets `text-transform:
   capitalize`, which is right for `paid` or `pending` and wrong for anything with a verb in it: a
   two-sentence operator warning on the admin Legal tab rendered "Do Not Send An Agreement To A

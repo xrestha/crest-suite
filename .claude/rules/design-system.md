@@ -526,6 +526,38 @@ it got reported. Margin gives byte-identical clearance (a margin on the last chi
 padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**
 
 
+## Flex `stretch` hides unequal chip heights until the row wraps (S691)
+
+Four adoption pills in the Admin Dashboard's Active Properties tile had drifted into three
+different boxes: `IMS`/`HR`/`POS` at `1px 4px` with no border, the Suite pill at `1px 5px` **with**
+a 1px border. A border adds 2px of height, so the one pill meant to read as a peer of the other
+three was the only one that did not match them.
+
+**It was invisible for as long as the row fitted on one line.** A flex row's default
+`align-items: stretch` paints every item to the height of the tallest, so all four *fills* rendered
+at 18px and only the ring gave it away. The real heights were `13 / 13 / 13 / 18`, and they showed
+the moment the row wrapped — which happens at the grid floor, i.e. on the narrow viewports nobody
+screenshots. Reported from a screenshot of the wide case, where the only visible symptom was that
+one chip looked boxier than its neighbours.
+
+Three things generalise:
+
+- **Measure a set's heights with the row FORCED to wrap**, or `stretch` will tell you they agree.
+  `getBoundingClientRect().height` per item, at the container's floor width as well as its natural
+  one. Equal heights on one line prove nothing.
+- **State the box once.** `adoptionPill(fill, ink, { border, bold })` is the same move `statCard`
+  in that file and `.page-header` app-wide already make: an identical inline style object repeated
+  four times has four chances to drift, and this one had taken three of them. Give the unbordered
+  members `border: 1px solid transparent` so they match height without gaining a ring.
+- **Do not flatten a deliberate difference while fixing an accidental one.** A first pass also
+  unified `fontWeight`, which had been 700 on the Suite pill on purpose — weight and a ★ are what
+  mark that axis out. Weight is not size. Only the box was shared in the end.
+
+A stale number came out of the same block: its comment cited a 190px grid floor when S642 had
+lowered it to 158, so its whole fit argument was computed against an inner width 33px wider than
+the real one. **A measurement written into a comment rots exactly like a value written into a
+rule** — re-derive it when you touch the block, or state where it came from so the next reader can.
+
 ## An inline style is how a rule stops reaching the elements that need it (S682)
 
 Two instances found in one pass, opposite directions, same cause.
