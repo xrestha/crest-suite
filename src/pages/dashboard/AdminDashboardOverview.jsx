@@ -167,9 +167,19 @@ export default function AdminDashboardOverview() {
   // The transparent border stays on all four rather than being dropped: it pins the box geometry,
   // so adding a visible border to any one of them later cannot silently make it 2px taller than
   // its neighbours, which is exactly the bug this helper was written to fix.
+  //
+  // Same SIZE means both visible dimensions, not just height. Equal-height pills of different
+  // width are still four different rectangles, and a reader who asks for "the same size" is
+  // asking for the same rectangle. minWidth is the measured widest label today (POS 1 = 39.5px
+  // outer), so all four render identical at 40px, centred. It is a MIN, not a width: a 2-digit
+  // count (POS 12 = 45px) grows past it and briefly breaks uniformity rather than clipping, which
+  // is the right trade — 46px would fit that case but forces the row to wrap on ordinary laptops
+  // (4x46 + 3x3 = 193px against ~191px of inner width at 1440) for data that does not exist yet.
+  // border-box so the 40 is the OUTER rectangle the eye compares, padding and border included.
   const adoptionPill = (fill, ink) => ({
     fontSize: 10, lineHeight: 1.5,
     padding: '1px 4px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
+    minWidth: 40, boxSizing: 'border-box', textAlign: 'center',
     background: `color-mix(in srgb, ${fill}, transparent)`,
     color: ink,
     border: '1px solid transparent',

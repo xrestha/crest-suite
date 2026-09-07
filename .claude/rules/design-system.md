@@ -567,6 +567,14 @@ Three things generalise:
   thing on screen, and it agreed with itself every time, which is exactly what made it convincing.
   If a rebuilt harness disagrees with a screenshot, the harness is the suspect: copy the wrapper
   chain verbatim from the source, or drive the real app.
+- **"The same size" means the same rectangle — BOTH dimensions.** A pill on screen is a 2D shape:
+  it has a width and a height, and nothing else. Five passes on the adoption pills equalised the
+  height and then reported success while the four widths were 36 / 33 / 39 / 27, because "pills
+  hug their label" was treated as an exemption nobody had asked for. It is not; four equal-height
+  rectangles of different width are four different sizes, and the reader could see it. `minWidth`
+  set to the measured widest label (40px, `border-box`, centred) is what "same size" costs, and it
+  is a min, not a width, so a longer label grows rather than clips. When a reader says size, ask
+  which dimension they mean before deciding one of them does not count.
 
 A stale number came out of the same block: its comment cited a 190px grid floor when S642 had
 lowered it to 158, so its whole fit argument was computed against an inner width 33px wider than
