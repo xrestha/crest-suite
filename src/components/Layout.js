@@ -16,6 +16,7 @@ import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
 import { colorTint } from '../data/pricingPlans'
+import { APP_VERSION } from '../shared/appVersion'
 import {
   Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
   Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
@@ -1074,6 +1075,9 @@ export default function Layout() {
       <div className="sidebar-user-role">
         {isAdmin ? 'Admin' : isOwner ? 'Owner' : posRole ? `POS · ${posRole.charAt(0).toUpperCase() + posRole.slice(1)}` : 'Client'}
       </div>
+      {/* Same build line the account menu carries on desktop — the drawer is the only nav a phone
+          has, so it needs it too. */}
+      <div className="sidebar-user-role" style={{ fontFamily: 'ui-monospace, "Cascadia Code", Consolas, monospace', letterSpacing: '0.04em' }}>{APP_VERSION}</div>
     </div>
   )
 
@@ -1610,6 +1614,17 @@ export default function Layout() {
                 <span className="sidebar-icon"><LogOut size={16} strokeWidth={1.75} /></span>
                 {isPinStaff ? 'Lock POS' : 'Sign out'}
               </button>
+              {/* The build this tab is actually running. APP_VERSION moves in lockstep with the
+                  service worker's CACHE_NAME (appVersion.test.js asserts it), so this is the one
+                  place a reader can tell a stale tab from a missing fix without DevTools — the
+                  question that cost four screenshots in S691 when a shipped fix was reported
+                  missing and the tab was simply two versions behind. Monospace so digits do not
+                  wobble; text3 so it recedes under the real actions above it. */}
+              <div className="topbar-panel-rule" />
+              <div title="App build — quote this if a change you were expecting is missing"
+                style={{ padding: '2px 14px 6px', fontSize: 10, color: 'var(--theme-text3)', fontFamily: 'ui-monospace, "Cascadia Code", Consolas, monospace', letterSpacing: '0.04em' }}>
+                {APP_VERSION}
+              </div>
             </Dropdown>
           </div>
         </div>
