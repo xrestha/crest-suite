@@ -651,6 +651,19 @@ phones. Shrinking the figure to 20px also fixes it and was rejected: it de-empha
 number on every KPI in the product to solve a grid problem. Raise the floor, never let the value
 wrap.
 
+**And every card in a KPI row is the same rectangle — the same height as well as the same width.**
+The `1fr` columns already give equal width; equal height comes from the grid's default
+`align-items: stretch`, so **never set `alignItems: 'start'` on a stat strip.** It sized each
+card to its own content, and the admin strip shipped at 123 / 101 / 87 / 87 / 87 / 87 with a
+ragged bottom edge until S691. A card that holds less simply carries empty space below its figure;
+that is what one rectangle costs. Two consequences that were both measured before this was written:
+a card that is a `<button>` (the admin strip's filter cards) vertically CENTRES its content, so
+once stretched its label sinks below the div cards' — give it `display: flex; flexDirection:
+column; justifyContent: flex-start` so it lays out top-down like its neighbours (labels all at 13px,
+where they had been 13 / 23 / 31); and **"the same size" means both dimensions**, so measure the
+label offset inside each card as well as the outer box, because the outer boxes agreeing is exactly
+the state in which the inner drift shows.
+
 **One breakpoint: 768px.** No tablet tier and no desktop max-width. Above it the top bar IS the
 navigation and `.sidebar-wrap` is `display: none`; below it the bar goes away and the same
 `.sidebar-wrap` becomes the phone drawer (`translateX(-100%)` plus a 44px fixed hamburger and a
