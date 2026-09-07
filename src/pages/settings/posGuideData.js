@@ -171,7 +171,7 @@ export const POS_GUIDE_GROUPS = [
         route: '/pos/reservations',
         plan: 'Staff+',
         summary:
-          'The booking book. A booking is a promise about a future table, kept in its own record and DERIVED onto the Orders floor — it never writes the table\'s status. Take one by phone, WhatsApp or at the door, or let customers request one from the outlet\'s booking QR / link; every online request waits for a staff Accept — the count shows on the Reservations row in the sidebar, on the POS dot in the rail and on the dashboard\'s Bookings Tonight tile, and the Reservations page chimes while it is open. Seating hands off to Order Taking with the party size as the covers, and paying the bill marks the booking completed.',
+          'The booking book. A booking is a promise about a future table, kept in its own record and DERIVED onto the Orders floor — it never writes the table\'s status. Take one by phone, WhatsApp or at the door, or let customers request one from the outlet\'s booking QR / link; every online request waits for a staff Accept — the count shows on the Reservations row inside the POS → Floor menu, on the dot on the POS button in the top bar and on the dashboard\'s Bookings Tonight tile, and the Reservations page chimes while it is open. Seating hands off to Order Taking with the party size as the covers, and paying the bill marks the booking completed.',
         workflow: [
           'Take: + New booking — name, phone (looked up in the customer book: visits, unsettled credit, past no-shows), guests, BS day + time, optional held tables, how they booked. Sitting length prefills per party size.',
           'Confirm: the 💬 button opens WhatsApp on this device with the confirmation message prefilled; the number is on the row for a phone call. Nothing is sent automatically — no SMS gateway, no sender ID to register.',
@@ -180,7 +180,7 @@ export const POS_GUIDE_GROUPS = [
           'Undo: a no-show who turns up is put back to Arrived (⋯ → They turned up), which clears the mark from their phone number; a cancelled booking is reinstated to Booked. Both only on the booking\'s own day — after that it is a record, not a guest at the door.',
           'Decline vs cancel: a request from the booking link is DECLINED with its own reason list (No table at that time, Closed that day, Party too large), because that reason is shown on the guest\'s phone. Cancel reasons are for the book.',
           'Online requests: an amber band at the top of the page, polled every 15 s with a chime — Accept confirms, Decline needs a reason, and the guest\'s phone shows the answer within seconds.',
-          'Views: Upcoming (the default — every future booking under day headers, so a colleague\'s booking for next week is on screen without picking the date), Day (one day, with the hour-by-hour strip), Unconfirmed (from today), Activity (the newest hundred changes, newest first, with who took each booking; changes since this device last opened the page are marked new, and that count also sits on the Reservations row in the sidebar).',
+          'Views: Upcoming (the default — every future booking under day headers, so a colleague\'s booking for next week is on screen without picking the date), Day (one day, with the hour-by-hour strip), Unconfirmed (from today), Activity (the newest hundred changes, newest first, with who took each booking; changes since this device last opened the page are marked new, and that count also sits on the Reservations row inside the POS → Floor menu).',
         ],
         fields: [
           { label: 'Status ladder', desc: 'Requested (online only) → Booked → Confirmed → Arrived → Seated → Completed; No-show and Cancelled are terminal. Seated MEANS the order exists — the database refuses a seated row with no order_id.' },
@@ -457,7 +457,7 @@ export const POS_GUIDE_GROUPS = [
           'Updating one switch never resets the others — each field saves independently, so setting a Discount Limit cannot quietly wipe someone\'s role or team.',
           'Discount Limit and Allow Void are enforced server-side at close, not just in the till screen — a staff session cannot exceed them from a modified browser. Admin and Owner are exempt from both by design.',
         ],
-        connections: 'Ranks gate every POS page (chips throughout this guide); the two switches bind Orders\' billing modal and the server-side close guard; teams bind the KDS and the sidebar. Linked HR employees keep one identity across modules. PIN lockout resets land here.',
+        connections: 'Ranks gate every POS page (chips throughout this guide); the two switches bind Orders\' billing modal and the server-side close guard; teams bind the KDS and which POS pages a station account can reach at all. Linked HR employees keep one identity across modules. PIN lockout resets land here.',
       },
     ],
   },

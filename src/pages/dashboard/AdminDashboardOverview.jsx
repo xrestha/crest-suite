@@ -153,8 +153,8 @@ export default function AdminDashboardOverview() {
   const planBadge = (plan) => ({
     fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)',
     color:       plan === 'pro' ? 'var(--theme-accent-ink)'  : plan === 'growth' ? 'var(--theme-green-text)'               : 'var(--theme-text2)',
-    background:  plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)': plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)'            : 'rgba(138,146,163,0.10)',
-    border: `1px solid ${plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'rgba(138,146,163,0.20)'}`,
+    background:  plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)': plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)'            : 'color-mix(in srgb, var(--theme-text2) 10%, transparent)',
+    border: `1px solid ${plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'color-mix(in srgb, var(--theme-text2) 20%, transparent)'}`,
   })
 
   return (

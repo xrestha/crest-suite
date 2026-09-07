@@ -12,6 +12,9 @@ description: The 9-step checklist for shipping a new Crest Suite feature — fea
    **A Suite feature belongs in none of the three tier sets.** There is a `SUITE_KEYS` set in `AuthContext.js` naming them, exported for documentation; `hasFeature()` deliberately lets them fall through to `false` so `SuiteGate` owns the decision. `STARTER_KEYS`/`GROWTH_KEYS`/`PRO_KEYS` key off `client.plan` (the *IMS* plan), while `SuiteGate` gates on `clients.suite_plan` and passes on `tierOk || overridden` where `overridden` is `hasFeature(key)`. Putting `owner_dashboard` or `monthly_owner_report` into `PRO_KEYS` would make `hasFeature()` true for every IMS Pro client, so `overridden` would always short-circuit the tier check and **Crest Suite Pro would stop gating anything** — an entire SKU given away. Their `feature_flags` column exists only as the per-client exception the `||` implies. `FeatureAccessModal` renders them in their own accent-washed band **above** the plan grid, with a line saying so, rather than as a fifth column.
 2. **Route**: wrap with `<ModuleGate module="ims">` + `<PremiumGate featureKey="..." minPlan="...">` in `App.js`.
 3. **Nav**: add an entry to `NAV` or `REPORTS` in `Layout.js` with `featureKey` and `minPlan`.
+   Nothing else is needed for the top bar or the phone drawer: both render from the same arrays,
+   and a labelled group becomes a bar dropdown automatically (`renderBarGroup`). A brand-new
+   GROUP is likewise picked up on both surfaces from `IMS_GROUPS`/`HR_GROUPS`/`POS_GROUPS`.
 4. **Tooltips**: every non-obvious column header and form label needs a `<Tip>` tooltip.
 5. **Help page**: add an entry to `src/pages/Help.js`.
 6. **Changelog**: prepend the session entry to the newest `CHANGELOG/S###-S###.md`, run

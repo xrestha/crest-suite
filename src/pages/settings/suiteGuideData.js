@@ -34,9 +34,9 @@ export const SUITE_GUIDE_GROUPS = [
         fields: [
           { label: 'ONE tier, always', desc: 'suite_plan is NULL or \'pro\' — nothing else. It used to carry starter/growth/pro, but every call site asked for growth, so Suite Starter unlocked nothing at all and Suite Pro added nothing over Suite Growth. Retired S548.' },
           { label: 'SuiteGate vs ModuleGate/PremiumGate', desc: 'SuiteGate is a third gate on a genuinely separate axis, and it NEVER redirects on failure — an ineligible viewer gets an inline upsell in place, because the nav entry has to stay visible to be sold. That is why a Suite nav item carries no featureKey/minPlan tag: those would hide it instead of upselling it.' },
-          { label: 'Where a client finds it in the sidebar', desc: 'A labelled, collapsible CREST SUITE group sits under the Dashboard link on every module panel — IMS, HR and POS alike, since Suite is cross-module. It holds EVERY Suite feature: Owner Dashboard, Owner Report, Profit & Loss, Group Console (with more than one outlet), Demand Forecast and Fixed Assets. A client without suite_plan sees the same group carrying a PRO chip in place of the item count, and the rows still click through to the in-place upsell. (On the Crest-admin panel it renders LAST instead, below Clients / Periods / Guest Menu / Audit Log / Settings — there it is a client-facing layer being looked at from outside, not the operator\'s own work.)' },
+          { label: 'Where a client finds it in the navigation', desc: 'A CREST SUITE menu sits in the nav row beside the Dashboard link on every module panel — IMS, HR and POS alike, since Suite is cross-module. It holds EVERY Suite feature: Owner Dashboard, Owner Report, Profit & Loss, Group Console (with more than one outlet), Demand Forecast and Fixed Assets. A client without suite_plan sees the same group carrying a PRO chip in place of the item count, and the rows still click through to the in-place upsell. (On the Crest-admin panel it renders LAST instead, below Clients / Periods / Guest Menu / Audit Log / Settings — there it is a client-facing layer being looked at from outside, not the operator\'s own work.)' },
           { label: 'Two gates inside one group', desc: 'The four owner-altitude pages are Owner-or-admin only. Demand Forecast and Fixed Assets are Suite-billed but IMS-shaped and gated at IMS supervisor rank, so an IMS supervisor who is not the Owner sees a two-item Crest Suite group. The gate is per item rather than on the group precisely so that grouping them did not revoke them from those supervisors; a viewer who can reach none of them sees no group at all.' },
-          { label: 'The command palette reads the same list', desc: 'Ctrl/Cmd-K searches every Suite destination under a "Suite" tag, using longer names (Monthly Owner/Manager Report, Consolidated Profit & Loss) since it is searched by typing. It builds from the sidebar\'s own list and applies the same per-item gates, so the two can never disagree about who may see a Suite page — which they did until S638.' },
+          { label: 'The command palette reads the same list', desc: 'Ctrl/Cmd-K searches every Suite destination under a "Suite" tag, using longer names (Monthly Owner/Manager Report, Consolidated Profit & Loss) since it is searched by typing. It builds from the nav\'s own list and applies the same per-item gates, so the two can never disagree about who may see a Suite page — which they did until S638.' },
           { label: 'requireModules', desc: 'Each Suite feature declares its own module floor. Owner Dashboard needs BOTH ims and hr (its original behaviour); Group Console, Consolidated P&L, Monthly Owner Report, Demand Forecast and Fixed Assets need ims only. Do not assume every Suite page needs Owner Dashboard\'s pair.' },
           { label: 'The feature_flags override', desc: 'Each page passes a featureKey (owner_dashboard, monthly_owner_report, consolidated_pnl, multi_outlet), so admin can grant one Suite page to a client without suite_plan. Admin always bypasses everything.' },
         ],
@@ -158,10 +158,10 @@ export const SUITE_GUIDE_GROUPS = [
         route: null,
         plan: 'Crest Suite Pro · Owner or admin',
         summary:
-          'A group of outlets is several clients rows joined by clients.group_id. An Owner switches between them from the sidebar and every scoped query re-points at the selected outlet. The architecture is SELECTED-OUTLET INDIRECTION, not policy rewriting: profiles.active_client_id was added and only my_client_id() changed, to coalesce(active_client_id, client_id). Every one of ~151 policy references keeps its exact shape and resolves to the selected outlet.',
+          'A group of outlets is several clients rows joined by clients.group_id. An Owner switches between them from the top bar and every scoped query re-points at the selected outlet. The architecture is SELECTED-OUTLET INDIRECTION, not policy rewriting: profiles.active_client_id was added and only my_client_id() changed, to coalesce(active_client_id, client_id). Every one of ~151 policy references keeps its exact shape and resolves to the selected outlet.',
         workflow: [
           'Admin links outlets by setting clients.group_id. Both new columns default NULL, so an ungrouped client is byte-identical to before — which is what made this safe to ship across the whole book at once.',
-          'The Owner picks an outlet in the sidebar; the whole app re-scopes. The Group Console rolls the group up.',
+          'The Owner picks an outlet in the top bar; the whole app re-scopes. The Group Console rolls the group up.',
         ],
         fields: [
           { label: 'Why not a set-returning my_client_ids()', desc: 'It would touch every policy on ~50 tables and permanently widen RLS from "one client" to "any client in my group" — removing RLS as the backstop behind the scoped query layer\'s own filter.' },
@@ -226,7 +226,7 @@ export const SUITE_GUIDE_GROUPS = [
           'A revoke also clears active_client_id, so it EVICTS rather than merely denying the next switch. Denying the next switch would leave someone sitting inside an outlet they had just lost access to.',
           'The outlet list here comes from the RPC, not from the session\'s own outlet list: the matrix must include outlets excluded from the FIGURES for want of Suite Pro, because access and staffing are not what the group is billed for.',
         ],
-        connections: 'Feeds the sidebar outlet switcher. Rank still comes from the three role axes on the staff account itself.',
+        connections: 'Feeds the top-bar outlet switcher. Rank still comes from the three role axes on the staff account itself.',
       },
       {
         id: 'master-push',

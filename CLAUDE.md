@@ -57,7 +57,7 @@ meaning.
 
 - **React 19 (CRA)** — no Vite, no custom webpack config, no TypeScript
 - **Supabase JS v2** — single client at `src/supabaseClient.js`; anon key only in the browser bundle
-- **Code splitting (S440)** — every page component in `App.js` is route-level `React.lazy(() => import(...))`; only structural pieces stay eager (contexts, `Layout`, `ProtectedRoute`, `ModuleGate`/`PremiumGate`). Keep new page routes lazy too. Two `Suspense` boundaries: one around `Layout.js`'s `<Outlet />` (so the sidebar persists during in-app navigation — only the content area shows `RouteFallback`) and a top-level one in `App.js` for the public routes. Any `import './x.css'` must stay **above** the lazy `const`s or ESLint's `import/first` fails the CI build. This cut initial JS from ~931 kB → ~165 kB gzipped (the rest lazy-loads as ~97 on-demand chunks)
+- **Code splitting (S440)** — every page component in `App.js` is route-level `React.lazy(() => import(...))`; only structural pieces stay eager (contexts, `Layout`, `ProtectedRoute`, `ModuleGate`/`PremiumGate`). Keep new page routes lazy too. Two `Suspense` boundaries: one around `Layout.js`'s `<Outlet />` (so the top bar persists during in-app navigation — only the content area shows `RouteFallback`) and a top-level one in `App.js` for the public routes. Any `import './x.css'` must stay **above** the lazy `const`s or ESLint's `import/first` fails the CI build. This cut initial JS from ~931 kB → ~165 kB gzipped (the rest lazy-loads as ~97 on-demand chunks)
 - **`xlsx` is always `import('xlsx')` inside the click handler, never a top-level `import * as XLSX from 'xlsx'` (S522).** Route-level lazy-loading (S440 above) only defers a *page's own* code — it does nothing about a library that page statically imports, which webpack still must fetch the moment the route loads. `xlsx` is 138 kB gzipped and is only ever touched by an explicit Export/Import click, so a static import paid it on every visit to all 37 pages with an Excel button. Make the handler `async` and put `const XLSX = await import('xlsx')` on its first line. `recharts` (102 kB) is deliberately left static — charts are above-the-fold content, not a deferred click. The three files that needed a different shape, and how the fix was verified in the built output, are in `.claude/rules/frontend-performance.md`.
 - **Vercel** for deployment — `vercel.json` sets `no-cache` on `index.html` to prevent CDN serving stale bundles
 - **PWA service worker** at `public/service-worker.js` — registered only in production (`src/index.js`). `CACHE_NAME` (read the current value from the file — it moves constantly) must be bumped on **every** JS/CSS change you want existing users to actually receive, not just breaking ones — the fetch handler is cache-first for static assets, so a plain deploy (or even a hard refresh) leaves already-cached chunks serving the old code indefinitely until this constant changes and `activate` purges the old cache (S452 found a real fix silently never reached the browser because of this)
@@ -187,7 +187,7 @@ await scopedDelete('vendors').eq('id', vendorId)
 - Admin: `adminViewClientId` (from `localStorage`; set when admin "views as" a client)
 - Client user: `profile.client_id`
 
-Admin switches clients via the sidebar dropdown → `switchAdminClient(id, name)` → all pages re-fetch via `useEffect([clientId, ...])`.
+Admin switches clients via the top-bar dropdown → `switchAdminClient(id, name)` → all pages re-fetch via `useEffect([clientId, ...])`.
 
 As of 2026-07-05 every IMS, HR and POS page, plus `Dashboard.js`, `Periods.js` and `Settings.js`, goes through `scopedDb`. Two pages are **correctly exempt, not pending**: `AuditLog.js` (a cross-client admin viewer — `audit_logs.client_id` is nullable and its "All Clients" filter is incompatible with auto-scoping to one client) and `AdminClients.js` (has no `clientId` of its own — it loops over an explicit client list and acts on whichever `client.id` a row targets, so it calls the raw `scopedFrom`/`scopedInsert`/`scopedUpdate`/`scopedDelete` functions from `scopedDb.js` directly with that `client.id`, instead of the `useScopedDb()` hook). `Periods.js`'s admin "all clients" view and `Dashboard.js`'s `loadAdminStats()` use that same raw-function-with-explicit-id pattern, while their genuinely cross-tenant reads stay on plain `supabase.from()`.
 
@@ -201,7 +201,7 @@ The app is one React app / one Supabase project with three modules toggled by pe
 | Crest HR | `hr_enabled` | `false` |
 | Crest POS | `pos_enabled` | `false` (real column, added S193) |
 
-`clientModules` in `AuthContext` drives **display** (sidebar + dashboard sections). `imsEnabled` / `hrEnabled` drive **route access** (admin bypasses both).
+`clientModules` in `AuthContext` drives **display** (nav + dashboard sections). `imsEnabled` / `hrEnabled` drive **route access** (admin bypasses both).
 
 ### Staff role systems (POS / IMS / HR)
 

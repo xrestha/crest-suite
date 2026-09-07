@@ -140,7 +140,8 @@ enforced, and derives `client_id` from the order rather than taking it as a para
   exactly the people it must exempt. This shipped broken (S575→S583): any admin or Owner on a
   machine that had ever completed POS device binding was silently signed out after 3 idle
   minutes, reported as "why does the app sign me out when I leave for a while". The same raw
-  test drives the rail button's Lock-POS-vs-Sign-out label and the sign-out routing to
+  test drives the Lock-POS-vs-Sign-out label (account menu on desktop, drawer rail on a phone)
+  and the sign-out routing to
   `/pos/login` vs `/login`.
 - **Sales Exceptions ranks by Revenue Impact** (discount + void menu value + comp *potential
   sales value*) — one coherent unit. Comp food cost stays in its own column. Never reintroduce a
@@ -674,7 +675,7 @@ are load-bearing, each with the reason it exists:
   future `updated_by` must be set from `auth.uid()` in the trigger, never a parameter. The "new
   since you last looked" stamp is per device (`src/shared/reservationSeen.js`); the page and
   `useNavBadgeCounts` must keep counting from the SAME stamp with the SAME predicate, or the
-  sidebar chip and the tab disagree.
+  nav chip and the tab disagree.
 
 ## Server-assigned numbers, the offline queue, and `settings` RLS
 

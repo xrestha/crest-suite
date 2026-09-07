@@ -67,7 +67,7 @@ Shape and type have their own token sets at the top of `Layout.css`: `--radius-x
 
 **S424's two named traps both recurred once more, found by a full `/impeccable audit` pass (S521) rather than the hook** (the hook only runs on edited files — `AdminClients.js` hadn't been touched since before the S424 fix shipped, so its violations sat undetected). `AdminClients.js`'s Trial Accounts panel had a `linear-gradient()` header (the codebase's only confirmed instance of the no-gradient Cards rule being broken), solid `background:'#f87171'`/`color:'#fff'` fills on its count pill and "Wants to Subscribe" badge instead of the alpha-tint pattern, and a hardcoded `color:'#000'` on `var(--theme-accent)` for its "Annual" badge — the exact accent-text bug from S424, recurring. Same file's module pills and "Features" button also carried a second, undocumented accent color (`#60a5fa`/`#818cf8`, an indigo/blue with no home in the palette), independently duplicated in `SuiteGate.js`'s upsell card — both fixed to `var(--theme-accent)`/`var(--theme-focus-ring)`, matching the identical upsell card in `PremiumGate.js`, which never had the bug. All fixed in place rather than reworked — same components, same layout, just reading tokens instead of literals. Lesson: a hook that only fires on touched files will never catch drift in a file nobody has opened in months; a periodic full-project `/impeccable audit` is the only thing that does.
 
-**The canonical neutral tint is `rgba(138,146,163,…)` — `--theme-text2` "Slate Text", the same value `.badge-gray` uses.** Three different greys were in play for one role until S540: the canonical slate; `rgba(107,114,128,…)` (`#6b7280`, which *is* documented — but as `chart-tick`, so using it for UI chrome passes a literal-value check while breaking DESIGN.md's chart/chrome separation); and `rgba(120,113,108,…)` (`#78716c`, documented nowhere at all). The plan badge in `ClientDrawer.js` and its duplicate in `AdminDashboardOverview.jsx` used *two different* greys within the same element — one for fill, another for border. All five sites now point at the slate. **The lesson is that "the hook didn't flag it" is not the same as "it's right":** the hook only reported the undocumented `#78716c` and stayed silent on the chart color being used as a badge border, because its check is per-value, not per-role. When reaching for a neutral, use `badge-gray` if a class fits, or `rgba(138,146,163,…)` if the element needs inline styling.
+**The canonical neutral tint is `color-mix(in srgb, var(--theme-text2) N%, transparent)`, the same shape `.badge-gray` and its four sibling badge classes use.** It was stated here as the literal `rgba(138,146,163,…)` from S540 until S691, and that is a worked example of why a rule must never freeze a value that moves: `#8a92a3` was `--theme-text2` on the **pre-Modernist** palette, S689 re-themed the product and moved the token to `#bab6b6` / `#605d5d`, and nothing re-checked the rule — so nine literals across six files went on painting a retired cool slate next to `color: var(--theme-text2)` text that re-toned correctly, and the rule itself is what made them read as sanctioned. Swept in S691. **`.badge-gray` is the thinnest margin of the six badge classes** and the only one whose fill and ink come from the same token: measured from painted pixels it is 4.68:1 on Modernist Light (over card and sidebar alike) and 6.44:1 on Night, against the retired literal's 4.95/6.83 — AA-legal either way, but re-measure it before changing its alpha or `--theme-text2`. Giving it `--theme-text1` would take it to 11.58:1 and match how every sibling pairs a tint with a stronger ink; that is an open option, not a defect. **Measure a `color-mix` from PAINTED PIXELS, never from `getComputedStyle`** — it returns `color(srgb r g b / a)` with 0–1 components, so a parser written for `rgb(0–255)` silently drops the tint and reports the text on the bare ground. That artifact reported this same chip as 4.31:1 and failing, which is a plausible enough number to act on. Three different greys were in play for one role until S540: the canonical slate; `rgba(107,114,128,…)` (`#6b7280`, which *is* documented — but as `chart-tick`, so using it for UI chrome passes a literal-value check while breaking DESIGN.md's chart/chrome separation); and `rgba(120,113,108,…)` (`#78716c`, documented nowhere at all). The plan badge in `ClientDrawer.js` and its duplicate in `AdminDashboardOverview.jsx` used *two different* greys within the same element — one for fill, another for border. All five sites now point at the slate. **The lesson is that "the hook didn't flag it" is not the same as "it's right":** the hook only reported the undocumented `#78716c` and stayed silent on the chart color being used as a badge border, because its check is per-value, not per-role. When reaching for a neutral, use `badge-gray` if a class fits, or `color-mix(in srgb, var(--theme-text2) N%, transparent)` if the element needs inline styling — mixing with `var(--theme-card)` instead of `transparent` where the chip may sit on the darker shell ground, as `utils/subscription.js` does throughout. The `#6b7280` still live in `BestSellers.js`, `CoversReport.jsx` and `SalesReport.jsx` is **not** this defect: it is `chart-tick` used on Recharts SVG props, where `var()` cannot resolve, and each site carries a comment confirming the page's TEXT takes the tokens.
 
 **Drift concentrates in inline-styled controls, and two app-wide gaps were found behind it (S546).** An `/impeccable audit` of `ClientDrawer.js` scored 10/20, and every finding in the theming and integrity dimensions sat on an element that had opted out of a class — where the file uses `.btn`/`.badge-*`/`.data-table`/`Tip`/`Modal` it follows the system almost perfectly. Two of those were behavioral, not cosmetic, and both are the S424→S521 recurrence again: `color:'#fff'` on a helper line (every light preset has `card:#ffffff`, so it was invisible on five of ten themes) and `color:'#000'` on `var(--theme-accent)` (3.85:1 on Latte, below AA). **Twenty of the file's twenty-six `borderRadius` literals were off the closed 8/12/18/24/999 scale** — the file predates the 2026-07-12 step-up and nobody had opened it since. Two gaps behind those are wider than one file and only one is closed:
 
@@ -271,7 +271,7 @@ conventions and nothing on screen would otherwise admit it.
 
 ### A nav item's visibility condition belongs on the ITEM, not at each render site (S638/S639)
 
-The sidebar is not the only thing that reads the nav: the **command palette** flattens every
+The rendered nav is not the only thing that reads the nav model: the **command palette** flattens every
 destination into one searchable list, and `isItemVisible()` is the predicate both go through. A
 condition written *around* a render site is therefore applied to one consumer and not the other.
 
@@ -294,7 +294,7 @@ reachable, so per-item gating degrades correctly on its own.
 ### A nav icon is unique per route, because the command palette flattens the modules (S606)
 
 `CommandPalette.js:134` renders each nav item's `icon` and lists **every module's items in one
-searchable list**. The sidebar shows one module panel at a time, so an icon shared by two routes in
+searchable list**. The nav shows one module panel at a time, so an icon shared by two routes in
 different modules looks fine there and sits directly beside its twin in the palette. Sixteen such
 collisions had accumulated — `Users` was Customers *and* Employees, `Banknote` was Purchase 1L+
 Report *and* Payroll, `CalendarClock` was FIFO/Expiry *and* Staff Roster, `Building2` was three
@@ -492,8 +492,12 @@ failures produced *plausible* numbers, which is the whole danger — neither loo
 only tell was two passes disagreeing with each other:
 
 - **The harness double-debited the sidebar.** It placed a 240px `<div>` beside `.main-content` — but
-  Layout.css's own `.main-content` already reserves the sidebar with `margin-left`, so every reading
+  Layout.css's own `.main-content` reserved the sidebar with `margin-left`, so every reading
   came in 240px pessimistic (854px of room reported at a 1440px viewport, against a true 1094px).
+  **Since S691 there is no reservation at all** — the shell is a column under a top bar and
+  `.main-content` is just the row below it, so a harness now models the full viewport width minus
+  the page's own 32px padding. The lesson outlives the numbers: check the harness's reported room
+  against the arithmetic before trusting any figure in it.
 - **Then it resized a wrapper instead of the viewport.** Setting `.shell { width: 1440px }` inside a
   671px browser window reports `overflow: 0` for a table that overflows badly in the real one — the
   scroll container is sized by the window, not by the div you widened.
@@ -593,7 +597,8 @@ chip's class, and the modifier makes that easier to ignore than to fix.
 ## A page that invents its own class names opts out of the touch tier (S678)
 
 `Layout.css`'s `@media (pointer: coarse)` block can only reach selectors it knows about — `.btn`,
-`.tab-btn`, `.sidebar-link`, the bare-element floor. **A stylesheet that names its own controls
+`.tab-btn`, `.sidebar-link`, the top bar's `.topbar-*` controls, the bare-element floor. **A
+stylesheet that names its own controls
 gets none of it, silently.** `Legal.css` had no coarse block at all, so on the public Terms page
 measured at 390px: contents-rail links **28.2px tall with a 0px gap** between eighteen of them,
 the verify disclosure 28px, footer links 18px — on the one surface in the product that is pure
@@ -765,8 +770,10 @@ turned working, deliberate code into apparent drift, and none of them announced 
 - **Whole palettes vanished**: the 13-token print grayscale ramp and the guest menu's 14-token
   bone-and-pine set. Both are real, reused, deliberately theme-independent scales.
 - **A sanctioned exception lost its rationale.** The sidebar's `width`/`margin-left` collapse
-  animation is recorded in `.impeccable/config.json`'s `ignoreValues`, but the *reason* lived only
-  in DESIGN.md — so the config entry survived and the argument did not.
+  animation was recorded in `.impeccable/config.json`'s `ignoreValues`, but the *reason* lived only
+  in DESIGN.md — so the config entry survived and the argument did not. (Both entries were
+  removed in S691 along with the animation itself: an exemption that no longer exempts anything is
+  a claim the next reader has to go and disprove.)
 
 So: after any rewrite, **re-derive coverage rather than re-reading the prose.** Diff the old and new
 frontmatter key sets, grep `config.json`'s ignore reasons for `DESIGN.md` and confirm each still has

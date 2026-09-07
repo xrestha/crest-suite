@@ -915,8 +915,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       </span>
       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-full)',
         color: client.plan === 'pro' ? 'var(--theme-accent-ink)' : client.plan === 'growth' ? 'var(--theme-green-text)' : 'var(--theme-text2)',
-        background: client.plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)' : client.plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'rgba(138,146,163,0.10)',
-        border: `1px solid ${client.plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : client.plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'rgba(138,146,163,0.25)'}`,
+        background: client.plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)' : client.plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'color-mix(in srgb, var(--theme-text2) 10%, transparent)',
+        border: `1px solid ${client.plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : client.plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'color-mix(in srgb, var(--theme-text2) 25%, transparent)'}`,
       }}>
         {client.plan === 'pro' ? 'Pro' : client.plan === 'growth' ? 'Growth' : 'Starter'}
       </span>

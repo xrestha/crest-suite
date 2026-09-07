@@ -1,6 +1,6 @@
 // Content for Admin Settings → Guides → Crest IMS. Static reference data, not fetched from the DB —
 // edit this file directly and redeploy to update the guide (see CLAUDE.md decision log, S417).
-// Grouped to mirror the IMS sidebar's own NAV_GROUPS in Layout.js so the guide reads in the same
+// Grouped to mirror the IMS nav's own IMS_GROUPS in Layout.js so the guide reads in the same
 // order a user encounters the module.
 
 export const IMS_GUIDE_GROUPS = [
@@ -502,7 +502,7 @@ export const IMS_GUIDE_GROUPS = [
           'Disposal gain/loss = Disposal Proceeds − NBV at Disposal (book side only — Nepal tax pooling just reduces the pool balance by the proceeds, with no separate per-asset gain/loss).',
         ],
         gotchas: [
-          'It lives under CREST SUITE in the sidebar, not under Costing — it is billed on the Suite axis, not an IMS tier. It is documented in this guide because everything it reads is IMS data.',
+          'It lives in the Crest Suite menu, not under Costing — it is billed on the Suite axis, not an IMS tier. It is documented in this guide because everything it reads is IMS data.',
           'Book depreciation and Nepal tax depreciation are expected to disagree with each other — different methods (straight-line per-asset vs. declining-balance pooled), different starting rules. That is normal, not a bug; the Tax Depreciation tab carries its own on-screen disclaimer to verify current rates with an accountant before filing, since Nepal\'s Finance Act amends these periodically.',
           'Once a depreciation run or tax pool run is Posted, its schedule rows are immutable at the database level — there is no Reopen. Fixing a mistake means posting a new adjustment run for the same period, not editing the old one.',
           'Preview never writes anything — only Post does. Safe to Preview repeatedly while checking numbers.',
@@ -708,7 +708,7 @@ export const IMS_GUIDE_GROUPS = [
           'If no POS revenue signal exists but a qty forecast does (from manual entries), revenue is instead estimated as Σ(forecastQty × recipe.selling_price) and shown with a "≈" prefix.',
         ],
         gotchas: [
-          'It lives under CREST SUITE in the sidebar, not under Stock Reports — it is billed on the Suite axis, not an IMS tier. It is documented in this guide because everything it reads is IMS data.',
+          'It lives in the Crest Suite menu, not under Stock Reports — it is billed on the Suite axis, not an IMS tier. It is documented in this guide because everything it reads is IMS data.',
           'Manual sales-entry history only kicks in as a fallback/supplement once POS history covers fewer than 42 days — and only for the qty signal, never covers/revenue.',
           'New forecast rows are inserted before the old run is deleted (not delete-then-insert) — a failed recompute can\'t wipe out the last good forecast.',
         ],
@@ -1204,7 +1204,7 @@ export const IMS_GUIDE_GROUPS = [
         summary:
           'Crest IMS has a three-tier role system (Staff / Supervisor / Manager) that decides which IMS pages a login can reach. It mirrors the POS role system deliberately — same shape, same rank comparison — but is a completely separate axis: ims_role on the profiles row, independent of pos_role. This page is where an Owner or Manager creates IMS logins and assigns those roles.',
         workflow: [
-          'Roles rank Staff (1) < Supervisor (2) < Manager (3). Every gated page declares a minimum, and access is a simple rank comparison — hasImsAccess(min) in AuthContext, plus a matching minImsRole tag on the sidebar/command-palette entry so a page a user cannot open is never shown as a link.',
+          'Roles rank Staff (1) < Supervisor (2) < Manager (3). Every gated page declares a minimum, and access is a simple rank comparison — hasImsAccess(min) in AuthContext, plus a matching minImsRole tag on the nav/command-palette entry so a page a user cannot open is never shown as a link.',
           'The Owner login and any platform admin both resolve to Manager automatically — they never need an ims_role set. Note the Owner test is negative: an account counts as Owner only when it has none of pos_role, hr_self_service, or ims_role set, so giving someone an ims_role deliberately demotes them out of Owner-level access.',
           '"+ Add Staff" has three modes. HR Employee links the new login to an existing hr_employees record so the name never drifts between modules. IMS-only Staff creates a fresh email + password login. Existing User (added later, see below) assigns a role to a login that already exists rather than creating anything.',
           'Reset Password sets a new password immediately — there is no email or reset-link flow, so the new password has to be handed to the person directly.',
@@ -1217,11 +1217,11 @@ export const IMS_GUIDE_GROUPS = [
         ],
         formulas: [],
         gotchas: [
-          'A staff account with no ims_role at all cannot see any IMS page — the whole IMS section disappears from their sidebar rather than showing locked entries. That is the intended state for, say, an HR-only or POS-only login, not a misconfiguration.',
+          'A staff account with no ims_role at all cannot see any IMS page — the whole IMS section disappears from their navigation rather than showing locked entries. That is the intended state for, say, an HR-only or POS-only login, not a misconfiguration.',
           '"Existing User" eligibility is deliberately narrow, and it is an architectural constraint rather than a UI nicety: only accounts with none of pos_role, hr_self_service, or ims_role already set are offered. Assigning ims_role to an account that is already POS PIN staff or HR self-service would appear to work in the UI while every actual table read and write kept silently failing — the S316 RESTRICTIVE isolation policies (no_pos_pin_staff, no_self_service_accounts) key off pos_email IS NOT NULL / hr_self_service = true directly, entirely independent of ims_role. The same check is enforced server-side in update_ims_role, not just in the picker, so calling the action directly cannot bypass it.',
           'The picker is empty for anyone but the Owner and an admin, by design. The 2026-08-10 security review found the pair of get_ims_eligible_users / get_hr_role_eligible_users returned each eligible account\'s id AND real login email to any authenticated account of the client, with no rank check — and the accounts they list, being non-staff logins, are exactly the Owner\'s. Combined with admin-user-ops\' reset_ims_password (which then verified only that the target shared the caller\'s client_id), an IMS or HR Manager could read the Owner\'s email, overwrite the Owner\'s password, and sign in as them. Both halves are fixed: the RPCs are Owner/admin-only, and every staff-management action now refuses a target that is not already a staff account of that module.',
           'Role changes take effect on the affected user\'s next profile load — an already-signed-in session keeps its old menu until it refreshes. When in doubt, have them sign out and back in rather than assuming the change failed.',
-          'Route guards and nav visibility are two separate things and both matter. A page whose route guard bounces an under-privileged user is secure but still a trust problem if its link stays visible and dead-ends — every gated entry therefore carries minImsRole so the sidebar and ⌘K palette hide it too. This was a real bug once: the Settings link is rendered directly in Layout.js outside the nav groups, so it initially skipped the visibility filter and Staff accounts saw a clickable link to a page that bounced them.',
+          'Route guards and nav visibility are two separate things and both matter. A page whose route guard bounces an under-privileged user is secure but still a trust problem if its link stays visible and dead-ends — every gated entry therefore carries minImsRole so the nav and ⌘K palette hide it too. This was a real bug once: the Settings link is rendered directly in Layout.js outside the nav groups, so it initially skipped the visibility filter and Staff accounts saw a clickable link to a page that bounced them.',
         ],
         connections:
           'Gates every page in this guide — see the tier lists above for exactly which. Reads and writes profiles.ims_role through the admin-user-ops Edge Function; overlaps with POS Staff and HR Self-Service only in that all three write staff-account markers onto the same profiles row, which is why the eligibility rule above exists.',

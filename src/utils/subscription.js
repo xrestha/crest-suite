@@ -104,5 +104,5 @@ export function getSubStatus(client) {
   // Explicit, not a silent "—": a client with no dates at all fails OPEN in getAccessState
   // (unlimited access) and is skipped by the auto-deactivation sweep, so this is the one state
   // an operator must notice and price — a converted trial lands here until dates are set (S574).
-  return { label: 'No end date', days: null, color: 'var(--theme-text2)', bg: 'rgba(138,146,163,0.12)', border: 'rgba(138,146,163,0.3)' }
+  return { label: 'No end date', days: null, color: 'var(--theme-text2)', bg: 'color-mix(in srgb, var(--theme-text2) 12%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' }
 }

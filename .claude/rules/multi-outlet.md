@@ -10,7 +10,7 @@ paths:
 
 # Multi-outlet: one login, several clients (S548)
 
-A group of outlets is several `clients` rows joined by `clients.group_id → client_groups`. An Owner switches between them from the sidebar; the Group Console (`/group-dashboard`, Suite Pro) rolls them up.
+A group of outlets is several `clients` rows joined by `clients.group_id → client_groups`. An Owner switches between them from the top bar (the drawer's client badge below 768px); the Group Console (`/group-dashboard`, Suite Pro) rolls them up.
 
 **The architecture is selected-outlet indirection, NOT policy rewriting.** `my_client_id()` appears in ~151 places across 18 migrations. Rewriting them to a set-returning `my_client_ids()` would touch every policy on ~50 tables and permanently widen RLS from "one client" to "any client in my group", removing RLS as the backstop behind `scopedDb`'s filter. Instead `profiles.active_client_id` was added and **only `my_client_id()` changed**, to `coalesce(active_client_id, client_id)`. Every policy keeps its exact shape and resolves to the selected outlet. The frontend gets it free: `useScopedDb` binds `clientId` from `AuthContext`, so one value re-scopes ~200 call sites and all 65 `CLIENT_SCOPED_TABLES`.
 

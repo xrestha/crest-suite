@@ -4,16 +4,6 @@
     "ignoreFiles": [],
     "ignoreValues": [
       {
-        "rule": "layout-transition",
-        "value": "width 0.22s ease",
-        "createdAt": "2026-08-18T10:12:43.638Z"
-      },
-      {
-        "rule": "layout-transition",
-        "value": "margin-left 0.22s ease",
-        "createdAt": "2026-08-18T10:12:43.782Z"
-      },
-      {
         "rule": "design-system-color",
         "value": "#666",
         "createdAt": "2026-08-19T10:10:41.841Z",

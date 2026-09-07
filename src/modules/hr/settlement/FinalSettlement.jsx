@@ -647,7 +647,11 @@ export default function FinalSettlement() {
     setFestPaid(!!row.festival_paid)
     setCurrent(row)
     setMsg('')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    // The app shell owns the scrollport, not the window (.layout-root is height:100dvh /
+    // overflow-y:auto so the top bar can be sticky — see Layout.css). window.scrollTo is a no-op
+    // against a body that does not scroll, and this is the one call site in the shell that used
+    // it: loading a draft settlement into the form above must bring the form back into view.
+    document.querySelector('.layout-root')?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   async function markPaid(row, method) {

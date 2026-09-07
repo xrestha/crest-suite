@@ -67,7 +67,7 @@ It had no guard at the route or in the component, and while the sidebar offered 
 `(isAdmin || isOwner) && outlets.length > 1`, the **command palette** offered it on
 `outlets.length > 1` alone — so a staff account of a grouped client could search its way in. The
 two conditions must match: the palette flattens every module into one searchable list, so any
-gate applied to a sidebar entry has to be applied there too. Its RPC had the mirror-image hole —
+gate applied to a nav entry has to be applied there too. Its RPC had the mirror-image hole —
 `get_group_summary()` checked only `my_group_id() IS NULL`, which is a MEMBERSHIP test, and every
 staff account shares its client's `client_id`, so a waiter could have pulled every outlet's
 revenue, purchases and payroll. Both fixed; neither was reachable, because no client has ever had

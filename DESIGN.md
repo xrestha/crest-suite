@@ -602,11 +602,25 @@ from one rule. Only digits are affected; text cells are unchanged.
 
 ## Layout
 
-**The shell is a fixed sidebar plus a flowing content column.** `.sidebar-wrap` is
-`position: fixed` at 240px (56px collapsed) and `.main-content` reserves that space with a matching
-`margin-left` on the same two values; the two animate in lockstep. Content padding is 32px on every
-page and nothing is centred in a reading measure — every screen here is a working surface rather
-than a document. (`/legal/*` renders outside the shell and is the exception; see Density above.)
+**The shell is a two-band top bar above a flowing content column.** `.app-topnav` is
+`position: sticky` at the top of `.layout-root`, and `.main-content` is simply the row beneath it
+— no reserved margin, nothing to keep in lockstep. Band 1 (`.topbar-primary`) is SESSION: brand,
+module switcher, tenant, BS period, plan, search, account. Band 2 (`.topbar-nav`) is NAVIGATION
+within the selected module. Two bands rather than one because those are independent axes; a single
+strip makes them read as one list. Content padding is 32px on every page and nothing is centred in
+a reading measure — every screen here is a working surface rather than a document.
+(`/legal/*` renders outside the shell and is the exception; see Density above.)
+
+**`.layout-root` owns the scrollport, and that is what makes the bar sticky.** `src/index.css`
+opens with `html, body { overflow-x: hidden }`, so `body` becomes its own scroll container sized to
+its content and a `position: sticky` child of the body flow has a scrollport that never scrolls
+— it renders, computes to `sticky`, and moves 1:1 with the content forever (measured: the bar's
+viewport `top` went 0 → −600 after a 600px scroll). The root therefore takes
+`height: 100dvh; overflow-y: auto; overscroll-behavior: contain` and carries **no `min-height`**:
+100vh ≥ 100dvh, so a min-height would push the root past its own scrollport and hand the scroll
+back to the body, which is the original bug. Same rule as the guest menu and `/login` (see
+`.claude/rules/design-system.md`). One consequence to remember: `window.scrollTo` no longer
+describes the page — scroll `.layout-root`.
 
 **Spacing rhythm is a 4/8/16/24 scale, applied by convention rather than by token.** There are no
 `--spacing-*` custom properties, so the scale lives in the frontmatter and in usage. 16px is the
@@ -633,13 +647,18 @@ phones. Shrinking the figure to 20px also fixes it and was rejected: it de-empha
 number on every KPI in the product to solve a grid problem. Raise the floor, never let the value
 wrap.
 
-**One breakpoint: 768px.** No tablet tier and no desktop max-width. Below it the sidebar leaves the
-flow entirely (`translateX(-100%)` plus a 44px fixed hamburger and a 55%-black overlay),
-`.main-content` drops its reserved margin and takes 16px padding, and every multi-column dashboard
-grid collapses to one column.
+**One breakpoint: 768px.** No tablet tier and no desktop max-width. Above it the top bar IS the
+navigation and `.sidebar-wrap` is `display: none`; below it the bar goes away and the same
+`.sidebar-wrap` becomes the phone drawer (`translateX(-100%)` plus a 44px fixed hamburger and a
+55%-black overlay), `.main-content` takes 16px padding, `.context-bar` turns back on as the only
+place a phone states tenant and period, and every multi-column dashboard grid collapses to one
+column. **`display` for both lives in `Layout.css`, never inline in `Layout.js`** — an inline
+declaration beats an external rule at any specificity, so a component that sets its own display can
+never be hidden by a media query.
 
 **Touch sizing is scoped to the input method, not to a width.** `@media (pointer: coarse)` gives
-`.btn` 44px and tunes every control down from there — `.sidebar-link` and `.module-tab` 44,
+`.btn` 44px and tunes every control down from there — `.sidebar-link`, `.module-tab` and every
+top-bar control (`.topbar-pill`, the context and account triggers) 44,
 `.btn-sm` / `.tab-btn` / an in-table `.btn` 32, the chart controls 44x44 — plus the shell controls a
 finger actually hits, which were in no coarse rule at all until they were measured (the outlet
 switcher, the control that re-scopes the whole tenant session, at 95x20px; sidebar search at
@@ -1027,12 +1046,24 @@ whether their bill saved.
 
 ### Navigation
 
-- **The shell** is one fixed column: wordmark, module switcher, nav, footer. It collapses to a 56px
-  icon rail where labels are hidden (not truncated — clipped labels rendered "IM / HR / PO") and
-  `RailTip` supplies the name on hover.
-- **The module switcher** is the signature: a horizontal pill row expanded, an icon column
-  collapsed, same buttons and data. Active takes `accent-ink` on the focus-ring tint with a 1px
-  ring of the same tint.
+- **The shell** is a two-band top bar: brand + module switcher + session context + account on band
+  one, the selected module's pages on band two. Below 768px the same nav model renders as the phone
+  drawer instead.
+- **The module switcher** is the signature: a horizontal row of `.module-tab` buttons, the same
+  component and the same data on both surfaces. Active takes `accent-ink` on the focus-ring tint
+  with a 1px ring of the same tint.
+- **A nav GROUP becomes a dropdown, and the rows inside it are `.sidebar-link`.** `IMS_GROUPS` /
+  `HR_GROUPS` / `POS_GROUPS` are already `{ key, label, items }`, so the bar reads the existing nav
+  model sideways rather than owning a second copy — same gates, same counts, same pin star. An
+  unlabelled group flattens to pills on both surfaces.
+- **`.topbar-pill` is a COMPLETE class, not a hover rule over an inline style.** A pill with no
+  background of its own falls through to the UA — `#f0f0f0` on a `<button>`, underlined `#0000EE`
+  on an `<a>` — which is the `.btn`-with-no-variant failure on a second class. Only the state
+  (`--current`) comes from JSX.
+- **Every dropdown panel is `position: fixed`, anchored to the trigger's measured rect.**
+  `.topbar-nav` sets `overflow-x: auto` so the bar can never grow a third band, and a scroll
+  container clips BOTH axes — there is no one-axis overflow in CSS. An absolutely positioned
+  panel is cut off at the bar's own height and never appears at all.
 - **Nav links** are 13px fog at `4px 12px`, square; active takes `accent-ink` on the
   focus-ring tint at 600. Hover is the table-hover tint. A pin-to-favourites star appears on
   `:hover` **and `:focus-within`**, since it is keyboard-reachable.
@@ -1040,20 +1071,20 @@ whether their bill saved.
   sidebar before the main content.
 - **The context bar** answers "which tenant, which period" on every route as a hairline and a row
   of text, not a card.
-- **Collapse is a class toggle, not an unmount.** `.sidebar-wrap--collapsed` hides the nav content
-  with `display: none`, so scroll position and any open dropdown survive a collapse/expand instead
-  of resetting.
+- **The drawer is hidden, never unmounted.** Above 768px `.sidebar-wrap` is `display: none`; below
+  it, closed, it is translated off-screen. Either way its scroll position and dropdown state
+  survive, and the print hide-rule keeps working against one unchanged class name.
 
-**The one accepted layout-property animation.** `.sidebar-shell` animates `width` and
-`.main-content` tracks it with `margin-left`, both at `0.22s ease` — normally an anti-pattern, and
-correctly flagged as one by any detector. It stays, and the reasoning has held through two
-sidebar rewrites: `.sidebar-wrap` is `position: fixed`, so **real space has to be reserved** for
-whichever width the sidebar currently is. A `transform`-only version would slide the sidebar over
-the content rather than resizing the column, so avoiding it means restructuring the shell's
-positioning strategy app-wide. The animation also fires only on a rare, manual, user-triggered
-toggle — never continuously and never scroll-linked — so the actual jank risk is low. Revisit only
-if the positioning mechanism changes for other reasons. Both values are recorded in
-`.impeccable/config.json`'s `ignoreValues`; this paragraph is why.
+**There is no longer an accepted layout-property animation.** This paragraph used to argue for
+one: `.sidebar-shell` animated `width` while `.main-content` tracked it with `margin-left`, both at
+`0.22s ease`, because a `position: fixed` sidebar meant **real space had to be reserved** for
+whichever width it currently was. The argument was sound and it is now moot — the shell is a
+column, the collapse toggle is gone, and the only shell transition left is the drawer's
+`transform`, which is not a layout property. **The two `layout-transition` entries in
+`.impeccable/config.json`'s `ignoreValues` were removed in the same change**: an exemption that no
+longer exempts anything is a claim the next reader has to go and disprove. Kept as a note rather
+than deleted, because “restructuring the shell's positioning strategy app-wide” was named here as
+the price of avoiding it, and that is exactly what was eventually paid.
 
 ### Data Tables (signature component)
 

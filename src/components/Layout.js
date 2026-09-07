@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useState, useEffect, useRef, useMemo, Suspense } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, Suspense } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { supabase } from '../supabaseClient'
@@ -23,8 +23,8 @@ import {
   ConciergeBell, Contact, CreditCard, Crown, FileBarChart, FileCheck2, FileDigit,
   FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, LifeBuoy,
   History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart,
-  LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree, PanelLeftClose,
-  PanelLeftOpen, ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
+  LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree,
+  ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
   Receipt, ReceiptText, RefreshCw, Scale, ScrollText, Search, Settings, Settings2,
   ShieldCheck, ShoppingCart, Sigma, SlidersHorizontal, Store, Tag, Tags, Target, Timer,
   Trash2, TrendingUp, TriangleAlert, Trophy, Truck, Undo2, UserCheck, Users, Users2,
@@ -203,6 +203,109 @@ const HR_GROUPS = [
   ]},
 ]
 
+// The bar pill's shape is `.topbar-pill` in Layout.css — a complete class, not an inline style
+// object, so a pill can never fall through to the UA's own button/link chrome (S678). `pillClass`
+// is the only thing JSX decides: which state it is in.
+const pillClass = current => `topbar-pill${current ? ' topbar-pill--current' : ''}`
+
+// One disclosure, shared by the nav group menus, the tenant/outlet switcher and the account chip.
+//
+// Deliberately a DISCLOSURE (aria-expanded + aria-controls), not role="menu". A menu is an
+// application widget whose children are commands and where arrow keys become the only way
+// through. These panels hold ordinary navigation links, and a screen-reader user is better served
+// by them staying ordinary links inside a labelled region than by being re-declared as menuitems.
+// Escape closes and returns focus to the trigger; ArrowDown opens and steps into the panel; a
+// pointer press or a focus landing outside closes. Route changes close it from Layout.
+function Dropdown({ id, isOpen, setOpen, triggerClass, triggerLabel, triggerTitle,
+                    ariaLabel, children, align = 'left', width = 236, disabled = false }) {
+  const triggerRef = useRef(null)
+  const panelRef = useRef(null)
+  const [pos, setPos] = useState(null)
+
+  // The panel is position:FIXED and anchored to the trigger's measured rect, not absolutely
+  // positioned inside it.
+  //
+  // .topbar-nav scrolls horizontally so that enabling one more module can never push the bar onto
+  // a third row. Setting overflow-x also resolves overflow-y to `auto` — a scroll container clips
+  // BOTH axes, there is no one-axis overflow in CSS — so an absolutely positioned panel is cut
+  // off at the bar's own height and never appears at all. A fixed panel is outside every
+  // ancestor's clip by definition. The bar is position:sticky at top 0, so the trigger does not
+  // move while the page scrolls and the rect stays valid; a resize can move it, so a resize
+  // closes the panel rather than leaving it stranded beside its trigger.
+  useLayoutEffect(() => {
+    if (!isOpen) { setPos(null); return }
+    const r = triggerRef.current?.getBoundingClientRect()
+    if (!r) return
+    setPos(align === 'right'
+      ? { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) }
+      : { top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) })
+  }, [isOpen, align, width])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const close = () => setOpen(false)
+    window.addEventListener('resize', close)
+    return () => window.removeEventListener('resize', close)
+  }, [isOpen, setOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    function inside(target) {
+      return panelRef.current?.contains(target) || triggerRef.current?.contains(target)
+    }
+    function onPointerDown(e) { if (!inside(e.target)) setOpen(false) }
+    function onKeyDown(e) {
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      triggerRef.current?.focus()
+    }
+    // A focus landing outside closes it too, so tabbing past the last link does not leave an open
+    // panel hanging behind the rest of the bar.
+    function onFocusIn(e) { if (!inside(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('focusin', onFocusIn)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('focusin', onFocusIn)
+    }
+  }, [isOpen, setOpen])
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={triggerClass || 'topbar-pill'}
+        aria-expanded={isOpen}
+        aria-controls={id}
+        aria-label={ariaLabel}
+        title={triggerTitle}
+        disabled={disabled}
+        onClick={() => setOpen(!isOpen)}
+        onKeyDown={e => {
+          if (e.key !== 'ArrowDown') return
+          e.preventDefault()
+          setOpen(true)
+          // The panel does not exist yet on the frame the key is pressed.
+          requestAnimationFrame(() => panelRef.current?.querySelector('a, button')?.focus())
+        }}
+      >
+        {triggerLabel}
+      </button>
+      {isOpen && pos && (
+        <div
+          id={id}
+          ref={panelRef}
+          className="topbar-panel"
+          style={{ position: 'fixed', ...pos, minWidth: width }}
+        >{children}</div>
+      )}
+    </div>
+  )
+}
+
 export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
           isTrial, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
@@ -234,8 +337,11 @@ export default function Layout() {
   }, [clientId, clientModules.ims])
   const navigate = useNavigate()
   const clientName = profile?.clients?.name
-  const [collapsed, setCollapsed] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  // At most one top-bar disclosure is open at a time, so the open one is NAMED here rather than
+  // each menu holding its own boolean — two panels open at once is a state this cannot reach.
+  // The two pre-existing booleans (client / outlet switcher) folded into this for the same reason.
+  const [openMenu, setOpenMenu] = useState(null)
   const [allClients, setAllClients] = useState([])
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false)
   const [pendingTrialCount, setPendingTrialCount] = useState(0)
@@ -286,14 +392,17 @@ export default function Layout() {
   // outlet. crest-offline is opened lazily here rather than imported at module scope so a client
   // without POS never touches IndexedDB for this check.
   async function handleSwitchOutlet(targetId) {
-    if (targetId === clientId) { setOutletDropdownOpen(false); return }
+    if (targetId === clientId) { setOutletDropdownOpen(false); setOpenMenu(null); return }
     setOutletError('')
     setSwitchingOutlet(true)
     // The offline-queue guard lives inside switchOutlet so every entry point gets it.
     const { error } = await switchOutlet(targetId)
     setSwitchingOutlet(false)
+    // The error stays on screen, so the panel it belongs to stays open with it — closing here
+    // would drop the only report the switch refused.
     if (error) { setOutletError(error.message || 'Could not switch outlet.'); return }
     setOutletDropdownOpen(false)
+    setOpenMenu(null)
     navigate('/dashboard')
   }
 
@@ -336,6 +445,11 @@ export default function Layout() {
     }
     // any other route (/help, /pricing, …) keeps the current panel
   }, [location.pathname])
+
+  // Every top-bar disclosure closes on navigation. Without this, clicking a link inside a panel
+  // leaves that panel open over the page it just opened — the drawer has had the equivalent
+  // (setMobileSidebarOpen(false) on each link) since it was written.
+  useEffect(() => { setOpenMenu(null) }, [location.pathname])
 
   useEffect(() => {
     if (!clientDropdownOpen) return
@@ -562,6 +676,65 @@ export default function Layout() {
     )
   }
 
+  // ── The same nav model, read sideways ────────────────────────────────────────────────────────
+  // Nothing about WHAT is in the nav changes here — IMS_GROUPS / HR_GROUPS / POS_GROUPS are
+  // already `{ key, label, items }`, which is a dropdown in everything but name. renderBarGroup is
+  // renderGroup's horizontal twin: an unlabelled group (POS's setup row) flattens to pills exactly
+  // as it does in the drawer, a labelled one becomes a disclosure, and the rows INSIDE the panel
+  // are renderNavItem — the same component, the same gates, the same pin star. The bar and the
+  // drawer therefore cannot disagree about which page lives under which heading, which is the
+  // whole reason neither surface got its own copy of the nav model.
+
+  function renderBarPill(item, { label } = {}) {
+    const nc = navCounts[item.to]
+    const count = nc?.count || 0
+    return (
+      <NavLink key={item.to} to={item.to} className={({ isActive }) => pillClass(isActive)}>
+        <item.icon size={15} strokeWidth={1.75} aria-hidden="true" style={{ flexShrink: 0 }} />
+        {label || item.label}
+        {count > 0 && (
+          <span className={`${nc.tone} badge-sentence`} style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4, flexShrink: 0 }}
+            aria-label={nc.label} title={nc.label}>{count > 99 ? '99+' : count}</span>
+        )}
+      </NavLink>
+    )
+  }
+
+  function renderBarGroup(group) {
+    const items = unlockedItems(group.items)
+    if (items.length === 0) return null
+    // An unlabelled group has no header to hang a disclosure on — flat pills, same as the drawer.
+    if (!group.label) return items.map(i => renderBarPill(i))
+    const current = items.some(i => location.pathname === i.to || location.pathname.startsWith(i.to + '/'))
+    const count = items.reduce((t, i) => t + (navCounts[i.to]?.count || 0), 0)
+    const id = `topnav-${group.key}`
+    return (
+      <Dropdown
+        key={group.key}
+        id={id}
+        isOpen={openMenu === group.key}
+        setOpen={open => setOpenMenu(open ? group.key : null)}
+        triggerClass={pillClass(current)}
+        triggerLabel={<>
+          {group.label}
+          {/* A badge REPLACES the count, exactly as in the drawer's group header: "PRO" is what the
+              reader needs from this trigger, and a number alongside it only says how many things
+              they cannot use yet. */}
+          {group.badge
+            ? <span className="badge-yellow" style={{ fontSize: 9, letterSpacing: '0.06em' }}>{group.badge}</span>
+            : count > 0 && (
+              <span className="badge-amber badge-sentence" style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4 }}>
+                {count > 99 ? '99+' : count}
+              </span>
+            )}
+          <ChevronDown size={13} strokeWidth={2.25} aria-hidden="true" style={{ flexShrink: 0, opacity: 0.75 }} />
+        </>}
+      >
+        {items.map(i => renderNavItem(i, { pinnable: group.pinnable !== false }))}
+      </Dropdown>
+    )
+  }
+
   // Which module panels exist for this user, and which one is showing.
   // activePanel (route-synced) is resolved against visibility — if it points at a module this
   // user can't see (or nothing is selected yet), fall back to the first available panel.
@@ -700,25 +873,97 @@ export default function Layout() {
 
   function openPanel(key) {
     setActivePanel(key)
-    setCollapsed(false)
+    setOpenMenu(null)
   }
 
-  function renderUpgradeTeaser() {
-    // Only the buyer sees the upsell: a staff login cannot upgrade anything, and a sidebar that
-    // sells to a waiter is noise where a manager needs the nav (S683).
+  // ── Tenant / outlet switching, said once ─────────────────────────────────────────────────────
+  // The switcher now renders in TWO places — the top bar's context cluster and the phone drawer's
+  // client badge — so the option rows and the subscription badge are functions rather than markup
+  // repeated per surface. Only the container differs: the drawer keeps its inline
+  // .sidebar-dropdown-panel (a vertical panel inside a column, nothing clips it), the bar uses the
+  // fixed-position Dropdown for the reason that component documents.
+  function subStatusBadge(entity, style) {
+    const s = getSubStatus(entity)
+    if (!s.label) return null
+    return (
+      <span style={{
+        fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)',
+        flexShrink: 0, color: s.color, background: s.bg, border: `1px solid ${s.border}`, ...style,
+      }}>{s.label}</span>
+    )
+  }
+
+  function renderClientOptions(onPick) {
+    return (
+      <>
+        <button
+          className={`sidebar-dropdown-item${!adminViewClientId ? ' sidebar-dropdown-item--active' : ''}`}
+          onClick={() => { switchAdminClient(null, ''); onPick() }}
+        >
+          <span>Crest Admin</span>
+        </button>
+        {allClients.map(c => (
+          <button
+            key={c.id}
+            className={`sidebar-dropdown-item${c.id === adminViewClientId ? ' sidebar-dropdown-item--active' : ''}`}
+            onClick={() => { switchAdminClient(c.id, c.name); onPick() }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+            {subStatusBadge(c)}
+          </button>
+        ))}
+      </>
+    )
+  }
+
+  // switchableOutlets, not outlets: an allowlisted manager may reach two of the group's five
+  // branches, and offering the other three would fail server-side inside set_active_outlet() with
+  // an error rather than a closed door (S617).
+  function renderOutletOptions() {
+    return switchableOutlets.map(o => (
+      <button
+        key={o.id}
+        role="option"
+        aria-selected={o.id === clientId}
+        className={`sidebar-dropdown-item${o.id === clientId ? ' sidebar-dropdown-item--active' : ''}`}
+        onClick={() => handleSwitchOutlet(o.id)}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>
+        {/* A lapsed outlet inside a healthy group locks only itself (getAccessState/ProtectedRoute
+            are per selected outlet), so the badge is the only warning before someone switches
+            into a locked app. */}
+        {subStatusBadge(o)}
+      </button>
+    ))
+  }
+
+  // ── The upgrade nudge, computed once ─────────────────────────────────────────────────────────
+  // The teaser card and the bottom "Upgrade ↑" button were both sidebar furniture and neither fits
+  // a 44px bar. The card survives in the phone drawer (which is still a column with room for it);
+  // on desktop the same facts render as one row inside the account menu. Both read THIS, so the
+  // count in the menu and the list in the drawer can never disagree about what is locked.
+  //
+  // Only the buyer sees the upsell: a staff login cannot upgrade anything, and chrome that sells
+  // to a waiter is noise where a manager needs the nav (S683).
+  const upgrade = (() => {
     if (isAdmin || plan === 'pro' || !isOwner) return null
-    const nextTier  = plan === 'growth' ? 'pro' : 'growth'
-    const tierLabel = nextTier === 'growth' ? 'Growth' : 'Pro'
+    const nextTier = plan === 'growth' ? 'pro' : 'growth'
+    const locked = [...NAV.slice(1), ...REPORTS].filter(
+      item => item.featureKey && !hasFeature(item.featureKey) && item.minPlan === nextTier
+    )
+    if (locked.length === 0) return null
+    return { nextTier, tierLabel: nextTier === 'growth' ? 'Growth' : 'Pro', locked }
+  })()
+
+  function renderUpgradeTeaser() {
+    if (!upgrade) return null
+    const { nextTier, tierLabel, locked } = upgrade
     // Tokens, not the Dark preset's own hex — this CTA was painting brass/green literals on all
     // ten presets. Text takes the *-text/-ink variants (the base tokens fail AA on the light
     // presets); the tints derive from the PRESET's own base token via colorTint, because the old
     // rgba literals were the DARK preset's green/brass frozen under every light theme (S612).
     const tierColor = nextTier === 'growth' ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)'
     const tierTint  = pct => colorTint(nextTier === 'growth' ? 'var(--theme-green)' : 'var(--theme-accent)', pct)
-    const locked = [...NAV.slice(1), ...REPORTS].filter(
-      item => item.featureKey && !hasFeature(item.featureKey) && item.minPlan === nextTier
-    )
-    if (locked.length === 0) return null
     const shown = locked.slice(0, 5)
     const more  = locked.length - shown.length
 
@@ -781,7 +1026,7 @@ export default function Layout() {
     return (
       <RailTip key={t.key} label={t.tip}>
         <button
-          className={`module-tab${panel === t.key && !collapsed ? ' module-tab--active' : ''}`}
+          className={`module-tab${panel === t.key ? ' module-tab--active' : ''}`}
           onClick={() => openPanel(t.key)}
           aria-current={panel === t.key ? 'true' : undefined}
         >
@@ -795,6 +1040,28 @@ export default function Layout() {
           <span className="module-tab-label">{t.label}</span>
         </button>
       </RailTip>
+    )
+  }
+
+  // The same tab in the top bar. Two differences and both are forced: no RailTip (it positions to
+  // the right of its anchor, which in a horizontal row covers the next tab — `title` instead), and
+  // no `flex: 1` (see .topbar-modules .module-tab in Layout.css), since a bar tab sizes to its
+  // label rather than sharing a fixed column width.
+  function renderTopModuleTab(t) {
+    return (
+      <button
+        key={t.key}
+        title={t.tip}
+        className={`module-tab${panel === t.key ? ' module-tab--active' : ''}`}
+        onClick={() => openPanel(t.key)}
+        aria-current={panel === t.key ? 'true' : undefined}
+      >
+        <span className="module-tab-icon" style={{ position: 'relative' }}>
+          <t.icon size={16} strokeWidth={1.75} aria-hidden="true" />
+          {t.dot && <span className="module-tab-dot" style={{ color: t.dot }} />}
+        </span>
+        <span className="module-tab-label">{t.label}</span>
+      </button>
     )
   }
 
@@ -815,7 +1082,15 @@ export default function Layout() {
       {/* WCAG 2.4.1 — 41 sidebar controls precede the first control in <main> on every route. */}
       <a href="#main-content" className="skip-link">Skip to content</a>
       {mobileSidebarOpen && <div className="sidebar-overlay" onClick={() => setMobileSidebarOpen(false)} />}
-      <div ref={sidebarRef} className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}${collapsed ? ' sidebar-wrap--collapsed' : ''}`}>
+      {/* The phone drawer. At/below 768px this slides in exactly as it always did; above it the
+          drawer is display:none and the top bar below IS the navigation.
+
+          Its class names are deliberately UNCHANGED. Every drawer rule, the scrim, the
+          @media (pointer: coarse) target bumps and the @media print hide-rule all target
+          `.sidebar-wrap`, and `display` for it lives in Layout.css rather than inline here — an
+          inline declaration beats an external rule at any specificity, so a component that sets
+          its own display can never be hidden by a media query. */}
+      <div ref={sidebarRef} className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}`}>
         <div className="sidebar-shell">
 
           {/* Brand — logo + wordmark + search trigger. Always visible; text hides when collapsed
@@ -1161,12 +1436,8 @@ export default function Layout() {
               className={({ isActive }) => `rail-btn${isActive ? ' rail-btn--active' : ''}`}
               onClick={() => setMobileSidebarOpen(false)}><HelpCircle size={18} strokeWidth={1.75} /></NavLink>
           </RailTip>
-          <RailTip label={collapsed ? 'Show menu' : 'Hide menu'}>
-            <button className="rail-btn" title={collapsed ? 'Show menu' : 'Hide menu'}
-              onClick={() => setCollapsed(c => !c)}>
-              {collapsed ? <PanelLeftOpen size={18} strokeWidth={1.75} /> : <PanelLeftClose size={18} strokeWidth={1.75} />}
-            </button>
-          </RailTip>
+          {/* The collapse toggle that used to sit here is gone with the desktop rail: this nav
+              renders only inside the phone drawer now, where there is nothing to collapse TO. */}
           <RailTip label={isPinStaff ? 'Lock POS' : 'Sign out'}>
             <button className="rail-btn rail-btn--signout" title={isPinStaff ? 'Lock POS' : 'Sign out'}
               onClick={handleSignOut}><LogOut size={18} strokeWidth={1.75} /></button>
@@ -1175,7 +1446,233 @@ export default function Layout() {
         </div>{/* /sidebar-shell */}
       </div>
 
-      <main id="main-content" tabIndex={-1} className={`main-content${collapsed ? ' main-content--collapsed' : ''}`}>
+      {/* ── Desktop top bar ──────────────────────────────────────────────────────────────────────
+          Two bands, because this shell carries two independent axes and a single strip would make
+          them look like one. Band 1 is SESSION — which product, which tenant, which period, who
+          you are. Band 2 is NAVIGATION within whichever module band 1 selected. Forty-one IMS
+          destinations do not fit across a bar, so band 2 folds each existing nav group into a
+          dropdown: every destination stays at most two interactions away, and the gates, the
+          counts and the pin star are the same objects the drawer uses rather than a second copy. */}
+      <header className="app-topnav">
+        <div className="topbar-primary">
+          {/* app_name is white-labeled per client, so this is the CUSTOMER's brand. In a
+              fixed-height band it truncates on one line rather than clamping to two the way the
+              drawer's wordmark does — the title attribute carries the untruncated name. */}
+          <NavLink to="/dashboard" className="topbar-brand" title={settings?.app_name || 'Crest'}>
+            {settings?.logo_url
+              ? <img src={settings.logo_url} alt="" style={{ width: 26, height: 26, objectFit: 'contain', flexShrink: 0 }} />
+              : <Hexagon size={22} strokeWidth={2} aria-hidden="true" style={{ color: 'var(--theme-accent-ink)', flexShrink: 0 }} />}
+            <span className="topbar-brand-word">
+              <span className="topbar-brand-name">{settings?.app_name || 'Crest'}</span>
+              <span className="topbar-brand-sub">{PANEL_TITLES[panel] || 'Crest Suite'}</span>
+            </span>
+          </NavLink>
+
+          {/* The module switcher keeps its own landmark: it is the primary mode switch of the
+              entire product. RailTip is deliberately NOT used here — it positions to the RIGHT of
+              its anchor, which in a horizontal row lands on top of the next tab. The dot's tooltip
+              rides on `title` instead. */}
+          {totalTabCount > 1 && (
+            <nav aria-label="Modules" className="topbar-modules">
+              {adminTab && renderTopModuleTab(adminTab)}
+              {moduleTabs.map(renderTopModuleTab)}
+            </nav>
+          )}
+
+          <div className="topbar-context">
+            {isAdmin ? (
+              <Dropdown
+                id="topnav-client"
+                align="right"
+                width={288}
+                isOpen={openMenu === '__client'}
+                setOpen={open => setOpenMenu(open ? '__client' : null)}
+                triggerClass="topbar-context-trigger"
+                ariaLabel="Switch client"
+                triggerLabel={<>
+                  <span className="topbar-context-label">{adminViewClientId ? 'Viewing' : 'Admin View'}</span>
+                  <span className="topbar-context-name">
+                    {allClients.find(c => c.id === adminViewClientId)?.name || 'Crest Admin'}
+                  </span>
+                  <ChevronDown size={13} strokeWidth={2.25} aria-hidden="true" style={{ opacity: 0.75, flexShrink: 0 }} />
+                </>}
+              >
+                {renderClientOptions(() => setOpenMenu(null))}
+              </Dropdown>
+            ) : canSwitchOutlet ? (
+              <Dropdown
+                id="topnav-outlet"
+                align="right"
+                width={288}
+                isOpen={openMenu === '__outlet'}
+                setOpen={open => setOpenMenu(open ? '__outlet' : null)}
+                triggerClass="topbar-context-trigger"
+                ariaLabel="Switch outlet"
+                disabled={switchingOutlet}
+                triggerLabel={<>
+                  <span className="topbar-context-name">{switchingOutlet ? 'Switching…' : clientName}</span>
+                  <ChevronDown size={13} strokeWidth={2.25} aria-hidden="true" style={{ opacity: 0.75, flexShrink: 0 }} />
+                </>}
+              >
+                <div role="listbox">{renderOutletOptions()}</div>
+                {/* The refusal renders INSIDE the panel it belongs to, which is also why
+                    handleSwitchOutlet leaves the panel open on error — in the bar there is nowhere
+                    else for it to go, and dropping it would lose the only report of the failure. */}
+                {outletError && (
+                  <p role="alert" style={{ fontSize: 11, color: 'var(--theme-red-text)', margin: 0, padding: '8px 12px' }}>{outletError}</p>
+                )}
+              </Dropdown>
+            ) : clientName ? (
+              <span className="topbar-context-name topbar-context-name--static">{clientName}</span>
+            ) : null}
+
+            {subStatusBadge(isAdmin ? allClients.find(c => c.id === adminViewClientId) : profile?.clients)}
+            {adminViewClientId && !isAdmin && <span className="context-bar-tag">Viewing as admin</span>}
+
+            {/* The context bar's facts, hoisted into the shell. Every IMS figure is period-scoped,
+                an admin can be viewing as another tenant and an Owner can switch outlets — three
+                independent ways to read a real number off the wrong books. POS/kitchen staff and
+                non-IMS clients simply get no period segment rather than an empty one. */}
+            {activePeriod && (
+              <>
+                <span aria-hidden="true" className="context-bar-sep">·</span>
+                <span className="context-bar-period">{BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year}</span>
+                <span className={`badge ${activePeriod.status === 'open' ? 'badge-green' : 'badge-gray'}`}>
+                  {activePeriod.status === 'open' ? 'Open' : 'Closed'}
+                </span>
+              </>
+            )}
+            {!isAdmin && clientName && (
+              <>
+                <span aria-hidden="true" className="context-bar-sep">·</span>
+                <span className="context-bar-plan">{plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}</span>
+              </>
+            )}
+          </div>
+
+          <div className="topbar-actions">
+            <button className="sidebar-search-btn" onClick={() => setPaletteOpen(true)} title="Search pages (Ctrl+K)" aria-label="Search pages">
+              <Search size={13} strokeWidth={2} aria-hidden="true" />
+            </button>
+            <button className="sidebar-search-btn sidebar-calc-btn" onClick={() => setCalcOpen(true)}
+              title="Quick calculator (Alt+C)" aria-label="Open quick calculator">
+              <Calculator size={13} strokeWidth={2} aria-hidden="true" />
+            </button>
+
+            <Dropdown
+              id="topnav-account"
+              align="right"
+              width={244}
+              isOpen={openMenu === '__account'}
+              setOpen={open => setOpenMenu(open ? '__account' : null)}
+              triggerClass="topbar-account-trigger"
+              triggerLabel={<>
+                <span className="topbar-account-name">{profile?.full_name || 'User'}</span>
+                <ChevronDown size={13} strokeWidth={2.25} aria-hidden="true" style={{ opacity: 0.75, flexShrink: 0 }} />
+              </>}
+            >
+              <div style={{ padding: '8px 14px 10px' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{profile?.full_name || 'User'}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                  {isAdmin ? 'Admin' : isOwner ? 'Owner' : posRole ? `POS · ${posRole.charAt(0).toUpperCase() + posRole.slice(1)}` : 'Client'}
+                </div>
+              </div>
+              {/* The sidebar's upgrade teaser and its bottom "Upgrade ↑" button both lived in a
+                  240px column and neither survives a 44px band. One row here carries the same two
+                  facts — which tier is next, and how much is behind it — and lands on the page
+                  that sells it. The full teaser is still rendered in the phone drawer. */}
+              {upgrade && (
+                <>
+                  <div className="topbar-panel-rule" />
+                  <button className="topbar-upgrade" onClick={() => { setOpenMenu(null); navigate('/pricing') }}>
+                    <span style={{ fontWeight: 700 }}>{upgrade.tierLabel} plan</span>
+                    <span style={{ color: 'var(--theme-text3)' }}>
+                      {upgrade.locked.length} feature{upgrade.locked.length === 1 ? '' : 's'} locked
+                    </span>
+                    <span aria-hidden="true" style={{ marginLeft: 'auto' }}>↑</span>
+                  </button>
+                </>
+              )}
+              <div className="topbar-panel-rule" />
+              <NavLink to="/help" className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}>
+                <span className="sidebar-icon"><HelpCircle size={16} strokeWidth={1.75} /></span>Help
+              </NavLink>
+              {/* Support is its own row rather than a Help sub-section (S683): the contact lived six
+                  tabs into Help, and "where do I find support?" was the first thing asked once it
+                  became editable. */}
+              <NavLink to="/help?section=support" className="sidebar-link">
+                <span className="sidebar-icon"><LifeBuoy size={16} strokeWidth={1.75} /></span>Support
+              </NavLink>
+              <button onClick={handleSignOut} className="sidebar-link" style={{
+                width: 'calc(100% - 20px)', border: 'none', background: 'transparent',
+                cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+              }}>
+                <span className="sidebar-icon"><LogOut size={16} strokeWidth={1.75} /></span>
+                {isPinStaff ? 'Lock POS' : 'Sign out'}
+              </button>
+            </Dropdown>
+          </div>
+        </div>
+
+        <nav aria-label={`${PANEL_TITLES[panel] || 'Crest'} pages`} className="topbar-nav">
+          {renderBarPill(dashNavItem, { label: dashLabel })}
+          {pinnedItems.length > 0 && renderBarGroup({ key: 'pinned', label: 'Pinned', items: pinnedItems })}
+
+          {panel === 'admin' && isAdmin && (
+            <>
+              {/* Clients keeps its two operator counts — they are the reason an operator opens the
+                  app at all, and they are the one place in this bar where a number is a to-do
+                  rather than a tally. */}
+              <NavLink to="/admin/clients" className={({ isActive }) => pillClass(isActive)}>
+                <Building2 size={15} strokeWidth={1.75} aria-hidden="true" style={{ flexShrink: 0 }} />
+                Clients
+                {pendingTrialCount > 0 && (
+                  <span className="badge-red badge-sentence" style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4 }}
+                    title="Clients requesting to subscribe">{pendingTrialCount} want to sub</span>
+                )}
+                {newTrialCount > 0 && (
+                  <span className="badge-amber badge-sentence" style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4 }}
+                    title="New trial signups in the last 7 days">{newTrialCount} NEW</span>
+                )}
+              </NavLink>
+              {renderBarPill({ to: '/periods', label: 'Periods', icon: CalendarRange })}
+              {renderBarPill({ to: '/admin/guest-menu', label: 'Guest Menu', icon: QrCode })}
+              {renderBarPill({ to: '/admin/audit', label: 'Audit Log', icon: History })}
+              {renderBarPill({ to: '/settings', label: 'Settings', icon: Settings })}
+              {/* Crest Suite renders LAST on this panel, unlike every other one — on a module panel
+                  it is the Owner's own destination, here it is a client-facing layer the operator
+                  looks at from outside, and Clients / Periods / Guest Menu / Audit Log are the work. */}
+              {renderBarGroup(suiteGroup())}
+            </>
+          )}
+
+          {panel === 'ims' && imsVisible && (
+            <>
+              {renderBarGroup(suiteGroup())}
+              {IMS_GROUPS.map(renderBarGroup)}
+              {!isAdmin && hasFeature('settings') && hasImsAccess('manager') &&
+                renderBarPill({ to: '/settings', label: 'Settings', icon: Settings })}
+            </>
+          )}
+
+          {panel === 'hr' && hrVisible && (
+            <>
+              {renderBarGroup(suiteGroup())}
+              {isItemVisible(HR_DASHBOARD) && renderBarPill(HR_DASHBOARD)}
+              {HR_GROUPS.map(renderBarGroup)}
+            </>
+          )}
+
+          {panel === 'pos' && posVisible && (
+            <>
+              {renderBarGroup(suiteGroup())}
+              {POS_GROUPS.map(renderBarGroup)}
+            </>
+          )}
+        </nav>
+      </header>
+
+      <main id="main-content" tabIndex={-1} className="main-content">
         {/* "☰" is a glyph, not an accessible name — this button announced as the character itself,
             with no indication it opens anything or whether it is currently open. */}
         <button
@@ -1184,7 +1681,7 @@ export default function Layout() {
           aria-label="Open navigation menu"
           aria-expanded={mobileSidebarOpen}
           aria-controls="sidebar-nav"
-          onClick={() => { setMobileSidebarOpen(true); setCollapsed(false) }}
+          onClick={() => setMobileSidebarOpen(true)}
         >
           <span aria-hidden="true">☰</span>
         </button>
@@ -1252,12 +1749,13 @@ export default function Layout() {
             unreachable. Their copy — including the trial_purge_at retention countdown — moved into
             SubscriptionLock's `trial` case. */}
 
-        {/* Renders on every route, at every width, in both collapse states — that is the whole
-            point of it, so it deliberately does not hide on the dashboard that happens to repeat
-            the same facts in its own subtitle. Quiet by construction: secondary text, one hairline,
-            no card. The period is the emphasised token because it is the one that silently changes
-            under you; POS/kitchen staff accounts and non-IMS clients simply get no period segment
-            rather than an empty one. */}
+        {/* PHONE ONLY now (`.context-bar` is display:none above 768px). The top bar states these
+            same facts on desktop, and saying them twice on one screen is worse than saying them
+            once — but below 768px the bar is gone and the drawer that would otherwise carry them
+            is off-canvas, so this stays as the ONLY place a phone user can read which tenant and
+            which period the figures belong to. Kept mounted rather than conditioned on a width in
+            JS: a JS breakpoint and a CSS one drift, and only one of them can be tested in print.
+            Quiet by construction — secondary text, one hairline, no card. */}
         {clientName && (
           <div className="context-bar">
             <span className="context-bar-client">{clientName}</span>

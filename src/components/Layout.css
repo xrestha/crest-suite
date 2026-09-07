@@ -350,10 +350,12 @@ textarea,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* .sidebar-shell/.main-content are the collapse pair — a 184px layout shift, and the largest
-     motion in the shell. They were missing here while `.sidebar-toggle`, a class with zero JSX
-     references, was being guarded. */
-  .rail-btn, .sidebar-link, .module-tab, .sidebar-search-btn, .sidebar-shell, .main-content,
+  /* The .sidebar-shell/.main-content collapse pair that used to head this list is gone with the
+     desktop rail — there is no width to animate any more. The top bar's own transitions
+     (.topbar-pill, .topbar-context-trigger, .topbar-account-trigger, .topbar-upgrade) joined it in
+     their place: a new hover transition needs adding here, not just to the rule that declares it. */
+  .rail-btn, .sidebar-link, .module-tab, .sidebar-search-btn,
+  .topbar-pill, .topbar-context-trigger, .topbar-account-trigger, .topbar-upgrade,
   .skip-link, .sidebar-pin {
     transition-duration: 0ms !important;
   }
@@ -365,20 +367,296 @@ textarea,
   }
 }
 
+/* The shell is a COLUMN: the top bar, then .main-content. The phone drawer (.sidebar-wrap) is
+   still in the DOM at every width and is simply not displayed above 768px — which is why none of
+   the drawer's rules below, nor the print hide-rule, needed to change when navigation moved up. */
 .layout-root {
   display: flex;
-  min-height: 100vh;
+  flex-direction: column;
   background: var(--theme-bg);
+  /* ── The shell owns its own scrollport, and this is what makes the bar sticky (S604) ──
+     `src/index.css` opens with `html, body { overflow-x: hidden }`. Because html's overflow is
+     then not `visible` it stops propagating to the viewport, body becomes its own scroll container
+     sized exactly to its content, and a `position: sticky` child of the body has a scrollport that
+     never scrolls. It renders, it computes to sticky, and it moves 1:1 with the content forever.
+
+     Measured on this stylesheet before the fix: .app-topnav's viewport `top` went 0 → −600 after
+     scrolling 600px. Nothing about it looks wrong — the rule is there and it is applied.
+
+     `dvh`, not `vh`, and NO `min-height`: 100vh ≥ 100dvh, so a min-height would push this root
+     taller than its own scrollport and hand the scroll straight back to the body, which is the
+     original bug. The old `min-height: 100vh` was removed for exactly that reason.
+
+     Two things change meaning under a container scrollport and were re-checked: an
+     IntersectionObserver with `root: null` measures the viewport (none in this app observe page
+     scroll), and window.scrollY/scrollTo no longer describe the page. */
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
-/* ── SIDEBAR: unified column, brand + module switcher + content, collapses to an icon rail ── */
+/* ── APP SHELL: THE DESKTOP TOP BAR ──────────────────────────────────────────────────────────
+   Two bands, because this shell carries two independent axes. Band 1 (.topbar-primary) is SESSION:
+   which product, which tenant, which period, who you are. Band 2 (.topbar-nav) is NAVIGATION
+   within whichever module band 1 selected. A single strip would make those read as one list. */
+.app-topnav {
+  display: flex;
+  flex-direction: column;
+  background: var(--theme-sidebar);
+  border-bottom: 1px solid var(--theme-border);
+  position: sticky;
+  top: 0;
+  /* Above .main-content and its cards; below Modal (100+) and the POS full-screen layers (1000),
+     which are meant to cover the shell rather than sit under it. */
+  z-index: 100;
+}
+
+.topbar-primary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 20px;
+  min-height: 52px;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  text-decoration: none;
+  max-width: 210px;
+  border-radius: var(--radius-md);
+}
+.topbar-brand-word {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+/* One line here, not the drawer's two-line clamp: a band with a fixed height cannot grow to fit a
+   long white-labeled property name, so it truncates and the title attribute carries the full one. */
+.topbar-brand-name {
+  font-size: var(--font-size-brand);
+  font-weight: 700;
+  color: var(--theme-text1);
+  letter-spacing: 0.04em;
+  font-family: 'Georgia', serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-brand-sub {
+  font-size: var(--font-size-micro);
+  color: var(--theme-text3);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-modules {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+/* .module-tab carries `flex: 1` for the drawer, where the tabs share one 240px row. In a bar each
+   tab sizes to its own label. */
+.topbar-modules .module-tab {
+  flex: none;
+  padding: 6px 10px;
+}
+
+/* Pushed right by its own auto margin rather than a spacer element, so the module row keeps its
+   natural width and this cluster takes whatever is left. */
+.topbar-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+  font-size: var(--font-size-micro);
+  color: var(--theme-text3);
+}
+.topbar-context-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-md);
+  background: var(--theme-bg);
+  color: var(--theme-text2);
+  cursor: pointer;
+  font-family: inherit;
+  transition: color var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard);
+}
+.topbar-context-trigger:hover:not(:disabled) {
+  color: var(--theme-text1);
+  border-color: var(--theme-accent);
+}
+.topbar-context-trigger:disabled { cursor: default; }
+.topbar-context-label {
+  font-size: var(--font-size-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--theme-text3);
+  flex-shrink: 0;
+}
+.topbar-context-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--theme-text1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.topbar-context-name--static { max-width: 200px; }
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.topbar-account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-md);
+  background: var(--theme-bg);
+  color: var(--theme-text1);
+  font-size: var(--font-size-nav-item);
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+.topbar-account-trigger:hover { border-color: var(--theme-accent); }
+/* The name is the chip; it truncates rather than pushing the bar wider. */
+.topbar-account-name {
+  max-width: 148px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The link row SCROLLS rather than wraps: a bar that grows to a third band moves the page content
+   down the moment someone is granted one more module, and the whole point of the dropdowns is that
+   the bar's height is fixed no matter how many destinations exist. Setting overflow-x also
+   resolves overflow-y to `auto`, which is why every panel this row opens is position:fixed — see
+   the Dropdown component in Layout.js. */
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 20px 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topbar-nav::-webkit-scrollbar { display: none; }
+
+/* The horizontal counterpart to .sidebar-link, and a COMPLETE class rather than a hover rule over
+   an inline style object. That distinction is the S678 rule and it was watched to fail here: a
+   `.topbar-pill` carrying no background of its own falls through to the UA — `#f0f0f0` on a
+   <button> (the only light-filled thing on a dark bar) and underlined `#0000EE` on an <a>, which
+   is what the dropdown triggers and the Dashboard link would each have rendered as. Everything the
+   pill IS lives here; only which STATE it is in comes from JSX, as a modifier. */
+.topbar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--theme-text2);
+  font-size: var(--font-size-nav-item);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--motion-fast) var(--ease-standard),
+              background var(--motion-fast) var(--ease-standard);
+}
+/* accent-ink, not accent — same measurement as .sidebar-link--active: the base accent as TEXT
+   falls under AA on the light preset, and the active item would be the least legible thing in the
+   bar, inverting the one signal the state exists to send. */
+.topbar-pill--current {
+  color: var(--theme-accent-ink);
+  background: var(--theme-focus-ring);
+  font-weight: 600;
+}
+.topbar-pill:hover {
+  color: var(--theme-text1);
+  background: var(--theme-table-hover);
+}
+.topbar-pill--current:hover {
+  color: var(--theme-accent-ink);
+  background: var(--theme-focus-ring);
+}
+.topbar-pill:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+}
+
+.topbar-panel {
+  z-index: 120;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 6px 0;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--theme-card-shadow);
+}
+.topbar-panel-rule {
+  height: 1px;
+  background: var(--theme-border-lt);
+  margin: 6px 10px;
+}
+
+.topbar-upgrade {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 20px);
+  margin: 0 10px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--theme-accent-ink);
+  font-size: var(--font-size-nav-item);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+.topbar-upgrade:hover { background: var(--theme-table-hover); }
+
+/* ── SIDEBAR: the phone drawer. Above 768px the top bar is the navigation and this is hidden ──
+   `display` lives HERE rather than inline in Layout.js: an inline declaration beats an external
+   rule at any specificity, so a component that sets its own display can never be hidden by a
+   media query. The drawer is not unmounted — it is translated off-screen below 768px and
+   display:none above it, so its scroll position and dropdown state survive. */
 .sidebar-wrap {
   position: fixed;
   top: 0;
   left: 0;
   height: 100vh;
   z-index: 100;
-  display: flex;
+  display: none;
 }
 
 .sidebar-shell {
@@ -389,15 +667,8 @@ textarea,
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* Matches .main-content's margin-left transition below — the two animate in lockstep since
-     .sidebar-wrap is position:fixed and this is what it actually reserves layout space for
-     (same "real space, not a transform trick" reasoning DESIGN.md's Navigation section documents
-     for main-content, extended here since collapse now resizes one column instead of hiding a
-     second one). */
-  transition: width 0.22s ease;
-}
-.sidebar-wrap--collapsed .sidebar-shell {
-  width: 56px;
+  /* The `width` transition that used to live here is gone with the collapse toggle: the drawer has
+     one width, and it arrives by sliding in (transform), not by growing. */
 }
 
 .rail-btn {
@@ -493,22 +764,12 @@ textarea,
   padding: 10px 10px 4px;
   flex-shrink: 0;
 }
-.sidebar-wrap--collapsed .module-switcher {
-  flex-direction: column;
-  padding: 10px 8px 4px;
-}
 /* Admin row sits directly above the IMS/HR/POS row — tighten the seam between the two stacked
    .module-switcher blocks instead of doubling each one's own top/bottom padding. */
 .module-switcher--admin {
   padding-bottom: 3px;
 }
 .module-switcher--admin + .module-switcher {
-  padding-top: 3px;
-}
-.sidebar-wrap--collapsed .module-switcher--admin {
-  padding-bottom: 3px;
-}
-.sidebar-wrap--collapsed .module-switcher--admin + .module-switcher {
   padding-top: 3px;
 }
 
@@ -531,10 +792,6 @@ textarea,
               background var(--motion-fast) var(--ease-standard),
               box-shadow var(--motion-fast) var(--ease-standard);
 }
-.sidebar-wrap--collapsed .module-tab {
-  flex: none;
-  justify-content: center;
-}
 .module-tab:hover {
   color: var(--theme-text1);
   background: var(--theme-table-hover);
@@ -554,13 +811,6 @@ textarea,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The 56px rail cannot hold a label — without this the tabs rendered "IM / HR / PO", clipped by
-   .sidebar-shell's overflow, contradicting DESIGN.md's Navigation spec ("collapses to a vertical
-   icon-only column"). RailTip already supplies the name on hover in this state. */
-.sidebar-wrap--collapsed .module-tab-label {
-  display: none;
-}
-
 /* Everything client-badge/nav/footer — hidden as a block when collapsed, rather than unmounted,
    so scroll position and dropdown state survive toggling. */
 .sidebar-content {
@@ -570,12 +820,6 @@ textarea,
   flex-direction: column;
   overflow: hidden;
 }
-.sidebar-wrap--collapsed .sidebar-content,
-.sidebar-wrap--collapsed .sidebar-brand-text,
-.sidebar-wrap--collapsed .sidebar-search-btn {
-  display: none;
-}
-
 .sidebar-bottom {
   display: flex;
   flex-direction: row;
@@ -588,12 +832,6 @@ textarea,
   margin-top: auto; /* belt-and-suspenders: always glued to the true bottom of .sidebar-shell,
                         regardless of how much vertical space .sidebar-content ends up using */
 }
-/* Collapsed rail is only 56px wide — not enough for 3 buttons side by side, so fall back to a
-   single icon column, same row/column flip already used for .module-switcher above. */
-.sidebar-wrap--collapsed .sidebar-bottom {
-  flex-direction: column;
-}
-
 .sidebar-toggle {
   background: none;
   border: 1px solid var(--theme-border);
@@ -887,20 +1125,18 @@ textarea,
 }
 
 /* ── MAIN CONTENT ────────────────────────── */
+/* No reserved column any more: the shell is a column, so this is simply the row below the bar.
+   With it goes the one accepted layout-property animation DESIGN.md used to carry an argument for
+   — .sidebar-shell's `width` paired with this element's `margin-left`. There is nothing left to
+   animate, which is the better answer than the justification was. */
 .main-content {
-  margin-left: 240px; /* unified sidebar column, expanded */
   flex: 1;
-  min-height: 100vh;
+  min-height: 0;
   padding: 32px;
   background: var(--theme-bg);
   color: var(--theme-text1);
   min-width: 0;
   overflow-x: hidden;
-  transition: margin-left 0.22s ease;
-}
-
-.main-content--collapsed {
-  margin-left: 56px; /* sidebar collapsed to its icon-only width */
 }
 
 /* ── SHARED PAGE COMPONENTS ─────────────── */
@@ -1127,7 +1363,9 @@ tr.interactive-row:focus-visible {
    it. Wraps rather than truncating, since on a phone it is the ONLY place this information
    appears at all (the sidebar that otherwise carries it is off-canvas). */
 .context-bar {
-  display: flex;
+  /* Phone-only. See the @media (max-width: 768px) block near the end of this file, which turns it
+     back on, and the comment beside it in Layout.js. */
+  display: none;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
@@ -1451,6 +1689,16 @@ tr.interactive-row:focus-visible {
   .sidebar-dropdown-trigger,
   .sidebar-dropdown-item,
   .sidebar-link {
+    min-height: 40px;
+  }
+  /* The top bar is hidden below 768px, but `pointer: coarse` is not a width — a touchscreen laptop
+     or a tablet in landscape gets the bar, not the drawer, so every control in it needs the tier
+     too. Its dropdown PANEL rows are .sidebar-link and are already covered above. */
+  .topbar-pill,
+  .topbar-context-trigger,
+  .topbar-account-trigger,
+  .topbar-upgrade,
+  .topbar-modules .module-tab {
     min-height: 40px;
   }
   .btn-sm,
@@ -2070,8 +2318,14 @@ textarea:focus-visible {
   color: var(--theme-red-text);
 }
 
+/* The one badge whose fill and ink come from the SAME token, because grey has no `*-text` variant
+   the way green/red/amber/purple/accent do. It holds AA on both presets — measured from painted
+   pixels at 4.68:1 worst (Modernist Light, over card and sidebar alike), 6.44:1 on Night — but it
+   is the thinnest margin of the six badge classes, so re-measure this one before changing either
+   the alpha or `--theme-text2`. Giving it `--theme-text1` instead would take it to 11.58:1 and
+   match how every sibling pairs a tint with a stronger ink; that is a live option, not a defect. */
 .badge-gray {
-  background: rgba(138,146,163,0.10);
+  background: color-mix(in srgb, var(--theme-text2) 10%, transparent);
   color: var(--theme-text2);
 }
 
@@ -2670,7 +2924,9 @@ textarea:focus-visible {
      Reorder Report's Print Par Sheet blank column. */
   .print-blank-input { color: transparent !important; }
   .print-blank-input::placeholder { color: transparent !important; }
-  .sidebar-wrap { display: none !important; }
+  /* .app-topnav joined this list when navigation moved to the top. Forgetting it puts the whole
+     bar — brand, module tabs, tenant and period — at the head of every printed document. */
+  .sidebar-wrap, .app-topnav { display: none !important; }
   .main-content { margin-left: 0 !important; padding: 0 !important; }
   .btn, button { display: none !important; }
   body { background: white !important; color: black !important; }
@@ -2783,11 +3039,22 @@ textarea:focus-visible {
 .sidebar-overlay  { display: none; }
 
 @media (max-width: 768px) {
+  /* The bar's dropdowns are a pointer-and-keyboard shape; at phone width the drawer is the whole
+     navigation again, exactly as it was before the bar existed. */
+  .app-topnav { display: none; }
+
   .sidebar-wrap {
+    /* Overrides the desktop `display: none` above. */
+    display: flex;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
     z-index: 200;
   }
+
+  /* The shell's only statement of tenant/period on a phone — the top bar is gone here and the
+     drawer that would otherwise carry it is off-canvas. Hidden above this width, where the bar
+     says the same thing. */
+  .context-bar { display: flex; }
   .sidebar-wrap.mobile-open {
     transform: translateX(0);
   }

@@ -100,7 +100,7 @@ was fail-closed for the sidebar and for nothing else: `posTeam` reached four fil
 no POS page read it for access, so a kitchen or bar PIN account typing `/pos/orders` got the till
 and, at supervisor rank, `/pos/shifts` — the cash-drawer reconciliation. The predicate now lives
 in `src/shared/posTeamAccess.js` (`posPathReachable`, `STATION_TEAM_HOME`), `AuthContext` exposes
-it as `canReachPosPath(path)`, `isItemVisible` reads it for the sidebar and the palette, and
+it as `canReachPosPath(path)`, `isItemVisible` reads it for the nav and the palette, and
 **`ModuleGate` enforces it on every POS route** — so a POS page nobody has written yet is already
 unreachable to a station team, which is what fail-closed was supposed to mean. Two siblings closed
 in the same step: `/menu-pricing` was the one in-app route with **no `ModuleGate` at all** (an
@@ -136,8 +136,11 @@ What holds now, and why each piece is where it is:
   twice. `featureCatalog.test.js` reads `App.js` and `Layout.js` and fails on any routed or
   navigated `featureKey` with no label, so the plan-only headline can never come back for a real
   route.
-- **The buyer is the audience for a pitch.** The sidebar's upgrade teaser and footer chip now render
-  for `isOwner` only; `SuiteGate` and `PremiumGate` show "View plans →" and the contact block to an
+- **The buyer is the audience for a pitch.** The upgrade teaser and footer chip render for `isOwner`
+  only — and since the top-bar move they render in two different places: the full teaser stays in the
+  phone drawer, while on desktop the same facts are one row in the account menu (tier name + locked
+  count), both computed from the one `upgrade` object in `Layout.js` so they cannot disagree.
+  `SuiteGate` and `PremiumGate` show "View plans →" and the contact block to an
   owner and one sentence — *it is switched on for the whole outlet, not per login — ask the account
   owner* — to anyone else. A CTA whose reader cannot act on it is noise where a manager needs the
   nav.

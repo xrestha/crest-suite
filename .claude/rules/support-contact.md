@@ -80,7 +80,8 @@ only way to take that number off eight surfaces was another number or a deploy. 
 already guarded on `phone`/`telHref` being falsy; the test asserts the off state, the explicit
 chat channel, the consultant and the default.
 
-**Where a client finds it.** The sidebar's bottom rail carries a **Support** button (`LifeBuoy`)
+**Where a client finds it.** The account menu carries a **Support** row (`LifeBuoy`), and the phone
+drawer's bottom rail carries the same button
 beside Help, landing on `/help?section=support`; `Help.js` reads `?section=` against
 `HELP_SECTIONS` and follows it on change, so a link can name the section — before S683 it lived
 only in component state, six tabs in, and "where is support?" was the first question asked once
@@ -152,7 +153,7 @@ Two instances, and the split is deliberate:
   with `ThemeContext.js`'s `PRESETS.dark` or the impeccable hook will (correctly) flag them as
   undocumented colours. `ProtectedRoute.js`'s loading screen already does the same thing.
 - **Page scope** (`Layout.js`, wrapping only `<Suspense><Outlet /></Suspense>`, **not** the whole
-  `<main>`) — the sidebar and header survive a page crash, and `resetKey={location.pathname}`
+  `<main>`) — the top bar and page header survive a page crash, and `resetKey={location.pathname}`
   clears the error on navigation. Wrapping more of `<main>` would let a `Layout` render error be
   swallowed here instead of falling through to the app-scope boundary.
 
