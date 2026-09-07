@@ -541,12 +541,12 @@ export default function EmployeeList() {
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         {selfServiceMap[e.id] ? (
                           e.access_blocked ? (
-                            <Tip text="Self-Service is enabled on this account, but login is blocked. Select this employee and use Activate above to restore it.">
+                            <Tip text="Self-Service is enabled on this account, but login is blocked. Select this employee and use Activate above to restore it." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                               <span className="badge badge-gray" style={{ fontSize: 10 }}>Self-Service (blocked)</span>
                             </Tip>
                           ) : (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              <Tip text="This employee can log in via the Self-Service link to view their own payslip, submit leave, and see their roster.">
+                              <Tip text="This employee can log in via the Self-Service link to view their own payslip, submit leave, and see their roster." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                                 <span className="badge badge-green" style={{ fontSize: 10 }}>✓ Self-Service</span>
                               </Tip>
                               <Tip text="Remove this employee's Self-Service login entirely — their PIN stops working and the account is deleted. Their employee record, payslips and leave history are kept. To suspend access temporarily instead, tick the row and use Deactivate.">
@@ -560,7 +560,7 @@ export default function EmployeeList() {
                             </span>
                           )
                         ) : ssStatusErr ? (
-                          <Tip text="Self-Service status couldn't be loaded, so this is unknown — not 'no login'. Reload before enabling: if this employee already has Self-Service, enabling it again will fail.">
+                          <Tip text="Self-Service status couldn't be loaded, so this is unknown — not 'no login'. Reload before enabling: if this employee already has Self-Service, enabling it again will fail." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                             <span className="badge badge-gray" style={{ fontSize: 10 }}>Self-Service ?</span>
                           </Tip>
                         ) : (

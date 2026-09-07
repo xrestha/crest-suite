@@ -267,7 +267,20 @@ export default function AdminDashboardOverview() {
                   // visible on the screens that bill it, and the star keeps its accent fill, its
                   // heavier weight and a Tip naming it. The full "★ SUITE" pill still renders per
                   // row in the table below, where there is width for it.
-                  <Tip text={`Crest Suite Pro is on ${suiteCount} ${suiteCount === 1 ? 'property' : 'properties'} — the owner layer sold per outlet on top of the modules.`} width={250}>
+                  //
+                  // Tip's wrapper span is `display: inline` with a dashed border-bottom and
+                  // `cursor: help` (Tip.js) — meant for a tipped WORD inside a sentence. As a FLEX
+                  // ITEM in this row it stretches to the row height while the pill inside stays at
+                  // its natural height at the top, and the dashed rule then draws at the bottom of
+                  // the stretched box, well below the pill. That is what made this one pill look a
+                  // different size from its three neighbours, and it survived the entire
+                  // equalise-the-boxes pass because the difference was never in the pill at all.
+                  // `style` is Tip's documented escape hatch (spread last over its own defaults):
+                  // inline-flex so the wrapper hugs the pill, no rule, no help cursor. The tooltip,
+                  // the focus ring and aria-describedby are untouched. UsageChip.jsx already does
+                  // exactly this; a badge is not a tipped word.
+                  <Tip text={`Crest Suite Pro is on ${suiteCount} ${suiteCount === 1 ? 'property' : 'properties'} — the owner layer sold per outlet on top of the modules.`} width={250}
+                    style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                     <span style={adoptionPill('var(--theme-accent) 20%', 'var(--theme-accent-ink)', true)}>★ {suiteCount}</span>
                   </Tip>
                 )}

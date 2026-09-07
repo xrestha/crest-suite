@@ -560,6 +560,13 @@ Three things generalise:
   nobody could point at, and the next screenshot asked *where is the change*. When a difference is
   reported by eye, name the cue that is carrying it before choosing what to equalise; a measurement
   that says two things now agree is not evidence that anyone can tell.
+- **And measure the REAL component tree, not a reconstruction of it.** Three rounds of measurement
+  reported `[19,19,19,19] equal` while the live pill was visibly wrong, because the harness rendered
+  a bare `<span>` and the live one is wrapped in `Tip` — whose `display: inline` wrapper becomes the
+  flex item, stretches, and hangs a dashed rule below the chip. The harness was not measuring the
+  thing on screen, and it agreed with itself every time, which is exactly what made it convincing.
+  If a rebuilt harness disagrees with a screenshot, the harness is the suspect: copy the wrapper
+  chain verbatim from the source, or drive the real app.
 
 A stale number came out of the same block: its comment cited a 190px grid floor when S642 had
 lowered it to 158, so its whole fit argument was computed against an inner width 33px wider than
