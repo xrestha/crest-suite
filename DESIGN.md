@@ -700,6 +700,12 @@ nor its placeholder (Chrome prints placeholders as if they were values), so a sh
 over and filled in with a pen; `.print-hide-row` prints only the rows a user checked. Letterhead
 documents set Georgia and their own grayscale ink ramp rather than reading theme tokens.
 
+**Promoting a label to a `<button>` deletes it from paper.** `button { display: none !important }`
+is blanket, so the moment a column heading becomes a sort control the printed table loses that
+column's *title* — the figures print under nothing. `.th-sort` reprints as plain black text and
+drops only its arrow; any future label-turned-control needs the same override, written in the same
+change as the control.
+
 **The print reset targets the CELL, which is why a supporting line needs `.cell-sub`.**
 `@media print` sets `th, td { color: black !important }` — inheritance, so any descendant `<span>`
 carrying its own colour inline **wins** and prints in theme ink on white paper. Every secondary line
@@ -1061,6 +1067,13 @@ if the positioning mechanism changes for other reasons. Both values are recorded
 - **`.data-table--sticky-first`** pins the first column for a matrix whose first column is the row
   label (one column per outlet), so scrolling right does not leave the reader matching numbers to
   remembered row order.
+- **`.th-sort`** turns a column heading into a sort control. It inherits the header's own
+  typography — the same 11px/500 uppercase fog — so a sortable column reads identically to a fixed
+  one and only the arrow and the pointer say it is interactive; `.th-sort--active` brings the label
+  to paper ink and the arrow to accent. Put the `<button>` **inside** `Tip`, not around it: `Tip`
+  makes a lone interactive child its own focus target, so the column stays one tab stop and the
+  tooltip is announced on the control rather than on a wrapper nobody focuses. The `<th>` carries
+  `aria-sort`. Menu Pricing is the reference.
 - **Row actions belong on the row**, and the disclosure control is a real `<button>` inside a
   `<td>` (`RowDisclosure`). **Never `role="button"` on a `<tr>`** — that overrides the row's
   implicit `row` role, which takes the row out of the table's structure and stops a screen reader

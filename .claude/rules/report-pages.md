@@ -177,3 +177,14 @@ first item"* — an empty state that names a button and invites the reader to st
 they already have. It carries `loadError` → `ReportLoadError` now, through `firstError` on the batch and
 `fetchAllRowsChunked` on the ingredients `.in()` (every recipe id in one URL). Same for
 `TaxPoolTab`'s repair-expense read, whose empty result understated the Section 16 cap.
+
+**And half of that fix was unreachable for three weeks (S690).** `MenuPricing.js` has **two
+returns** — a POS-only branch and an IMS branch — and S683 set `loadError` in the shared loader but
+rendered `ReportLoadError` in only the first one. The IMS branch, the branch with the food costs
+and the margins in it, still fell through to `display.length === 0` and printed the "add your first
+item" invitation on a failed read. Nothing about the source looks wrong: `loadError` is set, the
+component imports `ReportLoadError`, and the string it renders is in the file. **On a page with
+more than one `return`, a failed-read fix has to be checked in every branch that can render the
+table** — see `component-library.md`'s standing rule that a page with two returns will put your new
+UI where nobody can reach it. Grep the file for `empty-state` and confirm each occurrence has a
+`loadError` case above it.

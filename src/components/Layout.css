@@ -1771,6 +1771,30 @@ table.data-table--sticky-first tr:hover td:first-child {
    (S670), so none of them had ever printed legibly; nobody had tried from a dark theme. */
 .cell-sub { display: block; font-size: 11px; color: var(--theme-text3); margin-top: 2px; }
 
+/* Sortable column header. The button carries the th's own typography so a sortable header reads
+   identically to a fixed one — only the arrow and the pointer say it is interactive. The arrow is
+   a separate span so the print reset can drop it: UI chrome on a printed price list is noise, and
+   the row order on paper is self-evident. */
+table.data-table th .th-sort {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+table.data-table th .th-sort:hover { color: var(--theme-text1); }
+table.data-table th .th-sort--active { color: var(--theme-text1); }
+table.data-table th .th-sort-arrow { font-size: 9px; opacity: 0.3; }
+table.data-table th .th-sort--active .th-sort-arrow { opacity: 1; color: var(--theme-accent-ink); }
+
 /* Purchases bill list. The Item and Vendor cells are deliberately the only wrappable columns in
    this table, and there is no `.purchases-item-cell` rule any more — that history is worth the
    paragraph, because it was rewritten three times and each fix caused the next.
@@ -2661,6 +2685,11 @@ textarea:focus-visible {
   /* One standard size for every cell, overriding whatever smaller/inline size a page used on
      screen (10-11px labels, etc.) — printed tables should read as one consistent document. */
   th, td { border: 1px solid #ccc !important; color: black !important; padding: 6px 10px !important; background: white !important; font-size: 12px !important; }
+  /* `button { display: none }` above would take the LABEL of every sortable column header with
+     it — the header is a button so the whole column would print untitled. It prints as plain
+     text instead; the arrow is chrome and goes. */
+  table.data-table th .th-sort { display: inline !important; color: black !important; }
+  table.data-table th .th-sort-arrow { display: none !important; }
   .badge { border: 1px solid #ccc !important; color: black !important; background: white !important; border-radius: 0 !important; }
   input { background: white !important; color: black !important; border: 1px solid #ccc !important; }
   .no-print { display: none !important; }

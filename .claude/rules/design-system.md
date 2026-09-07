@@ -89,6 +89,7 @@ Use these global classes from `Layout.css` — don't repeat inline styles:
 - `data-table` — styled table
 - `table-wrap` — horizontal scroll wrapper (required on all wide tables). **Add `table-wrap--fab-clear` alongside it on any page that also renders a `Fab`** — `Fab` is `position: fixed` with no space reserved for it, so without this modifier the last table row's action buttons sit underneath it (found live, S442, on HR Employees — fixed there and on the other 10 pages with the same pairing). A new page combining a table with `Fab` should include this modifier from the start.
 - `tab-btn` / `tab-btn--active` / `tab-bar` — pill filter/sort buttons
+- `th-sort` / `th-sort--active` / `th-sort-arrow` — a sortable column heading (S690). The button inherits the `<th>`'s own typography so a sortable column reads identically to a fixed one; the arrow is a separate span so the print block can drop it. **Put the `<button>` inside `Tip`, not around it** — `Tip` makes a lone interactive child its own focus target, so the column stays one tab stop and the tooltip is announced on the control. `aria-sort` goes on the `<th>`
 - `form-select` — styled `<select>`. **Not for a text input** — it carries `cursor: pointer`, so a field wearing it reads as a menu
 - `form-input` — styled standalone `<input>` (S593). An input inside a `.form-field` wrapper is styled by that wrapper's descendant rule and needs no class; an input **outside** one had nothing to reach for until this existed, so it rendered as the browser's native white box — obvious on the dark presets, near-invisible on the light ones. Shares one declaration block with `.form-field input` so the two cannot drift
 - `page-header` — the block every page opens with (28px bottom margin, and under 768px the 60px left padding that clears the fixed hamburger). **Add `page-header--split` whenever the header has actions on the right** — it owns the flex row, `space-between`, `flex-wrap` and the gap, so no page hand-rolls them. A title-only header takes `page-header` alone; the base is deliberately not `display: flex`, or the 29 title-only headers would put their `<h1>` and `<p>` side by side
@@ -410,6 +411,44 @@ column, and inline beats the class silently.
 **Day columns say the month.** `formatBsDay(day, bsMonth)` → "1st Bhadra", not a bare `1` that only
 reads correctly while the page header is on screen. Full rule in `DESIGN.md` and
 `.claude/rules/bs-calendar.md`; Excel exports keep the numeric column.
+
+### Turning a label into a button deletes it from print (S690)
+
+`@media print` in `Layout.css` carries a blanket `button { display: none !important }` — every
+control, everywhere, because none of them mean anything on paper. The consequence nobody expects:
+the moment a static piece of text is promoted to a `<button>`, **it stops printing at all**. Menu
+Pricing's sortable column headings would have printed a price list whose Food Cost, FC % and Change
+columns had no titles — figures under nothing, on a sheet whose whole purpose is to be handed to
+someone else and priced by hand.
+
+`.th-sort` reprints as plain black text and hides only the arrow. **The rule generalises past this
+one class**: whenever a label, a heading, a badge or a value becomes a button, add its print
+override in the same change, and check the printed output rather than the screen. The tell is that
+nothing looks wrong anywhere except in a print preview nobody opens.
+
+### Sorting a table on a column the reader is still typing into (S690)
+
+Menu Pricing sorts by New FC % and Change, both computed from the **unsaved draft** in a New Price
+box rather than from a saved row. Three rules came out of it, and each prevents a specific defect:
+
+- **A row with no draft sorts last in BOTH directions.** "No new price yet" is not a small number,
+  and putting the untouched rows at the top of an ascending sort buries the ones the reader is
+  actually working on.
+- **Freeze the row order when the input takes focus, and do NOT release it on blur.** Without a
+  freeze the row re-sorts on every keystroke — "7", "75", "750" are three different food costs and
+  three different positions — and the input slides away under the cursor. Releasing on blur is
+  worse than not freezing at all: the row's own Save button is what the reader clicks next, and a
+  row that re-sorts on blur moves out from under the pointer between `mousedown` and `mouseup`, so
+  **the click never lands**. Release on re-sort, search or tab change instead, and say on screen
+  that the order is being held and how to release it.
+- **A figure column opens on its worst end first.** The reason to sort by FC % is to find what is
+  eating the margin, not to confirm what is already fine — so the first click on a numeric column
+  is descending, and only a name column opens ascending.
+
+A search box over the same table needs one more thing: **the category tab counts stop describing
+what is on screen the moment a search narrows it**, so show "N of M items" whenever the search has
+hidden rows, and make the empty state distinguish "nothing matches this search" from "nothing here
+yet".
 
 ### A table where every column is `nowrap` can only overflow (S646)
 

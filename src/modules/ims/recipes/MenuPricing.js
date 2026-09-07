@@ -21,6 +21,11 @@ function vatOf(r) {
 
 const EMPTY_FORM = { name: '', category: '', price: '', vatRate: 0.13, costPrice: '' }
 
+// Columns whose value comes from an unsaved draft rather than a saved row. Sorting on one of
+// these: null (nothing typed yet) sorts last in BOTH directions — "no new price" is not a small
+// number — and the row order freezes while a price box has focus.
+const DRAFT_SORT_KEYS = { newFc: true, change: true }
+
 export default function MenuPricing() {
   const { clientId, profile, clientModules, hasImsAccess } = useAuth()
   const { settings } = useSettings()
@@ -37,6 +42,13 @@ export default function MenuPricing() {
   const [loading, setLoading]   = useState(true)
   const [loadError, setLoadError] = useState(null) // a failed read, never rendered as an empty menu
   const [catTab, setCatTab]     = useState('All')
+  const [search, setSearch]     = useState('')
+  const [sortKey, setSortKey]   = useState('name')
+  const [sortDir, setSortDir]   = useState('asc')
+  // Row order captured while a New Price box has focus. Sorting by New FC % or Change reads a
+  // value the reader is mid-way through typing, so without this the row jumps on every keystroke
+  // ("7", "75", "750" are three different food costs) and drags the focused input with it.
+  const [frozenIds, setFrozenIds] = useState(null)
   const [drafts, setDrafts]     = useState({})   // { id: string (incl-VAT input) }
   const [saving, setSaving]     = useState({})   // { id: bool }
   const [errors, setErrors]     = useState({})   // { id: string }
@@ -165,7 +177,61 @@ export default function MenuPricing() {
     recipes.forEach(r => { tabCounts[r.category] = (tabCounts[r.category] || 0) + 1 })
     return { tabs: ['All', ...Object.keys(tabCounts).sort()], tabCounts }
   }, [recipes])
-  const display = catTab === 'All' ? recipes : recipes.filter(r => r.category === catTab)
+  const display = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const list = recipes.filter(r =>
+      (catTab === 'All' || r.category === catTab) &&
+      (!q || r.name.toLowerCase().includes(q) || (r.category || '').toLowerCase().includes(q))
+    )
+
+    const valOf = r => {
+      switch (sortKey) {
+        case 'pos':    return r.pos_enabled ? 1 : 0
+        case 'cost':   return r.cost > 0 ? r.cost : null
+        case 'price':  return r.inclVat > 0 ? r.inclVat : null
+        case 'fc':     return r.exVat > 0 ? r.fcPct : null
+        case 'newFc': {
+          const d = parseFloat(drafts[r.id])
+          const ex = d > 0 ? d / (1 + r.vat) : 0
+          return ex > 0 && r.cost > 0 ? (r.cost / ex) * 100 : null
+        }
+        case 'change': {
+          const d = parseFloat(drafts[r.id])
+          return d > 0 && r.inclVat > 0 ? d - r.inclVat : null
+        }
+        default: return null
+      }
+    }
+
+    const mul = sortDir === 'asc' ? 1 : -1
+    const byName = (a, b) => a.name.localeCompare(b.name)
+    const sorted = [...list].sort((a, b) => {
+      if (sortKey === 'name') return byName(a, b) * mul
+      const av = valOf(a), bv = valOf(b)
+      if (av === null && bv === null) return byName(a, b)
+      if (av === null) return 1
+      if (bv === null) return -1
+      // Name is the tiebreaker everywhere, so equal figures never shuffle between renders.
+      return av === bv ? byName(a, b) : (av - bv) * mul
+    })
+
+    if (!frozenIds || !DRAFT_SORT_KEYS[sortKey]) return sorted
+    const pos = new Map(frozenIds.map((id, i) => [id, i]))
+    // Rows that were not on screen when the order froze (a search cleared mid-edit) go last.
+    return sorted
+      .map((r, i) => [r, pos.has(r.id) ? pos.get(r.id) : frozenIds.length + i])
+      .sort((a, b) => a[1] - b[1])
+      .map(([r]) => r)
+  }, [recipes, catTab, search, sortKey, sortDir, drafts, frozenIds])
+
+  function toggleSort(key) {
+    setFrozenIds(null)
+    if (sortKey === key) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return }
+    setSortKey(key)
+    // A figure column opens on its worst end first — the reason to sort by FC % is to find the
+    // items eating the margin, not the ones already fine.
+    setSortDir(key === 'name' ? 'asc' : 'desc')
+  }
 
   function setDraft(id, val) {
     setDrafts(d => ({ ...d, [id]: val }))
@@ -244,11 +310,26 @@ export default function MenuPricing() {
     setAddModal(true)
   }
 
-  const th = (align, tip, label, width) => (
-    <th style={{ textAlign: align || 'left', width }}>
-      {tip ? <Tip text={tip} width={240}>{label}</Tip> : label}
-    </th>
-  )
+  // `sortAs` makes the header a sort control. The button goes INSIDE Tip on purpose: Tip makes a
+  // lone interactive child its own focus target, so the column is one tab stop and the tooltip is
+  // announced on the button rather than on a wrapper span nobody focuses.
+  const th = (align, tip, label, width, sortAs) => {
+    const active = sortAs && sortKey === sortAs
+    const arrow  = active ? (sortDir === 'asc' ? '▲' : '▼') : '↕'
+    const inner = sortAs ? (
+      <button type="button" className={`th-sort${active ? ' th-sort--active' : ''}`}
+        onClick={() => toggleSort(sortAs)}
+        aria-label={`Sort by ${label}${active ? (sortDir === 'asc' ? ', ascending' : ', descending') : ''}`}>
+        {label}<span className="th-sort-arrow" aria-hidden="true">{arrow}</span>
+      </button>
+    ) : label
+    return (
+      <th style={{ textAlign: align || 'left', width }}
+        aria-sort={sortAs ? (active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}>
+        {tip ? <Tip text={sortAs ? `${tip} Click the heading to sort by this column.` : tip} width={240}>{inner}</Tip> : inner}
+      </th>
+    )
+  }
 
   const posOnCount  = recipes.filter(r => r.pos_enabled).length
   const posOffCount = recipes.filter(r => !r.pos_enabled).length
@@ -277,15 +358,33 @@ export default function MenuPricing() {
         </div>
       )}
 
-      <div className="tab-bar" style={{ marginBottom: 16 }}>
-        {tabs.map(t => {
-          const count = t === 'All' ? recipes.length : (tabCounts[t] || 0)
-          return (
-            <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => setCatTab(t)}>
-              {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>
-            </button>
-          )
-        })}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+        <input
+          style={{
+            background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
+            padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260,
+          }}
+          placeholder="Search by item or category…"
+          aria-label="Search menu items by name or category"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <div className="tab-bar" style={{ marginBottom: 0 }}>
+          {tabs.map(t => {
+            const count = t === 'All' ? recipes.length : (tabCounts[t] || 0)
+            return (
+              <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => setCatTab(t)}>
+                {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>
+              </button>
+            )
+          })}
+        </div>
+        {search.trim() && !loading && (
+          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+            {display.length} of {recipes.length} item{recipes.length !== 1 ? 's' : ''}
+            <button className="btn-linklike" onClick={() => setSearch('')} style={{ marginLeft: 8 }}>Clear</button>
+          </span>
+        )}
       </div>
 
       {loading ? (
@@ -293,7 +392,11 @@ export default function MenuPricing() {
       ) : loadError ? (
         <ReportLoadError error={loadError} />
       ) : display.length === 0 ? (
-        <div className="empty-state">No menu items yet. Use <strong>+ Add Item</strong> above to add your first item.</div>
+        <div className="empty-state">
+          {recipes.length > 0
+            ? <>No items match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}{catTab !== 'All' ? <> in <strong>{catTab}</strong></> : null}.</>
+            : <>No menu items yet. Use <strong>+ Add Item</strong> above to add your first item.</>}
+        </div>
       ) : (
         <div className="table-wrap">
           <table className="data-table">
@@ -516,7 +619,10 @@ export default function MenuPricing() {
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Menu Pricing')
-    XLSX.writeFile(wb, `menu-pricing${catTab !== 'All' ? '-' + catTab.toLowerCase() : ''}.xlsx`)
+    // The sheet is the on-screen filter, so the filename has to name the whole filter — a search
+    // hit dropping 90 rows out of an export called plain "menu-pricing" reads as the whole menu.
+    const slug = search.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
+    XLSX.writeFile(wb, `menu-pricing${catTab !== 'All' ? '-' + catTab.toLowerCase() : ''}${slug ? '-' + slug : ''}.xlsx`)
   }
 
   /* ── IMS view (full food-cost table) ─────────────────────────────────────── */
@@ -532,12 +638,12 @@ export default function MenuPricing() {
         <div className="no-print" style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           {/* Prints the table as filtered on screen — the active category tab goes into the print
               title (same convention as Stock Movements), since the tab bar itself is no-print. */}
-          <Tip text="Prints the price list exactly as filtered on screen — the current category tab, with current prices and FC%." width={280}>
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`Menu Pricing${catTab !== 'All' ? ' - ' + catTab : ''}`)}>
+          <Tip text="Prints the price list exactly as filtered and sorted on screen — the current category tab and search, with current prices and FC%." width={280}>
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`Menu Pricing${catTab !== 'All' ? ' - ' + catTab : ''}${search.trim() ? ` - search: "${search.trim()}"` : ''}`)}>
               🖨 Print
             </button>
           </Tip>
-          <Tip text="Downloads the list as filtered on screen, with a blank New Price column to fill in and send back." width={280}>
+          <Tip text="Downloads the list as filtered and sorted on screen, with a blank New Price column to fill in and send back." width={280}>
             <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || display.length === 0}>
               ⬇ Excel
             </button>
@@ -565,36 +671,70 @@ export default function MenuPricing() {
         </div>
       )}
 
-      {/* Category tabs */}
-      <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
-        {tabs.map(t => {
-          const count = t === 'All' ? recipes.length : (tabCounts[t] || 0)
-          return (
-            <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => setCatTab(t)}>
-              {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>
-            </button>
-          )
-        })}
+      {/* Search + category tabs */}
+      <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+        <input
+          style={{
+            background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
+            padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 260,
+          }}
+          placeholder="Search by item or category…"
+          aria-label="Search menu items by name or category"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setFrozenIds(null) }}
+        />
+        <div className="tab-bar" style={{ marginBottom: 0 }}>
+          {tabs.map(t => {
+            const count = t === 'All' ? recipes.length : (tabCounts[t] || 0)
+            return (
+              <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => { setCatTab(t); setFrozenIds(null) }}>
+                {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>
+              </button>
+            )
+          })}
+        </div>
+        {/* The tab counts above count the whole category, so once a search narrows the table they
+            stop describing what is on screen — this says what is actually showing. */}
+        {search.trim() && !loading && (
+          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+            {display.length} of {recipes.length} item{recipes.length !== 1 ? 's' : ''}
+            <button className="btn-linklike" onClick={() => { setSearch(''); setFrozenIds(null) }} style={{ marginLeft: 8 }}>Clear</button>
+          </span>
+        )}
+        {frozenIds && DRAFT_SORT_KEYS[sortKey] && (
+          <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+            Order held while you price — click the column heading to re-sort.
+          </span>
+        )}
       </div>
 
       {loading ? (
         <div className="loading-state">Loading…</div>
+      ) : loadError ? (
+        // A failed read is not an empty menu (S594). This branch had no loadError case at all,
+        // so a refused or dropped query rendered as "No menu items found. Use + Add Item" — an
+        // invitation to re-enter a menu that is already there.
+        <ReportLoadError error={loadError} />
       ) : display.length === 0 ? (
-        <div className="empty-state">No menu items found. Use <strong>+ Add Item</strong> above to add your first item.</div>
+        <div className="empty-state">
+          {recipes.length > 0
+            ? <>No items match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}{catTab !== 'All' ? <> in <strong>{catTab}</strong></> : null}.</>
+            : <>No menu items found. Use <strong>+ Add Item</strong> above to add your first item.</>}
+        </div>
       ) : (
         <div className="table-wrap">
           <table className="data-table">
             <thead>
               <tr>
                 {th('left',  null, '#', 36)}
-                {th('center', 'Toggle to include or exclude this item from the POS order screen. Turn off for seasonal or discontinued items, or to 86 it for the day when you run out — just remember to turn it back on once restocked.', 'On POS', 72)}
-                {th('left',  'Recipe name, category, and VAT status. VAT 13% items: selling price includes 13% VAT. No VAT items are sold at the price as entered.', 'Item')}
-                {th('right', 'Total ingredient cost per portion at current item rates from the Item Master.', 'Food Cost', 100)}
-                {th('right', 'Current VAT-inclusive menu price saved in Recipe Costing. Calculated as selling price × (1 + VAT rate).', 'Current Price', 120)}
-                {th('right', `Food cost ÷ ex-VAT selling price. Green up to ${fcThresholds(settings).warn}%, amber up to ${fcThresholds(settings).critical}%, red above that — the thresholds set in Settings → Thresholds. A plate of momo costing NPR 105 sold at NPR 300 is 35%.`, 'FC %', 80)}
+                {th('center', 'Toggle to include or exclude this item from the POS order screen. Turn off for seasonal or discontinued items, or to 86 it for the day when you run out — just remember to turn it back on once restocked.', 'On POS', 72, 'pos')}
+                {th('left',  'Recipe name, category, and VAT status. VAT 13% items: selling price includes 13% VAT. No VAT items are sold at the price as entered.', 'Item', undefined, 'name')}
+                {th('right', 'Total ingredient cost per portion at current item rates from the Item Master.', 'Food Cost', 100, 'cost')}
+                {th('right', 'Current VAT-inclusive menu price saved in Recipe Costing. Calculated as selling price × (1 + VAT rate).', 'Current Price', 120, 'price')}
+                {th('right', `Food cost ÷ ex-VAT selling price. Green up to ${fcThresholds(settings).warn}%, amber up to ${fcThresholds(settings).critical}%, red above that — the thresholds set in Settings → Thresholds. A plate of momo costing NPR 105 sold at NPR 300 is 35%.`, 'FC %', 80, 'fc')}
                 {th('right', 'Enter a new VAT-inclusive menu price. The ex-VAT price and FC% are back-calculated automatically. Press Enter to save.', 'New Price (incl VAT)', 150)}
-                {th('right', 'Projected FC% at the new price. Updates live as you type.', 'New FC %', 90)}
-                {th('right', 'Difference between new and current VAT-inclusive price. Green = price increase, red = price decrease.', 'Change', 90)}
+                {th('right', 'Projected FC% at the new price. Updates live as you type.', 'New FC %', 90, 'newFc')}
+                {th('right', 'Difference between new and current VAT-inclusive price. Green = price increase, red = price decrease.', 'Change', 90, 'change')}
                 {th(null, null, '', 72)}
               </tr>
             </thead>
@@ -642,6 +782,11 @@ export default function MenuPricing() {
                       {r.exVat > 0 ? `${r.fcPct.toFixed(1)}% ${fcMark(r.fcPct)}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
+                      {/* Focusing this box freezes the row order (see DRAFT_SORT_KEYS) and nothing
+                          releases it on blur on purpose: the Save button sits in this same row, and
+                          a row that re-sorts on blur moves out from under the pointer between
+                          mousedown and mouseup, so the click never lands. Re-sorting, searching or
+                          switching tab releases it. */}
                       <input
                         id={`menuprice-${r.id}`}
                         className="print-blank-input"
@@ -650,6 +795,7 @@ export default function MenuPricing() {
                         placeholder={r.inclVat > 0 ? r.inclVat.toFixed(0) : '0'}
                         onChange={e => setDraft(r.id, e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && changed && saveRow(r)}
+                        onFocus={() => { if (DRAFT_SORT_KEYS[sortKey] && !frozenIds) setFrozenIds(display.map(x => x.id)) }}
                         aria-label={`New menu price for ${r.name}`}
                         {...fieldAria(`menuprice-${r.id}`, errors[r.id])}
                         style={{
