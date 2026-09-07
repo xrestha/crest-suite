@@ -219,7 +219,11 @@ export function summarizeLaborForecastRows(rows) {
     // `asRosteredDays` are past days whose hours/cost/heads came from the roster because no
     // attendance was entered — counted, since the roster is the day's best record until then,
     // but named, since they are not clocked figures.
+    // `requiredHours` totals only the days that HAVE a requirement, and `requiredDays` says how
+    // many those were — a period total that silently covered half its days would read as the whole
+    // week's requirement and be short by the rest.
     shortDays: 0, staffedDays: 0, unpricedShifts: 0, asRosteredDays: 0, costPct: null,
+    requiredHours: 0, requiredDays: 0,
   }
   for (const r of rows) {
     let hours, cost, revenue, rec, heads
@@ -244,6 +248,8 @@ export function summarizeLaborForecastRows(rows) {
     const measured = rec != null && heads != null
     if (measured) out.staffedDays += 1
     const short = measured && heads < rec
+    const required = r.isPast ? r.actual?.required : r.required
+    if (required && required.hours != null) { out.requiredHours += required.hours; out.requiredDays += 1 }
     if (hours != null) out.hours += hours
     if (cost != null) out.cost += cost
     if (revenue != null) {
@@ -253,6 +259,7 @@ export function summarizeLaborForecastRows(rows) {
     if (short) out.shortDays += 1
   }
   out.hours = parseFloat(out.hours.toFixed(1))
+  out.requiredHours = parseFloat(out.requiredHours.toFixed(1))
   out.costPct = out.revenueOnMeasuredDays > 0 ? (out.costOnMeasuredDays / out.revenueOnMeasuredDays) * 100 : null
   return out
 }

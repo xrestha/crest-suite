@@ -394,3 +394,39 @@ Four rules for `laborForecast.js`, each from a figure that read plausibly and wa
   and Status are hidden entirely for a non-POS outlet: covers are only ever counted by POS bills,
   so the axis can never hold a value, and a footer that said "covered every measured day" over
   zero measured days was vacuous (`staffedDays` guards it).
+
+### The labour STANDARD: what the day needs, learned from the outlet's own history (S693)
+
+`laborStandard.js` derives sales-per-labour-hour from a trailing 120-day window and turns forecast
+revenue into required hours. Five rules, each of which produces a plausible number when broken:
+
+- **Ratio of totals, never a mean of per-day ratios**, and linear through the origin with no
+  fixed-crew intercept — the per-weekday split absorbs most of what an intercept would do, and a
+  two-parameter fit produces a figure nobody can check by hand. `typicalShiftHours` is
+  `Σ hours / Σ heads` from the window, NEVER `STANDARD_HOURS_PER_DAY`: that is the statutory day,
+  a payroll constant, not a rostering fact about this outlet.
+- **Only evidence may train it.** `isTrainingSample` requires recorded hours, an existing period,
+  and non-zero hours and revenue. A bulk `bs_day = 0` sales month is barred ENTIRELY — its revenue
+  is understated with no day to attach it to, which deflates the standard and INFLATES required
+  hours on every future day.
+- **Attendance is the strong basis, the roster the weak one, and the gap between them is MEASURED.**
+  Most clients enter attendance in one batch at month end, so an attendance-only model is blind to
+  the current month. `measureRosterBias` computes `Σ attendanceHours / Σ rosteredHours` over the
+  days carrying both and scales roster-only samples by it; below 10 overlap days they train
+  unadjusted and the tab says so. Never assume a direction — overtime pushes the ratio above 1.
+- **The window's hours read EVERY employee, whatever their status.** `computeActualLabor` skips any
+  row whose employee is not in the list it was given, and the board's list is
+  `status IN ('active','probation')` — so reusing it here would discard every hour worked by anyone
+  who has since left, and required hours would come out LOW, telling the owner to roster fewer
+  people than his own history says he needed. `tallyWindowAttendance` filters by nothing. S633 on a
+  second surface: a history outlives the people in it.
+- **Say which basis each number came from, on the row.** A weekday under 4 samples falls back to
+  the all-days figure and announces it (`describeBasis`); under 20 qualifying days there is no
+  standard at all rather than a thin one; a failed window read is an `ActionError` saying it is a
+  failed read, not a lack of history. And say what the thing IS: it learns what this outlet
+  normally uses per rupee, not what it ideally should — a chronically overstaffed outlet trains a
+  chronically overstaffed standard.
+
+`covers_per_staff_target` stays a POLICY the owner sets; the learned covers-per-shift figure is
+shown beside it and never written into it. Collapsing the two would destroy the ability to say "we
+are understaffing against our own standard".

@@ -4,17 +4,23 @@ import { Navigate } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
+import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd, bsDiffDays, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd, formatBsDay, bsDiffDays, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { printWithTitle } from '../../../utils/printTitle'
 import {
-  calcHours, rKey, computeEmpHours, computeDayHours, computeScheduledCount, computeUnpricedCount,
+  calcHours, rKey, shiftHours, computeEmpHours, computeDayHours, computeScheduledCount, computeUnpricedCount,
   computePlannedLaborCost, computeRecommendedHeadcount, summarizeLaborForecastRows,
   computeDayRevenue, computeActualLabor, computeActualStaff,
 } from './laborForecast'
+import {
+  LABOR_STANDARD_LOOKBACK_DAYS, MIN_SAMPLE_DAYS, buildLaborStandard, requiredHoursFor,
+  requiredStaffFor, describeBasis, tallyWindowAttendance, tallyWindowRoster,
+} from './laborStandard'
+import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fmtTime, shiftTextColor } from './rosterHelpers'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
@@ -86,6 +92,10 @@ const stickyCol = {
   background: 'var(--theme-card)',
 }
 const STICKY_CLS = 'roster-sticky'
+const round1 = n => (n == null ? '' : parseFloat(n.toFixed(1)))
+// The muted second line under a figure in the Labor Forecast table — what was planned, what the
+// day needs, or which basis a number came from. One definition, used by the rows and the footer.
+const plan = text => <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text3)' }}>{text}</div>
 
 // ── Main Roster ───────────────────────────────────────────────────────────────
 
@@ -98,6 +108,7 @@ export default function Roster() {
   // without POS the Recommended Staff / Status axis can never hold a value on any row.
   const hasPos = !!clientModules?.pos
   const { colors } = useTheme()
+  const { settings, saveSettings } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedDelete } = useScopedDb()
   const today = getBsToday()
 
@@ -134,25 +145,41 @@ export default function Roster() {
       .then(({ count }) => setPendingSwaps(count || 0))
   }, [clientId, scopedFrom])
 
-  // Letterhead info for the print header + labor-scheduling target — fetched once per client
-  const [bizInfo, setBizInfo] = useState({ name: '', address: '' })
-  const [coversPerStaffTarget, setCoversPerStaffTarget] = useState(20)
+  // Letterhead name for the print header. The ADDRESS and the covers target used to be read here
+  // too, from a second `settings` query that duplicated SettingsContext's own `select('*')` — and
+  // both queries dropped their error, so a failed `clients` read silently printed a schedule with
+  // no letterhead. Both now come from context; only the client name is fetched here (S693).
+  const [bizInfo, setBizInfo] = useState({ name: '' })
   useEffect(() => {
     if (!clientId) return
-    Promise.all([
-      supabase.from('clients').select('name').eq('id', clientId).single(),
-      supabase.from('settings').select('property_address, covers_per_staff_target').eq('client_id', clientId).maybeSingle(),
-    ]).then(([{ data: client }, { data: settings }]) => {
-      setBizInfo({ name: client?.name || '', address: settings?.property_address || '' })
-      setCoversPerStaffTarget(settings?.covers_per_staff_target ?? 20)
-    })
+    supabase.from('clients').select('name').eq('id', clientId).single()
+      .then(({ data, error }) => {
+        if (error) { console.error('client name read failed:', error); return }
+        setBizInfo({ name: data?.name || '' })
+      })
   }, [clientId])
+
+  const savedCoversTarget = settings?.covers_per_staff_target ?? 20
+  // Local draft so a rejected save can revert to what is actually stored — the input was
+  // `defaultValue`, so before this it kept showing a number the database had refused.
+  const [coversTargetDraft, setCoversTargetDraft] = useState(null)
+  const [coversTargetError, setCoversTargetError] = useState(null)
+  const coversPerStaffTarget = coversTargetDraft ?? savedCoversTarget
 
   async function saveCoversPerStaffTarget(raw) {
     const n = Math.max(1, parseInt(raw) || 20)
-    setCoversPerStaffTarget(n)
+    setCoversTargetDraft(n)
+    setCoversTargetError(null)
     if (!clientId) return
-    await supabase.from('settings').update({ covers_per_staff_target: n }).eq('client_id', clientId)
+    try {
+      // Through saveSettings, not a bare `.update()`: that one silently no-ops for a client with
+      // no settings row yet, and checked no error, so the target simply never saved.
+      await saveSettings({ covers_per_staff_target: n })
+      setCoversTargetDraft(null) // context now holds it; fall back to the stored value
+    } catch (e) {
+      setCoversTargetDraft(null) // revert to what is stored, so the box never lies
+      setCoversTargetError(asActionError(e))
+    }
   }
 
   // Demand-forecast overlay: day-level covers/revenue forecast (recipe_id IS NULL rows in
@@ -173,11 +200,11 @@ export default function Roster() {
       // straddling a month boundary needs two, and awaiting them in sequence doubled the wait
       // for no reason: neither read's filter depends on the other's result.
       const results = await Promise.all([...months.values()].map(bs =>
-        scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, generated_at, holiday_name, holiday_multiplier')
+        scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, revenue_estimated, generated_at, holiday_name, holiday_multiplier')
           .is('recipe_id', null).eq('bs_year', bs.year).eq('bs_month', bs.month)))
       for (const r of results) { if (r && r.error) { setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
     } else {
-      const { data, error } = await scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, generated_at, holiday_name, holiday_multiplier')
+      const { data, error } = await scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, revenue_estimated, generated_at, holiday_name, holiday_multiplier')
         .is('recipe_id', null).eq('bs_year', bsYear).eq('bs_month', bsMonth)
       if (error) { setBoardError(boardLoadFailed(error)); return }
       all = data || []
@@ -189,6 +216,10 @@ export default function Roster() {
       if (!map[key] || new Date(r.generated_at) > new Date(map[key].generated_at)) {
         map[key] = {
           covers: r.forecast_covers, revenue: r.forecast_revenue, generated_at: r.generated_at,
+          // runForecast sets this when it had no POS revenue history for the day and priced the
+          // forecast quantities at menu prices instead. Required hours inherit that estimate, so
+          // the row has to admit it rather than presenting a derived figure as measured.
+          revenueEstimated: !!r.revenue_estimated,
           holiday: r.holiday_name ? { name: r.holiday_name, multiplier: r.holiday_multiplier } : null,
         }
       }
@@ -891,6 +922,152 @@ export default function Roster() {
   }, [clientId, tab, columns, isPastCol, hasPos, scopedFrom, actualsReq])
   useEffect(() => { loadActuals() }, [loadActuals])
 
+  // ── The labour STANDARD: how many hours this outlet needs per rupee ───────────────────────
+  // A trailing window (120 days) of real days, turned into sales-per-labour-hour by
+  // laborStandard.js. Deliberately a SEPARATE loader from loadActuals: different key (the client,
+  // not the visible range), different lifetime (once, not on every month arrow), different
+  // employee filter (see below), and anchored on TODAY rather than the viewed month — the standard
+  // is "what my business needs now", and a past month is judged by it, which the tab says.
+  //
+  // The employee read carries NO status filter, and that is load-bearing. computeActualLabor skips
+  // any attendance row whose employee is not in the list it was given, and the board's list is
+  // status IN ('active','probation') — so over four months it would discard every hour worked by
+  // anyone who has since left. Window hours low → sales-per-labour-hour high → REQUIRED HOURS LOW,
+  // i.e. the model would tell the owner to roster fewer people than his own history says he needed.
+  // A history outlives the people in it (S633).
+  const [laborStd, setLaborStd] = useState(null)
+  const [stdError, setStdError] = useState(null)
+  const [stdLoading, setStdLoading] = useState(false)
+  const stdReq = useLatestRequest()
+  const loadLaborStandard = useCallback(async () => {
+    if (!clientId || tab !== 'labor' || shiftTypes.length === 0) return
+    const cached = readPageCache('roster', 'laborStandard', clientId)
+    if (cached) { setLaborStd(cached); setStdError(null); return }
+    stdReq.begin(clientId)
+    setStdLoading(true)
+    setStdError(null)
+
+    // The BS days the trailing window covers, walked back from YESTERDAY — today is still in
+    // progress and would train the model on a part-day.
+    const windowDays = []
+    const months = new Map()
+    for (let i = 1; i <= LABOR_STANDARD_LOOKBACK_DAYS; i++) {
+      const ad = new Date()
+      ad.setDate(ad.getDate() - i)
+      const bs = adToBs(ad)
+      windowDays.push({ ...bs, weekday: ad.getDay(), key: `${bs.year}:${bs.month}:${bs.day}` })
+      months.set(`${bs.year}:${bs.month}`, { bsYear: bs.year, bsMonth: bs.month })
+    }
+
+    const { data: periods, error: perErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
+    if (perErr) {
+      if (!stdReq.isCurrent(clientId)) return
+      setStdError(asActionError(perErr)); setLaborStd(null); setStdLoading(false); return
+    }
+    const periodByMonth = {}
+    for (const p of periods || []) periodByMonth[`${p.bs_year}:${p.bs_month}`] = p
+    const monthByPeriodId = {}
+    const pids = []
+    for (const [k, m] of months) {
+      const p = periodByMonth[k]
+      if (p) { pids.push(p.id); monthByPeriodId[p.id] = m }
+    }
+
+    const [attRes, rosRes, salesRes, recipesRes, empsRes, posRes] = await Promise.all([
+      // Per employee per day — crosses the 1000-row cap at ~34 staff in ONE month, so every
+      // period's read is paged with a unique tiebreaker.
+      Promise.all(pids.map(pid => fetchAllRows(() =>
+        scopedFrom('hr_attendance', 'employee_id, period_id, bs_day, status, hours_worked')
+          .eq('period_id', pid).order('id')))),
+      // hr_roster has no period_id — filtered by BS month, same cardinality, same cap.
+      Promise.all([...months.values()].map(m => fetchAllRows(() =>
+        scopedFrom('hr_roster', 'employee_id, bs_year, bs_month, bs_day, shift_type_id')
+          .eq('bs_year', m.bsYear).eq('bs_month', m.bsMonth).order('id')))),
+      pids.length > 0
+        ? fetchAllRows(() => supabase.from('sales_entries')
+            .select('period_id, recipe_id, bs_day, qty_sold, unit_price, discount, source')
+            .in('period_id', pids).order('id'))
+        : Promise.resolve({ data: [], error: null }),
+      fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
+      // No status filter — see the comment above this loader.
+      scopedFrom('hr_employees', 'id, department'),
+      hasPos
+        ? fetchAllRows(() => scopedFrom('pos_orders', 'id, covers, closed_at')
+            .eq('status', 'billed').eq('close_type', 'paid').is('credit_note_id', null)
+            .gte('closed_at', new Date(Date.now() - LABOR_STANDARD_LOOKBACK_DAYS * 86400000).toISOString())
+            .order('id'))
+        : Promise.resolve({ data: null, error: null }),
+    ])
+    if (!stdReq.isCurrent(clientId)) return
+    const readErr = attRes.find(r => r.error)?.error || rosRes.find(r => r.error)?.error
+      || salesRes.error || recipesRes.error || empsRes.error || posRes.error
+    if (readErr) { setStdError(asActionError(readErr)); setLaborStd(null); setStdLoading(false); return }
+
+    const deptByEmp = Object.fromEntries((empsRes.data || []).map(e => [e.id, e.department || null]))
+    const priceMap = Object.fromEntries((recipesRes.data || []).map(r => [r.id, parseFloat(r.selling_price) || 0]))
+    const shiftById = Object.fromEntries((shiftTypes || []).map(t => [t.id, t]))
+    const hoursOfRosterRow = r => shiftHours(shiftById[r.shift_type_id])
+
+    const byKey = {}
+    for (const d of windowDays) {
+      byKey[d.key] = { attendance: [], roster: [], sales: [], covers: hasPos ? 0 : null }
+    }
+    for (const res of attRes) for (const a of res.data || []) {
+      const m = monthByPeriodId[a.period_id]
+      const b = m && byKey[`${m.bsYear}:${m.bsMonth}:${a.bs_day}`]
+      if (b) b.attendance.push(a)
+    }
+    for (const res of rosRes) for (const r of res.data || []) {
+      const b = byKey[`${r.bs_year}:${r.bs_month}:${r.bs_day}`]
+      if (b) b.roster.push(r)
+    }
+    // A BS month whose sales were entered as one bs_day=0 lump has real revenue with no day to
+    // attach it to, so EVERY day of it is understated — the whole month is barred from training.
+    const bulkMonths = new Set()
+    for (const s of salesRes.data || []) {
+      const m = monthByPeriodId[s.period_id]
+      if (!m) continue
+      if (s.bs_day === 0) { bulkMonths.add(`${m.bsYear}:${m.bsMonth}`); continue }
+      const b = byKey[`${m.bsYear}:${m.bsMonth}:${s.bs_day}`]
+      if (b) b.sales.push(s)
+    }
+    for (const o of posRes.data || []) {
+      const bs = adToBs(new Date(o.closed_at))
+      const b = byKey[`${bs.year}:${bs.month}:${bs.day}`]
+      if (b) b.covers += o.covers || 1
+    }
+
+    const samples = windowDays.map(d => {
+      const b = byKey[d.key]
+      const att = tallyWindowAttendance(b.attendance, deptByEmp)
+      const ros = tallyWindowRoster(b.roster, hoursOfRosterRow, deptByEmp)
+      // Attendance is the strong basis. The roster is the weaker one, used only where attendance
+      // has not arrived — which, for a client entering it in one batch at month end, is most of
+      // the current month. buildLaborStandard scales those by the bias it measures from the days
+      // that carry both, so a roster hour is converted into the attendance hour it predicts.
+      const useAtt = att.recorded
+      const t = useAtt ? att : ros
+      return {
+        key: d.key, weekday: d.weekday,
+        hours: t.hours, hoursBasis: useAtt ? 'attendance' : 'roster',
+        headCount: t.headCount, hoursByDept: t.hoursByDept,
+        revenue: computeDayRevenue(b.sales, priceMap),
+        covers: b.covers,
+        recorded: t.recorded,
+        periodExists: !!periodByMonth[`${d.year}:${d.month}`],
+        bulkMonth: bulkMonths.has(`${d.year}:${d.month}`),
+        attendanceHours: att.hours,
+        rosteredHours: ros.hours,
+      }
+    })
+
+    const std = buildLaborStandard(samples)
+    writePageCache('roster', 'laborStandard', clientId, std)
+    setLaborStd(std)
+    setStdLoading(false)
+  }, [clientId, tab, hasPos, shiftTypes, scopedFrom, stdReq])
+  useEffect(() => { loadLaborStandard() }, [loadLaborStandard])
+
   const laborForecastRows = useMemo(() => columns.map(col => {
     const key = `${col.bsYear}:${col.bsMonth}:${col.bsDay}`
     const f = forecastByDay[key]
@@ -899,9 +1076,20 @@ export default function Roster() {
     const plannedCost    = computePlannedLaborCost(col, filteredEmps, roster, shiftMap, monthDays, componentsByEmp)
     const unpricedCount  = computeUnpricedCount(col, filteredEmps, roster, shiftMap)
     const scheduledCount = computeScheduledCount(col, employees, roster, shiftMap)
-    const recommended    = computeRecommendedHeadcount(f?.covers, coversPerStaffTarget)
     const costPct        = f?.revenue > 0 ? (plannedCost / f.revenue) * 100 : null
     const isPast         = isPastCol(col)
+    const weekday        = bsToAd(col.bsYear, col.bsMonth, col.bsDay).getDay()
+    // How many hours this day NEEDS, learned from the outlet's own history. Narrowed by the same
+    // Department filter as Hours and Labor Cost beside it — an outlet-wide requirement against a
+    // kitchen-only roster is the apples-to-oranges comparison the filter fix already removed once.
+    const dept           = deptFilter === 'All' ? null : deptFilter
+    const required       = requiredHoursFor(f?.revenue ?? null, laborStd, weekday, dept)
+    // Prefer the learned standard: it is revenue-based, so it reaches outlets with no POS at all,
+    // and it knows this outlet rather than a typed constant. Covers ÷ target stays as the fallback
+    // (and is shown beside it) so an owner who set that target deliberately can still see it.
+    const coversRec      = computeRecommendedHeadcount(f?.covers, coversPerStaffTarget)
+    const requiredStaff  = requiredStaffFor(required?.hours ?? null, laborStd?.typicalShiftHours)
+    const recommended    = requiredStaff ?? coversRec
     let actual = null
     const a = isPast && actualsByDay ? actualsByDay[key] : null
     if (a) {
@@ -916,6 +1104,11 @@ export default function Roster() {
       const hours = fromRoster ? scheduledHrs : labor.hours
       const cost  = fromRoster ? plannedCost  : labor.cost
       const staff = fromRoster ? scheduledCount : computeActualStaff(a.attendance, employees)
+      // On a past day the requirement is measured against what the day actually EARNED — the
+      // retrospective verdict on the roster, not a forecast of it.
+      const actualRequired = requiredHoursFor(revenue, laborStd, weekday, dept)
+      const actualCoversRec = computeRecommendedHeadcount(a.covers, coversPerStaffTarget)
+      const actualReqStaff = requiredStaffFor(actualRequired?.hours ?? null, laborStd?.typicalShiftHours)
       actual = {
         recorded: labor.recorded,
         basis: fromRoster ? 'roster' : 'attendance',
@@ -923,16 +1116,22 @@ export default function Roster() {
         otHours: fromRoster ? 0 : labor.otHours,
         revenue,
         covers: a.covers,
-        recommended: computeRecommendedHeadcount(a.covers, coversPerStaffTarget),
+        required: actualRequired,
+        coversRec: actualCoversRec,
+        recommended: actualReqStaff ?? actualCoversRec,
         costPct: revenue > 0 ? (cost / revenue) * 100 : null,
       }
     }
-    return { col, isPast, actual, scheduledHrs, plannedCost, unpricedCount, scheduledCount, recommended, costPct, forecastRevenue: f?.revenue ?? null, forecastCovers: f?.covers ?? null, holiday: f?.holiday ?? null, generatedAt: f?.generated_at ?? null }
-  }), [columns, forecastByDay, filteredEmps, employees, roster, shiftMap, coversPerStaffTarget, componentsByEmp, isPastCol, actualsByDay, priceByRecipe])
+    return { col, isPast, actual, weekday, scheduledHrs, plannedCost, unpricedCount, scheduledCount, required, coversRec, recommended, costPct, forecastRevenue: f?.revenue ?? null, forecastCovers: f?.covers ?? null, revenueEstimated: !!f?.revenueEstimated, holiday: f?.holiday ?? null, generatedAt: f?.generated_at ?? null }
+  }), [columns, forecastByDay, filteredEmps, employees, roster, shiftMap, coversPerStaffTarget, componentsByEmp, isPastCol, actualsByDay, priceByRecipe, laborStd, deptFilter])
   const forecastRowByKey = useMemo(
     () => Object.fromEntries(laborForecastRows.map(r => [`${r.col.bsYear}:${r.col.bsMonth}:${r.col.bsDay}`, r])),
     [laborForecastRows])
   const laborTotals = useMemo(() => summarizeLaborForecastRows(laborForecastRows), [laborForecastRows])
+  // The staffing axis (Recommended Staff + Covered/Short) is reachable whenever a number can
+  // honestly be put on it: POS covers, OR a standard learned from this outlet's own history —
+  // which is revenue-based and so needs no till at all. That second path is the point of S693.
+  const showStaffing = hasPos || !!laborStd?.ok
   // When the visible forecast was last generated — loaded since S246, never shown, so a 30-day
   // run from three weeks ago looked as current as one from this morning.
   const forecastGeneratedAt = useMemo(() => {
@@ -1010,7 +1209,7 @@ export default function Roster() {
           {/* Print-only header */}
           <div className="print-only roster-print-header" style={{ marginBottom: 12 }}>
             {bizInfo.name && <div style={{ fontWeight: 700, fontSize: 15 }}>{bizInfo.name}</div>}
-            {bizInfo.address && <div style={{ fontSize: 11 }}>{bizInfo.address}</div>}
+            {settings?.property_address && <div style={{ fontSize: 11 }}>{settings.property_address}</div>}
             <div style={{ fontWeight: 700, fontSize: 16, marginTop: bizInfo.name ? 6 : 0 }}>Staff Roster — {periodLabel}</div>
             <div style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
               {shiftTypes.filter(s => s.active !== false).map(s => {
@@ -1541,15 +1740,32 @@ export default function Roster() {
                     Covers/Staff target
                   </Tip>
                 </label>
-                <input id="roster-covers-target" type="number" min="1" step="1" defaultValue={coversPerStaffTarget}
+                <input id="roster-covers-target" type="number" min="1" step="1" value={coversPerStaffTarget}
+                  onChange={e => setCoversTargetDraft(Math.max(1, parseInt(e.target.value) || 1))}
                   onBlur={e => saveCoversPerStaffTarget(e.target.value)}
                   className="form-input" style={{ width: 56, padding: '3px 6px', fontSize: 12 }} />
+                {/* The learned figure sits BESIDE the target, never inside it: the target is the
+                    service standard the owner wants, the learned figure is what the outlet
+                    actually did, and overwriting one with the other would destroy the ability to
+                    say "we are understaffing against our own standard". */}
+                {laborStd?.learnedCoversPerStaffShift != null && (
+                  <Tip text={`Over the last ${laborStd.sampleDays} days your staff averaged this many covers per shift. Shown for comparison — it never overwrites your target.`} width={260}>
+                    <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                      (yours runs ~{Math.round(laborStd.learnedCoversPerStaffShift)})
+                    </span>
+                  </Tip>
+                )}
               </div>
             )}
           </div>
-          {!hasPos && (
+          {coversTargetError && (
+            <div style={{ marginBottom: 8 }}>
+              <ActionError error={{ text: 'The Covers/Staff target was not saved, so the box has gone back to the stored value. ' + coversTargetError.text, detail: coversTargetError.detail }} />
+            </div>
+          )}
+          {!hasPos && !laborStd?.ok && (
             <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
-              Recommended Staff and Covered/Short are not shown for this outlet: they are worked out from covers, and covers are only counted by Crest POS bills — manual Sales Entries record what sold, not how many guests. Hours, revenue and Cost % do not need them.
+              Recommended Staff and Covered/Short are not shown yet. They need either Crest POS (which counts covers) or about three weeks of Attendance and daily Sales Entries, from which this outlet's own required hours can be worked out — covers are not needed for that path.
             </p>
           )}
 
@@ -1568,7 +1784,7 @@ export default function Roster() {
           )}
           {deptFilter !== 'All' && (
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px' }}>
-              Showing <strong>{deptFilter}</strong> only for Scheduled Hours and Planned Labor Cost. Forecast Revenue, Recommended Staff and Scheduled Staff stay whole-outlet, because covers are served by the whole outlet — so Cost % here is this department's cost against total revenue.
+              Showing <strong>{deptFilter}</strong> only for Hours and Labor Cost, and the "need" figure narrows with them — it is this department's share of the outlet's hours over the last {LABOR_STANDARD_LOOKBACK_DAYS} days, applied to the day's requirement. Revenue, Recommended Staff and Staff stay whole-outlet, because the business is served by everyone — so Cost % here is this department's cost against total revenue.
             </p>
           )}
           {(() => {
@@ -1588,6 +1804,32 @@ export default function Roster() {
               <ActionError error={{ text: 'Allowances could not be read, so Planned Labor Cost below is basic pay + SSF only and UNDERSTATES the real figure. Reload to try again. ' + componentsError.text, detail: componentsError.detail }} />
             </div>
           )}
+          {/* What the required-hours figures were learned from. Attendance is commonly entered in
+              one batch at month end, so this evidence is routinely weeks old and the tab must say
+              so rather than let a learned number look live. */}
+          {stdError ? (
+            <div style={{ marginBottom: 8 }}>
+              <ActionError error={{ text: 'The labour history for this outlet could not be read, so the "need" figures below show "—" rather than a number that might be wrong. This is a failed read, not a lack of history. Reload to try again. ' + stdError.text, detail: stdError.detail }} />
+            </div>
+          ) : laborStd?.ok ? (
+            <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
+              "Need" figures are learned from {laborStd.sampleDays} of this outlet's own days
+              {laborStd.latestSampleKey ? `, most recently ${formatBsDay(Number(laborStd.latestSampleKey.split(':')[2]), Number(laborStd.latestSampleKey.split(':')[1]))}` : ''}
+              {' '}— {fmtNpr(laborStd.overall.salesPerLaborHour)} of sales per labour hour, at {round1(laborStd.typicalShiftHours)}h a shift.
+              {laborStd.rosterDays > 0 && (laborStd.rosterBias.applies
+                ? ` ${laborStd.rosterDays} of them had no Attendance yet, so their rostered hours were adjusted by the ${Math.round(Math.abs(1 - laborStd.rosterBias.ratio) * 100)}% gap measured between roster and Attendance over ${laborStd.rosterBias.overlapDays} days that had both.`
+                : ` ${laborStd.rosterDays} of them had no Attendance yet and used rostered hours unadjusted — there were too few days carrying both to measure the gap.`)}
+              {laborStd.trimmedDays > 0 ? ` ${laborStd.trimmedDays} unusual day${laborStd.trimmedDays === 1 ? '' : 's'} (a festival, a closure, a part-entered sheet) left out.` : ''}
+              {' '}It says what this outlet normally uses per rupee, not what it ideally should.
+            </p>
+          ) : stdLoading ? (
+            <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>Working out this outlet's required hours from its own history…</p>
+          ) : laborStd ? (
+            <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
+              Not enough history yet to work out required hours: {laborStd.sampleDays} usable day{laborStd.sampleDays === 1 ? '' : 's'} of {laborStd.windowDays} looked at, and at least {MIN_SAMPLE_DAYS} are needed. A day counts once it has both hours (Attendance, or a roster) and that day's sales entered.
+              {laborStd.bulkMonthDays > 0 ? ` ${laborStd.bulkMonthDays} day${laborStd.bulkMonthDays === 1 ? ' was' : 's were'} left out for having sales entered as a monthly lump.` : ''}
+            </p>
+          ) : null}
 
           <div className="table-wrap">
             <table className="data-table">
@@ -1595,7 +1837,7 @@ export default function Roster() {
                 <tr>
                   <th>Date</th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Coming days: hours scheduled on the roster. Past days: hours actually worked per Attendance, with the rostered figure underneath for comparison." width={240}>Hours</Tip>
+                    <Tip text="Coming days: hours scheduled on the roster. Past days: hours actually worked per Attendance, with the rostered figure underneath. The second line also shows what the day NEEDS — that day's revenue divided by the sales per labour hour this outlet has been running, learned from its own last 120 days." width={280}>Hours</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Coming days: Demand Forecast revenue. Past days: the day's actual revenue from Sales Entries — the same figure Owner Dashboard puts under Revenue, and POS bills post there per day." width={260}>Revenue</Tip>
@@ -1606,15 +1848,18 @@ export default function Roster() {
                   <th style={{ textAlign: 'right' }}>
                     <Tip text={`Labor cost as a share of revenue. Healthy ≤${LABOR_WARN}% ✓ · watch ${LABOR_WARN}–${LABOR_CRITICAL}% △ · too high >${LABOR_CRITICAL}% ▲ — the same band the Owner Dashboard uses, on the same definition of labour cost. Planned against forecast for coming days, actual against actual for past days.`} width={280}>Cost %</Tip>
                   </th>
-                  {hasPos && (
+                  {showStaffing && (
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Ceil(covers ÷ Covers/Staff target). Forecast covers for coming days; for past days the covers actually served (closed POS bills), i.e. how many staff that day turned out to need." width={260}>Recommended Staff</Tip>
+                      <Tip text="Required hours ÷ the shift length this outlet actually runs, both learned from its own history — so it works without POS. Where there is not enough history yet, it falls back to covers ÷ your Covers/Staff target, and the line under each number says which was used." width={300}>
+                        <span style={{ display: 'block' }}>Recommended</span>
+                        <span style={{ display: 'block' }}>Staff</span>
+                      </Tip>
                     </th>
                   )}
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Coming days: people rostered ON DUTY, whole outlet regardless of the Department filter — Day Off, Leave, Holiday and any other zero-hour shift are not counted. Past days: people marked Present or Half-day in Attendance, with the rostered count underneath." width={280}>Staff</Tip>
                   </th>
-                  {hasPos && <th>Status</th>}
+                  {showStaffing && <th>Status</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1622,7 +1867,6 @@ export default function Roster() {
                   const weekday = WEEKDAYS[bsToAd(r.col.bsYear, r.col.bsMonth, r.col.bsDay).getDay()]
                   const a = r.isPast ? r.actual : null
                   // Muted secondary line under an actual figure: what the roster had planned.
-                  const plan = text => <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text3)' }}>{text}</div>
                   const dash = title => <span title={title}>—</span>
                   // Status on the row's own basis — plan vs forecast ahead, floor vs served behind.
                   const rec   = r.isPast ? (a?.recommended ?? null) : r.recommended
@@ -1668,6 +1912,11 @@ export default function Roster() {
                                 {plan('as rostered · no attendance')}
                               </Tip>
                             )}
+                            {a?.required && (
+                              <Tip text={`This day earned ${fmtNpr(a.revenue)}, and at ${describeBasis(a.required.basis)} this outlet runs ${fmtNpr(a.required.basis.salesPerLaborHour)} of sales per labour hour — so it needed about ${a.required.hours}h.`} width={280}>
+                                {plan(`need ${a.required.hours}h`)}
+                              </Tip>
+                            )}
                             {a?.recorded && a.otHours > 0 && (
                               <Tip text={`${a.otHours}h of these were overtime (beyond the rostered shift), priced at basic × ${1.5} in Labor Cost.`} width={220}>
                                 <span className="badge-yellow" style={{ fontSize: 9, marginLeft: 6 }}>{a.otHours}h OT</span>
@@ -1687,12 +1936,19 @@ export default function Roster() {
                             const f = bandFigure(a?.costPct ?? null, lcBand, { decimals: 0 })
                             return <td style={{ textAlign: 'right', ...f.style }} title={f.title}>{f.text}</td>
                           })()}
-                          {hasPos && <td style={{ textAlign: 'right' }}>{rec ?? '—'}</td>}
+                          {showStaffing && (
+                            <td style={{ textAlign: 'right' }}>
+                              {rec ?? '—'}
+                              {a?.required
+                                ? plan(describeBasis(a.required.basis))
+                                : (a?.coversRec != null ? plan(`covers ÷ ${coversPerStaffTarget}`) : null)}
+                            </td>
+                          )}
                           <td style={{ textAlign: 'right' }}>
                             {heads ?? '—'}
                             {asRostered ? plan('as rostered') : plan(`rostered ${r.scheduledCount}`)}
                           </td>
-                          {hasPos && (
+                          {showStaffing && (
                             <td>
                               {rec == null || heads == null ? '—' : short
                                 ? <span className="badge-amber" style={{ fontSize: 10 }}>⚠ Was short</span>
@@ -1712,6 +1968,14 @@ export default function Roster() {
                                 <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>⚠ {r.unpricedCount} unpriced</span>
                               </Tip>
                             )}
+                            {/* What the day needs, from this outlet's own history. Neutral, never
+                                a signal colour: the verdict belongs in Status, and this row
+                                already spends amber on unpriced shifts and unadjusted holidays. */}
+                            {r.required && (
+                              <Tip text={`Forecast revenue ${fmtNpr(r.forecastRevenue)} at ${describeBasis(r.required.basis)}, where this outlet runs ${fmtNpr(r.required.basis.salesPerLaborHour)} of sales per labour hour.${r.revenueEstimated ? ' That forecast revenue is itself an estimate from menu prices, so this figure inherits the estimate.' : ''}`} width={280}>
+                                {plan(`need ${r.required.hours}h${r.revenueEstimated ? ' (est.)' : ''}`)}
+                              </Tip>
+                            )}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {r.forecastRevenue != null ? fmtNpr(r.forecastRevenue) : '—'}
@@ -1727,9 +1991,19 @@ export default function Roster() {
                             const f = bandFigure(r.costPct, lcBand, { decimals: 0 })
                             return <td style={{ textAlign: 'right', ...f.style }} title={f.title}>{f.text}</td>
                           })()}
-                          {hasPos && <td style={{ textAlign: 'right' }}>{r.recommended ?? '—'}</td>}
+                          {showStaffing && (
+                            <td style={{ textAlign: 'right' }}>
+                              {r.recommended ?? '—'}
+                              {/* Which basis produced this number, on the row rather than in one
+                                  footnote — a Tuesday with 6 samples and a Friday falling back to
+                                  all-days are different bases in the same view. */}
+                              {r.required
+                                ? plan(describeBasis(r.required.basis))
+                                : (r.coversRec != null ? plan(`covers ÷ ${coversPerStaffTarget}`) : null)}
+                            </td>
+                          )}
                           <td style={{ textAlign: 'right' }}>{r.scheduledCount}</td>
-                          {hasPos && (
+                          {showStaffing && (
                             <td>
                               {r.recommended == null ? '—' : short
                                 ? <span className="badge-amber" style={{ fontSize: 10 }}>⚠ Short</span>
@@ -1770,6 +2044,14 @@ export default function Roster() {
                         <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>⚠ {laborTotals.unpricedShifts} unpriced</span>
                       </Tip>
                     )}
+                    {/* The period requirement — the single most actionable figure on the tab, and
+                        it costs no column. Says how many days it covers when that is not all of
+                        them, so it is never read as the whole week's need. */}
+                    {laborTotals.requiredDays > 0 && (
+                      <Tip text={`Learned requirement across the ${laborTotals.requiredDays} day${laborTotals.requiredDays === 1 ? '' : 's'} that have a revenue figure${laborTotals.requiredDays < laborTotals.totalDays ? ` of the ${laborTotals.totalDays} shown` : ''}. Compare it with the hours beside it.`} width={280}>
+                        {plan(`need ${laborTotals.requiredHours}h${laborTotals.requiredDays < laborTotals.totalDays ? ` · ${laborTotals.requiredDays}/${laborTotals.totalDays} days` : ''}`)}
+                      </Tip>
+                    )}
                   </td>
                   <td style={{ textAlign: 'right' }}>{laborTotals.actualDays + laborTotals.forecastDays > 0 ? fmtNpr(laborTotals.revenue) : '—'}</td>
                   <td style={{ textAlign: 'right' }}>{laborTotals.cost > 0 ? fmtNpr(laborTotals.cost) : '—'}</td>
@@ -1777,9 +2059,9 @@ export default function Roster() {
                     const f = bandFigure(laborTotals.costPct, lcBand, { decimals: 1 })
                     return <td style={{ textAlign: 'right', ...f.style }} title={f.title}>{f.text}</td>
                   })()}
-                  {hasPos && <td style={{ textAlign: 'right' }}>—</td>}
+                  {showStaffing && <td style={{ textAlign: 'right' }}>—</td>}
                   <td style={{ textAlign: 'right' }}>—</td>
-                  {hasPos && (
+                  {showStaffing && (
                     <td>
                       {/* A verdict needs at least one day it could be reached on — no covers
                           anywhere means nothing was measured, not that everything was covered. */}

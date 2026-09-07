@@ -271,9 +271,22 @@ describe('summarizeLaborForecastRows', () => {
     expect(t.forecastDays).toBe(0)
   })
 
+  test('required hours total only the days that have one, and say how many those were', () => {
+    const t = summarizeLaborForecastRows([
+      { isPast: false, scheduledHrs: 27, plannedCost: 2613, forecastRevenue: 31000, required: { hours: 31 } },
+      { isPast: false, scheduledHrs: 27, plannedCost: 2613, forecastRevenue: null, required: null },
+      { isPast: true, actual: { recorded: true, basis: 'attendance', hours: 25, cost: 2400, revenue: 20000, staff: 3, recommended: 3, required: { hours: 20 } } },
+    ])
+    expect(t.requiredHours).toBeCloseTo(51, 1)
+    expect(t.requiredDays).toBe(2)   // the no-forecast day contributes nothing
+    expect(t.totalDays).toBe(3)
+  })
+
   test('empty input', () => {
     const t = summarizeLaborForecastRows([])
     expect(t.totalDays).toBe(0)
     expect(t.costPct).toBeNull()
+    expect(t.requiredHours).toBe(0)
+    expect(t.requiredDays).toBe(0)
   })
 })
