@@ -355,7 +355,8 @@ reserve. The red is rationed hard: it marks the thing you are meant to press and
 - **Card** (`#242221` Night / `#eae9e9` Light): every surface that holds content. One tone lifted
   off the page on Night; one tone *dropped* below it on Light, because the page is already paper.
 - **Sidebar** (`#141312` Night / `#eae9e9` Light): one step *darker* than the page on Night, so the
-  shell recedes behind the work rather than framing it.
+  shell recedes behind the work rather than framing it. The token keeps its name and now grounds
+  the **top bar** as well as the phone drawer — it is the shell colour, not a position.
 - **Border** (`#3a3836` / `#d7d3d3`) is structural — card edges, input outlines, the 2px section
   rule. **Border Light** (`#2c2a29` / `#e5e3e3`) is internal — row dividers, ghost button edges.
   They are not interchangeable, and with the corner gone they carry more of the hierarchy than they
@@ -535,8 +536,10 @@ only ever appears where the product is speaking as itself rather than showing yo
   rather than as a clause, and at this weight and size the break is as visible as the words. Break
   the line before shrinking the type; the type size here is load-bearing against a measured
   viewport budget.
-- **Wordmark** (Georgia 700, 16px sidebar / 20px signed-out, 1.2, `0.04em`): the client's own
-  white-labelled brand name. This is the customer's identity, not ours.
+- **Wordmark** (Georgia 700, 16px top bar / 20px signed-out, 1.2, `0.04em`): the client's own
+  white-labelled brand name. This is the customer's identity, not ours. In the bar it truncates on
+  one line rather than clamping to the drawer's two, because a fixed-height band cannot grow to fit
+  a long property name — the `title` attribute carries the untruncated one.
 - **Title** (600, 22px): `.page-title`, one per route.
 - **Readout** (700, 48px, tabular): the till's keypad readout — the covers count and the estimate
   minutes a cook or waiter reads at arm's length on a tablet while their hands are busy. Added S682
@@ -560,11 +563,12 @@ the whole viewport, a document printed on letterhead — and nowhere else. One s
 a signature; two make it an affectation.
 
 **The Brand Lockup Rule.** The mark and the wordmark name the same brand, or neither is shown. Four
-of the five surfaces that draw the lockup — the sidebar and the three signed-out pages (`/login`,
-`/pricing`, `/reset-password`) — resolve both halves from one source: `settings.logo_url` if the
+of the five surfaces that draw the lockup — the shell (the top bar above 768px, the phone drawer
+below it, one lockup either way) and the three signed-out pages (`/login`, `/pricing`,
+`/reset-password`) — resolve both halves from one source: `settings.logo_url` if the
 client has uploaded a mark, Crest's `Hexagon` in the accent if not, beside
-`settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the sidebar
-and on `/pricing`, `objectFit: contain`, square. Only the sidebar carried that conditional
+`settings.app_name || 'Crest Suite'`. 26px on `/login` and `/reset-password`, 22px in the shell
+and on `/pricing`, `objectFit: contain`, square. Only the shell carried that conditional
 for its first year; the public pages drew Crest's hexagon unconditionally *while naming the client*,
 so a white-labelled operator met their own name beside somebody else's mark on the page they log in
 through — and on the page a password-reset email lands them on, where a mismatched brand reads as a
@@ -712,7 +716,9 @@ someone checking whether they work tomorrow. Everything is scoped under `.self-s
 
 Paper is a real output here — stock count sheets, payslips, purchase bills, KOTs, gate passes,
 recipe cost cards, POs — and none of the palette survives onto it. `@media print` forces a white
-ground and black text, strips the sidebar and every `button`, flattens `.card` and `.stat-card` to
+ground and black text, strips the shell — `.app-topnav` AND `.sidebar-wrap`, both named, because a
+class missing from that hide-rule prints the whole navigation at the head of every document — and
+every `button`, flattens `.card` and `.stat-card` to
 a 1px `#ccc` rectangle with no radius and no shadow, and normalises every cell to 12px with a
 `#ccc` rule. Two print-only affordances: `.print-blank-input` prints the box and neither its value
 nor its placeholder (Chrome prints placeholders as if they were values), so a sheet can be handed
@@ -1067,8 +1073,11 @@ whether their bill saved.
 - **Nav links** are 13px fog at `4px 12px`, square; active takes `accent-ink` on the
   focus-ring tint at 600. Hover is the table-hover tint. A pin-to-favourites star appears on
   `:hover` **and `:focus-within`**, since it is keyboard-reachable.
-- **The skip link** is WCAG 2.4.1 and not optional here: 41 focusable controls sit inside the
-  sidebar before the main content.
+- **The skip link** is WCAG 2.4.1 and not optional here: about **20** focusable controls sit in the
+  top bar before the main content on the busiest panel — 9 in band one (brand, up to four module
+  tabs, the tenant switcher, search, calculator, account) and 11 in band two (Dashboard, Pinned,
+  Crest Suite, the seven IMS groups, Settings). That is half the 41 the sidebar put there, and the
+  link matters just as much: they still all precede the content in DOM order, on every route.
 - **The context bar** answers "which tenant, which period" on every route as a hairline and a row
   of text, not a card.
 - **The drawer is hidden, never unmounted.** Above 768px `.sidebar-wrap` is `display: none`; below
