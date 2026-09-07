@@ -189,7 +189,7 @@ export const HR_GUIDE_GROUPS = [
           'It copies only what the Department filter is showing. With a filter on, the other departments\' next week is left exactly as it was.',
           'Swap History spans every month, not the week or month the board is showing — it is a permanent record, so it is on its own tab rather than under the board\'s period controls.',
         ],
-        connections: 'Shift length feeds Attendance\'s OT auto-calculation and Generate-from-Roster. Published days feed Self-Service\'s Roster tab. The labor forecast reads Pay Setup rates; the demand overlay reads Holiday Calendar multipliers and the Suite Demand Forecast.',
+        connections: 'Shift length feeds Attendance\'s OT auto-calculation and Generate-from-Roster. Published days feed Self-Service\'s Roster tab. The labor forecast prices scheduled hours from Pay Setup — basic, earning allowances and the employer SSF share, the same labour-cost definition as Owner Dashboard — and counts only on-duty shifts as staff; for days already past it reads Attendance, Sales Entries and closed POS bills instead of the forecast; the demand overlay reads Holiday Calendar multipliers and the Suite Demand Forecast.',
       },
       {
         id: 'attendance',

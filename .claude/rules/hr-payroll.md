@@ -361,3 +361,36 @@ threshold. Roster's Labor Forecast had `costPct > 35 ? amber : inherit`: a diffe
 both dashboards, no healthy state, no too-high state, and hue-only on a row already spending amber
 on a staffing shortfall and a holiday tag. Use `bandFigure(pct, lcBand, { decimals: 0 })` and render
 its `text`, which carries the ✓/△/▲ — see `ims-figures.md` for why the marks are not optional.
+
+### The Labor Forecast prices the hour the way payroll pays it, and the roster stands in for a missing day (S692)
+
+Four rules for `laborForecast.js`, each from a figure that read plausibly and was wrong:
+
+- **A scheduled hour costs the LOADED rate, never `hourlyRateOf(basic)` alone.** `loadedHourlyRateOf`
+  is the Owner Report estimate per hour — monthly `(basic + earning components) / (monthDays × 8)`,
+  daily `basic / 8`, hourly `basic`, plus the 20% employer SSF share (gated on `ssf_enrolled AND
+  ssf_no`, the engine's rule) spread over the same hours. The tab shares `lcBand` with the Owner
+  Dashboard, and a band shared on a different definition of the numerator is a lie: an enrolled
+  employee costs ≥1.2× basic before any allowance, so a day at 30% ✓ here was 36% △ there. With no
+  components and no SSF it equals `hourlyRateOf` exactly — every difference is a cost that was
+  left out.
+- **A roster row is not a person on duty.** Help tells managers to mark rest days with the
+  zero-hour "Day Off" shift, so `computeScheduledCount` uses `isOnDutyShift`: an off-type NAME
+  (`isOffDay`, the same keywords Generate from Roster uses) or an explicit `hours: 0` is off duty.
+  A working shift with UNKNOWN hours (the default "Split": `hours: null`, no times) is on duty and
+  flagged "unpriced" — it adds a head and nothing else until someone sets its length.
+- **Hours and cost follow the Department filter; Scheduled Staff never does.** Recommended Staff
+  is covers ÷ target for the whole outlet, so the head it is compared with must be too, or filtering
+  the Board to one department made every day read "Short". The tab shows the filter and says which
+  columns it narrows.
+- **A past day reads actuals, and when Attendance has none the ROSTER stands in — labelled.**
+  Revenue from `sales_entries` (the Owner Dashboard's definition, hence the band's own
+  denominator; POS posts there per day so it works for IMS-only clients), covers from closed paid
+  `pos_orders` (only where the VIEWED client has POS — `clientModules.pos`, not `posEnabled`,
+  which is true for every admin session), hours from `hr_attendance` with `ot_hours` priced at
+  basic × 1.5 because it sits INSIDE `hours_worked`. A day with no attendance rows is
+  `basis: 'roster'`: the rostered hours, cost and heads, with "as rostered · no attendance" under
+  each — never 0h, and never a dash against a board showing three full shifts. Recommended Staff
+  and Status are hidden entirely for a non-POS outlet: covers are only ever counted by POS bills,
+  so the axis can never hold a value, and a footer that said "covered every measured day" over
+  zero measured days was vacuous (`staffedDays` guards it).

@@ -143,6 +143,10 @@ Two things to preserve when touching them:
 
 `Roster.jsx`'s Labor Forecast tab reads `lcBand` too, so a day that reads healthy on the roster
 board reads healthy here. It used to carry its own `> 35 ? amber`, which agreed with neither.
+**A shared band needs a shared numerator as well (S692):** that tab priced hours at basic pay while
+this page counts gross + OT + employer SSF, so the same band told two stories; `loadedHourlyRateOf`
+in `laborForecast.js` now mirrors `computeMonthlyReport.js`'s estimate per hour, and its past days
+divide by `sales_entries` revenue — this page's own denominator. Detail in `hr-payroll.md`.
 
 ### A branch the page knows about must be said out loud (S683)
 
