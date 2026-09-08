@@ -168,3 +168,16 @@ thing: its KPI strip was gated on `!error` and its table was not, so a failed `g
 rendered *"Nothing here is a real figure"* directly above *"No outlets in this group"* (rows is `[]`
 on failure). The table and both admin panels now wait for a successful read. **A page that branches on
 a module flag or an error owes the reader the sentence for the branch it took.**
+
+## The getting-started card is one component with two visibility rules (S697)
+
+`src/pages/dashboard/GettingStartedCard.jsx` is the only place a new owner is told what to do
+first. `ClientDashboard` decides **whether** it renders (IMS empty — no items, no purchases — or
+the client is on a trial); the card decides **which module lists** to show (Stock & costing
+always; Staff & payroll and Billing only while their first step is undone off-trial, and until
+every step is done on a trial) and removes itself when none remain. Keep both halves: the parent
+rule is what stops a paying client seeing the card every month at `purchaseTotal 0`, and the card's
+own rule is what lets a trial keep its checklist after the first item exists. It reads its four
+HR/POS head counts itself, only when rendered — **do not fold them into ClientDashboard's main
+load**, which most clients pay for on every visit and which never needs them. A failed count
+withholds that list; this is guidance, not a figure, so `firstError()` does not apply.
