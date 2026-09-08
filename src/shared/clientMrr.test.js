@@ -1,5 +1,7 @@
+import fs from 'fs'
+import path from 'path'
 import { clientMRR, clientMrrBreakdown, monthlyRate } from './clientMrr'
-import { SUITE_ADDON } from '../data/pricingPlans'
+import { SUITE_ADDON, DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
 
 // Money shared by two admin screens (the Admin Dashboard's platform MRR and Admin → Clients' per
 // property figure), so a regression here misreports revenue in two places at once and agrees with
@@ -159,5 +161,61 @@ describe('breakdown', () => {
 
   it('falls back to the shipped defaults when no price table is passed', () => {
     expect(clientMrrBreakdown(client()).total).toBeGreaterThan(0)
+  })
+})
+
+// The billing-export Edge Function is a deliberate SECOND copy of the arithmetic above: it is
+// pasted into the Supabase dashboard editor, so it cannot import this file. Nothing else in the
+// suite can see it, and it drifted for months — it priced Crest Suite as a bundle REPLACING the
+// module sum, the model this product retired in S552, while hss-suite billed off its payload. A
+// comment saying "mirror any change here by hand" is not a mechanism; this is (S703).
+//
+// Source-read guard, the technique nepalMoney.test.js already uses. Full-line comments are
+// stripped first, so the prose ABOUT the retired bundle does not trip the assertions against it.
+describe('the billing-export copy keeps step with this file', () => {
+  const SRC = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'supabase', 'functions', 'billing-export', 'index.ts'),
+    'utf8',
+  )
+  const CODE = SRC
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(/\r?\n/)
+    .filter(line => !line.trim().startsWith('//'))
+    .join(' ')
+
+  const shippedDefault = name => {
+    const m = CODE.match(new RegExp('const ' + name + ' = (\\d+)'))
+    expect(m).not.toBeNull()
+    return Number(m[1])
+  }
+
+  it('prices Suite additively, not as a bundle', () => {
+    expect(CODE).not.toMatch(/SUITE_BUNDLES/)
+    expect(CODE).not.toMatch(/suite_bundle/)
+    expect(CODE).toMatch(/breakdown\.suite = v/)
+  })
+
+  it('reads every price from settings.plan_prices, Suite included', () => {
+    expect(CODE).toMatch(/planPrices\?\.ims/)
+    expect(CODE).toMatch(/planPrices\?\.hr/)
+    expect(CODE).toMatch(/planPrices\?\.pos/)
+    expect(CODE).toMatch(/planPrices\?\.suite/)
+  })
+
+  // The fallbacks are the same shipped prices, hand-copied. Asserting the VALUES rather than their
+  // presence is what makes a repricing in pricingPlans.js fail here instead of going unnoticed.
+  it('falls back to the same shipped prices this repo ships', () => {
+    expect(shippedDefault('DEFAULT_HR_PRICE')).toBe(DEFAULT_PLAN_PRICES.hr)
+    expect(shippedDefault('DEFAULT_POS_PRICE')).toBe(DEFAULT_PLAN_PRICES.pos)
+    expect(shippedDefault('DEFAULT_SUITE_PRICE')).toBe(DEFAULT_PLAN_PRICES.suite)
+
+    const ims = CODE.match(/const DEFAULT_IMS_PRICES[^=]*= \{([^}]*)\}/)
+    expect(ims).not.toBeNull()
+    const parsed = {}
+    ims[1].split(',').forEach(pair => {
+      const [k, v] = pair.split(':').map(x => x.trim())
+      if (k) parsed[k] = Number(v)
+    })
+    expect(parsed).toEqual(DEFAULT_PLAN_PRICES.ims)
   })
 })

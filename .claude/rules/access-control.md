@@ -68,9 +68,17 @@ writer must not also ride along in the general one**, or saving an unrelated tab
 value back.
 
 `supabase/functions/billing-export/index.ts` keeps a deliberate ported copy (it is pasted into the
-dashboard editor and cannot import). It reads `plan_prices` for IMS/HR/POS, but its `SUITE_BUNDLES`
-still models Suite as a bundle replacing the module sum — the pre-S552 model. Mirror any pricing
-change there by hand.
+dashboard editor and cannot import), and **hss-suite bills off its payload**. It read `plan_prices`
+for IMS/HR/POS while pricing Suite from a `SUITE_BUNDLES` table that replaced the module sum — the
+pre-S552 model — so the two repos disagreed outright on every Suite client for months. Fixed S703:
+Suite is additive, priced from `plan_prices.suite`, and `next_renewal_at` considers every active
+window rather than Suite's alone.
+
+**A comment saying “mirror this by hand” is not a mechanism.** `clientMrr.test.js` now READS that
+file and asserts it: no `SUITE_BUNDLES`, every price off `planPrices?.*`, and each hand-copied
+fallback equal to `DEFAULT_PLAN_PRICES` — so repricing here fails there instead of going unnoticed.
+The file is still deployed by pasting it into the Supabase dashboard, so **a merged change is not a
+shipped one** until someone does that.
 
 ## Which tier a feature belongs in
 

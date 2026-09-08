@@ -19,16 +19,19 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 
 // Ported from src/data/pricingPlans.js — this function is pasted into the Supabase dashboard editor
 // (no build step, no shared import with the frontend bundle), so these are a deliberate duplicate.
-// ims/hr/pos flat prices ARE overridable live via settings.plan_prices (read below); SUITE_BUNDLES has
-// no DB override anywhere in this app — if pricingPlans.js ever changes, mirror it here too.
+// All four are the SHIPPED defaults and all four are overridable live via settings.plan_prices
+// (read below), exactly as DEFAULT_PLAN_PRICES is on the app side. Mirror any change here by hand.
+//
+// Until S703 this block also held a SUITE_BUNDLES table — starter 5,300 / growth 5,800 / pro 6,500 —
+// and computeBilling returned early on it, ignoring IMS, HR and POS entirely. That is the pricing
+// model this product retired in S552: Crest Suite Pro is an ADD-ON bought per outlet on top of the
+// modules, not a bundle containing them. The app side moved and this copy did not, so for any
+// client with suite_plan = 'pro' the two disagreed outright (a Growth client on all three modules
+// plus Suite: 8,700 in Crest, 6,500 in this payload) — and hss-suite bills off this payload.
 const DEFAULT_IMS_PRICES: Record<string, number> = { starter: 2000, growth: 2600, pro: 3500 }
 const DEFAULT_HR_PRICE = 2600
 const DEFAULT_POS_PRICE = 2000
-const SUITE_BUNDLES: { key: string; monthly: number; annual: number }[] = [
-  { key: 'starter', monthly: 5300, annual: 3975 },
-  { key: 'growth', monthly: 5800, annual: 4350 },
-  { key: 'pro', monthly: 6500, annual: 4875 },
-]
+const DEFAULT_SUITE_PRICE = 2000
 
 function monthlyRate(base: number, billingCycle: string | null) {
   return billingCycle === 'annual' ? Math.round(base * 0.75) : base
@@ -37,15 +40,16 @@ function daysUntil(dateStr: string | null) {
   return dateStr ? Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000) : null
 }
 
-// Exact port of clientMRR() (src/pages/dashboard/AdminDashboardOverview.jsx:95-119) — same
-// suite-bundle-replaces-the-per-module-sum rule, same enabled+ends_at-in-future gates per module,
-// same 25%-off-annual conversion. Adds three fields the live dashboard doesn't compute today, purely
-// for the HSS side's benefit: next_renewal_at, billable, and pricing_basis (so a synced number is
-// auditable, not a black box).
+// Port of clientMrrBreakdown() (src/shared/clientMrr.js) — same enabled+ends_at-in-future gate per
+// module, same 25%-off-annual conversion, and since S703 the same additive Suite. Read that file
+// first if this one needs changing: every rule in it is one somebody got wrong once. Adds three
+// fields the app side doesn't compute, purely for the HSS side's benefit: next_renewal_at, billable,
+// and pricing_basis (so a synced number is auditable, not a black box).
 function computeBilling(c: any, planPrices: any) {
   const imsPrices = planPrices?.ims || DEFAULT_IMS_PRICES
   const hrPrice = planPrices?.hr ?? DEFAULT_HR_PRICE
   const posPrice = planPrices?.pos ?? DEFAULT_POS_PRICE
+  const suitePrice = planPrices?.suite ?? DEFAULT_SUITE_PRICE
 
   const imsEnd = c.ims_ends_at || c.subscription_ends_at
   const imsD = daysUntil(imsEnd)
@@ -64,28 +68,25 @@ function computeBilling(c: any, planPrices: any) {
   let pricingBasis = 'none'
   const breakdown: Record<string, number | null> = { ims: null, hr: null, pos: null, suite: null }
 
-  if (suiteActive) {
-    const bundle = SUITE_BUNDLES.find(b => b.key === c.suite_plan)
-    if (bundle) {
-      monthlyAmount = c.billing_cycle === 'annual' ? bundle.annual : bundle.monthly
-      pricingBasis = 'suite_bundle'
-      breakdown.suite = monthlyAmount
-    }
-  }
-  if (pricingBasis !== 'suite_bundle') {
-    if (imsActive) { const v = monthlyRate(imsPrices[c.plan] || 0, c.billing_cycle); monthlyAmount += v; breakdown.ims = v }
-    if (hrActive) { const v = monthlyRate(hrPrice, c.billing_cycle); monthlyAmount += v; breakdown.hr = v }
-    if (posActive) { const v = monthlyRate(posPrice, c.billing_cycle); monthlyAmount += v; breakdown.pos = v }
-    if (monthlyAmount > 0) pricingBasis = 'per_module'
-  }
+  // Suite ADDS to the module sum — it never replaces it. A Starter tier priced at 0 is a real
+  // configuration, so an active module is listed at whatever it costs rather than dropped.
+  if (imsActive) { const v = monthlyRate(imsPrices[c.plan] || 0, c.billing_cycle); monthlyAmount += v; breakdown.ims = v }
+  if (hrActive) { const v = monthlyRate(hrPrice, c.billing_cycle); monthlyAmount += v; breakdown.hr = v }
+  if (posActive) { const v = monthlyRate(posPrice, c.billing_cycle); monthlyAmount += v; breakdown.pos = v }
+  if (suiteActive) { const v = monthlyRate(suitePrice, c.billing_cycle); monthlyAmount += v; breakdown.suite = v }
+  // 'suite_bundle' is retired and no longer emitted (S703). hss-suite only ever displayed this
+  // string — it never branched on it — so the value simply stops appearing; the column comment in
+  // its own migration still lists it.
+  if (monthlyAmount > 0) pricingBasis = 'per_module'
 
+  // Every active window is a candidate, Suite included. It used to be Suite's date ALONE whenever
+  // Suite was on — correct only while Suite replaced the modules, so a Suite client whose IMS
+  // expired next month reported the Suite date and the earlier renewal went unseen (S703).
   const candidates: string[] = []
+  if (imsActive && imsEnd) candidates.push(imsEnd)
+  if (hrActive) candidates.push(c.hr_ends_at)
+  if (posActive) candidates.push(c.pos_ends_at)
   if (suiteActive && suiteEnd) candidates.push(suiteEnd)
-  else {
-    if (imsActive && imsEnd) candidates.push(imsEnd)
-    if (hrActive) candidates.push(c.hr_ends_at)
-    if (posActive) candidates.push(c.pos_ends_at)
-  }
   const nextRenewalAt = candidates.length ? candidates.sort()[0] : null
 
   return {
