@@ -7,7 +7,6 @@ import { fetchAllRows } from '../shared/fetchAllRows'
 import { useAutoPurgeBackup, refreshBackupPermission } from '../modules/admin/dataExport/useAutoPurgeBackup'
 import Tip from '../components/Tip'
 import { useSettings } from '../context/SettingsContext'
-import { DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
 import { clientMrrBreakdown } from '../shared/clientMrr'
 import ClientDrawer from './adminClients/ClientDrawer'
 import FeatureAccessModal from './adminClients/FeatureAccessModal'
@@ -50,10 +49,12 @@ function relativeTime(iso) {
 }
 
 export default function AdminClients() {
-  const { settings } = useSettings()
   // One definition with the Admin Dashboard's own figure (src/shared/clientMrr.js). Prices come
-  // from Settings > Plan Pricing, falling back to the shipped defaults.
-  const planPrices = settings.plan_prices || DEFAULT_PLAN_PRICES
+  // from Settings > Plan Pricing, falling back to the shipped defaults. `planPrices` is the
+  // PLATFORM row's table (S701) — `settings.plan_prices` is whichever row this session read, and
+  // an admin viewing a client reads THEIR row, where the column is null: every per-client figure
+  // on this screen silently reverted to the shipped prices the moment a client was selected.
+  const { planPrices } = useSettings()
   const [clients, setClients]         = useState([])
   const [loading, setLoading]         = useState(true)
   const [listError, setListError]     = useState(null) // a failed read is not "no clients yet"

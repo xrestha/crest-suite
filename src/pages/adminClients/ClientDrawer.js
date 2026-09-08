@@ -11,7 +11,11 @@ import Tip from '../../components/Tip'
 import Modal from '../../components/Modal'
 import { MIN_PASSWORD_LENGTH } from '../../utils/weakPasswords'
 import { adminOp } from '../../shared/adminOp'
-import { MODULE_COLORS, MODULE_INK, moduleTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../../data/pricingPlans'
+// Colours only — the PRICES this panel quotes come from useSettings().pricing (S701), so the
+// figure under each module button is the one Settings > Plan Pricing actually charges. It used
+// to import the constants, which meant the screen where an operator picks a client's modules
+// quoted the shipped price while the MRR line beside it used the admin's edited one.
+import { MODULE_COLORS, MODULE_INK, moduleTint } from '../../data/pricingPlans'
 import ClientLegalTab from './ClientLegalTab'
 import { runBackup } from '../../modules/admin/dataExport/runBackup'
 import { restoreClientData } from '../../modules/admin/dataExport/restoreClientData'
@@ -61,7 +65,7 @@ function deriveInvoicePrefix(name) {
 
 export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const { adminViewClientId, refreshViewModules } = useAuth()
-  const { loadClientSettings, saveClientSettings } = useSettings()
+  const { loadClientSettings, saveClientSettings, pricing } = useSettings()
   const [activeTab, setActiveTab] = useState('users')
 
   // Every input in this drawer needs an id its <label> can point at — 22 fields shipped with a
@@ -1260,7 +1264,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         <div>{opt.label}</div>
                         {opt.on && (
                           <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.85 }}>
-                            +NPR {(billingCycle === 'annual' ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-IN')}/mo
+                            +NPR {(billingCycle === 'annual' ? pricing.suite.annual : pricing.suite.monthly).toLocaleString('en-IN')}/mo
                           </div>
                         )}
                       </button>
@@ -1389,7 +1393,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 ].map(mod => {
                   if (!mod.enabled) return null
                   const s = getDateStatus(mod.endsAt)
-                  const flatPricing = mod.key === 'hr' ? HR_PRICING : mod.key === 'pos' ? POS_PRICING : null
+                  const flatPricing = mod.key === 'hr' ? pricing.hr : mod.key === 'pos' ? pricing.pos : null
                   const accentInk  = MODULE_INK[mod.key]
                   // These sections used to be disabled whenever a Suite Bundle was selected,
                   // because the bundle replaced per-module pricing and dates entirely in
@@ -1425,7 +1429,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         <>
                           {/* Plan cards — IMS only, real tiers */}
                           <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-                            {IMS_TIERS.map(p => {
+                            {pricing.imsTiers.map(p => {
                               const price = billingCycle === 'annual' ? p.annual : p.monthly
                               const active = mod.plan === p.key
                               return (
@@ -1443,7 +1447,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                           </div>
                           <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
                             {(() => {
-                              const tier = IMS_TIERS.find(p => p.key === mod.plan) || IMS_TIERS[0]
+                              const tier = pricing.imsTiers.find(p => p.key === mod.plan) || pricing.imsTiers[0]
                               return billingCycle === 'annual'
                                 ? `Annual · NPR ${tier.annual.toLocaleString('en-IN')}/mo × 12 = NPR ${(tier.annual * 12).toLocaleString('en-IN')}/yr`
                                 : `Monthly · NPR ${tier.monthly.toLocaleString('en-IN')}/mo`

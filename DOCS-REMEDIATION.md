@@ -246,9 +246,17 @@ tables that disagree:
   Pricing (S380). `DEFAULT_PLAN_PRICES` is derived from `IMS_TIERS`/`HR_PRICING`/`POS_PRICING`
   specifically so admin analytics can never drift independently again.
 
-Current: IMS tiered 2,000 / 2,600 / 3,500. HR flat 2,600. POS flat 2,000. Crest Suite Pro a
-per-outlet add-on at +2,000 (annual +1,500), requires IMS, `suite_plan` is `NULL | 'pro'`. Annual is
-25% off uniformly.
+**As of S701 those constants are the SHIPPED DEFAULTS, not the live prices.** Admin > Settings >
+Plan Pricing writes `settings.plan_prices` on the platform (`client_id` NULL) row, and
+`resolvePricing(planPrices)` lays it over the constants per field — so the live figure for any
+plan is whatever that row says, falling back to the file. Every surface that prints money reads
+`useSettings().pricing`; nothing imports the constants to render. Structure rather than figures,
+because the figures move: IMS is tiered (starter/growth/pro), HR, POS and Crest Suite Pro are each
+one flat price, Suite is a per-outlet add-on requiring IMS with `suite_plan` in `NULL | 'pro'`, and
+annual is 25% off uniformly (`annualOf`). **Do not restate the numbers here** — a doc that names a
+price is a copy of a value an admin can change from the UI, which is the same trap this section is
+about: the figures previously printed in this paragraph were already out of date, since HR and POS
+had been repriced through the admin screen.
 
 Meanwhile the **tier thesis** (Starter = Record & Comply, Growth = Control, Pro = Strategy, Suite
 Pro = Synthesis) and its two derived rules — a feature must produce a number on its own tier's data,

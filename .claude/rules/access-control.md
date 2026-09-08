@@ -7,6 +7,8 @@ paths:
   - "src/components/SuiteGate.js"
   - "src/components/Layout.js"
   - "src/shared/clientMrr.js"
+  - "src/data/pricingPlans.js"
+  - "src/pages/Pricing.js"
   - "src/pages/AdminClients.js"
   - "src/pages/adminClients/**"
 ---
@@ -33,12 +35,42 @@ platform total nobody could attribute to a client. The arithmetic now lives in
 planPrices)`), imported by both. Do not write a second copy: each of its rules is one that was
 wrong once — a module counts only when ENABLED *and* paid through, Suite ADDS rather than replaces,
 Suite resolves via `suite_ends_at` with the IMS window as a legacy fallback, and annual is 25% off
-*except* Suite's annual, which is a published price. Two presentation rules ride with it: **zero is
+every line, Suite's included (S701 — its published 1,500 always WAS that derivation of 2,000). Two presentation rules ride with it: **zero is
 a real state and says why** ("Not billing", never `NPR 0`, which reads as a price we charge), and an
 unbilled module is **omitted** from the breakdown rather than listed at zero — except a *live*
 module priced at zero, whose line stays, because dropping it would read as the module being off.
 
 **Suite has ONE tier** (S548): `suite_plan` is `NULL | 'pro'`. It was `starter|growth|pro`, but both call sites were `minTier="growth"` — so Suite Starter unlocked nothing at all and Suite Pro added nothing over Suite Growth on its own axis. It is also an **add-on priced per outlet on top of a client's modules**, not a bundle containing them: turning it on implies only that IMS is enabled (`requireModules`' floor) and says nothing about HR, POS, or which IMS tier the client is on. `requireModules` (array, default `['ims','hr']` — Owner Dashboard's original behavior) varies per feature; Monthly Owner Report, Demand Forecast and Fixed Assets pass `['ims']`. Don't assume every caller needs Owner Dashboard's set.
+
+## A price is printed from the resolver, and read from the PLATFORM row (S701)
+
+Two mistakes with one symptom — an admin changes a price in Settings > Plan Pricing and the number
+a customer reads does not move.
+
+**Nothing prints a price from the constants in `pricingPlans.js`.** `IMS_TIERS`/`HR_PRICING`/
+`POS_PRICING`/`SUITE_ADDON` are the shipped defaults and the feature lists; the figure on screen
+comes from `useSettings().pricing`, which is `resolvePricing(planPrices)` — the admin's
+`settings.plan_prices` laid over those constants, per FIELD (a table with only `hr` set leaves the
+rest at their shipped price) and keeping a deliberate 0 (the test is "is this a number", never
+`|| fallback`). The public pricing page, Help's Plan & Pricing tab and ClientDrawer's module picker
+each imported the constants directly and were therefore immune to every price change ever made,
+while the MRR figures beside them tracked it. `annualOf()` is the one definition of × 0.75.
+
+**`settings` is whichever row THIS session read; a platform-wide fact is not on it.** A client
+session reads its own settings row, where `plan_prices` is null — so `settings.plan_prices ||
+DEFAULT` silently meant "the shipped prices" for Admin → Clients with a client selected, the Admin
+Dashboard, and the Subscription Agreement an Owner signs. `SettingsContext` reads the platform
+(`client_id` NULL) row separately and exposes `planPrices` and `pricing`; use those, the same way
+`platformSupport` already worked. The writing half is the mirror image: platform facts save through
+their own `savePlatform*` function, never through `saveSettings()` (which targets the viewed
+client), and `saveSettings()` strips the columns those functions own — **a column with a dedicated
+writer must not also ride along in the general one**, or saving an unrelated tab puts the stale
+value back.
+
+`supabase/functions/billing-export/index.ts` keeps a deliberate ported copy (it is pasted into the
+dashboard editor and cannot import). It reads `plan_prices` for IMS/HR/POS, but its `SUITE_BUNDLES`
+still models Suite as a bundle replacing the module sum — the pre-S552 model. Mirror any pricing
+change there by hand.
 
 ## Which tier a feature belongs in
 

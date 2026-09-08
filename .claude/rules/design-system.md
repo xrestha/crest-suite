@@ -528,6 +528,30 @@ it got reported. Margin gives byte-identical clearance (a margin on the last chi
 padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**
 
 
+## A derived figure does not get its own mode (S702)
+
+Settings > Plan Pricing had a Monthly tab and an Annual tab. Annual is `annualOf(monthly)` — one
+expression, × 0.75, with no second source of truth — so the toggle put a *printout of the number
+already on screen* behind a click, and the Annual tab was a grid of read-only boxes with the Save
+button disabled beneath them: an entire mode in which nothing could be done. Both figures render
+together now, under the one editable input, with the ARR beside them.
+
+The test for whether a value earns its own mode is **whether you can act on it there**. A derived
+figure never can. Show it next to what derives it, keep the single editable field that produced it,
+and the two can no longer disagree — which was the toggle's actual job.
+
+**Repeating a label down a row of sibling cards gives several controls one accessible name.** Three
+cards each labelled their input `Monthly price`. Visually unambiguous — the card heading above says
+which module — but a screen reader announces three identical edit boxes with nothing to tell them
+apart, and `getByLabelText` cannot address them either, which is the cheap tell. The input takes an
+`aria-label` naming its module that still CONTAINS the visible label text, which is what WCAG 2.5.3
+asks for; the visible label stays short. Same family as the label-association rules above: a name
+that is only unambiguous *because of where it sits on screen* is not an accessible name.
+
+**A field builder is a plain function returning JSX, never a component declared inside render.** A
+component declared there is a new type on every keystroke, so React unmounts the input and the field
+loses focus after one digit. `{priceField({...})}` reconciles as inline elements and keeps it.
+
 ## Flex `stretch` hides unequal chip heights until the row wraps (S691)
 
 Four adoption pills in the Admin Dashboard's Active Properties tile had drifted into three

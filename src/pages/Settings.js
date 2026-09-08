@@ -5,7 +5,7 @@ import { supabase } from '../supabaseClient'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { useTheme, PRESETS } from '../context/ThemeContext'
 import Tip from '../components/Tip'
-import { MODULE_COLORS, DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
+import { MODULE_INK, DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
 import { assignMissingProductCodes } from '../shared/productCode'
 import { useConfirm } from '../shared/hooks/useConfirm'
 import { Navigate } from 'react-router-dom'
@@ -29,7 +29,8 @@ function deriveInvoicePrefix(name) {
 }
 
 export default function Settings() {
-  const { settings, saveSettings, loadSettings, recipeCategories, platformSupport, savePlatformSupport } = useSettings()
+  const { settings, saveSettings, loadSettings, recipeCategories, platformSupport, savePlatformSupport,
+          planPrices, savePlatformPlanPrices } = useSettings()
   const { ask: askConfirm, confirmEl } = useConfirm()
   const { clientId, isAdmin, hasFeature, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
@@ -44,7 +45,6 @@ export default function Settings() {
     return true
   })
   const [activeTab, setActiveTab] = useState(isAdmin ? 'Branding' : 'Thresholds')
-  const [pricingCycle, setPricingCycle] = useState('monthly')
   const [form, setForm] = useState({ ...settings })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -83,6 +83,33 @@ export default function Settings() {
     setPlatformForm(next)
   }, [platformSupport])
   function updatePlatform(key, val) { setPlatformForm(f => ({ ...f, [key]: val })) }
+
+  // Settings > Plan Pricing (S701) — the same shape as the platform support card above, for the
+  // same reason: a price is one fact for the whole platform, so it lives on the client_id-NULL
+  // row and not on whichever client is being viewed. Editing it through `form`/`save()` wrote it
+  // onto the VIEWED client's settings row, where nothing reads it — the save reported success and
+  // the price everyone sees never moved.
+  const [priceForm, setPriceForm] = useState(DEFAULT_PLAN_PRICES)
+  const [priceSaving, setPriceSaving] = useState(false)
+  const [priceMsg, setPriceMsg] = useState('')
+  const priceSeedRef = useRef(null)
+  useEffect(() => {
+    // Built field by field rather than spread over the stored row, because the live row still
+    // carries the JSONB column's original DEFAULT — flat `starter`/`growth`/`pro` keys from before
+    // IMS tiers moved under `ims`. Nothing has read those in a long time; spreading the row would
+    // carry them into every future save and keep three dead prices sitting next to four live ones.
+    const stored = planPrices || {}
+    const next = {
+      ims:   { ...DEFAULT_PLAN_PRICES.ims, ...(stored.ims || {}) },
+      hr:    stored.hr ?? DEFAULT_PLAN_PRICES.hr,
+      pos:   stored.pos ?? DEFAULT_PLAN_PRICES.pos,
+      suite: stored.suite ?? DEFAULT_PLAN_PRICES.suite,
+    }
+    const key = JSON.stringify(next)
+    if (key === priceSeedRef.current) return
+    priceSeedRef.current = key
+    setPriceForm(next)
+  }, [planPrices])
 
   useEffect(() => {
     loadSettings(isAdmin && !clientId ? null : clientId)
@@ -145,6 +172,19 @@ export default function Settings() {
       setPlatformMsg('error:' + e.message)
     }
     setPlatformSaving(false)
+  }
+
+  async function savePrices() {
+    if (priceSaving) return  // the button stays enabled while busy (DESIGN.md), so this is the guard
+    setPriceSaving(true); setPriceMsg('')
+    try {
+      await savePlatformPlanPrices(priceForm)
+      setPriceMsg('ok:Prices saved — the public pricing page, Help > Plan & Pricing and every MRR figure now quote them.')
+      setTimeout(() => setPriceMsg(''), 5000)
+    } catch (e) {
+      setPriceMsg('error:' + e.message)
+    }
+    setPriceSaving(false)
   }
 
   async function handleLogoUpload(file) {
@@ -358,10 +398,12 @@ export default function Settings() {
               : 'Operational thresholds, code formats, recipe categories and your theme'}
           </p>
         </div>
-        {/* Support is the one tab whose cards each commit their own row, so the page-level button
-            does not render there: measured, the nearest Save to the consultant fields was the OTHER
-            card's, 243px away, while the button that saved them sat 1,345px up (S684). */}
-        {activeTab !== 'Support' && (
+        {/* Support and Plan Pricing are the tabs whose cards each commit their own row, so the
+            page-level button does not render there: measured, the nearest Save to the consultant
+            fields was the OTHER card's, 243px away, while the button that saved them sat 1,345px
+            up (S684). Plan Pricing joined them in S701 — this button writes the VIEWED client's
+            settings row, which is the one place platform prices must never go. */}
+        {activeTab !== 'Support' && activeTab !== 'Plan Pricing' && (
           <button className="btn btn-primary" onClick={save} disabled={saving}>
             {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
           </button>
@@ -926,107 +968,125 @@ export default function Settings() {
         )
       })()}
 
-      {/* PLAN PRICING */}
+      {/* PLAN PRICING — the platform's price list, so it saves to the client_id-NULL settings row
+          through savePrices(), never through the page-level save() (S701). */}
       {activeTab === 'Plan Pricing' && (() => {
-        const planPrices = form.plan_prices || DEFAULT_PLAN_PRICES
-        const imsPrices = planPrices.ims || DEFAULT_PLAN_PRICES.ims
+        // priceForm, not `form`: `form` is whichever client's settings row this session read, and
+        // writing prices there put them somewhere nothing reads — the save said "✓ Saved" and the
+        // price the world sees never moved.
+        const imsPrices = priceForm.ims || DEFAULT_PLAN_PRICES.ims
+        const setPrices = next => { setPriceForm(next); setPriceMsg('') }
         function updateIms(tier, value) {
-          update('plan_prices', {
-            ...planPrices,
+          setPrices({
+            ...priceForm,
             ims: { ...imsPrices, [tier]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) },
           })
         }
         function updateFlat(key, value) {
-          update('plan_prices', { ...planPrices, [key]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) })
+          setPrices({ ...priceForm, [key]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) })
         }
-        // Same 25%-off-monthly convention already used everywhere else annual pricing appears
-        // (pricingPlans.js's own IMS_TIERS/HR_PRICING/POS_PRICING/SUITE_ADDON annual fields are
-        // all exactly monthly × 0.75; ClientDrawer's Billing Cycle toggle labels it "Save 25%").
-        // Annual is a derived read-only view here, not a second editable source of truth — editing
-        // always happens on Monthly, so the two can never drift apart from each other.
-        const annualOf = monthly => Math.round((monthly || 0) * 0.75)
-        const isAnnual = pricingCycle === 'annual'
+        // Monthly and annual are on screen together (S702). They used to be two tabs, which made
+        // the annual column a place you had to go and look — for a figure that is not a second
+        // price but a printout of this one: annualOf() (×0.75, in pricingPlans.js) is the single
+        // definition shared with every screen that quotes an annual rate. Only Monthly is editable
+        // here, so the two can never drift apart.
+        //
+        // A plain function, not a component: a component declared inside render is a NEW type on
+        // every keystroke, so React would unmount the input and the field would lose focus after
+        // one digit.
+        const priceField = ({ id, label, ariaLabel, value, fallback, onChange }) => {
+          // The annual RATE and what a year of it actually comes to. The rate alone is the
+          // number on the pricing page; the ARR is the number an operator is deciding with, and
+          // it was previously only derivable by multiplying in your head.
+          const annual = annualOf(value ?? fallback)
+          return (
+            <div className="form-field" key={id}>
+              <label htmlFor={id}>{label}</label>
+              <input
+                id={id}
+                className="form-input"
+                type="number" min="0" step="100"
+                // Three cards each label their field "Monthly price", so the visible label alone
+                // gives three controls one accessible name. The aria-label names the module and
+                // still CONTAINS the visible text, which is what WCAG 2.5.3 asks for.
+                aria-label={ariaLabel}
+                value={value ?? ''}
+                onChange={e => onChange(e.target.value)}
+                placeholder={String(fallback)}
+              />
+              <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
+                Annual · NPR {annual.toLocaleString('en-IN')} / Month
+                <span style={{ display: 'block', marginTop: 2 }}>
+                  ARR · NPR {(annual * 12).toLocaleString('en-IN')} / Year
+                </span>
+              </span>
+            </div>
+          )
+        }
+        const flatCards = [
+          { key: 'hr',    color: MODULE_INK.hr,  title: 'Crest HR' },
+          { key: 'pos',   color: MODULE_INK.pos, title: 'Crest POS' },
+          // Suite is priced here too since S701. It is sold per outlet on top of the modules, so
+          // its figure adds to a client's MRR rather than replacing any of the above.
+          { key: 'suite', color: MODULE_INK.ims, title: 'Crest Suite Pro' },
+        ]
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card">
-              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Plan Prices (NPR)</h3>
-              <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
-                Mirrors the real advertised pricing shown on the Help page's Plan &amp; Pricing tab and the public
-                pricing page (single source of truth: <code>src/data/pricingPlans.js</code>) — IMS is tiered,
-                HR and POS are each a single flat price with no tiers. A client's Monthly Value on the Admin
-                Dashboard sums whichever of these apply to their active modules. Changing a price here takes
-                effect immediately on the Admin Dashboard's MRR/ARR figures; it does not retroactively bill or
-                notify clients, and does not change the public pricing page itself.
-              </p>
-
-              <div style={{ display: 'flex', gap: 4, marginTop: 18, borderBottom: '1px solid var(--theme-border)' }}>
-                {[{ key: 'monthly', label: 'Monthly' }, { key: 'annual', label: 'Annual · Save 25%' }].map(opt => (
-                  <button key={opt.key} onClick={() => setPricingCycle(opt.key)} style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    padding: '8px 16px', fontSize: 12, fontWeight: 600,
-                    color: pricingCycle === opt.key ? 'var(--theme-accent-ink)' : 'var(--theme-text2)',
-                    borderBottom: pricingCycle === opt.key ? '2px solid var(--theme-accent)' : '2px solid transparent',
-                    marginBottom: -1
-                  }}>{opt.label}</button>
-                ))}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  <Tip
+                    width={340}
+                    text="One price list for the whole platform — saved against Crest itself, not against the client you are currently viewing. What you save here is what the public pricing page, the Help page's Plan & Pricing tab, the module picker in Admin → Clients and every MRR/ARR figure all quote. Annual is calculated at 25% off the monthly price, so only Monthly is editable. It applies the next time each page loads; nobody already subscribed is re-billed or notified."
+                  >
+                    Plan Prices (NPR)
+                  </Tip>
+                </h3>
+                {/* The Save sits with the fields it commits and NOT in the page header, because the
+                    header button writes the viewed client's settings row — the one place these must
+                    never go (S684's rule, S701's reason). Everything it saves is on screen with it. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  {priceMsg && (
+                    <span role={priceMsg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 13, color: priceMsg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                      {priceMsg.replace(/^(ok|error):/, '')}
+                    </span>
+                  )}
+                  <button className="btn btn-primary" onClick={savePrices} aria-busy={priceSaving || undefined}>
+                    {priceSaving ? 'Saving…' : 'Save Plan Prices'}
+                  </button>
+                </div>
               </div>
-              {isAnnual && (
-                <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '12px 0 0' }}>
-                  Auto-calculated from Monthly (25% off) — read-only. Edit the Monthly tab to change these.
-                </p>
-              )}
             </div>
 
             <div className="card">
-              <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: MODULE_COLORS.ims }}>Crest IMS — tiered</h4>
+              <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: MODULE_INK.ims }}>Crest IMS — tiered</h4>
               <div className="form-grid form-grid-3">
-                {['starter', 'growth', 'pro'].map(tier => (
-                  <div className="form-field" key={tier}>
-                    <label htmlFor={`set-ims-price-${tier}`} style={{ textTransform: 'capitalize' }}>{tier}</label>
-                    <input
-                      id={`set-ims-price-${tier}`}
-                      type="number" min="0" step="100"
-                      readOnly={isAnnual}
-                      value={isAnnual ? annualOf(imsPrices[tier]) : (imsPrices[tier] ?? '')}
-                      onChange={e => !isAnnual && updateIms(tier, e.target.value)}
-                      placeholder={String(isAnnual ? annualOf(DEFAULT_PLAN_PRICES.ims[tier]) : DEFAULT_PLAN_PRICES.ims[tier])}
-                      style={isAnnual ? { opacity: 0.7, cursor: 'default' } : undefined}
-                    />
-                  </div>
-                ))}
+                {['starter', 'growth', 'pro'].map(tier => priceField({
+                  id: `set-ims-price-${tier}`,
+                  label: <span style={{ textTransform: 'capitalize' }}>{tier} · monthly</span>,
+                  value: imsPrices[tier],
+                  fallback: DEFAULT_PLAN_PRICES.ims[tier],
+                  onChange: v => updateIms(tier, v),
+                }))}
               </div>
             </div>
 
-            <div className="card">
-              <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: MODULE_COLORS.hr }}>Crest HR — flat (no tiers)</h4>
-              <div className="form-field" style={{ maxWidth: 220 }}>
-                <label htmlFor="set-hr-price">{isAnnual ? 'Annual (equivalent /mo)' : 'Monthly price'}</label>
-                <input
-                  id="set-hr-price"
-                  type="number" min="0" step="100"
-                  readOnly={isAnnual}
-                  value={isAnnual ? annualOf(planPrices.hr) : (planPrices.hr ?? '')}
-                  onChange={e => !isAnnual && updateFlat('hr', e.target.value)}
-                  placeholder={String(isAnnual ? annualOf(DEFAULT_PLAN_PRICES.hr) : DEFAULT_PLAN_PRICES.hr)}
-                  style={isAnnual ? { opacity: 0.7, cursor: 'default' } : undefined}
-                />
-              </div>
-            </div>
-
-            <div className="card">
-              <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: MODULE_COLORS.pos }}>Crest POS — flat (no tiers)</h4>
-              <div className="form-field" style={{ maxWidth: 220 }}>
-                <label htmlFor="set-pos-price">{isAnnual ? 'Annual (equivalent /mo)' : 'Monthly price'}</label>
-                <input
-                  id="set-pos-price"
-                  type="number" min="0" step="100"
-                  readOnly={isAnnual}
-                  value={isAnnual ? annualOf(planPrices.pos) : (planPrices.pos ?? '')}
-                  onChange={e => !isAnnual && updateFlat('pos', e.target.value)}
-                  placeholder={String(isAnnual ? annualOf(DEFAULT_PLAN_PRICES.pos) : DEFAULT_PLAN_PRICES.pos)}
-                  style={isAnnual ? { opacity: 0.7, cursor: 'default' } : undefined}
-                />
-              </div>
+            {/* HR, POS and Suite are one flat price each, so they read as one row of three rather
+                than three full-width cards a screen tall (S702). */}
+            <div className="form-grid form-grid-3">
+              {flatCards.map(card => (
+                <div className="card" key={card.key}>
+                  <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: card.color }}>{card.title}</h4>
+                  {priceField({
+                    id: `set-${card.key}-price`,
+                    label: card.key === 'suite' ? 'Monthly, per outlet' : 'Monthly price',
+                    ariaLabel: `${card.title} — ${card.key === 'suite' ? 'monthly, per outlet' : 'monthly price'}`,
+                    value: priceForm[card.key],
+                    fallback: DEFAULT_PLAN_PRICES[card.key],
+                    onChange: v => updateFlat(card.key, v),
+                  })}
+                </div>
+              ))}
             </div>
           </div>
         )

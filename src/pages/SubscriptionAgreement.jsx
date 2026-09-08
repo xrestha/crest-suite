@@ -56,7 +56,7 @@ export default function SubscriptionAgreement() {
   const [params] = useSearchParams()
   const requestedId = params.get('client')
   const { isAdmin, isOwner, clientId, ready } = useAuth()
-  const { settings } = useSettings()
+  const { planPrices } = useSettings()
 
   const [client, setClient] = useState(null)
   const [loadErr, setLoadErr] = useState(null)
@@ -86,8 +86,12 @@ export default function SubscriptionAgreement() {
 
   const today = useMemo(() => new Date(), [])
   const breakdown = useMemo(
-    () => (client ? clientMrrBreakdown(client, settings?.plan_prices) : { total: 0, lines: [] }),
-    [client, settings]
+    // planPrices is the PLATFORM row's table. `settings.plan_prices` was the row THIS session
+    // read, and an Owner reads their own client's row where the column is null — so the money on
+    // the agreement an Owner signs fell back to the shipped prices while the admin's own screen
+    // showed the real ones (S701).
+    () => (client ? clientMrrBreakdown(client, planPrices) : { total: 0, lines: [] }),
+    [client, planPrices]
   )
 
   // ── Guards. AFTER every hook, so the hook order is identical on every render. ──

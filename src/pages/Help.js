@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
-import { MODULE_COLORS, MODULE_INK, colorTint, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
+import { MODULE_COLORS, MODULE_INK, colorTint } from '../data/pricingPlans'
 import SupportContactLine from '../components/SupportContactLine'
 // The Help sections a URL may open directly: /help?section=support is the sidebar's Support
 // button (S683) — before it, "where is support?" had no answer a link could give, because the
@@ -19,7 +19,7 @@ const sectionFromSearch = search => {
 const LegalTab = lazy(() => import('./help/LegalTab'))
 
 // ── IMS feature data, grouped by plan tier (Getting Started module guide — distinct from the
-// IMS_TIERS pricing data imported above) ─────────────────────────────────────
+// tier pricing the Pricing tab renders from useSettings().pricing) ─────────────────────────────────────
 const IMS_FEATURE_TIERS = [
   {
     tier: 'core', label: 'Core — All Plans', planLabel: null, planColor: 'var(--theme-text2)',
@@ -819,8 +819,10 @@ const GLOSSARY = [
   { term: 'Requisition',      def: 'An internal stock transfer from the main store to a department (e.g. kitchen, bar), tracked separately from external purchases.' },
 ]
 
-// IMS_TIERS / HR_PRICING / POS_PRICING / SUITE_ADDON / MODULE_COLORS now come from
-// ../data/pricingPlans — the single source of truth shared with Pricing.js and ClientDrawer.js.
+// MODULE_COLORS comes from ../data/pricingPlans — the single source of truth shared with
+// Pricing.js and ClientDrawer.js. The PRICES no longer come from there directly (S701): this tab
+// reads `useSettings().pricing`, so an admin's Settings > Plan Pricing edit shows up here and on
+// the public page together. Importing the constants was what let the two disagree.
 
 const FAQ = [
   { q: 'How does the navigation work? I have a lot of pages.', a: 'On a computer the navigation is a bar across the top, in two rows. The top row is your session: the Crest logo, one button per module you have (Crest IMS, Crest HR, Crest POS), which property and BS period you are looking at, search, the calculator, and your name. The second row is the pages of whichever module is selected — Dashboard on its own, then one menu per group (Operations, Costing, the report categories). Click a module button to switch panels; the bar also follows you automatically when you navigate, so opening a POS page selects POS. Star a page inside any menu and it joins a Pinned menu at the front of the row. Help, Support and Sign out live under your name. On a phone the top bar is replaced by the ☰ button, which slides the same pages in from the left.' },
@@ -913,7 +915,7 @@ export default function Help() {
   const [expandedFaq, setExpandedFaq]             = useState(null)
   const [pricingAnnual, setPricingAnnual]         = useState(false)
   const [searchQuery, setSearchQuery]             = useState('')
-  const { settings } = useSettings()
+  const { settings, pricing } = useSettings()
   const navigate = useNavigate()
   const phone   = settings?.contact_phone   || ''
   const email   = settings?.contact_email   || ''
@@ -1637,7 +1639,7 @@ export default function Help() {
           {/* Crest IMS — 3 tiers */}
           <p style={{ fontSize: 11, color: MODULE_INK.ims, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>Crest IMS</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
-            {IMS_TIERS.map(plan => {
+            {pricing.imsTiers.map(plan => {
               const highlight = plan.key === 'growth'
               const price = pricingAnnual ? plan.annual : plan.monthly
               return (
@@ -1685,8 +1687,8 @@ export default function Help() {
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
             {[
-              { key: 'hr',  name: 'Crest HR',  color: MODULE_INK.hr,  pricing: HR_PRICING },
-              { key: 'pos', name: 'Crest POS', color: MODULE_INK.pos, pricing: POS_PRICING },
+              { key: 'hr',  name: 'Crest HR',  color: MODULE_INK.hr,  pricing: pricing.hr },
+              { key: 'pos', name: 'Crest POS', color: MODULE_INK.pos, pricing: pricing.pos },
             ].map(mod => {
               const price = pricingAnnual ? mod.pricing.annual : mod.pricing.monthly
               return (
@@ -1716,15 +1718,15 @@ export default function Help() {
           <div className="card" style={{ marginBottom: 24, borderColor: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' }}>
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div style={{ minWidth: 180 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 8 }}>{SUITE_ADDON.label}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 8 }}>{pricing.suite.label}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>
-                  +NPR {(pricingAnnual ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-IN')}
+                  +NPR {(pricingAnnual ? pricing.suite.annual : pricing.suite.monthly).toLocaleString('en-IN')}
                   <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)' }}>/month per outlet</span>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 6 }}>{SUITE_ADDON.requiresLabel}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 6 }}>{pricing.suite.requiresLabel}</div>
               </div>
               <ul style={{ margin: 0, paddingLeft: 18, flex: 1, minWidth: 240 }}>
-                {SUITE_ADDON.features.map(f => (
+                {pricing.suite.features.map(f => (
                   <li key={f} style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 5, lineHeight: 1.5 }}>{f}</li>
                 ))}
               </ul>

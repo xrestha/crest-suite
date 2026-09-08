@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { Hexagon, Check, Mail, Calculator, Users, CalendarDays, ChevronDown } from 'lucide-react'
 import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
-import { MODULE_COLORS, MODULE_INK, moduleTint, TRIAL_DAYS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
+// Prices are NOT imported from here any more (S701) — only the module colours and the trial
+// length are constants. What this page prints comes from `useSettings().pricing`, which resolves
+// the admin's Settings > Plan Pricing figures over the shipped ones; importing IMS_TIERS et al.
+// directly is exactly what made this page immune to a price change.
+import { MODULE_COLORS, MODULE_INK, moduleTint, TRIAL_DAYS } from '../data/pricingPlans'
 // The registered entity, from the one place it is pinned against the published legal documents.
 import { COMPANY } from '../legal'
 
@@ -98,6 +102,15 @@ function FeatureList({ features, color, collapsible = false }) {
   )
 }
 
+// A price that is not known yet is a shimmer, not a default figure. The numbers arrive with the
+// platform settings row a beat after first paint, so printing the shipped price and swapping it
+// when the read lands would let a visitor read one price and act on another — on a page
+// headlined "Simple, honest pricing". The em-width keeps the swap from moving the layout.
+function Amount({ ready, value, width = '3.6em' }) {
+  if (!ready) return <span className="skeleton" aria-hidden="true" style={{ display: 'inline-block', width, height: '0.7em', verticalAlign: 'baseline' }} />
+  return <>{value.toLocaleString('en-IN')}</>
+}
+
 function SectionHeading({ color, title, subtitle }) {
   return (
     <div style={{ textAlign: 'center', marginBottom: 24 }}>
@@ -113,7 +126,11 @@ function SectionHeading({ color, title, subtitle }) {
 export default function Pricing() {
   const [annual, setAnnual]   = useState(false)
   const [showFaq, setShowFaq] = useState(false)
-  const { settings } = useSettings()
+  // `pricing` is the live table (the admin's overrides resolved over the shipped defaults), and
+  // `loading` spans BOTH reads loadSettings() makes, so it is the right gate for the figures.
+  const { settings, pricing, loading: pricesLoading } = useSettings()
+  const priceReady = !pricesLoading
+  const suite = pricing.suite
   const navigate = useNavigate()
   // A signed-in reader is an OWNER comparing plans, not a visitor deciding whether to sign up.
   // "Login →" and "Start Free Trial →" used to eject them onto the signed-out funnel, with
@@ -272,7 +289,7 @@ export default function Pricing() {
         <SectionHeading color={MODULE_INK.ims} title="Crest IMS" subtitle="Inventory, recipe costing & food-cost intelligence" />
       </div>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 24 }}>
-        {IMS_TIERS.map(plan => {
+        {pricing.imsTiers.map(plan => {
           const highlight = plan.key === 'growth'
           const price = annual ? plan.annual : plan.monthly
           return (
@@ -302,13 +319,13 @@ export default function Pricing() {
               </div>
 
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
-                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                  NPR {price.toLocaleString('en-IN')}
+                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }} aria-busy={!priceReady || undefined}>
+                  NPR <Amount ready={priceReady} value={price} />
                   <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span>
                 </div>
                 {annual && (
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
-                    Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/year
+                    Billed annually · NPR <Amount ready={priceReady} value={price * 12} width="4.2em" />/year
                   </div>
                 )}
               </div>
@@ -338,8 +355,8 @@ export default function Pricing() {
       </div>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
         {[
-          { key: 'hr',  name: 'Crest HR',  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: HR_PRICING },
-          { key: 'pos', name: 'Crest POS', tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: POS_PRICING },
+          { key: 'hr',  name: 'Crest HR',  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: pricing.hr },
+          { key: 'pos', name: 'Crest POS', tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: pricing.pos },
         ].map(mod => {
           const price = annual ? mod.pricing.annual : mod.pricing.monthly
           return (
@@ -350,13 +367,13 @@ export default function Pricing() {
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px', lineHeight: 1.5 }}>{mod.tagline}</p>
 
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
-                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                  NPR {price.toLocaleString('en-IN')}
+                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }} aria-busy={!priceReady || undefined}>
+                  NPR <Amount ready={priceReady} value={price} />
                   <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span>
                 </div>
                 {annual && (
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
-                    Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/year
+                    Billed annually · NPR <Amount ready={priceReady} value={price * 12} width="4.2em" />/year
                   </div>
                 )}
               </div>
@@ -385,31 +402,31 @@ export default function Pricing() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 32, alignItems: 'start' }}>
             <div>
               <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 10 }}>
-                {SUITE_ADDON.label}
+                {suite.label}
               </div>
               <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
-                +NPR {(annual ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-IN')}
+                +NPR <Amount ready={priceReady} value={annual ? suite.annual : suite.monthly} />
                 <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month per outlet</span>
               </div>
               {annual && (
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 10 }}>
-                  Billed annually · NPR {(SUITE_ADDON.annual * 12).toLocaleString('en-IN')}/year
+                  Billed annually · NPR <Amount ready={priceReady} value={suite.annual * 12} width="4.2em" />/year
                 </div>
               )}
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 8, lineHeight: 1.5 }}>
-                {SUITE_ADDON.requiresLabel}
+                {suite.requiresLabel}
               </div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 20, lineHeight: 1.5 }}>
                 Not part of the free trial — added once your modules are running.
               </div>
               <button
-                onClick={() => askAbout(SUITE_ADDON.label)}
+                onClick={() => askAbout(suite.label)}
                 style={{ background: GOLD, border: `1px solid ${GOLD}`, color: 'var(--theme-accent-text)', padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
-                Ask about {SUITE_ADDON.label} →
+                Ask about {suite.label} →
               </button>
             </div>
             <div style={{ gridColumn: 'span 2', minWidth: 0 }}>
-              <FeatureList features={SUITE_ADDON.features} color={GOLD} />
+              <FeatureList features={suite.features} color={GOLD} />
               <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '14px 0 0', lineHeight: 1.55 }}>
                 Running more than one outlet? Add Crest Suite Pro to each one and the Group Console
                 rolls them all up on a single screen.

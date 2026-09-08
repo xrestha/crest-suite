@@ -1,4 +1,4 @@
-import { DEFAULT_PLAN_PRICES, SUITE_ADDON } from '../data/pricingPlans'
+import { DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
 
 // What one client pays us per month, in one place.
 //
@@ -44,6 +44,7 @@ export function clientMrrBreakdown(c, planPrices) {
   const imsPrices = prices.ims || DEFAULT_PLAN_PRICES.ims
   const hrPrice   = prices.hr ?? DEFAULT_PLAN_PRICES.hr
   const posPrice  = prices.pos ?? DEFAULT_PLAN_PRICES.pos
+  const suitePrice = prices.suite ?? DEFAULT_PLAN_PRICES.suite
 
   const imsEnd    = c.ims_ends_at || c.subscription_ends_at
   const imsActive = windowOpen(c.ims_enabled !== false, imsEnd)
@@ -67,12 +68,14 @@ export function clientMrrBreakdown(c, planPrices) {
     lines.push({ key: 'pos', label: 'POS', amount: monthlyRate(posPrice, c.billing_cycle) })
   }
   if (suiteActive) {
-    // Suite's own annual figure is a published price, not a 25% derivation, so it is read from
-    // SUITE_ADDON rather than run through monthlyRate.
+    // Suite is priced in Settings > Plan Pricing like the modules (S701) — it used to be the one
+    // line here that could not be repriced without a deploy. Its annual figure is the same 25%
+    // derivation as everything else (annualOf), which is exactly what the published 2,000/1,500
+    // pair already was, so a default-priced client's number is unchanged.
     lines.push({
       key: 'suite',
       label: 'Crest Suite Pro',
-      amount: c.billing_cycle === 'annual' ? SUITE_ADDON.annual : SUITE_ADDON.monthly,
+      amount: c.billing_cycle === 'annual' ? annualOf(suitePrice) : suitePrice,
     })
   }
 

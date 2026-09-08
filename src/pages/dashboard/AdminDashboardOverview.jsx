@@ -6,7 +6,6 @@ import { supabase } from '../../supabaseClient'
 import Tip from '../../components/Tip'
 import { BS_MONTHS, adToBs } from '../../utils/bsCalendar'
 import { getSubStatus, getDateStatus } from '../../utils/subscription'
-import { DEFAULT_PLAN_PRICES } from '../../data/pricingPlans'
 import { clientMRR } from '../../shared/clientMrr'
 
 // Cross-tenant admin overview — every client's periods/profiles in one unscoped read to build
@@ -14,7 +13,7 @@ import { clientMRR } from '../../shared/clientMrr'
 // no single client to scope to). Rendered only when Dashboard.js resolves showAdminDash === true.
 export default function AdminDashboardOverview() {
   const { switchAdminClient } = useAuth()
-  const { settings } = useSettings()
+  const { planPrices } = useSettings()
   const navigate = useNavigate()
 
   const [adminClients, setAdminClients]   = useState([])
@@ -103,8 +102,9 @@ export default function AdminDashboardOverview() {
   // MRR: IMS (tiered) + HR (flat) + POS (flat) + the Suite add-on. The arithmetic lives in
   // src/shared/clientMrr.js so Admin -> Clients can show the same per-client figure without a
   // second copy of rules that each cost something to get right. Prices are editable in
-  // Settings > Plan Pricing (admin-only global row) and fall back to the shipped defaults.
-  const planPrices = settings.plan_prices || DEFAULT_PLAN_PRICES
+  // Settings > Plan Pricing (admin-only global row) and fall back to the shipped defaults — from
+  // the PLATFORM row via the context, not from `settings`, which is whichever row this session
+  // read and carries no prices at all once a client is selected (S701).
   const mrrOf = c => clientMRR(c, planPrices)
   const estMRR = active.reduce((sum, c) => sum + mrrOf(c), 0)
   const estARR  = estMRR * 12

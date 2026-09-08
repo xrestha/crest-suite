@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { useAuth } from './AuthContext'
-import { DEFAULT_PLAN_PRICES } from '../data/pricingPlans'
+import { DEFAULT_PLAN_PRICES, resolvePricing } from '../data/pricingPlans'
 import { errorLine } from '../shared/errorText'
 import { platformSupportFromRow } from '../shared/supportContact'
 
@@ -70,6 +70,13 @@ export function SettingsProvider({ children }) {
   // (migration not yet applied): resolveSupportContact() then falls back to its constants, so a
   // missing column costs the edit screen and nothing else.
   const [platformSupport, setPlatformSupport] = useState(null)
+  // The platform row's plan_prices (S701), kept separate from `settings.plan_prices` for the same
+  // reason platformSupport is: `settings` is whichever row the CURRENT session reads, and a client
+  // session reads its own — where plan_prices is null. Every price a customer is shown has to come
+  // from the one row the admin actually edits, so it is read once here and resolved for everyone.
+  // null until read, and left alone on a failed read: resolvePricing() then prints the shipped
+  // figures rather than blanking four cards on the public pricing page.
+  const [platformPlanPrices, setPlatformPlanPrices] = useState(null)
   const [featureFlags, setFeatureFlags] = useState(DEFAULT_FLAGS)
   const [loading, setLoading] = useState(true)
 
@@ -88,10 +95,14 @@ export function SettingsProvider({ children }) {
       // rule — a failed read is not an empty value).
       if (cid) {
         const { data: prow, error: perr } = await supabase.from('settings')
-          .select('support_contact, contact_phone, contact_email, contact_website').is('client_id', null).maybeSingle()
-        if (!perr) setPlatformSupport(platformSupportFromRow(prow))
+          .select('support_contact, contact_phone, contact_email, contact_website, plan_prices').is('client_id', null).maybeSingle()
+        if (!perr) {
+          setPlatformSupport(platformSupportFromRow(prow))
+          setPlatformPlanPrices(prow?.plan_prices || null)
+        }
       } else {
         setPlatformSupport(platformSupportFromRow(data))
+        setPlatformPlanPrices(data?.plan_prices || null)
       }
     } catch (e) {
       setSettings(DEFAULT_SETTINGS)
@@ -124,8 +135,11 @@ export function SettingsProvider({ children }) {
 
   async function saveSettings(updates) {
     const cid = isAdmin && !clientId ? null : clientId
-    // Strip DB metadata that must not appear in INSERT/UPDATE payloads
-    const { id: _id, client_id: _cid, created_at: _ca, updated_at: _ua, ...payload } = updates
+    // Strip DB metadata that must not appear in INSERT/UPDATE payloads — and plan_prices, which
+    // has a dedicated writer (savePlatformPlanPrices). A column with its own writer must not also
+    // ride along in the general one: `updates` comes from a form seeded when the page loaded, so
+    // saving ANY other tab after a price change would put the stale table back (S701).
+    const { id: _id, client_id: _cid, created_at: _ca, updated_at: _ua, plan_prices: _pp, ...payload } = updates
 
     let query = supabase.from('settings').select('id')
     query = cid ? query.eq('client_id', cid) : query.is('client_id', null)
@@ -162,6 +176,24 @@ export function SettingsProvider({ children }) {
       if (error) throw new Error(errorLine(error))
     }
     setPlatformSupport(contact)
+  }
+
+  // Plan prices are ONE fact for the whole platform, so they save to the client_id-NULL row
+  // whichever client the admin happens to be viewing — exactly like savePlatformSupport above,
+  // and for a sharper reason: saveSettings() would have written them onto the viewed client's own
+  // settings row, where nothing reads them. The price would appear to save, the toast would say so,
+  // and the public pricing page would go on showing the old figure (S701).
+  async function savePlatformPlanPrices(prices) {
+    const { data: existing, error: exErr } = await supabase.from('settings').select('id').is('client_id', null).maybeSingle()
+    if (exErr) throw new Error(errorLine(exErr))
+    if (existing?.id) {
+      const { error } = await supabase.from('settings').update({ plan_prices: prices, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      if (error) throw new Error(errorLine(error))
+    } else {
+      const { error } = await supabase.from('settings').insert({ client_id: null, plan_prices: prices })
+      if (error) throw new Error(errorLine(error))
+    }
+    setPlatformPlanPrices(prices)
   }
 
   // Same guard as saveSettings, and both writes now report: this is the admin's "save this
@@ -223,10 +255,16 @@ export function SettingsProvider({ children }) {
     ? settings.recipe_categories
     : DEFAULT_RECIPE_CATS
 
+  // `planPrices` is the raw override table (what clientMrr.js takes); `pricing` is it resolved
+  // against the shipped constants and ready to print. Everything that shows money to a person
+  // reads one of these two — never pricingPlans.js's constants directly.
+  const planPrices = platformPlanPrices || DEFAULT_PLAN_PRICES
+  const pricing = useMemo(() => resolvePricing(platformPlanPrices), [platformPlanPrices])
+
   return (
     <SettingsContext.Provider value={{
-      settings, featureFlags, loading, platformSupport,
-      saveSettings, saveClientSettings, saveFeatureFlags, savePlatformSupport,
+      settings, featureFlags, loading, platformSupport, planPrices, pricing,
+      saveSettings, saveClientSettings, saveFeatureFlags, savePlatformSupport, savePlatformPlanPrices,
       loadSettings, loadClientSettings, loadClientFeatureFlags,
       isFeatureEnabled, recipeCategories
     }}>

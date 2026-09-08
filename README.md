@@ -58,7 +58,7 @@ quotes as the evidence of what a signed contract incorporated by reference, so u
 | `src/components/` | Reusable UI, and the route guards every protected route stacks |
 | `src/context/` | Auth, settings and theme providers. Singular `context` — the plural is a glob that has already rotted once |
 | `src/utils/` | Standalone helpers: BS calendar, expression evaluator, subscription state, timeouts |
-| `src/data/` | `pricingPlans.js` — the single source of truth for plans and prices |
+| `src/data/` | `pricingPlans.js` — the plans, their feature lists, and the SHIPPED prices. What a screen prints is `resolvePricing()` over the admin's Settings > Plan Pricing figures, reached as `useSettings().pricing` |
 | `src/legal/` | The published Terms and Privacy Policy as markdown, their content hashes, and the registry the acceptance flow stamps. Edit a `.md` and re-run `node scripts/hash-legal.mjs`; a test fails if you forget |
 | `supabase/` | Migrations and Edge Functions |
 | `scripts/` | Build, audit and docs-check scripts, all reachable from `package.json` — except `check-design-layers.mjs`, run by hand after a theme change |

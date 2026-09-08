@@ -154,12 +154,60 @@ export const SUITE_ADDON = {
   ],
 }
 
-// Admin-analytics pricing table (Settings > Plan Pricing, used by AdminDashboardOverview.jsx's
-// MRR/ARR estimate) — derived from the same tiers/prices above so a fresh install's internal
-// revenue estimate starts in sync with the actual advertised pricing, not an independently
-// hand-typed placeholder table that can silently drift out of step with it.
+// Annual is monthly less 25%, everywhere — every `annual` field above is exactly that, and
+// Settings > Plan Pricing renders its Annual tab as a read-only derivation for the same reason.
+// One expression, so a price an admin types gets its annual twin without a second editable field
+// that can drift away from the monthly one.
+export const ANNUAL_DISCOUNT = 0.75
+export const annualOf = monthly => Math.round((monthly || 0) * ANNUAL_DISCOUNT)
+
+// The admin-editable price table (Settings > Plan Pricing), stored as `settings.plan_prices` on
+// the platform (client_id NULL) row — shaped like the tiers/prices above so a fresh install's
+// figures start in sync with the advertised pricing rather than an independently hand-typed
+// placeholder table that can silently drift out of step with it.
 export const DEFAULT_PLAN_PRICES = {
   ims: Object.fromEntries(IMS_TIERS.map(t => [t.key, t.monthly])),
   hr: HR_PRICING.monthly,
   pos: POS_PRICING.monthly,
+  // Suite is priced here too (S701). It used to be the one sellable thing with no override, so
+  // the pricing page could track three of its four cards and printed a stale figure on the fourth.
+  suite: SUITE_ADDON.monthly,
+}
+
+// The prices above are the SHIPPED defaults, not necessarily the live ones. Until S701 the
+// admin's override reached the internal MRR figures and nothing a customer could see: the public
+// pricing page, the Help page's Plan & Pricing tab and the admin's own module picker each
+// imported the constants above directly, so raising HR to 2,400 moved the Admin Dashboard and
+// left 2,600 printed on the page the buyer actually reads.
+//
+// Nothing PRINTS a price from the constants any more — it resolves through here first, against
+// `useSettings().planPrices`. Two properties matter:
+//
+//   * It falls back per FIELD, not all-or-nothing. A plan_prices object carrying only `hr` leaves
+//     every other price at its shipped figure — which is what a row written before a later
+//     price was added actually looks like.
+//   * 0 is a real price and survives. A Starter tier priced at 0 is a live configuration
+//     (clientMrr.js lists it rather than dropping it), so the test is "is this a number" and not
+//     `|| fallback`, which would quietly restore 2,000 over a deliberate zero.
+const withMonthly = (base, monthly) =>
+  typeof monthly === 'number' && Number.isFinite(monthly)
+    ? { ...base, monthly, annual: annualOf(monthly) }
+    : base
+
+/**
+ * Every sellable price, resolved and ready to print.
+ * @param {object} [planPrices] `settings.plan_prices` from the platform row; anything absent or
+ *                              non-numeric falls back to the constant above it.
+ * @returns {{ imsTiers: object[], hr: object, pos: object, suite: object }} the same shapes as
+ *          IMS_TIERS / HR_PRICING / POS_PRICING / SUITE_ADDON, features and labels included.
+ */
+export function resolvePricing(planPrices) {
+  const p = planPrices || {}
+  const ims = p.ims || {}
+  return {
+    imsTiers: IMS_TIERS.map(tier => withMonthly(tier, ims[tier.key])),
+    hr:    withMonthly(HR_PRICING, p.hr),
+    pos:   withMonthly(POS_PRICING, p.pos),
+    suite: withMonthly(SUITE_ADDON, p.suite),
+  }
 }

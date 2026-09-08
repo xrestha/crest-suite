@@ -92,11 +92,42 @@ describe('annual billing', () => {
     expect(clientMRR(c, PRICES)).toBe(3750 + 1125)
   })
 
-  // Suite's annual figure is a published price, not a derivation — 1500, not 25% off 2000 (1500
-  // by coincidence today, so assert against the constant, which is what protects it if it moves).
-  it('reads Suite annual from the published price, not a 25% derivation', () => {
+  // Suite discounts annually like everything else, off whatever it is currently priced at. The
+  // published 2,000/1,500 pair already WAS that derivation, so this figure did not move when
+  // Suite became admin-editable (S701) — asserted against the constant so it stays honest if the
+  // shipped price does move.
+  it('discounts Suite annually like every other line', () => {
     const c = client({ billing_cycle: 'annual', suite_plan: 'pro', suite_ends_at: future })
     expect(clientMRR(c, PRICES)).toBe(3750 + SUITE_ADDON.annual)
+  })
+})
+
+// Suite used to be the one line here that no admin could reprice: its figure came from the
+// SUITE_ADDON constant while every other line read the price table. A client's bill would not
+// follow Settings > Plan Pricing for the most expensive thing on it (S701).
+describe('the Suite add-on is priced from the table', () => {
+  const suiteAt = n => ({ ...PRICES, suite: n })
+
+  it('bills the admin-set Suite price', () => {
+    const c = client({ suite_plan: 'pro', suite_ends_at: future })
+    expect(clientMRR(c, suiteAt(3000))).toBe(5000 + 3000)
+  })
+
+  it('discounts the admin-set price annually', () => {
+    const c = client({ billing_cycle: 'annual', suite_plan: 'pro', suite_ends_at: future })
+    expect(clientMRR(c, suiteAt(3000))).toBe(3750 + 2250)
+  })
+
+  // A price table written before Suite was editable has no `suite` key at all, and a table that
+  // sets it to 0 means 0 — the same 'is this a number' rule resolvePricing() applies.
+  it('falls back to the shipped price when the table has no suite key', () => {
+    const c = client({ suite_plan: 'pro', suite_ends_at: future })
+    expect(clientMRR(c, PRICES)).toBe(5000 + SUITE_ADDON.monthly)
+  })
+
+  it('honours a Suite priced at 0 rather than restoring the default', () => {
+    const c = client({ suite_plan: 'pro', suite_ends_at: future })
+    expect(clientMRR(c, suiteAt(0))).toBe(5000)
   })
 })
 
