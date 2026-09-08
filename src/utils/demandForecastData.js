@@ -1,129 +1,40 @@
 import { supabase } from '../supabaseClient'
 import { scopedFrom, scopedInsert, scopedDelete } from '../shared/scopedDb'
 import { fetchAllRowsChunked } from '../shared/fetchAllRows'
-import { bsToAd, adToBs } from './bsCalendar'
 import { computeOrderAmounts } from './posBillingMath'
+import {
+  LOOKBACK_DAYS, buildDailyHistory, buildManualDailyHistory, periodsInLookback, forecastByWeekday,
+} from './demandForecastMath'
 
-const LOOKBACK_DAYS = 84 // 12 weeks — enough same-weekday samples for a moving average
-const SAMPLES_PER_WEEKDAY = 8 // cap how many historical same-weekday points feed the average
+// The arithmetic lives in demandForecastMath.js (pure, tested); this file is the Supabase
+// orchestration around it. Re-exported so older imports keep resolving.
+export { buildDailyHistory, buildManualDailyHistory, forecastByWeekday } from './demandForecastMath'
 
-// ── Pure data-shaping (no Supabase) — testable in isolation ────────────────
+export const FORECAST_METHOD = 'weekday_weighted_average'
 
-// Collapses raw pos_orders + their items into one row per calendar day: total covers,
-// total net revenue, and qty sold per recipe. Orders with a credit_note_id are excluded —
-// the same rule SalesReport.jsx's dailyRows uses, since a credit-noted bill's revenue
-// correction is posted as a new entry on the day it's issued, not retroactively.
-export function buildDailyHistory(orders, itemsByOrder, computeOrderAmounts) {
-  const byDay = {}
-  for (const o of orders) {
-    if (o.credit_note_id) continue
-    const d = new Date(o.closed_at)
-    const key = d.toDateString()
-    const items = itemsByOrder[o.id] || []
-    // Revenue excludes item-level comps (never billed at menu price — see PosOrders.jsx); the
-    // qtyByRecipe loop below still counts them, since a comped dish was still prepared/consumed
-    // and demand planning cares about that regardless of what it billed for.
-    const amounts = computeOrderAmounts(o, items.filter(i => !i.comped), true)
-    const row = byDay[key] = byDay[key] || { date: new Date(d.getFullYear(), d.getMonth(), d.getDate()), weekday: d.getDay(), covers: 0, revenue: 0, qtyByRecipe: {}, basis: 'pos' }
-    row.covers += o.covers || 1
-    row.revenue += amounts.net
-    for (const i of items) {
-      if (!i.recipe_id) continue
-      row.qtyByRecipe[i.recipe_id] = (row.qtyByRecipe[i.recipe_id] || 0) + i.qty
-    }
-  }
-  return Object.values(byDay).sort((a, b) => a.date - b.date)
+// PostgREST reports an unknown column as PGRST204 ("Could not find the 'x' column …") from its
+// schema cache; Postgres itself would say 42703. Either way, only the two evidence columns are
+// new enough to be missing.
+function isMissingSampleColumns(err) {
+  const text = `${err?.message || ''} ${err?.details || ''}`
+  return (err?.code === 'PGRST204' || err?.code === '42703') && /sample_count/.test(text)
 }
-
-// Merges sales_entries (source='manual') history for days not already covered by POS
-// history — bs_day=0 is a bulk-entry sentinel (Sales.js) and MUST be excluded, or a whole
-// month's lump quantity lands on a single fabricated "day", corrupting the weekday average.
-export function buildManualDailyHistory(salesEntries, periodsById) {
-  const byDay = {}
-  for (const e of salesEntries) {
-    if (e.bs_day === 0) continue
-    const period = periodsById[e.period_id]
-    if (!period) continue
-    const ad = bsToAd(period.bs_year, period.bs_month, e.bs_day)
-    const key = ad.toDateString()
-    const row = byDay[key] = byDay[key] || { date: ad, weekday: ad.getDay(), covers: 0, revenue: 0, qtyByRecipe: {}, basis: 'manual' }
-    row.qtyByRecipe[e.recipe_id] = (row.qtyByRecipe[e.recipe_id] || 0) + e.qty_sold
-    // manual entries carry no covers/revenue signal at all — basis:'manual' lets
-    // forecastByWeekday exclude these rows from the covers/revenue average instead of
-    // silently averaging in a false zero
-  }
-  return Object.values(byDay)
-}
-
-// Day-of-week moving average: for each of the next `horizonDays` calendar days, average the
-// last up-to-SAMPLES_PER_WEEKDAY historical days that fall on the same weekday. Deliberately
-// simple/auditable over a trained model — see plan tradeoff note.
-export function forecastByWeekday(dailyHistory, horizonDays, holidaysByKey = {}) {
-  const byWeekday = Array.from({ length: 7 }, () => [])
-  for (const row of dailyHistory) byWeekday[row.weekday].push(row)
-  for (const rows of byWeekday) rows.sort((a, b) => b.date - a.date) // most recent first
-
-  const results = []
-  const today = new Date()
-  for (let i = 1; i <= horizonDays; i++) {
-    const target = new Date(today)
-    target.setDate(today.getDate() + i)
-    const weekday = target.getDay()
-    const samples = byWeekday[weekday].slice(0, SAMPLES_PER_WEEKDAY)
-    const n = samples.length
-    const bs = adToBs(target)
-    const holidayKey = `${bs.year}:${bs.month}:${bs.day}`
-    const holiday = holidaysByKey[holidayKey] || null
-    // Nepal holiday footfall swings both directions depending on the specific festival and the
-    // business (some restaurants close for Dashain Tika, others get slammed the week after), so
-    // the multiplier is owner-set per holiday occurrence in Holiday Calendar rather than guessed
-    // here — a holiday with no multiplier configured is still flagged (via `holiday` below) but
-    // left unadjusted, same as before.
-    const multiplier = holiday && holiday.demand_multiplier != null ? parseFloat(holiday.demand_multiplier) : null
-
-    // Qty averages over every sample (manual-basis rows carry real qty signal, that's their
-    // whole purpose). Covers/revenue average ONLY over pos-basis samples — a manual-basis row
-    // structurally has covers=revenue=0 (never tracked), so mixing it in would silently
-    // average toward a false zero instead of reflecting "no signal available".
-    const posSamples = samples.filter(s => s.basis === 'pos')
-
-    const qtyByRecipe = {}
-    for (const s of samples) {
-      for (const [recipeId, qty] of Object.entries(s.qtyByRecipe)) {
-        qtyByRecipe[recipeId] = (qtyByRecipe[recipeId] || 0) + qty / (n || 1)
-      }
-    }
-    if (multiplier != null) {
-      for (const recipeId of Object.keys(qtyByRecipe)) qtyByRecipe[recipeId] *= multiplier
-    }
-
-    const rawCovers = posSamples.length > 0 ? posSamples.reduce((s, r) => s + r.covers, 0) / posSamples.length : null
-    const rawRevenue = posSamples.length > 0 ? posSamples.reduce((s, r) => s + r.revenue, 0) / posSamples.length : null
-
-    results.push({
-      date: target, bs, weekday,
-      sampleCount: n, posSampleCount: posSamples.length,
-      forecastCovers: rawCovers != null && multiplier != null ? rawCovers * multiplier : rawCovers,
-      forecastRevenue: rawRevenue != null && multiplier != null ? rawRevenue * multiplier : rawRevenue,
-      forecastQtyByRecipe: qtyByRecipe,
-      holiday, // { name, holiday_type, demand_multiplier } if this date matches hr_holiday_calendar, else null
-    })
-  }
-  return results
-}
-
-// ── Supabase orchestration ──────────────────────────────────────────────────
 
 export async function runForecast(clientId, horizonDays = 7) {
-  const runStartedAt = new Date().toISOString()
-  const lookbackStart = new Date()
-  lookbackStart.setDate(lookbackStart.getDate() - LOOKBACK_DAYS)
+  const now = new Date()
+  const runStartedAt = now.toISOString()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const lookbackStart = new Date(todayStart)
+  lookbackStart.setDate(todayStart.getDate() - LOOKBACK_DAYS)
 
   try {
     const [ordersRes, periodsRes, holidaysRes] = await Promise.all([
+      // Bounded at both ends: today's bills are a partial day and must not stand in for a whole
+      // one (forecastByWeekday drops them too — this just avoids fetching them).
       scopedFrom('pos_orders', clientId, 'id, covers, closed_at, credit_note_id')
         .eq('status', 'billed').eq('close_type', 'paid')
-        .gte('closed_at', lookbackStart.toISOString()),
+        .gte('closed_at', lookbackStart.toISOString())
+        .lt('closed_at', todayStart.toISOString()),
       scopedFrom('monthly_periods', clientId, 'id, bs_year, bs_month'),
       scopedFrom('hr_holiday_calendar', clientId, 'bs_year, bs_month, bs_day, name, holiday_type, demand_multiplier'),
     ])
@@ -155,16 +66,20 @@ export async function runForecast(clientId, horizonDays = 7) {
 
     // Fallback to manual sales_entries only if POS history is sparse (new POS client / pre-POS periods)
     if (history.length < LOOKBACK_DAYS / 2) {
-      const periodsById = Object.fromEntries((periods || []).map(p => [p.id, p]))
-      const periodIds = (periods || []).map(p => p.id)
+      const windowPeriods = periodsInLookback(periods, lookbackStart)
+      const periodsById = Object.fromEntries(windowPeriods.map(p => [p.id, p]))
+      const periodIds = windowPeriods.map(p => p.id)
       if (periodIds.length > 0) {
-        // Every period the client has ever had, so this crosses 1000 rows inside one real year —
-        // it was a bare select, silently truncated (S683).
+        // Chunked and paged: a period set of a few months still crosses 1000 rows on a long menu
+        // (S683). `source` is DEFAULT 'manual' but nullable, and rows predating the default read
+        // as NULL — the same predicate persistSalesDay.js uses, or those days vanish from the
+        // forecast while still counting as revenue everywhere else.
         const { data: manualEntries, error: manualErr } = await fetchAllRowsChunked(periodIds, ids =>
           supabase.from('sales_entries').select('period_id, recipe_id, bs_day, qty_sold, source')
-            .in('period_id', ids).eq('source', 'manual').order('id'))
+            .in('period_id', ids).or('source.is.null,source.eq.manual').order('id'))
         if (manualErr) throw manualErr
-        history = history.concat(buildManualDailyHistory(manualEntries || [], periodsById))
+        const coveredKeys = new Set(history.map(h => h.date.toDateString()))
+        history = history.concat(buildManualDailyHistory(manualEntries || [], periodsById, coveredKeys))
       }
     }
 
@@ -172,11 +87,12 @@ export async function runForecast(clientId, horizonDays = 7) {
       (holidays || []).map(h => [`${h.bs_year}:${h.bs_month}:${h.bs_day}`, { name: h.name, holiday_type: h.holiday_type, demand_multiplier: h.demand_multiplier }])
     )
 
-    const forecast = forecastByWeekday(history, horizonDays, holidaysByKey)
+    const forecast = forecastByWeekday(history, horizonDays, holidaysByKey, now)
 
     // When no pos-basis samples exist for a weekday, forecastRevenue is null even though we
     // may still have a real qty forecast (from manual sales_entries) — estimate revenue from
-    // forecasted qty × menu price instead of showing a bare "0", and mark it clearly as such.
+    // forecasted qty × current ex-VAT menu price instead of showing a bare "0", and mark it
+    // clearly as such. selling_price is ex-VAT (MenuPricing.js), so both bases agree.
     const allRecipeIds = [...new Set(forecast.flatMap(f => Object.keys(f.forecastQtyByRecipe)))]
     let priceByRecipe = {}
     if (allRecipeIds.length > 0) {
@@ -203,6 +119,10 @@ export async function runForecast(clientId, horizonDays = 7) {
         model_basis: hasPosSignal ? 'pos' : 'manual', horizon_days: horizonDays,
         holiday_name: f.holiday?.name || null,
         holiday_multiplier: f.holiday?.demand_multiplier ?? null,
+        // How much evidence stood behind the day — a forecast averaged over one week and one over
+        // eight used to look identical on the page (S694; migration 20260908120000).
+        sample_count: f.sampleCount,
+        pos_sample_count: f.posSampleCount,
       })
       for (const [recipeId, qty] of Object.entries(f.forecastQtyByRecipe)) {
         rows.push({
@@ -221,26 +141,38 @@ export async function runForecast(clientId, horizonDays = 7) {
     // yet" instead of the last good run). demand_forecast_daily has no natural upsert key
     // (recipe-level rows share a date), so old rows are still cleared by id exclusion afterward —
     // every recompute click would otherwise stack duplicate day-rows and loadStored's read-back
-    // would non-deterministically pick between old and new values.
+    // would non-deterministically pick between old and new values. Which is exactly why the
+    // delete's error is checked: a refused delete used to leave both runs in place while the run
+    // log recorded a success.
     if (rows.length > 0) {
-      const { data: inserted, error: insErr } = await scopedInsert('demand_forecast_daily', clientId, rows)
+      let { data: inserted, error: insErr } = await scopedInsert('demand_forecast_daily', clientId, rows)
+      if (insErr && isMissingSampleColumns(insErr)) {
+        // Migration 20260908120000 not applied yet on this database. The forecast is still
+        // correct without its evidence columns, so write it without them rather than refuse —
+        // the page simply omits the "from the last N Wednesdays" line until the migration lands.
+        console.warn('demand_forecast_daily has no sample_count columns yet — apply migration 20260908120000. Writing the forecast without them.')
+        const stripped = rows.map(({ sample_count, pos_sample_count, ...rest }) => rest)
+        ;({ data: inserted, error: insErr } = await scopedInsert('demand_forecast_daily', clientId, stripped))
+      }
       if (insErr) throw insErr
       const newIds = (inserted || []).map(r => r.id)
       if (newIds.length > 0) {
-        await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays).not('id', 'in', `(${newIds.join(',')})`)
+        const { error: delErr } = await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays).not('id', 'in', `(${newIds.join(',')})`)
+        if (delErr) throw delErr
       }
     } else {
-      await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays)
+      const { error: delErr } = await scopedDelete('demand_forecast_daily', clientId).eq('horizon_days', horizonDays)
+      if (delErr) throw delErr
     }
     await scopedInsert('demand_forecast_run_log', clientId, {
-      run_at: runStartedAt, method: 'weekday_moving_average',
+      run_at: runStartedAt, method: FORECAST_METHOD,
       rows_written: rows.length, error: null,
     })
 
     return { forecast, rowsWritten: rows.length }
   } catch (err) {
     await scopedInsert('demand_forecast_run_log', clientId, {
-      run_at: runStartedAt, method: 'weekday_moving_average',
+      run_at: runStartedAt, method: FORECAST_METHOD,
       rows_written: 0, error: err.message || String(err),
     })
     throw err

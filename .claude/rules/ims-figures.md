@@ -1,6 +1,8 @@
 ---
 paths:
   - "src/shared/imsFormulas.js"
+  - "src/utils/demandForecastData.js"
+  - "src/utils/demandForecastMath.js"
   - "src/modules/ims/stockcount/**"
   - "src/modules/ims/reports/**"
   - "src/pages/Settings.js"
@@ -81,3 +83,30 @@ the chip that replaced it, on **29 IMS pages**; `ReportPage` carries it in a `sc
 that is the same set this section's previous paragraph is about. Two pages are deliberately
 excluded and carry a comment saying so: `PeriodComparison` (its scope *is* every period) and
 `OutstandingPayables` (unbounded — payables carry forward).
+
+### Demand Forecast: revenue is ex-VAT, arithmetic is pure, and an average is not a portion (S694)
+
+**"Revenue" means Σ qty × ex-VAT price everywhere, and a forecast of it must mean the same.**
+`buildDailyHistory` in `src/utils/demandForecastMath.js` takes `grossAmt − discount` from
+`computeOrderAmounts`, never `.net` (the rounded amount payable *including* VAT). It was the only
+caller in the app that hard-coded `vatReg = true`, and the Roster's Labor Forecast divided that
+VAT-inclusive figure by a sales-per-labour-hour learned from ex-VAT `sales_entries`, inflating
+required hours ~13% on a VAT-registered outlet. Any new consumer of `forecast_revenue` can assume
+ex-VAT; any new *producer* of a revenue-like figure must state its VAT basis in a comment.
+
+**The arithmetic lives in `demandForecastMath.js`, which imports no Supabase client;
+`demandForecastData.js` is the orchestration around it.** Put new forecast maths in the pure file
+— it has a test file, the orchestration file cannot. Three properties the tests pin: the day of
+the run is never a sample (a morning recompute would count a partial day as a whole one), a dish
+absent from a sample is a zero that day (not a missing sample), and covers/revenue average over
+POS-basis samples only (a manual day is "no signal", not zero).
+
+**A per-day average is shown as whole plates on the page, never as a decimal.** `splitDishList`
+→ `platesOf` (ceil) for anything ≥ `OCCASIONAL_THRESHOLD`, an "occasional" tail below it; the raw
+average and the sample count go on hover. A reader took "0.8" as a portion size. The same applies
+to any future per-dish figure: the kitchen makes plates.
+
+**The manual-sales read uses `source.is.null,source.eq.manual`**, the predicate
+`persistSalesDay.js` uses, because rows predating the column default read NULL. `.eq('source',
+'manual')` silently drops them. And a day present in both POS and manual history is ONE sample —
+pass the POS day-key set to `buildManualDailyHistory`.
