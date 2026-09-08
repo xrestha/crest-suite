@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Hexagon, Check, Mail, Calculator, Users, CalendarDays } from 'lucide-react'
+import { Hexagon, Check, Mail, Calculator, Users, CalendarDays, ChevronDown } from 'lucide-react'
 import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
 import { MODULE_COLORS, MODULE_INK, moduleTint, TRIAL_DAYS, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON } from '../data/pricingPlans'
@@ -55,22 +55,52 @@ const FAQS = [
 ]
 
 // Shared feature-list rendering, colored by whichever module owns the card.
-function FeatureList({ features, color }) {
+//
+// The long lists collapse (S699). Starter names 17 features and Growth 14, and because the three
+// tiers share one grid row every card was stretched to the tallest — so the IMS section ran about
+// 17 lines deep three times over and pushed Crest HR and Crest POS well below the fold. A visitor
+// who is not already sold does not read 39 bullets to find out that payroll exists. Seven is the
+// middle of the 5–7 range the pricing-page research converges on, with the rest one click away.
+//
+// Two decisions worth keeping:
+//
+// It is a BUTTON, not hover. Hover looks tidier and is the wrong mechanism: most pricing-page
+// traffic is on a phone, which has no hover state at all — and worse than absent, a tap on a
+// :hover rule latches it until the visitor taps somewhere else, so a card would open and then
+// refuse to close. Hover is a bonus for people holding a mouse, never the only way in.
+//
+// It collapses only where it saves more than two lines, so Pro (8), POS (8), HR (7) and Suite (6)
+// stay whole: a control that hides two lines costs more attention than the two lines it saves.
+const COLLAPSE_AFTER = 7
+
+function FeatureList({ features, color, collapsible = false }) {
+  const [open, setOpen] = useState(false)
+  const collapses = collapsible && features.length > COLLAPSE_AFTER + 2
+  const shown = collapses && !open ? features.slice(0, COLLAPSE_AFTER) : features
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      {features.map((f, i) => (
+      {shown.map((f, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
           <Check size={14} strokeWidth={2.5} aria-hidden="true" style={{ color, flexShrink: 0, marginTop: 2 }} />
           <span style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.45 }}>{f}</span>
         </div>
       ))}
+      {collapses && (
+        <button
+          type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+          style={{ background: 'none', border: 'none', padding: '4px 0 0', marginTop: 1, color, fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, alignSelf: 'flex-start' }}>
+          {open ? 'Show less' : `Show ${features.length - COLLAPSE_AFTER} more`}
+          <ChevronDown size={13} strokeWidth={2.5} aria-hidden="true"
+            style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }} />
+        </button>
+      )}
     </div>
   )
 }
 
 function SectionHeading({ color, title, subtitle }) {
   return (
-    <div style={{ textAlign: 'center', marginBottom: 28 }}>
+    <div style={{ textAlign: 'center', marginBottom: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 6 }}>
         <span style={{ width: 10, height: 10, borderRadius: 0, background: color, flexShrink: 0 }} />
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: 'var(--theme-text1)' }}>{title}</h2>
@@ -135,7 +165,7 @@ export default function Pricing() {
       <main>
 
       {/* Hero */}
-      <div style={{ textAlign: 'center', padding: '72px 32px 52px' }}>
+      <div style={{ textAlign: 'center', padding: '72px 32px 32px' }}>
         {!session && (
           <div style={{ display: 'inline-block', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 'var(--radius-full)', padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
             {TRIAL_DAYS} days free · All three modules · No credit card
@@ -144,42 +174,17 @@ export default function Pricing() {
         <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
           Simple, honest pricing
         </h1>
-        <p style={{ fontSize: 16, color: 'var(--theme-text2)', margin: '0 auto 44px', maxWidth: 560, lineHeight: 1.7 }}>
+        <p style={{ fontSize: 16, color: 'var(--theme-text2)', margin: '0 auto', maxWidth: 560, lineHeight: 1.7 }}>
           Built for Nepal's restaurants and cafes. Works in BS calendar, NPR, and FonePay, with no Western-SaaS workarounds needed.
           Buy Crest IMS, Crest HR, and Crest POS separately, then add Crest Suite Pro on top for the owner-level view across all of them.
         </p>
 
-        {/* Billing toggle */}
-        <div style={{ display: 'inline-flex', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 'var(--radius-md)', padding: 4, gap: 2 }}>
-          <button
-            onClick={() => setAnnual(false)} aria-pressed={!annual}
-            style={{ background: !annual ? brassTint(15) : 'none', border: !annual ? `1px solid ${brassTint(30)}` : '1px solid transparent', color: !annual ? GOLD_INK : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
-            Monthly
-          </button>
-          <button
-            onClick={() => setAnnual(true)} aria-pressed={annual}
-            style={{ background: annual ? brassTint(15) : 'none', border: annual ? `1px solid ${brassTint(30)}` : '1px solid transparent', color: annual ? GOLD_INK : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-            Annual
-            <span style={{ background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', color: GREEN, fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 700, letterSpacing: '0.04em' }}>
-              Save 25%
-            </span>
-          </button>
-        </div>
-        {/* Every figure on this page is exclusive of VAT, and until now the page made no tax claim
-            at all while the Terms said fees are quoted ex-VAT and 13% is added on the invoice. One
-            of the two had to move; a price that turns out to be 13% higher on the invoice than on
-            the page is the kind of surprise the Consumer Protection Act 2075 exists for. Placed
-            with the billing toggle rather than in the footer because that is where the numbers are
-            being compared. */}
-        <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '12px 0 0', textAlign: 'center' }}>
-          All prices exclude VAT. 13% VAT is added on invoice.
-        </p>
       </div>
 
       {/* ── Why Crest — value strip (this page is the single marketing surface per the tool-first
              product charter; a typographic strip, not a hero-plus-three-cards, on purpose) ── */}
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 72px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 30, borderTop: `1px solid ${BORDER}`, paddingTop: 44 }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 32, borderTop: `1px solid ${BORDER}`, paddingTop: 32 }}>
           {[
             { Icon: Calculator,   title: 'Cost intelligence, not just billing', body: 'True food cost, recipe margins, and variance. The numbers POS-only tools never surface.' },
             { Icon: Users,        title: 'HR and payroll built in',             body: 'SSF, TDS, attendance, and roster in the same product. Nepal-compliant and deadline-ready every month.' },
@@ -205,7 +210,7 @@ export default function Pricing() {
         <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px' }}>
           <div style={{
             background: CARD, border: `1px solid ${brassTint(30)}`, borderRadius: 'var(--radius-lg)',
-            padding: '30px 32px', display: 'flex', gap: 30, alignItems: 'center', flexWrap: 'wrap',
+            padding: '32px', display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap',
             boxShadow: `0 4px 48px ${brassTint(10)}`,
           }}>
             <div style={{ flex: '1 1 440px', minWidth: 0 }}>
@@ -213,12 +218,11 @@ export default function Pricing() {
                 Free for {TRIAL_DAYS} days
               </div>
               <h2 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 11px', color: 'var(--theme-text1)', lineHeight: 1.25 }}>
-                You try all three modules, not one tier of one of them
+                Stock, staff and the till — all switched on
               </h2>
               <p style={{ fontSize: 14, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.7 }}>
-                Every trial runs at the <strong style={{ color: 'var(--theme-text1)', fontWeight: 700 }}>Growth</strong> tier
-                with Crest IMS, Crest HR and Crest POS all switched on, so you can cost a recipe, set up payroll and bill a
-                table in the same week. We open each trial personally — sign up and we will call you within one working day,
+                Every trial includes Crest IMS, Crest HR and Crest POS at the <strong style={{ color: 'var(--theme-text1)', fontWeight: 700 }}>Growth</strong> tier,
+                so you can cost a recipe, set up payroll and bill a table in the same week. We open each trial personally — sign up and we will call you within one working day,
                 and your {TRIAL_DAYS} days start from that call, not from the form. No card. When the {TRIAL_DAYS} days are
                 up you choose what to keep, and everything you entered carries straight over.
               </p>
@@ -232,11 +236,42 @@ export default function Pricing() {
         </div>
       )}
 
+      {/* ── Billing controls (S699) ──────────────────────────────────────────────────────────
+             These decide every number below them and lived in the hero, a screen and a half above
+             the first price they change — so a visitor comparing NPR 2,000 against NPR 1,500 had
+             to scroll back up to learn which one they were reading, and the 25% annual saving was
+             announced before there was anything to apply it to. Moved to the head of the pricing
+             region, where the numbers are. Deliberately NOT sticky: this page has been bitten by
+             sticky-in-body-flow before (S604). The VAT line rides alongside rather than beneath —
+             same information, one row instead of two, and it wraps under on a narrow screen. ── */}
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px' }}>
+        <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 32, marginBottom: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18, flexWrap: 'wrap' }}>
+          <div style={{ display: 'inline-flex', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 'var(--radius-md)', padding: 4, gap: 2 }}>
+            <button
+              onClick={() => setAnnual(false)} aria-pressed={!annual}
+              style={{ background: !annual ? brassTint(15) : 'none', border: !annual ? `1px solid ${brassTint(30)}` : '1px solid transparent', color: !annual ? GOLD_INK : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+              Monthly
+            </button>
+            <button
+              onClick={() => setAnnual(true)} aria-pressed={annual}
+              style={{ background: annual ? brassTint(15) : 'none', border: annual ? `1px solid ${brassTint(30)}` : '1px solid transparent', color: annual ? GOLD_INK : 'var(--theme-text2)', padding: '8px 22px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+              Annual
+              <span style={{ background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', color: GREEN, fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 700, letterSpacing: '0.04em' }}>
+                Save 25%
+              </span>
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>
+            All prices exclude VAT. 13% VAT is added on invoice.
+          </p>
+        </div>
+      </div>
+
       {/* ── Crest IMS — 3 tiers ── */}
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px' }}>
         <SectionHeading color={MODULE_INK.ims} title="Crest IMS" subtitle="Inventory, recipe costing & food-cost intelligence" />
       </div>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 24 }}>
         {IMS_TIERS.map(plan => {
           const highlight = plan.key === 'growth'
           const price = annual ? plan.annual : plan.monthly
@@ -269,11 +304,11 @@ export default function Pricing() {
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
                 <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
                   NPR {price.toLocaleString('en-IN')}
-                  <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
+                  <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span>
                 </div>
                 {annual && (
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
-                    Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr
+                    Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/year
                   </div>
                 )}
               </div>
@@ -290,7 +325,7 @@ export default function Pricing() {
                     {plan.includesLabel}
                   </div>
                 )}
-                <FeatureList features={plan.features} color={MODULE_INK.ims} />
+                <FeatureList features={plan.features} color={MODULE_INK.ims} collapsible />
               </div>
             </div>
           )
@@ -298,10 +333,10 @@ export default function Pricing() {
       </div>
 
       {/* ── Crest HR + Crest POS — flat modules ── */}
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px' }}>
         <SectionHeading color={MODULE_INK.hr} title="Crest HR & Crest POS" subtitle="Payroll and floor operations — buy either one on its own" />
       </div>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
         {[
           { key: 'hr',  name: 'Crest HR',  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: HR_PRICING },
           { key: 'pos', name: 'Crest POS', tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: POS_PRICING },
@@ -317,11 +352,11 @@ export default function Pricing() {
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
                 <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
                   NPR {price.toLocaleString('en-IN')}
-                  <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
+                  <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span>
                 </div>
                 {annual && (
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
-                    Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr
+                    Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/year
                   </div>
                 )}
               </div>
@@ -332,7 +367,7 @@ export default function Pricing() {
                 {session ? `Ask about ${mod.name}` : 'Start Free Trial'} →
               </button>
 
-              <FeatureList features={mod.pricing.features} color={MODULE_INK[mod.key]} />
+              <FeatureList features={mod.pricing.features} color={MODULE_INK[mod.key]} collapsible />
             </div>
           )
         })}
@@ -342,23 +377,23 @@ export default function Pricing() {
           One SKU sitting on top of whatever modules a client bought, with a real feature list.
           This section used to render three bundle cards showing only a strikethrough price and
           no features at all — which was the entire pitch. */}
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px' }}>
         <SectionHeading color={GOLD} title="Crest Suite Pro" subtitle="The owner layer — added on top of your modules, not a separate product" />
       </div>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 80px' }}>
+      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px' }}>
         <div style={{ background: CARD, border: `1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)`, borderRadius: 'var(--radius-lg)', padding: '32px 28px', position: 'relative' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 28, alignItems: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 32, alignItems: 'start' }}>
             <div>
               <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 10 }}>
                 {SUITE_ADDON.label}
               </div>
-              <div style={{ fontSize: 30, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
+              <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', marginBottom: 4 }}>
                 +NPR {(annual ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-IN')}
-                <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo per outlet</span>
+                <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/month per outlet</span>
               </div>
               {annual && (
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 10 }}>
-                  Billed annually · NPR {(SUITE_ADDON.annual * 12).toLocaleString('en-IN')}/yr
+                  Billed annually · NPR {(SUITE_ADDON.annual * 12).toLocaleString('en-IN')}/year
                 </div>
               )}
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 8, lineHeight: 1.5 }}>
@@ -385,7 +420,7 @@ export default function Pricing() {
       </div>
 
       {/* FAQ button */}
-      <div style={{ textAlign: 'center', padding: '0 24px 80px' }}>
+      <div style={{ textAlign: 'center', padding: '0 24px 64px' }}>
         <button
           onClick={() => setShowFaq(true)}
           style={{ background: brassTint(8), border: `1px solid ${brassTint(25)}`, color: GOLD_INK, padding: '11px 28px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>

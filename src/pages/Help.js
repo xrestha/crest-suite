@@ -1656,8 +1656,8 @@ export default function Help() {
                     )}
                   </div>
                   <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString('en-IN')}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
-                    {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr</div>}
+                    <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString('en-IN')}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span></div>
+                    {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/year</div>}
                   </div>
                   {plan.includesLabel && (
                     <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginBottom: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
@@ -1695,8 +1695,8 @@ export default function Help() {
                     <span style={{ fontSize: 16, fontWeight: 700, color: mod.color, fontFamily: 'Georgia, serif' }}>{mod.name}</span>
                   </div>
                   <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString('en-IN')}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
-                    {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr</div>}
+                    <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString('en-IN')}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span></div>
+                    {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/year</div>}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
                     {mod.pricing.features.map((f, i) => (
@@ -1719,7 +1719,7 @@ export default function Help() {
                 <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 8 }}>{SUITE_ADDON.label}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>
                   +NPR {(pricingAnnual ? SUITE_ADDON.annual : SUITE_ADDON.monthly).toLocaleString('en-IN')}
-                  <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo per outlet</span>
+                  <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)' }}>/month per outlet</span>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 6 }}>{SUITE_ADDON.requiresLabel}</div>
               </div>

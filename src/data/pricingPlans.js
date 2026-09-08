@@ -75,7 +75,7 @@ const GROWTH_EXTRAS = [
   'Stock Movements Ledger (Book vs Physical)',
   'Overheads, P&L, and Break-Even Analysis',
   'Budget vs Actual per Category',
-  'Internal Requisitions (Store to Department)',
+  'Internal Requisitions (Store Issues to Kitchen, Bar)',
   'Dead Stock & Slow Mover Detection',
   'Recipe Contribution Margin Report',
   'Menu Repricing (Underpriced Dish Finder)',

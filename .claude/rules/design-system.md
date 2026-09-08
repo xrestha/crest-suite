@@ -927,3 +927,35 @@ variant, probe `.badge-*` on `document.body`, not on a card**, and re-run the CV
 subscription chips in `utils/subscription.js` mix their tint with `--theme-card` rather than
 `transparent` for the related reason: the sidebar ground is darker than the card, so a see-through
 pill there measured 4.34 with text tuned for 4.5 on white.
+
+## Vertical rhythm on a long page, and the proximity rule (S699)
+
+`DESIGN.md`'s `spacing` scale stops at `xl: 32px`, which covers a component's insides and nothing
+about how far one section sits from the next. `/pricing` filled that gap by inventing a value at
+each site and ended up with **nine different vertical gaps — 24, 28, 30, 40, 44, 52, 64, 72, 80** —
+four of them (28, 30, 44, 52) on no scale at all. When a page-level rhythm is needed, extend the
+documented scale by 8 rather than starting a private one: **24** a heading to the thing it labels,
+**32** either side of a divider rule, **40** a control to the section it governs, **64** one
+section to the next.
+
+**The gap that matters is never the absolute one, it is the ratio to its neighbour.** Every
+`SectionHeading` on `/pricing` sat 52px above its own cards (a 28px margin inside it plus 24px of
+wrapper padding) while the block above was 40px away — so "Crest IMS" was *nearer the billing
+toggle than the three cards it names*. Readers group by distance, so the heading was joining the
+wrong thing. A label needs clearly less space below it than above it; check the pair, not the
+number. `SectionHeading` now carries the whole gap (24px) and its wrappers carry none, so the
+relationship cannot be re-broken one section at a time.
+
+**Hover is not a disclosure mechanism.** Reaching for `:hover` to expand a card is tempting and
+wrong: most marketing-page traffic is a phone, which has no hover state — and worse than absent, a
+tap on a `:hover` rule *latches* it until the visitor taps elsewhere, so the thing opens and then
+refuses to close. Anything that reveals content is a `<button>` with `aria-expanded`; hover is a
+bonus for people holding a mouse, never the only way in. The same reasoning already governs the
+`@media (pointer: coarse)` touch floor above.
+
+**Progressive disclosure earns its keep only past a threshold.** `FeatureList`'s `collapsible` prop
+shows the first seven and folds the rest, but only when more than two lines would be hidden — a
+control that hides two lines costs more attention than the two lines it saves. On `/pricing` that
+means Starter (17) and Growth (14) fold while Pro (8), POS (8), HR (7) and Suite (6) stay whole.
+Note *why* the long ones mattered: the three tiers share one CSS grid row, so **every** card was
+stretched to the tallest one's height.
