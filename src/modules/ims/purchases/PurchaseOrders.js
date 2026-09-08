@@ -361,8 +361,13 @@ ${text}`, detail })
     setReceiveSaving(true)
     setReceiveError('')
 
+    // One receipt is ONE bill. purchase_group_id defaults to gen_random_uuid() PER ROW, so without
+    // an explicit shared id a six-line delivery landed as six separate bills on the Purchases list
+    // — six rows, six Del buttons, "1 item" each, and edit opened one line at a time (S698).
+    const receiptGroupId = crypto.randomUUID()
     const { error: purchErr } = await supabase.from('purchase_entries').insert(
       toReceive.map(l => ({
+        purchase_group_id: receiptGroupId,
         period_id: receivingPo.period_id,
         item_id: l.item_id,
         vendor_id: receivingPo.vendor_id,

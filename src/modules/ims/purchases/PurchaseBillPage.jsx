@@ -8,6 +8,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import PeriodScope from '../../../components/PeriodScope'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { getCf, fmtRate } from './purchasesHelpers'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import PurchaseBillForm from './PurchaseBillForm'
 import PurchaseBillPrint from './PurchaseBillPrint'
 
@@ -49,6 +50,8 @@ export default function PurchaseBillPage() {
   const [printBill, setPrintBill] = useState(null)
   const [rateUpdateItems, setRateUpdateItems]       = useState([])
   const [rateUpdateSelected, setRateUpdateSelected] = useState(new Set())
+  const [rateUpdateBusy, setRateUpdateBusy]         = useState(false)
+  const [rateUpdateError, setRateUpdateError]       = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) load() }, [clientId, groupId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -100,13 +103,34 @@ export default function PurchaseBillPage() {
         setLoadError('That bill belongs to a different client than the one currently selected.')
         setLoading(false); return
       }
+
+      // The pickers list ACTIVE vendors and items only, but a bill keeps naming whatever it was
+      // written against. Before S698 a bill whose vendor had since been archived rendered
+      // "— None —" in the vendor select while state still held the id (a controlled <select>
+      // with no matching option paints its first option), and a line whose item had been hidden
+      // in Item Master rendered an empty picker — and getCf() on a missing item returned 1, so
+      // that line's qty and rate were shown in BASE units with nothing to say so. Fetch what the
+      // bill names and is not in the lists, flagged so the form can label it.
+      const vendorIds = [...new Set(mine.map(r => r.vendor_id).filter(Boolean))]
+      const missingVendorIds = vendorIds.filter(id => !(v || []).some(x => x.id === id))
+      const missingItemIds = [...new Set(mine.map(r => r.item_id))].filter(id => !(i || []).some(x => x.id === id))
+      const [extraV, extraI] = await Promise.all([
+        missingVendorIds.length ? supabase.from('vendors').select('*').in('id', missingVendorIds) : Promise.resolve({ data: [] }),
+        missingItemIds.length ? supabase.from('items').select('*, categories(name)').in('id', missingItemIds) : Promise.resolve({ data: [] }),
+      ])
+      const extraErr = extraV.error || extraI.error
+      // A bill line's item is what the cf and every displayed qty/rate derive from — an unreadable
+      // one is an unopenable bill, not a blank picker (the Overheads/Stock rule for entry pages).
+      if (extraErr) { setLoadError(extraErr.message); setLoading(false); return }
+      if (extraV.data?.length) setVendors([...(v || []), ...extraV.data.map(x => ({ ...x, _inactive: true }))])
+      if (extraI.data?.length) setItems([...(i || []), ...extraI.data.map(x => ({ ...x, _inactive: true }))])
       setEditingEntries(mine)
     }
     setLoading(false)
   }
 
   const itemOptions = useMemo(
-    () => items.map(i => ({ value: i.id, label: `${i.name}${i.categories?.name ? ` (${i.categories.name})` : ''}` })),
+    () => items.map(i => ({ value: i.id, label: `${i.name}${i.categories?.name ? ` (${i.categories.name})` : ''}${i._inactive ? ' (inactive)' : ''}` })),
     [items]
   )
 
@@ -155,7 +179,10 @@ export default function PurchaseBillPage() {
     const freshById = new Map((freshItems || []).map(i => [i.id, i]))
     const changed = []
     for (const l of validLines) {
-      const capturedRate = parseFloat(l.rate)
+      const capturedRate = parseFloat(l.rate) || 0
+      // A free line (rate 0, S698) is a gift, not a price — it must never offer to zero the
+      // Item Master rate every valuation reads.
+      if (capturedRate <= 0) continue
       const fi = freshById.get(l.item_id)
       if (!fi) continue
       const cf = getCf(fi)
@@ -200,15 +227,35 @@ export default function PurchaseBillPage() {
 
   async function applyRateUpdates() {
     const toUpdate = rateUpdateItems.filter(i => rateUpdateSelected.has(i.itemId))
-    await Promise.all(toUpdate.map(i => supabase.from('items').update({ rate: toPerBase(i) }).eq('id', i.itemId)))
+    setRateUpdateBusy(true); setRateUpdateError(null)
+    // Each update's error is read (S698). Before this the writes ran bare and the cache below was
+    // written regardless, so a refused update — RLS, a dropped connection — left the list page
+    // showing the NEW rate over a database still holding the old one: the screen agreeing with
+    // the user and disagreeing with the database, which is the S597 shape. Only what landed is
+    // cached; what did not stays in the prompt with the reason.
+    const results = await Promise.all(toUpdate.map(i =>
+      supabase.from('items').update({ rate: toPerBase(i) }).eq('id', i.itemId).then(r => ({ item: i, error: r.error }))))
+    const landed = results.filter(r => !r.error).map(r => r.item)
+    const failed = results.filter(r => r.error)
     // Write the list page's cached `items` through as well. It seeds its state from this cache on
     // mount, so skipping it would show the pre-update rate on the page we are about to return to.
     const next = items.map(i => {
-      const upd = toUpdate.find(r => r.itemId === i.id)
+      const upd = landed.find(r => r.itemId === i.id)
       return upd ? { ...i, rate: toPerBase(upd), per_uom_rate: toPerBase(upd) } : i
     })
     setItems(next)
-    writePageCache('purchases', 'items', effectiveClientId, next)
+    // The list page's cache holds ACTIVE items only; an inactive one appended for this bill's
+    // edit (see load()) must not ride into its Item filter.
+    writePageCache('purchases', 'items', effectiveClientId, next.filter(i => !i._inactive))
+    setRateUpdateBusy(false)
+    if (failed.length > 0) {
+      const { text, detail } = asActionError(failed[0].error)
+      const names = failed.map(f => f.item.itemName).join(', ')
+      setRateUpdateItems(failed.map(f => f.item))
+      setRateUpdateSelected(new Set(failed.map(f => f.item.itemId)))
+      setRateUpdateError({ text: `${landed.length > 0 ? `${landed.length} item${landed.length === 1 ? '' : 's'} updated. ` : ''}Item Master still holds the old rate for ${names} — the update was refused. The bill itself is saved. ${text}`, detail })
+      return
+    }
     setRateUpdateItems([])
     setRateUpdateSelected(new Set())
     navigate(listUrl)
@@ -338,14 +385,15 @@ export default function PurchaseBillPage() {
               ))}
             </div>
 
+            <ActionError error={rateUpdateError} />
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" style={{ fontSize: 12, padding: '7px 16px' }}
-                onClick={applyRateUpdates} disabled={rateUpdateSelected.size === 0}>
-                Update {rateUpdateSelected.size} item{rateUpdateSelected.size !== 1 ? 's' : ''}
+                onClick={applyRateUpdates} disabled={rateUpdateSelected.size === 0 || rateUpdateBusy} aria-busy={rateUpdateBusy || undefined}>
+                {rateUpdateBusy ? 'Updating…' : `${rateUpdateError ? 'Retry' : 'Update'} ${rateUpdateSelected.size} item${rateUpdateSelected.size !== 1 ? 's' : ''}`}
               </button>
               <button className="btn btn-ghost" style={{ fontSize: 12, padding: '7px 16px' }}
-                onClick={() => { setRateUpdateItems([]); setRateUpdateSelected(new Set()); navigate(listUrl) }}>
-                Skip all
+                onClick={() => { setRateUpdateItems([]); setRateUpdateSelected(new Set()); setRateUpdateError(null); navigate(listUrl) }}>
+                {rateUpdateError ? 'Leave as is' : 'Skip all'}
               </button>
             </div>
           </div>

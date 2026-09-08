@@ -1,14 +1,15 @@
 import { npr2 } from '../../../shared/nepalMoney'
 import { useState } from 'react'
 import { supabase } from '../../../supabaseClient'
-import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
+import { bsToAd, formatAd, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import QtyInput from '../../../components/QtyInput'
 import FieldError from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
-import { getCf, calcBillTotals, fmtRate, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { getCf, calcBillTotals, fmtRate, lineState, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false }
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
@@ -63,6 +64,8 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // Per-field validation. `error` above stays the form-level channel — a rejected write, and the
   // "add at least one line" rule, which belongs to the line table rather than any one box (S603).
   const [dayErr, setDayErr] = useState('')
+  // The duplicate-bill question (S698). A warning, never a hard stop — some vendors reuse numbers.
+  const { ask: askConfirm, confirmEl } = useConfirm()
 
   function handleHeaderDayChange(day) {
     setDayErr('')
@@ -94,7 +97,12 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
         if (per > 0) updated.rate = String(parseFloat((per * cf).toFixed(5)))
         updated._amtDraft = ''
       }
-      if (field === 'rate' || field === 'vat_inclusive') updated._amtDraft = ''
+      // The Total box is a DRAFT that back-computes the rate; once any input to that arithmetic
+      // moves, the draft no longer describes the row. Qty was missing from this list (S698): type
+      // qty 10 + total 1000 → rate 100, then correct qty to 20 — the rate stayed, Amount read 2,000
+      // and the Total box still said 1000. Two figures on one row disagreeing, and the one the
+      // reader trusts most is the one they typed.
+      if (field === 'rate' || field === 'vat_inclusive' || field === 'qty') updated._amtDraft = ''
       if (field === 'shelf_life' && val && billHeader.bs_day && period) {
         const ad = bsToAd(period.bs_year, period.bs_month, parseInt(billHeader.bs_day))
         const exp = new Date(ad); exp.setDate(exp.getDate() + parseInt(val))
@@ -119,24 +127,110 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   function addBillLine() { setBillLines(prev => [...prev, newLine()]) }
   function removeBillLine(key) { setBillLines(prev => prev.length > 1 ? prev.filter(l => l._key !== key) : prev) }
 
+  // Has this vendor's bill number been entered before? Two people keying the same paper bill is
+  // the most common real double count, and until S698 the form gave no signal. Same vendor, same
+  // reference (case-insensitive), any month, excluding the bill being edited. A read that fails
+  // is reported as "could not check", never treated as "no duplicate" — a guard that drops its
+  // read passes vacuously (S613).
+  async function findDuplicateBill() {
+    const ref = billHeader.invoice_ref.trim()
+    if (!ref || !billHeader.vendor_id) return null
+    const { data, error: dupErr } = await supabase.from('purchase_entries')
+      .select('id, bs_day, purchase_group_id, monthly_periods!inner(bs_year, bs_month)')
+      .eq('vendor_id', billHeader.vendor_id)
+      .ilike('invoice_ref', ref)
+      .order('created_at')
+      .limit(50)
+    if (dupErr) return { error: dupErr }
+    const others = (data || []).filter(r => (r.purchase_group_id || r.id) !== editingGroupId)
+    if (others.length === 0) return null
+    const first = others[0]
+    return {
+      bills: new Set(others.map(r => r.purchase_group_id || r.id)).size,
+      when: `${formatBsDay(first.bs_day, first.monthly_periods?.bs_month)} ${first.monthly_periods?.bs_year || ''}`.trim(),
+    }
+  }
+
   async function saveBill() {
     const maxDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 32
     if (!billHeader.bs_day || billHeader.bs_day < 1 || billHeader.bs_day > maxDay) {
       setDayErr(`Enter a valid BS day (1–${maxDay}).`); return
     }
     setDayErr('')
-    const valid = billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0)
-    if (valid.length === 0) { setError('Add at least one item with item, qty and rate filled.'); return }
 
+    // Refuse an incomplete row by name rather than dropping it. The old filter silently left out
+    // any row missing a price — so a bill saved with fewer lines than the reader had typed, and
+    // the only hint was the count on the Save button.
+    const incomplete = billLines
+      .map((l, idx) => ({ l, idx, state: lineState(l) }))
+      .filter(x => x.state === 'incomplete')
+    if (incomplete.length > 0) {
+      const names = incomplete.map(({ l, idx }) => {
+        const item = items.find(i => i.id === l.item_id)
+        return item ? `"${item.name}"` : `row ${idx + 1}`
+      })
+      setError(`${names.join(', ')} ${incomplete.length === 1 ? 'is' : 'are'} missing an item or a quantity above 0. Fill ${incomplete.length === 1 ? 'it' : 'them'} in, or remove the row with ×. A rate of 0 is fine — that is a free line.`)
+      return
+    }
+    const valid = billLines.filter(l => lineState(l) === 'complete')
+    if (valid.length === 0) { setError('Add at least one item with a quantity.'); return }
+
+    // An edit with nothing to supersede is a contradiction, and the one that would duplicate the
+    // bill. Refuse — the page only renders this form for an edit once it has loaded the bill's
+    // rows, so reaching here means something is wrong.
+    if (editingGroupId && (editingEntries || []).length === 0) {
+      setError('This bill could not be re-read, so it was not saved. Reopen it from the list and try again.')
+      return
+    }
+
+    setError('')
+    setSaving(true)
+    const dup = await findDuplicateBill()
+    setSaving(false)
+    if (dup?.error) {
+      const { text } = asActionError(dup.error)
+      askConfirm({
+        title: 'Could not check for a duplicate bill',
+        body: <p style={{ margin: 0 }}>Crest could not check whether this vendor already has bill #{billHeader.invoice_ref.trim()} on record ({text}). Save it anyway?</p>,
+        confirmLabel: 'Save anyway', busyLabel: 'Saving…',
+        run: () => commitBill(valid),
+      })
+      return
+    }
+    if (dup) {
+      const vendor = vendors.find(v => v.id === billHeader.vendor_id)
+      askConfirm({
+        title: 'This bill number is already on record',
+        body: (
+          <p style={{ margin: 0 }}>
+            <strong>{vendor?.name || 'This vendor'}</strong> already has bill <strong>#{billHeader.invoice_ref.trim()}</strong> entered on {dup.when}
+            {dup.bills > 1 ? ` (${dup.bills} times)` : ''}. Saving again records the same bill twice, and every purchase figure counts it twice.
+            Only save if the vendor genuinely reused the number.
+          </p>
+        ),
+        confirmLabel: 'Save anyway', danger: true, busyLabel: 'Saving…',
+        run: () => commitBill(valid),
+      })
+      return
+    }
+    await commitBill(valid)
+  }
+
+  // The write. ONE transaction since S698: `save_purchase_bill` deletes the superseded lines and
+  // inserts the replacements inside a single statement, so an edit can no longer leave the bill
+  // holding both versions (the S648 double-count) — either the whole replacement lands or none of
+  // it does. The RPC also refuses a bill with vendor payments recorded against it, because those
+  // payments cascade off the lines it would delete; that refusal reaches here as an error the
+  // errorText table knows how to word.
+  async function commitBill(valid) {
     setSaving(true); setError('')
 
     const discountAmt = parseFloat(billHeader.discount) || 0
-    const entries = valid.map(l => {
+    const lines = valid.map(l => {
       const item = items.find(i => i.id === l.item_id)
       const cf = getCf(item)
-      const exVatRate = parseFloat(l.rate)  // entered rate is always ex-VAT (NetRate on bill)
+      const exVatRate = parseFloat(l.rate) || 0  // entered rate is always ex-VAT (NetRate on bill); 0 = free line
       return {
-        period_id:       period.id,
         item_id:         l.item_id,
         vendor_id:       billHeader.vendor_id || null,
         bs_day:          parseInt(billHeader.bs_day),
@@ -150,99 +244,53 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
       }
     })
 
-    // Carried back to the caller so the auto-printed voucher can state the entry time the
-    // database actually recorded, not the moment the print ran.
-    let savedCreatedAt = null
-    if (editingGroupId) {
-      // An edit with nothing to supersede is a contradiction, and the one that would duplicate the
-      // bill: the insert below always runs, so if this list were empty we would add a second copy
-      // of every line and delete none. Refuse instead — the caller only renders this form for an
-      // edit once it has loaded the bill's rows, so reaching here means something is wrong.
-      const supersededIds = (editingEntries || []).map(e => e.id)
-      if (supersededIds.length === 0) {
-        setError('This bill could not be re-read, so it was not saved. Reopen it from the list and try again.')
-        setSaving(false); return
-      }
+    // A bill's entry time has to survive its own corrections (S670). The save replaces every
+    // line, so without carrying the stamp forward each edit would restamp created_at to now():
+    // the Purchases list (ordered bs_day, created_at, id) would jump the bill to the end of its
+    // day, and the "Entered" time on screen would become the moment of the last typo fix.
+    //
+    // The earliest superseded row wins — that is when this bill entered the book. Lines ADDED
+    // during the edit inherit it too, which is the intent: there is no old-line/new-line
+    // distinction to preserve, and a per-line stamp would make the bill's displayed time depend on
+    // which line happened to sort first. The raw string is carried through rather than a
+    // re-serialised Date, so Postgres' own microsecond precision survives. NULL on a new bill lets
+    // DEFAULT now() fire.
+    const supersededIds = editingGroupId ? (editingEntries || []).map(e => e.id) : []
+    const billCreatedAt = editingGroupId
+      ? (editingEntries || [])
+          .map(e => e.created_at)
+          .filter(Boolean)
+          .reduce((a, b) => (a && +new Date(a) <= +new Date(b) ? a : b), null)
+      : null
 
-      // A bill's entry time has to survive its own corrections (S670). This path INSERTS the
-      // replacement lines and then deletes the originals, so without carrying the stamp forward
-      // every edit restamps created_at to now(): the Purchases list (ordered bs_day, created_at,
-      // id) would jump the bill to the end of its day, and the "Entered" time on screen would
-      // become the moment of the last typo fix rather than when the bill was filed.
-      //
-      // The earliest superseded row wins — that is when this bill entered the book. Lines ADDED
-      // during the edit inherit it too, which is the intent: the insert rewrites every line on
-      // every save, so there is no old-line/new-line distinction to preserve, and a per-line
-      // stamp would make the bill's displayed time depend on which line happened to sort first.
-      // This promotes created_at to a bill-level fact stored per line, exactly as invoice_ref,
-      // payment_method and discount_amount already are on this table.
-      //
-      // The raw string is carried through rather than a re-serialised Date, so Postgres' own
-      // microsecond precision survives. Legacy rows (purchase_group_id IS NULL) need no branch:
-      // editingEntries is the set actually loaded, so the minimum is over the real originals.
-      const billCreatedAt = (editingEntries || [])
-        .map(e => e.created_at)
-        .filter(Boolean)
-        .reduce((a, b) => (a && +new Date(a) <= +new Date(b) ? a : b), null)
-
-      // Insert the new lines BEFORE removing the old ones (not delete-then-insert) — if the
-      // insert fails partway (network blip, an item deleted mid-edit), the bill keeps its
-      // previous, still-valid line items instead of being left with none.
-      const { error: insErr } = await supabase.from('purchase_entries')
-        .insert(entries.map(e => ({
-          ...e,
-          purchase_group_id: editingGroupId,
-          ...(billCreatedAt ? { created_at: billCreatedAt } : {}),
-        })))
-      if (insErr) {
-        const { text, detail } = asActionError(insErr)
-        setError({ text: `${text}
-
-Your changes were not saved, and the bill still has the lines it had before — nothing has been lost.`, detail })
-        setSaving(false); return
-      }
-
-      // Remove the superseded lines BY ID — the rows this form was opened on — not by matching
-      // `purchase_group_id = editingGroupId`.
-      //
-      // That predicate silently missed the LEGACY case and duplicated the bill (fixed S648). A bill
-      // written before grouping existed has `purchase_group_id IS NULL`, so the list keys it by the
-      // row's own id (`p.purchase_group_id || p.id`) and hands that id here as editingGroupId. The
-      // insert above then stamps the NEW rows with it — but the original row's group column is
-      // still NULL, so the delete matched nothing but the rows it had just written, and the old
-      // line survived alongside its own replacement. Every figure in IMS that sums purchases would
-      // have counted that bill's original line twice, with nothing on screen to say so.
-      //
-      // Deleting the loaded ids is exact in both cases and needs no `.not('id','in',…)` guard,
-      // since a fresh insert can never collide with an id we already held. It also declines to
-      // delete a line added to this bill by someone else since it was opened: the group predicate
-      // would have taken that with it, and removing a row this editor never saw is the worse of
-      // the two failures. Not chunked — the list is one vendor bill's lines.
-      const { error: delErr } = await supabase.from('purchase_entries')
-        .delete().in('id', supersededIds)
-      if (delErr) {
-        // The new lines are already written by this point, so the bill is now carrying both
-        // versions and every purchase figure that reads it is double-counting. That is the fact
-        // the user needs — not the constraint name.
-        const { text, detail } = asActionError(delErr)
-        setError({ text: `Your changes were saved, but the lines they replaced could not be removed — this bill now holds both versions, so its total and every purchase report reading it are counting it twice. Reopen the bill and delete the duplicated lines before relying on any purchase figure.
-
-${text}`, detail })
-        setSaving(false); return
-      }
-    } else {
-      const groupId = crypto.randomUUID()
-      // .select() the stamp back so the voucher can print the server's own entry time rather than
-      // the browser's clock. Same request, no extra round trip.
-      const { data: ins, error: insErr } = await supabase.from('purchase_entries')
-        .insert(entries.map(e => ({ ...e, purchase_group_id: groupId })))
-        .select('created_at')
-      if (insErr) { setError(asActionError(insErr)); setSaving(false); return }
-      savedCreatedAt = ins?.[0]?.created_at || null
+    // The superseded ids are the rows this form was opened on — never `purchase_group_id =
+    // editingGroupId`. That predicate silently missed the LEGACY case (purchase_group_id IS NULL,
+    // keyed by the row's own id) and duplicated the bill until S648. The RPC deletes exactly these
+    // ids and asserts the count, so a line someone else removed since the bill was opened is
+    // reported rather than silently replaced.
+    const { data: savedCreatedAt, error: rpcErr } = await supabase.rpc('save_purchase_bill', {
+      p_period_id:      period.id,
+      p_group_id:       editingGroupId || crypto.randomUUID(),
+      p_lines:          lines,
+      p_superseded_ids: supersededIds.length > 0 ? supersededIds : null,
+      p_created_at:     billCreatedAt || null,
+    })
+    if (rpcErr) {
+      const { text, detail } = asActionError(rpcErr)
+      // No claim that nothing landed: a dead connection does not prove that (error-messages rule).
+      // On an edit the honest next step is to look, since a retry over a committed replacement
+      // is refused by the RPC's own stale check rather than duplicated.
+      setError({
+        text: editingGroupId
+          ? `${text}\n\nReopen this bill from the list to see what it holds before trying again.`
+          : text,
+        detail,
+      })
+      setSaving(false); return
     }
 
     setSaving(false)
-    onSaved(billHeader, valid, savedCreatedAt)
+    onSaved(billHeader, valid, savedCreatedAt || null)
   }
 
   // No QuickCalculator here any more. The form carried its own second instance plus a header
@@ -258,7 +306,12 @@ ${text}`, detail })
           <label htmlFor="purcha-f1">Vendor</label>
           <select id="purcha-f1" className="form-select" style={{ fontSize: 13 }} value={billHeader.vendor_id} onChange={e => setBillHeader(h => ({ ...h, vendor_id: e.target.value }))}>
             <option value="">— None —</option>
-            {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            {/* An archived/inactive vendor stays on the bill that names it. The picker lists active
+                vendors only, so before S698 a bill whose vendor had since been archived rendered
+                "— None —" here while state still held the id: save untouched kept the vendor,
+                touch the dropdown and it was gone with no way back. The page appends the bill's
+                own vendor when it is missing, flagged so it is not mistaken for a live choice. */}
+            {vendors.map(v => <option key={v.id} value={v.id}>{v.name}{v._inactive ? ' (inactive)' : ''}</option>)}
           </select>
         </div>
         <div className="form-field">
@@ -329,7 +382,7 @@ ${text}`, detail })
               </th>
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 118 }}>Qty *</th>
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
-                <Tip text="Ex-VAT price for ONE of whatever the Qty column is counting — the base unit (GM, PCS…), or the purchase unit where the item has a conversion set. Item Master's price for that same unit is shown under each box. Check the VAT box on each line for items attracting 13% VAT." width={300}>Rate (NPR) *</Tip>
+                <Tip text="Ex-VAT price for ONE of whatever the Qty column is counting — the base unit (GM, PCS…), or the purchase unit where the item has a conversion set. Item Master's price for that same unit is shown under each box. Leave it 0 for free goods (buy 10 get 1 free): stock goes up, spend does not. Check the VAT box on each line for items attracting 13% VAT." width={300}>Rate (NPR)</Tip>
               </th>
               <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 4px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 40 }}>
                 <Tip text="Check to apply 13% VAT to this line item only." width={210}>VAT</Tip>
@@ -464,7 +517,7 @@ ${text}`, detail })
           const { taxableBase, nonTaxableBase, subTotal, discount, vatTotal, grandTotal } = calcBillTotals(billLines, billHeader.discount)
           if (subTotal === 0) return null
           const fmt = npr2
-          const itemCount = billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0).length
+          const itemCount = billLines.filter(l => lineState(l) === 'complete').length
           return (
             <div style={{ textAlign: 'right', fontSize: 13, minWidth: 300 }}>
               <div style={{ color: 'var(--theme-text3)', marginBottom: 3 }}>
@@ -506,9 +559,15 @@ ${text}`, detail })
       <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={saveBill} disabled={saving}>
-          {saving ? 'Saving…' : editingGroupId ? 'Update Bill' : `Save ${billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0).length || ''} Entr${billLines.filter(l => l.item_id && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0).length === 1 ? 'y' : 'ies'}`}
+          {(() => {
+            if (saving) return 'Saving…'
+            if (editingGroupId) return 'Update Bill'
+            const n = billLines.filter(l => lineState(l) === 'complete').length
+            return `Save ${n || ''} Entr${n === 1 ? 'y' : 'ies'}`
+          })()}
         </button>
       </div>
+      {confirmEl}
     </>
   )
 }

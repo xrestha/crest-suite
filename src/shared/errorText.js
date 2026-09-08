@@ -59,6 +59,23 @@ const rules = [
     operator: "You're not allowed to do that — this account doesn't have access to that record.",
   },
 
+  // A purchase bill with vendor payments recorded against it cannot be deleted or edited (S698):
+  // payable_payments cascades off purchase_entries, so either would silently erase money that
+  // actually left the bank. Raised by the purchase_entries delete trigger and save_purchase_bill.
+  {
+    test: e => /purchase_bill_has_payments/i.test(e.message || ''),
+    staff: 'This bill has payments recorded against it, so it cannot be changed or deleted. Ask your manager.',
+    operator: 'This bill has vendor payments recorded against it, so it cannot be changed or deleted. Remove the payments in Outstanding Payables first, then try again.',
+  },
+
+  // save_purchase_bill found fewer lines to replace than the form was opened on — someone else
+  // edited or deleted the bill in the meantime. Nothing was written.
+  {
+    test: e => /purchase_bill_stale/i.test(e.message || ''),
+    staff: 'This bill changed while you were editing it. Nothing was saved — reopen it from the list and try again.',
+    operator: 'This bill changed while you were editing it (another user edited or deleted it). Nothing was saved — reopen it from the list and try again.',
+  },
+
   // Something already exists on a unique index.
   {
     test: e => e.code === '23505' || /duplicate key|already exists/i.test(e.message || ''),

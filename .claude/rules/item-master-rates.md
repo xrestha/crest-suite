@@ -49,8 +49,10 @@ Four consequences fell out of that, all now fixed and all worth not re-deriving:
   per-BTL. The Conversion tab's preview now shows cost **per purchase unit** (`rate × cf`), since
   `rate` is already the per-base-unit figure.
 - **The bill prefills `per_uom_rate × cf`, never `items.rate`** (`PurchaseBillForm.jsx`) — the rate
-  that matches whichever unit the Qty box is counting, in both cases. Purchase Orders had always
-  done this (`PurchaseOrders.js:155`); the bill modal was the only holdout. Each row now also prints
+  that matches whichever unit the Qty box is counting, in both cases. Purchase Orders prefills
+  bare `per_uom_rate` and has no conversion handling at all — its qty is BASE units, so that is
+  internally consistent, not the same rule (an earlier version of this line claimed it did `× cf`;
+  it does not, S698). The bill modal was the only place the two units could cross. Each row now also prints
   the master rate for that same unit beneath the box, ambered past 5×/⅕, so a unit mix-up is visible
   on the row rather than only in a grand total where a 500× error still reads as a plausible number.
 - **The "Rate changes detected" sync compares and writes in the box's unit** (`PurchaseBillPage.jsx`

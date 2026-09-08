@@ -121,6 +121,37 @@ Migrated from the root `CLAUDE.md` (S663).
 - `hr-selfservice-login` (`supabase/functions/hr-selfservice-login/`, added S464) completes HR Self-Service PIN login server-side: takes `{ staff_id, pin }`, resolves the real email with the service role, calls `signInWithPassword` itself, and returns only the resulting session tokens — added specifically so the browser never has to hold or transmit the account's actual email during login. `SelfServiceLogin.jsx` calls it via `supabase.functions.invoke(...)` and then `supabase.auth.setSession({access_token, refresh_token})` on success, since `signInWithPassword` used to do that step implicitly and now the real auth call happens off-browser.
 - **Staff accounts are same-client at the RLS level** — POS PIN staff (`pos_email IS NOT NULL`), IMS staff (`ims_role IS NOT NULL`), HR staff (`hr_role IS NOT NULL`), and HR self-service accounts (`hr_self_service = true`) all share `role='client'` + `client_id` with the owner, so the standard admin-or-same-client policy alone gives any of them owner-level data access. S316 (`20260708130000_staff_account_business_table_isolation.sql`) fenced off POS/self-service with **RESTRICTIVE** `no_self_service_accounts` / `no_pos_pin_staff` policies per table; S419 added `no_ims_staff` for IMS staff; S430 added `no_hr_role_staff` for HR staff (helpers: `is_hr_self_service()`, `is_pos_pin_staff()`, `is_ims_staff()`, `is_hr_role_staff()`). **When creating a new business table, add it to every matching restrictive-policy list** — a new table doesn't inherit the exclusions, and a bare same-client policy re-opens the hole for whichever staff-account type's JWT touches it.
 
+## A purchase bill saves through `save_purchase_bill`, and a paid bill cannot be deleted (S698)
+
+`save_purchase_bill(p_period_id, p_group_id, p_lines, p_superseded_ids, p_created_at)` (migration
+`20260908140000`) is the purchases twin of `save_sales_day` below: `PurchaseBillForm.jsx` is its
+only caller, and it deletes the superseded line ids and inserts the replacements in ONE
+transaction. Until S698 the edit path was two HTTP requests (insert, then delete), and a failure
+between them left the bill holding both versions and every purchase figure double-counting it.
+Same `SECURITY INVOKER` reasoning as the sales one — `purchase_entries` carries the restrictive
+staff-isolation families and every one of them must keep applying. Two properties are load-bearing:
+
+- **The delete runs first and its row count is ASSERTED.** Under RLS a row the caller may not
+  delete simply does not delete, and a row someone else already removed is the same silence — so
+  an unasserted count is the S648 duplicate one layer down. A mismatch raises `purchase_bill_stale`
+  and rolls the whole save back; `errorText.js` words it.
+- **A bill with vendor payments is refused** (`purchase_bill_has_payments`). `payable_payments`
+  is `ON DELETE CASCADE` off `purchase_entries`, so an edit — which deletes lines — or a delete
+  silently erased money that had left the bank. Decision (Aashish, 2026-09-08): block, never warn.
+
+The block lives in THREE places on purpose. `purchase_entries_guard_paid_delete` is a `BEFORE
+DELETE` trigger, because the list page's Delete and Delete All never go through the RPC and a
+delete the browser can skip is advisory (invariant #3); it keys off `current_user IN ('anon',
+'authenticated')` exactly as `guard_profiles_privileged_columns()` does, so the service role passes
+— Danger Zone deletes a client's `payable_payments` BEFORE its `purchase_entries` anyway. The RPC
+checks before writing so the message is the bill's own. And `Purchases.js` pre-checks through
+`purchase_bill_payments(p_ids)` so the refusal is worded before anything is attempted — that
+lookup is `SECURITY DEFINER` (with its own caller check, wrapped in `COALESCE`) so the guard cannot
+pass vacuously for an account whose RLS view of `payable_payments` is narrower than its view of
+`purchase_entries`. **A guard that drops its read passes vacuously**, so the pre-check refuses on a
+failed read too. No legacy fallback: the migration must be applied before the frontend deploys, and
+until it is, Save reports the function as unavailable rather than saving the old two-step way.
+
 ## Sales Entry saves through one atomic RPC, not three round trips
 
 Migrated from the root `CLAUDE.md` (S663).

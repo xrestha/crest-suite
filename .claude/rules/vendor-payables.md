@@ -10,6 +10,42 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
+### A bill with payments recorded against it is frozen, and a return has its own day (S698)
+
+Six things settled by the S698 re-analysis of the purchases module, each a decision Aashish made
+in plain words on 2026-09-08 — do not re-litigate them:
+
+- **A bill with vendor payments cannot be deleted or edited.** `payable_payments` cascades off
+  `purchase_entries`, so both used to erase money that had actually left the bank, from Payment
+  Report and Vendor Balance Confirmation alike, with no trace. The guard is a `BEFORE DELETE`
+  trigger plus the RPC plus a worded pre-check on the list page — see `supabase-sql.md`. The
+  message tells the reader to remove the payments in Outstanding Payables first.
+- **A return is dated to the day the goods went back**, through its own `Day Returned` picker
+  (pre-filled with the bill's day). It used to copy `linked.bs_day`, so every return was dated to
+  the purchase, Vendor Balance Confirmation's running ledger showed returns before they happened,
+  and the Returns tab's own Day tooltip promised the opposite. Rows written before S698 still
+  carry the bill's day; nothing signals that, and it is only wrong where the return genuinely
+  happened later.
+- **A free line is a line.** `lineState()` in `purchasesHelpers.js` (tested) has three states —
+  blank (ignored), incomplete (refused by name), complete — and a complete line with rate 0 or
+  blank saves as free goods: stock up, spend unchanged. The rate-sync prompt skips it, or a gift
+  would offer to zero the Item Master rate. The old filter dropped any priced-at-0 or unpriced row
+  silently.
+- **Same vendor + same bill number is a WARNING, not a stop.** `findDuplicateBill()` asks before
+  saving (case-insensitive, any month, excluding the bill being edited). Some vendors reuse
+  numbers. A failed check asks too, rather than passing as "no duplicate".
+- **A PO receipt is ONE bill.** `purchase_group_id` defaults to `gen_random_uuid()` PER ROW, so an
+  insert that omits it gets a different group on every line — `PurchaseOrders.confirmReceive`
+  did, and a six-line delivery was six bills on the Purchases list. Any new writer of
+  `purchase_entries` must stamp one shared id per bill.
+- **Delete All is Supervisor+.** Staff keeps single-bill add/edit/delete.
+
+Two tooltips were corrected in the same pass and the correction is worth keeping true: the
+Purchases page's gross figure is bill rate BEFORE discount, Monthly Summary and P&L take the same
+bills NET of allocated discounts (S601), and Stock Count's Summary values what arrived at the
+ITEM MASTER rate — three legitimately different figures, so no tooltip may claim they match. And
+the Daily Register's Total is a QUANTITY in the base unit, not money.
+
 ### The `vendors` row is the only copy of the supplier's NAME (S671)
 
 `purchase_entries`, `purchase_orders` and `vendor_returns` store a `vendor_id` and nothing else;
@@ -49,8 +85,8 @@ most important table.
 
 ### `purchase_entries.created_at` is a BILL-level fact, not a row-level one (S670)
 
-It no longer answers "when was this row written". The edit path in `PurchaseBillForm.jsx` inserts
-replacement lines and deletes the originals, so the column used to restamp to `now()` on every
+It no longer answers "when was this row written". The edit path in `PurchaseBillForm.jsx` replaces
+every line (since S698 inside `save_purchase_bill`, one transaction), so the column used to restamp to `now()` on every
 correction — a bill's "Entered" time was really the moment of its last typo fix, and the Purchases
 list (ordered `bs_day, created_at, id`) jumped it to the end of its day. The edit now carries the
 earliest superseded row's stamp forward onto every replacement line, so one bill has one entry time,

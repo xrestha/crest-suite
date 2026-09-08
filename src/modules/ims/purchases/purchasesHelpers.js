@@ -1,4 +1,5 @@
-// Shared by Purchases.js, PurchaseBillForm.jsx, and ReturnsTab.jsx.
+// Shared by Purchases.js, PurchaseBillForm.jsx, and ReturnsTab.jsx. Pure — no supabase import, so
+// purchasesHelpers.test.js can load it.
 
 // How a vendor bill was settled. Distinct from POS's PAYMENT_METHODS (posOrdersConstants.js) on
 // purpose — that is how a GUEST pays us, this is how we pay a SUPPLIER, and the two lists have no
@@ -56,4 +57,22 @@ export function aging(days) {
   if (days <= 60) return { label: '31–60 days', color: 'var(--theme-accent-ink)' }
   if (days <= 90) return { label: '61–90 days', color: 'var(--theme-amber-text)' }
   return                 { label: '90+ days',   color: 'var(--theme-red-text)' }
+}
+
+// What a line row IS before it is saved (S698). Three states, because the old filter
+// (`item && qty > 0 && rate > 0`) collapsed two of them into "not saved": the default empty row —
+// correctly ignored — and a row with an item and a quantity but no price, which was dropped from
+// the save with nothing on screen to say so. Those are different facts. A 'blank' row is ignored;
+// an 'incomplete' row is refused BY NAME; and a 'complete' row with a rate of 0 or nothing in the
+// box is a FREE line (buy 10 get 1 free) — stock goes up, spend does not. Decision, Aashish
+// 2026-09-08: accept NPR 0 lines rather than have free goods folded into the paid quantity, which
+// mispriced the rate, or left out, which the next stock count then read as a surplus.
+export function lineState(l) {
+  const hasItem = !!l.item_id
+  const qty  = parseFloat(l.qty)
+  const rate = parseFloat(l.rate)
+  const touched = hasItem || (l.qty !== '' && l.qty != null) || (l.rate !== '' && l.rate != null) || !!l.expiry_date || !!l.shelf_life
+  if (!touched) return 'blank'
+  if (hasItem && qty > 0 && !(rate < 0)) return 'complete'
+  return 'incomplete'
 }

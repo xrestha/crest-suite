@@ -111,6 +111,12 @@ export default function Purchases() {
       (requestedPeriodId && (p || []).find(x => x.id === requestedPeriodId)) ||
       (p || []).find(x => x.status === 'open')
     if (target) {
+      // Claim the page for the auto-selected period (the hook's own contract, missed here until
+      // S698): without it a period change during this first load left the dropdown snapping back
+      // to the open month — init's setSelectedPeriod landed AFTER the user's — while the table
+      // showed the month they had chosen. Label and figures disagreeing is the exact thing the
+      // guard exists to prevent.
+      periodReq.begin(target.id)
       setSelectedPeriod(target)
       await Promise.all([loadPurchases(target.id), loadReturns(target.id)])
     }
@@ -119,9 +125,11 @@ export default function Purchases() {
 
   async function loadPurchases(periodId) {
     // Paged — the purchases table itself, one row per bill line for the period (S529).
+    // `is_active` rides along so the Daily Register and the Item filter can name a purchase of
+    // an item since hidden in Item Master rather than dropping it (S698).
     const { data, error } = await fetchAllRows(() => supabase
       .from('purchase_entries')
-      .select('*, items(name, uom, purchase_unit, conversion_factor, categories(name)), vendors(name)')
+      .select('*, items(name, uom, purchase_unit, conversion_factor, is_active, categories(name)), vendors(name)')
       .eq('period_id', periodId)
       .order('bs_day')
       .order('created_at')
@@ -176,10 +184,41 @@ export default function Purchases() {
     navigate(`/purchases/${groupId}/edit`)
   }
 
-  function deleteGroup(groupId) {
+  // Which of these purchase lines have vendor payments recorded against them (S698).
+  // payable_payments is ON DELETE CASCADE off purchase_entries, so deleting a bill used to erase
+  // money that had actually left the bank — from Payment Report and Vendor Balance Confirmation
+  // alike, with no trace. Decision (Aashish, 2026-09-08): BLOCK. The database trigger is the
+  // guard; this pre-check exists so the refusal is worded in the bill's terms before anything is
+  // attempted. A check that could not run has not passed: a failed read refuses too.
+  async function paymentsOn(entryIds) {
+    const { data, error } = await supabase.rpc('purchase_bill_payments', { p_ids: entryIds })
+    if (error) return { error }
+    const rows = data || []
+    return {
+      count: rows.reduce((s, r) => s + Number(r.payment_count || 0), 0),
+      total: rows.reduce((s, r) => s + parseFloat(r.paid_total || 0), 0),
+      bills: new Set(rows.map(r => {
+        const e = purchases.find(p => p.id === r.purchase_entry_id)
+        return e ? (e.purchase_group_id || e.id) : r.purchase_entry_id
+      })).size,
+    }
+  }
+
+  async function deleteGroup(groupId) {
     const groupEntries = purchases.filter(p => (p.purchase_group_id || p.id) === groupId)
     const n = groupEntries.length
     const groupTotal = groupEntries.reduce((s, e) => s + e.qty * e.rate, 0)
+    setActionError(null)
+    const paid = await paymentsOn(groupEntries.map(e => e.id))
+    if (paid.error) {
+      const { text, detail } = asActionError(paid.error)
+      setActionError({ text: `This bill was not deleted — Crest could not check whether it has payments recorded against it. ${text}`, detail })
+      return
+    }
+    if (paid.count > 0) {
+      setActionError(`This bill has ${paid.count} payment${paid.count === 1 ? '' : 's'} recorded against it (NPR ${Math.round(paid.total).toLocaleString('en-IN')}), so it cannot be deleted — that would erase money already paid to the vendor. Remove the payments in Outstanding Payables first, then delete the bill.`)
+      return
+    }
     // A bill is money on the vendor ledger and stock on the count; the ask is the product's own
     // dialog with the amount in it (S682; was window.confirm).
     askConfirm({
@@ -215,6 +254,18 @@ export default function Purchases() {
   async function performDeleteAllPurchases() {
     if (!selectedPeriod || purchases.length === 0) return
     setActionError(null)
+    // Same paid-bill block as a single delete, over the whole month. The RPC takes the ids in the
+    // request body, so a month of lines is not an .in() URL (the S629 trap).
+    const paid = await paymentsOn(purchases.map(p => p.id))
+    if (paid.error) {
+      const { text, detail } = asActionError(paid.error)
+      setActionError({ text: `Nothing was deleted — Crest could not check whether any bill this month has payments recorded against it. ${text}`, detail })
+      return
+    }
+    if (paid.count > 0) {
+      setActionError(`Nothing was deleted. ${paid.bills} bill${paid.bills === 1 ? ' has' : 's have'} payments recorded against ${paid.bills === 1 ? 'it' : 'them'} (${paid.count} payment${paid.count === 1 ? '' : 's'}, NPR ${Math.round(paid.total).toLocaleString('en-IN')}), and deleting ${paid.bills === 1 ? 'it' : 'them'} would erase money already paid to the vendor. Remove those payments in Outstanding Payables first, or delete the other bills one at a time.`)
+      return
+    }
     const { error } = await supabase.from('purchase_entries').delete().eq('period_id', selectedPeriod.id)
     if (error) {
       const { text, detail } = asActionError(error)
@@ -243,10 +294,26 @@ export default function Purchases() {
 
   // ─── DERIVED ─────────────────────────────────────────────
 
+  // The active item list plus any item this period's purchases name that is no longer in it —
+  // hidden in Item Master since the bill was entered (S698). The purchases query joins enough of
+  // `items` to build a row. Before this the Daily Register built its rows from `items` alone, so a
+  // purchase of a since-hidden item was in the header count, on the Purchases tab and in every
+  // report, and silently absent from the register and its Excel export; the Item filter could not
+  // reach it either. A rollup that silently cannot claim a row produces a believable wrong total.
+  const itemsWithPurchased = useMemo(() => {
+    const known = new Set(items.map(i => i.id))
+    const extra = new Map()
+    purchases.forEach(p => {
+      if (known.has(p.item_id) || extra.has(p.item_id) || !p.items) return
+      extra.set(p.item_id, { id: p.item_id, ...p.items, _inactive: p.items.is_active === false })
+    })
+    return extra.size === 0 ? items : [...items, ...extra.values()]
+  }, [items, purchases])
+
   // Options for the searchable item picker (built once per items change).
   const itemOptions = useMemo(
-    () => items.map(i => ({ value: i.id, label: `${i.name}${i.categories?.name ? ` (${i.categories.name})` : ''}` })),
-    [items]
+    () => itemsWithPurchased.map(i => ({ value: i.id, label: `${i.name}${i.categories?.name ? ` (${i.categories.name})` : ''}${i._inactive ? ' (inactive)' : ''}` })),
+    [itemsWithPurchased]
   )
   const itemFilterOptions = useMemo(
     () => [{ value: 'all', label: 'All Items' }, ...itemOptions],
@@ -338,6 +405,9 @@ export default function Purchases() {
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
+  // Delete All wipes a whole month; Staff keeps single-bill add/edit/delete and loses only this
+  // (decision, Aashish 2026-09-08). Admin and Owner resolve to 'manager' on every axis.
+  const canDeleteAll = hasImsAccess('supervisor')
 
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
   // the route was reachable by any account at an ims_enabled client regardless of ims_role.
@@ -356,7 +426,9 @@ export default function Purchases() {
         return (
           <Modal title={`⚠ Delete all ${noun} entries?`} maxWidth={440} onClose={() => { setDeleteAllTarget(null); setDeleteAllTyped('') }}>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginTop: 0 }}>
-              This permanently deletes <strong style={{ color: 'var(--theme-red-text)' }}>all {count} {noun} entr{count !== 1 ? 'ies' : 'y'}</strong> for <strong>{periodLabel}</strong>. This cannot be undone.
+              This permanently deletes <strong style={{ color: 'var(--theme-red-text)' }}>all {count} {noun} entr{count !== 1 ? 'ies' : 'y'}</strong> for <strong>{periodLabel}</strong>.
+              {deleteAllTarget === 'purchases' && ' Returns recorded against them stay on the Returns tab, unlinked. A bill with vendor payments recorded against it stops the whole delete.'}
+              {' '}This cannot be undone.
             </p>
             <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginBottom: 6 }}>
               Type <strong style={{ color: 'var(--theme-text1)' }}>{periodLabel}</strong> to confirm.
@@ -451,7 +523,10 @@ export default function Purchases() {
           <div className="stat-value">{purchases.length}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Goods value at qty × rate, before bill discounts and excluding VAT. Matches what Stock Count and COGS consume; the payable figure including VAT is in the table footer." width={270}>Gross Purchases (ex-VAT)</Tip></div>
+          {/* No claim that this "matches Stock Count and COGS" (S698): Stock Count's Summary values
+              purchases at the ITEM MASTER rate, and Monthly Summary / P&L at bill rate net of
+              allocated discounts. This is bill rate before discount — say what it is. */}
+          <div className="stat-label"><Tip text="Goods value at qty × the rate on each bill, before bill discounts and excluding VAT. Monthly Summary and P&L take the same bills net of their discounts, and Stock Count's Summary values what arrived at the Item Master rate — so those can differ from this by design. The payable figure including VAT is in the table footer." width={300}>Gross Purchases (ex-VAT)</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
@@ -490,7 +565,7 @@ export default function Purchases() {
               }}>{tab.label}</button>
           ))}
         </div>
-        {!isLocked && !loadError && activeTab !== 'register' && (
+        {!isLocked && !loadError && canDeleteAll && activeTab !== 'register' && (
           <button
             className="btn btn-ghost"
             style={{ fontSize: 12, padding: '5px 12px', marginBottom: 4, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
@@ -805,7 +880,7 @@ export default function Purchases() {
                     })}
                     <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                       <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>
-                        <Tip text="Sum of qty × rate for the lines shown — before any bill discount and excluding VAT. This is the goods value, which is what Stock Count and COGS use." width={270}>Total goods value (ex-VAT)</Tip>
+                        <Tip text="Sum of qty × rate for the lines shown — before any bill discount and excluding VAT. Monthly Summary and P&L take these bills net of their discounts; Stock Count's Summary values them at the Item Master rate." width={280}>Total goods value (ex-VAT)</Tip>
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                         {filteredQty !== null ? filteredQty.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
@@ -861,10 +936,11 @@ export default function Purchases() {
           dayMatrix[p.item_id][p.bs_day] = (dayMatrix[p.item_id][p.bs_day] || 0) + parseFloat(p.qty || 0)
         })
 
-        // items with at least one purchase, grouped by category
+        // items with at least one purchase, grouped by category — including items since hidden
+        // in Item Master (itemsWithPurchased), so the register claims every row the header counts
         const purchasedIds = new Set(purchases.map(p => p.item_id))
         const byCategory = {}
-        items.filter(i => purchasedIds.has(i.id)).forEach(item => {
+        itemsWithPurchased.filter(i => purchasedIds.has(i.id)).forEach(item => {
           const cat = item.categories?.name || 'Uncategorized'
           if (!byCategory[cat]) byCategory[cat] = []
           byCategory[cat].push(item)
@@ -880,7 +956,7 @@ export default function Purchases() {
             byCategory[cat].forEach((item, idx) => {
               const row = {
                 'S.No': idx + 1,
-                'Item Name': item.name,
+                'Item Name': item._inactive ? `${item.name} (inactive)` : item.name,
                 'UOM': item.uom,
               }
               let total = 0
@@ -936,7 +1012,8 @@ export default function Purchases() {
                       {days.map(d => (
                         <th key={d} style={{ ...thStyle, width: 52, color: d % 2 === 0 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>{d}</th>
                       ))}
-                      <th style={{ ...thStyle, width: 68, color: 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 3 }}><Tip text="Row total across every day of the month, at goods value (ex-VAT, before bill discounts)." width={260}>Total</Tip></th>
+                      {/* A QUANTITY, in the item's base unit — the tooltip claimed money until S698. */}
+                      <th style={{ ...thStyle, width: 68, color: 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 3 }}><Tip text="Total quantity bought across every day of the month, in the item's base unit (the UOM column). Returns are not deducted here. For money, see the Purchases tab." width={260}>Total</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -966,7 +1043,10 @@ export default function Purchases() {
                           return (
                             <tr key={item.id} style={{ background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)' }}>
                               <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--theme-text3)' }}>{idx + 1}</td>
-                              <td style={{ ...tdStyle, textAlign: 'left', color: 'var(--theme-text1)', fontWeight: 500 }}>{item.name}</td>
+                              <td style={{ ...tdStyle, textAlign: 'left', color: 'var(--theme-text1)', fontWeight: 500 }}>
+                                {item.name}
+                                {item._inactive && <span className="badge badge-gray" style={{ marginLeft: 6 }}>inactive</span>}
+                              </td>
                               <td style={{ ...tdStyle, color: 'var(--theme-text2)' }}>{item.uom}</td>
                               {days.map(d => {
                                 const qty = dayMatrix[item.id]?.[d]

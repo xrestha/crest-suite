@@ -3,28 +3,39 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
+import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import FieldError from '../../../components/FieldError'
 import { getCf } from './purchasesHelpers'
-import { formatBsDay } from '../../../utils/bsCalendar'
+import { formatBsDay, daysInBsMonth } from '../../../utils/bsCalendar'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
-const EMPTY_RETURN = { purchase_entry_id: '', qty: '', notes: '' }
+const EMPTY_RETURN = { purchase_entry_id: '', qty: '', bs_day: '', notes: '' }
 
 // Vendor Returns tab — record + list returns against an existing purchase entry. Rate, vendor,
 // and payment method are always inherited from the linked purchase (a return can't have its own).
+// The DAY is the return's own (S698): it used to be copied from the bill, so every return was
+// dated to the day the goods were bought, and Vendor Balance Confirmation's running ledger — which
+// orders by that day — showed returns before they happened, while this tab's own Day column
+// tooltip promised the opposite. The picker pre-fills the bill's day, so the common same-day case
+// costs nothing extra to type.
 export default function ReturnsTab({ period, purchases, returns, isLocked, effectiveClientId, onChanged }) {
   // .btn-primary's CSS pairs its background with --theme-accent-text, calibrated for --theme-accent
   // — overriding just the background to red here left the text color mismatched to accent, not red.
   const { scopedUpdate, scopedInsert, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [showReturnForm, setShowReturnForm] = useState(false)
   const [returnForm, setReturnForm]         = useState(EMPTY_RETURN)
   const [returnSaving, setReturnSaving]     = useState(false)
   const [returnError, setReturnError]       = useState('')
+  const [dayErr, setDayErr]                 = useState('')
+  const [actionError, setActionError]       = useState(null)   // the last delete that did not land
   const [editingReturnId, setEditingReturnId] = useState(null)
 
   function openNewReturn() {
     setEditingReturnId(null)
     setReturnForm(EMPTY_RETURN)
-    setReturnError('')
+    setReturnError(''); setDayErr('')
     setShowReturnForm(true)
   }
 
@@ -34,9 +45,10 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
     setReturnForm({
       purchase_entry_id: ret.purchase_entry_id || '',
       qty: cf > 1 ? ret.qty / cf : ret.qty,   // DB stores base units; form shows purchase units
+      bs_day: ret.bs_day ? String(ret.bs_day) : '',
       notes: ret.notes || ''
     })
-    setReturnError('')
+    setReturnError(''); setDayErr('')
     setShowReturnForm(true)
   }
 
@@ -52,6 +64,10 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
     if (!linked) { setReturnError('Linked purchase not found.'); return }
     const retQty = parseFloat(returnForm.qty)
     if (!returnForm.qty || retQty <= 0) { setReturnError('Enter a valid return quantity.'); return }
+    const maxDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 32
+    const retDay = parseInt(returnForm.bs_day)
+    if (!retDay || retDay < 1 || retDay > maxDay) { setDayErr(`Pick the day the goods went back (1–${maxDay}).`); return }
+    setDayErr('')
     const retCf = getCf(linked.items)
     const baseRetQty = retQty * retCf
     const linkedQty = parseFloat(linked.qty)
@@ -80,7 +96,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
       qty:                baseRetQty,
       rate:               parseFloat(linked.rate),
       payment_method:     linked.payment_method || 'Cash',
-      bs_day:             linked.bs_day,
+      bs_day:             retDay,
       notes:              returnForm.notes.trim() || null
     }
 
@@ -98,10 +114,25 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
     onChanged()
   }
 
-  async function deleteReturn(id) {
-    if (!window.confirm('Delete this return entry?')) return
-    await scopedDelete('vendor_returns').eq('id', id)
-    onChanged()
+  function deleteReturn(ret) {
+    const value = (parseFloat(ret.qty) || 0) * (parseFloat(ret.rate) || 0)
+    // The product's own consequence dialog, with the money in it (S682 moved bill delete off
+    // window.confirm; this one had been left behind). And the delete's error is READ: a bare
+    // await meant a refused delete reloaded the same rows and the return "came back" unexplained.
+    askConfirm({
+      title: 'Delete this return?',
+      confirmLabel: 'Delete Return', danger: true, busyLabel: 'Deleting…',
+      body: <p style={{ margin: 0 }}>{ret.items?.name || 'This return'}, NPR {Math.round(value).toLocaleString('en-IN')}, goes back onto this period's net purchases and the vendor's payable. This cannot be undone.</p>,
+      run: async () => {
+        setActionError(null)
+        const { error } = await scopedDelete('vendor_returns').eq('id', ret.id)
+        if (error) {
+          const { text, detail } = asActionError(error)
+          setActionError({ text: `This return is still recorded — it was not deleted. ${text}`, detail })
+        }
+        onChanged()
+      },
+    })
   }
 
   const returnTotal = returns.reduce((s, r) => s + r.qty * r.rate, 0)
@@ -117,12 +148,18 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
       {/* Return Add/Edit Form */}
       {showReturnForm && (
         <Modal onClose={() => { setShowReturnForm(false); setEditingReturnId(null) }} title={editingReturnId ? 'Edit Return' : 'Record Return to Vendor'}>
-          <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 2fr', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr 2fr', gap: 16 }}>
             <div className="form-field">
               <label htmlFor="return-f1">Purchase Entry to Return *</label>
               <select id="return-f1"
                 value={returnForm.purchase_entry_id}
-                onChange={e => setReturnForm(f => ({ ...f, purchase_entry_id: e.target.value, qty: '' }))}
+                onChange={e => {
+                  // Pre-fill the day from the bill picked; the reader corrects it only when the
+                  // goods went back on a later day.
+                  const linked = getLinkedPurchase(e.target.value)
+                  setDayErr('')
+                  setReturnForm(f => ({ ...f, purchase_entry_id: e.target.value, qty: '', bs_day: linked?.bs_day ? String(linked.bs_day) : f.bs_day }))
+                }}
               >
                 <option value="">— Select a purchase entry —</option>
                 {purchases.map(p => {
@@ -172,6 +209,13 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
             </div>
 
             <div className="form-field">
+              <label htmlFor="return-f4"><Tip text="The day the goods actually went back to the vendor. Pre-filled with the bill's day; change it if the return happened later in the month. Vendor ledgers and balance letters date the return by this." width={280}>Day Returned *</Tip></label>
+              <BsCalendarPicker id="return-f4" lockYear={period?.bs_year} lockMonth={period?.bs_month} value={returnForm.bs_day}
+                onChange={d => { setDayErr(''); setReturnForm(f => ({ ...f, bs_day: d })) }} placeholder="Pick day" invalid={dayErr} />
+              <FieldError id="return-f4" message={dayErr} />
+            </div>
+
+            <div className="form-field">
               <label htmlFor="return-f3">Notes (optional)</label>
               <input id="return-f3"
                 value={returnForm.notes}
@@ -213,6 +257,8 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
           </div>
         </Modal>
       )}
+
+      <ActionError error={actionError} />
 
       {/* Returns table */}
       <div className="card">
@@ -262,7 +308,9 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                       −NPR {(ret.qty * ret.rate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td>
-                      <span className={`badge ${ret.payment_method === 'Cash' ? 'badge-green' : ret.payment_method === 'Credit' ? 'badge-red' : 'badge-purple'}`}>
+                      {/* badge-yellow for Credit, as the Purchases tab: a credit bill is a normal
+                          commercial arrangement, not a fault, and red is this product's warning. */}
+                      <span className={`badge ${ret.payment_method === 'Cash' ? 'badge-green' : ret.payment_method === 'Credit' ? 'badge-yellow' : 'badge-purple'}`}>
                         {ret.payment_method || 'Cash'}
                       </span>
                     </td>
@@ -271,7 +319,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
                       {!isLocked && (
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEditReturn(ret)}>Edit</button>
-                          <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteReturn(ret.id)}>Del</button>
+                          <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteReturn(ret)}>Del</button>
                         </div>
                       )}
                     </td>
@@ -290,6 +338,7 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
         )}
       </div>
       <Fab onClick={openNewReturn} label="+ Add Return" show={!isLocked && !showReturnForm && purchases.length > 0} />
+      {confirmEl}
     </>
   )
 }

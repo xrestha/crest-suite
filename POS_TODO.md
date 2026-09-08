@@ -9,13 +9,13 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-02 (S670 — added B4, the timezone follow-ups that change a figure rather than a label)
+Last updated: 2026-09-08 (S698 — narrowed B's hard-delete entry: the `purchase_entries` half is now atomic and refused on a paid bill)
 
 ---
 
 ## B. Reports — compliance-adjacent
 
-- [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier; `pos_orders` itself never hard-deletes once billed, verified)
+- [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier; `pos_orders` itself never hard-deletes once billed, verified). **Narrowed by S698 on the purchases side, not closed:** the replacement is now one transaction inside `save_purchase_bill` rather than two requests, so a bill can no longer end up holding both versions, and a bill with `payable_payments` against it is refused outright by a `BEFORE DELETE` trigger. The lines themselves are still replaced rather than superseded, so an audit trail beyond `audit_logs` would still need a version column. `sales_entries` is unchanged.
 - [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code)
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
