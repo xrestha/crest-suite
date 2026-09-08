@@ -2166,6 +2166,33 @@ table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
   .row-menu-item { min-height: 44px; }
 }
 
+/* ── Quick Calculator drag handle (Calculator.js, S704) ────────────────────────────────────────
+   The panel floats over a live page rather than behind a scrim, so it has to be movable. The grip
+   is the KEYBOARD affordance (arrow keys nudge, WCAG 2.5.7) and needs the product's focus pair —
+   which is exactly what an inline style cannot express, since :focus-visible has no inline form.
+   The row around it carries the pointer handlers and the grab cursor; the grip inherits it so the
+   whole bar reads as one draggable surface. */
+.calc-drag-grip {
+  display: inline-flex;
+  align-items: center;
+  color: var(--theme-text3);
+  cursor: inherit;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+.calc-drag-grip:focus-visible {
+  background: var(--theme-focus-ring);
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 1px;
+  color: var(--theme-text1);
+}
+@media (pointer: coarse) {
+  /* The grip is only the keyboard path; the whole header row is the touch target, so this needs
+     no 44px floor of its own — widening it would only push the title. */
+  .calc-drag-row { min-height: 44px; }
+}
+
 /* What the last status move did — "Sharma ×4 confirmed — 5th Bhadra at 7:30 PM. Show that day".
    Sits where ActionError sits and reads in the success colour AS TEXT; it is a sentence, not a
    card, for the same reason .action-error is not one. */

@@ -985,3 +985,51 @@ control that hides two lines costs more attention than the two lines it saves. O
 means Starter (17) and Growth (14) fold while Pro (8), POS (8), HR (7) and Suite (6) stay whole.
 Note *why* the long ones mattered: the three tiers share one CSS grid row, so **every** card was
 stretched to the tallest one's height.
+
+## A scrim is a control, and it says "finish this before anything else" (S704)
+
+The Quick Calculator had been built on `Modal.js`'s overlay verbatim — `position: fixed; inset: 0`,
+`rgba(0,0,0,0.6)`, `onClick={onClose}` — because that is the shape every overlay in this product
+had. The consequence was not cosmetic. You press Alt+C **to read a figure that is on the page**,
+and the scrim dimmed that figure, blocked the scroll that would bring the rest of it into view, and
+— being the close affordance — dismissed the calculator the moment you clicked the number you were
+checking. Reported as "I can't access the page behind it", which is exactly what a scrim is for.
+
+**Ask what the overlay OWNS before giving it one.** A dialog that owns a decision earns a scrim:
+it is the visual form of "this is the only thing you may do next", and the backdrop-click, the
+focus trap and `aria-modal` are all downstream of that one claim. A tool that helps you read or
+act on the page underneath owns nothing, and every one of those four mechanisms then works against
+it. The tell is a component whose reason to exist is a fact that lives on the page it is covering.
+
+Four things a non-modal floating panel needs that a `Modal` gives you for free, each with a trap:
+
+- **A `zIndex` above the dialogs it may be opened over**, not merely above the page. The calculator
+  sat at 400 and `Modal` callers pass up to 2100, so on the purchase-bill form — the single place
+  the tool is most reached for — it would have rendered *underneath*. It is 2500 now, below `Tip`'s
+  9999.
+- **`role="dialog"` WITHOUT `aria-modal`.** Nothing behind it is inert; claiming otherwise tells a
+  screen reader the rest of the page is unavailable when it is exactly as available as before.
+- **`no-print`.** A scrim makes an overlay hard to forget about; without one it is easy to leave
+  a floating tool open over a report someone then prints.
+- **Its own separation from the page.** `--theme-card-shadow` is tuned for a card sitting on the
+  page ground (`0 1px 2px` on Modernist Light) and is nowhere near enough for a panel that has to
+  read as lifted off live content. The heavier literal is deliberate.
+
+**A draggable panel is three rules, not one.** Use `setPointerCapture` on the handle rather than
+`mousedown` plus document listeners — capture routes every subsequent move and up back to the
+handle when the pointer outruns it or leaves the window, and one code path covers mouse, touch and
+pen; `touchAction: 'none'` on that handle, or a touch drag scrolls the page underneath instead of
+moving the panel. Clamp against the LIVE element (`offsetWidth`/`offsetHeight`), not the width
+constant — the panel's height changes with its content — and re-clamp on open and on resize, or a
+window resized while it was closed strands the handle off-screen. And keep the position in
+component state for the session rather than persisting it: a position saved on one monitor is how
+a panel gets stranded on another.
+
+**The keyboard path is not optional and it cannot live on the handle row.** The reason to move the
+panel is to uncover the figure underneath, so a drag-only affordance puts that out of a keyboard
+user's reach entirely (WCAG 2.5.7 Dragging Movements). But the handle row holds the close button,
+and interactive content inside a `role="button"` container is invalid and unfocusable — the S653
+rule, arrived at from the other direction. So the row carries the pointer handlers and the grab
+cursor, and a separate focusable grip holding only an icon carries `role="button"`, the arrow keys
+and the focus ring. That ring is why the grip is a CLASS: `:focus-visible` has no inline form, so
+an inline-styled grip would have fallen back to the UA outline the rest of the product replaced.

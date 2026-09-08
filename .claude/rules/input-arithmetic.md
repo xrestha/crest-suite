@@ -16,3 +16,13 @@ Three invariants from S623's review, each a live bug before it was a rule (`QtyI
 - **`looksLikeExpression()`'s character class must cover everything `tokenize()` normalises** — ASCII `x`/`X` (its multiply) and the comma it strips included. When detection lagged the tokenizer, `12x4` and `1,200` skipped evaluation and reached a caller's `parseFloat` as raw strings, which read a *prefix* (12, 1) — a silently 4×/1000×-wrong rate. Extending `tokenize` means extending the detection class in the same change.
 - **`QtyInput` never hands a raw unparseable string up.** `commit()` runs even non-expression text through `evaluate()` and reverts genuine garbage (`5oo`) to the last good value; the live keystroke mirror suppresses anything that doesn't `Number()` as itself. Corollary: plain numbers commit as **numbers**, not strings.
 - **Escape's cancel is a ref, not state** (`cancelRef`): Escape blurs the field and the blur's `commit()` runs before React re-renders, so it closes over the pre-Escape draft — without the ref, Esc *committed* the expression, byte-identical to Enter (measured, not reasoned). Enter itself only blurs (calling `commit()` in the keydown too double-fired `onCommit`). And Esc consumes the key (`stopPropagation`) only when there is an edit to cancel, paired with `Modal`'s `defaultPrevented` check, so cancelling one box never discards the dialog around it.
+
+## The Quick Calculator's SHELL is not documented here (S704)
+
+This file covers the evaluator the calculator shares with `QtyInput`. The panel around it — why it
+is a floating draggable thing rather than a modal, its `zIndex` against `Modal`, the drag and its
+keyboard equivalent — is in `.claude/rules/component-library.md`'s `Calculator` row and the
+**"A scrim is a control"** section of `.claude/rules/design-system.md`. The one-line version, since
+this is the file that auto-loads when you open `Calculator.js`: **do not give it a backdrop.** It
+had one until S704, and a scrim over the page is precisely what stops you reading the figure you
+opened the calculator to check.
