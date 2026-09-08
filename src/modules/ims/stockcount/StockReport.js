@@ -207,7 +207,7 @@ export default function StockReport() {
         <div className="stat-card">
           <div className="stat-label">Low Stock</div>
           <div className="stat-value" style={{ color: lowCount > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{lowCount}</div>
-          <div className="stat-sub">at or below par level</div>
+          <div className="stat-sub">below par level</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Out of Stock</div>

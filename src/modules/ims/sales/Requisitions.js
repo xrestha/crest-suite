@@ -16,7 +16,7 @@ import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
-import { buildUsageMap } from '../stockcount/stockReportCalc'
+import { buildStockRows } from '../stockcount/stockReportCalc'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const DEPARTMENTS = [
@@ -191,14 +191,6 @@ export default function Requisitions() {
     const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns },
       { data: wastages }, { data: staffMealsData }, { data: sales }, { data: clientRecipes }] = results
 
-    const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
-    const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
-    const purchMap = {}
-    ;(purchases || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-    ;(returns   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - (parseFloat(r.qty) || 0) })
-    const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-    const staffMap = {}; (staffMealsData || []).forEach(r => { staffMap[r.item_id] = (staffMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-
     const recipeIds = (clientRecipes || []).map(r => r.id)
     // The recipe walk throws on a failed read (S695); same answer as any other failed read here.
     let breakdown = {}
@@ -207,15 +199,12 @@ export default function Requisitions() {
     } catch (_) {
       return null
     }
-    const usageMap = buildUsageMap(sales, breakdown)
 
+    // The ONE on-hand calculation Stock Report and Reorder use (S696) — this guard kept a local
+    // copy of the same arithmetic, which is how the two drift apart the next time either moves.
     const onHand = {}
-    items.forEach(item => {
-      const hasClosing = item.id in closeMap
-      const rawTheoretical = (openMap[item.id] || 0) + (purchMap[item.id] || 0)
-        - (usageMap[item.id] || 0) - (wasteMap[item.id] || 0) - (staffMap[item.id] || 0)
-      onHand[item.id] = hasClosing ? closeMap[item.id] : Math.max(0, rawTheoretical)
-    })
+    buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals: staffMealsData, sales, breakdown })
+      .forEach(r => { onHand[r.item.id] = r.onHand })
     return onHand
   }
 

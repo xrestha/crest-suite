@@ -67,7 +67,7 @@ export const IMS_GUIDE_GROUPS = [
         formulas: [
           'Food Cost % = Net Purchases ÷ Revenue × 100. The band is the CLIENT\'s own fc_warning_pct / fc_critical_pct from Settings — 35 and 45 are only the defaults — and it carries a shape marker (✓ Healthy / △ Watch / ▲ Too high) as well as a colour, so the verdict survives colour-blindness and a black-and-white print.',
           'Est. Net Margin % = (Revenue − Net Purchases − Overhead Total) ÷ Revenue × 100.',
-          'Reorder shortfall = Par Qty − Current Stock, where Current Stock is the physical closing count if one exists, else max(0, Opening + Net Purchases − theoretical usage).',
+          'Items to Reorder = buildStockRows() (stockReportCalc.js), the same calculation as the Reorder Report (S696): Current Stock is the physical closing count if one exists, else max(0, Opening + Net Purchases − Usage − Wastage − Staff Meals); flagged when strictly below par; shortfall = Par − Current Stock. Before S696 this panel deducted neither wastage nor staff meals, so its count and the report it links to disagreed.',
         ],
         gotchas: [
           'Gated tiles (Variance, Recipe Costing, Menu Repricing, Reorder, Overheads — all Growth+) don\'t just hide the number on a lower plan — the underlying query is skipped entirely, so a Starter browser never even holds the Growth-tier figures in memory.',
@@ -318,7 +318,7 @@ export const IMS_GUIDE_GROUPS = [
         ],
         gotchas: [
           'Wastage/staff-meal saves are delete-then-insert (two round trips), unlike opening/closing\'s atomic upsert — a per-cell save lock serializes concurrent autosave-vs-Save-All/Clear-All so the delete/insert pairs can never interleave into duplicate, double-counted rows.',
-          'A closing_stock row can exist with a NULL physical_qty (an aborted save) — always treat this as 0, never NaN, or the item silently drops out of Reorder/Variance math.',
+          'closing_stock.physical_qty is NOT NULL in the schema (the baseline migration), so a row with a NULL count cannot exist — an older note here said it could. A row with 0 IS a count (S695). Every consumer parses through parseFloat(v) || 0 regardless, via buildStockRows() since S696.',
           'Items with no category (or a stale category id) appear in an "Uncategorised" group on the Summary tab, rendered only when it actually holds something. Before that group existed, such items silently dropped out of the category rollup\'s Totals while still appearing in the item table below — so if the two Summary tables ever look like they disagree, check for uncategorised items first.',
           'Offline mode queues edits locally and replays them on reconnect — a "N pending" badge shows queued writes that haven\'t synced yet.',
           'The automatic carry-forward is a one-time snapshot taken at the instant the period is closed — it is not a live link. If the closing count was not fully saved at that moment (the common real-world case: the month gets closed first and physically counted afterwards), the new period\'s Opening Stock is left blank and nothing re-triggers it on its own. This is the single most likely cause of a "my opening stock is empty even though I counted last month" report; the fix is the "↩ Pull from last month" button on the Opening Stock tab, which is safe to run at any point.',
@@ -637,24 +637,26 @@ export const IMS_GUIDE_GROUPS = [
         title: 'Reorder Report',
         route: '/reorder',
         plan: 'Growth+',
-        summary: 'Auto-generates a purchase shopping list of items at/below their par level, with inline par-level editing.',
+        summary: 'Auto-generates a purchase shopping list of items below their par level, with inline par-level editing.',
         workflow: [
-          'Select period (default filter: Reorder Only). Click a Par Level cell to edit inline (Enter=save, Escape=cancel). Search/filter by category.',
-          '"Book Stock" column (when the item has any POS-driven stock_movements this period) links to Stock Movements filtered to that item/period.',
+          'Select period (default: the open month, else the most recent one — since S696 the page no longer shows "Stock is healthy" over a report it never built when no month is open). Default filter: Reorder Only. Click a Par Level cell to edit inline (Enter=save, Escape=cancel). Search/filter by category.',
+          '"Book Stock" column (when the item has any stock_movements this period — POS bills/comps AND saved manual Sales Entry days both write them) links to Stock Movements filtered to that item/period.',
           'Admin-only "Clear Book Stock" deletes stock_movements for the period (destructive, confirm-gated). "Clear All Par" resets every item\'s par level to 0 across the whole client (also confirm-gated).',
         ],
         fields: [
-          { label: 'Book Stock', desc: 'Opening + Net Purchases − Wastage + Σ POS stock_movements for the period — a live, POS-depletion-aware figure shown only if the item has movement rows.' },
+          { label: 'Book Stock', desc: 'Opening + Net Purchases − Wastage − Staff Meals + Σ stock_movements (negative) for the period — a live, ledger-aware figure shown only if the item has movement rows.' },
+          { label: 'Par Level (inline save)', desc: 'A save that fails shows a red ActionError under the header and the row keeps its previous value. Before S696 both writes were bare awaits and the insert\'s returned id was discarded, so the SECOND edit of a freshly-set par went out as id=eq.undefined, was refused, and the screen kept showing a value the database never got.' },
         ],
         formulas: [
-          'Current Stock = physical closing count if present, else max(0, Opening + Net Purchases − Wastage − Usage).',
-          'Shortfall = max(0, Par − Current Stock). Est. Value = Shortfall × unit rate.',
+          'Current Stock = physical closing count if present, else max(0, Opening + Net Purchases − Usage − Wastage − Staff Meals) — buildStockRows() in stockReportCalc.js, the ONE calculation Stock Report, the Dashboard panel, the Owner Dashboard tile, the Monthly Owner Report and Requisitions\' over-issue guard all call (S696). Usage runs through selectDepletingSales (POS supersedes a manual row for the same recipe/day; a credit note never adds stock back).',
+          'Needs reorder = Par > 0 AND Current Stock < Par (strictly below — an item exactly at par is OK). Shortfall = Par − Current Stock when flagged, else 0. Est. Value = Shortfall × per_uom_rate.',
         ],
         gotchas: [
           'Items with Par = 0 are labeled "No Par" and excluded from the default Reorder Only filter — check "All Items" to see them.',
           '"Clear Book Stock" only deletes the raw movement ledger, never touches physical counts or Current Stock. "Clear All Par" resets par levels client-wide, not just the current filtered view — both are genuinely destructive, confirm before using.',
+          'Do NOT write a local copy of the on-hand arithmetic anywhere. Before S696 five surfaces each had one — three deducted no wastage or staff meals, the Owner Dashboard\'s excluded comps AND dropped every NULL-source legacy manual row via .neq(\'source\',\'pos_comp\'), and this page flagged <= par while the dashboards flagged < — so the Dashboard tile that said 3 linked to a report that said 7.',
         ],
-        connections: 'Book Stock deep-links to Stock Movements. Shares theoretical-stock logic with Stock Report. Used as a purchasing shopping list.',
+        connections: 'Book Stock deep-links to Stock Movements. Shares its on-hand/below-par calculation (buildStockRows) with Stock Report, the Dashboard, the Owner Dashboard, the Monthly Owner Report and Requisitions. Used as a purchasing shopping list.',
       },
       {
         id: 'stock-movements',

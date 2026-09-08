@@ -117,7 +117,8 @@ consumers; Stock Count's Summary holds two tables built from different loops tha
 out; a variance-style report must default to a CLOSED period, and must STATE which period it is on
 (`PeriodScope`) rather than trailing it off the end of a sentence; a Closing Stock of 0 is a
 COUNT (a row), blank is not, a requisition is NOT a stock deduction, and a failed read on Stock
-Count renders nothing below the error card (S695).
+Count renders nothing below the error card (S695); **on-hand/"below par" is `buildStockRows()`
+everywhere** — staff meals deducted, AT par is fine, never a local copy (S696).
 
 ### Multi-outlet: one login, several clients (S548)
 

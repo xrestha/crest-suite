@@ -152,3 +152,47 @@ to any future per-dish figure: the kitchen makes plates.
 `persistSalesDay.js` uses, because rows predating the column default read NULL. `.eq('source',
 'manual')` silently drops them. And a day present in both POS and manual history is ONE sample —
 pass the POS day-key set to `buildManualDailyHistory`.
+
+### On-hand and "below par" have ONE calculation, on six surfaces (S696)
+
+`buildStockRows()` in `src/modules/ims/stockcount/stockReportCalc.js` (tested) is the only place
+that turns a period's opening, closing, purchases, returns, wastage, staff meals, sales and recipe
+breakdown into an item's on-hand, its par comparison and its shortfall. **Stock Report, Reorder
+Report, the Dashboard's Items to Reorder panel and Top Variance table, the Owner Dashboard's Items
+Below Par tile, the Monthly Owner Report and Requisitions' over-issue guard all call it.** A
+re-analysis of the Reorder Report on 2026-09-08 found five copies, no two alike:
+
+| Surface | Wastage | Staff meals | Sales dedup | Flag |
+|---|---|---|---|---|
+| Reorder Report | yes | no | raw | at or below |
+| Stock Report | yes | yes | shared rule | at or below |
+| Client Dashboard panel | no | no | raw | below |
+| Owner Dashboard tile | no | no | excluded comps, and NULL-source rows via `.neq` | below |
+| Monthly Owner Report | no | no | raw | below |
+
+So the Dashboard tile linked to a report that disagreed with it, and the frozen Owner Report
+disagreed with both. Three decisions were put to Aashish in plain words and he took the
+recommended option on each: **an item exactly AT par is fine** (par is "the minimum I want on
+hand"; being at it is having it — the old `<=` painted the row red with a shortfall of "—" and
+printed a line to buy 0.00), **staff meals come off the shelf** (the S551 COGS decision, applied
+to on-hand), and **every surface reads the one function**. `summarizeReorder(rows)` is the
+count-and-value pair the tiles want. The Monthly Owner Report's `CURRENT_SCHEMA_VERSION` went to
+4 for it — no shape change, but a v3 row and a v4 row are not computed the same way.
+
+Three things the same audit found on the Reorder Report itself, each with one right answer:
+
+- **A second edit of a freshly-set par level never saved.** `savePar` threw away the row
+  `scopedInsert` returns, stored the par without its id, and the next save on that item went to
+  the update path with `.eq('id', undefined)` — which supabase-js sends as `id=eq.undefined`,
+  Postgres refuses, and the bare `await` dropped. The screen showed the new value; a reload showed
+  the first. The row id is kept now, every failure renders through `ActionError`, and the
+  row keeps its previous value. **When a write returns the row, keep what the next write needs.**
+- **Between closing one month and opening the next, the page said "Stock is healthy".** `init()`
+  loaded nothing when no period was open. It falls back to the latest period now, as Stock
+  Report always did, and claims the page through `periodReq.begin()`.
+- **Book Stock's tooltip, Help entry, glossary and guide all said "POS only"** while manual Sales
+  Entry has written `source = 'manual'` movements since 2026-07-30. A sentence that describes a
+  column is a claim about the code, and this one had been false for six weeks.
+
+**Do not write a sixth copy.** The tell is a page that needs "what is on the shelf" and reaches
+for `opening_stock` directly — it should reach for `buildStockRows` and read `onHand`.

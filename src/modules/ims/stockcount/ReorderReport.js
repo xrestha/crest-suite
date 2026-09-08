@@ -15,6 +15,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { buildStockRows } from './stockReportCalc'
 
 export default function ReorderReport() {
   const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
@@ -78,8 +79,15 @@ export default function ReorderReport() {
     const [{ data: p }, { data: c }] = initResults
     setPeriods(p || [])
     setCategories(c || [])
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) { setSelectedPeriod(open); await loadReport(open.id) }
+    // Fall back to the latest period when none is open (the gap between closing one month and
+    // opening the next). Before S696 this page loaded nothing then, and the empty state said
+    // "Stock is healthy" over a report it had never built.
+    const initial = (p || []).find(x => x.status === 'open') || (p || [])[0]
+    if (initial) {
+      periodReq.begin(initial.id)   // claim the page, as the S695 rule says init() should
+      setSelectedPeriod(initial)
+      await loadReport(initial.id)
+    }
     setLoading(false)
   }
 
@@ -101,11 +109,17 @@ export default function ReorderReport() {
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
+      // Staff meals come off the shelf (S696) — Stock Report already deducted them and this page
+      // did not, so an item Stock Report called Low read OK on the page a purchase list prints from.
+      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       // Both paged rather than bare selects — either can exceed PostgREST's silent 1000-row cap
       // on a busy period, and a truncated read here understates theoretical usage and Book Stock
       // with no error to notice. Book Stock is a figure people place orders against, so a
       // quietly-low number is worse than a missing one (S528, see shared/fetchAllRows.js).
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).order('id')),
+      // bs_day + source feed the shared POS-supersedes-manual rule in buildUsageMap (S696) — this
+      // was the last page summing sales_entries raw, so a day sold in both POS and manual entry
+      // consumed its ingredients twice and a credit note put stock back on the shelf.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
       scopedFrom('par_levels'),
       fetchAllRows(() => scopedFrom('stock_movements', 'item_id, qty').eq('period_id', periodId).order('id'))
     ])
@@ -121,74 +135,63 @@ export default function ReorderReport() {
       { data: purchases },
       { data: returns },
       { data: wastages },
+      { data: staffMeals },
       { data: sales },
       { data: pars },
       { data: movements }
     ] = results
 
+    // The row id is what savePar's update path filters on, so it must be kept here and after an
+    // insert (see savePar) — without it a second edit went out as `id=eq.undefined` (S696).
     const parMap = {}
     ;(pars || []).forEach(p => { parMap[p.item_id] = { id: p.id, par_qty: parseFloat(p.par_qty) || 0 } })
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setParLevels(parMap)
 
-    const openMap  = {}; (opening  || []).forEach(r => { openMap[r.item_id]  = parseFloat(r.qty) || 0 })
-    const closeMap = {}; (closing  || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
-    const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-
-    // PATCHED: net purchase map (purchases − returns)
-    const purchMap = {}
-    ;(purchases || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-    ;(returns   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - (parseFloat(r.qty) || 0) })
-
     const movementMap = {}
     ;(movements || []).forEach(m => { movementMap[m.item_id] = (movementMap[m.item_id] || 0) + (parseFloat(m.qty) || 0) })
 
-    const soldMap = {}; (sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0) })
-    const soldRecipeIds = Object.keys(soldMap).filter(id => soldMap[id] > 0)
+    // Only the recipes that sold need exploding — the walk is the expensive read on this page.
+    const soldRecipeIds = [...new Set((sales || []).map(s => s.recipe_id).filter(Boolean))]
     // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
     // item's current stock read as opening + purchases, so nothing ever needed reordering.
     let breakdown = {}
     try {
-      breakdown = await explodeRecipeIngredients(supabase, soldRecipeIds)
+      breakdown = soldRecipeIds.length > 0 ? await explodeRecipeIngredients(supabase, soldRecipeIds) : {}
     } catch (err) {
       setLoadError(err); setRows([]); return
     }
-    const usageMap = {}
-    soldRecipeIds.forEach(recipeId => {
-      (breakdown[recipeId] || []).forEach(({ item_id, qty }) => {
-        usageMap[item_id] = (usageMap[item_id] || 0) + qty * soldMap[recipeId]
-      })
-    })
 
-    const built = (items || []).map(item => {
-      const openQty  = openMap[item.id] || 0
-      const netPurch = purchMap[item.id] || 0
-      const wasteQty = wasteMap[item.id] || 0
-      const usageQty = usageMap[item.id] || 0
-      const hasClosing = item.id in closeMap
-      // PATCHED: theoretical stock uses net purchase
-      const currentStock = hasClosing
-        ? closeMap[item.id]
-        : Math.max(0, openQty + netPurch - wasteQty - usageQty)
-      const par = parMap[item.id]?.par_qty || 0
-      const shortfall = Math.max(0, par - currentStock)
-      const needsReorder = par > 0 && currentStock <= par
-      const hasMovements = item.id in movementMap
-      const bookStock = hasMovements ? Math.max(0, openQty + netPurch - wasteQty + movementMap[item.id]) : null
-
+    // On-hand, the par comparison and the shortfall all come from the ONE calculation Stock
+    // Report, both dashboards, the Monthly Owner Report and Requisitions use (S696) — this page
+    // used to keep its own copy, which deducted no staff meals, summed sales raw and flagged an
+    // item sitting exactly at par. See stockReportCalc.js for the five rules.
+    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars }).map(r => {
+      const hasMovements = r.item.id in movementMap
+      // Book Stock is the same theoretical figure with the ledger's own depletions in place of
+      // sales × recipe: opening + net purchases − wastage − staff meals + Σ movements (negative).
+      const bookStock = hasMovements ? Math.max(0, r.openQty + r.netPurch - r.wasteQty - r.staffQty + movementMap[r.item.id]) : null
       return {
-        item, openQty, purchQty: netPurch, wasteQty, usageQty,
-        currentStock, stockSource: hasClosing ? 'closing' : 'theoretical',
+        item: r.item, openQty: r.openQty, purchQty: r.netPurch, wasteQty: r.wasteQty, staffQty: r.staffQty, usageQty: r.usageQty,
+        currentStock: r.onHand, stockSource: r.stockSource,
         bookStock, hasMovements,
-        par, shortfall, needsReorder,
-        category: item.categories?.name || 'Uncategorised',
-        unitValue: parseFloat(item.per_uom_rate) || 0,
-        shortfallValue: shortfall * (parseFloat(item.per_uom_rate) || 0)
+        par: r.par, shortfall: r.shortfall, needsReorder: r.needsReorder,
+        category: r.category,
+        unitValue: r.unitRate,
+        shortfallValue: r.shortfallValue,
       }
     })
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRows(built)
+  }
+
+  // The par comparison for one row after an inline edit — the same rule buildStockRows applies
+  // (below par, never at it), so a value typed here cannot flag differently from a reload.
+  function withPar(row, par) {
+    const needsReorder = par > 0 && row.currentStock < par
+    const shortfall = needsReorder ? par - row.currentStock : 0
+    return { ...row, par, shortfall, needsReorder, shortfallValue: shortfall * row.unitValue }
   }
 
   function startEditPar(itemId, current) {
@@ -203,20 +206,35 @@ export default function ReorderReport() {
       return
     }
     setSavingPar(p => ({ ...p, [itemId]: true }))
+    setActionError(null)
     const existing = parLevels[itemId]
-    if (existing) {
-      await scopedUpdate('par_levels', { par_qty: val, updated_at: new Date().toISOString() }).eq('id', existing.id)
+    // Both writes used to be bare awaits, and the insert's returned row was thrown away — so the
+    // par was stored without its id, the NEXT edit of the same item went out as
+    // `id=eq.undefined`, Postgres refused it, and the screen kept showing a value the database
+    // never got (S696). The row id is kept now and every failure is shown.
+    let saved = existing
+    if (existing?.id) {
+      const { error } = await scopedUpdate('par_levels', { par_qty: val, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      if (error) { saved = null; reportParError(error) }
+      else saved = { ...existing, par_qty: val }
     } else {
-      await scopedInsert('par_levels', { item_id: itemId, par_qty: val })
+      // Unique on (client_id, item_id) — an insert racing a par the page has not seen is refused
+      // rather than duplicated, and the reader is told to reload.
+      const { data, error } = await scopedInsert('par_levels', { item_id: itemId, par_qty: val })
+      if (error) { saved = null; reportParError(error) }
+      else saved = { id: data?.[0]?.id, par_qty: val }
     }
-    setParLevels(p => ({ ...p, [itemId]: { ...(p[itemId] || {}), par_qty: val } }))
-    setRows(r => r.map(row => {
-      if (row.item.id !== itemId) return row
-      const shortfall = Math.max(0, val - row.currentStock)
-      return { ...row, par: val, shortfall, needsReorder: val > 0 && row.currentStock <= val, shortfallValue: shortfall * row.unitValue }
-    }))
+    if (saved) {
+      setParLevels(p => ({ ...p, [itemId]: saved }))
+      setRows(r => r.map(row => row.item.id === itemId ? withPar(row, val) : row))
+    }
     setEditingPar(p => { const n = { ...p }; delete n[itemId]; return n })
     setSavingPar(p => { const n = { ...p }; delete n[itemId]; return n })
+  }
+
+  function reportParError(error) {
+    const a = asActionError(error)
+    setActionError({ text: 'The par level was not saved — the row still shows its previous value. ' + a.text, detail: a.detail })
   }
 
   function handleParKey(e, itemId) {
@@ -328,7 +346,7 @@ export default function ReorderReport() {
       'Par Level': r.par || '',
       'Current Stock': parseFloat(r.currentStock.toFixed(3)),
       'Book Stock (POS)': r.hasMovements ? parseFloat(r.bookStock.toFixed(3)) : '',
-      'Stock Source': r.stockSource === 'closing' ? 'Physical Count' : 'Theoretical (Net Purchases)',
+      'Stock Source': r.stockSource === 'closing' ? 'Physical Count' : 'Calculated (Opening + Net Purchases − Usage − Wastage − Staff Meals)',
       'Shortfall': r.shortfall > 0 ? parseFloat(r.shortfall.toFixed(3)) : '',
       'Unit Rate (NPR)': r.unitValue,
       'Shortfall Value (NPR)': r.shortfall > 0 ? parseFloat(r.shortfallValue.toFixed(0)) : '',
@@ -430,7 +448,7 @@ export default function ReorderReport() {
         <div className="stat-card">
           <div className="stat-label">Items to Reorder</div>
           <div className="stat-value" style={{ color: reorderCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{reorderCount}</div>
-          <div className="stat-sub">at or below par level</div>
+          <div className="stat-sub">below par level</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Reorder Value</div>
@@ -511,10 +529,10 @@ export default function ReorderReport() {
                     </Tip>
                   </th>
                   <th>Item</th><th>Category</th><th>UOM</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Minimum stock you want on hand at all times. Set this per item — when stock falls to or below par, a reorder is triggered." width={240}>Par Level</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Minimum stock you want on hand at all times. Set this per item — when stock falls below par, a reorder is triggered. Sitting exactly at par is fine." width={240}>Par Level</Tip></th>
                   <th style={{ textAlign: 'right' }}>Current Stock</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Live stock based on POS sales/comps recorded this period. Shown only for items sold through POS — '—' means no POS activity yet, not zero usage." width={260}>Book Stock</Tip></th>
-                  <th><Tip text="Physical = based on your closing count entry. Calc'd = estimated from Opening + Net Purchases − Usage − Wastage (less reliable)." width={250}>Source</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Live stock from the depletion ledger — every POS bill or comp, and every manual Sales Entry day, records the ingredients it used. Shown only for items with a ledger entry this period — '—' means nothing recorded yet, not zero usage." width={270}>Book Stock</Tip></th>
+                  <th><Tip text="Physical = based on your closing count entry. Calc'd = estimated from Opening + Net Purchases − Usage − Wastage − Staff Meals (less reliable). Same figure as Stock Report's On-hand." width={260}>Source</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Par Level − Current Stock. The quantity you need to order to get back to par." width={210}>Shortfall</Tip></th>
                   <th style={{ textAlign: 'right' }}>Est. Value (NPR)</th>
                   <th>Status</th>
@@ -577,7 +595,7 @@ export default function ReorderReport() {
                           ) : '—'}
                         </td>
                         <td>
-                          <Tip text={row.stockSource === 'closing' ? 'Physical closing count entered via stock count.' : 'Calculated: Opening + Net Purchases − Usage − Wastage'} width={240}>
+                          <Tip text={row.stockSource === 'closing' ? 'Physical closing count entered via stock count.' : 'Calculated: Opening + Net Purchases − Usage − Wastage − Staff Meals'} width={240}>
                             <span className={`badge ${row.stockSource === 'closing' ? 'badge-green' : 'badge-gray'}`}>
                               {row.stockSource === 'closing' ? 'Physical' : "Calc'd"}
                             </span>

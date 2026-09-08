@@ -26,6 +26,7 @@ import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '.
 import { nepalBs } from '../../shared/nepalTime'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
+import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 import SalesPivot from '../../modules/dashboard/SalesPivot'
 import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
@@ -403,6 +404,10 @@ export default function ClientDashboard() {
       // needs them apart. The KPI cards still use the all-bucket sum; see overheadBuckets below.
       period ? supabase.from('overheads').select('amount, bucket').eq('period_id', period.id) : { data: [] },
       period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
+      // Staff meals come off the shelf in the shared on-hand calculation (S696) — the Items to
+      // Reorder panel used to deduct neither wastage nor staff meals, so it disagreed with the
+      // Reorder Report it links to.
+      period ? supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id) : { data: [] },
     ])
 
     const independentResults = await independentPromise
@@ -443,7 +448,8 @@ export default function ClientDashboard() {
       { data: opening },
       { data: closing },
       { data: overheadsData },
-      { data: wastagesData }
+      { data: wastagesData },
+      { data: staffMealsData }
     ] = dependentResults
 
     const hadRealError = (periodErr && periodErr.code !== 'PGRST116')
@@ -462,13 +468,12 @@ export default function ClientDashboard() {
     // falls back to the recipe's current price — previously always used the current price, so
     // this period's revenue silently reflected today's menu price rather than what was charged.
     // soldMap/revenueMap (comp-excluded) drive every revenue-facing figure on this page —
-    // Revenue, daily trend, projections, Menu Health opportunity. soldMapAll (every source,
-    // including 'pos_comp') feeds theoreticalMap below instead, since a comped dish still
-    // consumed real stock even though it collected no revenue — see the query comment above.
-    const soldMap = {}, soldMapAll = {}, revenueMap = {}
+    // Revenue, daily trend, projections, Menu Health opportunity. Consumption (theoreticalMap
+    // below) is built from every source instead, since a comped dish still consumed real stock
+    // even though it collected no revenue — see the query comment above.
+    const soldMap = {}, revenueMap = {}
     ;(salesData || []).forEach(s => {
       const qty = parseFloat(s.qty_sold)
-      soldMapAll[s.recipe_id] = (soldMapAll[s.recipe_id] || 0) + qty
       if (s.source === 'pos_comp') return
       const price = s.unit_price != null ? parseFloat(s.unit_price) : (currentPriceMap[s.recipe_id] || 0)
       soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + qty
@@ -476,15 +481,11 @@ export default function ClientDashboard() {
     })
     const revenueTotal = Object.values(revenueMap).reduce((s, v) => s + v, 0)
 
-    // theoreticalMap: item-level usage this period. ingredientBreakdown rows are already
-    // recursed through sub-recipe nesting and yield_pct-adjusted per one portion — just scale by
-    // how many portions actually sold. Uses soldMapAll (comps included) — see comment above.
-    const theoreticalMap = {}
-    Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
-      const sold = soldMapAll[recipeId] || 0
-      if (sold <= 0) return
-      rows.forEach(({ item_id, qty }) => { theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + sold * qty })
-    })
+    // theoreticalMap: item-level usage this period, through the ONE depletion rule every stock
+    // page applies (S696) — POS supersedes a manual row for the same recipe and day, a credit note
+    // never puts stock back. This page used to sum every row raw, so a day sold in both POS and
+    // manual entry consumed its ingredients twice on the Variance widget and the Reorder panel.
+    const theoreticalMap = buildUsageMap(salesData, ingredientBreakdown)
 
     // itemRateMap built from allItems (unfiltered by is_active) — an item deactivated mid-period
     // still has real wastage/recipe-cost history for that period; it shouldn't zero-cost to 0.
@@ -533,7 +534,6 @@ export default function ClientDashboard() {
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) })
-    const parMap = {}; (parLevels || []).forEach(p => { parMap[p.item_id] = parseFloat(p.par_qty) || 0 })
 
     // Variance top 5 — gated on canVariance (Growth+); see Menu Health comment above for why
     // this needs a data gate, not just a render gate.
@@ -696,31 +696,22 @@ export default function ClientDashboard() {
       .slice(0, 10)
     setAndCache(setTopItemSpend, 'topItemSpend', itemSpendRows)
 
-    // Reorder — use net purchMap for theoretical stock. Gated on canReorder (Growth+); see Menu
-    // Health comment above for why this needs a data gate, not just a render gate.
+    // Reorder — the same on-hand and below-par calculation the Reorder Report this panel links
+    // to uses (S696; this used to be its own copy that deducted neither wastage nor staff meals,
+    // so the tile could say 3 and the report 7). Gated on canReorder (Growth+); see Menu Health
+    // comment above for why this needs a data gate, not just a render gate.
     if (canReorder) {
-      const reorderRows = (items || [])
-        .filter(i => parMap[i.id] > 0)
-        .map(i => {
-          const hasPhysical = closeMap[i.id] !== undefined
-          // `|| 0` guard: a closing_stock row can exist with a NULL physical_qty (a partial count
-          // save), which parses to NaN. Without the guard, NaN !== undefined so hasPhysical was
-          // still true, and NaN downstream (shortfall, needsReorder = NaN > 0 = false) silently
-          // dropped the item from the list entirely instead of flagging it — even if critically low.
-          const currentStock = hasPhysical
-            ? (closeMap[i.id] || 0)
-            : Math.max(0, (openMap[i.id] || 0) + (purchMap[i.id] || 0) - (theoreticalMap[i.id] || 0))
-          const par = parMap[i.id]
-          const shortfall = par - currentStock
-          const estValue = shortfall > 0 ? shortfall * parseFloat(i.per_uom_rate || 0) : 0
-          return {
-            name: i.name, uom: i.uom, currentStock: Math.round(currentStock * 100) / 100,
-            par, shortfall: Math.round(shortfall * 100) / 100,
-            estValue: Math.round(estValue), needsReorder: shortfall > 0,
-            source: hasPhysical ? 'Physical' : "Calc'd"
-          }
-        })
+      const reorderRows = buildStockRows({
+        items, opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
+        sales: salesData, breakdown: ingredientBreakdown, pars: parLevels,
+      })
         .filter(r => r.needsReorder)
+        .map(r => ({
+          name: r.item.name, uom: r.item.uom, currentStock: Math.round(r.onHand * 100) / 100,
+          par: r.par, shortfall: Math.round(r.shortfall * 100) / 100,
+          estValue: Math.round(r.shortfallValue), needsReorder: true,
+          source: r.stockSource === 'closing' ? 'Physical' : "Calc'd"
+        }))
         .sort((a, b) => b.estValue - a.estValue)
         .slice(0, 5)
       setAndCache(setReorderItems, 'reorderItems', reorderRows)

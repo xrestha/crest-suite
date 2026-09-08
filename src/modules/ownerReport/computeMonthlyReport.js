@@ -10,6 +10,7 @@ import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { calcAmount, hourlyRateOf, tallyAttendance } from '../hr/payroll/payrollCompute'
 import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
+import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
 import { computeOrderAmounts, computeCategoryAmounts } from '../../utils/posBillingMath'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
@@ -37,7 +38,8 @@ async function computeImsSection(clientId, period) {
     // reorder shortfall built on it below — silently understated by the comp volume, and the
     // section disagreed with the live Variance/Reorder pages, which have never filtered comps.
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')),
-    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).order('id')),
+    // bs_day + source feed the shared depletion rule in buildStockRows (S696).
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', period.id).order('id')),
     scopedFrom('recipes', clientId, 'id, selling_price'),
     supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
     fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')),
@@ -53,6 +55,9 @@ async function computeImsSection(clientId, period) {
     supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id),
     supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id),
     scopedFrom('payable_payments', clientId, 'purchase_entry_id, amount'),
+    // Staff meals come off the shelf in the shared on-hand calculation the reorder figure is
+    // built from (S696).
+    supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id),
   ])
   // A failed read must THROW so runSection() records it as a section error the page names —
   // otherwise it flows through `|| []` and freezes zeros into the immutable snapshot (S612).
@@ -60,7 +65,7 @@ async function computeImsSection(clientId, period) {
   const [
     { data: purchases }, { data: returns }, { data: salesData }, { data: consumptionSales }, { data: recipes },
     { data: overheadsData }, { data: wastagesData }, { data: items }, { data: parLevels },
-    { data: opening }, { data: closing }, { data: payablePayments },
+    { data: opening }, { data: closing }, { data: payablePayments }, { data: staffMealsData },
   ] = results
 
   const grossTotal  = (purchases || []).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
@@ -103,32 +108,16 @@ async function computeImsSection(clientId, period) {
   const recipeIds = (recipes || []).map(r => r.id)
   const ingredientBreakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
   // consumptionSales, not salesData — comps consumed ingredients even though they earned nothing.
-  const soldMap = {}; (consumptionSales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) })
-  const theoreticalMap = {}
-  Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
-    const sold = soldMap[recipeId] || 0
-    if (sold <= 0) return
-    rows.forEach(({ item_id, qty }) => { theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + sold * qty })
+  // The on-hand / below-par figures come from the ONE calculation the live Reorder Report and
+  // both dashboards use (S696, schema v4); v3 snapshots carried this section's own copy, which
+  // deducted neither wastage nor staff meals and summed sales raw. Sub-recipes are filtered here
+  // because the items read above keeps them for the stock-value figures (see its comment).
+  const stockRows = buildStockRows({
+    items: (items || []).filter(i => !i.is_sub_recipe), // items query is already filtered to is_active=true
+    opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
+    sales: consumptionSales, breakdown: ingredientBreakdown, pars: parLevels,
   })
-  const purchMap = {}
-  ;(purchases || []).forEach(p => { purchMap[p.item_id] = (purchMap[p.item_id] || 0) + parseFloat(p.qty || 0) })
-  ;(returns || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - parseFloat(r.qty || 0) })
-  const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) })
-  const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) })
-  const parMap = {}; (parLevels || []).forEach(p => { parMap[p.item_id] = parseFloat(p.par_qty) || 0 })
-
-  let reorderCount = 0, reorderEstValueTotal = 0
-  ;(items || []).forEach(i => {
-    if (i.is_sub_recipe) return // items query is already filtered to is_active=true
-    const par = parMap[i.id] || 0
-    if (par <= 0) return
-    const hasPhysical = closeMap[i.id] !== undefined
-    const currentStock = hasPhysical
-      ? closeMap[i.id]
-      : Math.max(0, (openMap[i.id] || 0) + (purchMap[i.id] || 0) - (theoreticalMap[i.id] || 0))
-    const shortfall = par - currentStock
-    if (shortfall > 0) { reorderCount += 1; reorderEstValueTotal += shortfall * parseFloat(i.per_uom_rate || 0) }
-  })
+  const { count: reorderCount, estValueTotal: reorderEstValueTotal } = summarizeReorder(stockRows)
 
   const foodCostPct = revenueTotal > 0 ? (purchaseTotal / revenueTotal) * 100 : null
 
@@ -488,7 +477,10 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // includes comped covers, where v1/v2 snapshots excluded them. Bumped anyway because the Trend
 // section compares this period against already-frozen prior snapshots — a v2 row and a v3 row are
 // not computed the same way, and the version is the only trace of that a reader will ever have.
-export const CURRENT_SCHEMA_VERSION = 3
+// 4 (S696): no shape change; `ims.reorder` now comes from the shared `buildStockRows` — wastage
+// and staff meals deducted, sales deduplicated through the POS-supersedes-manual rule, "below
+// par" strictly below — where v3 kept a local copy that did none of those. Same reasoning as v3.
+export const CURRENT_SCHEMA_VERSION = 4
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

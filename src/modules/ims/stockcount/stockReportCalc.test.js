@@ -1,4 +1,4 @@
-import { buildStockRows, buildUsageMap } from './stockReportCalc'
+import { buildStockRows, buildUsageMap, summarizeReorder } from './stockReportCalc'
 
 const item = (id, rate = 10) => ({ id, name: id, per_uom_rate: rate, categories: { name: 'Dry' } })
 const dish = { dish: [{ item_id: 'rice', qty: 0.2 }] }
@@ -56,11 +56,57 @@ describe('Stock Report on-hand (stockReportCalc)', () => {
     expect(r.status).toBe('out')
   })
 
-  test('low when at or under par, only when par is set', () => {
+  test('low when under par, only when par is set', () => {
     const [low] = rowsFor({ opening: [{ item_id: 'rice', qty: 4 }], pars: [{ item_id: 'rice', par_qty: 5 }] })
     expect(low.status).toBe('low')
     const [ok] = rowsFor({ opening: [{ item_id: 'rice', qty: 4 }] })
     expect(ok.status).toBe('ok')
+  })
+})
+
+describe('Below par is one rule for every surface (S696)', () => {
+  test('under par: flagged, with the shortfall and its value', () => {
+    const [r] = rowsFor({ opening: [{ item_id: 'rice', qty: 3 }], pars: [{ item_id: 'rice', par_qty: 5 }] })
+    expect(r.needsReorder).toBe(true)
+    expect(r.shortfall).toBeCloseTo(2)
+    expect(r.shortfallValue).toBeCloseTo(20)
+  })
+
+  test('exactly at par is fine — nothing to buy, so nothing to flag', () => {
+    const [r] = rowsFor({ opening: [{ item_id: 'rice', qty: 5 }], pars: [{ item_id: 'rice', par_qty: 5 }] })
+    expect(r.needsReorder).toBe(false)
+    expect(r.shortfall).toBe(0)
+    expect(r.status).toBe('ok')
+  })
+
+  test('no par set: never flagged, whatever the stock', () => {
+    const [r] = rowsFor({ opening: [{ item_id: 'rice', qty: 0.001 }] })
+    expect(r.needsReorder).toBe(false)
+    expect(r.par).toBe(0)
+  })
+
+  test('staff meals come off the shelf and can push an item below par', () => {
+    const base = { opening: [{ item_id: 'rice', qty: 5 }], pars: [{ item_id: 'rice', par_qty: 5 }] }
+    expect(rowsFor(base)[0].needsReorder).toBe(false)
+    const [r] = rowsFor({ ...base, staffMeals: [{ item_id: 'rice', qty: 1 }] })
+    expect(r.needsReorder).toBe(true)
+    expect(r.shortfall).toBeCloseTo(1)
+  })
+
+  test('a counted 0 with a par is below par by the whole par', () => {
+    const [r] = rowsFor({ closing: [{ item_id: 'rice', physical_qty: 0 }], pars: [{ item_id: 'rice', par_qty: 5 }] })
+    expect(r.needsReorder).toBe(true)
+    expect(r.shortfall).toBe(5)
+  })
+
+  test('summarizeReorder counts flagged rows and sums their value', () => {
+    const rows = buildStockRows({
+      items: [item('rice'), item('dal', 20), item('salt')],
+      opening: [{ item_id: 'rice', qty: 1 }, { item_id: 'dal', qty: 1 }, { item_id: 'salt', qty: 9 }],
+      pars: [{ item_id: 'rice', par_qty: 3 }, { item_id: 'dal', par_qty: 2 }, { item_id: 'salt', par_qty: 9 }],
+      breakdown: {},
+    })
+    expect(summarizeReorder(rows)).toEqual({ count: 2, estValueTotal: 2 * 10 + 1 * 20 })
   })
 })
 

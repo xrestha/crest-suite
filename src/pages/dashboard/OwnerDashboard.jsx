@@ -23,6 +23,7 @@ import {
   SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY,
 } from '../../modules/hr/payrollConstants'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
+import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
 
 // Cost & Margin trend series. Fixed hex, for the reason DESIGN.md states by name: the semantic
 // token set is five ROLES, not five distinguishable hues. These four lines were
@@ -186,10 +187,18 @@ export default function OwnerDashboard() {
       scopedFrom('items', 'id, per_uom_rate, yield_pct').eq('is_active', true).eq('is_sub_recipe', false),
       scopedFrom('par_levels', 'item_id, par_qty'),
       scopedFrom('recipes', 'id, selling_price'),
-      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).neq('source', 'pos_comp').order('id')) : { data: [] },
+      // Every source, with bs_day + source for the shared depletion rule (S696). This read used
+      // to carry `.neq('source', 'pos_comp')`, which was wrong twice over: a comped dish still
+      // consumed its ingredients, and a .neq on a NULLABLE column also drops every legacy manual
+      // row whose source is NULL — so consumption was understated and the tile under-counted.
+      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', period.id).order('id')) : { data: [] },
+      // Wastage and staff meals come off the shelf in the shared calculation (S696); this tile
+      // deducted neither, so it disagreed with the Reorder Report it summarises.
+      period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
+      period ? supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id) : { data: [] },
     ])
     setLoadErrors(prev => ({ ...prev, reorder: results.some(r => r.error) ? 'Reorder figures failed to load — may be incomplete or stale.' : '' }))
-    const [{ data: purchases }, { data: returns }, { data: opening }, { data: closing }, { data: items }, { data: parLevels }, { data: recipes }, { data: sales }] = results
+    const [{ data: purchases }, { data: returns }, { data: opening }, { data: closing }, { data: items }, { data: parLevels }, { data: recipes }, { data: sales }, { data: wastages }, { data: staffMeals }] = results
 
     const dashRecipeIds = (recipes || []).map(r => r.id)
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
@@ -208,38 +217,14 @@ export default function OwnerDashboard() {
       setLoadErrors(prev => ({ ...prev, reorder: 'Reorder figures failed to load — may be incomplete or stale.' }))
     }
 
-    const soldMap = {}; (sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) })
-    // ingredientBreakdown rows are already yield_pct-adjusted per one portion — just scale by how
-    // many portions actually sold.
-    const theoreticalMap = {}
-    Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
-      const sold = soldMap[recipeId] || 0
-      if (sold <= 0) return
-      rows.forEach(({ item_id, qty }) => { theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + sold * qty })
+    // The same on-hand / below-par calculation the Reorder Report uses (S696) — this tile used to
+    // keep its own copy (no wastage, no staff meals, comps excluded, raw sales), so the count
+    // here and the count on that page were different numbers for the same client.
+    const rows = buildStockRows({
+      items, opening, closing, purchases, returns, wastages, staffMeals,
+      sales, breakdown: ingredientBreakdown, pars: parLevels,
     })
-
-    const purchMap = {}
-    ;(purchases || []).forEach(p => { purchMap[p.item_id] = (purchMap[p.item_id] || 0) + parseFloat(p.qty || 0) })
-    ;(returns || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - parseFloat(r.qty || 0) })
-    const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) })
-    const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) })
-    const parMap = {}; (parLevels || []).forEach(p => { parMap[p.item_id] = parseFloat(p.par_qty) || 0 })
-
-    let count = 0, estValueTotal = 0
-    ;(items || []).forEach(i => {
-      const par = parMap[i.id] || 0
-      if (par <= 0) return
-      const hasPhysical = closeMap[i.id] !== undefined
-      const currentStock = hasPhysical
-        ? closeMap[i.id]
-        : Math.max(0, (openMap[i.id] || 0) + (purchMap[i.id] || 0) - (theoreticalMap[i.id] || 0))
-      const shortfall = par - currentStock
-      if (shortfall > 0) {
-        count += 1
-        estValueTotal += shortfall * parseFloat(i.per_uom_rate || 0)
-      }
-    })
-    setReorderStats({ count, estValueTotal })
+    setReorderStats(summarizeReorder(rows))
   }
 
   // ── Overdue vendor payables (>60 days) — cross-period by nature, doesn't wait on `period` ──
