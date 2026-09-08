@@ -23,4 +23,18 @@ Four rules, each of which cost something to learn:
   `LegalReacceptance` immediately after `accessLocked`, for a client Owner with an outstanding
   Terms/Privacy version. Same reasoning as this one — one choke point, never per-page — and it
   also fails open. See `.claude/rules/legal-documents.md`.
+- **A fifth state sits BEFORE the trial-expiry branch: `pending` (S697).** A self-service signup
+  is created with `trial_approved_at = NULL` and opens on the day an admin presses **Approve** in
+  Admin → Clients' Trial Accounts panel. `getAccessState` returns `reason: 'pending'` for
+  `is_trial && !trial_approved_at`, and `SubscriptionLock` shows the "we will call you" copy —
+  accent tone, phone icon, no subscribe button, no retention talk, because the person reading it
+  is almost always a real owner who just signed up. It is checked before expiry on purpose: the
+  dates `register_trial` writes at signup are PROVISIONAL (they exist so an abandoned signup still
+  ages into the purge job), and `approveTrial` rewrites all four so the 7 days start at approval.
+  Two things must keep the stamp: the admin "+ New Client" form (hand-onboarded, approved by
+  definition) and migration `20260908130000`'s backfill of every pre-existing trial. `trialPending`
+  from `AuthContext` is what keeps the day-one trial banner quiet until the trial has started.
+  The trial itself is **Growth with IMS, HR and POS all on** — safe to hand out only because
+  nobody sees it until approved, which is why the approval gate and the richer trial shipped as
+  one change and must not be separated.
 - **This is a UI gate, not a security boundary.** RLS still lets a locked client's JWT read and write its own rows. Real enforcement would mean an expiry check inside the RESTRICTIVE policy families on ~50 tables. Also note **two doors stay open** after the lock: HR Self-Service (`/hr/self-service` is mounted *outside* `ProtectedRoute`) and the public guest-menu ordering route (`get_guest_menu` gates on `pos_enabled` only).

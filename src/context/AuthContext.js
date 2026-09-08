@@ -235,7 +235,7 @@ export function AuthProvider({ children }) {
         const [{ data: client }, { data: flags }, { data: siblings }] = await Promise.all([
           supabase
             .from('clients')
-            .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, ims_enabled, hr_enabled, pos_enabled, suite_plan, is_trial, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested')
+            .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, ims_enabled, hr_enabled, pos_enabled, suite_plan, is_trial, trial_approved_at, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested, pan_no, contact_phone')
             .eq('id', effectiveClientId)
             .single(),
           supabase
@@ -535,6 +535,10 @@ export function AuthProvider({ children }) {
   // Self-service 7-day free trial fields
   const _now              = new Date()
   const isTrial           = !isAdmin && !!(profile?.clients?.is_trial)
+  // Signed up, not yet approved by an admin (S697). getAccessState() is what actually locks the
+  // app on this; the flag is exported so trial UI (banner, checklist) can stay quiet until the
+  // trial has genuinely started.
+  const trialPending      = isTrial && !profile?.clients?.trial_approved_at
   const _trialExpiresAt   = profile?.clients?.trial_expires_at ? new Date(profile.clients.trial_expires_at) : null
   const _trialPurgeAt     = profile?.clients?.trial_purge_at   ? new Date(profile.clients.trial_purge_at)   : null
   const trialExpired      = isTrial && !!_trialExpiresAt && _trialExpiresAt < _now
@@ -591,7 +595,7 @@ export function AuthProvider({ children }) {
       signIn, signOut,
       clientId, isAdmin, isPremium,
       plan,
-      isTrial, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
+      isTrial, trialPending, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
       accessLocked, accessReason, graceDaysLeft,
       legalReacceptRequired, refreshProfile: () => session?.user?.id && fetchProfile(session.user.id),
       featureFlags, hasFeature,

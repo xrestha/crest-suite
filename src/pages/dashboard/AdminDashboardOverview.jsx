@@ -32,7 +32,7 @@ export default function AdminDashboardOverview() {
     const since24h = new Date(Date.now() - 86400000).toISOString()
     const [{ data: clients }, { data: periods }, { data: recentProfiles }] = await Promise.all([
       supabase.from('clients')
-        .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, subscribe_requested, trial_expires_at')
+        .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, trial_approved_at, subscribe_requested, trial_expires_at')
         .order('name'),
       supabase.from('monthly_periods')
         .select('client_id, bs_year, bs_month, status')
@@ -95,6 +95,9 @@ export default function AdminDashboardOverview() {
   const noPeriod     = active.filter(c => !clientPeriods[c.id] || clientPeriods[c.id].status !== 'open')
   const trialSignups = adminClients.filter(c => c.is_trial)
   const wantToSub    = trialSignups.filter(c => c.subscribe_requested)
+  // Signed up, not yet approved (S697) — a person on the "we will call you" screen. Outranks
+  // "wants to subscribe" on the tile: the second is a sale to close, the first is someone waiting.
+  const toApprove    = trialSignups.filter(c => !c.trial_approved_at)
   const activeClientIds = new Set(activeTodayClients.map(c => c.id))
 
   // MRR: IMS (tiered) + HR (flat) + POS (flat) + the Suite add-on. The arithmetic lives in
@@ -372,21 +375,26 @@ export default function AdminDashboardOverview() {
 
             {/* 6 — Trial Signups */}
             <div
-              style={{ ...statCard(wantToSub.length > 0 ? 'color-mix(in srgb, var(--theme-red) 50%, transparent)' : trialSignups.length > 0 ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : undefined), cursor: 'pointer' }}
+              style={{ ...statCard(toApprove.length > 0 || wantToSub.length > 0 ? 'color-mix(in srgb, var(--theme-red) 50%, transparent)' : trialSignups.length > 0 ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : undefined), cursor: 'pointer' }}
               onClick={() => navigate('/admin/clients')}
             >
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Trial Signups</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: trialSignups.length > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
                 {trialSignups.length}
               </div>
-              {wantToSub.length > 0 ? (
+              {toApprove.length > 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 0, background: 'var(--theme-red)', flexShrink: 0 }} />
+                  {toApprove.length} waiting for your approval
+                </div>
+              ) : wantToSub.length > 0 ? (
                 <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 0, background: 'var(--theme-red)', flexShrink: 0 }} />
                   {wantToSub.length} want{wantToSub.length === 1 ? 's' : ''} to subscribe
                 </div>
               ) : (
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
-                  {trialSignups.length === 0 ? 'No active trials' : '7-day free · Starter'} · View →
+                  {trialSignups.length === 0 ? 'No active trials' : '7-day free · Growth + HR + POS'} · View →
                 </div>
               )}
             </div>
@@ -481,6 +489,7 @@ export default function AdminDashboardOverview() {
                     let typeLabel, typeColor
                     if (!c.is_active)       { typeLabel = 'Inactive';     typeColor = 'var(--theme-text2)' }
                     else if (isPaying)      { typeLabel = 'Subscription'; typeColor = 'var(--theme-green-text)' }
+                    else if (isTrial && !c.trial_approved_at) { typeLabel = 'Awaiting approval'; typeColor = 'var(--theme-amber-text)' }
                     else if (isTrial)       { typeLabel = 'Trial';        typeColor = 'var(--theme-accent-ink)' }
                     else if (sub.days !== null && sub.days < 0) { typeLabel = 'Expired'; typeColor = 'var(--theme-red-text)' }
                     else                    { typeLabel = 'No billing';   typeColor = 'var(--theme-text3)' }

@@ -503,6 +503,12 @@
   grid-column: 3 / -1;
 }
 
+/* Row three (S697): the outlet address takes the first two tracks, the CTA keeps its last two.
+   An address is the longest thing typed on this form and a single 1.3fr track clips it. */
+.login-trial-grid > .login-field--address {
+  grid-column: 1 / 3;
+}
+
 .login-btn--inline {
   margin-top: 0;
   white-space: nowrap;
@@ -1006,7 +1012,8 @@
     grid-template-columns: 1fr;
   }
 
-  .login-trial-grid > .login-btn--inline {
+  .login-trial-grid > .login-btn--inline,
+  .login-trial-grid > .login-field--address {
     grid-column: auto;
   }
 }

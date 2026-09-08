@@ -309,7 +309,7 @@ function Dropdown({ id, isOpen, setOpen, triggerClass, triggerLabel, triggerTitl
 
 export default function Layout() {
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
-          isTrial, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
+          isTrial, trialPending, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
           accessReason, graceDaysLeft, clientId,
           outlets, switchableOutlets, canSwitchOutlet, switchOutlet,
           hasPosAccess, posRole, canReachPosPath, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
@@ -347,6 +347,9 @@ export default function Layout() {
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false)
   const [pendingTrialCount, setPendingTrialCount] = useState(0)
   const [newTrialCount, setNewTrialCount] = useState(0)
+  // Signups waiting for Approve in Admin -> Clients (S697). Outranks the other two: a person is
+  // sitting on the "we will call you" screen until this number is zero.
+  const [approvalCount, setApprovalCount] = useState(0)
   const [subscribing, setSubscribing] = useState(false)
   const [outletDropdownOpen, setOutletDropdownOpen] = useState(false)
   const [switchingOutlet, setSwitchingOutlet] = useState(false)
@@ -466,11 +469,12 @@ export default function Layout() {
   useEffect(() => {
     if (!isAdmin) return
     supabase.from('clients')
-      .select('id, name, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, is_trial, trial_expires_at, trial_start_date, subscribe_requested')
+      .select('id, name, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, is_trial, trial_approved_at, trial_expires_at, trial_start_date, subscribe_requested')
       .order('name')
       .then(({ data }) => {
         setAllClients(data || [])
         setPendingTrialCount((data || []).filter(c => c.subscribe_requested).length)
+        setApprovalCount((data || []).filter(c => c.is_trial && !c.trial_approved_at).length)
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
         setNewTrialCount((data || []).filter(c => c.is_trial && c.trial_start_date && c.trial_start_date >= sevenDaysAgo).length)
       })
@@ -1000,10 +1004,11 @@ export default function Layout() {
   // var(--theme-amber) the HR/POS dots below use for the identical "pending" semantic.
   const adminTab = isAdmin && {
     key: 'admin', label: 'Admin', icon: ShieldCheck,
-    tip: pendingTrialCount > 0 ? `Admin — ${pendingTrialCount} want to subscribe`
+    tip: approvalCount > 0 ? `Admin — ${approvalCount} signup${approvalCount !== 1 ? 's' : ''} to approve`
+      : pendingTrialCount > 0 ? `Admin — ${pendingTrialCount} want to subscribe`
       : newTrialCount > 0 ? `Admin — ${newTrialCount} new trial${newTrialCount !== 1 ? 's' : ''}`
       : 'Admin',
-    dot: pendingTrialCount > 0 ? 'var(--theme-red)' : newTrialCount > 0 ? 'var(--theme-amber)' : null,
+    dot: approvalCount > 0 || pendingTrialCount > 0 ? 'var(--theme-red)' : newTrialCount > 0 ? 'var(--theme-amber)' : null,
   }
   const moduleTabs = [
     imsVisible && { key: 'ims', label: 'IMS', icon: Warehouse, tip: 'Crest IMS', dot: null },
@@ -1345,6 +1350,12 @@ export default function Layout() {
                   {/* Both count badges use an alpha-tint fill + full-opacity signal text, per
                       DESIGN.md's badge spec — the previous solid fills paired hardcoded #fff /
                       #000 foregrounds that failed contrast on several presets. */}
+                  {approvalCount > 0 && (
+                    <span style={{ fontSize: 11, fontWeight: 800, background: 'color-mix(in srgb, var(--theme-red) 15%, transparent)', color: 'var(--theme-red-text)', border: '1px solid color-mix(in srgb, var(--theme-red) 35%, transparent)', borderRadius: 0, padding: '2px 8px', lineHeight: 1.4 }}
+                      title="Signups waiting for your approval">
+                      {approvalCount} to approve
+                    </span>
+                  )}
                   {pendingTrialCount > 0 && (
                     <span style={{ fontSize: 11, fontWeight: 800, background: 'color-mix(in srgb, var(--theme-red) 15%, transparent)', color: 'var(--theme-red-text)', border: '1px solid color-mix(in srgb, var(--theme-red) 35%, transparent)', borderRadius: 0, padding: '2px 8px', lineHeight: 1.4 }}
                       title="Clients requesting to subscribe">
@@ -1641,6 +1652,10 @@ export default function Layout() {
               <NavLink to="/admin/clients" className={({ isActive }) => pillClass(isActive)}>
                 <Building2 size={15} strokeWidth={1.75} aria-hidden="true" style={{ flexShrink: 0 }} />
                 Clients
+                {approvalCount > 0 && (
+                  <span className="badge-red badge-sentence" style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4 }}
+                    title="Signups waiting for your approval">{approvalCount} to approve</span>
+                )}
                 {pendingTrialCount > 0 && (
                   <span className="badge-red badge-sentence" style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4 }}
                     title="Clients requesting to subscribe">{pendingTrialCount} want to sub</span>
@@ -1731,19 +1746,26 @@ export default function Layout() {
           </div>
         )}
 
-        {/* Trial banners — shown from day 4 onwards and after expiry */}
-        {isTrial && !trialExpired && trialDaysLeft <= 4 && (
+        {/* Trial banner — shown from day ONE (S697), not from day 4. A clock that only appears
+            with four days left reads as an alarm; one that has been there since the first login
+            reads as a fact. Same banner, two tones: quiet accent while there is time, amber for
+            the last four days. The expired case lives in SubscriptionLock. */}
+        {isTrial && !trialExpired && !trialPending && (() => {
+          const urgent = trialDaysLeft <= 4
+          const tone = urgent ? 'var(--theme-amber)' : 'var(--theme-accent)'
+          const ink  = urgent ? 'var(--theme-amber-text)' : 'var(--theme-accent-ink)'
+          return (
           <div style={{
-            background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+            background: `color-mix(in srgb, ${tone} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)`,
             borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
           }} role="status">
             <div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
-                ⏳ {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial
+              <span style={{ fontSize: 13, fontWeight: 700, color: ink }}>
+                {urgent ? '⏳ ' : ''}{trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial
               </span>
               <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 10 }}>
-                Subscribe to keep your data after the trial ends.
+                {urgent ? 'Subscribe to keep your data after the trial ends.' : 'Everything you enter carries straight over when you subscribe.'}
               </span>
             </div>
             {!subscribeRequested ? (
@@ -1754,10 +1776,11 @@ export default function Layout() {
                 {subscribing ? 'Sending…' : 'I Want to Subscribe →'}
               </button>
             ) : (
-              <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
+              <span style={{ fontSize: 12, color: ink, fontWeight: 600 }}>✓ Request sent — we'll be in touch</span>
             )}
           </div>
-        )}
+          )
+        })()}
 
         {/* The two post-expiry trial banners that used to sit here are gone: a trial-expired client
             is now locked out by ProtectedRoute and never renders Layout at all, so they were

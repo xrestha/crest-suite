@@ -69,6 +69,7 @@ function fillRequiredFields() {
     target: { value: 'Kh4trm-9quiet-Ledge' },
   })
   fireEvent.change(screen.getByLabelText(/phone/i), { target: { value: '9801234567' } })
+  fireEvent.change(screen.getByLabelText(/outlet address/i), { target: { value: 'Jhamsikhel, Lalitpur' } })
 }
 
 beforeEach(() => {

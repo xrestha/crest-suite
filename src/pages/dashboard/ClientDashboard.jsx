@@ -31,6 +31,7 @@ import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCou
 import SalesPivot from '../../modules/dashboard/SalesPivot'
 import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
+import { useSupportContact } from '../../shared/hooks/useSupportContact'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
 
 // Roving-tabindex tab row for in-card view switches — completes the tablist contract the bare
@@ -233,7 +234,8 @@ function targetLineValue(snap, day) {
 }
 
 export default function ClientDashboard() {
-  const { profile, clientId, isAdmin, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
+  const { profile, clientId, isAdmin, isTrial, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
+  const support = useSupportContact()
   // 'kitchen'/'bar' pos_team accounts (S431) get kitchen-ops KPIs (open/late tickets, prep time)
   // instead of the front-of-house Revenue/Covers/Avg Check/Tables Occupied cards — they have no
   // more use for revenue figures on their landing dashboard than a POS-only staffer has for IMS's.
@@ -2387,7 +2389,14 @@ export default function ClientDashboard() {
           empty strings are individually well written and collectively unreadable as guidance,
           because they appear in whatever order the data happens to load. This gives the sequence
           once, at the top, and disappears the moment any step is done. */}
-      {showIms && activePeriod && !loading && stats && stats.itemCount === 0 && stats.purchaseTotal === 0 && (
+      {/* On a TRIAL the card stays until all four steps are done (S697): a 7-day trial is short
+          enough that "you have items, now record a purchase" is still guidance, not nagging. For
+          everyone else the original rule holds — items exist, the card is gone — because a paying
+          client's every new month starts at purchaseTotal 0 and this must not reappear monthly. */}
+      {showIms && activePeriod && !loading && stats && (
+        (stats.itemCount === 0 && stats.purchaseTotal === 0) ||
+        (isTrial && !(stats.itemCount > 0 && stats.purchaseTotal > 0 && stats.recipeCount > 0 && stats.revenueTotal > 0))
+      ) && (
         <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
           <p style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>Let’s get {periodLabel} set up</p>
           <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
@@ -2423,6 +2432,17 @@ export default function ClientDashboard() {
               </li>
             ))}
           </ol>
+          {/* A person, not a tooltip. The support contact already exists (useSupportContact); on a
+              trial the cheapest welcome available is a twenty-minute call, so offer it where the
+              owner is deciding what to do first. */}
+          {isTrial && (support.whatsappHref || support.telHref) && (
+            <p style={{ margin: '14px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+              Stuck, or want a hand entering your first items? A twenty-minute call gets most kitchens set up.{' '}
+              {support.whatsappHref && <a href={support.whatsappHref} target="_blank" rel="noreferrer">WhatsApp us</a>}
+              {support.whatsappHref && support.telHref && ' or '}
+              {support.telHref && <a href={support.telHref}>call {support.phone}</a>}.
+            </p>
+          )}
         </div>
       )}
 

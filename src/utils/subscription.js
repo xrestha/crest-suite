@@ -49,6 +49,13 @@ export function getAccessState(client) {
   // whose dates are still valid, and it is the switch that actually means something now.
   if (client.is_active === false) return { ...open, locked: true, reason: 'deactivated' }
 
+  // A signup nobody has approved yet (S697). Trials are approved by a person before they open,
+  // and the 7-day clock starts at approval — so this is checked BEFORE the expiry branch below,
+  // or a signup that sat unapproved past its provisional expiry would show "trial ended" to
+  // someone who never got in. Only a row that is a trial AND carries no approval stamp is held;
+  // every non-trial client has NULL here and is unaffected (fails open, like the rest).
+  if (client.is_trial && !client.trial_approved_at) return { ...open, locked: true, reason: 'pending' }
+
   // Self-service trial. The retention window that follows expiry (trial_purge_at) is about how
   // long the DATA is kept, not about continued access, so the lock lands on the expiry date.
   if (client.is_trial && client.trial_expires_at && new Date(client.trial_expires_at) < new Date()) {
@@ -94,6 +101,11 @@ export function getSubStatus(client) {
   // trial_ends_at was a second, legacy trial column that only the admin "+ New Client" form
   // wrote and only this fallback read, so an admin-created client and a self-service trial were
   // invisible to each other's screens (S574; migration 20260818190000 folded it in).
+  if (client?.is_trial && !client?.trial_approved_at) {
+    // Awaiting approval — the operator's own to-do, so it takes the amber "pending" tone the
+    // admin surfaces already use for open work rather than the accent tone of a running trial.
+    return { label: 'Awaiting approval', days: null, color: 'var(--theme-amber-text)', bg: 'color-mix(in srgb, var(--theme-amber) 10%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)' }
+  }
   if (client?.is_trial && client?.trial_expires_at) {
     const days = Math.ceil((new Date(client.trial_expires_at) - now) / 86400000)
     if (days < 0) return { label: 'Trial expired', days, color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 10%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }

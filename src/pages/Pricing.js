@@ -26,7 +26,7 @@ const BORDER = 'var(--theme-border)'
 const FAQS = [
   {
     q: `Is the ${TRIAL_DAYS}-day trial really free?`,
-    a: `Yes — the IMS Starter plan is completely free for the first ${TRIAL_DAYS} days with no credit card and no hidden fees. After that it continues at its listed monthly rate, or you can upgrade to Growth or Pro at any time.`,
+    a: `Yes — your first ${TRIAL_DAYS} days are free, with no credit card and no hidden fees. The trial runs at the Growth level with all three modules switched on, so you can cost a recipe, set up payroll and bill a table before deciding. We switch every trial on personally: sign up, and we will call you within one working day to open it. After the trial, pick the modules and tier you actually want.`,
   },
   {
     q: 'Can I negotiate the price?',

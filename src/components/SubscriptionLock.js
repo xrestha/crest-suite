@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Lock } from 'lucide-react'
+import { Lock, PhoneCall } from 'lucide-react'
 import { useSupportContact } from '../shared/hooks/useSupportContact'
+import { TRIAL_DAYS } from '../data/pricingPlans'
 
 // Full-page lock shown in place of the app once a client's subscription has lapsed.
 //
@@ -16,6 +17,8 @@ export default function SubscriptionLock() {
   const [sending, setSending] = useState(false)
 
   const clientName = profile?.clients?.name || 'Your account'
+  const contactPhone = profile?.clients?.contact_phone || null
+  const isPending  = accessReason === 'pending'
 
   // Every copy variant below ends by asking the client to get in touch, and this screen used to
   // give them no way to do it when settings.contact_phone/email were blank, which is their default
@@ -26,6 +29,15 @@ export default function SubscriptionLock() {
   const { phone, email, telHref } = useSupportContact()
 
   const COPY = {
+    // Not a lock in the customer's eyes — it is the front step. Approval exists so a competitor
+    // cannot tour the product from a throwaway email, but the person reading this is almost
+    // always a real owner who just typed their details in, so the copy says what happens next
+    // and when, and asks nothing of them. The trial clock has not started yet (it starts at
+    // approval), so no countdown, no subscribe button, no talk of data retention.
+    pending: {
+      title: 'Thanks — your trial is on its way',
+      body: `Every Crest trial is switched on personally. We will call ${contactPhone ? contactPhone : 'the number you gave us'} within one working day to confirm a few details and open your ${TRIAL_DAYS}-day trial. There is nothing you need to do until then.`,
+    },
     trial: {
       title: 'Your free trial has ended',
       body: trialPurgeInDays !== null && trialPurgeInDays > 0
@@ -59,9 +71,10 @@ export default function SubscriptionLock() {
         <div style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           width: 52, height: 52, borderRadius: 'var(--radius-full)',
-          background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)',
-          marginBottom: 18, color: 'var(--theme-red-text)',
-        }}><Lock size={22} strokeWidth={2} aria-hidden="true" /></div>
+          background: isPending ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)' : 'color-mix(in srgb, var(--theme-red) 12%, transparent)',
+          border: isPending ? '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)' : '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)',
+          marginBottom: 18, color: isPending ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)',
+        }}>{isPending ? <PhoneCall size={22} strokeWidth={2} aria-hidden="true" /> : <Lock size={22} strokeWidth={2} aria-hidden="true" />}</div>
 
         <h1 style={{
           margin: '0 0 6px', fontSize: 20, fontWeight: 700,
@@ -78,10 +91,12 @@ export default function SubscriptionLock() {
             market, and this is the exact screen where it is live. The answer is already true —
             every client can be exported in full on request — so state it here rather than only in
             the positioning doc. */}
-        <p style={{ margin: '0 0 20px', fontSize: 12, lineHeight: 1.6, color: 'var(--theme-text3)' }}>
-          Your records are yours. We can export everything to Excel and hand it back on request,
-          whatever the state of your subscription.
-        </p>
+        {!isPending && (
+          <p style={{ margin: '0 0 20px', fontSize: 12, lineHeight: 1.6, color: 'var(--theme-text3)' }}>
+            Your records are yours. We can export everything to Excel and hand it back on request,
+            whatever the state of your subscription.
+          </p>
+        )}
 
         {(phone || email) && (
           <div style={{
@@ -101,7 +116,7 @@ export default function SubscriptionLock() {
           display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap',
           paddingTop: 20, borderTop: '1px solid var(--theme-border-lt)',
         }}>
-          {!subscribeRequested ? (
+          {isPending ? null : !subscribeRequested ? (
             <button
               className="btn btn-primary"
               disabled={sending}

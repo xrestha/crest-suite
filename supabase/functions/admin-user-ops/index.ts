@@ -310,10 +310,17 @@ Deno.serve(async (req) => {
 
     // ── Self-service trial signup — no admin auth required ────────────────────
     if (action === 'register_trial') {
-      const { business_name, email, password, full_name, phone, accepted_legal } = params
+      const { business_name, email, password, full_name, phone, accepted_legal, location, pan_no } = params
       if (!business_name || !email || !password) {
         return json({ error: 'business_name, email and password are required' }, 400)
       }
+      // Outlet address and PAN exist so the approval call has something concrete to check
+      // against (S697). Neither is validated beyond shape — a PAN check is the admin's job on the
+      // call, not a regex's — and PAN stays optional because a café that has not registered yet
+      // is still a real prospect. Both are bounded because they are attacker-typed text.
+      const outletLocation = typeof location === 'string' ? location.trim().slice(0, 200) : ''
+      const panNo          = typeof pan_no === 'string' ? pan_no.trim().slice(0, 20) : ''
+      if (!outletLocation) return json({ error: 'Outlet address is required' }, 400)
 
       // The clickwrap is enforced HERE, not only by the checkbox. A consent control the browser can
       // skip is not a consent control -- the same reasoning as S531 invariant #3, where the POS and
@@ -411,19 +418,31 @@ Deno.serve(async (req) => {
       const trialExpires = new Date(now.getTime() + 7  * 24 * 60 * 60 * 1000) // +7 days
       const trialPurge   = new Date(now.getTime() + 22 * 24 * 60 * 60 * 1000) // +7+15 days
 
+      // The trial is Growth with all three modules on (S697): Starter is "record and comply" and
+      // contains none of the numbers that sell the product, and a 7-day trial never reaches a
+      // month close, so Recipe Costing / Recipe Margin are the first pages that can show a figure
+      // the same afternoon. This is safe to hand out because nobody sees it until an admin
+      // approves the signup — trial_approved_at stays NULL here and getAccessState() locks the
+      // client with reason 'pending' until AdminClients.approveTrial stamps it. The trial dates
+      // are still written now so an abandoned, never-approved signup ages into the purge job
+      // like any other; approval restarts them from the approval day.
       const { data: client, error: clientErr } = await admin
         .from('clients')
         .insert({
           name:              business_name,
+          location:          outletLocation,
+          pan_no:            panNo || null,
           contact_person:    full_name || business_name,
           contact_phone:     phone || null,
-          plan:              'starter',
+          plan:              'growth',
           is_trial:          true,
+          trial_approved_at: null,
           trial_start_date:  now.toISOString(),
           trial_expires_at:  trialExpires.toISOString(),
           trial_purge_at:    trialPurge.toISOString(),
           ims_enabled:       true,
-          hr_enabled:        false,
+          hr_enabled:        true,
+          pos_enabled:       true,
         })
         .select('id')
         .single()

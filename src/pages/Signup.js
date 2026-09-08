@@ -45,6 +45,8 @@ export default function Signup() {
   const [tBiz, setTBiz]         = useState('')
   const [tName, setTName]       = useState('')
   const [tPhone, setTPhone]     = useState('')
+  const [tAddress, setTAddress] = useState('')
+  const [tPan, setTPan]         = useState('')
   const [tEmail, setTEmail]     = useState('')
   const [tPass, setTPass]       = useState('')
   const [tShowPass, setTShowPass] = useState(false)
@@ -75,6 +77,7 @@ export default function Signup() {
     if (!tEmail.trim())                      errs['trial-email'] = 'Email is required.'
     else if (!EMAIL_RE.test(tEmail.trim()))  errs['trial-email'] = 'Enter a valid email address.'
     if (!tPhone.trim())                      errs['trial-phone'] = 'Phone number is required.'
+    if (!tAddress.trim())                    errs['trial-address'] = 'Outlet address is required.'
     if (!tLegal)                             errs['trial-legal'] = 'Please accept the Terms of Service and Privacy Policy to continue.'
     if (!tPass)                              errs['trial-password'] = 'Password is required.'
     else if (tPass.length < MIN_PASSWORD_LENGTH) {
@@ -85,7 +88,7 @@ export default function Signup() {
     }
 
     setTFieldErr(errs)
-    const firstInvalid = ['trial-biz', 'trial-email', 'trial-password', 'trial-phone', 'trial-legal'].find(id => errs[id])
+    const firstInvalid = ['trial-biz', 'trial-email', 'trial-password', 'trial-phone', 'trial-address', 'trial-legal'].find(id => errs[id])
     if (firstInvalid) { document.getElementById(firstInvalid)?.focus(); return }
 
     setTLoading(true)
@@ -94,6 +97,10 @@ export default function Signup() {
         business_name: tBiz.trim(),
         full_name:     tName.trim() || tBiz.trim(),
         phone:         tPhone.trim(),
+        // Where the outlet is and its PAN — so the approval call has something concrete to check
+        // (S697). PAN is optional: a café that has not registered yet is still a real prospect.
+        location:      tAddress.trim(),
+        pan_no:        tPan.trim() || null,
         email:         tEmail.trim().toLowerCase(),
         password:      tPass,
         // The version and hash of what was actually on screen, from the bundle this browser has
@@ -222,6 +229,15 @@ export default function Signup() {
                   <input id="trial-phone" type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" required {...trialFieldAria('trial-phone')} />
                   {trialFieldError('trial-phone')}
                 </div>
+                <div className="login-field">
+                  <label htmlFor="trial-pan">PAN number <span className="login-optional">(optional)</span></label>
+                  <input id="trial-pan" inputMode="numeric" value={tPan} onChange={e => setTPan(e.target.value)} placeholder="9-digit PAN" maxLength={20} />
+                </div>
+                <div className="login-field login-field--address">
+                  <label htmlFor="trial-address">Outlet address *</label>
+                  <input id="trial-address" value={tAddress} onChange={e => setTAddress(e.target.value)} placeholder="e.g. Jhamsikhel, Lalitpur" required {...trialFieldAria('trial-address')} />
+                  {trialFieldError('trial-address')}
+                </div>
                 <button type="submit" className="login-btn login-btn--trial login-btn--inline login-btn--flush" disabled={tLoading}>
                   <span>{tLoading ? 'Creating your account…' : 'Start Free Trial'}</span>
                   <span aria-hidden="true">→</span>
@@ -257,8 +273,13 @@ export default function Signup() {
                 </span>
               </label>
               {trialFieldError('trial-legal')}
+              {/* The evaluation purpose is stated HERE, beside the consent, so the acceptance the
+                  ledger records was made in sight of it — Terms 9(d) forbids competitive use, and a
+                  clause nobody was shown at the moment of agreeing is a weaker anchor (S697). The
+                  same sentence tells a genuine owner what happens next, which is the point. */}
               <p className="login-consent login-consent--sub">
-                You are creating a {TRIAL_DAYS}-day free trial. No card required.
+                Trials are for restaurants, cafés and hotels evaluating Crest for their own outlet.
+                We switch every trial on personally — expect a call within one working day, and your {TRIAL_DAYS}-day trial starts then. No card required.
               </p>
             </form>
           )}

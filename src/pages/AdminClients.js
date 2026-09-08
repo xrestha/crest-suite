@@ -13,6 +13,7 @@ import ClientDrawer from './adminClients/ClientDrawer'
 import FeatureAccessModal from './adminClients/FeatureAccessModal'
 import { errorLine } from '../shared/errorText'
 import ReportLoadError from '../components/ReportLoadError'
+import ActionError, { asActionError } from '../components/ActionError'
 
 // ── Subscription badge ────────────────────────────────────────────────────────
 function SubBadge({ client }) {
@@ -60,6 +61,9 @@ export default function AdminClients() {
   const [newForm, setNewForm]         = useState(EMPTY_CLIENT_FORM)
   const [saving, setSaving]           = useState(false)
   const [formError, setFormError]     = useState('')
+  // Approve / seed failures on the Trial Accounts panel. Converted at the call site (errorText),
+  // never at render — see .claude/rules/error-messages.md.
+  const [trialActionError, setTrialActionError] = useState(null)
   const [activeDrawer, setActiveDrawer] = useState(null)
   const [featureModalClient, setFeatureModalClient] = useState(null)
   const [lastSeenMap, setLastSeenMap] = useState({})
@@ -160,6 +164,9 @@ export default function AdminClients() {
       contact_person: newForm.contact_person.trim(),
       contact_phone: newForm.contact_phone.trim(),
       is_trial: true,
+      // Hand-onboarded by the admin creating it — approved by definition (S697). Without this
+      // stamp getAccessState() would hold the new client on the "we will call you" screen.
+      trial_approved_at: now.toISOString(),
       trial_start_date: now.toISOString(),
       trial_expires_at: trialEnd.toISOString(),
       trial_purge_at: trialPurge.toISOString(),
@@ -167,25 +174,57 @@ export default function AdminClients() {
     if (error) { setFormError('The client was not created. ' + errorLine(error)); setSaving(false); return }
 
     if (clientData?.id) {
-      const { year: bsYear, month: bsMonth } = getBsToday()
-      await Promise.all([
-        // Auto-create opening period for the current BS month
-        scopedInsert('monthly_periods', clientData.id, {
-          bs_year: bsYear,
-          bs_month: bsMonth,
-          status: 'open'
-        }),
-        // Seed settings row so client sees their own name in Settings > Branding
-        supabase.from('settings').insert({
-          client_id: clientData.id,
-          app_name: newForm.name.trim(),
-        })
-      ])
+      const seedErr = await seedFirstMonth(clientData.id, newForm.name.trim())
+      if (seedErr) setFormError('The client was created, but its first month was not opened. ' + errorLine(seedErr))
     }
 
     setSaving(false)
     setShowNewForm(false)
     setNewForm(EMPTY_CLIENT_FORM)
+    loadClients()
+  }
+
+  // Opens the current BS month and seeds the settings row so a new client's first login lands on a
+  // live month rather than "No periods yet" on every IMS page. Idempotent on purpose: it runs when
+  // an admin creates a client by hand AND when a self-service signup is approved, and Approve can
+  // be pressed twice. Returns the first error, or null.
+  async function seedFirstMonth(clientId, name) {
+    const [{ data: periods, error: pErr }, { data: settingsRows, error: sErr }] = await Promise.all([
+      supabase.from('monthly_periods').select('id').eq('client_id', clientId).limit(1),
+      supabase.from('settings').select('client_id').eq('client_id', clientId).limit(1),
+    ])
+    if (pErr || sErr) return pErr || sErr
+    const { year: bsYear, month: bsMonth } = getBsToday()
+    const writes = []
+    if (!periods?.length) {
+      writes.push(scopedInsert('monthly_periods', clientId, { bs_year: bsYear, bs_month: bsMonth, status: 'open' }))
+    }
+    if (!settingsRows?.length) {
+      // Seed settings row so the client sees their own name in Settings > Branding
+      writes.push(supabase.from('settings').insert({ client_id: clientId, app_name: name }))
+    }
+    const results = await Promise.all(writes)
+    return results.find(r => r?.error)?.error || null
+  }
+
+  // A self-service signup opens on the day an admin presses this, and the 7-day clock starts
+  // NOW — the provisional dates register_trial wrote at signup are replaced, so a day spent
+  // waiting for the call is not a day off the trial (S697). The purge date follows the same
+  // +15-day retention promise the Terms make.
+  async function approveTrial(client) {
+    setTrialActionError(null)
+    const now = new Date()
+    const trialEnd = new Date(now.getTime() + 7 * 86400000)
+    const trialPurge = new Date(trialEnd.getTime() + 15 * 86400000)
+    const { error } = await supabase.from('clients').update({
+      trial_approved_at: now.toISOString(),
+      trial_start_date:  now.toISOString(),
+      trial_expires_at:  trialEnd.toISOString(),
+      trial_purge_at:    trialPurge.toISOString(),
+    }).eq('id', client.id)
+    if (error) { setTrialActionError(asActionError(error, 'operator')); return }
+    const seedErr = await seedFirstMonth(client.id, client.name)
+    if (seedErr) setTrialActionError(asActionError(seedErr, 'operator'))
     loadClients()
   }
 
@@ -323,9 +362,13 @@ export default function AdminClients() {
 
       {/* ── Trial Accounts ── */}
       {(() => {
+        // Awaiting-approval rows first: each one is a person sitting on the "we will call you"
+        // screen, and the row's own button is the thing that lets them in.
         const trialClients = clients.filter(c => c.is_trial)
+          .sort((a, b) => (a.trial_approved_at ? 1 : 0) - (b.trial_approved_at ? 1 : 0))
         if (trialClients.length === 0) return null
         const now = new Date()
+        const awaitingCount = trialClients.filter(c => !c.trial_approved_at).length
         return (
           <div style={{ marginBottom: 28, border: '2px solid var(--theme-red)', borderRadius: 0, overflow: 'hidden' }}>
             {/* Header — flat alpha-tint wash, not a gradient (DESIGN.md: cards never gradient/tint toward the accent) */}
@@ -337,12 +380,17 @@ export default function AdminClients() {
                   <span style={{ marginLeft: 8, background: 'color-mix(in srgb, var(--theme-red) 18%, transparent)', color: 'var(--theme-red-text)', borderRadius: 'var(--radius-md)', padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                  {trialClients.filter(c => c.subscribe_requested).length > 0
+                  {awaitingCount > 0
+                    ? `${awaitingCount} waiting for your approval — call, check they run a real outlet, then Approve`
+                    : trialClients.filter(c => c.subscribe_requested).length > 0
                     ? `${trialClients.filter(c => c.subscribe_requested).length} requesting to subscribe`
-                    : 'Free trials — self-service signups get 7 days, admin-created clients 30 · Starter plan'}
+                    : 'Free trials — self-service signups get 7 days from approval, admin-created clients 30 · Growth + all modules'}
                 </div>
               </div>
             </div>
+            {trialActionError && (
+              <div style={{ padding: '10px 20px 0' }}><ActionError error={trialActionError} /></div>
+            )}
             {/* Rows */}
             <div style={{ background: 'color-mix(in srgb, var(--theme-red) 4%, transparent)' }}>
               {trialClients.map(c => {
@@ -352,6 +400,7 @@ export default function AdminClients() {
                 const daysLeft= expAt && !expired ? Math.ceil((expAt - now) / 86400000) : null
                 const purgeDays = purgeAt && expired ? Math.ceil((purgeAt - now) / 86400000) : null
                 const wantsToSub = c.subscribe_requested
+                const awaiting   = !c.trial_approved_at
                 return (
                   <div key={c.id} style={{
                     display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px',
@@ -368,6 +417,11 @@ export default function AdminClients() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
+                        {awaiting && (
+                          <span className="badge badge-amber" style={{ flexShrink: 0, fontWeight: 700 }}>
+                            Awaiting approval
+                          </span>
+                        )}
                         {wantsToSub && (
                           <span className="badge badge-red" style={{ flexShrink: 0, fontWeight: 700 }}>
                             Wants to Subscribe
@@ -381,7 +435,11 @@ export default function AdminClients() {
                             {c.contact_person && c.contact_person !== c.name ? ` · ${c.contact_person}` : ''}
                           </span>
                         )}
-                        {expired
+                        {awaiting
+                          ? <span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>
+                              · {[c.location, c.pan_no ? `PAN ${c.pan_no}` : 'no PAN given'].filter(Boolean).join(' · ')}
+                            </span>
+                          : expired
                           ? <span style={{ color: 'var(--theme-red-text)', fontWeight: 600 }}>
                               · Trial expired{purgeDays != null && purgeDays > 0 ? ` · data purge in ${purgeDays}d` : ' · purge imminent'}
                             </span>
@@ -408,6 +466,15 @@ export default function AdminClients() {
                           ✓ Dismiss
                         </button>
                       )}
+                      {awaiting ? (
+                        <button
+                          className="btn btn-primary"
+                          style={{ fontSize: 11, padding: '4px 10px' }}
+                          onClick={() => approveTrial(c)}
+                          title="Opens the account and starts the 7-day trial today">
+                          ✓ Approve trial
+                        </button>
+                      ) : (<>
                       <button
                         className="btn btn-ghost"
                         style={{ fontSize: 11, padding: '4px 8px' }}
@@ -421,6 +488,7 @@ export default function AdminClients() {
                         onClick={() => convertTrialToPaid(c)}>
                         Convert to Paid
                       </button>
+                      </>)}
                       <button
                         className="btn btn-ghost"
                         style={{ fontSize: 11, padding: '4px 8px', color: 'var(--theme-red-text)' }}
