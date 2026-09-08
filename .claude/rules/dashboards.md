@@ -192,3 +192,52 @@ own rule is what lets a trial keep its checklist after the first item exists. It
 HR/POS head counts itself, only when rendered — **do not fold them into ClientDashboard's main
 load**, which most clients pay for on every visit and which never needs them. A failed count
 withholds that list; this is guidance, not a figure, so `firstError()` does not apply.
+
+## The five dashboards share one vertical rhythm, and one KPI card (S700)
+
+`.dash-section` (28px) and `.dash-row` (16px) in `Layout.css` are the rhythm. A section heading
+holds **8px** above its own content, which is the point: 28-against-8 is a 3.5x contrast, and that
+ratio — not the absolute gap — is what makes a group read as a group. ClientDashboard had been
+running 10-under-14 (1.4x) and its module headings floated free of the cards they named; a spacing
+sweep found **14 distinct vertical intervals** across the five files against a documented 4/8/16/24
+scale, and four different section intervals (14 / 16 / 20 / 28) with nothing choosing between them.
+
+Four things about those two classes matter when adding to a dashboard:
+
+- **They are declared AFTER `.stat-grid` and `.stat-grid--compact`**, so a grid that IS a section
+  takes `stat-grid dash-section` and wins the tie on equal specificity, and a compact pill row that
+  needs a gap below it takes `stat-grid stat-grid--compact dash-row` — beating that class's own
+  `margin-bottom: 0`. Move either declaration and both stop working, silently.
+- **Both zero on `:last-child`**, and that is what makes them safe to apply unconditionally. This
+  JSX is conditional almost everywhere — which block renders last depends on which modules a client
+  bought — so a plain bottom margin stacks on `.main-content`'s 32px bottom padding for some clients
+  and not others, and a row landing last inside a section doubles up with the section's own gap.
+- **They step to 16/8 under 768px.** `.main-content` drops 32 → 16 there, and 28 would separate
+  sections by nearly twice the page's own margin on the screen with the least room to give.
+- **A block inside `.dash-3col-*` gets NO margin of its own.** HR and POS carried `marginTop: 6`
+  and `marginBottom: 14`, written when the module blocks stacked; once S438/S439 made them grid
+  columns the top margin stopped being a separator and became a column OFFSET, so Inventory's
+  heading sat 6px above the other two. On the phone, where the grid collapses to one column, the
+  same margins compounded with its 16px row-gap into 36px. The grid's gap is the only thing that
+  should space them.
+
+**The KPI card is `.stat-card`, in one of two tiers.** Plain `.stat-card` for a `.stat-grid`
+(`gap: 0`, so the class's `-1px` margins collapse each pair of adjacent borders into one drawn line
+and its shadow is dropped to do it); `.stat-card stat-card--compact` for a strip that has a real
+gap (`8px 16px`, no seam pull, shadow kept). Before S700 three dashboards had typed the same five
+box properties out inline and landed on their own padding — `10px 14px`, `14px 16px`, `12px 14px`
+against the class's `20px` — and two of them sat in a `gap: 0` grid **without** the seam pull or
+the shadow reset, so thirteen KPI cells drew 2px double rules with their shadows overlapping at
+every join. GroupDashboard had the same defect one step removed, using `.card` in that grid.
+`.card--compact` (16px) is the matching tier for a whole card, ChartCard included.
+
+**A loading skeleton must be the same grid as the content it stands in for.** AdminDashboardOverview's
+was `minmax(190px)` / `gap: 14` / `alignItems: start` against the real strip's `158` / `8` /
+`stretch`, so the skeleton laid out fewer columns at a different height and the page jumped when
+the data landed. A skeleton that does not match is a layout shift with extra steps.
+
+**Verify a cascade claim by measuring it.** Every statement above was checked by rendering the real
+`Layout.css` in a browser and reading `getComputedStyle` at 1440 and 390 — which tie wins, which
+`:last-child` fires, what the compact gutter actually renders as (the declared 8px had been coming
+out as **7px**, because `.stat-card`'s seam pull is meaningless once there is space between cells).
+Specificity reasoning is a hypothesis; the computed value is the fact.

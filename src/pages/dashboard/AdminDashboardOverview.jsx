@@ -140,9 +140,15 @@ export default function AdminDashboardOverview() {
     return c.name.toLowerCase().includes(searchQ) || (c.location || '').toLowerCase().includes(searchQ)
   })
 
+  // The box is .stat-card's, not a fifth hand-rolled copy of it — this file was the third
+  // dashboard to type the same five properties out inline and then land on its own padding
+  // (12x14, against ClientDashboard's 10x14, OwnerDashboard's 14x16 and the class's own 20).
+  // --compact is the tier for a strip that has a real gap: no seam pull, shadow kept. Returns
+  // PROPS rather than a style object now that the class is half the answer; only the border
+  // colour, which is per-tile state, stays inline.
   const statCard = (borderColor) => ({
-    background: 'var(--theme-card)', border: `1px solid ${borderColor || 'var(--theme-border)'}`,
-    borderRadius: 'var(--radius-lg)', boxShadow: 'var(--theme-card-shadow)', padding: '12px 14px'
+    className: 'stat-card stat-card--compact',
+    ...(borderColor ? { style: { borderColor } } : {}),
   })
 
   // One box for the four module-adoption pills in the Active Properties tile.
@@ -198,9 +204,9 @@ export default function AdminDashboardOverview() {
   // sub-lines out top-down exactly as the div cards' block flow does; alignItems:'stretch' keeps
   // each child full-width like a block. Same rectangle outside, same starting line inside.
   const filterCard = (key, borderColor) => ({
-    style: { ...statCard(borderColor), cursor: 'pointer', textAlign: 'left', width: '100%', font: 'inherit',
+    style: { ...(borderColor ? { borderColor } : {}), cursor: 'pointer', textAlign: 'left', width: '100%', font: 'inherit',
              display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start' },
-    className: 'interactive-card',
+    className: 'stat-card stat-card--compact interactive-card',
     onClick: () => setFilter(filter === key ? null : key),
     'aria-pressed': filter === key,
   })
@@ -224,15 +230,20 @@ export default function AdminDashboardOverview() {
       {adminLoading ? (
         <>
           <div role="status" aria-live="polite" className="sr-only">Loading platform overview…</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginBottom: 20, alignItems: 'start' }}>
+          {/* Every property of this grid is the real strip's below — same floor, same gap, no
+              alignItems. It had been minmax(190)/gap:14/alignItems:start against the real
+              158/8/stretch, so the skeleton laid out fewer columns at a different height and the
+              whole page jumped when the data landed. A skeleton that doesn't match its own
+              content is a layout shift with extra steps. */}
+          <div className="dash-section" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(158px, 1fr))', gap: 8 }}>
             {[0, 1, 2, 3, 4, 5].map(i => (
-              <div key={i} style={statCard()}>
-                <span className="skeleton" style={{ display: 'block', width: '60%', height: 11, marginBottom: 10 }} />
+              <div key={i} {...statCard()}>
+                <span className="skeleton" style={{ display: 'block', width: '60%', height: 11, marginBottom: 8 }} />
                 <span className="skeleton" style={{ display: 'block', width: '40%', height: 26 }} />
               </div>
             ))}
           </div>
-          <div className="card" style={{ padding: 20 }}>
+          <div className="card card--compact">
             {[0, 1, 2, 3, 4].map(i => (
               <span key={i} className="skeleton" style={{ display: 'block', width: '100%', height: 34, marginBottom: 8 }} />
             ))}
@@ -243,8 +254,8 @@ export default function AdminDashboardOverview() {
           {/* ── 6 KPI cards, sized to sit on ONE row ──
               There are six tiles and the old 190px floor fitted five, so Trial Signups sat alone on
               a second row with empty space beside it and the properties table started a full row
-              lower. The floor is the lever, never a pinned track count (S613): 158px with a 10px
-              gap gives six columns from ~1010px of content width, and still degrades to five, then
+              lower. The floor is the lever, never a pinned track count (S613): 158px with an 8px
+              gap gives six columns from ~990px of content width, and still degrades to five, then
               fewer, on smaller screens.
               Everything inside the tiles came down to match — statCard's padding, the headline
               numbers and the adoption pills — because narrowing a column without narrowing its
@@ -258,13 +269,13 @@ export default function AdminDashboardOverview() {
               carry empty space below their figure, which is what "the same size" costs and means.
               Same lesson as the adoption pills: same size is BOTH dimensions, not just the one
               that happened to match already. */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(158px, 1fr))', gap: 10, marginBottom: 20 }}>
+          <div className="dash-section" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(158px, 1fr))', gap: 8 }}>
 
             {/* 1 — Active Properties + module adoption */}
-            <div style={statCard()}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Active Properties</div>
+            <div {...statCard()}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Active Properties</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>{inactive.length} inactive · {adminClients.length} total</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{inactive.length} inactive · {adminClients.length} total</div>
               {/* Four adoption pills on ONE row, and ONE box shared by all four.
                   They had drifted into three different boxes: the module pills at `1px 4px` with no
                   border, the Suite pill at `1px 5px` WITH a 1px border — and a border adds 2px of
@@ -319,14 +330,14 @@ export default function AdminDashboardOverview() {
 
             {/* 2 — Active Today */}
             <button {...filterCard('activeToday', activeTodayClients.length > 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : undefined)}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 6, height: 6, borderRadius: 0, background: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-border)', flexShrink: 0 }} />
                 Active Today
               </div>
               <div style={{ fontSize: 24, fontWeight: 800, color: activeTodayClients.length > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
                 {activeTodayClients.length}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5, lineHeight: 1.7 }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, lineHeight: 1.7 }}>
                 {activeTodayClients.length === 0
                   ? 'No logins in last 24 h'
                   : <>
@@ -343,31 +354,31 @@ export default function AdminDashboardOverview() {
 
             {/* 3 — Expiring ≤30 days + churn risk sub-count */}
             <button {...filterCard(churnRisk.length > 0 ? 'churn' : 'expiring', churnRisk.length > 0 ? 'color-mix(in srgb, var(--theme-red) 30%, transparent)' : expiring30.length > 0 ? 'rgba(217,119,6,0.15)' : undefined)}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Expiring ≤30 Days</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Expiring ≤30 Days</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: churnRisk.length > 0 ? 'var(--theme-red-text)' : expiring30.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>
                 {expiring30.length}
               </div>
               {churnRisk.length > 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 5 }}>⚠ {churnRisk.length} critical ≤7 days</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 4 }}>⚠ {churnRisk.length} critical ≤7 days</div>
               ) : (
-                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Within 30 days</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Within 30 days</div>
               )}
             </button>
 
             {/* 4 — No Open Period */}
             <button {...filterCard('noPeriod', noPeriod.length > 0 ? 'color-mix(in srgb, var(--theme-red) 35%, transparent)' : undefined)}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>No Open Period</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>No Open Period</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>{noPeriod.length}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>Active clients — need setup</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Active clients — need setup</div>
             </button>
 
             {/* 5 — MRR + ARR */}
-            <div style={statCard()}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Est. Monthly Revenue</div>
+            <div {...statCard()}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Est. Monthly Revenue</div>
               <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--theme-accent-ink)', lineHeight: 1.1 }}>
                 NPR {estMRR.toLocaleString('en-IN')}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
                 {payingCount} paying · ARR{' '}
                 <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estARR.toLocaleString('en-IN')}</span>
               </div>
@@ -375,25 +386,26 @@ export default function AdminDashboardOverview() {
 
             {/* 6 — Trial Signups */}
             <div
-              style={{ ...statCard(toApprove.length > 0 || wantToSub.length > 0 ? 'color-mix(in srgb, var(--theme-red) 50%, transparent)' : trialSignups.length > 0 ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : undefined), cursor: 'pointer' }}
+              className="stat-card stat-card--compact"
+              style={{ borderColor: toApprove.length > 0 || wantToSub.length > 0 ? 'color-mix(in srgb, var(--theme-red) 50%, transparent)' : trialSignups.length > 0 ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : undefined, cursor: 'pointer' }}
               onClick={() => navigate('/admin/clients')}
             >
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Trial Signups</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Trial Signups</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: trialSignups.length > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
                 {trialSignups.length}
               </div>
               {toApprove.length > 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 0, background: 'var(--theme-red)', flexShrink: 0 }} />
                   {toApprove.length} waiting for your approval
                 </div>
               ) : wantToSub.length > 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 6, height: 6, borderRadius: 0, background: 'var(--theme-red)', flexShrink: 0 }} />
                   {wantToSub.length} want{wantToSub.length === 1 ? 's' : ''} to subscribe
                 </div>
               ) : (
-                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 5 }}>
+                <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
                   {trialSignups.length === 0 ? 'No active trials' : '7-day free · Growth + HR + POS'} · View →
                 </div>
               )}
@@ -402,7 +414,7 @@ export default function AdminDashboardOverview() {
 
           {/* ── Single merged "All Properties" table ── */}
           <div className="card" style={{ padding: 0 }}>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>All Properties</span>
               {/* A placeholder is a last-resort accessible name and disappears the moment you
                   type. type="search" + a real label, per DESIGN.md's every-field-needs-htmlFor. */}
@@ -523,7 +535,7 @@ export default function AdminDashboardOverview() {
 
                         {/* Property + active-today dot */}
                         <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             {isActiveToday && (
                               <span title="Active today" style={{ width: 7, height: 7, borderRadius: 0, background: 'var(--theme-green)', flexShrink: 0 }} />
                             )}
@@ -582,7 +594,7 @@ export default function AdminDashboardOverview() {
                           {mrr > 0 ? (
                             <>
                               NPR {mrr.toLocaleString('en-IN')}
-                              <span style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--theme-text3)', marginTop: 2 }}>
+                              <span style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--theme-text3)', marginTop: 4 }}>
                                 {c.is_active ? (c.billing_cycle === 'annual' ? 'Annual' : 'Monthly') : 'inactive — not billed'}
                               </span>
                             </>
@@ -594,15 +606,15 @@ export default function AdminDashboardOverview() {
                           <div>
                             <span style={{ fontSize: 12, color: typeColor }}>{typeLabel}</span>
                             {hrExpiring && c.hr_enabled && (
-                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>HR exp. {hrDays}d</div>
+                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>HR exp. {hrDays}d</div>
                             )}
                             {/* Suite could lapse silently: this column tracks IMS, and the only
                                 other module hint was HR's. Losing Suite is NPR 2,000/outlet. */}
                             {suiteExpiring && (
-                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>Suite exp. {suiteDays}d</div>
+                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>Suite exp. {suiteDays}d</div>
                             )}
                             {c.suite_plan && !suiteLive && (
-                              <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>Suite lapsed</div>
+                              <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>Suite lapsed</div>
                             )}
                           </div>
                         </td>

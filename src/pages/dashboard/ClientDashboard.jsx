@@ -50,7 +50,7 @@ function ChartTabs({ idBase, label, tabs, active, onChange }) {
     requestAnimationFrame(() => document.getElementById(`${idBase}-tab-${next.key}`)?.focus())
   }
   return (
-    <div className="tab-bar" role="tablist" aria-label={label} style={{ marginBottom: 6 }} onKeyDown={onKeyDown}>
+    <div className="tab-bar" role="tablist" aria-label={label} style={{ marginBottom: 8 }} onKeyDown={onKeyDown}>
       {tabs.map(t => (
         <button
           key={t.key} type="button" role="tab"
@@ -142,7 +142,7 @@ function TrendTooltipContent({ active, payload, label, big }) {
   }).sort((a, b) => Number(b.value) - Number(a.value))
   if (!shown.length) return null
   return (
-    <div style={{ ...TOOLTIP_CHROME, ...(big && { fontSize: 12 }), color: 'var(--theme-text1)', padding: '8px 12px', whiteSpace: 'nowrap' }}>
+    <div style={{ ...TOOLTIP_CHROME, ...(big && { fontSize: 12 }), color: 'var(--theme-text1)', padding: '8px 16px', whiteSpace: 'nowrap' }}>
       <p style={{ margin: 0, fontWeight: 600 }}>{label}</p>
       {shown.map(en => {
         // Actual-vs-target gap on the two actual rows; the target rows themselves carry none, and
@@ -1172,18 +1172,19 @@ export default function ClientDashboard() {
   // Shared mini card style + a11y — returns a spreadable props object so every KPI card gets
   // keyboard support (role/tabIndex/onKeyDown) and a visible focus ring for free, instead of each
   // clickable div being mouse-only. Non-interactive cards (onClick == null) get style only.
+  // .stat-card --compact, not a fourth hand-rolled copy of the same box. This file, OwnerDashboard
+  // and AdminDashboardOverview each typed .stat-card's five box properties out inline and then
+  // drifted on the one thing that shows — 10x14 here, 14x16 there, 12x14 there, against the
+  // class's own 20 — so a KPI card meant nothing in particular across the four dashboards. The
+  // --compact tier is for a strip with a REAL gap (these sit in .stat-grid--compact): shadow kept,
+  // seam pull dropped. Only cursor and the interaction props are this call site's business.
   const kpiCard = (onClick) => ({
-    style: {
-      background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)',
-      boxShadow: 'var(--theme-card-shadow)',
-      padding: '10px 14px', cursor: onClick ? 'pointer' : 'default',
-      transition: 'border-color var(--motion-fast) var(--ease-standard)'
-    },
+    className: onClick ? 'stat-card stat-card--compact interactive-card' : 'stat-card stat-card--compact',
     ...(onClick ? {
+      style: { cursor: 'pointer' },
       onClick,
       role: 'button',
       tabIndex: 0,
-      className: 'interactive-card',
       onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }
     } : {})
   })
@@ -1197,7 +1198,12 @@ export default function ClientDashboard() {
       aria-expanded={openDetails[key]}
       aria-controls={panelId}
       className="btn btn-ghost"
-      style={{ fontSize: 11, padding: '4px 10px', marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+      // No margins and no padding: .btn already supplies 8px 16px, inline-flex, centring and a
+      // 6px icon gap. The space ABOVE this button belongs to the section that contains it and
+      // the space below to the .dash-row it sits in — it had a 10px top margin and nothing at
+      // all below, so collapsed it sat flush against the chart row beneath it (0px), and
+      // expanded it got 14. The gap under a control should not depend on what the control says.
+      style={{ fontSize: 11 }}
     >
       {openDetails[key] ? 'Hide details' : `Show ${count} more`}
       <ChevronDown size={12} aria-hidden="true" style={{ transform: openDetails[key] ? 'rotate(180deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }} />
@@ -1222,12 +1228,15 @@ export default function ClientDashboard() {
       onClick={() => navigate('/pricing')}
       role="button"
       tabIndex={0}
-      className="interactive-card"
+      className="stat-card stat-card--compact interactive-card"
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/pricing') } }}
+      // The same box as the KPI tiles it sits beside — it occupies one of their slots and must
+      // measure like one — minus the shadow, because a dashed ghost tile is not a figure and
+      // should sit back from the cards that are.
       style={{
         background: 'color-mix(in srgb, var(--theme-purple) 8%, transparent)',
         border: '1px dashed color-mix(in srgb, var(--theme-purple) 40%, transparent)',
-        borderRadius: 'var(--radius-lg)', padding: '10px 14px', cursor: 'pointer', transition: 'border-color var(--motion-fast) var(--ease-standard)'
+        boxShadow: 'none', cursor: 'pointer'
       }}
     >
       <div style={{ ...kpiLabelStyle, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
@@ -1267,7 +1276,7 @@ export default function ClientDashboard() {
   // without them the page jumps h1 → h3 (ChartCard titles) with no level in between, which
   // breaks heading navigation for screen-reader users (dashboard critique P2, S569).
   const moduleHeader = (text) => showModuleHeaders
-    ? <h2 style={{ fontSize: 11, fontWeight: 400, margin: '0 0 10px', color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{text}</h2>
+    ? <h2 style={{ fontSize: 11, fontWeight: 400, margin: '0 0 8px', color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{text}</h2>
     : <h2 className="sr-only">{text}</h2>
 
   // Equal-width 3-column layout — only kicks in at 2+ modules, matching showModuleHeaders. A
@@ -1641,7 +1650,7 @@ export default function ClientDashboard() {
   // full-width in both layouts.
   const imsChartsAndTables = !loading && activePeriod && (
     <>
-      <div className="dash-spend-purchases-row" style={{ marginBottom: 14 }}>
+      <div className="dash-spend-purchases-row dash-row">
 
         {/* Pie — Category Spend, and Bar — Top Items, combined behind a tab so Daily Purchases vs
             Sales (genuinely the more information-dense chart of the three, especially once the
@@ -1692,7 +1701,7 @@ export default function ClientDashboard() {
                   {tabs}
                   {panel(<>
                   {big && (
-                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                       <StatPill label="Total spend" value={`NPR ${categorySpendTotal.toLocaleString('en-IN')}`} />
                       <StatPill label="Top category" value={`${categorySpend[0].name} (${((categorySpend[0].value / categorySpendTotal) * 100).toFixed(0)}%)`} color={CHART_COLORS[0]} />
                       <StatPill label="Categories" value={categorySpend.length} />
@@ -1720,10 +1729,10 @@ export default function ClientDashboard() {
                       />
                     </PieChart>
                   </ResponsiveContainer>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 6 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginTop: 8 }}>
                     {categorySpend.map((entry, i) => {
                       return (
-                        <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: CHART_COLORS[i % CHART_COLORS.length], flexShrink: 0 }} />
                           <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{entry.name}</span>
                           {big && <span style={{ fontSize: 11, color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-IN')}</span>}
@@ -1756,7 +1765,7 @@ export default function ClientDashboard() {
                 {tabs}
                 {panel(<>
                 {big && (
-                  <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                  <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                     <StatPill label={`Top ${shown.length} total`} value={`NPR ${shownTotal.toLocaleString('en-IN')}`} color={colors.accent} />
                     <StatPill label="Top item" value={shown[0].fullName || shown[0].name} color={CHART_COLORS[0]} />
                     {purchaseTotal > 0 && <StatPill label="Share of net purchases" value={`${((shownTotal / purchaseTotal) * 100).toFixed(0)}%`} />}
@@ -1789,7 +1798,14 @@ export default function ClientDashboard() {
             scroll div's large minWidth forces the track wide and squeezes the other cards. */}
         <ChartCard
           title="Daily Purchases vs Sales"
-          smallHeight={160}
+          // Taller than ChartCard's 160 default because this is the one chart with a TWO-line
+          // X-axis (day number over weekday initial). Recharts places tick text at
+          // axisY + tickSize(6) + tickMargin(2) regardless of tickLine={false}, so the second
+          // line's baseline sat at 162px inside a 160px SVG and the initials were clipped away by
+          // the SVG edge — invisible, not merely tight. The axis band below is widened to 34 to
+          // hold both lines, and this height is raised by the same amount so the plotted area
+          // keeps (slightly more than) the room it had.
+          smallHeight={184}
           // This card's modal carries more chrome than most ChartCard users — 6 legend chips, 6
           // stat pills, a 2-line X-axis (day + weekday) and a 2-line-wrapping footer — so the
           // default 440px chart plus all of that no longer fits inside a typical viewport without
@@ -1826,7 +1842,7 @@ export default function ClientDashboard() {
           </>}
           footer={<>
             {(salesProjection || purchProjection || salesTargetSnap || purchTargetSnap) && (
-              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '2px 16px' }}>
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
                 {salesProjection && (
                   <span>
                     Projected month-end revenue: <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString('en-IN')}</strong>
@@ -1908,7 +1924,10 @@ export default function ClientDashboard() {
                     </defs>
                   )}
                   <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="day" tick={dayAxisTick} height={big ? 32 : 26} tickLine={false} axisLine={false} interval={0} />
+                  {/* Small height must clear the tick's own 8px offset plus the second line's
+                      dy=20 and its descender, or the weekday initial renders past the SVG's
+                      bottom edge and is clipped (see smallHeight above). */}
+                  <XAxis dataKey="day" tick={dayAxisTick} height={big ? 32 : 34} tickLine={false} axisLine={false} interval={0} />
                   <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
                   {/* See TrendTooltipContent at module scope for why this chart needs custom
                       content (anchor-day suppression, value-sorted rows, the target arrows). */}
@@ -1939,7 +1958,7 @@ export default function ClientDashboard() {
             return (
               <>
                 {big && (
-                  <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                  <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                     <StatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchases} />
                     {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
                     {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
@@ -1963,13 +1982,13 @@ export default function ClientDashboard() {
 
       {/* ── FC% Trend + Cost Breakdown/Sales Mix, side by side ── */}
       {((fcTrend.length >= 2 && canSales) || costTabAvailable || mixTabAvailable) && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
+        <div className="dash-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
 
           {fcTrend.length >= 2 && canSales && (
             <ChartCard
               title="Food Cost % — Monthly Trend"
               footer={<>
-                <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 11, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, flexWrap: 'wrap' }}>
                   <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcBands.warn}% Good</span>
                   <span style={{ color: 'var(--theme-amber-text)' }}>● {fcBands.warn}–{fcBands.critical}% Watch</span>
                   <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcBands.critical}% High</span>
@@ -1978,7 +1997,7 @@ export default function ClientDashboard() {
                 {/* A withheld month is stated, not silently dropped — otherwise the chart quietly
                     claims the current month has no figure at all. */}
                 {fcOpenTooEarly && (
-                  <div style={{ fontSize: 11, marginTop: 6, color: 'var(--theme-text2)' }}>
+                  <div style={{ fontSize: 11, marginTop: 8, color: 'var(--theme-text2)' }}>
                     {fcOpenPoint.label} in progress — Day {dayOfPeriod} of {periodDays}. A part-month
                     usually buys stock for the whole month, so its ratio is arithmetic rather than a
                     signal; it joins the line from Day {SETTLE_DAY}.
@@ -1991,7 +2010,7 @@ export default function ClientDashboard() {
                 return (
                 <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
                   {big && fcTrendAvg != null && (
-                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                    <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                       <StatPill label={`Average · ${fcSettled.length} completed month${fcSettled.length === 1 ? '' : 's'}`} value={`${fcTrendAvg.toFixed(1)}%`} color={colors.text2} />
                       <StatPill label="Best month" value={`${fcTrendBest.label} (${fcTrendBest.fc}%)`} color={colors.greenText} textColor={colors.greenText} />
                       <StatPill label="Highest month" value={`${fcTrendWorst.label} (${fcTrendWorst.fc}%)`} color={colors.redText} textColor={colors.redText} />
@@ -2052,14 +2071,14 @@ export default function ClientDashboard() {
               smallHeight={costTabAvailable && mixTabAvailable ? 172 : 140}
               footer={costCardEffectiveView === 'cost' ? (
                 <>
-                  <div style={{ fontSize: 11, marginTop: 6, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                  <div style={{ fontSize: 11, marginTop: 8, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
                     {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
                   </div>
                   {/* Percentages below the slices are a share of whatever the pie actually contains,
                       which flips with the sign of the margin — say which, rather than leaving a bare
                       "23.4%" to be read against the wrong denominator. */}
-                  <div style={{ fontSize: 11, marginTop: 2, color: 'var(--theme-text3)' }}>
+                  <div style={{ fontSize: 11, marginTop: 4, color: 'var(--theme-text3)' }}>
                     {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · from Overheads page buckets
                   </div>
                   {laborBucketMissing && (
@@ -2105,7 +2124,7 @@ export default function ClientDashboard() {
                       {tabs}
                       {panel(<>
                       {big && (
-                        <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                        <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                           <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} />
                           {/* Matches the Food Cost slice, not colors.accent — on a preset where accent
                               isn't gold the pill would otherwise disagree with the slice it summarizes. */}
@@ -2137,9 +2156,9 @@ export default function ClientDashboard() {
                           />
                         </PieChart>
                       </ResponsiveContainer>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 6 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', marginTop: 8 }}>
                         {costBreakdown.map(entry => (
-                          <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <div style={{ width: 8, height: 8, borderRadius: 'var(--radius-full)', background: COST_BREAKDOWN_COLORS[entry.name] || colors.text3, flexShrink: 0 }} />
                             <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
                               {entry.name} <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {entry.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
@@ -2178,7 +2197,7 @@ export default function ClientDashboard() {
                     {tabs}
                     {panel(<>
                     {big && (
-                      <div className="chart-stat-strip" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                      <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                         <StatPill label="Total revenue" value={`NPR ${Math.round(salesMixTotal).toLocaleString('en-IN')}`} />
                         <StatPill label="Top category" value={`${salesMixCategories[0]} (${((salesMixBuckets[salesMixCategories[0]] / salesMixTotal) * 100).toFixed(0)}%)`} color={salesMixColorOf(salesMixCategories[0])} />
                         <StatPill label="Categories" value={salesMixCategories.length} />
@@ -2205,13 +2224,13 @@ export default function ClientDashboard() {
                         />
                       </PieChart>
                     </ResponsiveContainer>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
                       {salesMixCategories.map(cat => {
                         const amount = salesMixBuckets[cat]
                         const pct = (amount / salesMixTotal) * 100
                         return (
                           <div key={cat} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12.5 }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--theme-text1)' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--theme-text1)' }}>
                               <span style={{ width: 8, height: 8, borderRadius: 0, background: salesMixColorOf(cat), flexShrink: 0 }} />
                               {cat}
                             </span>
@@ -2230,14 +2249,14 @@ export default function ClientDashboard() {
       )}
 
       {/* ── Bottom: Variance + Reorder side by side ── */}
-      {<div style={{ display: 'grid', gridTemplateColumns: canReorder ? 'repeat(auto-fit, minmax(320px, 1fr))' : '1fr', gap: 14, marginBottom: 20 }}>
+      {<div className="dash-row" style={{ display: 'grid', gridTemplateColumns: canReorder ? 'repeat(auto-fit, minmax(320px, 1fr))' : '1fr', gap: 16 }}>
 
         {/* Variance table */}
         {canVariance ? (
-          <div className="card" style={{ padding: '14px 16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div className="card card--compact">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Top Variance Items</h3>
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '9px 12px' }} onClick={() => navigate('/variance')}>Full Report →</button>
+              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => navigate('/variance')}>Full Report →</button>
             </div>
             {topVariance.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
@@ -2248,11 +2267,11 @@ export default function ClientDashboard() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr>
-                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'left', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>Item</th>
-                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>
+                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'left', paddingBottom: 8, borderBottom: '1px solid var(--theme-border)' }}>Item</th>
+                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 8, borderBottom: '1px solid var(--theme-border)' }}>
                       <Tip text="Qty used above what recipes predict — indicates waste, theft, or over-portioning.">Over-used</Tip>
                     </th>
-                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid var(--theme-border)' }}>
+                    <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 8, borderBottom: '1px solid var(--theme-border)' }}>
                       <Tip text="Over-used qty × item rate. The NPR cost of unaccounted usage this period." width={200}>Value at Risk</Tip>
                     </th>
                   </tr>
@@ -2260,9 +2279,9 @@ export default function ClientDashboard() {
                 <tbody>
                   {topVariance.map((row, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid var(--theme-bg)' }}>
-                      <td style={{ padding: '5px 0', fontWeight: 600, color: 'var(--theme-text1)' }}>{row.name}</td>
-                      <td style={{ padding: '5px 0', textAlign: 'right', color: 'var(--theme-red-text)' }}>+{Number(row.variance.toFixed(1)).toLocaleString('en-IN')} {row.uom}</td>
-                      <td style={{ padding: '5px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString('en-IN')}</td>
+                      <td style={{ padding: '4px 0', fontWeight: 600, color: 'var(--theme-text1)' }}>{row.name}</td>
+                      <td style={{ padding: '4px 0', textAlign: 'right', color: 'var(--theme-red-text)' }}>+{Number(row.variance.toFixed(1)).toLocaleString('en-IN')} {row.uom}</td>
+                      <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString('en-IN')}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2276,10 +2295,10 @@ export default function ClientDashboard() {
 
         {/* Reorder panel */}
         {canReorder ? (
-          <div className="card" style={{ padding: '14px 16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div className="card card--compact">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items to Reorder</h3>
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '9px 12px' }} onClick={() => navigate('/reorder')}>Full Report →</button>
+              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => navigate('/reorder')}>Full Report →</button>
             </div>
             {reorderItems.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
@@ -2292,13 +2311,13 @@ export default function ClientDashboard() {
             ) : (
               <div>
                 {reorderItems.map((item, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: i < reorderItems.length - 1 ? '1px solid var(--theme-bg)' : 'none' }}>
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: i < reorderItems.length - 1 ? '1px solid var(--theme-bg)' : 'none' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>Stock: {item.currentStock} · Par: {item.par} {item.uom}</div>
                     </div>
                     <div style={{ textAlign: 'right', marginLeft: 12, flexShrink: 0 }}>
-                      <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}><ArrowDown size={11} aria-hidden="true" /> {item.shortfall} {item.uom}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}><ArrowDown size={11} aria-hidden="true" /> {item.shortfall} {item.uom}</div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>NPR {item.estValue.toLocaleString('en-IN')}</div>
                     </div>
                   </div>
@@ -2336,8 +2355,8 @@ export default function ClientDashboard() {
         // role="alert" so a screen-reader user hears the failure when the banner appears —
         // this page's loading region already announces politely; a fetch failure should not
         // be the one async state that stays silent (dashboard critique P2, S569).
-        <div key={section} role="alert" className="card" style={{
-          marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+        <div key={section} role="alert" className="card dash-row" style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
           borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
         }}>
@@ -2345,9 +2364,9 @@ export default function ClientDashboard() {
             <TriangleAlert size={14} aria-hidden="true" /> {msg}
           </p>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={() => retryLoad(section)}>Retry</button>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => retryLoad(section)}>Retry</button>
             <button
-              className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }}
+              className="btn btn-ghost" style={{ fontSize: 12 }}
               onClick={() => setLoadErrors(prev => ({ ...prev, [section]: '' }))} aria-label="Dismiss"
             >×</button>
           </div>
@@ -2359,7 +2378,7 @@ export default function ClientDashboard() {
         if (!s.label || s.days === null || s.days > 7) return null
         const isExpired = s.days < 0
         return (
-          <div className="card" role="status" aria-live="polite" style={{ marginBottom: 20, borderColor: s.border, background: s.bg }}>
+          <div className="card dash-row" role="status" aria-live="polite" style={{ borderColor: s.border, background: s.bg }}>
             <p style={{ color: s.color, margin: 0, fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={16} aria-hidden="true" />
               {isExpired ? 'Your subscription has expired' : `Your ${s.label.startsWith('Trial') ? 'trial' : 'subscription'} expires in ${s.days} day${s.days !== 1 ? 's' : ''}`}
@@ -2373,7 +2392,7 @@ export default function ClientDashboard() {
 
       {showIms && !activePeriod && !loading && (
         <div
-          className="card interactive-card" style={{ marginBottom: 20, cursor: 'pointer', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
+          className="card interactive-card dash-row" style={{ cursor: 'pointer', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
           onClick={() => navigate('/periods')} role="button" tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/periods') } }}
         >
@@ -2398,7 +2417,7 @@ export default function ClientDashboard() {
       )}
 
       {periodExpired && !loading && (
-        <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
+        <div className="card dash-row" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
           {/* wrap: at 375px the message and its action button cannot share a row. */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <div>
@@ -2422,7 +2441,7 @@ export default function ClientDashboard() {
             )}
           </div>
           {periodCloseError && (
-            <p role="alert" style={{ color: 'var(--theme-red-text)', margin: '10px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <p role="alert" style={{ color: 'var(--theme-red-text)', margin: '8px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={13} aria-hidden="true" /> {periodCloseError}
             </p>
           )}
@@ -2437,8 +2456,8 @@ export default function ClientDashboard() {
               onCancel={() => setConfirmPeriodClose(false)}
             >
               <CloseConfirmBody notes={closeNotes}>
-                <p style={{ margin: '0 0 10px' }}>Closing the month is how its figures become final:</p>
-                <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+                <p style={{ margin: '0 0 8px' }}>Closing the month is how its figures become final:</p>
+                <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
                   {/* HR is deliberately NOT locked by the close — payroll is finalized after the
                       stock month closes — so the sentence names exactly what locks. */}
                   <li>Purchases, Sales, Stock Count and Overheads for {BS_MONTHS[activePeriod.bs_month - 1]} become read-only for your team (Crest admin can still correct figures later).{clientModules?.hr ? ' HR pages stay open — Payroll Run locks itself once finalized.' : ''}</li>
@@ -2457,13 +2476,15 @@ export default function ClientDashboard() {
       {/* ── No modules enabled ── */}
       {!showIms && !showHr && !showPos && (
         <div className="card" style={{ textAlign: 'center', padding: '48px 24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }} aria-hidden="true"><LayoutGrid size={32} strokeWidth={1.5} /></div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }} aria-hidden="true"><LayoutGrid size={32} strokeWidth={1.5} /></div>
           <p style={{ fontSize: 15, color: 'var(--theme-text1)', fontWeight: 600, margin: '0 0 8px' }}>No modules enabled</p>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>Contact your consultant to activate Crest IMS, Crest HR, or Crest POS.</p>
         </div>
       )}
 
-      <div className={dashColsClass}>
+      {/* dash-section so the module block keeps the page's rhythm below it whether it renders as
+          the 2/3-column grid or, for a single-module client, one plain full-width block. */}
+      <div className={`dash-section ${dashColsClass}`.trim()}>
       {/* ── IMS KPIs ── */}
       {showIms && <div>
       {moduleHeader('Inventory')}
@@ -2480,14 +2501,16 @@ export default function ClientDashboard() {
         </div>
       ) : (
         <>
-          <div className="stat-grid stat-grid--compact" style={{ marginBottom: 14 }}>
+          <div className="stat-grid stat-grid--compact dash-row">
             {netPurchasesCard}{revenueCard}{foodCostCard}{fixedCostsCard}{netMarginCard}
           </div>
-          <div className="stat-grid stat-grid--compact" style={{ marginBottom: 14 }}>
+          <div className="stat-grid stat-grid--compact dash-row">
             {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{wastageCard}
           </div>
           {imsChartsAndTables}
-          {canSales && <div style={{ marginTop: 14 }}><SalesPivot activePeriod={activePeriod} posEnabled={false} /></div>}
+          {/* No top margin of its own: the block above carries the gap, and .dash-row:last-child
+              means that block carries it only while something actually follows it. */}
+          {canSales && <div><SalesPivot activePeriod={activePeriod} posEnabled={false} /></div>}
         </>
       )}
       </div>}
@@ -2498,7 +2521,15 @@ export default function ClientDashboard() {
           sections above handle their own loading state (a skeleton bar per KPI value, same grid
           shape throughout). Now one block, matching that pattern. */}
       {showHr && (
-        <div style={{ marginBottom: 14, marginTop: showIms ? 6 : 0 }}>
+        /* No margins of its own, and neither has POS below. These are GRID CHILDREN of
+           .dash-3col-*: the 6px top was written when the three module blocks stacked vertically,
+           and once S438/S439 made them columns it stopped being a separator and became a column
+           OFFSET — HR and POS started 6px lower than Inventory, so the three module headings did
+           not sit on one line. The 14px bottom compounded the other way on the phone, where the
+           grid collapses to one column and its own 16px row-gap is the separator: 14 + 16 + 6 =
+           36px between modules against 14 everywhere else on the page. The grid's gap is the only
+           thing that should be spacing these. */
+        <div>
           {moduleHeader('Human Resources')}
           {/* A dashboard's whole job is a 5-second "state of things" glance — headcount, active
               staff and payroll are exactly that for HR, not reference data, so every card here
@@ -2507,23 +2538,24 @@ export default function ClientDashboard() {
               Pending Approvals is still the section's headline — spans 2 columns for visual
               weight, same instinct as IMS's Food Cost % above — but "headline" means "biggest,"
               not "only thing shown." */}
-          <div className="stat-grid stat-grid--compact">
+          <div className="stat-grid stat-grid--compact dash-row">
             {showModuleHeaders && <div style={{ gridColumn: 'span 2' }}>{hrHeadlineCard}</div>}
             {hrSecondaryCards}
           </div>
-          {!showModuleHeaders && <div style={{ marginTop: 10 }}>{hrHeadlineCard}</div>}
+          {!showModuleHeaders && <div>{hrHeadlineCard}</div>}
         </div>
       )}
 
       {/* ── POS KPIs ── */}
       {showPos && (
-        <div style={{ marginBottom: 14, marginTop: (showIms || showHr) ? 6 : 0 }}>
+        /* Same as HR above — the grid gap spaces the columns, this block does not. */
+        <div>
           {moduleHeader(posTeam === 'bar' ? 'Bar' : posTeam === 'kitchen' ? 'Kitchen' : 'Point of Sale')}
           {/* Same reversal as HR above — Covers Served/Avg Check/Tables Occupied (or Late/Ready &
               Waiting/Avg Prep for a kitchen/bar station) are exactly what a mid-rush glance needs,
               not occasional reference data, so they stay visible. Revenue/Open Tickets is still
               the headline via size + position, not via hiding its siblings. */}
-          <div className="stat-grid stat-grid--compact">
+          <div className="stat-grid stat-grid--compact dash-row">
             {showModuleHeaders && <div style={{ gridColumn: 'span 2' }}>{posIsStationTeam ? posKitchenHeadlineCard : posFrontHeadlineCard}</div>}
             {posIsStationTeam
               ? <>{!showModuleHeaders && posKitchenHeadlineCard}{posKitchenSecondaryCards}</>
@@ -2535,7 +2567,7 @@ export default function ClientDashboard() {
               Single-module (POS-only) clients keep it right here, unchanged; once 2+ modules
               share the page it moves into the shared Sales Breakdown section below instead, so it
               can sit next to the manual-sales pivot rather than fight IMS for column space. */}
-          {!showModuleHeaders && !posIsStationTeam && <div style={{ marginTop: 14 }}><SalesPivot activePeriod={activePeriod} posEnabled={true} /></div>}
+          {!showModuleHeaders && !posIsStationTeam && <div><SalesPivot activePeriod={activePeriod} posEnabled={true} /></div>}
         </div>
       )}
       </div>
@@ -2547,10 +2579,12 @@ export default function ClientDashboard() {
           scroll length; charts stay visible, they already have their own ChartCard compact/
           expand pattern for progressive disclosure at the individual-chart level. ── */}
       {showIms && showModuleHeaders && (
-        <div style={{ marginBottom: 14 }}>
-          {detailsToggle('ims', 6, 'ims-details-panel')}
+        <div className="dash-section">
+          {/* The toggle gets its gap from a row wrapper rather than from its own margins, so the
+              space under it is the same 16 whether the panel below is open or shut. */}
+          <div className="dash-row">{detailsToggle('ims', 6, 'ims-details-panel')}</div>
           {openDetails.ims && (
-            <div id="ims-details-panel" className="stat-grid stat-grid--compact" style={{ marginTop: 10, marginBottom: 14 }}>
+            <div id="ims-details-panel" className="stat-grid stat-grid--compact dash-row">
               {activePeriodCard}{itemsCard}{vendorsCard}{recipesCard}{menuHealthCard}{fixedCostsCard}
             </div>
           )}
@@ -2566,9 +2600,9 @@ export default function ClientDashboard() {
           own, which is what actually widens "Manual Sales by Category" now that it's not sharing
           the row three ways. ── */}
       {showModuleHeaders && ((showIms && canSales) || (showPos && !posIsStationTeam)) && (
-        <div style={{ marginBottom: 20 }}>
+        <div className="dash-section">
           {moduleHeader('Sales Breakdown')}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
             {showIms && canSales && <SalesPivot activePeriod={activePeriod} posEnabled={false} title="Manual Sales by Category" />}
             {showPos && !posIsStationTeam && <SalesPivot activePeriod={activePeriod} posEnabled={true} title="POS Sales by Category" />}
           </div>

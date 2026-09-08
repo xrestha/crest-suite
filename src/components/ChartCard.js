@@ -74,21 +74,21 @@ function ChartModal({ title, legend, footer, renderChart, onClose, modalHeight }
         // to go but off-screen equally in both directions, since the backdrop centers it with
         // align-items:center. Scrolling inside the panel keeps Escape/backdrop-click as the way
         // out rather than a half-visible Close button no longer being reachable.
-        style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xl)', padding: '20px 28px', width: '92%', maxWidth: 1100, maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', boxShadow: '0 8px 60px rgba(0,0,0,0.5)', outline: 'none' }}
+        style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-xl)', padding: '24px 32px', width: '92%', maxWidth: 1100, maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', boxShadow: '0 8px 60px rgba(0,0,0,0.5)', outline: 'none' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--theme-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
           <div id={titleId} style={{ fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>{title}</div>
-          <div style={{ display: 'flex', gap: 18, fontSize: 11, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 16, fontSize: 11, alignItems: 'center' }}>
             {legend}
             <button
               className="chart-close-btn"
               onClick={onClose}
-              style={{ border: '1px solid var(--theme-border)', padding: '3px 10px', cursor: 'pointer', fontSize: 12 }}
+              style={{ border: '1px solid var(--theme-border)', padding: '4px 8px', cursor: 'pointer', fontSize: 12 }}
             >✕ Close</button>
           </div>
         </div>
         {renderChart(modalHeight)}
-        {footer && <div style={{ marginTop: 12 }}>{footer}</div>}
+        {footer && <div style={{ marginTop: 16 }}>{footer}</div>}
       </div>
     </div>,
     document.body
@@ -103,12 +103,12 @@ export default function ChartCard({
   const ts = titleStyle || DEFAULT_TITLE_STYLE
 
   return (
-    <div className="card" style={{ padding: '14px 16px', ...cardStyle }}>
+    <div className="card card--compact" style={cardStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
         {/* A real <h3>, not a styled div, so screen-reader users can jump between charts by
             heading (dashboard critique P2, S569). margin reset since h3 otherwise adds its own. */}
         <h3 style={{ margin: 0, ...ts }}>{title}</h3>
-        <div style={{ display: 'flex', gap: 14, fontSize: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 16, fontSize: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           {legend}
           {/* aria-label, not title alone: `title` is an unreliable accessible name and is invisible
               to touch entirely. Naming the chart makes the button distinguishable when a page

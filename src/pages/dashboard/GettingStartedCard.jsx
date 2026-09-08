@@ -74,14 +74,14 @@ export default function GettingStartedCard({ periodLabel, stats, isTrial, showHr
   const multi = sections.length > 1
 
   return (
-    <div className="card" style={{ marginBottom: 20, borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+    <div className="card dash-row" style={{ borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
         <p style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
           {isTrial ? 'Your first week with Crest' : `Let’s get ${periodLabel} set up`}
         </p>
         <Link to="/help?section=guide" style={{ fontSize: 12, fontWeight: 600 }}>Full guide →</Link>
       </div>
-      <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         {multi
           ? 'Your figures stay at zero until there’s something to count. Each list is in order — start with whichever part of the business matters most to you.'
           : 'Your figures below stay at zero until there’s something to count. Four steps, in order — each one feeds the next.'}
@@ -97,7 +97,7 @@ export default function GettingStartedCard({ periodLabel, stats, isTrial, showHr
                 <li key={s.n}>
                   <button
                     className="btn btn-ghost"
-                    style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px' }}
+                    style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 16, padding: '8px 16px' }}
                     onClick={() => navigate(s.to)}
                   >
                     <span style={{
@@ -107,7 +107,7 @@ export default function GettingStartedCard({ periodLabel, stats, isTrial, showHr
                       color: s.done ? 'var(--theme-green-text)' : 'var(--theme-text2)',
                       border: '1px solid var(--theme-border)',
                     }}>{s.done ? '✓' : s.n}</span>
-                    <span style={{ display: 'grid', gap: 1, minWidth: 0 }}>
+                    <span style={{ display: 'grid', minWidth: 0 }}>
                       <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{s.label}</span>
                       <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{s.hint}</span>
                     </span>

@@ -633,6 +633,17 @@ padding and the gap between major sections; 28px is the standing bottom margin u
 `.page-header` and a `.stat-grid`; 8px and 4px are chip-level and intra-control. A value off this
 scale in new work is drift, the same way an off-ramp font size is.
 
+**On a page of stacked sections, the ratio is the rhythm — not the absolute gap.** `.dash-section`
+(28) and `.dash-row` (16) are the dashboards' pair, with 8 from a section heading to its own
+content: a 3.5x contrast between "next group" and "this label belongs to that block", which is what
+makes groups separate when the page is squinted at. Below that ratio the grouping stops reading —
+ClientDashboard ran at 10 under a 14 (1.4x) and its module headings floated free of the cards they
+named. Both classes zero themselves on `:last-child`, so a section can never stack its own margin
+on `.main-content`'s 32px bottom padding and a row landing last inside a section cannot double up
+with the section's gap. Under 768px they step to 16/8: `.main-content` drops 32 → 16 there, and a
+28px group gap would separate sections by nearly twice the page's own margin on the screen with the
+least vertical room to give — the contrast is the rhythm, the absolute size is not.
+
 **The page root takes no padding of its own, and the header is `.page-header`.** `.main-content`
 already owns the 32px; a page that adds its own doubles it. `.page-header--split` is the
 title-block-left / actions-right shape that ~50 of the 78 header sites were hand-rolling inline,

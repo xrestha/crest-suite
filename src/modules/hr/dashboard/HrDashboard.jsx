@@ -245,10 +245,10 @@ export default function HrDashboard() {
         <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
       </div>
       {[0, 1, 2].map(row => (
-        <div key={row} className="stat-grid">
+        <div key={row} className="stat-grid dash-section">
           {[0, 1, 2, 3].map(card => (
             <div key={card} className="stat-card">
-              <span className="skeleton" style={{ display: 'block', width: '60%', height: 11, marginBottom: 10 }} />
+              <span className="skeleton" style={{ display: 'block', width: '60%', height: 11, marginBottom: 8 }} />
               <span className="skeleton" style={{ display: 'block', width: '40%', height: 24 }} />
             </div>
           ))}
@@ -274,8 +274,8 @@ export default function HrDashboard() {
       {/* A load failure used to be indistinguishable from "this client genuinely has no data" —
           every query above silently discarded Supabase's error field. */}
       {loadError && (
-        <div className="card" style={{
-          marginBottom: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+        <div className="card dash-section" style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
           borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
           background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
         }}>
@@ -283,9 +283,9 @@ export default function HrDashboard() {
             <span aria-hidden="true">⚠</span> {loadError}
           </p>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => load(++loadIdRef.current)}>Retry</button>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => load(++loadIdRef.current)}>Retry</button>
             <button
-              className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+              className="btn btn-ghost" style={{ fontSize: 12 }}
               onClick={() => setLoadError('')} aria-label="Dismiss"
             >×</button>
           </div>
@@ -296,7 +296,7 @@ export default function HrDashboard() {
       <SectionLabel>
         Approvals {pendingTotal > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTotal} pending)</span>}
       </SectionLabel>
-      <div className="stat-grid">
+      <div className="stat-grid dash-section">
         <KCard
           label="Leave Pending"
           value={pendingLeave}
@@ -337,7 +337,7 @@ export default function HrDashboard() {
 
       {/* ── KPI Row 2 — Headcount ───────────────────────────────────────────── */}
       <SectionLabel>Headcount</SectionLabel>
-      <div className="stat-grid">
+      <div className="stat-grid dash-section">
         <KCard
           label="Active Staff"
           value={empStats?.active ?? '—'}
@@ -378,7 +378,7 @@ export default function HrDashboard() {
           <SectionLabel>
             Last Finalized Payroll — {payInfo.periodLabel} ({payInfo.count} employees)
           </SectionLabel>
-          <div className="stat-grid">
+          <div className="stat-grid dash-section">
             <KCard
               label="Net Payable"
               value={`NPR ${fmt(payInfo.netPay)}`}
@@ -425,7 +425,7 @@ export default function HrDashboard() {
       )}
 
       {!payInfo && (
-        <div className="card" style={{ padding: '14px 18px', marginBottom: 28, fontSize: 13, color: 'var(--theme-text2)' }}>
+        <div className="card card--compact dash-section" style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
           No finalized payroll yet. Generate and finalize a payroll run to see net pay and SSF summary here.
         </div>
       )}

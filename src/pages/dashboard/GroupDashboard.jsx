@@ -193,20 +193,25 @@ export default function GroupDashboard() {
               </div>
             )}
 
-            {!error && <div className="stat-grid">
-              <div className="card">
+            {/* .stat-card, not .card: .stat-grid is gap:0 and the seam only works because .stat-card
+                zeroes its shadow and pulls -1px margins so each pair of adjacent borders draws as
+                ONE line (see Layout.css). Four .cards in it butted their 1px borders into 2px
+                double rules with their shadows overlapping at every join -- the exact two-depth-
+                models-arguing the class comment warns about. dash-section for the mobile rhythm. */}
+            {!error && <div className="stat-grid dash-section">
+              <div className="stat-card">
                 <div className="stat-label"><Tip text="Sum of every included outlet's revenue for this BS month. For a POS-enabled outlet this already includes POS revenue, since PosOrders stamps a sales_entries row per closed bill.">Group Revenue</Tip></div>
                 <div className="stat-value">{loading ? <StatSkeleton /> : fmtNpr(groupRevenue)}</div>
               </div>
-              <div className="card">
+              <div className="stat-card">
                 <div className="stat-label"><Tip text="Group net purchases ÷ group revenue. Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one.">Group Food Cost %</Tip></div>
                 <div className="stat-value" style={{ color: loading ? undefined : pctColor(groupFc, 35, 45) }}>{loading ? <StatSkeleton /> : fmtPct(groupFc)}</div>
               </div>
-              <div className="card">
+              <div className="stat-card">
                 <div className="stat-label"><Tip text="Finalized payroll (gross + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate.">Group Labour %</Tip></div>
                 <div className="stat-value" style={{ color: loading ? undefined : pctColor(groupLabour, 25, 35) }}>{loading ? <StatSkeleton /> : fmtPct(groupLabour)}</div>
               </div>
-              <div className="card">
+              <div className="stat-card">
                 <div className="stat-label"><Tip text="Covers across included outlets, from paid POS bills closed within this BS month's AD date range. Outlets without POS contribute zero.">Group Covers</Tip></div>
                 <div className="stat-value">{loading ? <StatSkeleton /> : groupCovers ? groupCovers.toLocaleString('en-IN') : '—'}</div>
               </div>

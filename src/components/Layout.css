@@ -1279,6 +1279,15 @@ textarea,
   padding: 24px;
 }
 
+/* The dense tier of the same card. Dashboards and chart cards genuinely run tighter than 24, and
+   had been saying so inline in six different ways -- 14px 16px (x4, including ChartCard, which
+   backs every chart in the product), 14px 18px, 20px 16px -- none of them on the 4/8/16/24 scale
+   and none of them agreeing. One value, stated once. An inline padding also escapes any future
+   change to card density the way an inline-styled control escapes :disabled. */
+.card--compact {
+  padding: 16px;
+}
+
 /* Applied alongside role="button"/tabIndex={0} on clickable cards and rows that aren't real
    <button> elements (dashboard KPI cards, queue table rows) — gives keyboard users a visible
    focus indicator, matching .ticket-btn's existing focus-visible treatment. */
@@ -1288,12 +1297,17 @@ tr.interactive-row:focus-visible {
   outline-offset: 2px;
 }
 
-/* Every dashboard KPI card already declares `transition: border-color 0.15s` inline (kpiCard()/
-   KCard() in ClientDashboard.jsx/OwnerDashboard.jsx/HrDashboard.jsx) — implying a hover state that
-   never actually fired, since no rule existed to change the border color on :hover. Steps to
-   accent, the same "this became interactive" cue DESIGN.md documents for ghost buttons. (Queue
-   table rows don't need an equivalent — they already get one from the existing
-   `table.data-table tr:hover td` rule.) */
+/* Steps to accent on hover — the same "this became interactive" cue DESIGN.md documents for ghost
+   buttons. (Queue table rows need no equivalent; they get one from `table.data-table tr:hover td`.)
+
+   The transition lives HERE now. Each of the three dashboards used to declare
+   `transition: border-color …` inline inside its own kpiCard()/KCard(), which is how a hover state
+   was implied for a long time before any rule existed to fire it — and it meant the cue only
+   animated on cards whose file happened to remember. The cards are .stat-card now, so the
+   behaviour belongs to the class that owns the border it animates. */
+.interactive-card {
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
 .interactive-card:hover {
   border-color: var(--theme-accent);
 }
@@ -2791,12 +2805,41 @@ textarea:focus-visible {
 /* ClientDashboard's KPI rows — deliberately denser than the default stat-grid (S439's compact
    money-pill tier). One named variant instead of six silent inline reimplementations (S569, from
    the dashboard critique): gap steps to 8 (on the 4/8/16/24 scale — the inline copies used an
-   off-scale 10), and margin-bottom resets to 0 since these rows carry their own inline margins
-   where the surrounding layout needs them. */
+   off-scale 10), and margin-bottom resets to 0 since the surrounding layout, not the grid,
+   decides what follows it — a row that needs a gap below takes .dash-row alongside. */
 .stat-grid--compact {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
   margin-bottom: 0;
+}
+
+/* ── Dashboard vertical rhythm ─────────────────────────────────────────────────────────────
+   28px from one group to the next, against the 8px a section heading holds above its own
+   content, is the 3.5x contrast HrDashboard's SectionLabel already documents and hits -- and 28
+   is the interval .page-header and .stat-grid impose anyway. ClientDashboard was running the
+   same page at an inline 14 under a 10px heading gap: a 1.4x contrast, which is not enough for
+   a group to read as a group. Across the five dashboards the section interval had drifted to
+   14 / 16 / 20 / 28 with nothing choosing between them.
+
+   Declared AFTER .stat-grid and .stat-grid--compact on purpose: a grid that IS a section takes
+   `stat-grid dash-section`, and on equal specificity this rule has to win that tie.
+
+   :last-child zeroes both, and that is what makes them safe to apply unconditionally. The JSX
+   around them is conditional almost everywhere -- which block renders last depends on which
+   modules a client bought -- so an unconditional bottom margin would stack on .main-content's
+   own 32px bottom padding on some clients and not others, and a row landing last inside a
+   section would double up with the section's gap. */
+.dash-section { margin-bottom: 28px; }
+.dash-row     { margin-bottom: 16px; }
+.dash-section:last-child,
+.dash-row:last-child { margin-bottom: 0; }
+
+@media (max-width: 768px) {
+  /* .main-content drops 32 -> 16 here, so a 28px group gap would separate sections by nearly
+     twice the page's own margin, on the screen with the least vertical room to give. The 2x
+     contrast between the two values is what the rhythm is; the absolute size is not. */
+  .dash-section { margin-bottom: 16px; }
+  .dash-row     { margin-bottom: 8px; }
 }
 
 /* ClientDashboard.jsx's 3-column layout (IMS/HR/POS) — equal-width columns. IMS's own row here
@@ -2828,7 +2871,7 @@ textarea:focus-visible {
 .dash-spend-purchases-row {
   display: grid;
   grid-template-columns: 1fr 2fr;
-  gap: 14px;
+  gap: 16px;
 }
 @media (max-width: 768px) {
   .dash-spend-purchases-row {
@@ -2846,6 +2889,23 @@ textarea:focus-visible {
   box-shadow: none;
   padding: 20px;
   margin: 0 -1px -1px 0;
+}
+
+/* Same box, dense tier -- for a KPI strip that has a REAL gap and whose cells therefore are
+   separate objects again: the -1px seam pull is meaningless once there is space between cells (it
+   was quietly rendering .stat-grid--compact's declared 8px gutters as 7px), and the shadow comes
+   back because a floating cell should float.
+
+   It exists because ClientDashboard, OwnerDashboard and AdminDashboardOverview had each typed
+   .stat-card's five box properties out inline and then drifted on the one that shows: padding
+   10px 14px, 14px 16px and 12px 14px against the class's 20. Four KPI cards, four densities, and
+   nothing choosing any of them -- the same failure `statCard` in AdminDashboardOverview.jsx was
+   already written to stop within one file. 8px 16px is the button's padding, i.e. a value the
+   system already uses, rather than a fifth invention. */
+.stat-card--compact {
+  padding: 8px 16px;
+  margin: 0;
+  box-shadow: var(--theme-card-shadow);
 }
 
 .stat-label {

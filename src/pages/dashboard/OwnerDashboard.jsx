@@ -374,23 +374,21 @@ export default function OwnerDashboard() {
   })
   const hasTrendData = trendChartData.some(d => d.prime != null || d.margin != null)
 
-  // Shared mini card style — matches ClientDashboard.jsx's kpiCard() convention. The CARD is
-  // hand-rolled (ClientDashboard's denser padding tier, not .stat-card's 20px); the GRID it sits
-  // in is .stat-grid, which is where the 200px auto-fit floor, the 16px peer gap and the 28px
-  // group break come from. Those two decisions are separable and only the second was ever drift.
-  // Returns a spreadable props object (style + role/tabIndex/onKeyDown when clickable) so every
-  // KPI card gets keyboard support and a visible focus ring, matching ClientDashboard.jsx's fix.
+  // Returns a spreadable props object so every KPI card gets keyboard support and a visible focus
+  // ring. The card itself is .stat-card, not a hand-rolled box: these live in a .stat-grid, which
+  // is gap:0 because .stat-card collapses each pair of adjacent borders into one drawn line via
+  // its own -1px margins and drops its shadow to do it. The inline copy here reproduced
+  // .stat-card's five box properties but neither of those two, so nine KPI cells butted 1px
+  // borders into 2px double rules with their shadows overlapping at every join — and drifted to a
+  // fourth padding (14x16 against the class's 20) while they were at it. Only the cursor and the
+  // interaction props are this call site's business.
   const kpiCard = (onClick) => ({
-    style: {
-      background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-lg)',
-      boxShadow: 'var(--theme-card-shadow)',
-      padding: '14px 16px', cursor: onClick ? 'pointer' : 'default', transition: 'border-color var(--motion-fast) var(--ease-standard)',
-    },
+    className: onClick ? 'stat-card interactive-card' : 'stat-card',
     ...(onClick ? {
+      style: { cursor: 'pointer' },
       onClick,
       role: 'button',
       tabIndex: 0,
-      className: 'interactive-card',
       onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }
     } : {})
   })
@@ -447,8 +445,8 @@ export default function OwnerDashboard() {
             dismissible, retry-able banner instead of a wrong-looking number on the one dashboard
             whose whole purpose is trustworthy figures. */}
         {Object.entries(loadErrors).filter(([, msg]) => msg).map(([section, msg]) => (
-          <div key={section} className="card" style={{
-            marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+          <div key={section} className="card dash-row" style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
             borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
             background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
           }}>
@@ -471,7 +469,7 @@ export default function OwnerDashboard() {
             "—" plus the "No open period" banner below, which was simply wrong: the real cause is
             the missing module, not a missing period. */}
         {!(clientModules.ims && clientModules.hr) && !loading && (
-          <div className="card" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
+          <div className="card dash-row" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
             <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
               <TriangleAlert size={15} aria-hidden="true" /> Owner Dashboard needs both Crest IMS and Crest HR enabled — this property has {clientModules.ims ? 'only IMS' : clientModules.hr ? 'only HR' : 'neither'}.
             </p>
@@ -479,7 +477,7 @@ export default function OwnerDashboard() {
         )}
         {clientModules.ims && clientModules.hr && !activePeriod && !loading && (
           <div
-            className="card interactive-card" style={{ marginBottom: 16, cursor: 'pointer', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
+            className="card interactive-card dash-row" style={{ cursor: 'pointer', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
             onClick={() => navigate('/periods')} role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/periods') } }}
           >
@@ -491,7 +489,7 @@ export default function OwnerDashboard() {
             heading gives screen-reader users a landmark to navigate by without changing the
             visual layout. */}
         <h2 className="sr-only">Profitability (month-to-date)</h2>
-        <div className="stat-grid">
+        <div className="stat-grid dash-section">
 
           <div {...kpiCard(() => navigate('/sales'))}>
             <div style={kpiLabelStyle}>Revenue (MTD)</div>
@@ -561,7 +559,7 @@ export default function OwnerDashboard() {
         </div>
 
         <h2 className="sr-only">Operations</h2>
-        <div className="stat-grid">
+        <div className="stat-grid dash-section">
 
           <div {...kpiCard(() => navigate('/wastage-report'))}>
             <div style={kpiLabelStyle}>Wastage Value (MTD)</div>
@@ -617,15 +615,15 @@ export default function OwnerDashboard() {
         </div>
 
         {trendLoading ? (
-          <div className="card" style={{ padding: '14px 16px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Cost &amp; Margin — Trend</div>
+          <div className="card card--compact">
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Cost &amp; Margin — Trend</div>
             <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
           </div>
         ) : !hasTrendData ? (
           /* This used to render `false` — no card, no heading, nothing, just a gap where a chart
              belongs. A Suite Pro client paying for the trend view deserves to be told it fills in
              rather than left to assume the page is broken. */
-          <div className="card" style={{ padding: '20px 16px' }}>
+          <div className="card card--compact">
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Cost &amp; Margin — Trend</div>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
               Your cost and margin history appears here once your first period closes. Each closed
