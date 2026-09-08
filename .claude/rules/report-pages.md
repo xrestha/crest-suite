@@ -75,7 +75,19 @@ Three rules came out of it:
   every read error, rendered every cell blank, and its Save All then DELETED the server's real rows
   for every visible item — the batch-save shape as data loss rather than display. It now renders
   `ReportLoadError` and nothing below it. The rule for an entry page is Overheads' and Stock's:
-  a failed read blocks the form, it never shows an empty one.)
+  a failed read blocks the form, it never shows an empty one.) **S699 found the next shape after
+  that one, on a page that had already been swept: `Sales.js` guarded its SALES reads and not the
+  MENU.** `init()` dropped the error on both its reads, and the recipe list is what both payload
+  builders iterate — so a failed recipes read rendered "No active recipes" above a live Save
+  button, built an EMPTY payload, and `save_sales_day` reads an empty payload as "delete this day's
+  manual rows and insert nothing". The guard to write is therefore not "did the figures load" but
+  **did every read the SAVE depends on load** — which on a merge-and-replace page includes the list
+  the payload iterates, not only the values it merges. Its Save/Clear/Import controls are disabled
+  on an empty list too, since they sit above the empty state and were reachable either way. Same
+  pass: that page's `loadError` was ONE slot written by five loaders, two of them concurrent, so
+  the loader that SUCCEEDED cleared the one that FAILED — **a shared error slot with concurrent
+  writers is a guard that switches itself off.** It is a per-loader record now, resolved per tab,
+  so a failed read on one tab also stops blanking the other three.
 - **Refusing to render the figure is half the job; the sentence you show instead is the other half
   (S619).** `firstError`/`ReportLoadError` decide *that* something failed. `errorText(err,
   'operator')` (`src/shared/errorText.js`) decides what the reader is told — one table, two

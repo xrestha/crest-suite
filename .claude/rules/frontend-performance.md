@@ -321,6 +321,23 @@ tab open, which would otherwise let one outlet's 120-day history land on another
 Two loaders on one page is fine; each holds its own `useLatestRequest`, since a shared one would
 have them cancelling each other.
 
+**S699 added a 40th, and it is the first SECOND AXIS inside a page that was already swept.**
+`Sales.js` had `periodReq` from the original sweep and was counted done — but `periodReq` keys on
+the period id, and the Daily tab reloads on every `‹`/`›` press, so the axis the page actually
+races on had no guard at all. Two quick clicks start two loads; the later-landing one wins
+`dailySales`. Three things generalise:
+
+- **A page is swept per LOADER, not per page.** Ask what each loader is keyed by and whether every
+  control that can restart it moves that key. Here `loadDailySales(periodId, day)` took a second
+  argument that no guard mentioned, in a file whose adoption of the rule was already on record.
+- **On a WRITE surface the stakes are not a flicker.** `dailySales` is the baseline
+  `buildDailyRows()` merges every untouched row against, so the losing load did not merely display
+  the wrong day — Save Day wrote one day's whole grid onto another day's `bs_day`, after
+  `save_sales_day` had deleted what was there. Sweep the entry pages before the report pages.
+- **A composite key is the answer here too**, as it was for `GroupDashboard` and `Overtime`:
+  `` `${periodId}:${day}` ``. The paragraph below said the composite-key reason was spent
+  everywhere it had been given; this was the one place it had never been asked.
+
 **Not swept:** `AttendanceSheet.jsx`, and
 `SupplierPriceTracker.js`/`MonthlyOwnerReport.jsx`, which select an id and derive rather than load.
 The first two were skipped because their loaders take `(bsYear, bsMonth)` rather than one id and
@@ -340,10 +357,15 @@ table-by-table finishes the table it was named after and leaves its neighbours.*
 `purchase_entries` almost everywhere and `wastages` almost nowhere — 10 of 12 `wastages` reads were
 still bare, including the multi-period windows in `AnnualSummary`, `PeriodComparison` and
 `ShrinkageReport`, while `sales_entries` split 9 wrapped / 9 not. 35 more sites across 25 files are
-now paged. Two worth knowing: `Sales.js`'s `loadAllDaySums` doubles as the **save-time fallback
-baseline** for every item the user did not type into, so a truncated read there could be *written
-back*, not merely displayed; and `Items.js`'s `checkAllUsage` feeds the force-delete guard, so its
-truncation reported a used item as unused. **Deliberately not wrapped**, so the next sweep does not
+now paged. Two worth knowing: `Sales.js`'s `loadAllDaySums` is every PERIOD figure on that page —
+the three stat cards and the whole Period Summary tab — so a truncated read there reports a
+believable short revenue against a full cost; and `Items.js`'s `checkAllUsage` feeds the
+force-delete guard, so its truncation reported a used item as unused. (S613 justified wrapping it
+by calling it "the save-time fallback baseline for every item the user did not type into", copied
+from the comment on the function. That was never true — the baselines are `sales` for Bulk and
+`dailySales` for Daily — and the claim survived two sessions because it argued for the right
+action. **A wrong reason attached to a correct fix is the hardest kind of stale doc to notice**;
+S699 corrected both the comment and this sentence.) **Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
 `persistSalesDay`'s legacy three-call fallback.
 

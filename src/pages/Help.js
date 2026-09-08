@@ -106,8 +106,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '↑', name: 'Sales Entry',
-        guide: 'Record total qty sold per menu item for the period. Only items with a recipe appear here. Revenue is calculated automatically from selling price × qty sold, minus any per-item Discount entered on Daily Entry. Use Bulk Entry for a month-end tally. If you also run Crest POS, Bulk Entry and Daily Entry are locked: every bill closed at the till already posts its own sales, so POS is the source of truth and manual entry would duplicate or contradict it. The Daily Breakdown and Period Summary tabs stay available read-only.',
-        tips: ['Sales data is required for the Variance Report to calculate theoretical usage', 'The Total Covers / Items with Sales / Period Revenue cards at the top cover the whole period — bulk and daily entries together — and price each sale at what it was actually sold for, not at the current menu price. Changing a menu price today does not restate last period revenue.', 'Sub-recipes are excluded — only top-level recipes appear here', 'You can update sales entries any time while the period is open', 'Daily Entry: click ↑ Import Excel to auto-fill qty AND discount from a vendor/POS "Sales Report Item Wise" export (.xlsx) for the currently selected day — it matches by Product Name and reads the Net qty sold and Discount columns; unmatched product names are listed in a small banner so you can fix names or enter them manually. Review the filled table, then click Save Day as usual', 'Discount (Daily Entry only) is a per-item NPR reduction for that day — e.g. staff discount or a promo — subtracted from Day Revenue and rolled up into Period Summary\'s Total Revenue. It has no effect on Bulk Entry, which has no per-day/discount concept', 'The Search menu item box above the tabs works on all four tabs and keeps its text as you switch between them. It only narrows which rows are shown: the stat cards still cover every item, a Bulk Entry Save still writes every recipe (not just the visible ones), and Period Summary\'s % of Revenue is still each item\'s share of the whole period — the footer says "N of M items shown" whenever the search has hidden some rows']
+        guide: 'Record total qty sold per menu item for the period. Only items with a recipe appear here. Revenue is calculated automatically from selling price × qty sold, minus any per-item Discount entered on Daily Entry. Use Bulk Entry for a month-end tally. If you also run Crest POS, Bulk Entry and Daily Entry are locked: every bill closed at the till already posts its own sales, so POS is the source of truth and manual entry would duplicate or contradict it. The Daily Breakdown and Period Summary tabs stay available read-only. On Daily Entry, any sales the till already posted for that day appear in a read-only From POS column beside the qty box, with their own revenue line: Save Day writes only what you type and never changes or deletes a POS sale.',
+        tips: ['Sales data is required for the Variance Report to calculate theoretical usage', 'The Items Sold / Items with Sales / Period Revenue cards at the top cover the whole period — bulk and daily entries together — and price each sale at what it was actually sold for, not at the current menu price. Changing a menu price today does not restate last period revenue.', 'Sub-recipes are excluded — only top-level recipes appear here', 'You can update sales entries any time while the period is open', 'Daily Entry: click ↑ Import Excel to auto-fill qty AND discount from a vendor/POS "Sales Report Item Wise" export (.xlsx) for the currently selected day — it matches by Product Name and reads the Net qty sold and Discount columns; unmatched product names are listed in a small banner so you can fix names or enter them manually. Review the filled table, then click Save Day as usual', 'Discount (Daily Entry only) is a per-item NPR reduction for that day — e.g. staff discount or a promo — subtracted from Day Revenue and rolled up into Period Summary\'s Total Revenue. It has no effect on Bulk Entry, which has no per-day/discount concept. A discount is only ever saved against a sale, so if you enter one on an item with no quantity sold, Save Day stops and names the items rather than quietly dropping the figure', 'The Search menu item box above the tabs works on all four tabs and keeps its text as you switch between them. It only narrows which rows are shown: the stat cards still cover every item, a Bulk Entry Save still writes every recipe (not just the visible ones), and Period Summary\'s % of Revenue is still each item\'s share of the whole period — the footer says "N of M items shown" whenever the search has hidden some rows']
       },
       {
         icon: '◎', name: 'Payment Summary',
@@ -1649,21 +1649,15 @@ export default function Help() {
                   )}
                   <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 16, fontWeight: 700, color: MODULE_INK.ims, fontFamily: 'Georgia, serif' }}>{plan.label}</span>
-                    {plan.key === 'starter' && !pricingAnnual && (
+                    {highlight && (
                       <span style={{ fontSize: 9, fontStyle: 'italic', fontWeight: 800, color: MODULE_INK.ims, background: colorTint(MODULE_COLORS.ims, 8), border: `1px solid ${colorTint(MODULE_COLORS.ims, 25)}`, padding: '2px 6px', borderRadius: 0, letterSpacing: '0.05em' }}>
-                        FREE FOR 7 DAYS TRIAL
+                        TRIALS RUN HERE
                       </span>
                     )}
                   </div>
                   <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
-                    {plan.key === 'starter' && !pricingAnnual ? (
-                      <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {plan.monthly.toLocaleString('en-IN')}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after trial</span></div>
-                    ) : (
-                      <>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString('en-IN')}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
-                        {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr</div>}
-                      </>
-                    )}
+                    <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString('en-IN')}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span></div>
+                    {pricingAnnual && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr</div>}
                   </div>
                   {plan.includesLabel && (
                     <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginBottom: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>

@@ -5,6 +5,8 @@ paths:
   - "src/utils/demandForecastMath.js"
   - "src/modules/ims/stockcount/**"
   - "src/modules/ims/reports/**"
+  - "src/modules/ims/sales/**"
+  - "src/modules/ims/recipes/**"
   - "src/pages/Settings.js"
   - "src/modules/ownerReport/computeMenuEngineeringSection.js"
 ---
@@ -194,5 +196,41 @@ Three things the same audit found on the Reorder Report itself, each with one ri
   Entry has written `source = 'manual'` movements since 2026-07-30. A sentence that describes a
   column is a claim about the code, and this one had been false for six weeks.
 
+
 **Do not write a sixth copy.** The tell is a page that needs "what is on the shelf" and reaches
 for `opening_stock` directly — it should reach for `buildStockRows` and read `onHand`.
+
+
+## A `.neq` on `sales_entries.source` drops the legacy rows, and on Sales Entry it deletes them (S699)
+
+`sales_entries.source` is `text DEFAULT 'manual'` with **no NOT NULL**, so every row written before
+the column had a default reads as NULL. In SQL `NULL <> 'pos_comp'` evaluates to NULL, not true, so
+a server-side `.neq('source', 'pos_comp')` silently drops every one of those rows — no error, no
+tell in the data, just a figure that is short.
+
+**Select `source` and filter in JS.** `ClientDashboard.jsx` and `OwnerDashboard.jsx` both learned
+this the hard way and both carry the reasoning at the call site; `persistSalesDay.js`'s `manualOnly`
+is the SQL-side equivalent (`or('source.is.null,source.eq.manual')`) for a filter that genuinely has
+to run on the server.
+
+**On `Sales.js` it was destructive rather than merely wrong, and that distinction is the rule.** A
+report that under-counts shows a low number. An ENTRY page that under-counts loses the row: the
+invisible row is absent from the payload the save builds, `findSupersededRows` only inspects the
+*opposite* entry mode, and `save_sales_day`'s delete covers `source IS NULL OR source = 'manual'` —
+so the next Save Day removed a row nobody had ever been shown. All three of that page's reads
+carried it, while `loadSales` (Bulk) had no source filter at all, so one legacy row was visible on
+one tab of the page and gone from the other three. `salesReads.test.js` reads the source and fails
+on either half of the defect — a `.neq` on the column, or a `select()` that omits it — because
+neither has a runtime symptom.
+
+**Still open, deliberately:** ~14 files carry the server-side form (`MenuEngineering`,
+`MenuRepricing`, `RecipeMargin`, `Recipes`, `AnnualSummary`, `BestSellers`, `MonthlySummary`,
+`Overheads`, `PeriodComparison`, `ConsolidatedPnl`, `OwnerDashboard`'s revenue read,
+`useSalesPivotData`, and the two `ownerReport` compute files). Every one is display-only and cannot
+delete a row, and each needs its own answer to what its figure is supposed to mean before it is
+changed — `OwnerDashboard`'s stock read was fixed in S696 precisely because the answer there was
+"comps consume ingredients", which is not the answer a revenue read gives.
+
+**The general shape:** any `.neq`, `.not.eq` or `.not.in` on a NULLABLE column excludes the NULL
+rows as well as the named ones. Check `NOT NULL` before filtering negatively in SQL, or filter
+positively (`.in(...)`) and let the NULLs fall where you decide.

@@ -12,9 +12,11 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
 import { persistSalesDay, findSupersededRows, depleteManualSales, SAVE_TIMEOUT_MS } from './persistSalesDay'
+import { isManualSource } from './salesDepletion'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { firstError } from '../../../shared/queryError'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import ReportLoadError from '../../../components/ReportLoadError'
 
@@ -35,6 +37,20 @@ const TAB_LABELS = { bulk: 'Bulk Entry', daily: 'Daily Entry', breakdown: 'Daily
 // two are read-only views of whatever POS has already posted, so they stay available.
 const ENTRY_TABS = ['bulk', 'daily']
 const READ_ONLY_TAB = 'summary'
+
+// `sales_entries.source` is nullable — DEFAULT 'manual', no NOT NULL — so every row written before
+// the column had a default reads as NULL. A SERVER-side `.neq('source','pos_comp')` therefore drops
+// those rows silently, because `NULL <> 'pos_comp'` is NULL rather than true. Both dashboards had
+// this and both fixed it by selecting `source` and filtering in JS (ClientDashboard.jsx,
+// OwnerDashboard.jsx); this page never got the sweep, and here it is worse than under-reporting.
+// A legacy row missing from the grid is missing from the save payload too, and save_sales_day's
+// delete covers `source IS NULL OR source = 'manual'` — so the next Save Day deletes the row the
+// page never showed anyone. Every read below selects `source` and uses these two predicates.
+const isComp = row => row.source === 'pos_comp'
+// What Daily Entry shows in its locked "From POS" column: real till sales and the credit notes
+// that reverse them. Comps are excluded here for the same reason they are excluded everywhere on
+// this page — a comped dish was never sold, and every figure here means real sales.
+const isPosRow = row => row.source === 'pos' || row.source === 'pos_credit'
 
 export default function Sales() {
   const { clientId, profile, loading: authLoading, isAdmin, clientModules, hasImsAccess } = useAuth()
@@ -58,13 +74,27 @@ export default function Sales() {
   // a stale cached number silently reaching a save. See conversation with Aashish (2026-07-27).
   const [periods, setPeriods]       = useState(() => readPageCache('sales', 'periods', effectiveClientId) ?? [])
   const periodReq = useLatestRequest()
+  // A SECOND guard, keyed `${periodId}:${day}` (S601's rule, applied to the axis this page actually
+  // races on). periodReq keys on the period id alone, so it cannot tell one day of a period from
+  // another — and the Daily tab reloads on every ‹/› press. Two quick clicks start two loads; the
+  // later-landing one wins `dailySales` while `selectedDay` shows whatever was clicked last, and
+  // because `dailySales` is what buildDailyRows() merges as its baseline, Save Day then writes one
+  // day's whole grid onto another day's `bs_day` — after save_sales_day has deleted what was there.
+  // On a report an overlapping load is a flicker; on a write surface it is a wrong figure saved.
+  const dayReq = useLatestRequest()
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [recipes, setRecipes]       = useState(() => readPageCache('sales', 'recipes', effectiveClientId) ?? [])
   const [sales, setSales]           = useState({}) // { recipe_id: qty } — bulk only, bs_day=0
   const [loading, setLoading]       = useState(true)
   // A failed sales read must not render as an empty grid: this page batch-saves what is on
   // screen, so a blank grid followed by Save writes zeros over real figures (S682).
-  const [loadError, setLoadError]   = useState(null)
+  //
+  // Keyed per loader rather than one shared slot. Five loaders write this and two of them
+  // (loadSales + loadAllDaySums) run concurrently inside handlePeriodChange — so with one slot the
+  // one that SUCCEEDED cleared the one that FAILED, and the page went back to rendering a confident
+  // empty grid over a read that never landed. Each loader now only ever sets or clears its own key.
+  const [loadErrors, setLoadErrors] = useState({})
+  const noteLoad = (key, err) => setLoadErrors(prev => ({ ...prev, [key]: err || null }))
   const [bulkForm, setBulkForm]     = useState({})
   const [bulkSaving, setBulkSaving] = useState(false)
   const [bulkSaved, setBulkSaved]   = useState(false)
@@ -82,6 +112,15 @@ export default function Sales() {
   // it's independently editable/auditable rather than silently baked into a price.
   const [dailyDiscounts, setDailyDiscounts] = useState({})
   const [discountForm, setDiscountForm]     = useState({})
+  // What the TILL sold on this day, held apart from the editable manual maps above and shown in a
+  // locked column. `dailySales` used to carry every source, so on a POS client (admin only — the
+  // tabs are closed to everyone else) the grid pre-filled with the till's own quantities and
+  // buildDailyRows() handed them straight back as `source='manual'` rows. save_sales_day deletes
+  // only manual rows, so the POS originals survived alongside the new copies and one Save Day
+  // roughly doubled the day's revenue. The migration says resolving POS-vs-manual is the UI's job;
+  // hiding the tabs is not that job for the one caller who can still reach them.
+  const [posDaySales, setPosDaySales]         = useState({})
+  const [posDayDiscounts, setPosDayDiscounts] = useState({})
   const [dailySaving, setDailySaving] = useState(false)
   const [dailySaved, setDailySaved]   = useState(false)
   const [dailySaveError, setDailySaveError] = useState('')
@@ -134,14 +173,29 @@ export default function Sales() {
 
   async function init() {
     setLoading(true)
-    const [{ data: p }, { data: r }] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('recipes').eq('is_active', true).neq('category', 'Sub-Recipe').order('name')
     ])
+    // Both reads dropped their `error` until S699, and on this page that is not merely a wrong
+    // report. A failed PERIODS read rendered NoPeriodState — "no period set up" for a read that
+    // never landed. A failed RECIPES read rendered "No active recipes. Add recipes in Recipe
+    // Costing first." over a live Save button, and buildBulkRows()/buildDailyRows() both iterate
+    // `recipes`, so an empty menu builds an EMPTY PAYLOAD — which save_sales_day treats as "delete
+    // this day's manual rows and insert nothing". The S682 guard below this only ever covered the
+    // sales reads; the menu the payload is built from was never checked.
+    const failed = firstError(results)
+    if (failed) { noteLoad('init', failed); setLoading(false); return }
+    noteLoad('init', null)
+    const [{ data: p }, { data: r }] = results
     setAndCache(setPeriods, 'periods', p || [])
     setAndCache(setRecipes, 'recipes', r || [])
     const open = (p || []).find(x => x.status === 'open')
-    if (open) { setSelectedPeriod(open); await Promise.all([loadSales(open.id), loadAllDaySums(open.id)]) }
+    if (open) {
+      periodReq.begin(open.id)   // claim the page, as useLatestRequest's own docs require of init()
+      setSelectedPeriod(open)
+      await Promise.all([loadSales(open.id), loadAllDaySums(open.id)])
+    }
     setLoading(false)
   }
 
@@ -152,8 +206,8 @@ export default function Sales() {
       .eq('period_id', periodId)
       .eq('bs_day', 0) // bulk entries only
     if (!periodReq.isCurrent(periodId)) return
-    if (error) { setLoadError(error); return }
-    setLoadError(null)
+    if (error) { noteLoad('sales', error); return }
+    noteLoad('sales', null)
     const map = {}
     ;(data || []).forEach(s => {
       map[s.recipe_id] = parseFloat(s.qty_sold) || 0
@@ -164,26 +218,40 @@ export default function Sales() {
   }
 
   async function loadDailySales(periodId, day) {
-    // Excludes comps (source='pos_comp') — a comped item was never actually sold, and this
-    // page's every figure (including the Day revenue shown alongside it) means real sales.
+    const key = `${periodId}:${day}`
+    dayReq.begin(key)   // synchronous — claims the day before any await
+    // `source` is SELECTED and comps are filtered in JS. See isComp's note above: a server-side
+    // .neq drops NULL-source rows too, and here that is destructive rather than merely wrong.
     const { data, error } = await supabase
       .from('sales_entries').select('*')
-      .eq('period_id', periodId).eq('bs_day', day).neq('source', 'pos_comp')
-    if (error) { setLoadError(error); return }
-    setLoadError(null)
+      .eq('period_id', periodId).eq('bs_day', day)
+    if (!dayReq.isCurrent(key)) return   // superseded by a newer day/period selection
+    if (error) { noteLoad('daily', error); return }
+    noteLoad('daily', null)
     const map = {}
     const discMap = {}
+    const posMap = {}
+    const posDiscMap = {}
     // Accumulate, don't overwrite — loadAllDaySums below has always summed, and this must agree
     // with it. A day can legitimately hold more than one row per recipe: POS writes one row PER
     // BILL, so a day with five bills of the same item was showing only the last bill's qty here.
+    //
+    // Manual and POS go to SEPARATE maps: only the manual one is the editable baseline a save
+    // merges into, and only the POS one is drawn in the locked column.
     ;(data || []).forEach(s => {
-      map[s.recipe_id] = (map[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
-      discMap[s.recipe_id] = (discMap[s.recipe_id] || 0) + (parseFloat(s.discount) || 0)
+      const manual = isManualSource(s.source)
+      if (!manual && !isPosRow(s)) return   // comps, and any source added later, are drawn nowhere
+      const qtyTarget = manual ? map : posMap
+      const discTarget = manual ? discMap : posDiscMap
+      qtyTarget[s.recipe_id] = (qtyTarget[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
+      discTarget[s.recipe_id] = (discTarget[s.recipe_id] || 0) + (parseFloat(s.discount) || 0)
     })
     setDailySales(map)
     setDailyForm({})
     setDailyDiscounts(discMap)
     setDiscountForm({})
+    setPosDaySales(posMap)
+    setPosDayDiscounts(posDiscMap)
   }
 
   async function loadAllDaySums(periodId) {
@@ -191,15 +259,18 @@ export default function Sales() {
     // 1000-row cap — and allDaySums doubles as a save-time fallback baseline, so a truncated
     // read here would not just misreport, it could be written back.
     const { data, error } = await fetchAllRows(() => supabase
-      .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price').eq('period_id', periodId).neq('source', 'pos_comp').order('id'))
-    // This map is the save-time fallback baseline for every item the user did not type into —
-    // a failed read here must block the page, not fall back to "nothing sold".
-    if (error) { if (periodReq.isCurrent(periodId)) setLoadError(error); return }
+      .from('sales_entries').select('recipe_id, qty_sold, discount, unit_price, source').eq('period_id', periodId).order('id'))
+    // These maps are every PERIOD figure on the page — the three stat cards and the whole Period
+    // Summary tab — so a failed read here must block the page, not fall back to "nothing sold".
+    // (They are not a save baseline: buildBulkRows merges `sales` and buildDailyRows `dailySales`.
+    // The comment here said otherwise for a long time.)
+    if (error) { if (periodReq.isCurrent(periodId)) noteLoad('allDay', error); return }
     const agg = {}
     const discAgg = {}
     const pricedAgg = {}
     const unpricedAgg = {}
     ;(data || []).forEach(e => {
+      if (isComp(e)) return
       const qty = parseFloat(e.qty_sold) || 0
       agg[e.recipe_id] = (agg[e.recipe_id] || 0) + qty
       discAgg[e.recipe_id] = (discAgg[e.recipe_id] || 0) + (parseFloat(e.discount) || 0)
@@ -210,6 +281,7 @@ export default function Sales() {
       }
     })
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    noteLoad('allDay', null)
     setAllDaySums(agg)
     setAllDayDiscounts(discAgg)
     setAllDayPricedRev(pricedAgg)
@@ -219,15 +291,20 @@ export default function Sales() {
   async function loadMonthlyEntries(periodId) {
     setMonthlyLoading(true)
     const { data, error } = await fetchAllRows(() => supabase
-      .from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp').order('id'))
+      .from('sales_entries').select('recipe_id, bs_day, qty_sold, source').eq('period_id', periodId).order('id'))
+    if (!periodReq.isCurrent(periodId)) return   // superseded — leave the spinner to the newer load
     setMonthlyLoading(false)
-    if (error) { setLoadError(error); return }
-    setMonthlyEntries(data || [])
+    if (error) { noteLoad('monthly', error); return }
+    noteLoad('monthly', null)
+    setMonthlyEntries((data || []).filter(e => !isComp(e)))
   }
 
   // Build the payload each mode would write. Kept separate from the save itself so the
   // "what will this delete?" precheck can run against the exact rows about to be sent.
-  function buildDailyRows() {
+  // The typed draft merged over the saved MANUAL baseline, per recipe. Extracted so the
+  // discount-without-quantity check below and the payload builder cannot disagree about what a
+  // save is going to contain.
+  function mergedDailyValues() {
     const merged = {}
     const mergedDiscount = {}
     recipes.forEach(r => {
@@ -241,6 +318,22 @@ export default function Sales() {
       const typedDisc = rawDisc !== undefined ? (rawDisc === '' ? 0 : parseFloat(rawDisc)) : null
       mergedDiscount[r.id] = (typedDisc !== null && !isNaN(typedDisc)) ? typedDisc : savedDisc
     })
+    return { merged, mergedDiscount }
+  }
+
+  // A discount on a row with no quantity is dropped by the `qty > 0` filter below, so it was typed,
+  // shown on screen as negative Day Revenue, counted in the day's Total discount — and then
+  // silently thrown away by Save Day. Money quietly disappearing off a screen is the one thing this
+  // page must not do, so the save stops and names the items instead of choosing for the user.
+  function discountsWithoutQty() {
+    const { merged, mergedDiscount } = mergedDailyValues()
+    return recipes
+      .filter(r => (mergedDiscount[r.id] || 0) > 0 && (merged[r.id] || 0) <= 0)
+      .map(r => r.name)
+  }
+
+  function buildDailyRows() {
+    const { merged, mergedDiscount } = mergedDailyValues()
     // unit_price/vat_rate snapshot the recipe's price at entry time — manual entry has no other
     // price source, but capturing it now is still far more stable than every report joining the
     // recipe's CURRENT price at view time (which used to silently reprice past periods' revenue
@@ -297,6 +390,23 @@ export default function Sales() {
     if (isBulk ? bulkSaving : dailySaving) return
     const setSaving = isBulk ? setBulkSaving : setDailySaving
     const setErr = isBulk ? setBulkSaveError : setDailySaveError
+
+    // An empty menu builds an empty payload, and save_sales_day reads that as "delete this day's
+    // manual rows and insert nothing". `recipes` is only ever empty because the client genuinely has
+    // no recipes or because the read failed — neither is a reason to clear a day.
+    if (recipes.length === 0) {
+      setErr('No menu items are loaded, so there is nothing to save. Reload the page; if the menu is still empty, add recipes in Recipe Costing first.')
+      return
+    }
+
+    if (!isBulk) {
+      const orphanDiscounts = discountsWithoutQty()
+      if (orphanDiscounts.length > 0) {
+        const shown = orphanDiscounts.slice(0, 5).join(', ')
+        setErr(`${orphanDiscounts.length === 1 ? 'This item has' : 'These items have'} a discount but no quantity sold, and a discount is only saved against a sale: ${shown}${orphanDiscounts.length > 5 ? `, and ${orphanDiscounts.length - 5} more` : ''}. Enter the quantity sold, or clear the discount, then save again.`)
+        return
+      }
+    }
 
     setSaving(true)
     setErr('')
@@ -513,6 +623,13 @@ export default function Sales() {
   const bulkRows = sortedRecipes.filter(r => matchesMenuSearch(r) && (!onlyWithSales || getQtyNum(r.id) > 0))
   const dailyRows = recipes.filter(r => matchesMenuFilter(r) && (!onlyWithSales || parseFloat(getDailyQty(r.id)) > 0))
 
+  // The locked "From POS" column only exists on a day that HAS till sales, so an IMS-only client
+  // never sees a column of dashes. Its revenue is stated separately rather than folded into Day
+  // revenue: that figure is what this grid is about to save, and the two must not be confusable.
+  const hasPosDay = Object.keys(posDaySales).length > 0 || Object.keys(posDayDiscounts).length > 0
+  const posDayRevenue = recipes.reduce((s, r) =>
+    s + (posDaySales[r.id] || 0) * (parseFloat(r.selling_price) || 0) - (posDayDiscounts[r.id] || 0), 0)
+
   // Daily Breakdown pivot — one row per recipe × one column per day (~9,000 cells on a real
   // month). Rebuilt per keystroke of the menu search before this memo; the totals are precomputed
   // maps so the footer doesn't re-reduce the whole matrix per column per render.
@@ -543,7 +660,19 @@ export default function Sales() {
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
     : '—'
 
+  // Which failed read blocks the screen the reader is actually on. `init` and `allDay` always
+  // count — the first is the menu and period list everything is built from, the second is the three
+  // stat cards, which sit above the tab strip. The rest is per tab, so a Daily Breakdown that could
+  // not load stops blocking Bulk Entry the moment you leave it: the previous single shared slot
+  // meant one tab's failure blanked all four with no way back except a period change or a reload.
+  const TAB_LOAD_KEY = { bulk: 'sales', daily: 'daily', breakdown: 'monthly', summary: null }
+  const loadError = loadErrors.init || loadErrors.allDay || loadErrors[TAB_LOAD_KEY[viewMode]] || null
+
   const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
+  // Both Save buttons sit ABOVE the "No active recipes" empty state, so an empty menu — whether the
+  // client has none or the read failed — left a live Save over nothing. Both payload builders
+  // iterate `recipes`, and save_sales_day reads an empty payload as "clear this day".
+  const noMenu = recipes.length === 0
   const tabPrintLabel = `${TAB_LABELS[viewMode]} — ${periodLabel}${viewMode === 'daily' ? `, Day ${selectedDay}` : ''}`
 
   // 'staff' is the floor tier every other IMS page's guard is measured against — this page had no
@@ -553,7 +682,9 @@ export default function Sales() {
   // and read, then overwrite, the client's whole manual sales ledger. Nav already hid it
   // (Layout.js's imsVisible requires an imsRole); the route did not.
   if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="sales entry" />
+  // `!loadError` matters: with a failed periods read `periods` is [] for a reason that has nothing
+  // to do with the client's setup, and "no period" is the wrong sentence to put in front of them.
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="sales entry" />
 
   return (
     <div>
@@ -614,7 +745,7 @@ export default function Sales() {
           <div className="stat-sub">of {recipes.length} active recipes</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Total ex-VAT revenue for the period = sum of (Qty Sold × Selling Price) across all items. Used as the denominator for Food Cost %." width={280}>Period Revenue</Tip></div>
+          <div className="stat-label"><Tip text="Total ex-VAT revenue for the period, across every entry — bulk, daily and POS. Each sale is priced at the selling price recorded when it was entered, less any discount on it. Used as the denominator for Food Cost %." width={300}>Period Revenue</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 18 }}>
             NPR {totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </div>
@@ -726,7 +857,7 @@ export default function Sales() {
                     <button
                       className="btn btn-primary"
                       onClick={() => requestSave('bulk')}
-                      disabled={bulkSaving || isLocked}
+                      disabled={bulkSaving || isLocked || noMenu}
                     >
                       {bulkSaving ? 'Saving…' : bulkSaved ? '✓ Saved' : 'Save'}
                     </button>
@@ -849,7 +980,7 @@ export default function Sales() {
                     })()}
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <SalesImportButton recipes={recipes} disabled={isLocked} onMatched={handleImportMatched} />
+                    <SalesImportButton recipes={recipes} disabled={isLocked || noMenu} onMatched={handleImportMatched} />
                     <button
                       className="btn btn-ghost"
                       disabled={isLocked}
@@ -864,7 +995,7 @@ export default function Sales() {
                     <button
                       className="btn btn-primary"
                       onClick={() => requestSave('daily')}
-                      disabled={dailySaving || isLocked}
+                      disabled={dailySaving || isLocked || noMenu}
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
                 </div>
@@ -894,10 +1025,18 @@ export default function Sales() {
                         {totDiscount > 0 && (
                           <span style={{ color: 'var(--theme-text2)' }}>Total discount: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {totDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
                         )}
-                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue: <strong style={{ color: 'var(--theme-accent-ink)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
+                        <span style={{ color: 'var(--theme-text2)' }}>Day revenue (typed here): <strong style={{ color: 'var(--theme-accent-ink)' }}>{totRev > 0 ? `NPR ${totRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
+                        {hasPosDay && (
+                          <span style={{ color: 'var(--theme-text2)' }}>From POS: <strong style={{ color: 'var(--theme-text1)' }}>{posDayRevenue > 0 ? `NPR ${posDayRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</strong></span>
+                        )}
                       </div>
                     )
                   })()}
+                  {hasPosDay && (
+                    <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 12, fontSize: 12, color: 'var(--theme-text2)' }}>
+                      🛈 The till already posted sales for this day — shown in the read-only <strong>From POS</strong> column. Save Day writes only what you type in Qty Sold and Discount; it never changes or deletes a POS sale.
+                    </div>
+                  )}
                   <div className="table-wrap">
                   <table className="data-table">
                     <thead>
@@ -905,14 +1044,17 @@ export default function Sales() {
                         <th>Menu Item</th>
                         <th><Tip text="Recipe category — Food, Beverage, Dessert, etc." width={210}>Category</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="Ex-VAT selling price per portion as set in Recipe Costing." width={230}>Selling Price</Tip></th>
-                        <th style={{ textAlign: 'right', width: 160 }}><Tip text="Portions sold on this specific day. Saved separately from the monthly bulk total." width={250}>Qty Sold ({formatBsDay(selectedDay, selectedPeriod?.bs_month)})</Tip></th>
+                        <th style={{ textAlign: 'right', width: 160 }}><Tip text="Portions sold on this specific day, typed here by hand. Saved separately from the monthly bulk total." width={250}>Qty Sold ({formatBsDay(selectedDay, selectedPeriod?.bs_month)})</Tip></th>
+                        {hasPosDay && (
+                          <th style={{ textAlign: 'right', width: 110 }}><Tip text="Portions the till already sold on this day. Read-only — POS posts its own sales automatically, and Save Day never writes, changes or deletes these. They are shown so you can see the whole day before typing anything by hand." width={300}>From POS</Tip></th>
+                        )}
                         <th style={{ textAlign: 'right', width: 130 }}><Tip text="NPR discount applied to this item on this day — e.g. staff discount, promo, or complimentary reduction. Subtracted from Day Revenue. Auto-filled by ↑ Import Excel from the report's Discount column, or type it in directly." width={280}>Discount</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="Revenue for this item on this day = (Qty × Selling Price) − Discount, ex-VAT." width={260}>Day Revenue</Tip></th>
                       </tr>
                     </thead>
                     <tbody>
                       {dailyRows.length === 0 && (
-                        <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No menu items match this filter.</td></tr>
+                        <tr><td colSpan={hasPosDay ? 7 : 6} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: '16px 0' }}>No menu items match this filter.</td></tr>
                       )}
                       {dailyRows.map(recipe => {
                         const rawVal = getDailyQty(recipe.id)
@@ -942,6 +1084,14 @@ export default function Sales() {
                                 }, isLocked)}
                               />
                             </td>
+                            {hasPosDay && (
+                              // Text, not a disabled input: this is not a field that happens to be
+                              // locked, it is a figure from another system. A greyed-out box invites
+                              // someone to work out how to type in it.
+                              <td style={{ textAlign: 'right', color: (posDaySales[recipe.id] || 0) > 0 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>
+                                {(posDaySales[recipe.id] || 0) > 0 ? (posDaySales[recipe.id]).toLocaleString('en-IN') : '—'}
+                              </td>
+                            )}
                             <td style={{ textAlign: 'right' }}>
                               <input aria-label={`Discount: ${recipe.name}`}
                                 type="number" min="0"
@@ -981,7 +1131,7 @@ export default function Sales() {
                     <button
                       className="btn btn-primary"
                       onClick={() => requestSave('daily')}
-                      disabled={dailySaving || isLocked}
+                      disabled={dailySaving || isLocked || noMenu}
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
                   </>
