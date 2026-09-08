@@ -68,15 +68,7 @@ meaning.
 
 ### Access control — two-layer route guard
 
-Every protected route uses both guards stacked:
-
-```jsx
-<ModuleGate module="ims">
-  <PremiumGate featureKey="recipe_costing" minPlan="growth">
-    <Recipes />
-  </PremiumGate>
-</ModuleGate>
-```
+Every protected route in `App.js` stacks both guards, `ModuleGate` outside `PremiumGate`:
 
 - **`ModuleGate`** (`src/components/ModuleGate.js`) — checks `imsEnabled` / `hrEnabled` on the client record; admin always passes
 - **`PremiumGate`** (`src/components/PremiumGate.js`) — checks `hasFeature(key)` which respects plan tier first, then individual admin override flags
@@ -97,11 +89,7 @@ The entitlement histories behind these rules — why `plan` is plain `clients.pl
 
 ### Which tier a feature belongs in
 
-Placement is by attribute, not by when it was built. The tier thesis: **Starter = Record & Comply, Growth = Control, Pro = Strategy, Crest Suite Pro = Synthesis** (cross-module, owner altitude). Two rules fall out of it, both already broken once: **a feature must be able to produce a number on its own tier's data**, and **a statutory obligation never gates above the base tier** — nor may a data-entry page sit above the tier of any figure that consumes it.
-
-**Moving a feature between tiers requires a grandfather sweep in the same deploy.** `hasFeature()` is "plan tier OR explicit flag", so setting the flag `true` for affected clients restores prior access with no code change. Upward-*available* moves need no sweep.
-
-The five scoring attributes and the specific features that were misplaced are in `.claude/rules/access-control.md`.
+Placement is by attribute, not by when it was built: **Starter = Record & Comply, Growth = Control, Pro = Strategy, Crest Suite Pro = Synthesis** (cross-module, owner altitude). The five scoring attributes, the two rules that fall out of that thesis (both already broken once), the features that were misplaced, and the grandfather sweep a tier move needs in the same deploy are all in `.claude/rules/access-control.md`.
 
 ### The IMS figures that must come from one place (S551)
 
@@ -169,19 +157,6 @@ Two entitlement/abuse fixes from the same pass: `feature_flags` writes are now a
 ### Multi-tenant data isolation
 
 Every Supabase table is client-scoped. **Use the scoped data-access layer, not hand-written `.eq('client_id', ...)`:**
-
-```js
-import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-
-const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
-
-const { data } = await scopedFrom('items', 'id, name').eq('is_active', true)
-await scopedInsert('vendors', { name: 'Big Mart' })                    // stamps client_id
-await scopedInsert('categories', { name: 'Dairy' }, { single: true })  // .insert().select().single()
-await scopedUpsert('hr_roster', rows, { onConflict: '...' })           // always selects the row(s) back
-await scopedUpdate('items', { is_active: false }).eq('id', itemId)
-await scopedDelete('vendors').eq('id', vendorId)
-```
 
 `src/shared/scopedDb.js` fails closed (a sentinel UUID on reads/updates/deletes, an error object on inserts/upserts) when `clientId` is missing, instead of silently running unfiltered or leaking a NULL row — this matters most on **reads**, since an admin's RLS policy (`role='admin' OR client_id=own`) allows every tenant's rows and only the per-query filter narrows an admin "viewing as" session down to one client. Only tables in the `CLIENT_SCOPED_TABLES` allowlist (mirrors the DB's `client_id NOT NULL` constraints) can go through it — `scopedDb` throws for anything else. Tables scoped by `period_id`/parent-id instead of `client_id` (`purchase_entries`, `sales_entries`, `recipe_ingredients`, `opening_stock`, `closing_stock`, `wastages`, `staff_meals`, etc.), tables with a nullable `client_id` (`settings`, `budgets`), and the `clients` table itself stay on raw `supabase.from()`.
 
@@ -386,12 +361,8 @@ RESTRICTIVE staff-isolation policies; don't. Detail and the legacy three-call fa
 
 ### `recipe_ingredients` has no `client_id` column
 
-Always scope ingredient fetches by recipe IDs first:
-
-```js
-const recipeIds = recipes.map(r => r.id)
-supabase.from('recipe_ingredients').select('*').in('recipe_id', recipeIds)
-```
+Always scope ingredient fetches by recipe IDs first — collect the recipes' ids and filter
+`.in('recipe_id', recipeIds)`; there is no `client_id` to scope on.
 
 ### POS billing, shifts and the IMS handoff
 

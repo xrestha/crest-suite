@@ -177,7 +177,7 @@ export default function Signup() {
         <div className="signup-inner">
           <h1 className="signup-title">Start your free trial</h1>
           <p className="signup-sub">
-            Starter plan, free for {TRIAL_DAYS} days · No credit card · Nothing to install
+            All three modules at the Growth tier, free for {TRIAL_DAYS} days · No credit card · Nothing to install
           </p>
 
           {trialSuccess ? (

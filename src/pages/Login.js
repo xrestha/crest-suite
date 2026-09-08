@@ -360,7 +360,7 @@ export default function Login() {
           <div className="login-signup-copy">
             <h2 className="login-signup-title">New to {settings?.app_name || 'Crest Suite'}?</h2>
             <p className="login-signup-sub">
-              Starter plan, free for {TRIAL_DAYS} days · No credit card · Nothing to install
+              All three modules at the Growth tier, free for {TRIAL_DAYS} days · No credit card · Nothing to install
             </p>
           </div>
           <button

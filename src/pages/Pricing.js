@@ -29,6 +29,10 @@ const FAQS = [
     a: `Yes — your first ${TRIAL_DAYS} days are free, with no credit card and no hidden fees. The trial runs at the Growth level with all three modules switched on, so you can cost a recipe, set up payroll and bill a table before deciding. We switch every trial on personally: sign up, and we will call you within one working day to open it. After the trial, pick the modules and tier you actually want.`,
   },
   {
+    q: 'What happens when the trial ends?',
+    a: `Nothing is deleted and nothing is charged automatically. You pick the modules and the tier you actually want — Starter, Growth or Pro, with or without HR and POS — and everything you entered during the trial carries straight over. If you decide against Crest, we keep your data for 15 days in case you change your mind, then remove it as the Privacy Policy says.`,
+  },
+  {
     q: 'Can I negotiate the price?',
     a: 'We understand every business is different. Annual commitments come with significant savings built in. Reach out directly to discuss multi-property or long-term deals — we\'re flexible.',
   },
@@ -134,7 +138,7 @@ export default function Pricing() {
       <div style={{ textAlign: 'center', padding: '72px 32px 52px' }}>
         {!session && (
           <div style={{ display: 'inline-block', background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 'var(--radius-full)', padding: '5px 18px', fontSize: 12, color: GREEN, marginBottom: 24, letterSpacing: '0.06em', fontWeight: 600 }}>
-            {TRIAL_DAYS}-day free trial · No credit card required
+            {TRIAL_DAYS} days free · All three modules · No credit card
           </div>
         )}
         <h1 style={{ fontSize: 44, fontWeight: 800, margin: '0 0 16px', lineHeight: 1.15, color: 'var(--theme-text1)' }}>
@@ -190,6 +194,44 @@ export default function Pricing() {
         </div>
       </div>
 
+      {/* ── The free trial, stated once (S699) ─────────────────────────────────────────────
+             The trial stopped being a property of one tier when it became Growth-with-all-modules
+             (S697), and at that moment it also stopped being renderable inside a tier card: the
+             "FREE FOR 7 DAYS TRIAL" badge sat on Starter and told a visitor the exact opposite of
+             what they would actually get, while "NPR 2,000/mo after trial" underneath it named the
+             one tier the trial is not. A claim that spans all three module sections belongs above
+             all three of them. Hidden for a signed-in visitor, who has an account already. ── */}
+      {!session && (
+        <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px' }}>
+          <div style={{
+            background: CARD, border: `1px solid ${brassTint(30)}`, borderRadius: 'var(--radius-lg)',
+            padding: '30px 32px', display: 'flex', gap: 30, alignItems: 'center', flexWrap: 'wrap',
+            boxShadow: `0 4px 48px ${brassTint(10)}`,
+          }}>
+            <div style={{ flex: '1 1 440px', minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: GOLD_INK, marginBottom: 9 }}>
+                Free for {TRIAL_DAYS} days
+              </div>
+              <h2 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 11px', color: 'var(--theme-text1)', lineHeight: 1.25 }}>
+                You try all three modules, not one tier of one of them
+              </h2>
+              <p style={{ fontSize: 14, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.7 }}>
+                Every trial runs at the <strong style={{ color: 'var(--theme-text1)', fontWeight: 700 }}>Growth</strong> tier
+                with Crest IMS, Crest HR and Crest POS all switched on, so you can cost a recipe, set up payroll and bill a
+                table in the same week. We open each trial personally — sign up and we will call you within one working day,
+                and your {TRIAL_DAYS} days start from that call, not from the form. No card. When the {TRIAL_DAYS} days are
+                up you choose what to keep, and everything you entered carries straight over.
+              </p>
+            </div>
+            <button
+              onClick={() => navigate('/signup')}
+              style={{ background: GOLD, border: 'none', color: 'var(--theme-accent-text)', padding: '13px 30px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap' }}>
+              Start Free Trial →
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Crest IMS — 3 tiers ── */}
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 24px' }}>
         <SectionHeading color={MODULE_INK.ims} title="Crest IMS" subtitle="Inventory, recipe costing & food-cost intelligence" />
@@ -217,38 +259,29 @@ export default function Pricing() {
                     One Serif Rule allows exactly one serif element per screen, and this page had
                     twelve. */}
                 <span style={{ fontSize: 20, fontWeight: 700, color: MODULE_INK.ims }}>{plan.label}</span>
-                {plan.key === 'starter' && !annual && (
+                {highlight && (
                   <span style={{ fontSize: 11, fontStyle: 'italic', fontWeight: 800, color: MODULE_INK.ims, background: moduleTint('ims', 9), border: `1px solid ${moduleTint('ims', 25)}`, padding: '3px 8px', borderRadius: 'var(--radius-sm)', letterSpacing: '0.05em' }}>
-                    FREE FOR {TRIAL_DAYS} DAYS TRIAL
+                    YOUR TRIAL RUNS HERE
                   </span>
                 )}
               </div>
 
               <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: `1px solid ${BORDER}` }}>
-                {plan.key === 'starter' && !annual ? (
-                  <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                    NPR {plan.monthly.toLocaleString('en-IN')}
-                    <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo after trial</span>
+                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
+                  NPR {price.toLocaleString('en-IN')}
+                  <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
+                </div>
+                {annual && (
+                  <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
+                    Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr
                   </div>
-                ) : (
-                  <>
-                    <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1 }}>
-                      NPR {price.toLocaleString('en-IN')}
-                      <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--theme-text2)' }}>/mo</span>
-                    </div>
-                    {annual && (
-                      <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 6 }}>
-                        Billed annually · NPR {(price * 12).toLocaleString('en-IN')}/yr
-                      </div>
-                    )}
-                  </>
                 )}
               </div>
 
               <button
-                onClick={() => session ? askAbout(plan.label) : plan.key === 'starter' ? navigate('/signup') : navigate('/login')}
+                onClick={() => session ? askAbout(plan.label) : navigate('/signup')}
                 style={{ background: highlight ? MODULE_COLORS.ims : moduleTint('ims', 8), border: `1px solid ${highlight ? MODULE_COLORS.ims : moduleTint('ims', 25)}`, color: highlight ? 'var(--theme-accent-text)' : MODULE_INK.ims, padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
-                {session ? `Ask about ${plan.label}` : plan.key === 'starter' ? 'Start Free Trial' : `Get ${plan.label}`} →
+                {session ? `Ask about ${plan.label}` : 'Start Free Trial'} →
               </button>
 
               <div style={{ flex: 1 }}>
@@ -294,9 +327,9 @@ export default function Pricing() {
               </div>
 
               <button
-                onClick={() => session ? askAbout(mod.name) : navigate('/login')}
+                onClick={() => session ? askAbout(mod.name) : navigate('/signup')}
                 style={{ background: moduleTint(mod.key, 8), border: `1px solid ${moduleTint(mod.key, 25)}`, color: MODULE_INK[mod.key], padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, marginBottom: 22, width: '100%' }}>
-                {session ? 'Ask about' : 'Get'} {mod.name} →
+                {session ? `Ask about ${mod.name}` : 'Start Free Trial'} →
               </button>
 
               <FeatureList features={mod.pricing.features} color={MODULE_INK[mod.key]} />
@@ -328,13 +361,16 @@ export default function Pricing() {
                   Billed annually · NPR {(SUITE_ADDON.annual * 12).toLocaleString('en-IN')}/yr
                 </div>
               )}
-              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 20, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 8, lineHeight: 1.5 }}>
                 {SUITE_ADDON.requiresLabel}
               </div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 20, lineHeight: 1.5 }}>
+                Not part of the free trial — added once your modules are running.
+              </div>
               <button
-                onClick={() => session ? askAbout(SUITE_ADDON.label) : navigate('/login')}
+                onClick={() => askAbout(SUITE_ADDON.label)}
                 style={{ background: GOLD, border: `1px solid ${GOLD}`, color: 'var(--theme-accent-text)', padding: '11px 20px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 14, fontWeight: 700, width: '100%' }}>
-                {session ? 'Ask about' : 'Add'} {SUITE_ADDON.label} →
+                Ask about {SUITE_ADDON.label} →
               </button>
             </div>
             <div style={{ gridColumn: 'span 2', minWidth: 0 }}>
@@ -388,7 +424,7 @@ export default function Pricing() {
         <p style={{ fontSize: 14, color: 'var(--theme-text2)', margin: '0 0 36px', lineHeight: 1.6 }}>
           {session
             ? 'Email us what you want switched on. It is done on the account, and nothing you already record changes.'
-            : 'Start free today. No credit card. No commitment. Cancel any time.'}
+            : `Sign up in a minute, and we will call you within one working day to open your trial. ${TRIAL_DAYS} days, all three modules, no card.`}
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 48 }}>
           <button
