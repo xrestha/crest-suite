@@ -1,4 +1,5 @@
 // Shared recipe-costing helpers (pure, no React/Supabase deps).
+import { throwFirstError } from '../shared/queryError'
 
 // Suggested menu price to hit a target food-cost %, VAT-inclusive and rounded up to the
 // nearest NPR 5. `cost` is the per-portion food cost (ex-VAT), `targetFcPct` is a fraction
@@ -42,10 +43,19 @@ export async function explodeRecipeIngredients(supabase, recipeIds) {
 export async function explodeRecipeTree(supabase, recipeIds) {
   if (!recipeIds || recipeIds.length === 0) return {}
 
-  const { data: topIng } = await supabase
+  // A failed read THROWS rather than walking an empty tree (S695). Every consumer of this walk
+  // subtracts its output from stock, so a read that returned `{ data: null, error }` and was
+  // then treated as "no ingredients" produced a usage of zero for every dish sold — Stock
+  // Report's on-hand climbed to opening + purchases, Variance read as fully under-consumed, and
+  // nothing on any page said a read had failed (the S612 silent-zero rule, one layer down from
+  // where the pages check it). Callers catch this and route it to their own load-error surface;
+  // the ones that run inside a try/catch harness already did.
+  const topRes = await supabase
     .from('recipe_ingredients')
     .select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(yield_pct)')
     .in('recipe_id', recipeIds)
+  throwFirstError([topRes])
+  const { data: topIng } = topRes
 
   const allIng = [...(topIng || [])]
   const recipeMeta = {} // sub_recipe id -> { id, yield_qty }
@@ -74,12 +84,14 @@ export async function explodeRecipeTree(supabase, recipeIds) {
     // covered by `topIng`. Only the ingredient rows (`si`, the actual duplication risk) are
     // narrowed to ids not already fetched.
     const toFetchIngredients = frontier.filter(id => !fetchedIngredientsFor.has(id))
-    const [{ data: sr }, { data: si }] = await Promise.all([
+    const roundResults = await Promise.all([
       supabase.from('recipes').select('id, yield_qty').in('id', frontier),
       toFetchIngredients.length > 0
         ? supabase.from('recipe_ingredients').select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(yield_pct)').in('recipe_id', toFetchIngredients)
         : Promise.resolve({ data: [] }),
     ])
+    throwFirstError(roundResults)
+    const [{ data: sr }, { data: si }] = roundResults
     ;(sr || []).forEach(r => { recipeMeta[r.id] = r })
     toFetchIngredients.forEach(id => fetchedIngredientsFor.add(id))
     allIng.push(...(si || []))

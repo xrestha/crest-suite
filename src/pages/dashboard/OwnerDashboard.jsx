@@ -197,7 +197,16 @@ export default function OwnerDashboard() {
     // silently dropping any ingredient that was itself a sub-recipe (sauces, batters, prepped
     // components) from theoretical usage entirely, so a raw item consumed only through one could
     // show zero usage and never surface as needing reorder even when genuinely out of stock.
-    const ingredientBreakdown = dashRecipeIds.length > 0 ? await explodeRecipeIngredients(supabase, dashRecipeIds) : {}
+    // The recipe walk throws on a failed read (S695). This section's convention is to flag and
+    // continue with what it has, so a failed walk is reported the way a failed read in the batch
+    // above is — the reorder figures below are then computed without usage and say so.
+    let ingredientBreakdown = {}
+    try {
+      ingredientBreakdown = dashRecipeIds.length > 0 ? await explodeRecipeIngredients(supabase, dashRecipeIds) : {}
+    } catch (err) {
+      console.error('Owner Dashboard: recipe walk failed', err)
+      setLoadErrors(prev => ({ ...prev, reorder: 'Reorder figures failed to load — may be incomplete or stale.' }))
+    }
 
     const soldMap = {}; (sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) })
     // ingredientBreakdown rows are already yield_pct-adjusted per one portion — just scale by how

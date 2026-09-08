@@ -42,6 +42,12 @@ Two things were wrong the moment a third level existed, both fixed:
   is hit and simply returns what it has, so ingredients below the cut vanish from COGS and Variance
   as a believable smaller number. The cap is now `MAX_DEPTH_ROUNDS = 12` (was 5) and an exhausted
   frontier `console.error`s with the unresolved ids and the direction of the error.
+- **A failed READ was silent too, and it is not any more (S695).** Both reads inside
+  `explodeRecipeTree` dropped `error` and walked an empty tree, so every consumer's usage came out
+  as zero — Stock Report's on-hand climbed to opening + purchases, Variance read as fully
+  under-consumed — with no banner anywhere. It now `throwFirstError`s; every page-level caller
+  wraps it and routes to its own `setLoadError`, the dashboards flag their section, and the write
+  paths already ran it inside a try/catch. A new caller must catch it. Detail in `ims-figures.md`.
 
 **Two different sub-recipe counts exist and both are correct** — a recurring "why don't these match" question. `Recipes.js:177` counts the **master list** (`category === 'Sub-Recipe'` over an unfiltered fetch: no period, no usage, not even `is_active`), while Stock Movements' Sub-Recipes tab counts only what a **period's sales actually consumed**. The difference is prep items nothing sold touched, surfaced explicitly on that tab ("9 of your 57 …") rather than left to a cross-check. The one case where they genuinely cannot reconcile: a recipe referenced via `sub_recipe_id` whose own `category` was never set to `'Sub-Recipe'` — counted by the walk but not by the category filter, so used + unused would exceed the master total. That is a data-entry problem on the recipe, and the tab names the offenders instead of silently producing numbers that don't add up.
 

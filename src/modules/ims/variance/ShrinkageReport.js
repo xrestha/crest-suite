@@ -105,9 +105,16 @@ export default function ShrinkageReport() {
     // staff are stealing. Every other consumer (Variance, StockReport, ReorderReport, Requisitions,
     // FifoReport, both dashboards) was moved to this util; Shrinkage was the last one left behind.
     const shrinkRecipeIds = (clientRecipes || []).map(r => r.id)
-    const ingredientBreakdown = shrinkRecipeIds.length > 0
-      ? await explodeRecipeIngredients(supabase, shrinkRecipeIds)
-      : {}
+    // The recipe walk throws on a failed read (S695) — before, it walked an empty tree, theoretical
+    // usage came out as zero, and every item read as fully shrunk.
+    let ingredientBreakdown = {}
+    try {
+      ingredientBreakdown = shrinkRecipeIds.length > 0
+        ? await explodeRecipeIngredients(supabase, shrinkRecipeIds)
+        : {}
+    } catch (err) {
+      setLoadError(err); setReport([]); setSummary(null); setLoading(false); return
+    }
 
     // Build per-period-per-item lookups
     function makeMap(rows, valKey) {

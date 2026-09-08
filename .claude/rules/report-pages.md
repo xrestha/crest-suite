@@ -70,7 +70,12 @@ Three rules came out of it:
   `Purchases.js`, which also CACHED the empty result via sessionDataCache so the lie outlived the
   failed request, and `Requisitions.js`, whose `getOnHandMap` fed the over-issue guard from nine
   unchecked reads. Both now follow the Overheads pattern. The S631 lesson stands: a sweep framed
-  as "report pages" keeps missing the CRUD/entry pages that read and render the same way.)
+  as "report pages" keeps missing the CRUD/entry pages that read and render the same way. And
+  S695 found the worst one still standing: `Stock.js`, the page a month is closed from, dropped
+  every read error, rendered every cell blank, and its Save All then DELETED the server's real rows
+  for every visible item — the batch-save shape as data loss rather than display. It now renders
+  `ReportLoadError` and nothing below it. The rule for an entry page is Overheads' and Stock's:
+  a failed read blocks the form, it never shows an empty one.)
 - **Refusing to render the figure is half the job; the sentence you show instead is the other half
   (S619).** `firstError`/`ReportLoadError` decide *that* something failed. `errorText(err,
   'operator')` (`src/shared/errorText.js`) decides what the reader is told — one table, two

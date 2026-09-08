@@ -125,7 +125,14 @@ export default function Variance() {
     // the previous direct recipe_ingredients read only picked up rows with item_id set, silently
     // dropping any ingredient that was itself a sub-recipe (sauces, batters, prepped components)
     // from theoretical usage entirely, understating it and throwing false "over variance" flags.
-    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    // The recipe walk throws on a failed read (S695) — before, it walked an empty tree, theoretical
+    // usage came out as zero, and every item read as over-consumed by its whole actual usage.
+    let breakdown = {}
+    try {
+      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    } catch (err) {
+      setLoadError(err); setReport([]); setSummary(null); return
+    }
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })

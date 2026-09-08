@@ -115,7 +115,9 @@ dropping the ✓/△/▲; a settings field with no reader is worse than no field
 claim worth re-checking, since `variance_flag_pct` was declared wired while reaching one of its three
 consumers; Stock Count's Summary holds two tables built from different loops that must be kept tying
 out; a variance-style report must default to a CLOSED period, and must STATE which period it is on
-(`PeriodScope`) rather than trailing it off the end of a sentence.
+(`PeriodScope`) rather than trailing it off the end of a sentence; a Closing Stock of 0 is a
+COUNT (a row), blank is not, a requisition is NOT a stock deduction, and a failed read on Stock
+Count renders nothing below the error card (S695).
 
 ### Multi-outlet: one login, several clients (S548)
 

@@ -15,9 +15,11 @@ import SearchableSelect from '../../../components/SearchableSelect'
 import ConfirmModal from '../../../components/ConfirmModal'
 import QtyInput from '../../../components/QtyInput'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
 import './Stock.css'
 import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cachePeriods, getCachedPeriods, cacheStockData, getCachedStockData, enqueue, getQueue, dequeue } from '../../../utils/offlineQueue'
-import { BS_MONTHS, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
+import { BS_MONTHS, getBsToday, formatBsDay, daysInBsMonth } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -32,6 +34,19 @@ function dispPurch(baseQty, item) {
   }
   return Number(baseQty).toLocaleString('en-IN')
 }
+
+// A cell's on-screen value → what is written. '' (a blank cell) is null — "no figure" — and is
+// distinct from 0 since S695: a Closing Stock of 0 is a real count ("we looked, there was none")
+// and is stored as a row of physical_qty 0, so Stock Report can tell it from an item nobody
+// counted. Before this, every save ran parseFloat(v) || 0 and a 0 deleted the row, which made
+// "counted empty" and "not counted" the same fact in the database.
+function toQty(v) {
+  if (v === '' || v == null) return null
+  const n = parseFloat(v)
+  return Number.isFinite(n) ? n : null
+}
+// Blank means "no row"; for every field but closing a 0 means the same thing.
+const isNoRow = (fieldKey, qty) => qty == null || (fieldKey !== 'closing' && qty <= 0)
 
 export default function Stock() {
   const { clientId, profile, loading: authLoading, isAdmin, hasFeature, hasImsAccess } = useAuth()
@@ -63,6 +78,13 @@ export default function Stock() {
   const [saved, setSaved] = useState(false)
   // The last save that did not land, as `<ActionError>` copy naming what the server holds now.
   const [saveError, setSaveError] = useState(null)
+  // A read that failed. While set, nothing below the header renders: the tables would show every
+  // cell blank, and Save All writes on-screen state — so a failed read followed by Save All used
+  // to DELETE the month's real counts on the server (S695). No figure, no save.
+  const [loadError, setLoadError] = useState(null)
+  // An in-page notice for the things that used to be window.alert() — offline, no earlier month,
+  // nothing to carry forward. Not an error: nothing failed, there is just nothing to do.
+  const [pageNotice, setPageNotice] = useState(null)
   // Shared ConfirmModal for the page's bulk writes (S575 rule; these three ran on window.confirm
   // until S612): { title, body, confirmLabel, danger, run }.
   const [pendingConfirm, setPendingConfirm] = useState(null)
@@ -88,14 +110,21 @@ export default function Stock() {
   }, [])
 
   useEffect(() => {
-    if (!authLoading && effectiveClientId) {
-      init()
-      if (navigator.onLine) flushRef.current?.()
-    }
+    if (!authLoading && effectiveClientId) init()
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The day the Daily Wastage tab opens on. Today's day-of-month is right for the current period
+  // and can be past the end of a shorter or earlier one (day 32 of a 29-day month), so it is
+  // clamped to the period being shown.
+  function clampWDay(period) {
+    if (!period) return
+    const max = daysInBsMonth(period.bs_year, period.bs_month)
+    setWDay(d => Math.min(Math.max(1, d), max))
+  }
 
   async function init() {
     setLoading(true)
+    setLoadError(null)
 
     if (!navigator.onLine) {
       const [cachedItems, cachedCats, cachedPeriods] = await Promise.all([
@@ -110,6 +139,7 @@ export default function Stock() {
         const open = cachedPeriods.find(x => x.status === 'open')
         if (open) {
           setSelectedPeriod(open)
+          clampWDay(open)
           const cached = await getCachedStockData(open.id)
           if (cached) {
             const pending = await getQueue()
@@ -117,7 +147,7 @@ export default function Stock() {
             pending.forEach(op => {
               if (op.periodId === open.id) {
                 if (!sd[op.itemId]) sd[op.itemId] = {}
-                sd[op.itemId] = { ...sd[op.itemId], [op.fieldKey]: op.qty }
+                sd[op.itemId] = { ...sd[op.itemId], [op.fieldKey]: op.qty ?? '' }
               }
             })
             setStockData(sd)
@@ -133,11 +163,20 @@ export default function Stock() {
       return
     }
 
-    const [{ data: p }, { data: i }, { data: c }] = await Promise.all([
+    // Replay anything counted offline BEFORE reading the server, not alongside it. The two used to
+    // run concurrently from the effect, so when the read landed first the synced counts were
+    // dequeued but not on screen — and the next Save All wrote the stale screen back over them.
+    await flushQueue()
+
+    const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('items', '*, categories(name)').eq('is_active', true).order('name'),
       scopedFrom('categories').order('sort_order')
     ])
+    // A failed read is not "no periods yet" — that empty state is a claim about the client.
+    const initFailed = firstError(initResults)
+    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    const [{ data: p }, { data: i }, { data: c }] = initResults
     setPeriods(p || [])
     setItems(i || [])
     setCategories(c || [])
@@ -148,7 +187,9 @@ export default function Stock() {
     ])
     const open = (p || []).find(x => x.status === 'open')
     if (open) {
+      periodReq.begin(open.id)   // the auto-selected period claims the page like a chosen one
       setSelectedPeriod(open)
+      clampWDay(open)
       await loadStockData(open.id, i || [])
     }
     setLoading(false)
@@ -161,7 +202,8 @@ export default function Stock() {
     // entries are one row per item per day — but opening/closing are one row per item, so a client
     // past 1000 items would silently lose stock too. Each needs a unique tiebreaker in its sort or
     // paging can repeat a row on one page and skip it on the next.
-    const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }, reqRes] = await Promise.all([
+    setLoadError(null)
+    const results = await Promise.all([
       fetchAllRows(() => supabase.from('opening_stock').select('*').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('closing_stock').select('*').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('id, item_id, qty, bs_day, reason, items(name, uom, per_uom_rate)').eq('period_id', periodId).order('id')),
@@ -172,15 +214,28 @@ export default function Stock() {
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       // Independent of the six reads above but previously awaited after them — one extra serial
-      // round trip on every load of the heaviest page. A failure degrades to "no requisitions",
-      // exactly what the old try/catch did.
+      // round trip on every load of the heaviest page.
       fetchAllRows(() => supabase
         .from('requisition_lines')
         .select('item_id, qty_issued, requisitions!inner(client_id, period_id, status)')
         .eq('requisitions.period_id', periodId)
         .eq('requisitions.status', 'issued')
-        .order('id')).catch(() => ({ data: null })),
+        .order('id')),
     ])
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must not render as an empty month. Every read here destructured `{ data }`
+    // and dropped `error` until S695, so an RLS refusal or auth stall showed every cell blank —
+    // and Save All then deleted the server's real rows for every visible item (a blank is "no
+    // row"). The requisitions read used to degrade to "no requisitions"; it is in the check now
+    // because a Summary the month is closed on should not carry one silently missing column.
+    const failed = firstError(results)
+    if (failed) {
+      setLoadError(failed)
+      setStockData({}); setPurchases({}); setReturns({}); setRequisitioned({}); setPurchFreq({})
+      setDailyWastage({}); setDailyRows([])
+      return
+    }
+    const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }, reqRes] = results
 
     const data = {}
     const items = itemList || []
@@ -203,7 +258,6 @@ export default function Stock() {
       }
     })
     Object.keys(catchAllMap).forEach(id => { if (data[id]) data[id].wastage = catchAllMap[id] })
-    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setDailyWastage(dailyMap)
     setDailyRows(dated)
 
@@ -241,13 +295,25 @@ export default function Stock() {
     periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
+    clampWDay(p)
+    setPageNotice(null)
     if (!navigator.onLine) {
       const cached = await getCachedStockData(periodId)
+      if (!periodReq.isCurrent(periodId)) return
       if (cached) {
         setStockData(cached.stockData    || {})
         setPurchases(cached.purchases    || {})
         setReturns(cached.returns        || {})
         setRequisitioned(cached.requisitioned || {})
+      } else {
+        // No offline copy of this month: show it EMPTY under its own label. Leaving the previous
+        // month's figures on screen here meant a Save All queued last month's counts against this
+        // month's period id.
+        const blank = {}
+        items.forEach(item => { blank[item.id] = { opening: '', closing: '', wastage: '', staff_meal: '' } })
+        setStockData(blank); setPurchases({}); setReturns({}); setRequisitioned({})
+        setDailyWastage({}); setDailyRows([])
+        setPageNotice('This month has not been opened on this device while online, so its saved figures are not available offline. Anything you enter now is queued and will sync when you reconnect.')
       }
       return
     }
@@ -267,16 +333,19 @@ export default function Stock() {
   const fail = (error, cleared = false) => {
     if (error) throw Object.assign(new Error(error.message || String(error)), { supabase: error, cleared })
   }
+  // `qty` is null for a blank cell (see toQty). Closing keeps a 0 as a row — a count of nothing
+  // is still a count; every other field treats 0 and blank alike.
   async function persistValueDirect(periodId, itemId, fieldKey, qty) {
+    const noRow = isNoRow(fieldKey, qty)
     if (fieldKey === 'opening') {
-      if (qty <= 0) {
+      if (noRow) {
         fail((await supabase.from('opening_stock').delete().eq('period_id', periodId).eq('item_id', itemId)).error)
       } else {
         fail((await supabase.from('opening_stock').upsert({ period_id: periodId, item_id: itemId, qty }, { onConflict: 'period_id,item_id' })).error)
       }
     }
     if (fieldKey === 'closing') {
-      if (qty <= 0) {
+      if (noRow) {
         fail((await supabase.from('closing_stock').delete().eq('period_id', periodId).eq('item_id', itemId)).error)
       } else {
         fail((await supabase.from('closing_stock').upsert({ period_id: periodId, item_id: itemId, physical_qty: qty, counted_at: new Date().toISOString() }, { onConflict: 'period_id,item_id' })).error)
@@ -285,11 +354,11 @@ export default function Stock() {
     if (fieldKey === 'wastage') {
       // Only the undated catch-all row — dated daily-wastage rows are managed in the Daily Wastage tab.
       fail((await supabase.from('wastages').delete().eq('period_id', periodId).eq('item_id', itemId).is('bs_day', null)).error)
-      if (qty > 0) fail((await supabase.from('wastages').insert({ period_id: periodId, item_id: itemId, qty, bs_day: null })).error, true)
+      if (!noRow) fail((await supabase.from('wastages').insert({ period_id: periodId, item_id: itemId, qty, bs_day: null })).error, true)
     }
     if (fieldKey === 'staff_meal') {
       fail((await supabase.from('staff_meals').delete().eq('period_id', periodId).eq('item_id', itemId).eq('type', 'staff')).error)
-      if (qty > 0) fail((await supabase.from('staff_meals').insert({ period_id: periodId, item_id: itemId, qty, type: 'staff' })).error, true)
+      if (!noRow) fail((await supabase.from('staff_meals').insert({ period_id: periodId, item_id: itemId, qty, type: 'staff' })).error, true)
     }
   }
 
@@ -314,6 +383,9 @@ export default function Stock() {
   // Serializing every persistValue call through a per-(item,field) promise chain means a second
   // call for the same key always waits for the first's round trip to fully finish before it
   // starts its own, so the two delete/insert pairs can never overlap.
+  // Resolves true when the write landed (or was queued), false when it did not — the failure is
+  // already recorded on the page by then. Callers use the boolean to decide whether to show the
+  // "✓ Saved" state; they must never show it unconditionally (S695).
   const persistLocks = useRef({})
   async function persistValue(itemId, fieldKey, qty) {
     const key = `${itemId}:${fieldKey}`
@@ -323,10 +395,11 @@ export default function Stock() {
         await enqueue({ periodId: selectedPeriod.id, itemId, fieldKey, qty })
         setPendingSync(prev => prev + 1)
         setPendingItems(prev => new Set([...prev, itemId]))
-        return
+        return true
       }
       await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
-    }).catch(err => noteSaveFailure(itemId, fieldKey, err)) // recorded, and never wedges the chain for this key
+      return true
+    }).catch(err => { noteSaveFailure(itemId, fieldKey, err); return false }) // recorded, and never wedges the chain for this key
     persistLocks.current[key] = run
     return run
   }
@@ -357,8 +430,7 @@ export default function Stock() {
     setSaving(prev => ({ ...prev, [itemId]: true }))
     const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
     const source = overrideQty !== undefined ? overrideQty : (stockData[itemId] || {})[fieldKey]
-    const qty = parseFloat(source) || 0
-    await persistValue(itemId, fieldKey, qty)
+    await persistValue(itemId, fieldKey, toQty(source))
     setSaving(prev => ({ ...prev, [itemId]: false }))
   }
 
@@ -390,7 +462,12 @@ export default function Stock() {
           })
           return
         }
-        alert(`Can't save — ${negativeItems.length} item(s) show negative usage (more used than was ever bought or on hand): ${names}.\n\nFix the counts before saving.`)
+        setPendingConfirm({
+          title: 'Cannot save — negative usage',
+          confirmLabel: 'OK',
+          body: `${negativeItems.length} item(s) show negative usage — more used than was ever bought or on hand: ${names}. Fix those counts before saving.`,
+          run: () => {},
+        })
         return
       }
     }
@@ -406,18 +483,20 @@ export default function Stock() {
   // save for these keys has settled, and registers itself as each key's tail so a later onBlur
   // autosave chains after it — no delete/insert pair can interleave with it.
   async function persistValuesBulk(fieldKey, entries) {
-    if (entries.length === 0) return
+    if (entries.length === 0) return true
     if (!navigator.onLine) {
       // Offline writes go to the local queue — per-item is fine there, no network involved.
-      for (const e of entries) await persistValue(e.itemId, fieldKey, e.qty)
-      return
+      let allOk = true
+      for (const e of entries) allOk = (await persistValue(e.itemId, fieldKey, e.qty)) && allOk
+      return allOk
     }
     const periodId = selectedPeriod.id
     const priors = entries.map(e => persistLocks.current[`${e.itemId}:${fieldKey}`] || Promise.resolve())
     const run = Promise.all(priors).then(async () => {
       const allIds = entries.map(e => e.itemId)
-      const zeros = entries.filter(e => e.qty <= 0).map(e => e.itemId)
-      const positives = entries.filter(e => e.qty > 0)
+      // "zeros" is the delete set: blank cells, plus 0 on every field but closing (isNoRow).
+      const zeros = entries.filter(e => isNoRow(fieldKey, e.qty)).map(e => e.itemId)
+      const positives = entries.filter(e => !isNoRow(fieldKey, e.qty))
       if (fieldKey === 'opening') {
         if (zeros.length) fail((await supabase.from('opening_stock').delete().eq('period_id', periodId).in('item_id', zeros)).error)
         if (positives.length) fail((await supabase.from('opening_stock').upsert(
@@ -439,23 +518,31 @@ export default function Stock() {
         if (positives.length) fail((await supabase.from('staff_meals').insert(
           positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, type: 'staff' })))).error, true)
       }
-    }).catch(err => noteSaveFailure(null, fieldKey, err, entries.length)) // recorded; never wedges the chains
+      return true
+    }).catch(err => { noteSaveFailure(null, fieldKey, err, entries.length); return false }) // recorded; never wedges the chains
     entries.forEach(e => { persistLocks.current[`${e.itemId}:${fieldKey}`] = run })
     return run
   }
 
+  function flashSaved() {
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
+  }
+
   async function performSaveAll(visibleItems) {
     setSaveAllLoading(true)
+    setSaveError(null)
     const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
     // Same source saveRow reads for Save All: current on-screen state, no override.
     const entries = visibleItems.map(item => ({
       itemId: item.id,
-      qty: parseFloat((stockData[item.id] || {})[fieldKey]) || 0,
+      qty: toQty((stockData[item.id] || {})[fieldKey]),
     }))
-    await persistValuesBulk(fieldKey, entries)
+    const ok = await persistValuesBulk(fieldKey, entries)
     setSaveAllLoading(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2500)
+    // "✓ Saved" only when it did save. The bulk writer's catch records the failure and resolves,
+    // so this used to flash success directly above an ActionError saying the opposite.
+    if (ok) flashSaved()
   }
 
   // ── Daily wastage (dated, reason-tagged) ───────────────────────────────────
@@ -500,22 +587,27 @@ export default function Stock() {
       title: `Clear ${label} values`,
       confirmLabel: 'Clear All',
       danger: true,
-      body: `Every entered ${label} value for the ${visibleItems.length} item(s) currently shown is set to 0 and saved. This cannot be undone.`,
+      body: `Every entered ${label} value for the ${visibleItems.length} item(s) currently shown is cleared and saved as blank${fieldKey === 'closing' ? ' — not counted, which is different from a count of 0' : ''}. This cannot be undone.`,
       run: () => performClearAll(fieldKey, visibleItems),
     })
   }
 
   async function performClearAll(fieldKey, visibleItems) {
     setSaveAllLoading(true)
-    await persistValuesBulk(fieldKey, visibleItems.map(item => ({ itemId: item.id, qty: 0 })))
-    setStockData(prev => {
-      const next = { ...prev }
-      visibleItems.forEach(item => { next[item.id] = { ...next[item.id], [fieldKey]: 0 } })
-      return next
-    })
+    setSaveError(null)
+    // Blank, not 0: on the Closing tab a 0 is a real count and would be saved as one.
+    const ok = await persistValuesBulk(fieldKey, visibleItems.map(item => ({ itemId: item.id, qty: null })))
+    if (ok) {
+      // The screen follows the server, not the click — a refused clear leaves the figures the
+      // server still holds on screen, beside the ActionError that says so.
+      setStockData(prev => {
+        const next = { ...prev }
+        visibleItems.forEach(item => { next[item.id] = { ...next[item.id], [fieldKey]: '' } })
+        return next
+      })
+      flashSaved()
+    }
     setSaveAllLoading(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2500)
   }
 
   // Re-runnable version of Periods.js's close-time carry-forward: copies the chronologically
@@ -524,22 +616,31 @@ export default function Stock() {
   // repair a period that was closed before the carry-forward feature existed (pre-2026-07-17).
   async function pullFromLastMonthClosing() {
     if (!selectedPeriod || isLocked) return
-    if (!navigator.onLine) { alert('You’re offline. Last month’s closing counts are on the server, so this needs a connection. The counts you have entered on this page are saved on this device and will sync when you’re back online.'); return }
+    setPageNotice(null); setSaveError(null)
+    if (!navigator.onLine) { setPageNotice('You’re offline. Last month’s closing counts are on the server, so this needs a connection. The counts you have entered on this page are saved on this device and will sync when you’re back online.'); return }
     const prevPeriod = periods
       .filter(p => p.bs_year < selectedPeriod.bs_year || (p.bs_year === selectedPeriod.bs_year && p.bs_month < selectedPeriod.bs_month))
       .sort((a, b) => (b.bs_year - a.bs_year) || (b.bs_month - a.bs_month))[0]
-    if (!prevPeriod) { alert('This is the earliest period on record, so there is no previous month to carry a closing count forward from. Enter the opening stock directly.'); return }
+    if (!prevPeriod) { setPageNotice('This is the earliest period on record, so there is no previous month to carry a closing count forward from. Enter the opening stock directly.'); return }
     const prevLabel = `${BS_MONTHS[prevPeriod.bs_month - 1]} ${prevPeriod.bs_year}`
     setSaveAllLoading(true)
-    const { data: closingRows } = await supabase.from('closing_stock')
+    const { data: closingRows, error: readErr } = await supabase.from('closing_stock')
       .select('item_id, physical_qty').eq('period_id', prevPeriod.id)
-    const counted = (closingRows || []).filter(r => r.physical_qty != null && parseFloat(r.physical_qty) > 0)
-    if (counted.length === 0) {
-      setSaveAllLoading(false)
-      alert(`${prevLabel} was never closing-counted, so there is nothing to carry forward. Count the closing stock for ${prevLabel} first, or enter this month’s opening figures directly.`)
+    setSaveAllLoading(false)
+    if (readErr) {
+      // A failed read is not "never counted" — that sentence sent a reader off to recount a
+      // month that was already counted.
+      const { text, detail } = asActionError(readErr)
+      setSaveError({ text: `${prevLabel}'s closing count could not be read, so nothing was carried forward. ${text}`, detail })
       return
     }
-    setSaveAllLoading(false)
+    // Same rows the period close carries forward (closePeriod.js): every counted item, a count
+    // of 0 included — a 0 last month means this month opens on 0, not on whatever was typed.
+    const counted = (closingRows || []).filter(r => r.physical_qty != null)
+    if (counted.length === 0) {
+      setPageNotice(`${prevLabel} was never closing-counted, so there is nothing to carry forward. Count the closing stock for ${prevLabel} first, or enter this month’s opening figures directly.`)
+      return
+    }
     setPendingConfirm({
       title: 'Pull last month’s closing stock',
       confirmLabel: 'Overwrite Opening Stock',
@@ -551,16 +652,30 @@ export default function Stock() {
 
   async function performPullFromLastMonth(counted) {
     setSaveAllLoading(true)
-    const rows = counted.map(r => ({ period_id: selectedPeriod.id, item_id: r.item_id, qty: r.physical_qty }))
-    await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' })
+    setSaveError(null)
+    const positives = counted.filter(r => parseFloat(r.physical_qty) > 0)
+    const zeros = counted.filter(r => !(parseFloat(r.physical_qty) > 0)).map(r => r.item_id)
+    const rows = positives.map(r => ({ period_id: selectedPeriod.id, item_id: r.item_id, qty: r.physical_qty }))
+    // Checked, and the screen follows the server: this used to await the upsert bare, then paint
+    // the copied figures and flash "✓ Saved" whether or not the write had landed.
+    const upsertRes = rows.length ? await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' }) : { error: null }
+    const delRes = !upsertRes.error && zeros.length
+      ? await supabase.from('opening_stock').delete().eq('period_id', selectedPeriod.id).in('item_id', zeros)
+      : { error: null }
+    setSaveAllLoading(false)
+    const err = upsertRes.error || delRes.error
+    if (err) {
+      const { text, detail } = asActionError(err)
+      setSaveError({ text: `Last month's closing counts were not carried into Opening Stock — what is on screen is what the server held before. Reload to check, then try again. ${text}`, detail })
+      return
+    }
     setStockData(prev => {
       const next = { ...prev }
-      counted.forEach(r => { next[r.item_id] = { ...next[r.item_id], opening: r.physical_qty } })
+      positives.forEach(r => { next[r.item_id] = { ...next[r.item_id], opening: r.physical_qty } })
+      zeros.forEach(id => { next[id] = { ...next[id], opening: '' } })
       return next
     })
-    setSaveAllLoading(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2500)
+    flashSaved()
   }
 
   // Memoized once per items/filter change — this used to be a fresh filter pass (with
@@ -577,11 +692,10 @@ export default function Stock() {
   }, [items, filterCat, search])
   function filteredItems() { return visible }
 
+  // On the Closing tab an entered 0 is a count and shows in the progress figure; elsewhere a 0 is
+  // the same as blank.
   function countedItems(fk) {
-    return filteredItems().filter(item => {
-      const v = stockData[item.id]?.[fk]
-      return v !== '' && parseFloat(v) > 0
-    }).length
+    return filteredItems().filter(item => !isNoRow(fk, toQty(stockData[item.id]?.[fk]))).length
   }
 
   // PATCHED: subtract returns from used calculation
@@ -737,6 +851,14 @@ export default function Stock() {
         </div>
       </div>
       <ActionError error={saveError} className="no-print" />
+      {pageNotice && (
+        <div className="no-print" role="status" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 12, fontSize: 13, color: 'var(--theme-text1)' }}>
+          <span style={{ flex: 1 }}>{pageNotice}</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPageNotice(null)} aria-label="Dismiss">Dismiss</button>
+        </div>
+      )}
+
+      {loadError && <ReportLoadError error={loadError} />}
 
       {isLocked && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
@@ -761,6 +883,9 @@ export default function Stock() {
         </div>
       )}
 
+      {/* Nothing below the error card while a read has failed: every tab either shows figures the
+          page does not have or saves on-screen state back to the server. */}
+      {!loadError && <>
       {/* Seven tabs (eight with Staff Meals) in a row that had no flexWrap — the shape that hid
           ClientDrawer's last tab. .panel-tab-bar wraps instead, so "Print Sheet" cannot vanish. */}
       <div className="no-print panel-tab-bar" role="tablist" aria-label="Stock count sections">
@@ -1411,6 +1536,7 @@ export default function Stock() {
           </>
         )
       })()}
+      </>}
       {pendingConfirm && (
         <ConfirmModal
           title={pendingConfirm.title}

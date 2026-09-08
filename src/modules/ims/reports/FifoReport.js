@@ -105,7 +105,14 @@ export default function FifoReport() {
 
     // Item-level total consumption this period: sales usage (recipe-exploded) + wastage + staff meals
     const recipeIds = (clientRecipes || []).map(r => r.id)
-    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
+    // consumption figure below silently came out as wastage + staff meals only.
+    let breakdown = {}
+    try {
+      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    } catch (err) {
+      setLoadError(err); setRows([]); return
+    }
     const soldMap = {}
     ;(sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) })
     const consumedMap = {}

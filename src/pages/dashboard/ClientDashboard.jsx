@@ -426,12 +426,15 @@ export default function ClientDashboard() {
     // from dependentPromise, so it's kicked off now and runs alongside the period-scoped batch
     // rather than waiting for that too.
     const dashRecipeIds = (recipes || []).map(r => r.id)
+    // The recipe walk throws on a failed read (S695); null here means "could not be computed"
+    // and is folded into hadRealError below, the same way a failed read in either batch is.
     const ingredientBreakdownPromise = dashRecipeIds.length > 0
-      ? explodeRecipeIngredients(supabase, dashRecipeIds)
+      ? explodeRecipeIngredients(supabase, dashRecipeIds).catch(err => { console.error('Dashboard: recipe walk failed', err); return null })
       : Promise.resolve({})
 
-    const [dependentResults, ingredientBreakdown] = await Promise.all([dependentPromise, ingredientBreakdownPromise])
+    const [dependentResults, rawBreakdown] = await Promise.all([dependentPromise, ingredientBreakdownPromise])
     if (loadIdRef.current !== myId) return // superseded again after these more awaits
+    const ingredientBreakdown = rawBreakdown || {}
 
     const [
       { data: purchases },
@@ -445,6 +448,7 @@ export default function ClientDashboard() {
 
     const hadRealError = (periodErr && periodErr.code !== 'PGRST116')
       || independentResults.some(r => r.error) || dependentResults.some(r => r.error)
+      || rawBreakdown === null
     setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
 
     // PATCHED: purchaseTotal = gross − returns

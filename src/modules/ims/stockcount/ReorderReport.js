@@ -145,7 +145,14 @@ export default function ReorderReport() {
 
     const soldMap = {}; (sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0) })
     const soldRecipeIds = Object.keys(soldMap).filter(id => soldMap[id] > 0)
-    const breakdown = await explodeRecipeIngredients(supabase, soldRecipeIds)
+    // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
+    // item's current stock read as opening + purchases, so nothing ever needed reordering.
+    let breakdown = {}
+    try {
+      breakdown = await explodeRecipeIngredients(supabase, soldRecipeIds)
+    } catch (err) {
+      setLoadError(err); setRows([]); return
+    }
     const usageMap = {}
     soldRecipeIds.forEach(recipeId => {
       (breakdown[recipeId] || []).forEach(({ item_id, qty }) => {

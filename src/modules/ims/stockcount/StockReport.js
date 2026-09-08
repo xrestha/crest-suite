@@ -13,8 +13,10 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { buildStockRows } from './stockReportCalc'
 
 const npr = n => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+const STATUS_LABEL = { out: 'OUT', low: 'LOW', ok: 'OK', idle: 'NO ACTIVITY' }
 
 export default function StockReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -72,9 +74,15 @@ export default function StockReport() {
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
       scopedFrom('recipes', 'id'),
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).order('id')),
+      // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup inside
+      // buildStockRows — the same rule Variance, Theoretical Variance and Shrinkage apply. Read
+      // raw, a day sold in both POS and manual entry consumed its ingredients twice here, and a
+      // credit note (negative qty, 'pos_credit') put stock back on the shelf (S695).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
       scopedFrom('par_levels', 'item_id, par_qty'),
-      supabase.from('requisition_lines').select('item_id, qty_issued, requisitions!inner(period_id, status)').eq('requisitions.period_id', periodId).eq('requisitions.status', 'issued'),
+      // Requisitions are deliberately NOT read here any more — see stockReportCalc.js. Issued
+      // stock is consumed by the recipes the kitchen cooks, which the sales read above already
+      // covers; deducting both took every cooked-and-requisitioned item off twice.
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 valuation (S612 silent-zero rule).
@@ -83,65 +91,25 @@ export default function StockReport() {
     const [
       { data: items }, { data: opening }, { data: closing }, { data: purchases },
       { data: returns }, { data: wastages }, { data: staffMeals }, { data: clientRecipes },
-      { data: sales }, { data: pars }, { data: reqLines }
+      { data: sales }, { data: pars }
     ] = results
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
     // the previous direct recipe_ingredients read only picked up rows with item_id set (dropping
     // sub-recipe ingredients) and never divided by yield_pct at all, understating usage and
-    // overstating the computed on-hand qty for any item with trim/prep loss.
-    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    // overstating the computed on-hand qty for any item with trim/prep loss. It THROWS on a
+    // failed read (S695) — before that a dead recipe_ingredients read walked an empty tree, usage
+    // came out as zero for every dish, and on-hand climbed to opening + purchases with no banner.
+    let breakdown = {}
+    try {
+      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    } catch (err) {
+      if (!periodReq.isCurrent(periodId)) return
+      setLoadError(err); setRows([]); return
+    }
 
-    const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
-    const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
-    const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-    const staffMap = {}; (staffMeals || []).forEach(r => { staffMap[r.item_id] = (staffMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-    const parMap = {}; (pars || []).forEach(r => { parMap[r.item_id] = parseFloat(r.par_qty) || 0 })
-    const reqMap = {}; (reqLines || []).forEach(r => { reqMap[r.item_id] = (reqMap[r.item_id] || 0) + (parseFloat(r.qty_issued) || 0) })
-
-    // Net purchases (purchases − returns)
-    const purchMap = {}
-    ;(purchases || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-    ;(returns   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - (parseFloat(r.qty) || 0) })
-
-    // Usage from sales × recipe. breakdown[recipeId] is already yield_pct-adjusted, per-one-
-    // portion raw-ingredient qty (recursed through any sub-recipe nesting).
-    const soldMap = {}; (sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0) })
-    const usageMap = {}
-    Object.entries(breakdown).forEach(([recipeId, rows]) => {
-      const sold = soldMap[recipeId] || 0
-      if (sold <= 0) return
-      rows.forEach(({ item_id, qty }) => { usageMap[item_id] = (usageMap[item_id] || 0) + sold * qty })
-    })
-
-    const built = (items || []).map(item => {
-      const openQty   = openMap[item.id] || 0
-      const netPurch  = purchMap[item.id] || 0
-      const wasteQty  = wasteMap[item.id] || 0
-      const usageQty  = usageMap[item.id] || 0
-      const staffQty  = staffMap[item.id] || 0
-      const reqQty    = reqMap[item.id] || 0
-      const hasClosing = item.id in closeMap
-      const rawTheoretical = openQty + netPurch - usageQty - wasteQty - staffQty - reqQty
-      const onHand    = hasClosing ? closeMap[item.id] : Math.max(0, rawTheoretical)
-      const isNegative = !hasClosing && rawTheoretical < 0
-      const par       = parMap[item.id] || 0
-      const unitRate  = parseFloat(item.per_uom_rate) || 0
-      const stockValue = onHand * unitRate
-
-      let status
-      if (onHand <= 0) status = 'out'
-      else if (par > 0 && onHand <= par) status = 'low'
-      else status = 'ok'
-
-      return {
-        item, category: item.categories?.name || 'Uncategorised',
-        openQty, netPurch, usageQty, wasteQty, staffQty, reqQty,
-        onHand, isNegative, par, unitRate, stockValue,
-        stockSource: hasClosing ? 'closing' : 'theoretical', status,
-      }
-    })
+    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars })
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRows(built)
@@ -159,7 +127,12 @@ export default function StockReport() {
   const filteredValue = filtered.reduce((s, r) => s + r.stockValue, 0)
   const inStockCount = rows.filter(r => r.onHand > 0).length
   const lowCount     = rows.filter(r => r.status === 'low').length
+  // 'idle' (no activity at all this period) is not 'out' — a dormant item in the master list is
+  // not a stock-out, and counting it as one inflated this KPI by every item nobody had ever
+  // stocked (S695).
   const outCount     = rows.filter(r => r.status === 'out').length
+  const idleCount    = rows.filter(r => r.status === 'idle').length
+  const trackedCount = rows.length - idleCount
   const negativeCount = rows.filter(r => r.isNegative).length
 
   async function exportExcel() {
@@ -175,12 +148,16 @@ export default function StockReport() {
       'Purchased (net)': parseFloat(r.netPurch.toFixed(3)),
       'Used': parseFloat(r.usageQty.toFixed(3)),
       'Wastage': parseFloat(r.wasteQty.toFixed(3)),
+      // Every input to the theoretical figure is on the sheet, so a reader can reproduce On-hand
+      // from the row — Staff Meals was subtracted but absent until S695.
+      'Staff Meals': parseFloat(r.staffQty.toFixed(3)),
+      'Par': r.par || '',
       'Unit Rate (NPR)': r.unitRate,
       'Stock Value (NPR)': parseFloat(r.stockValue.toFixed(0)),
-      'Status': r.status === 'out' ? 'OUT' : r.status === 'low' ? 'LOW' : 'OK',
+      'Status': STATUS_LABEL[r.status],
     }))
     const ws = XLSX.utils.json_to_sheet(data)
-    ws['!cols'] = [22,10,18,8,11,14,10,14,10,10,14,16,8].map(w => ({ wch: w }))
+    ws['!cols'] = [22,10,18,8,11,14,10,14,10,10,12,8,14,16,11].map(w => ({ wch: w }))
     const wb = XLSX.utils.book_new()
     const period = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : 'Report'
     XLSX.utils.book_append_sheet(wb, ws, 'Stock Report')
@@ -193,7 +170,9 @@ export default function StockReport() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const statusBadge = (st) => st === 'out'
     ? <span className="badge badge-red">Out</span>
-    : st === 'low' ? <span className="badge badge-amber">Low</span> : <span className="badge badge-green">OK</span>
+    : st === 'low' ? <span className="badge badge-amber">Low</span>
+    : st === 'idle' ? <span className="badge badge-gray" title="No opening, purchases, usage, wastage or count this period">No activity</span>
+    : <span className="badge badge-green">OK</span>
 
   return (
     <div>
@@ -236,9 +215,9 @@ export default function StockReport() {
           <div className="stat-sub">zero on hand</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Items Tracked</div>
-          <div className="stat-value">{rows.length}</div>
-          <div className="stat-sub">{selectedPeriod?.status === 'open' ? 'Open period' : 'Closed period'}</div>
+          <div className="stat-label"><Tip text="Items with any activity this period — an opening figure, a purchase, usage, wastage, a staff meal or a closing count. Items with none of these are listed as 'No activity' rather than counted as out of stock." width={280}>Items Tracked</Tip></div>
+          <div className="stat-value">{trackedCount}</div>
+          <div className="stat-sub">{idleCount > 0 ? `${idleCount} with no activity · ` : ''}{selectedPeriod?.status === 'open' ? 'Open period' : 'Closed period'}</div>
         </div>
       </div>
       )}
@@ -261,6 +240,7 @@ export default function StockReport() {
           <option value="low">Low Stock</option>
           <option value="out">Out of Stock</option>
           <option value="ok">In Stock</option>
+          <option value="idle">No activity</option>
         </select>
         <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''} · NPR {npr(filteredValue)}</span>
       </div>
@@ -279,8 +259,8 @@ export default function StockReport() {
               <thead>
                 <tr>
                   <th>Item</th><th>Category</th><th>UOM</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Closing physical count if entered for this period; otherwise estimated as Opening + Net Purchases − Usage − Wastage − Staff Meals − Requisitioned." width={280}>On-hand</Tip></th>
-                  <th><Tip text="Physical = your closing count. Theoretical = calculated (less reliable until you do a stock count)." width={240}>Source</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Closing physical count if entered for this period (a count of 0 counts); otherwise estimated as Opening + Net Purchases − Usage (sales × recipe) − Wastage − Staff Meals. Requisitions are not deducted: the recipes the kitchen cooks already consume what was issued." width={300}>On-hand</Tip></th>
+                  <th><Tip text="Physical = your closing count, including a count of 0. Theoretical = calculated (less reliable until you do a stock count)." width={240}>Source</Tip></th>
                   <th style={{ textAlign: 'right' }}>Opening</th>
                   <th style={{ textAlign: 'right' }}>Purchased</th>
                   <th style={{ textAlign: 'right' }}>Used</th>

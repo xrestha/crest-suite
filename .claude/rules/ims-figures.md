@@ -70,6 +70,48 @@ Two standing notes for this page specifically:
   since no network is involved.
 - **Stock Count includes sub-recipes; `MonthlySummary.js` excludes them** (`.eq('is_sub_recipe', false)`). Both are deliberate — Stock Count physically counts prep — but it means the two pages' COGS for the same month differ by exactly the sub-recipe amount, with nothing on either page saying so. Left as-is; if this is ever reconciled, it is a product decision about which figure "COGS" names, not a bug fix.
 
+### Stock Count and Stock Report: what a 0 means, what a requisition is, and what a failed read does (S695)
+
+Three rules from a re-audit of `Stock.js` and `StockReport.js`, each decided with Aashish on
+2026-09-08:
+
+- **A Closing Stock of 0 is a COUNT, stored as a `closing_stock` row with `physical_qty = 0`.
+  Blank is "not counted" and is no row.** `toQty()` / `isNoRow()` at the top of `Stock.js` are the
+  one place that distinction is made — every save path (autosave, Save All, Clear All, the offline
+  queue, Pull from last month) goes through them. Before this every save ran `parseFloat(v) || 0`
+  and a 0 deleted the row, so "we counted it and there was none" and "nobody counted it" were the
+  same fact in the database, and Stock Report valued a counted-empty item at its theoretical
+  estimate. On every other field (opening, wastage, staff meal) 0 and blank still both mean "no
+  row". Clear All therefore blanks, never zeroes. Consumers that test `physical_qty > 0` treat a 0
+  row as uncounted, which is the old behaviour and not a regression; consumers that test
+  `item.id in closeMap` (Stock Report, Reorder, Variance, the dashboards) now see it as counted,
+  which is the point. The period-close carry-forward already filtered on `IS NOT NULL`.
+- **A requisition is NOT a stock deduction.** Issued stock is consumed by the recipes the kitchen
+  cooks, and sales × recipe already subtracts that. `StockReport.js` and `Requisitions.js`'s
+  over-issue guard both deducted it on top, taking every cooked-and-requisitioned item off twice
+  and blaming "a missing purchase entry". Requisitioned stays a cross-check column on Stock
+  Count's Summary. The arithmetic now lives in `stockReportCalc.js` (`buildStockRows` /
+  `buildUsageMap`, tested) and runs sales through `selectDepletingSales` like every other
+  consumer of theoretical usage — Stock Report had been the one page still summing raw rows, so a
+  POS-and-manual day consumed twice and a credit note put stock back.
+- **A failed read on Stock Count renders NOTHING below the error card.** Every read there
+  destructured `{ data }` and dropped `error`; an RLS refusal or auth stall showed every cell
+  blank, and Save All — which writes on-screen state, where blank means delete — then removed the
+  server's real rows for every visible item. That is the batch-save shape
+  `frontend-performance.md` warns about, on the one page where it destroys data rather than
+  misreporting it. The same audit found "✓ Saved" flashing after a refused bulk write (the catch
+  records the failure and resolves), Pull from last month never checking its upsert and reading a
+  failed read as "never counted", and an offline period switch with no cache keeping the previous
+  month's figures under the new label. `persistValue`/`persistValuesBulk` now resolve a boolean
+  and the success state is gated on it.
+
+**`explodeRecipeTree()` throws on a failed read (S695).** It used to drop `error` and walk an
+empty tree, so every consumer's usage came out as zero — on-hand climbed to opening + purchases,
+Variance read as fully under-consumed — with nothing on any page saying a read had failed. Every
+page-level caller now wraps it and routes to its own `setLoadError`; the dashboards flag their
+section; the write paths (`PosOrders`, `depleteManualSales`, the POS backfill) already ran it
+inside a try/catch. A new caller must do the same.
+
 **Variance-style reports must default to a CLOSED period.** Closing stock is counted at month end, so on an open period `closeQty` is 0 for every item, "actual used" becomes everything on hand plus everything bought, and the page paints a red "potential loss" figure on a month that structurally cannot have one. `Variance.js`/`TheoreticalVariance.js` now default to the most recent closed period and, if an open one is selected anyway, say the count is missing and render the figures neutral and unflagged rather than hiding them. `ShrinkageReport.js` and `ReorderReport.js` already did their own version of this.
 
 **And the period a report covers is a fact the page must STATE, not bury.** Across the IMS report

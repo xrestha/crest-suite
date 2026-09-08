@@ -155,7 +155,15 @@ export default function SupplierContribution() {
     }
 
     const recipeIds = Object.keys(soldByRecipe)
-    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and the
+    // whole period's consumed value silently came out as NPR 0.
+    let breakdown = {}
+    try {
+      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    } catch (err) {
+      if (!periodReq.isCurrent(periodId)) return
+      setLoadError(err); setRows([]); setTotals({ attributed: 0, consumed: 0, unattributed: 0 }); return
+    }
 
     // breakdown[recipeId] is per-one-portion, yield_pct-adjusted and already recursed through any
     // sub-recipe nesting, so a prep item never appears here — only the raw items at the bottom of

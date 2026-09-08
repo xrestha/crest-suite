@@ -203,7 +203,15 @@ export default function StockAgeing() {
     // manual bulk entry doesn't count the same dish twice and over-consume its own batches —
     // which here would make real stock vanish from the shelf rather than merely skew a variance.
     const recipeIds = (clientRecipes || []).map(r => r.id)
-    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
+    // batch on the shelf read as never consumed.
+    let breakdown = {}
+    try {
+      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    } catch (err) {
+      if (!fyReq.isCurrent(fy)) return
+      setLoadError(err); setRows([]); setTotals(null); setCarriedForwardTotal(0); return
+    }
     if (!fyReq.isCurrent(fy)) return   // superseded while the recipe walk was in flight
     const soldByRecipe = {}
     for (const s of selectDepletingSales(sales || [])) {

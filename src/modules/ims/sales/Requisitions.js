@@ -16,6 +16,7 @@ import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { buildUsageMap } from '../stockcount/stockReportCalc'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const DEPARTMENTS = [
@@ -174,18 +175,21 @@ export default function Requisitions() {
       scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).order('id')),
+      // source + bs_day feed the shared POS-supersedes-manual dedup (S695) — the same rule
+      // Stock Report applies, so this guard and that page agree on "available".
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
       scopedFrom('recipes', 'id'),
-      supabase.from('requisition_lines').select('item_id, qty_issued, requisitions!inner(id, period_id, status)')
-        .eq('requisitions.period_id', periodId).eq('requisitions.status', 'issued'),
+      // Issued requisitions are deliberately NOT read here any more (S695, decided with Aashish):
+      // what the store issued is consumed by the recipes the kitchen then cooks, and sales × recipe
+      // below already subtracts that. Deducting both took every cooked-and-requisitioned item off
+      // twice — and on this guard that meant refusing a requisition the store could fill.
     ])
     // A guard whose read failed has not passed (S613): a dropped deduction read INFLATES
     // estimated on-hand, waving the over-issue warning through exactly when the network is
     // the problem. Signal the caller instead of computing from partial data.
     if (firstError(results)) return null
     const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns },
-      { data: wastages }, { data: staffMealsData }, { data: sales }, { data: clientRecipes },
-      { data: reqLines }] = results
+      { data: wastages }, { data: staffMealsData }, { data: sales }, { data: clientRecipes }] = results
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
@@ -194,28 +198,22 @@ export default function Requisitions() {
     ;(returns   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - (parseFloat(r.qty) || 0) })
     const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
     const staffMap = {}; (staffMealsData || []).forEach(r => { staffMap[r.item_id] = (staffMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) })
-    const reqMap = {}
-    ;(reqLines || []).forEach(r => {
-      if (excludeReqId && r.requisitions?.id === excludeReqId) return
-      reqMap[r.item_id] = (reqMap[r.item_id] || 0) + (parseFloat(r.qty_issued) || 0)
-    })
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
-    const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
-    const soldMap = {}
-    ;(sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0) })
-    const usageMap = {}
-    Object.entries(breakdown).forEach(([recipeId, rows]) => {
-      const sold = soldMap[recipeId] || 0
-      if (sold <= 0) return
-      rows.forEach(({ item_id, qty }) => { usageMap[item_id] = (usageMap[item_id] || 0) + sold * qty })
-    })
+    // The recipe walk throws on a failed read (S695); same answer as any other failed read here.
+    let breakdown = {}
+    try {
+      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+    } catch (_) {
+      return null
+    }
+    const usageMap = buildUsageMap(sales, breakdown)
 
     const onHand = {}
     items.forEach(item => {
       const hasClosing = item.id in closeMap
       const rawTheoretical = (openMap[item.id] || 0) + (purchMap[item.id] || 0)
-        - (usageMap[item.id] || 0) - (wasteMap[item.id] || 0) - (staffMap[item.id] || 0) - (reqMap[item.id] || 0)
+        - (usageMap[item.id] || 0) - (wasteMap[item.id] || 0) - (staffMap[item.id] || 0)
       onHand[item.id] = hasClosing ? closeMap[item.id] : Math.max(0, rawTheoretical)
     })
     return onHand
