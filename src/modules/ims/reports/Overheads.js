@@ -7,6 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -68,9 +69,10 @@ function seedBucket(key) {
 }
 
 export default function Overheads() {
-  const { profile, clientId, isAdmin, hasImsAccess } = useAuth()
+  const { profile, clientId, isAdmin, hasImsAccess, clientModules } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
+  const hrOn = !!clientModules?.hr
 
   const [periods, setPeriods]       = useState([])
   const [periodId, setPeriodId]     = useState('')
@@ -81,9 +83,14 @@ export default function Overheads() {
   const [loadError, setLoadError]   = useState(null)
   const [saving, setSaving]         = useState(false)
   const [saved, setSaved]           = useState(false)
+  const [saveError, setSaveError]   = useState(null)
 
   useEffect(() => { if (effectiveClientId) loadPeriods() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (periodId) loadAll() }, [periodId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // `hrOn` is a dependency, not just an input: for an ADMIN viewing a client it comes from
+  // `viewModules`, which resolves on its own schedule — so the first load can run with hrOn=false
+  // and silently fall back to the Labor bucket on a client who does run payroll. Re-run when it
+  // settles. It is memoized in AuthContext, so this cannot loop.
+  useEffect(() => { if (periodId) loadAll() }, [periodId, hrOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadPeriods() {
     const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
@@ -187,9 +194,20 @@ export default function Overheads() {
     const results = await Promise.all([
       fetchAllRows(() => supabase.from('purchase_entries').select('qty, rate').eq('period_id', periodId).order('id')),
       scopedFrom('vendor_returns', 'qty, rate').eq('period_id', periodId),
-      // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
-      scopedFrom('recipes', 'id, selling_price')
+      // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
+      // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
+      // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
+      // the server-side form silently dropped every legacy manual row from REVENUE. On a
+      // dashboard that under-reports one figure; on THIS page revenue is the denominator of every
+      // percentage, and the numerator (food cost, from purchases) stayed whole — so Food Cost %
+      // and every "% of revenue" read HIGH, break-even read HIGH, and Net Profit read LOW, which
+      // is the sign of the "✓ Profitable / ✗ Operating at a loss" verdict directly below it.
+      // Pinned by salesReads.test.js, which is why `source` must stay in the column list.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId).order('id')),
+      scopedFrom('recipes', 'id, selling_price'),
+      // Labour is payroll XOR the Overheads 'labor' bucket, never the sum (.claude/rules/
+      // dashboards.md). Only asked for when HR is on; `{ data: [] }` keeps the tuple shape.
+      hrOn ? scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', periodId).eq('status', 'finalized') : { data: [] },
     ])
     // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S612).
     const failed = firstError(results)
@@ -198,8 +216,22 @@ export default function Overheads() {
       { data: purchases },
       { data: returns },
       { data: salesData },
-      { data: recipes }
+      { data: recipes },
+      { data: runs }
     ] = results
+
+    // Finalized payroll for this period — gross + employer SSF, the same definition
+    // get_group_summary and ConsolidatedPnl use, so the three never disagree about what labour
+    // costs. A finalized run whose payslips cannot be read must REFUSE rather than fall through
+    // to the Overheads bucket: that would quietly substitute a different labour source for the
+    // one the page says it used.
+    let labourPayroll = null
+    const runIds = (runs || []).map(r => r.id)
+    if (runIds.length > 0) {
+      const { data: slips, error: slipErr } = await scopedFrom('hr_payslips', 'gross, ssf_employer').in('run_id', runIds)
+      if (slipErr) { setLoadError(slipErr.message); setPeriodData(null); return }
+      labourPayroll = (slips || []).reduce((s, ps) => s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
+    }
 
     const gross  = (purchases || []).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
     const ret    = (returns  || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
@@ -212,15 +244,23 @@ export default function Overheads() {
     // this period's revenue silently reflected today's menu price, not what was charged then.
     const soldMap = {}, revenueBySold = {}
     ;(salesData || []).forEach(s => {
+      if (s.source === 'pos_comp') return   // never billed; see the read above
       const qty = parseFloat(s.qty_sold || 0)
       const price = s.unit_price != null ? parseFloat(s.unit_price) : (recipeMap[s.recipe_id] || 0)
       soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + qty
       revenueBySold[s.recipe_id] = (revenueBySold[s.recipe_id] || 0) + qty * price - (parseFloat(s.discount) || 0)
     })
     const revenue = Object.values(revenueBySold).reduce((s, v) => s + v, 0)
-    const covers  = Object.values(soldMap).reduce((s, qty) => s + qty, 0)
+    // DISHES, not covers. This is Σ qty_sold — one unit per portion sold, so a table of four
+    // sharing three plates is three, not four. `covers` is a real and DIFFERENT figure in this
+    // product (`pos_orders.covers`, the Covers Report, the Demand Forecast) meaning guests on a
+    // bill, and Help says plainly that covers come from POS bills and manual Sales Entries carry
+    // none. This page reads sales_entries, so covers are not available to it for an IMS-only
+    // client — the figure is honest, the old label was not. Comps are excluded from both revenue
+    // and the count so avg dish price divides like with like.
+    const dishes  = Object.values(soldMap).reduce((s, qty) => s + qty, 0)
 
-    setPeriodData({ revenue, foodCost, covers })
+    setPeriodData({ revenue, foodCost, dishes, labourPayroll })
   }
 
   function updateRow(bucket, idx, field, value) {
@@ -238,10 +278,39 @@ export default function Overheads() {
     setRows(prev => ({ ...prev, [bucket]: prev[bucket].filter((_, i) => i !== idx) }))
   }
 
+  // Replace-the-period save: delete this period's rows, then insert what is on screen. Neither
+  // half used to be checked, and supabase-js RESOLVES with `{ error }` rather than throwing — so
+  // a bare `await` discarded the only evidence either call failed and the button said "✓ Saved"
+  // regardless. Both failure directions were live:
+  //
+  //   delete fails, insert lands  → the period holds BOTH versions, and every consumer that sums
+  //                                 it double-counts (ClientDashboard's overheadTotal, Owner
+  //                                 Dashboard, the Monthly Owner Report, Recipes' True Cost
+  //                                 allocation, get_group_pnl).
+  //   delete lands, insert fails  → the period is EMPTY. `loadOverheads()` then found nothing,
+  //                                 fell into the carry-forward branch and seeded the previous
+  //                                 month's figures as a draft — so the owner was shown plausible
+  //                                 numbers under a success tick, over data that no longer
+  //                                 existed. That reload is now skipped on failure: the rows in
+  //                                 state are the only surviving copy of what they typed.
+  //
+  // The read path above has carried a comment about exactly this class since S612 ("on a
+  // data-entry page the silent-zero class is a data-loss class"); the write path had no guard.
   async function save() {
-    if (!effectiveClientId) { alert('Nothing was saved — no client is selected. Pick one in the switcher at the top left, then save again.'); return }
+    if (!effectiveClientId) { setSaveError('Nothing was saved — no client is selected. Pick one in the switcher at the top left, then save again.'); return }
     setSaving(true)
-    await scopedDelete('overheads').eq('period_id', periodId)
+    setSaveError(null)
+
+    // Ordered so the half that can refuse comes FIRST: nothing has been destroyed yet, so this
+    // failure is a clean no-op and the message can say so.
+    const { error: delErr } = await scopedDelete('overheads').eq('period_id', periodId)
+    if (delErr) {
+      const { text, detail } = asActionError(delErr)
+      setSaveError({ text: `Nothing was saved and nothing was changed — this period's saved figures are still as they were. ${text}`, detail })
+      setSaving(false)
+      return
+    }
+
     const inserts = []
     Object.entries(rows).forEach(([bucket, bucketRows]) => {
       bucketRows
@@ -254,7 +323,22 @@ export default function Overheads() {
           amount:      parseFloat(r.amount) || 0,
         }))
     })
-    if (inserts.length > 0) await scopedInsert('overheads', inserts)
+
+    if (inserts.length > 0) {
+      const { error: insErr } = await scopedInsert('overheads', inserts)
+      if (insErr) {
+        const { text, detail } = asActionError(insErr)
+        // The delete already committed. Never claim the write did not land — a dead fetch cannot
+        // prove that — and name the state the record is now in plus the way out (S619).
+        setSaveError({
+          text: `This period's fixed costs were cleared but the new figures did not save, so ${period?.label || 'this period'} currently has none stored. Everything you entered is still on screen and has NOT been lost — press Save again. Do not reload the page first. ${text}`,
+          detail,
+        })
+        setSaving(false)
+        return   // deliberately no reload: it would replace the only surviving copy with a carry-forward draft
+      }
+    }
+
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
@@ -267,11 +351,39 @@ export default function Overheads() {
     tax_fees: rows.tax_fees.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
   }), [rows])
 
-  const totalFixed = totals.overhead + totals.labor + totals.tax_fees
   const revenue  = periodData?.revenue  || 0
   const foodCost = periodData?.foodCost || 0
-  const covers   = periodData?.covers   || 0
+  const dishes   = periodData?.dishes   || 0
+
+  // Labour is payroll XOR the Overheads 'labor' bucket, NEVER the sum — the two are different
+  // measurements of the same cost and adding them double-counts (S526, .claude/rules/
+  // dashboards.md). A finalized HR payroll run supersedes whatever was typed on the Labor tab.
+  // Before this, the page could see neither: an HR client who runs payroll properly and leaves
+  // the Labor tab blank had a Net Profit overstated by their entire wage bill, painted green,
+  // under the words "✓ Profitable this period".
+  const labourPayroll  = periodData?.labourPayroll ?? null
+  const labourEffective = labourPayroll != null ? labourPayroll : totals.labor
+  const labourSource   = labourPayroll != null ? 'payroll' : totals.labor > 0 ? 'overheads' : 'none'
+  // Named on screen with its amount rather than silently dropped, so the two figures can be
+  // reconciled by whoever notices they differ.
+  const ignoredLabourBucket = labourPayroll != null && totals.labor > 0 ? totals.labor : 0
+
+  const totalFixed = totals.overhead + labourEffective + totals.tax_fees
   const netProfit = revenue > 0 ? revenue - foodCost - totalFixed : null
+
+  // A bucket with nothing in it has not been measured at 0 — it has not been entered. The
+  // distinction has to be carried from here to the cell, because the first `? :` that defaults it
+  // to 0 destroys it and no care at the call site gets it back (S713). `trafficLight(0, 30)`
+  // returns GREEN: 0 − 30 ≤ 2, so an untouched Labor tab rendered "0.0%" as comfortably inside a
+  // 30% target — the most flattering possible rendering of "we do not know what this costs". And
+  // `seedBucket()` writes blank preset rows into every new period, so the page manufactured its
+  // own examples.
+  const entered = {
+    food:  foodCost > 0,
+    labor: labourSource !== 'none',
+    oh:    totals.overhead > 0,
+    tax:   totals.tax_fees > 0,
+  }
   // BS months run 28-32 days, never 30 — a hardcoded /30 over/understates daily burn by up to
   // ~7% depending on the period.
   const selectedPeriodObj = periods.find(p => p.id === periodId)
@@ -279,7 +391,9 @@ export default function Overheads() {
 
   const hasSales = revenue > 0
 
+  // `null` in means `null` out: an absent figure has no ratio, and banding it would band a zero.
   function pct(amount, base) {
+    if (amount == null) return null
     return base > 0 ? (amount / base) * 100 : null
   }
 
@@ -309,20 +423,37 @@ export default function Overheads() {
     return `NPR ${Number(val || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
   }
 
-  // P&L rows
+  // P&L rows. An un-entered cost line carries `amount: null` — not 0 — so it renders as "—" in
+  // the muted tone instead of a green 0.0% beating its target. Net Profit is the one row that is
+  // genuinely computed rather than entered, so it keeps its value; the note beneath the strip
+  // says which lines are missing from it.
   const pnlRows = hasSales ? [
-    { key: 'food',   label: 'Food Cost',  amount: foodCost,        target: 30, color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
-    { key: 'labor',  label: 'Labor',      amount: totals.labor,    target: 30, color: 'var(--theme-text1)', textColor: 'var(--theme-text1)' },
-    { key: 'oh',     label: 'Overhead',   amount: totals.overhead, target: 25, color: 'var(--theme-green)', textColor: 'var(--theme-green-text)' },
-    { key: 'tax',    label: 'Tax & Fees', amount: totals.tax_fees, target: 5,  color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
+    { key: 'food',   label: 'Food Cost',  amount: entered.food  ? foodCost         : null, target: 30, color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+    { key: 'labor',  label: 'Labor',      amount: entered.labor ? labourEffective  : null, target: 30, color: 'var(--theme-text1)', textColor: 'var(--theme-text1)',
+      note: labourSource === 'payroll' ? 'from finalized payroll' : labourSource === 'overheads' ? 'from Overheads entry' : hrOn ? 'no finalized payroll run, and nothing on the Labor tab' : 'nothing on the Labor tab' },
+    { key: 'oh',     label: 'Overhead',   amount: entered.oh    ? totals.overhead  : null, target: 25, color: 'var(--theme-green)', textColor: 'var(--theme-green-text)' },
+    { key: 'tax',    label: 'Tax & Fees', amount: entered.tax   ? totals.tax_fees  : null, target: 5,  color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
     { key: 'profit', label: 'Net Profit', amount: netProfit,       target: 10,
       color:     netProfit != null && netProfit >= 0 ? 'var(--theme-green)'      : 'var(--theme-red)',
       textColor: netProfit != null && netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' },
   ] : null
 
+  // Every cost line the statement is missing, for the caveat under Net Profit. A statement that
+  // silently omits a cost overstates profit by exactly that much.
+  const missingLines = [
+    !entered.food  && 'Food Cost',
+    !entered.labor && 'Labor',
+    !entered.oh    && 'Overhead',
+    !entered.tax   && 'Tax & Fees',
+  ].filter(Boolean)
+
   // Cross-bucket ranked pivot — all line items with amount > 0, sorted by spend
   const allLineItems = useMemo(() => {
-    return Object.entries(rows).flatMap(([bucket, bucketRows]) =>
+    const lines = Object.entries(rows).flatMap(([bucket, bucketRows]) =>
+      // When finalized payroll supersedes the Labor bucket, the typed labour rows are NOT part of
+      // this statement — listing them would make the table's own TOTAL disagree with the
+      // "100%" it prints underneath, which is the two-tables-must-tie-out rule.
+      bucket === 'labor' && labourPayroll != null ? [] :
       bucketRows
         .filter(r => parseFloat(r.amount) > 0)
         .map(r => ({
@@ -330,18 +461,31 @@ export default function Overheads() {
           category:    r.category || '—',
           description: r.description || '',
           amount:      parseFloat(r.amount),
-          pctOfTotal:  totalFixed > 0 ? (parseFloat(r.amount) / totalFixed) * 100 : 0,
-          pctOfRev:    revenue    > 0 ? (parseFloat(r.amount) / revenue)    * 100 : null,
         }))
-    ).sort((a, b) => b.amount - a.amount)
-  }, [rows, totalFixed, revenue])
+    )
+    if (labourPayroll != null && labourPayroll > 0) {
+      lines.push({
+        bucket: 'labor',
+        category: 'Payroll',
+        description: 'Finalized HR payroll run — gross pay + employer SSF',
+        amount: labourPayroll,
+      })
+    }
+    return lines
+      .map(l => ({
+        ...l,
+        pctOfTotal: totalFixed > 0 ? (l.amount / totalFixed) * 100 : 0,
+        pctOfRev:   revenue    > 0 ? (l.amount / revenue)    * 100 : null,
+      }))
+      .sort((a, b) => b.amount - a.amount)
+  }, [rows, totalFixed, revenue, labourPayroll])
 
   // Break-even
-  const avgTicket = covers > 0 ? revenue / covers : 0
+  const avgDishPrice = dishes > 0 ? revenue / dishes : 0
   const fcPct     = revenue > 0 ? foodCost / revenue : 0.30
   const contribMargin   = 1 - fcPct
   const breakEvenRev    = contribMargin > 0 && totalFixed > 0 ? totalFixed / contribMargin : null
-  const breakEvenCovers = avgTicket > 0 && breakEvenRev ? Math.ceil(breakEvenRev / avgTicket) : null
+  const breakEvenDishes = avgDishPrice > 0 && breakEvenRev ? Math.ceil(breakEvenRev / avgDishPrice) : null
   const isAboveBreakEven = breakEvenRev != null && revenue >= breakEvenRev
 
   const period  = periods.find(p => p.id === periodId)
@@ -383,9 +527,23 @@ export default function Overheads() {
           could not read is a data-loss shape, not just a wrong figure (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
+      {/* A failed save is announced where the Save button is, not swallowed. role="alert" comes
+          from ActionError: someone who pressed Save and heard nothing has been told it worked. */}
+      <ActionError error={saveError} className="action-error--top" />
+
       {isLocked && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
+        </div>
+      )}
+
+      {/* The ignored labour source is NAMED with its amount rather than silently dropped, so an
+          owner who notices the two figures differ can reconcile them instead of guessing which
+          one the statement used. */}
+      {ignoredLabourBucket > 0 && (
+        <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--theme-accent-ink)' }}>Labour comes from your finalized payroll run this period ({fmt(labourEffective)}).</strong>{' '}
+          The {fmt(ignoredLabourBucket)} on the Labor tab is <strong>not</strong> added to the P&amp;L below — payroll and the Labor bucket are two measurements of the same cost, and summing them would double-count it. The tab stays editable for months with no payroll run.
         </div>
       )}
 
@@ -393,20 +551,27 @@ export default function Overheads() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
         {[
           {
-            label: 'Fixed Overheads', value: fmt(totals.overhead),
-            sub: fmtPct(totals.overhead, revenue) ? `${fmtPct(totals.overhead, revenue)} of revenue` : 'No sales data',
+            // An empty bucket reads "Not entered yet", never "NPR 0 · 0.0% of revenue" — the
+            // latter is a measurement, and nobody measured it (S713).
+            label: 'Fixed Overheads', value: entered.oh ? fmt(totals.overhead) : '—',
+            sub: !entered.oh ? 'Not entered yet'
+               : fmtPct(totals.overhead, revenue) ? `${fmtPct(totals.overhead, revenue)} of revenue` : 'No sales data',
             color: 'var(--theme-accent-ink)',
             tip: 'Rent, utilities, tech, marketing — costs that exist regardless of how many customers you serve.'
           },
           {
-            label: 'Labor Costs', value: fmt(totals.labor),
-            sub: fmtPct(totals.labor, revenue) ? `${fmtPct(totals.labor, revenue)} of revenue` : 'No sales data',
+            label: 'Labor Costs', value: entered.labor ? fmt(labourEffective) : '—',
+            sub: !entered.labor ? (hrOn ? 'No finalized payroll run, nothing entered' : 'Not entered yet')
+               : fmtPct(labourEffective, revenue) ? `${fmtPct(labourEffective, revenue)} of revenue${labourSource === 'payroll' ? ' · payroll' : ''}` : 'No sales data',
             color: 'var(--theme-text1)',
-            tip: 'Salaries, wages, and benefits. Industry target: ~30% of revenue.'
+            tip: labourSource === 'payroll'
+              ? 'Your finalized HR payroll run for this period — gross pay plus employer SSF. It supersedes whatever is typed on the Labor tab; the two are never added together. Industry target: ~30% of revenue.'
+              : 'Salaries, wages, and benefits, as entered on the Labor tab. Industry target: ~30% of revenue.'
           },
           {
-            label: 'Tax & Fees', value: fmt(totals.tax_fees),
-            sub: fmtPct(totals.tax_fees, revenue) ? `${fmtPct(totals.tax_fees, revenue)} of revenue` : 'No sales data',
+            label: 'Tax & Fees', value: entered.tax ? fmt(totals.tax_fees) : '—',
+            sub: !entered.tax ? 'Not entered yet'
+               : fmtPct(totals.tax_fees, revenue) ? `${fmtPct(totals.tax_fees, revenue)} of revenue` : 'No sales data',
             color: 'var(--theme-purple-text)',
             tip: 'VAT compliance, card processing fees, bank charges, licenses. Often forgotten but real.'
           },
@@ -414,7 +579,7 @@ export default function Overheads() {
             label: 'Total Fixed Costs', value: fmt(totalFixed),
             sub: fmtPct(totalFixed, revenue) ? `${fmtPct(totalFixed, revenue)} of revenue` : 'Overhead + Labor + Tax',
             color: 'var(--theme-text1)',
-            tip: 'Sum of all three buckets. Every month you must earn more than this just to survive.'
+            tip: 'Overhead + Labor + Tax & Fees. Every month you must earn more than this just to survive. A bucket you have not entered is missing from it, not zero.'
           },
           {
             label: 'Daily Fixed Cost', value: fmt(totalFixed / daysInSelectedMonth),
@@ -563,7 +728,7 @@ export default function Overheads() {
             <div>
               <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>P&L Summary</h3>
               <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text3)' }}>
-                Revenue: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(covers).toLocaleString('en-IN')} covers &nbsp;·&nbsp; {period?.label || '—'}
+                Revenue: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(dishes).toLocaleString('en-IN')} dishes sold &nbsp;·&nbsp; {period?.label || '—'}
               </p>
             </div>
             <Tip text="Food cost uses net purchases ÷ revenue (purchase-based). For COGS-based food cost, see Monthly Summary." width={240}>
@@ -574,28 +739,35 @@ export default function Overheads() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {pnlRows.map(row => {
               const actualPct  = pct(row.amount, revenue)
-              const numPct     = actualPct || 0
               const isProfit   = row.key === 'profit'
-              // Two values again: barColor fills the progress bar, barText labels the percentage
-              // beside it. The single value was the base token, which is a fill colour.
-              const barColor   = isProfit
-                ? (row.amount != null && row.amount >= 0 ? 'var(--theme-green)' : 'var(--theme-red)')
-                : trafficLightFill(numPct, row.target)
-              const barText    = isProfit
-                ? (row.amount != null && row.amount >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)')
-                : trafficLight(numPct, row.target)
-              const barWidth   = Math.min(Math.abs(numPct), 100)
+              // An un-entered line has no percentage and therefore no band. Passing `null` through
+              // to trafficLight() gets the muted tone rather than the green that `0 − target ≤ 2`
+              // used to produce, and the bar stays empty instead of drawing a full-width success.
+              const isMissing  = row.amount == null
+              const numPct     = actualPct == null ? null : actualPct
+              const barColor   = isMissing ? 'var(--theme-border)'
+                : isProfit
+                  ? (row.amount >= 0 ? 'var(--theme-green)' : 'var(--theme-red)')
+                  : trafficLightFill(numPct, row.target)
+              const barText    = isMissing ? 'var(--theme-text3)'
+                : isProfit
+                  ? (row.amount >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)')
+                  : trafficLight(numPct, row.target)
+              const barWidth   = numPct == null ? 0 : Math.min(Math.abs(numPct), 100)
 
               return (
                 <div key={row.key}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 0, background: row.color, display: 'inline-block', flexShrink: 0 }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 0, background: isMissing ? 'var(--theme-border)' : row.color, display: 'inline-block', flexShrink: 0 }} />
                       <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 90 }}>{row.label}</span>
                       <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>target {row.target}%</span>
+                      {row.note && <span style={{ fontSize: 11, color: 'var(--theme-text3)', fontStyle: 'italic' }}>· {row.note}</span>}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-                      <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{fmt(row.amount)}</span>
+                      <span style={{ fontSize: 13, color: isMissing ? 'var(--theme-text3)' : 'var(--theme-text2)' }}>
+                        {isMissing ? 'not entered' : fmt(row.amount)}
+                      </span>
                       <span style={{ fontSize: 14, fontWeight: 700, color: barText, minWidth: 54, textAlign: 'right' }}>
                         {actualPct != null
                           ? `${isProfit && row.amount >= 0 ? '+' : ''}${actualPct.toFixed(1)}%`
@@ -610,6 +782,15 @@ export default function Overheads() {
               )
             })}
           </div>
+
+          {/* A statement that silently omits a cost overstates profit by exactly that much, and
+              the Net Profit callout directly below prints a green ✓ on it. Say which lines are
+              missing before the verdict, not after. */}
+          {missingLines.length > 0 && (
+            <p style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
+              △ Net Profit below does <strong>not</strong> include {missingLines.join(', ')} — {missingLines.length === 1 ? 'that line has' : 'those lines have'} nothing recorded for this period, so profit is overstated by whatever {missingLines.length === 1 ? 'it costs' : 'they cost'}.
+            </p>
+          )}
 
           {/* Net profit callout */}
           {netProfit != null && (
@@ -644,7 +825,7 @@ export default function Overheads() {
           {/* Revenue cost stack — only when sales data available */}
           {hasSales && (() => {
             const fc  = { key: 'food',     label: 'Food Cost', color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)', amount: foodCost,        pct: pct(foodCost,        revenue) || 0 }
-            const lb  = { key: 'labor',    label: 'Labor',     color: 'var(--theme-text1)', textColor: 'var(--theme-text1)', amount: totals.labor,    pct: pct(totals.labor,    revenue) || 0 }
+            const lb  = { key: 'labor',    label: 'Labor',     color: 'var(--theme-text1)', textColor: 'var(--theme-text1)', amount: labourEffective, pct: pct(labourEffective, revenue) || 0 }
             const oh  = { key: 'overhead', label: 'Overhead',  color: 'var(--theme-green)', textColor: 'var(--theme-green-text)', amount: totals.overhead, pct: pct(totals.overhead, revenue) || 0 }
             const tx  = { key: 'tax',      label: 'Tax & Fees',color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
             const prPct = netProfit != null ? pct(netProfit, revenue) : null
@@ -655,8 +836,13 @@ export default function Overheads() {
             const segments = [fc, lb, oh, tx, pr].filter(s => s.amount != null && s.pct > 0.2)
             return (
               <div style={{ marginBottom: 24 }}>
+                {/* The scope this chart is drawn on has to be stated HERE too, not only in the
+                    P&L Summary header — a report that states a scope must state it everywhere the
+                    report goes, and this bar carries the same purchase-based Food Cost. */}
                 <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 10 }}>
                   Where each rupee of revenue goes &nbsp;·&nbsp; <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 600 }}>Revenue {fmt(revenue)}</span>
+                  <span style={{ color: 'var(--theme-text3)' }}> &nbsp;·&nbsp; Food Cost is purchase-based (net purchases), not COGS
+                  {missingLines.length > 0 ? ` · no ${missingLines.join(', ')} recorded, so the profit slice absorbs ${missingLines.length === 1 ? 'it' : 'them'}` : ''}</span>
                 </div>
                 {/* Stacked bar */}
                 <div style={{ display: 'flex', height: 36, borderRadius: 'var(--radius-sm)', overflow: 'hidden', gap: 2, marginBottom: 10 }}>
@@ -697,6 +883,14 @@ export default function Overheads() {
                     <span style={{ fontSize: 12, fontWeight: 700, color: cfg.textColor || cfg.color }}>{cfg.label}</span>
                     <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{fmt(total)}</span>
                   </div>
+                  {/* These are the TYPED rows. When payroll supersedes them they are still worth
+                      showing — they are what is stored — but the card must not imply they are in
+                      the statement above. */}
+                  {key === 'labor' && labourPayroll != null && (
+                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 10px', lineHeight: 1.5 }}>
+                      Superseded by finalized payroll ({fmt(labourPayroll)}) in the P&amp;L above.
+                    </p>
+                  )}
                   {total === 0 ? (
                     <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>No entries yet.</p>
                   ) : bucketRows.length === 0 ? (
@@ -811,7 +1005,7 @@ export default function Overheads() {
             borderColor: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'color-mix(in srgb, var(--theme-red) 20%, transparent)'
           }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
-              <Tip text="The minimum revenue / covers needed to cover all fixed costs. Below this = loss. Above = profit begins." width={230}>Break-Even Analysis</Tip>
+              <Tip text="The minimum revenue / dishes needed to cover all fixed costs. Below this = loss. Above = profit begins. Dishes, not covers: this is portions sold, and one guest usually orders several." width={250}>Break-Even Analysis</Tip>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
               <div>
@@ -819,16 +1013,16 @@ export default function Overheads() {
                 <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{breakEvenRev ? fmt(breakEvenRev) : '—'}</div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Need (Covers)</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{breakEvenCovers ? breakEvenCovers.toLocaleString('en-IN') : '—'}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Need (Dishes)</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{breakEvenDishes ? breakEvenDishes.toLocaleString('en-IN') : '—'}</div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Revenue</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{fmt(revenue)}</div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Covers</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{Math.round(covers).toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Dishes</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{Math.round(dishes).toLocaleString('en-IN')}</div>
               </div>
             </div>
             <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700,
@@ -847,44 +1041,45 @@ export default function Overheads() {
             </div>
             <p style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 10, marginBottom: 0, lineHeight: 1.6 }}>
               Formula: Total Fixed Costs ÷ (1 − FC%) &nbsp;·&nbsp;
-              Avg ticket: {avgTicket > 0 ? fmt(avgTicket) : '—'} &nbsp;·&nbsp;
-              FC%: {revenue > 0 ? `${(fcPct * 100).toFixed(1)}%` : '—'}
+              Avg dish price: {avgDishPrice > 0 ? fmt(avgDishPrice) : '—'} &nbsp;·&nbsp;
+              FC%: {revenue > 0 ? `${(fcPct * 100).toFixed(1)}%` : '—'} (purchase-based)
+              {missingLines.length > 0 && <> &nbsp;·&nbsp; excludes {missingLines.join(', ')}, so the real break-even is higher</>}
             </p>
           </div>
 
-          {/* Overhead per cover */}
+          {/* Fixed cost per dish */}
           <div className="card">
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 16 }}>
-              <Tip text="How much of each sale goes to fixed costs before any food cost or profit. Every cover must earn at least this much just to keep the lights on." width={240}>Cost per Cover</Tip>
+              <Tip text="How much of each dish sold goes to fixed costs before any food cost or profit. Every dish must earn at least this much just to keep the lights on. Per DISH, not per guest — one guest usually orders several, so the cost of seating a table is a multiple of this." width={260}>Cost per Dish</Tip>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Fixed OH / Cover</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Fixed OH / Dish</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
-                  {covers > 0 && totals.overhead > 0 ? fmt(totals.overhead / covers) : '—'}
+                  {dishes > 0 && totals.overhead > 0 ? fmt(totals.overhead / dishes) : '—'}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Labor / Cover</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Labor / Dish</div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>
-                  {covers > 0 && totals.labor > 0 ? fmt(totals.labor / covers) : '—'}
+                  {dishes > 0 && labourEffective > 0 ? fmt(labourEffective / dishes) : '—'}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Tax & Fees / Cover</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Tax & Fees / Dish</div>
                 <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--theme-purple-text)' }}>
-                  {covers > 0 && totals.tax_fees > 0 ? fmt(totals.tax_fees / covers) : '—'}
+                  {dishes > 0 && totals.tax_fees > 0 ? fmt(totals.tax_fees / dishes) : '—'}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Total Fixed / Cover</div>
+                <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Total Fixed / Dish</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>
-                  {covers > 0 && totalFixed > 0 ? fmt(totalFixed / covers) : '—'}
+                  {dishes > 0 && totalFixed > 0 ? fmt(totalFixed / dishes) : '—'}
                 </div>
               </div>
             </div>
             <p style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 14, marginBottom: 0, lineHeight: 1.6 }}>
-              Every sale must earn at least <strong style={{ color: 'var(--theme-text1)' }}>{covers > 0 && totalFixed > 0 ? fmt(totalFixed / covers) : '—'}</strong> just to cover fixed costs. Food cost and profit are on top of this.
+              Every dish sold must earn at least <strong style={{ color: 'var(--theme-text1)' }}>{dishes > 0 && totalFixed > 0 ? fmt(totalFixed / dishes) : '—'}</strong> just to cover fixed costs. Food cost and profit are on top of this.
             </p>
           </div>
         </div>
@@ -894,6 +1089,12 @@ export default function Overheads() {
       <div className="card" style={{ background: 'color-mix(in srgb, var(--theme-accent) 4%, transparent)', borderColor: 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' }}>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0, lineHeight: 1.7 }}>
           💡 <strong style={{ color: 'var(--theme-accent-ink)' }}>How overhead is allocated to recipes:</strong> Only <strong style={{ color: 'var(--theme-text1)' }}>Fixed Overheads</strong> (not labor or tax) are distributed across menu items proportionally by each item's share of period revenue. This gives you the true overhead-per-portion in Recipe Costing. Labor and Tax & Fees are period-level costs tracked separately.
+        </p>
+        <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '10px 0 0', lineHeight: 1.7 }}>
+          📐 <strong style={{ color: 'var(--theme-accent-ink)' }}>What the figures on this page mean:</strong>{' '}
+          <strong style={{ color: 'var(--theme-text1)' }}>Food Cost</strong> is purchase-based — net purchases (purchases less vendor returns) for the period, not COGS. It ignores opening and closing stock, so a month where you built stock reads worse than it was and a month where you ran it down reads better; Monthly Summary has the COGS-based figure.{' '}
+          <strong style={{ color: 'var(--theme-text1)' }}>Dishes</strong> is portions sold, not guests — Crest counts guests as <em>covers</em>, from POS bills only, which this page does not read.{' '}
+          <strong style={{ color: 'var(--theme-text1)' }}>Labor</strong> is your finalized payroll run when one exists for the period, otherwise whatever is on the Labor tab — never both added together.
         </p>
       </div>
       </>}

@@ -9,7 +9,7 @@
 // save_sales_day's delete covers `source IS NULL OR source = 'manual'` — so the next Save Day
 // removes a row nobody was ever shown. Filter comps in JS, over a `source` column that is selected.
 //
-// Covers the files that have had this decision MADE, not every file that reads the table. ~13
+// Covers the files that have had this decision MADE, not every file that reads the table. ~12
 // others still carry the server-side form; every one is display-only and cannot delete a row, and
 // each needs its own answer to what its figure is supposed to mean before it is changed.
 //
@@ -17,12 +17,19 @@
 // map sets the period's MEDIAN, which is the popularity cutoff, so dropping the legacy rows did
 // not shorten one column — it could move any dish on the menu into a different quadrant, and
 // then write that quadrant back to recipes.me_class for the POS suggestion engine to act on.
+//
+// Overheads joined next, for the same kind of reason. Revenue there is not one column among many:
+// it is the DENOMINATOR of every percentage on the page, while the numerator (food cost) comes
+// from purchases and stayed whole. So a short revenue pushed Food Cost % and every "% of revenue"
+// up, pushed break-even up, and pushed Net Profit down — and Net Profit's sign is what picks
+// between a green "✓ Profitable this period" and a red "✗ Operating at a loss this period".
 import fs from 'fs'
 import path from 'path'
 
 const FILES = [
   ['Sales.js', path.join(__dirname, 'Sales.js')],
   ['MenuEngineering.js', path.join(__dirname, '..', 'recipes', 'MenuEngineering.js')],
+  ['Overheads.js', path.join(__dirname, '..', 'reports', 'Overheads.js')],
 ]
 
 describe.each(FILES)('%s reads sales_entries in a way NULL-source rows survive', (_name, file) => {
