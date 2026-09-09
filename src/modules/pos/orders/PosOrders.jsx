@@ -1059,7 +1059,11 @@ export default function PosOrders() {
       scopedFrom('recipes', 'id, name, category, recipe_code, selling_price, vat_rate, me_class')
         .eq('is_active', true)
         .eq('pos_enabled', true)
-        .neq('category', 'Sub-Recipe')
+        // `.or(...)`, not `.neq('category','Sub-Recipe')` (S714). category is NULLABLE with no
+        // default and a server-side .neq drops NULL rows too, so a dish with no category was
+        // missing from the till's menu entirely — unorderable, with no error and nothing on screen
+        // to say a row had been filtered out. Same fix as Menu Pricing's own read.
+        .or('category.is.null,category.neq.Sub-Recipe')
         .order('name'),
       scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'),
     ])

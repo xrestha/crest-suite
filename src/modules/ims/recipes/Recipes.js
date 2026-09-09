@@ -37,6 +37,30 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 // short of reloading the page. withTimeout() races every call against this wall clock instead.
 const SAVE_TIMEOUT_MS = 20000
 
+// A REFUSAL THIS PAGE WROTE IS NOT AN ERROR TO BE RE-CLASSIFIED (S714).
+//
+// save() reports failures by throwing and letting one catch surface them, and that catch ran
+// every throw through asActionError(). But errorInfo()'s table only recognises Supabase/Postgres
+// SHAPES — a hand-written English sentence matches no rule and comes back as the generic
+// fallback, "That didn't work, and the reason isn't one we recognise", with the real sentence
+// demoted to the fine-print detail line. So every carefully worded refusal in this function was
+// reaching the user as that fallback: the duplicate Product Code, both halves of the mirror
+// name clash (S707, written specifically to say WHICH side already holds the name), and S711's
+// "saved, but the previous ingredient list could not be removed". Each was written to name a
+// consequence and each arrived as a shrug.
+//
+// ActionError already draws this distinction one layer down — "a plain string passes through
+// untouched, so the validation copy a form already writes by hand is never run through the error
+// table and flattened". This is the same rule for the throw/catch this save is built on: a
+// SaveRefusal carries text we wrote and, where there is one, the technical detail that caused it,
+// which is never destroyed (S619).
+class SaveRefusal extends Error {
+  constructor(text, detail = '') { super(text); this.name = 'SaveRefusal'; this.detail = detail }
+}
+// Same shape errorInfo() builds its own detail line from, so a refusal's fine print reads
+// identically to an unrecognised error's.
+const errorDetail = e => [e?.code, e?.message].filter(Boolean).join(' · ')
+
 export default function Recipes() {
   const { clientId, hasFeature, isAdmin, hasImsAccess } = useAuth()
   const showNutrition = hasFeature('nutrition_facts')
@@ -266,10 +290,26 @@ export default function Recipes() {
       .filter(i => i.is_active || usedInactive.has(i.id))
       .map(i => ({ value: i.id, label: i.is_active ? i.name : `${i.name} (hidden in Item Master)` }))
   }, [items, ingredients])
-  const subRecipeOptions = useMemo(
-    () => subRecipes.filter(sr => sr.id !== selectedRecipe?.id).map(sr => ({ value: sr.id, label: `⚙ ${sr.name} (${sr.yield_qty} ${sr.yield_uom})` })),
-    [subRecipes, selectedRecipe]
-  )
+  // Same shape as itemOptions above, for the same reason (S714). Two rows were rendering BLANK
+  // before this, both of them rows the recipe already has: a sub-recipe that has been Hidden, and
+  // one whose category was changed away from 'Sub-Recipe' — the second is refused at save time now,
+  // but rows already in that state predate the guard. A picker whose value is absent from its
+  // options shows an empty box, so the ingredient looked deleted while calcLiveCost (which resolves
+  // against `recipes`, not this list) went on costing it correctly. Resolve a row that is already
+  // ON the recipe from the full recipe list; offer only active sub-recipes to ADD.
+  const subRecipeOptions = useMemo(() => {
+    const used = new Set(ingredients.filter(g => g.type === 'sub_recipe' && g.sub_recipe_id).map(g => g.sub_recipe_id))
+    const offered = subRecipes.filter(sr => sr.is_active !== false)
+    const alreadyUsed = recipes.filter(sr => used.has(sr.id) && !offered.some(o => o.id === sr.id))
+    return [...offered, ...alreadyUsed]
+      .filter(sr => sr.id !== selectedRecipe?.id)
+      .map(sr => ({
+        value: sr.id,
+        label: `⚙ ${sr.name} (${sr.yield_qty} ${sr.yield_uom})`
+          + (sr.is_active === false ? ' — hidden' : '')
+          + (sr.category !== 'Sub-Recipe' ? ' — no longer a sub-recipe' : ''),
+      }))
+  }, [subRecipes, recipes, ingredients, selectedRecipe])
 
   // ── Form helpers ──────────────────────────────────────────────
   function openNew() {
@@ -532,6 +572,7 @@ export default function Recipes() {
     return `${SRC_PREFIX}-${String(maxNum + 1).padStart(3, '0')}`
   }
 
+
   async function save() {
     // Guard: never persist a recipe without a client — a null client_id makes the
     // recipe invisible (the list query filters by client_id). This previously happened
@@ -574,13 +615,19 @@ export default function Recipes() {
       return
     }
 
-    // Cycle check — only possible when editing an EXISTING sub-recipe (a brand-new one can't yet
+    // Cycle check — only possible when editing an EXISTING recipe (a brand-new one can't yet
     // be referenced by anything else). The ingredient picker already blocks a sub-recipe from
     // listing itself directly (see subRecipeOptions above), but nothing stopped an INDIRECT cycle
     // (A contains B, then B is edited to contain A) — both edits individually looked fine, but
     // together they made every cost calculation over that pair recurse forever. Caught here at
     // save time instead of just surviving it at cost-calc time (calcSubRecipeCostPerUnit).
-    if (selectedRecipe && recipeForm.category === 'Sub-Recipe') {
+    // Runs for ANY existing recipe, not just one whose form still says 'Sub-Recipe' (S714).
+    // What makes a cycle possible is being REFERENCED via sub_recipe_id, which does not care what
+    // the referenced row is categorised as — and a recipe converted away from Sub-Recipe before
+    // the check below existed is exactly the row that can still be referenced while editing under
+    // some other category. The walk is over in-memory state and returns false immediately for a
+    // recipe nothing points at, so running it always costs nothing.
+    if (selectedRecipe) {
       const wouldCreateCycle = (targetId, subRecipeId, seen = new Set()) => {
         if (subRecipeId === targetId) return true
         if (seen.has(subRecipeId)) return false
@@ -590,7 +637,7 @@ export default function Recipes() {
       }
       const cyclic = validIngs.some(i => i.type === 'sub_recipe' && wouldCreateCycle(selectedRecipe.id, i.sub_recipe_id))
       if (cyclic) {
-        setError('This would create a circular reference (this sub-recipe would end up containing itself through another sub-recipe). Remove that ingredient.')
+        setError(`This would create a circular reference — "${recipeForm.name.trim() || 'this recipe'}" would end up containing itself through another sub-recipe. Remove that ingredient.`)
         return
       }
     }
@@ -605,6 +652,40 @@ export default function Recipes() {
     // run — one finally covers every early-exit path instead of repeating the reset at each one.
     try {
       const isSubRecipe = recipeForm.category === 'Sub-Recipe'
+
+      // CONVERTING A SUB-RECIPE AWAY IS A DELETE OF THE LINK, AND IT NEEDS DELETE'S GUARD (S714).
+      //
+      // deleteRecipe() refuses while other recipes reference this one through
+      // `recipe_ingredients.sub_recipe_id`. This path — same recipe, same screen, one dropdown
+      // instead of a button — refused nothing: it deactivated the mirror item, nulled
+      // linked_item_id, and left every parent still pointing here. Nothing broke loudly, which is
+      // why it stayed: the cost engines resolve a sub_recipe_id without consulting the row's
+      // category, so Recipe Costing kept costing it correctly. What did NOT keep working was
+      // every surface that seeds its sub-recipe list BY category — the parents' ingredient picker
+      // here renders blank, and Menu Pricing costed the ingredient at zero until S714 widened its
+      // seed. This is the write that manufactured that state, so it is the write that must refuse.
+      //
+      // Checked BEFORE the recipe row is updated: a refusal after the update would leave the
+      // category changed and the mirror half-dealt-with.
+      const wasSubRecipe = !!(selectedRecipe && (selectedRecipe.linked_item_id || selectedRecipe.category === 'Sub-Recipe'))
+      if (wasSubRecipe && !isSubRecipe) {
+        const refRes = await withTimeout(
+          supabase.from('recipe_ingredients')
+            .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
+            .eq('sub_recipe_id', selectedRecipe.id),
+          SAVE_TIMEOUT_MS, 'Save'
+        )
+        // A check that could not run has not passed (S682).
+        if (refRes.error) {
+          const a = asActionError(refRes.error)
+          throw new SaveRefusal(`Couldn't check whether "${selectedRecipe.name}" is used as an ingredient by other recipes, so nothing was changed. Try again. ${a.text}`, a.detail)
+        }
+        const usedBy = [...new Set((refRes.data || []).map(x => x.recipes?.name).filter(Boolean))]
+        if (usedBy.length > 0) {
+          throw new SaveRefusal(`"${selectedRecipe.name}" is an ingredient in ${usedBy.join(', ')}, so it can't stop being a Sub-Recipe — those recipes would keep consuming it while it disappeared from their ingredient pickers. Remove it from them first, or use Hide if you just want it off the menu.`)
+        }
+      }
+
       const payload = {
         name: recipeForm.name.trim(),
         category: recipeForm.category,
@@ -644,7 +725,7 @@ export default function Recipes() {
       let recipeId
       if (selectedRecipe) {
         const { error } = await withTimeout(scopedUpdate('recipes', payload).eq('id', selectedRecipe.id), SAVE_TIMEOUT_MS, 'Save')
-        if (error) throw new Error(error.code === '23505' ? DUP_CODE_MSG : error.message)
+        if (error) throw error.code === '23505' ? new SaveRefusal(DUP_CODE_MSG, errorDetail(error)) : error
         recipeId = selectedRecipe.id
       } else if (isSubRecipe) {
         // getNextSubRecipeCode() computes from in-memory state, not a DB sequence — a genuine
@@ -657,7 +738,7 @@ export default function Recipes() {
           ;({ data, error } = await withTimeout(scopedInsert('recipes', payload, { single: true }), SAVE_TIMEOUT_MS, 'Save'))
           if (!error || error.code !== '23505') break
         }
-        if (error) throw new Error(error.message)
+        if (error) throw error
         recipeId = data.id
       } else {
         // Same shape as the sub-recipe branch above: an AUTO-issued code is computed from
@@ -676,7 +757,7 @@ export default function Recipes() {
           payload.recipe_code = nextProductCode(
             productCodePrefix(payload.category), (fresh || []).map(r => r.recipe_code))
         }
-        if (error) throw new Error(error.code === '23505' ? DUP_CODE_MSG : error.message)
+        if (error) throw error.code === '23505' ? new SaveRefusal(DUP_CODE_MSG, errorDetail(error)) : error
         recipeId = data.id
       }
 
@@ -698,7 +779,7 @@ export default function Recipes() {
         supabase.from('recipe_ingredients').upsert(ingPayload, { onConflict: 'recipe_id,item_id' }).select('id'),
         SAVE_TIMEOUT_MS, 'Save'
       )
-      if (ingError) throw new Error(ingError.message)
+      if (ingError) throw ingError
       if (selectedRecipe) {
         const newIds = (insertedIngs || []).map(r => r.id)
         // THIS DELETE'S ERROR WAS DROPPED, AND IT IS NOT A COSMETIC ONE (S711). The upsert above
@@ -716,7 +797,8 @@ export default function Recipes() {
         // recipe's own fields and its new ingredient rows are committed; what is wrong is that the
         // old rows are still there beside them, which is a visible, fixable state.
         if (pruneError) {
-          throw new Error(`"${recipeForm.name.trim()}" saved, but its previous ingredient list could not be removed — the recipe now holds both, so its cost is overstated. Open it and save again to clear the old rows. ${asActionError(pruneError).text}`)
+          const a = asActionError(pruneError)
+          throw new SaveRefusal(`"${recipeForm.name.trim()}" saved, but its previous ingredient list could not be removed — the recipe now holds both, so its cost is overstated. Open it and save again to clear the old rows. ${a.text}`, a.detail)
         }
       }
 
@@ -732,7 +814,10 @@ export default function Recipes() {
           const { data: newCat, error: catErr } = await withTimeout(
             scopedInsert('categories', { name: 'Sub-Recipes', sort_order: 999 }, { single: true }), SAVE_TIMEOUT_MS, 'Save'
           )
-          if (catErr) throw new Error('SR sync — category create failed: ' + catErr.message)
+          if (catErr) {
+            const a = asActionError(catErr)
+            throw new SaveRefusal(`"${recipeForm.name.trim()}" was saved, but the "Sub-Recipes" category it needs in Item Master could not be created, so it has no stock-count item yet and will not appear in Stock Count. Open it and save again. ${a.text}`, a.detail)
+          }
           srCategoryId = newCat?.id || null
         }
 
@@ -769,24 +854,27 @@ export default function Recipes() {
           scopedFrom('items', 'id, name, is_sub_recipe').eq('name', itemPayload.name).limit(2),
           SAVE_TIMEOUT_MS, 'Save'
         )
-        if (mirrorClash.error) throw new Error('SR sync — name check failed: ' + mirrorClash.error.message)
+        if (mirrorClash.error) {
+          const a = asActionError(mirrorClash.error)
+          throw new SaveRefusal(`Couldn't check whether "${itemPayload.name}" is already taken in Item Master, so the sub-recipe's stock-count item was not updated. Try again. ${a.text}`, a.detail)
+        }
         const taken = (mirrorClash.data || []).find(i => i.id !== existingLinkedId)
-        if (taken) throw new Error(DUP_MIRROR_MSG(itemPayload.name, taken.is_sub_recipe))
+        if (taken) throw new SaveRefusal(DUP_MIRROR_MSG(itemPayload.name, taken.is_sub_recipe))
 
         if (existingLinkedId) {
           const { error: updateErr } = await withTimeout(scopedUpdate('items', itemPayload).eq('id', existingLinkedId), SAVE_TIMEOUT_MS, 'Save')
           if (updateErr) {
-            throw new Error(updateErr.code === '23505'
-              ? DUP_MIRROR_MSG(itemPayload.name, false)
-              : 'SR sync — item update failed: ' + updateErr.message)
+            if (updateErr.code === '23505') throw new SaveRefusal(DUP_MIRROR_MSG(itemPayload.name, false), errorDetail(updateErr))
+            const a = asActionError(updateErr)
+            throw new SaveRefusal(`"${recipeForm.name.trim()}" was saved, but its stock-count item still shows the previous name and cost — Stock Count and the closing valuation will use those until this succeeds. Open it and save again. ${a.text}`, a.detail)
           }
         } else {
           itemPayload.item_code = payload.recipe_code || selectedRecipe?.recipe_code || null
           const { data: newItem, error: insertErr } = await withTimeout(scopedInsert('items', itemPayload, { single: true }), SAVE_TIMEOUT_MS, 'Save')
           if (insertErr) {
-            throw new Error(insertErr.code === '23505'
-              ? DUP_MIRROR_MSG(itemPayload.name, false)
-              : 'SR sync — item insert failed: ' + insertErr.message)
+            if (insertErr.code === '23505') throw new SaveRefusal(DUP_MIRROR_MSG(itemPayload.name, false), errorDetail(insertErr))
+            const a = asActionError(insertErr)
+            throw new SaveRefusal(`"${recipeForm.name.trim()}" was saved, but its stock-count item could not be created, so it will not appear in Stock Count and cannot be counted at month end. Open it and save again. ${a.text}`, a.detail)
           }
           linkedItemId = newItem?.id
         }
@@ -810,11 +898,13 @@ export default function Recipes() {
       // be lost after the server has committed it, and this save retries on a duplicate product
       // code, so a blind retry can leave two recipes behind. withTimeout's own message is already
       // written for a reader; it just needs the part it cannot know saying out loud.
-      setError(/timed out/i.test(err.message || '')
-        ? `${err.message}
+      setError(
+        err instanceof SaveRefusal ? { text: err.message, detail: err.detail }
+        : /timed out/i.test(err.message || '')
+          ? `${err.message}
 
 Check the recipe list before saving again — if it timed out after the recipe was written, saving a second time creates a duplicate.`
-        : asActionError(err))
+          : asActionError(err))
     } finally {
       setSaving(false)
     }
@@ -1142,7 +1232,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
               style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} onImported={init} isAdmin={isAdmin} />
+              <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} scopedDelete={scopedDelete} onImported={init} isAdmin={isAdmin} />
               <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
                 <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>
               </Tip>

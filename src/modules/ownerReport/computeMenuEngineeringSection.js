@@ -30,8 +30,11 @@ function classify(fcPct, qtySold, medianQty) {
 
 export async function computeMenuEngineeringSection(clientId, period) {
   const results = await Promise.all([
+    // Both NULL-safe (S714). Both columns are nullable and a server-side .neq drops NULL rows,
+    // so an uncategorised dish was absent from the matrix — and this section is FROZEN into the
+    // monthly snapshot, so it was absent permanently, with no way to tell from the artifact.
     scopedFrom('recipes', clientId, 'id, name, category, selling_price')
-      .neq('is_active', false).neq('category', 'Sub-Recipe'),
+      .not('is_active', 'is', false).or('category.is.null,category.neq.Sub-Recipe'),
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')),
   ])
   // Throw on a failed read so runSection() names this section as failed instead of freezing a

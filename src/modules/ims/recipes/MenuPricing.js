@@ -105,9 +105,20 @@ export default function MenuPricing() {
         .eq('is_active', true)
         .or('category.is.null,category.neq.Sub-Recipe')
         .order('name').order('id')),
-      fetchAllRows(() => scopedFrom('recipes', 'id, yield_qty')
-        .eq('category', 'Sub-Recipe')
-        .order('id')),
+      // EVERY recipe, not just the ones categorised 'Sub-Recipe' (S714). This list is what a
+      // sub-recipe ingredient is RESOLVED against, and `recipe_ingredients.sub_recipe_id` does not
+      // care what the row it points at is categorised as. A recipe reached that way whose own
+      // category was changed away — the "miscategorised" case Stock Movements' Sub-Recipes tab
+      // exists to name, so it demonstrably occurs in real data — fell out of this fetch, out of
+      // subIdSet, out of subIngMap, and landed below as `subCost[id] || 0`. Every other engine
+      // (explodeRecipeTree, computeRecipeCosts, and Recipe Costing's own detail view) applies no
+      // category filter and costs it in full, so this page silently UNDER-STATED food cost against
+      // every other screen — which is exactly the S713 fault, one layer below the walk that fix
+      // replaced. The walk was shared; the list it walks was still private.
+      //
+      // Deliberately unfiltered on is_active too: hiding a sub-recipe does not stop the recipes
+      // that contain it consuming it (see Recipes.js's toggleActive).
+      fetchAllRows(() => scopedFrom('recipes', 'id, yield_qty').order('id')),
       // Manual pairings — independent of everything else here; used to be a third serial round
       // trip at the tail of the load. Only fetched for the branch that can actually show them.
       posOnly
@@ -118,12 +129,11 @@ export default function MenuPricing() {
     // reader to start adding a menu they already have (S683, the S594 rule on a CRUD page).
     const readErr = firstError(results)
     if (readErr) { setLoadError(readErr); setLoading(false); return }
-    const [{ data: recipeData }, { data: subRecipeData }, { data: suggData }] = results
+    const [{ data: recipeData }, { data: recipeMeta }, { data: suggData }] = results
 
-    const allIds = [
-      ...(recipeData || []).map(r => r.id),
-      ...(subRecipeData || []).map(r => r.id),
-    ]
+    // recipeMeta is now the whole book, so it already covers every id in recipeData.
+    // fetchAllRowsChunked de-duplicates its id list anyway.
+    const allIds = (recipeMeta || []).map(r => r.id)
     const { data: ingData, error: ingErr } = allIds.length > 0
       ? await fetchAllRowsChunked(allIds, ids => supabase
           .from('recipe_ingredients')
@@ -132,11 +142,10 @@ export default function MenuPricing() {
       : { data: [], error: null }
     if (ingErr) { setLoadError(ingErr); setLoading(false); return }
 
-    // Build per-sub-recipe ingredient list for recursive cost
+    // Build the ingredient list every recipe is costed FROM. Keyed by recipe id with no filter:
+    // which of these rows is a sub-recipe is decided by what points at it, not by its category.
     const subIngMap = {}
-    const subIdSet = new Set((subRecipeData || []).map(sr => sr.id))
     for (const ri of (ingData || [])) {
-      if (!subIdSet.has(ri.recipe_id)) continue
       if (!subIngMap[ri.recipe_id]) subIngMap[ri.recipe_id] = []
       subIngMap[ri.recipe_id].push(ri)
     }
@@ -152,9 +161,16 @@ export default function MenuPricing() {
     // The helper reads `recipe_ingredients` off the recipe and resolves nested ids against the
     // array it is handed, so the separately-fetched ingredients are stitched back on here. Each
     // sub-recipe is costed once from a fresh path set, which is what an on-demand call did anyway.
-    const subRecipesFull = (subRecipeData || []).map(sr => ({ ...sr, recipe_ingredients: subIngMap[sr.id] || [] }))
+    // The resolution array is the WHOLE book (S714) — nesting resolves through it, so anything a
+    // sub_recipe_id can name has to be in it. Only the ids actually referenced as an ingredient
+    // are costed, though: walking every dish as if it were a prep item would be work with no
+    // reader, and this loop runs on every load of the page.
+    const subRecipesFull = (recipeMeta || []).map(sr => ({ ...sr, recipe_ingredients: subIngMap[sr.id] || [] }))
+    const referencedSubIds = new Set((ingData || []).map(ri => ri.sub_recipe_id).filter(Boolean))
     const subCost = {}
-    for (const sr of subRecipesFull) subCost[sr.id] = calcSubRecipeCostPerUnit(sr, subRecipesFull)
+    for (const sr of subRecipesFull) {
+      if (referencedSubIds.has(sr.id)) subCost[sr.id] = calcSubRecipeCostPerUnit(sr, subRecipesFull)
+    }
 
     const mainIdSet = new Set((recipeData || []).map(r => r.id))
     const costMap = {}

@@ -40,7 +40,10 @@ export default function AdminGuestMenu() {
       // sees rather than the recipe book behind it.
       supabase.from('recipes').select('id, image_url, description, is_veg')
         .eq('client_id', adminViewClientId).eq('is_active', true).eq('pos_enabled', true)
-        .neq('category', 'Sub-Recipe'),
+        // NULL-safe, which is what makes the claim above true (S714): get_guest_menu filters with
+        // `category IS DISTINCT FROM 'Sub-Recipe'`, and a `.neq` here does NOT match it — it also
+        // drops NULL-category rows, so these counts under-reported the menu guests were served.
+        .or('category.is.null,category.neq.Sub-Recipe'),
     ]).then(([{ data: client, error: cErr }, { data: rows, error: tErr }, { data: recipes, error: rErr }]) => {
       if (cancelled) return
       // A failed read is not an empty client. Without this, an RLS rejection or a dropped

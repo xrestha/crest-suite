@@ -62,7 +62,8 @@ export default function RecipeMargin() {
       // understate the true margin percentage if counted as if they had.
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
       scopedFrom('recipes', 'id, name, category, selling_price')
-        .neq('category', 'Sub-Recipe')
+        // NULL-safe (S714): a nullable column's NULL rows are dropped by .neq as well.
+        .or('category.is.null,category.neq.Sub-Recipe')
         .eq('is_active', true),
     ])
     // A failed read must not zero every margin and contribution figure (S612 silent-zero rule).

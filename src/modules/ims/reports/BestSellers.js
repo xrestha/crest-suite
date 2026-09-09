@@ -68,7 +68,9 @@ export default function BestSellers() {
       // price and would misleadingly inflate a heavily-comped item's qty/revenue rank.
       // Paged: a busy month's sales_entries can cross PostgREST's silent 1000-row cap (S528).
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
-      scopedFrom('recipes', 'id, name, category, selling_price').neq('category', 'Sub-Recipe'),
+      // NULL-safe (S714): .neq on a nullable column drops NULL rows too, so an uncategorised
+      // dish was missing from the ranking with nothing to say a row had been filtered out.
+      scopedFrom('recipes', 'id, name, category, selling_price').or('category.is.null,category.neq.Sub-Recipe'),
     ])
     // A failed read must not rank a confident NPR 0 (S612 silent-zero rule).
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection

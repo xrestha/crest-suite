@@ -27,7 +27,8 @@ export default function ComboBuilder() {
     Promise.all([
       scopedFrom('recipes', 'id, name, category, selling_price')
         .eq('is_active', true).eq('pos_enabled', true)
-        .neq('category', 'Sub-Recipe').order('name'),
+        // NULL-safe (S714) — see Menu Pricing. `.neq` on a nullable column drops NULL rows too.
+        .or('category.is.null,category.neq.Sub-Recipe').order('name'),
       supabase.from('settings').select('combo_discount_pct').eq('client_id', clientId).maybeSingle(),
     ]).then(([{ data: recs }, { data: settings }]) => {
       const list = recs || []

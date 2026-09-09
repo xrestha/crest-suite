@@ -66,10 +66,32 @@ Two things were wrong the moment a third level existed, both fixed:
   stitches its separately-fetched rows back onto the sub-recipes and calls the shared one. Grep
   `subCostPerUnit|function subCost` before adding any recipe-costing page — it should return
   nothing.
+
+  **And the walk was only half of what was private (S714).** Menu Pricing kept costing a sub-recipe
+  at **0** after S713, because the LIST it resolves against was still seeded
+  `.eq('category','Sub-Recipe')` — so a recipe reached through `sub_recipe_id` whose own category
+  had been changed away was absent from `subIdSet`, absent from `subIngMap`, and fell through
+  `subCost[id] || 0`. Every other engine resolves a `sub_recipe_id` without consulting the row's
+  category and costs it in full, so the same under-statement survived the fix that was supposed to
+  end it — same page, same direction, one layer down. It seeds from the whole book now
+  (`scopedFrom('recipes', 'id, yield_qty')`, unfiltered) and costs only the ids something actually
+  references. **What a `sub_recipe_id` names is decided by what POINTS at it, never by how it is
+  categorised**, so any list used to resolve one must be unfiltered — by category, and by
+  `is_active` for the reason `toggleActive` already gives.
 - **Running out of depth was silent.** `explodeRecipeTree`'s frontier loop stops when its round cap
   is hit and simply returns what it has, so ingredients below the cut vanish from COGS and Variance
   as a believable smaller number. The cap is now `MAX_DEPTH_ROUNDS = 12` (was 5) and an exhausted
   frontier `console.error`s with the unresolved ids and the direction of the error.
+
+  **Raising one cap and not its twin put the silence straight back (S714).** There are TWO depth
+  limits in that function — the fetch loop's `MAX_DEPTH_ROUNDS` and `explode()`'s own recursion
+  guard, which stayed at a hardcoded `depth > 10` when the loop went 5 → 12. That is the worst
+  available disagreement: the loop resolved levels 12 and 13, so the frontier came back EMPTY and
+  the loud error could not fire, while `explode()` quietly dropped exactly those levels — the
+  silence the fix existed to end, relocated one function down. The recursion guard reads
+  `MAX_DEPTH_ROUNDS` now and sets a flag reported once after the walk. `recipeCost.test.js` covers
+  an eleven-deep chain and was verified to fail against the old constant. **When you raise a limit,
+  grep the function for the other one**: a cap enforced in two places is one number.
 - **A failed READ was silent too, and it is not any more (S695).** Both reads inside
   `explodeRecipeTree` dropped `error` and walked an empty tree, so every consumer's usage came out
   as zero — Stock Report's on-hand climbed to opening + purchases, Variance read as fully
@@ -176,4 +198,87 @@ where its tooltip's "cost per unit = total cost ÷ yield qty" is exactly what
 `calcSubRecipeCostPerUnit` does. A recipe converted away from Sub-Recipe keeps its old batch yield
 in the column; it is inert, and resetting it would destroy the value if it were converted back.
 
----
+## Converting a sub-recipe away is a delete of the link, and it needs delete's guard (S714)
+
+`deleteRecipe` refuses while other recipes reference the row through
+`recipe_ingredients.sub_recipe_id`. Changing the **category** away from `Sub-Recipe` — same recipe,
+same screen, a dropdown instead of a button — refused nothing: it deactivated the mirror item,
+nulled `linked_item_id`, and left every parent still pointing at it.
+
+**Nothing broke loudly, which is why it survived, and the quiet damage is spread across pages that
+each look correct on their own.** The cost engines resolve a `sub_recipe_id` without consulting the
+row's category, so Recipe Costing went on costing the parent right. What stopped working was every
+surface that seeds its sub-recipe list BY category: the parents' ingredient picker rendered the row
+blank (its value was not in `subRecipeOptions`), and Menu Pricing costed the ingredient at **zero**
+— see the S714 note above. This write is what manufactured the state those two fixes had to absorb,
+so this is the write that refuses. It names the recipes holding it and points at Hide.
+
+The state still exists in data written before the guard, so **the two readers stay tolerant**:
+`subRecipeOptions` resolves an already-used row from the full recipe list and labels it
+*"no longer a sub-recipe"*, and Stock Movements' Sub-Recipes tab keeps its `miscategorised` list. A
+guard added late has to be paired with tolerance for the rows that predate it.
+
+**The cycle guard was gated on the same condition and is not any more.** It ran only
+`if (selectedRecipe && recipeForm.category === 'Sub-Recipe')` — so a recipe already converted away
+while still referenced could be edited into an indirect cycle with no check at all. What makes a
+cycle possible is being *referenced*, which is independent of how the row is categorised; it runs
+for any existing recipe now, and returns immediately for one nothing points at.
+
+## The bulk importer had none of `save()`'s guards (S714)
+
+`RecipeImportButton` writes `recipe_ingredients` with a plain `.insert()`, and every rule `save()`
+had accumulated stopped at the page.
+
+- **A duplicate ingredient line is refused, per the same asymmetry.** Two lines naming one item make
+  the insert fail with `21000` *after* the recipe row is committed; two lines naming one sub-recipe
+  fail at nothing and silently double that ingredient's cost. The silent half is the worse half, and
+  neither was visible in the preview. The whole recipe is now held back with its status naming the
+  ingredient, rather than the duplicate being summed — same reasoning as `save()`: 200g and 50g of
+  one item is as likely a typo in one row, and choosing for the user is not the importer's job.
+- **A failed ingredient insert deletes the recipe row it just created.** The two writes cannot be
+  reordered (the ingredients need the id), so the compensating delete is the only way to leave the
+  sheet re-importable — and an ingredient-less recipe is not a neutral leftover: it costs 0, which
+  `fcBand` renders as **0.0% ✓ in green** (the S713 rule in `ims-figures.md`). Deleting it is safe
+  precisely because it is seconds old; if the delete also fails, the message names the recipe to
+  remove by hand rather than claiming the import was clean.
+
+## The mirror item's rate is a SNAPSHOT; every other sub-recipe cost is live (S714)
+
+Decided rather than fixed, and worth knowing before anyone treats it as a bug:
+
+`items.rate` on a mirror row is written **only** by `Recipes.js`'s save, as
+`liveCost / yield_qty` at that moment. Nothing recomputes it — not a purchase, not a rate edit in
+Item Master, not a change to the sub-recipe's own ingredients through some other path. Meanwhile
+`PurchaseBillPage.jsx` rewrites `items.rate` for every raw ingredient on every bill, so the inputs
+move constantly and the mirror does not.
+
+That matters because **Stock Count deliberately counts mirrors** (`Stock.js` filters `is_active`
+only) and values them at `per_uom_rate` — so a sub-recipe's WIP valuation, the closing stock it
+feeds, and therefore COGS all ride on a cost frozen at the last recipe save, while
+`calcSubRecipeCostPerUnit` and `explodeRecipeTree` recompute the same sub-recipe live for Recipe
+Costing, Menu Pricing and Variance. The two are allowed to disagree and nothing on screen says so.
+
+The snapshot is defensible — it is the cost the batch was actually made at, which is what a stock
+valuation wants — and it is the same reasoning as `requisition_lines.rate` and `purchase_entries`
+in `ims-figures.md`'s document-versus-report rule. What is NOT settled is that it happens silently
+and by omission rather than by decision: there is no "recost sub-recipes" action, and no indication
+on Stock Count that a prep item's rate is older than the ingredients under it. Left as-is
+deliberately; if it is ever revisited, it is a product decision about what a WIP valuation means,
+not a bug fix.
+
+## Every read on this walk is paged, including the ones that only NAME things (S714)
+
+The S711 sweep covered `explodeRecipeTree` and `computeRecipeCosts`. Two reads on the same walk were
+left raw and are not any more:
+
+- **`TheoreticalVariance.js` reimplements the recursion locally** (`expandIngredients`) and read
+  `recipe_ingredients` for the client's entire book through a bare `.in()`. Being private is exactly
+  why it never received the sweep — the same sentence S713 had to write about the cost walk, about
+  the read this time. Its truncation is the dangerous direction: dishes below the cut expand to
+  nothing, theoretical usage comes out LOW, and low theoretical reads as **over-consumption** on the
+  one report a client uses to chase shrinkage.
+- **`subRecipeUsage.js`'s `fetchItemMap`** valued and NAMED at once, over every raw item under every
+  sold dish plus every sub-recipe's own ingredients. A missing rate is a zero (the reconciliation
+  figure comes out low); a missing name drops the ingredient out of the row's `ingredients` list, so
+  the find-an-ingredient search stops matching and reports nothing rather than reporting a failure.
+  **A read that only supplies labels still needs paging** — it fails as an absence, not an error.

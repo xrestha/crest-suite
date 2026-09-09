@@ -97,6 +97,10 @@ export async function explodeRecipeTree(supabase, recipeIds) {
   // vanish from COGS and Variance as a believable smaller number. Each round is 2 queries against
   // a frontier that shrinks fast, so the extra headroom costs nothing on a shallow tree.
   const MAX_DEPTH_ROUNDS = 12
+  // Set by explode() below if the recursion ever hits that cap. A flag rather than a log at the
+  // call site: explode() runs once per seed recipe and would otherwise repeat the same warning
+  // hundreds of times for one deep tree.
+  let depthExceeded = false
   let round = 0
   for (; round < MAX_DEPTH_ROUNDS && frontier.length > 0; round++) {
     // yield_qty (`sr`) is still fetched for the whole frontier every round — recipeMeta must
@@ -139,7 +143,16 @@ export async function explodeRecipeTree(supabase, recipeIds) {
   // array keeps the leaf-item return value (and so the recursive spread below) byte-identical to
   // what this function did before sub-recipe reporting existed.
   function explode(recipeId, scale, depth, subs) {
-    if (depth > 10) return [] // guard against runaway/cyclic sub-recipe refs
+    // TIED TO MAX_DEPTH_ROUNDS, not a second number (S714). This was a hardcoded 10 while the
+    // fetch loop above was raised 5 -> 12 by the S602 fix, which left the two caps disagreeing in
+    // the worst possible direction: the loop resolved levels the recursion then refused to walk,
+    // so the frontier came back EMPTY, the loud console.error below never fired, and the deepest
+    // levels were dropped in exactly the silence that fix existed to end. Running out of depth is
+    // now reported wherever it happens.
+    if (depth > MAX_DEPTH_ROUNDS) {
+      depthExceeded = true
+      return []
+    }
     const result = []
     for (const r of allIng.filter(x => x.recipe_id === recipeId)) {
       const qty = parseFloat(r.qty_per_portion || 0) * scale
@@ -176,6 +189,15 @@ export async function explodeRecipeTree(supabase, recipeIds) {
       items: Object.entries(agg).map(([item_id, qty]) => ({ item_id, qty })),
       subRecipes: Object.entries(subAgg).map(([sub_recipe_id, e]) => ({ sub_recipe_id, ...e })),
     }
+  }
+  // Same failure as an unresolved frontier, one layer down and previously unreported: rows were
+  // fetched but never walked, so everything below the cut is missing from these figures and
+  // missing usage reads as over-consumption, not as an error.
+  if (depthExceeded) {
+    console.error(
+      `explodeRecipeTree: sub-recipe nesting deeper than ${MAX_DEPTH_ROUNDS} levels — the ingredients ` +
+      `below that were fetched but not walked. COGS/Variance from this walk are UNDERSTATED.`
+    )
   }
   return out
 }

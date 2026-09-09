@@ -175,7 +175,12 @@ export default function Sales() {
     setLoading(true)
     const results = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('recipes').eq('is_active', true).neq('category', 'Sub-Recipe').order('name')
+      // `.or(...)`, not `.neq('category','Sub-Recipe')` (S714). category is NULLABLE with no
+      // default, and a server-side .neq also drops every NULL row — silently. Menu Pricing carries
+      // the same fix and the same comment; three sibling reads never got it.
+      // Here that meant a dish with no category could not be entered against a period at all — it
+      // was absent from Sales Entry's recipe list, with nothing saying so.
+      scopedFrom('recipes').eq('is_active', true).or('category.is.null,category.neq.Sub-Recipe').order('name')
     ])
     // Both reads dropped their `error` until S699, and on this page that is not merely a wrong
     // report. A failed PERIODS read rendered NoPeriodState — "no period set up" for a read that

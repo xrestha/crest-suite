@@ -4,6 +4,7 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import { convertQty } from '../../../utils/nutrition'
 import { calcRecipeCost, calcSubRecipeCostPerUnit } from './recipeCostCalc'
+import { asActionError } from '../../../components/ActionError'
 
 const IMPORT_COLS = ['Menu Item (Recipe)', 'Category', 'Selling Price', 'Yield', 'Ingredient (name or code)', 'Qty', 'Unit']
 
@@ -65,7 +66,26 @@ function parseImportRows(rows, items, subRecipes, recipes) {
   out.forEach(r => {
     r.matchedLines = r.lines.filter(l => l.matched && l.qty > 0)
     r.badLines = r.lines.filter(l => !(l.matched && l.qty > 0))
-    r.willImport = !r.duplicate && !r.isSub && r.matchedLines.length > 0
+    // THE SAME GUARD save() APPLIES, WHICH THIS PATH NEVER HAD (S714).
+    //
+    // `recipe_ingredients` has UNIQUE (recipe_id, item_id), so two lines naming one item make the
+    // insert below fail outright with 21000 — after the recipe row has already been written,
+    // leaving an ingredient-less recipe that costs 0 and wears a green food-cost tick. Two lines
+    // naming one SUB-RECIPE fail at nothing at all: item_id is NULL there, so it never matches
+    // that conflict target, both rows insert, and the recipe silently costs the prep item twice.
+    // The silent half is the worse half, and neither was detectable in the preview.
+    //
+    // Refused rather than summed, exactly as save() refuses it: 200g and 50g of one item is as
+    // likely a typo in one of the two rows, and quietly writing 250g would be this importer
+    // deciding which. The whole recipe is held back so nothing lands half-right.
+    const seen = new Set()
+    r.duplicateIngredient = null
+    for (const l of r.matchedLines) {
+      const key = l.type === 'item' ? `i:${l.item_id}` : `s:${l.sub_recipe_id}`
+      if (seen.has(key)) { r.duplicateIngredient = l.ingName; break }
+      seen.add(key)
+    }
+    r.willImport = !r.duplicate && !r.isSub && !r.duplicateIngredient && r.matchedLines.length > 0
   })
   return out
 }
@@ -74,7 +94,7 @@ function parseImportRows(rows, items, subRecipes, recipes) {
 // self-contained. Renders the two toolbar buttons and (once a file is parsed) the preview modal.
 // The parent only needs to hand over its current items/subRecipes/recipes (for ingredient
 // matching and duplicate detection) and get an onImported() callback to reload its recipe list.
-export default function RecipeImportButton({ items, subRecipes, recipes, exportRecipes, clientId, scopedInsert, onImported, isAdmin }) {
+export default function RecipeImportButton({ items, subRecipes, recipes, exportRecipes, clientId, scopedInsert, scopedDelete, onImported, isAdmin }) {
   const [importPreview, setImportPreview] = useState(null) // { recipes:[...], summary } | null
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState('')
@@ -180,6 +200,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           totalRecipes: parsed.length,
           willImport: parsed.filter(r => r.willImport).length,
           duplicates: parsed.filter(r => r.duplicate).length,
+          dupIngredients: parsed.filter(r => r.duplicateIngredient).length,
           subs: parsed.filter(r => r.isSub).length,
           matchedLines: parsed.reduce((s, r) => s + r.matchedLines.length, 0),
           badLines: parsed.reduce((s, r) => s + r.badLines.length, 0),
@@ -212,7 +233,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           target_fc_pct: 30,
           is_active: true,
         }, { single: true })
-        if (recErr) { setImportError(`Failed on "${r.name}": ${recErr.message}`); break }
+        if (recErr) { setImportError(`Failed on "${r.name}"${created > 0 ? ` — the ${created} before it were imported` : ''}. ${asActionError(recErr).text}`); break }
         const ingPayload = r.matchedLines.map(l => ({
           recipe_id: rec.id,
           item_id: l.item_id,
@@ -220,7 +241,20 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           qty_per_portion: l.qty,
         }))
         const { error: ingErr } = await supabase.from('recipe_ingredients').insert(ingPayload)
-        if (ingErr) { setImportError(`Ingredients failed on "${r.name}": ${ingErr.message}`); break }
+        if (ingErr) {
+          // The recipe row is already committed and its ingredients are not, so stopping here
+          // would leave a recipe with an empty ingredient list — which costs 0 and reads as a
+          // 0% food cost rather than as a failed import (S714). The two writes cannot be
+          // reordered (the ingredients need the recipe's id), so the compensating delete is the
+          // only way to leave the sheet re-importable. Safe to delete: this row is seconds old
+          // and nothing can reference it yet.
+          const { error: rollbackErr } = await scopedDelete('recipes').eq('id', rec.id)
+          const a = asActionError(ingErr)
+          setImportError(rollbackErr
+            ? `Ingredients failed on "${r.name}", and the empty recipe left behind could not be removed — delete "${r.name}" in the list before importing this sheet again. ${a.text}`
+            : `Ingredients failed on "${r.name}", so it was not imported${created > 0 ? ` (the ${created} before it were)` : ''}. Fix that row in the sheet and import again. ${a.text}`)
+          break
+        }
         created++
       }
     } finally {
@@ -256,6 +290,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
             <strong style={{ color: 'var(--theme-green-text)' }}>{importPreview.summary.matchedLines}</strong> ingredients matched
             {importPreview.summary.badLines > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.badLines}</strong> unmatched (skipped)</>}
             {importPreview.summary.duplicates > 0 && <> · {importPreview.summary.duplicates} already exist (skipped)</>}
+            {importPreview.summary.dupIngredients > 0 && <> · <strong style={{ color: 'var(--theme-red-text)' }}>{importPreview.summary.dupIngredients}</strong> with an ingredient listed twice (skipped — combine the rows in the sheet)</>}
             {importPreview.summary.subs > 0 && <> · {importPreview.summary.subs} sub-recipes (create in app)</>}
           </div>
 
@@ -264,6 +299,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
               const status = r.willImport ? { t: 'Will import', c: 'var(--theme-green)' }
                 : r.duplicate ? { t: 'Already exists — skipped', c: 'var(--theme-amber)' }
                 : r.isSub ? { t: 'Sub-recipe — create in app', c: 'var(--theme-text3)' }
+                : r.duplicateIngredient ? { t: `"${r.duplicateIngredient}" listed twice — skipped`, c: 'var(--theme-red)' }
                 : { t: 'No matched ingredients — skipped', c: 'var(--theme-red)' }
               return (
                 <div key={idx} style={{ padding: '10px 14px', borderBottom: idx < importPreview.recipes.length - 1 ? '1px solid var(--theme-border-lt)' : 'none', opacity: r.willImport ? 1 : 0.75 }}>

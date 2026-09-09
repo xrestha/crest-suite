@@ -135,8 +135,12 @@ export default function MenuEngineering() {
     // was given away.
     const [{ data: recipes, error: recErr }, { data: sales, error: salesErr }] = await Promise.all([
       scopedFrom('recipes', 'id, name, category, selling_price')
-        .neq('is_active', false)
-        .neq('category', 'Sub-Recipe'),
+        // Both filters are NULL-safe (S714). `.neq` on a NULLABLE column also drops every NULL
+        // row, server-side and silently — and BOTH of these columns are nullable, so an
+        // uncategorised dish, or one whose is_active was never set, dropped out of the matrix
+        // entirely rather than being classed. The SQL side has always used IS DISTINCT FROM.
+        .not('is_active', 'is', false)
+        .or('category.is.null,category.neq.Sub-Recipe'),
       supabase
         .from('sales_entries')
         .select('recipe_id, qty_sold, discount')

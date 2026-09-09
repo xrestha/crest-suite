@@ -102,6 +102,21 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   nothing about what landed. Both paths point at the same next step instead: reopen the order,
   because what it shows as outstanding is what actually recorded. **When you cannot promise what
   happened, name the place that can tell them.** `errorText.test.js` asserts both halves.
+- **A refusal the page WROTE must not be run back through the table (S714).** `errorInfo` only
+  recognises Supabase/Postgres *shapes*; a hand-written English sentence matches no rule and comes
+  back as the FALLBACK — "That didn't work, and the reason isn't one we recognise" — with the real
+  sentence demoted to the fine print. `Recipes.js`'s `save()` reports every failure by throwing and
+  surfacing it from one `catch (err) { setError(asActionError(err)) }`, so **every carefully worded
+  refusal in that function was reaching the user as that shrug**: the duplicate Product Code, both
+  halves of S707's mirror name clash (written specifically to say which side already holds the
+  name), and S711's "saved, but the previous ingredient list could not be removed". Each named a
+  consequence; each arrived as a generic apology. `ActionError` already draws this line one layer
+  down — a plain string passes through untouched — and a throw/catch needs the same distinction
+  made explicitly: a tagged error class (`SaveRefusal`) carrying `{ text, detail }` for copy we
+  wrote, `asActionError` for everything else. **The tell is a `catch` that converts, in a function
+  that throws its own prose.** Related: `throw new Error(error.message)` on a Supabase error
+  discards `error.code`, so the code-keyed rules (23514, 23502, 22P02) can never match — rethrow
+  the error object.
 - Distinct from the report rule above: that one is about a figure a page *did not compute*; this
   one is about the sentence shown once something has already failed. Rules only get added here for
   shapes genuinely recognisable from the error — everything else takes an honest fallback.

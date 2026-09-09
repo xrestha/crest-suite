@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
@@ -57,9 +57,28 @@ export default function TheoreticalVariance() {
 
     const tvRecipeIds = (r || []).map(x => x.id)
     const ingResults = await Promise.all([
-      tvRecipeIds.length > 0
-        ? supabase.from('recipe_ingredients').select('recipe_id, item_id, sub_recipe_id, qty_per_portion').in('recipe_id', tvRecipeIds)
-        : Promise.resolve({ data: [] }),
+      // PAGED AND CHUNKED, like the shared walk in utils/recipeCost.js and Recipes.js's own
+      // ingredient read (S714). This page reimplements the recursion locally (expandIngredients
+      // below), and being private is exactly why it never received the S711 sweep — a rule about
+      // how to read this table only reaches the reads someone opens. The seed is the client's
+      // ENTIRE recipe book (`scopedFrom('recipes','id')` above, unfiltered), so this is one row
+      // per ingredient across every recipe: ~120 recipes averaging 8 ingredients is already past
+      // PostgREST's 1000-row cap, and a few hundred uuids in the `.in()` URL is a 414 rather than
+      // a truncation.
+      //
+      // The direction of the error is what made it dangerous HERE in particular. Rows past the cut
+      // are simply absent, so the dishes below them expand to nothing and theoretical usage comes
+      // out LOW — and on this page a low theoretical does not read as missing data, it reads as
+      // OVER-CONSUMPTION. That is a variance report flagging shrinkage against staff for stock
+      // that was never actually short. No error, no short-array tell.
+      //
+      // `.order('id')` is the unique tiebreaker fetchAllRows requires: without a total order,
+      // paging can repeat a row on one page and skip it on the next.
+      fetchAllRowsChunked(tvRecipeIds, ids => supabase
+        .from('recipe_ingredients')
+        .select('recipe_id, item_id, sub_recipe_id, qty_per_portion')
+        .in('recipe_id', ids)
+        .order('id')),
       // Deliberately UNFILTERED, unlike the `items` fetch above that backs the display table: a
       // recipe can legitimately reference an inactive item or a sub-recipe mirror row, and its
       // trim loss is still real. Filtering here is what made yield_pct silently default to 100%.
@@ -77,10 +96,18 @@ export default function TheoreticalVariance() {
     setItems(i || [])
     setCategories(c || [])
 
-    // Attach ingredients to recipes
+    // Attach ingredients to recipes — grouped in one pass, as Recipes.js does. A filter per
+    // recipe is O(recipes x ingredient rows), which only became worth caring about once the read
+    // above stopped truncating at 1000: the full book is now genuinely every row.
+    const ingsByRecipe = new Map()
+    ;(ri || []).forEach(row => {
+      const list = ingsByRecipe.get(row.recipe_id)
+      if (list) list.push(row)
+      else ingsByRecipe.set(row.recipe_id, [row])
+    })
     const allRecipes = (r || []).map(recipe => ({
       ...recipe,
-      recipe_ingredients: (ri || []).filter(x => x.recipe_id === recipe.id)
+      recipe_ingredients: ingsByRecipe.get(recipe.id) || []
     }))
     // Attach sub_recipe object for expansion
     allRecipes.forEach(recipe => {

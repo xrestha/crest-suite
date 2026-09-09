@@ -304,7 +304,10 @@ export default function PosTableManagement() {
   async function loadRouting() {
     setRoutingLoading(true)
     const [{ data: recipeData }, { data: settingsData }] = await Promise.all([
-      scopedFrom('recipes', 'category').eq('pos_enabled', true).neq('category', 'Sub-Recipe'),
+      // Same nullable-column rule as below, though nothing changes here in practice: a NULL
+      // category contributes no routing category either way (`.filter(Boolean)`). Written the safe
+      // way so the next reader does not have to work that out (S714).
+      scopedFrom('recipes', 'category').eq('pos_enabled', true).or('category.is.null,category.neq.Sub-Recipe'),
       supabase.from('settings').select('pos_bot_categories').eq('client_id', clientId).maybeSingle(),
     ])
     const cats = Array.from(new Set((recipeData || []).map(r => r.category).filter(Boolean))).sort()
@@ -410,7 +413,9 @@ export default function PosTableManagement() {
     setHscLoading(true)
     const { data } = await scopedFrom('recipes', 'id, name, category, hsc_code')
       .eq('is_active', true).eq('pos_enabled', true)
-      .neq('category', 'Sub-Recipe').order('name')
+      // `.or(...)`, not `.neq` — category is nullable and a server-side .neq drops NULL rows,
+      // hiding an uncategorised dish from HSC code assignment (S714).
+      .or('category.is.null,category.neq.Sub-Recipe').order('name')
     setHscItems(data || [])
     setHscLoading(false)
     setHscLoaded(true)

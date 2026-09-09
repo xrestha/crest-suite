@@ -1,6 +1,6 @@
 import { explodeRecipeTree, computeRecipeCosts } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { throwFirstError } from '../../../shared/queryError'
 
 // Sub-recipe consumption for one period, derived from sales_entries.
@@ -172,7 +172,19 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
 // id → { name, rate } for valuing and naming items in one round trip.
 async function fetchItemMap(supabase, itemIds) {
   if (itemIds.length === 0) return {}
-  const res = await supabase.from('items').select('id, name, per_uom_rate').in('id', itemIds)
+  // CHUNKED AND PAGED (S714) — the last raw `.in()` left on this walk after the S711 sweep. The id
+  // list is every distinct raw item under every dish sold in the period PLUS every ingredient of
+  // every sub-recipe those dishes reach, so it is a large fraction of the client's Item Master
+  // rather than a handful of ids: past a few hundred uuids the `.in()` is spelled out into a URL
+  // longer than a proxy accepts, and past 1000 rows PostgREST truncates with no error.
+  //
+  // Both failure modes are silent in the same direction. A missing id is a missing rate, and a
+  // missing rate is zero — so `derivedItemValue`, the figure this tab reconciles the ledger
+  // against, comes out LOW; and a missing name drops that ingredient out of every row's
+  // `ingredients` list, so the find-an-ingredient search stops matching a sub-recipe that does
+  // contain it and reports nothing rather than reporting a failure.
+  const res = await fetchAllRowsChunked(itemIds, ids => supabase
+    .from('items').select('id, name, per_uom_rate').in('id', ids).order('id'))
   // A failed read here silently zeroed every valuation built from this map (S612 silent-zero rule).
   throwFirstError([res])
   return Object.fromEntries((res.data || []).map(i => [i.id, { name: i.name, rate: parseFloat(i.per_uom_rate) || 0 }]))

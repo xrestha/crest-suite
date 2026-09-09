@@ -179,6 +179,50 @@ describe('explodeRecipeIngredients — return shape is unchanged', () => {
   })
 })
 
+describe('explodeRecipeTree — the recursion depth cap (S714)', () => {
+  // A chain: dish -> s1 -> s2 -> ... -> s11 -> flour. Twelve levels below the dish, which the
+  // frontier loop resolves (MAX_DEPTH_ROUNDS = 12) and which explode() used to refuse to walk at
+  // a hardcoded depth > 10 — silently, because the frontier came back empty so the loud
+  // "nesting deeper than" console.error could not fire. Every yield_qty is 1 so the expected
+  // quantity is exactly the leaf's own, which makes a dropped level unmissable rather than
+  // approximately right.
+  const CHAIN = 11
+  function chainDb() {
+    const ingredients = [{ recipe_id: 'dish', qty_per_portion: 1, sub_recipe_id: 's1', item_id: null }]
+    for (let i = 1; i < CHAIN; i++) {
+      ingredients.push({ recipe_id: `s${i}`, qty_per_portion: 1, sub_recipe_id: `s${i + 1}`, item_id: null })
+    }
+    ingredients.push({ recipe_id: `s${CHAIN}`, qty_per_portion: 3, item_id: 'flour', sub_recipe_id: null, items: { yield_pct: 100 } })
+    const recipes = Array.from({ length: CHAIN }, (_, i) => ({ id: `s${i + 1}`, yield_qty: 1 }))
+    return makeStub({ ingredients, recipes })
+  }
+
+  test('reaches a leaf eleven sub-recipes down', async () => {
+    const tree = await explodeRecipeTree(chainDb(), ['dish'])
+    expect(byItem(tree.dish.items)).toEqual({ flour: 3 })
+  })
+
+  test('reports every sub-recipe on the way down', async () => {
+    const tree = await explodeRecipeTree(chainDb(), ['dish'])
+    expect(tree.dish.subRecipes).toHaveLength(CHAIN)
+  })
+
+  test('running past the cap is LOUD, never a smaller believable number', async () => {
+    // 20 levels: deeper than the fetch loop resolves as well as deeper than explode() walks.
+    const ingredients = [{ recipe_id: 'dish', qty_per_portion: 1, sub_recipe_id: 's1', item_id: null }]
+    for (let i = 1; i < 20; i++) {
+      ingredients.push({ recipe_id: `s${i}`, qty_per_portion: 1, sub_recipe_id: `s${i + 1}`, item_id: null })
+    }
+    ingredients.push({ recipe_id: 's20', qty_per_portion: 3, item_id: 'flour', sub_recipe_id: null, items: { yield_pct: 100 } })
+    const recipes = Array.from({ length: 20 }, (_, i) => ({ id: `s${i + 1}`, yield_qty: 1 }))
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    const tree = await explodeRecipeTree(makeStub({ ingredients, recipes }), ['dish'])
+    expect(byItem(tree.dish.items)).toEqual({})   // understated, and said so
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+})
+
 describe('explodeRecipeTree — the 1000-row cap (S711)', () => {
   // THE REGRESSION THIS PAGING EXISTS FOR. Before it, the read was a bare `.select().in()` and
   // PostgREST handed back the first 1000 rows with no error and nothing in the data to say so.

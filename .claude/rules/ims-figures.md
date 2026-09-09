@@ -287,3 +287,26 @@ changed — `OwnerDashboard`'s stock read was fixed in S696 precisely because th
 **The general shape:** any `.neq`, `.not.eq` or `.not.in` on a NULLABLE column excludes the NULL
 rows as well as the named ones. Check `NOT NULL` before filtering negatively in SQL, or filter
 positively (`.in(...)`) and let the NULLs fall where you decide.
+
+## `recipes.category` is the second column with that shape, on ten reads (S714)
+
+`category text` — nullable, **no default** — and `.neq('category', 'Sub-Recipe')` is how nine pages
+plus a count excluded prep items from a menu list. So an uncategorised dish silently vanished from
+Sales Entry, from the POS till's menu (**unorderable**, with no error and nothing to say a row had
+been filtered), from HSC code assignment, from Best Sellers, Recipe Margin, Menu Engineering, Combo
+Builder, the Dashboard's recipe count, the guest-menu readiness counts, and — permanently — from the
+frozen Monthly Owner Report's menu matrix. `recipes.is_active` is the same shape and
+`.neq('is_active', false)` appeared on two of those; `.not('is_active', 'is', false)` is the
+NULL-safe form (`IS NOT FALSE`), while a category needs
+`.or('category.is.null,category.neq.Sub-Recipe')`.
+
+**The SQL side had it right the whole time**, which is the useful part: every guest-menu function
+filters `rc.category IS DISTINCT FROM 'Sub-Recipe'`, so the server has always kept those rows and
+only the browser dropped them — `AdminGuestMenu.jsx`'s counts claimed to be "exactly the rows
+get_guest_menu serves" while measuring a different population. When a filter exists on both sides,
+**check the SQL before deciding what the browser meant to do**; `IS DISTINCT FROM` in a migration is
+a statement of intent that a `.neq` beside it silently contradicts.
+
+MenuPricing and MenuRepricing already carried the fix and the comment explaining it (S683). It did
+not travel, for the same reason nothing else in this file does: a fix reaches the copies someone
+opens.

@@ -357,7 +357,8 @@ export default function ClientDashboard() {
     const independentPromise = Promise.all([
       scopedFrom('items', '*', { count: 'exact', head: true }).eq('is_active', true).eq('is_sub_recipe', false),
       scopedFrom('vendors', '*', { count: 'exact', head: true }).eq('is_active', true),
-      scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).neq('category', 'Sub-Recipe'),
+      // NULL-safe (S714): .neq drops NULL-category rows, which undercounted the menu.
+      scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).or('category.is.null,category.neq.Sub-Recipe'),
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'),
       scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct'),
       scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
