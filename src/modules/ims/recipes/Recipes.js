@@ -10,6 +10,10 @@ import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
+import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { nprInt } from '../../../shared/nepalMoney'
 import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition } from '../../../utils/nutrition'
 import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -55,6 +59,15 @@ export default function Recipes() {
   const [overheadData, setOverheadData] = useState(() => readPageCache('recipes', 'overheadData', clientId)) // { totalOverheads, totalRevenue, revenueByRecipe, coversByRecipe, openPeriodId } | null
   const [items, setItems] = useState(() => readPageCache('recipes', 'items', clientId) ?? [])
   const [loading, setLoading] = useState(!cachedRecipes)
+  // A failed read is not an empty recipe book, and it is not a book of free recipes (S612/S711).
+  // Every read in init() used to drop its `error`: a failed `recipes` read rendered the "no
+  // recipes yet" empty state, and a failed `recipe_ingredients` read was worse — every recipe
+  // rendered with 0 ingredients, a food cost of NPR 0.00 and a 0% FC, which this page bands
+  // GREEN. That is a page telling an owner their whole menu is perfectly costed.
+  const [loadError, setLoadError] = useState(null)
+  // Separate from loadError on purpose: the True Cost with Overheads panel is one supplementary
+  // block on the detail view, so its read failing must not take the recipe list down with it.
+  const [overheadError, setOverheadError] = useState(null)
   // Wraps a normal setState call to also persist the same value to the shared session cache —
   // see the equivalent helper in ClientDashboard.jsx/Purchases.js for the tenant-isolation
   // reasoning (safe because this is only called after a load already resolved for this client).
@@ -104,19 +117,47 @@ export default function Recipes() {
     // the cache window (or a reload after save/delete) keeps showing the current list while this
     // reloads quietly underneath.
     if (!hasLoadedOnceRef.current) setLoading(true)
-    const [{ data: r }, { data: i }, { data: openPeriods }] = await Promise.all([
+    const baseResults = await Promise.all([
       scopedFrom('recipes').order('name'),
-      scopedFrom('items').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
+      // INACTIVE ITEMS ARE LOADED TOO, and the `is_active` filter moved to the picker (S711).
+      // `calcLiveCost` resolves an ingredient against this array and returns 0 for anything it
+      // cannot find, so with the filter here an ingredient whose item had been hidden in Item
+      // Master costed NOTHING in the edit form — while the detail view, which reads the joined
+      // `ri.items` row and applies no such filter, costed it in full. Two numbers for one recipe,
+      // on two screens one click apart, and the cheaper one appeared on the screen you change the
+      // price from. The row's picker also rendered blank, since its value was not in the options.
+      // Deactivating an item does not stop recipes consuming it — that is exactly why Item Master
+      // offers Hide as the safe alternative to Delete.
+      scopedFrom('items').eq('is_sub_recipe', false).order('name'),
       // Independent of the recipe/item reads — used to be a third serial round-trip level after
       // the ingredients fetch, for a lookup that needs nothing from either.
       scopedFrom('monthly_periods', 'id').eq('status', 'open').limit(1),
     ])
+    const baseFailed = firstError(baseResults)
+    if (baseFailed) { setLoadError(baseFailed); setLoading(false); return }
+    const [{ data: r }, { data: i }, { data: openPeriods }] = baseResults
 
-    // Fetch ingredients separately — scoped to this client's recipe IDs
+    // Fetch ingredients separately — scoped to this client's recipe IDs.
+    //
+    // Chunked and paged (S711), for the same two reasons the shared walk in utils/recipeCost.js
+    // is: this is one row per ingredient per recipe across the client's ENTIRE book, so ~120
+    // recipes at 8 ingredients each already passes PostgREST's 1000-row cap, and the recipe-id
+    // list in the `.in()` URL passes what a proxy accepts somewhere north of that.
+    //
+    // Truncation here did not just misprint a cost. openEdit() seeds the edit form from
+    // `recipe.recipe_ingredients`, and save() writes the form back as the complete list —
+    // upserting what it has and deleting everything else on the recipe. So opening and saving a
+    // recipe whose rows fell past the cap DELETED the missing ones for good, and nothing on
+    // screen distinguished a truncated recipe from a genuinely short one.
     const recipeIds = (r || []).map(x => x.id)
-    const { data: ings } = recipeIds.length > 0
-      ? await supabase.from('recipe_ingredients').select('*, items(name, uom, per_uom_rate, item_code, yield_pct, nutrition)').in('recipe_id', recipeIds)
-      : { data: [] }
+    const ingRes = await fetchAllRowsChunked(recipeIds, ids => supabase
+      .from('recipe_ingredients')
+      .select('*, items(name, uom, per_uom_rate, item_code, yield_pct, nutrition)')
+      .in('recipe_id', ids)
+      .order('id'))
+    if (ingRes.error) { setLoadError(ingRes.error.message || ingRes.error); setLoading(false); return }
+    const { data: ings } = ingRes
+    setLoadError(null)
 
     // Attach ingredients to recipes — grouped in one pass (a filter per recipe was
     // O(recipes × ingredient rows) on every load)
@@ -149,12 +190,26 @@ export default function Recipes() {
     const openPeriodId = openPeriods?.[0]?.id || null
 
     if (openPeriodId) {
-      const [{ data: ohRows }, { data: salesRows }] = await Promise.all([
+      const ohResults = await Promise.all([
         scopedFrom('overheads', 'amount').eq('period_id', openPeriodId).eq('bucket', 'overhead'),
         // Excludes comps (source='pos_comp') — never actually paid for, shouldn't earn a
         // revenue share of overhead. Matches the exclusion Overheads.js/OwnerDashboard.jsx use.
         fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', openPeriodId).neq('source', 'pos_comp').order('id'))
       ])
+      // These two failing does NOT blank the page — the True Cost panel is supplementary and the
+      // recipe list above it is already loaded and correct. But it must not fail as an absence
+      // either: a dropped error here sums to zero overheads, the `totalOverheads > 0` test below
+      // goes false, and the panel simply is not rendered — which the owner reads as "I have no
+      // overheads this period", a claim the page has no evidence for. Say so instead (S711).
+      const ohFailed = firstError(ohResults)
+      if (ohFailed) {
+        setAndCache(setOverheadData, 'overheadData', null)
+        setOverheadError(ohFailed)
+        setLoading(false)
+        return
+      }
+      setOverheadError(null)
+      const [{ data: ohRows }, { data: salesRows }] = ohResults
       const totalOverheads = (ohRows || []).reduce((s, o) => s + parseFloat(o.amount || 0), 0)
 
       // Per-recipe revenue/covers so overhead can be allocated proportional to each recipe's
@@ -199,7 +254,18 @@ export default function Recipes() {
   const subRecipes = useMemo(() => recipes.filter(r => r.category === 'Sub-Recipe'), [recipes])
 
   // Options for the searchable ingredient/sub-recipe pickers
-  const itemOptions = useMemo(() => items.map(i => ({ value: i.id, label: i.name })), [items])
+  // Active items are what you may ADD. An inactive one still appears if this recipe already uses
+  // it — labelled, so the row shows its real name and cost instead of an empty box, and so the
+  // choice to keep or replace it is the user's rather than being made by a silent zero.
+  const activeItems = useMemo(() => items.filter(i => i.is_active), [items])
+  const itemOptions = useMemo(() => {
+    const usedInactive = new Set(
+      ingredients.filter(g => g.type === 'item' && g.item_id).map(g => g.item_id)
+    )
+    return items
+      .filter(i => i.is_active || usedInactive.has(i.id))
+      .map(i => ({ value: i.id, label: i.is_active ? i.name : `${i.name} (hidden in Item Master)` }))
+  }, [items, ingredients])
   const subRecipeOptions = useMemo(
     () => subRecipes.filter(sr => sr.id !== selectedRecipe?.id).map(sr => ({ value: sr.id, label: `⚙ ${sr.name} (${sr.yield_qty} ${sr.yield_uom})` })),
     [subRecipes, selectedRecipe]
@@ -478,6 +544,36 @@ export default function Recipes() {
     )
     if (validIngs.length === 0) { setError('Add at least one ingredient with qty.'); return }
 
+    // The same ingredient twice is refused HERE because Postgres refuses it anyway, in a sentence
+    // nobody can act on (S711). `recipe_ingredients` has a UNIQUE (recipe_id, item_id), and the
+    // save upserts the whole list in one statement — two rows sharing a conflict target make that
+    // statement fail outright with 21000, "ON CONFLICT DO UPDATE command cannot affect row a
+    // second time", which reached the user verbatim. Nothing in the picker stopped it: itemOptions
+    // lists every item regardless of what is already on the recipe, so it is two clicks away.
+    //
+    // Refused rather than silently summed: 200g and 50g of the same item may well be a typo in one
+    // of the two rows, and quietly writing 250g would be this page deciding which. Sub-recipes are
+    // checked too — they have no unique constraint (item_id NULL never matches the target), so a
+    // duplicate there saves happily and double-counts the cost, which is worse than an error.
+    const dupLabel = (() => {
+      const seenItems = new Set()
+      const seenSubs = new Set()
+      for (const ing of validIngs) {
+        if (ing.type === 'item') {
+          if (seenItems.has(ing.item_id)) return items.find(i => i.id === ing.item_id)?.name || 'That ingredient'
+          seenItems.add(ing.item_id)
+        } else {
+          if (seenSubs.has(ing.sub_recipe_id)) return recipes.find(r => r.id === ing.sub_recipe_id)?.name || 'That sub-recipe'
+          seenSubs.add(ing.sub_recipe_id)
+        }
+      }
+      return null
+    })()
+    if (dupLabel) {
+      setError(`"${dupLabel}" is listed twice. A recipe holds one row per ingredient — combine the two quantities into a single row and remove the other.`)
+      return
+    }
+
     // Cycle check — only possible when editing an EXISTING sub-recipe (a brand-new one can't yet
     // be referenced by anything else). The ingredient picker already blocks a sub-recipe from
     // listing itself directly (see subRecipeOptions above), but nothing stopped an INDIRECT cycle
@@ -605,10 +701,23 @@ export default function Recipes() {
       if (ingError) throw new Error(ingError.message)
       if (selectedRecipe) {
         const newIds = (insertedIngs || []).map(r => r.id)
-        await withTimeout(
+        // THIS DELETE'S ERROR WAS DROPPED, AND IT IS NOT A COSMETIC ONE (S711). The upsert above
+        // has already landed, so a failed delete leaves the recipe holding BOTH lists. Item rows
+        // survive it harmlessly — `onConflict: 'recipe_id,item_id'` updated the existing row
+        // rather than adding one — but a SUB-RECIPE row has `item_id` NULL, never matches that
+        // conflict target, and therefore always inserts fresh. So a silent failure here DOUBLES
+        // every sub-recipe ingredient in the recipe, and the recipe costs twice as much from then
+        // on, on this page and in COGS, with the save having reported success.
+        const { error: pruneError } = await withTimeout(
           supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId).not('id', 'in', `(${newIds.join(',')})`),
           SAVE_TIMEOUT_MS, 'Save'
         )
+        // Names the CONSEQUENCE and does not claim the save failed — it did not (S619). The
+        // recipe's own fields and its new ingredient rows are committed; what is wrong is that the
+        // old rows are still there beside them, which is a visible, fixable state.
+        if (pruneError) {
+          throw new Error(`"${recipeForm.name.trim()}" saved, but its previous ingredient list could not be removed — the recipe now holds both, so its cost is overstated. Open it and save again to clear the old rows. ${asActionError(pruneError).text}`)
+        }
       }
 
       if (isSubRecipe) {
@@ -734,43 +843,95 @@ Check the recipe list before saving again — if it timed out after the recipe w
       return
     }
 
+    // SALES HISTORY IS THE OTHER HALF OF THE GUARD, AND IT IS THE HALF THAT BIT (S711).
+    //
+    // Seven things reference `recipes`, and — exactly as with `items` in S706 — they do not agree
+    // on what a delete means, while the calling code cannot see the difference:
+    //
+    //   sales_entries.recipe_id   plain FK          Postgres REFUSES the delete
+    //   recipe_ingredients        CASCADE (both)    ingredient rows go with the recipe
+    //   demand_forecast_daily     CASCADE           forecast rows go too
+    //   recipe_suggestions        CASCADE (both)    pairing rows go too
+    //   pos_kot_removals          SET NULL          the audit row survives, orphaned
+    //   pos_order_items.recipe_id NO FK AT ALL      bill lines silently point at nothing
+    //
+    // So "the database will stop me" was true for sales_entries only — and being stopped THERE
+    // was the problem, because deleteRecipeNow() used to clear recipe_ingredients first and then
+    // hit that refusal, leaving the recipe alive with an empty ingredient list. Every dish that
+    // has ever sold took that path. The delete is now ordered so nothing is touched until the
+    // recipe row itself is gone (see deleteRecipeNow), and this check refuses up front.
+    //
+    // `head: true` + `count: 'exact'` — we need "are there any", never the rows.
+    const [salesRes, posRes] = await Promise.all([
+      supabase.from('sales_entries').select('id', { count: 'exact', head: true }).eq('recipe_id', recipe.id),
+      supabase.from('pos_order_items').select('id', { count: 'exact', head: true }).eq('recipe_id', recipe.id),
+    ])
+    const historyErr = firstError([salesRes, posRes])
+    if (historyErr) {
+      setError({
+        text: `Couldn't check whether "${recipe.name}" has sales history, so it was not deleted. Try again.`,
+        detail: historyErr,
+      })
+      return
+    }
+    const soldCount = (salesRes.count || 0) + (posRes.count || 0)
+    if (soldCount > 0) {
+      // Names the CONSEQUENCE and the way out (S619). Hide is on the same row, so the alternative
+      // is one click away and loses nothing — past sales keep their figures either way.
+      setError(`"${recipe.name}" has ${nprInt(soldCount)} sales record${soldCount === 1 ? '' : 's'} against it and can't be deleted — removing it would break the revenue and food-cost history those sales belong to. Use Hide instead: it disappears from Sales Entry, POS, the QR menu and the menu reports, and can be un-hidden any time.`)
+      return
+    }
+
     askConfirm({
       title: `Delete "${recipe.name}"?`,
       confirmLabel: 'Delete Recipe', danger: true, busyLabel: 'Deleting…',
       body: (
         <p style={{ margin: 0 }}>
           The recipe and its ingredient list are removed{recipe.linked_item_id ? ', and its mirror item is deactivated' : ''}.
-          Sales already recorded against it keep their figures. This cannot be undone.
+          It has no sales recorded against it. This cannot be undone.
         </p>
       ),
       run: () => deleteRecipeNow(recipe),
     })
   }
 
+  // ORDER IS THE WHOLE FIX HERE (S711). This used to run ingredients → mirror item → recipe, so
+  // the two irreversible steps happened BEFORE the one that could still be refused. And it is
+  // refused routinely: `sales_entries.recipe_id` is a plain FK, so any dish that has ever sold
+  // came back 23503 at the last step with its ingredient list already destroyed and the recipe
+  // still on screen looking untouched. The old error text ("Reopen it and re-enter the
+  // ingredients") was honest about the damage but was reasoning at the message layer about
+  // something the sequencing should never have allowed.
+  //
+  // Now the recipe row goes first. `recipe_ingredients.recipe_id` is ON DELETE CASCADE, so its
+  // rows leave with it in the same transaction and no separate delete is needed — and if
+  // anything still refuses (a reference added later that this page has not learned about), it
+  // refuses with every row intact, which is the only safe way for this to fail.
   async function deleteRecipeNow(recipe) {
-    const { error: ingErr } = await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipe.id)
-    if (ingErr) {
-      const { text, detail } = asActionError(ingErr)
-      setError({ text: `"${recipe.name}" was not deleted and nothing was changed. ${text}`, detail })
+    const { error } = await scopedDelete('recipes').eq('id', recipe.id)
+    if (error) {
+      const { text, detail } = asActionError(error)
+      // 23503 = still referenced by something. The pre-check covers the references that exist
+      // today; a new one reaches the user here rather than through a half-finished delete.
+      setError({
+        text: error.code === '23503'
+          ? `"${recipe.name}" is still used by other records and was not deleted. Nothing was changed. Use Hide instead if you just want it off the menu.`
+          : `"${recipe.name}" was not deleted and nothing was changed. ${text}`,
+        detail,
+      })
       return
     }
+    // Only after the recipe is genuinely gone. A failure here leaves a mirror item that is still
+    // active but no longer owned by any recipe — worth saying plainly, since Stock Count will
+    // keep listing it and nothing else will ever update its cost again.
     if (recipe.linked_item_id) {
       const { error: itemErr } = await scopedUpdate('items', { is_active: false }).eq('id', recipe.linked_item_id)
       if (itemErr) {
         const { text, detail } = asActionError(itemErr)
-        setError({ text: `"${recipe.name}" was not deleted, but its ingredient list has already been cleared and its mirror item is still active. Reopen it and re-enter the ingredients, or try the delete again. ${text}`, detail })
+        setError({ text: `"${recipe.name}" was deleted, but its mirror item is still active in Item Master and Stock Count. Hide it there. ${text}`, detail })
+        init()
         return
       }
-    }
-    const { error } = await scopedDelete('recipes').eq('id', recipe.id)
-    if (error) {
-      // The ingredient rows and the mirror item are already gone by this point, so say so — the
-      // recipe still on screen is not the untouched record the user is about to assume it is.
-      const { text, detail } = asActionError(error)
-      setError({ text: `"${recipe.name}" was not deleted, but its ingredient list has already been cleared. Reopen it and re-enter the ingredients, or try the delete again.
-
-${text}`, detail })
-      return
     }
     init()
   }
@@ -968,8 +1129,12 @@ ${text}`, detail })
         </div>
       </div>
 
+      {/* A failed read replaces the page rather than sitting above a list of zero-cost recipes —
+          "your menu costs nothing" is a worse thing to render than nothing at all (S711). */}
+      {loadError && <ReportLoadError error={loadError} />}
+
       {/* ── LIST VIEW ── */}
-      {view === 'list' && (
+      {!loadError && view === 'list' && (
         <div className={printRecipe ? 'no-print' : ''}>
           {/* Search bar */}
           <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 16, alignItems: 'center' }}>
@@ -977,7 +1142,7 @@ ${text}`, detail })
               style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 240 }}
               placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} />
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <RecipeImportButton items={items} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} onImported={init} isAdmin={isAdmin} />
+              <RecipeImportButton items={activeItems} subRecipes={subRecipes} recipes={recipes} exportRecipes={exportRows} clientId={clientId} scopedInsert={scopedInsert} onImported={init} isAdmin={isAdmin} />
               <Tip text="Prints just the checked recipes in this tab, if any are checked — otherwise the whole tab, same as before." width={260}>
                 <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Costing - ${activeTabLabel}`)} disabled={printShareRows.length === 0}>🖶 Print</button>
               </Tip>
@@ -1248,7 +1413,7 @@ ${text}`, detail })
       )}
 
       {/* ── EDIT VIEW ── */}
-      {view === 'edit' && (
+      {!loadError && view === 'edit' && (
         <div>
           {/* Recipe details */}
           <div className="card" style={{ marginBottom: 20 }}>
@@ -1419,7 +1584,7 @@ ${text}`, detail })
               )}
               {suggestedPrice && (
                 <div>
-                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Suggested @ {recipeForm.target_fc_pct || 30}% FC</div>
+                  <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Suggested @ {recipeForm.target_fc_pct || 30}% FC (incl. VAT)</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {suggestedPrice}</div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{liveVat > 0 ? `incl. ${(liveVat*100).toFixed(0)}% VAT, ` : ''}rounded</div>
                 </div>
@@ -1606,7 +1771,7 @@ ${text}`, detail })
       )}
 
       {/* ── DETAIL VIEW ── */}
-      {view === 'detail' && selectedRecipe && (() => {
+      {!loadError && view === 'detail' && selectedRecipe && (() => {
         const isSubRec = selectedRecipe.category === 'Sub-Recipe'
         const cost = calcRecipeCost(selectedRecipe, recipes)
         const price = parseFloat(selectedRecipe.selling_price) || 0
@@ -1668,7 +1833,12 @@ ${text}`, detail })
                 { label: 'Food Cost %', value: fcPct != null ? `${fcPct.toFixed(1)}% ${fcB2.mark}` : '—', color: fcColor },
                 { label: 'Selling Price (ex. VAT)', value: price ? `NPR ${price.toFixed(2)}` : '—', color: 'var(--theme-text1)' },
                 { label: `Menu Price (incl. ${(vat*100).toFixed(0)}% VAT)`, value: price ? `NPR ${(price*(1+vat)).toFixed(0)}` : '—', color: 'var(--theme-text1)' },
-                { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC`, value: `NPR ${getSuggestedPrice(cost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}`, color: 'var(--theme-green-text)' },
+                // The VAT basis is IN the label because this tile sits two tiles along from
+                // "Selling Price (ex. VAT)" and getSuggestedPrice() returns a VAT-INCLUSIVE figure
+                // rounded up to NPR 5 (S711). Unlabelled, the two read as directly comparable and
+                // the suggestion looks ~13% higher than it is — it is the counterpart of "Menu
+                // Price (incl. VAT)" beside it, not of the ex-VAT price.
+                { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC (incl. VAT)`, value: `NPR ${getSuggestedPrice(cost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}`, color: 'var(--theme-green-text)' },
               ]).map(s => (
                 <div key={s.label} className="stat-card">
                   <div className="stat-label">{s.label}</div>
@@ -1676,6 +1846,15 @@ ${text}`, detail })
                 </div>
               ))}
             </div>
+
+            {/* The panel's absence is normally a fact ("no overheads recorded this period"), so a
+                failed read has to say it could not check rather than borrowing that meaning. */}
+            {!isSubRec && !overheadData && overheadError && (
+              <ActionError error={{
+                text: 'Overheads for the open period could not be read, so the True Cost figure is not shown. The food cost above is unaffected.',
+                detail: overheadError,
+              }} />
+            )}
 
             {/* Overhead panel — shown when overheads + sales exist for open period */}
             {!isSubRec && overheadData && price > 0 && (() => {

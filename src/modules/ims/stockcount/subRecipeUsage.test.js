@@ -13,22 +13,28 @@ function makeStub({ sales = [], ingredients = [], recipes = [], items = [] } = {
     return []
   }
   // Chainable + thenable, matching the shapes the loader actually builds:
-  //   .select().in(...)                        — recipes / items lookups
+  //   .select().in(...)                        — recipes / items lookups awaited directly
   //   .select().eq(...).order(...).range(...)  — the paged sales_entries read (fetchAllRows)
+  //   .select().in(...).order(...).range(...)  — the recipe walk (fetchAllRowsChunked, S711)
   // .eq() filters are recorded and applied on resolution — the loader relies on
   // .eq('category', 'Sub-Recipe') to build the master list, so a stub that ignored eq would make
   // the unused-diff tests pass for the wrong reason.
-  const chain = (table, eqs = []) => {
+  //
+  // `.in()` returns a CHAIN rather than resolving, because explodeRecipeTree/computeRecipeCosts
+  // now page their `.in()` reads. It stays thenable, so the sites that still await it directly
+  // (the recipes/items lookups in loadSubRecipeUsage) are unaffected.
+  const chain = (table, eqs = [], inFilter = null) => {
     // A filter on a column the fixture doesn't define is ignored rather than matching nothing —
     // that keeps fixtures minimal (no period_id/client_id boilerplate on every row) while still
     // genuinely enforcing .eq('category', 'Sub-Recipe'), which every recipe fixture does define.
     const apply = rows => rows.filter(r => eqs.every(([col, val]) => r[col] === undefined || r[col] === val))
+    const rows = () => apply(inFilter ? rowsFor(table, inFilter[0], inFilter[1]) : rowsFor(table))
     const c = {
-      eq: (col, val) => chain(table, [...eqs, [col, val]]),
+      eq: (col, val) => chain(table, [...eqs, [col, val]], inFilter),
+      in: (col, ids) => chain(table, eqs, [col, ids]),
       order: () => c,
-      in: (col, ids) => Promise.resolve({ data: apply(rowsFor(table, col, ids)), error: null }),
-      range: (from, to) => Promise.resolve({ data: apply(rowsFor(table)).slice(from, to + 1), error: null }),
-      then: (res, rej) => Promise.resolve({ data: apply(rowsFor(table)), error: null }).then(res, rej),
+      range: (from, to) => Promise.resolve({ data: rows().slice(from, to + 1), error: null }),
+      then: (res, rej) => Promise.resolve({ data: rows(), error: null }).then(res, rej),
     }
     return c
   }

@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-08 (S698 — narrowed B's hard-delete entry: the `purchase_entries` half is now atomic and refused on a paid bill)
+Last updated: 2026-09-09 (S711 — added B's `pos_order_items.recipe_id` missing-FK entry, found while enumerating what references `recipes`)
 
 ---
 
@@ -17,6 +17,20 @@ Last updated: 2026-09-08 (S698 — narrowed B's hard-delete entry: the `purchase
 
 - [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier; `pos_orders` itself never hard-deletes once billed, verified). **Narrowed by S698 on the purchases side, not closed:** the replacement is now one transaction inside `save_purchase_bill` rather than two requests, so a bill can no longer end up holding both versions, and a bill with `payable_payments` against it is refused outright by a `BEFORE DELETE` trigger. The lines themselves are still replaced rather than superseded, so an audit trail beyond `audit_logs` would still need a version column. `sales_entries` is unchanged.
 - [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code)
+- [ ] 🟡 `pos_order_items.recipe_id` has **no foreign key at all** (found S711 while enumerating what
+  references `recipes`). Every other referencing column is constrained one way or another —
+  `sales_entries` refuses the delete, three tables cascade, `pos_kot_removals` sets null — and this
+  one lets a recipe be deleted out from under its bill lines, which then point at an id that no
+  longer exists. The bill itself still prints, because a line carries its own `name` and `price`
+  snapshot; what breaks is anything joining back to `recipes` for a COST, so a comp on the POS
+  exception report or a margin on the sales report silently values those lines at zero.
+  **The page-level guard added in S711 covers the delete path in the app** (Recipe Costing counts
+  POS lines before allowing a delete), which is why this is 🟡 and not 🔴 — but per S707's own
+  lesson, a guard that lives only in the page is a guard on the page: the REST API still accepts
+  the delete. The fix is a migration adding the FK, which has to decide between `ON DELETE SET NULL`
+  (matching `pos_kot_removals`, keeps the bill line and loses the link) and a plain FK (refuses,
+  matching `sales_entries` — probably right, since the two tables are the same fact recorded twice).
+  Check for pre-existing orphans before adding either, or the migration fails on live data.
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
 

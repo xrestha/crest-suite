@@ -136,7 +136,10 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
                 { label: 'Overhead / Portion', value: `NPR ${ohPer.toFixed(2)}` },
                 { label: 'True Cost / Portion', value: `NPR ${trueCost.toFixed(2)}` },
                 { label: 'True Net Margin %', value: trueMargin != null ? `${trueMargin.toFixed(1)}%` : '—' },
-                { label: 'Suggested @ 30% Margin', value: `NPR ${suggested}` },
+                // Says "incl. VAT" for the same reason the on-screen tiles do (S711): this is a
+                // printed sheet someone prices a menu from, and the figure is VAT-inclusive and
+                // rounded up to NPR 5, unlike the ex-VAT Selling Price above it.
+                { label: `Suggested @ 30% Margin (incl. ${(vat * 100).toFixed(0)}% VAT)`, value: `NPR ${suggested}` },
               ].map(m => (
                 <div key={m.label}>
                   <div style={{ fontSize: 9, color: '#777', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{m.label}</div>

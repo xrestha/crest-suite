@@ -1,5 +1,6 @@
 // Shared recipe-costing helpers (pure, no React/Supabase deps).
 import { throwFirstError } from '../shared/queryError'
+import { fetchAllRowsChunked } from '../shared/fetchAllRows'
 
 // Suggested menu price to hit a target food-cost %, VAT-inclusive and rounded up to the
 // nearest NPR 5. `cost` is the per-portion food cost (ex-VAT), `targetFcPct` is a fraction
@@ -50,10 +51,29 @@ export async function explodeRecipeTree(supabase, recipeIds) {
   // nothing on any page said a read had failed (the S612 silent-zero rule, one layer down from
   // where the pages check it). Callers catch this and route it to their own load-error surface;
   // the ones that run inside a try/catch harness already did.
-  const topRes = await supabase
+  // PAGED AND CHUNKED, both for the same read (S711). Two separate caps sit on this one query and
+  // each of them is silent in its own way:
+  //
+  //   Rows — `recipe_ingredients` is one row per ingredient per recipe, and the biggest callers
+  //   seed with the client's ENTIRE recipe book (Variance.js passes `scopedFrom('recipes','id')`
+  //   unfiltered). A book of ~120 recipes averaging 8 ingredients is already past PostgREST's
+  //   1000-row cap, and the rows past the cut simply are not there: every dish below them
+  //   explodes to nothing, theoretical usage comes out LOW, and low theoretical reads as
+  //   over-consumption — false variance flags, overstated shrinkage, understated reorder need,
+  //   and an understated COGS on both dashboards and the Monthly Owner Report. No error, no
+  //   short-array tell; the figure just looks like a slightly better week.
+  //
+  //   URL — a `.in()` list is spelled out in the request URL at ~37 characters per uuid, so a few
+  //   hundred recipe ids is a 414 rather than a truncation.
+  //
+  // `.order('id')` is the unique tiebreaker fetchAllRows requires: without a total order, paging
+  // can repeat a row on one page and skip it on the next, which would turn a truncation into a
+  // subtler wrong-quantity bug. The order is otherwise irrelevant — everything below aggregates.
+  const topRes = await fetchAllRowsChunked(recipeIds, ids => supabase
     .from('recipe_ingredients')
     .select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(yield_pct)')
-    .in('recipe_id', recipeIds)
+    .in('recipe_id', ids)
+    .order('id'))
   throwFirstError([topRes])
   const { data: topIng } = topRes
 
@@ -84,11 +104,18 @@ export async function explodeRecipeTree(supabase, recipeIds) {
     // covered by `topIng`. Only the ingredient rows (`si`, the actual duplication risk) are
     // narrowed to ids not already fetched.
     const toFetchIngredients = frontier.filter(id => !fetchedIngredientsFor.has(id))
+    // Same paging/chunking as the top-level read above, for the same two reasons — a wide prep
+    // book (every sauce, batter and marinade referenced by anything sold) reaches this loop as
+    // one frontier. fetchAllRowsChunked returns `{ data: [] }` for an empty id list on its own,
+    // so the `toFetchIngredients.length > 0` ternary this replaced is no longer needed.
     const roundResults = await Promise.all([
-      supabase.from('recipes').select('id, yield_qty').in('id', frontier),
-      toFetchIngredients.length > 0
-        ? supabase.from('recipe_ingredients').select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(yield_pct)').in('recipe_id', toFetchIngredients)
-        : Promise.resolve({ data: [] }),
+      fetchAllRowsChunked(frontier, ids => supabase
+        .from('recipes').select('id, yield_qty').in('id', ids).order('id')),
+      fetchAllRowsChunked(toFetchIngredients, ids => supabase
+        .from('recipe_ingredients')
+        .select('recipe_id, qty_per_portion, item_id, sub_recipe_id, items(yield_pct)')
+        .in('recipe_id', ids)
+        .order('id')),
     ])
     throwFirstError(roundResults)
     const [{ data: sr }, { data: si }] = roundResults
@@ -167,14 +194,28 @@ export async function computeRecipeCosts(supabase, recipeIds) {
 
   // cost_price needs nothing from the explode walk — start it first so it runs concurrently with
   // the walk's own round trips instead of adding a serial one after them.
-  const manualCostsPromise = supabase.from('recipes').select('id, cost_price').in('id', recipeIds)
+  //
+  // Both reads are chunked/paged (S711): `recipeIds` here is whatever the caller sold or listed,
+  // and `itemIds` is every distinct raw ingredient underneath all of it — a full menu resolves to
+  // more of both than a `.in()` URL holds.
+  const manualCostsPromise = fetchAllRowsChunked(recipeIds, ids => supabase
+    .from('recipes').select('id, cost_price').in('id', ids).order('id'))
   const breakdown = await explodeRecipeIngredients(supabase, recipeIds)
   const itemIds = [...new Set(Object.values(breakdown).flatMap(rows => rows.map(r => r.item_id)))]
 
-  const [{ data: rates }, { data: manualCosts }] = await Promise.all([
-    itemIds.length > 0 ? supabase.from('items').select('id, per_uom_rate').in('id', itemIds) : Promise.resolve({ data: [] }),
+  const costResults = await Promise.all([
+    fetchAllRowsChunked(itemIds, ids => supabase
+      .from('items').select('id, per_uom_rate').in('id', ids).order('id')),
     manualCostsPromise,
   ])
+  // These two dropped their errors while the walk above them threw on its own (S695), which left
+  // exactly one silent path back in: a failed `items` read gives every rate 0, so `ingredientCost`
+  // is 0, so every recipe falls through to `manualMap` — also 0 — and the caller gets a complete
+  // cost map of zeros. That is a 100% margin on Recipe Margin and Best Sellers, a comp valued at
+  // nothing on the POS exception report, and a frozen zero in the Monthly Owner Report snapshot.
+  // Throwing matches explodeRecipeTree, so the callers that already catch it need no change.
+  throwFirstError(costResults)
+  const [{ data: rates }, { data: manualCosts }] = costResults
   const rateMap = {}
   ;(rates || []).forEach(i => { rateMap[i.id] = parseFloat(i.per_uom_rate) || 0 })
   const manualMap = {}

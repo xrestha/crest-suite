@@ -67,4 +67,101 @@ Two things were wrong the moment a third level existed, both fixed:
 
 **Two different sub-recipe counts exist and both are correct** — a recurring "why don't these match" question. `Recipes.js:177` counts the **master list** (`category === 'Sub-Recipe'` over an unfiltered fetch: no period, no usage, not even `is_active`), while Stock Movements' Sub-Recipes tab counts only what a **period's sales actually consumed**. The difference is prep items nothing sold touched, surfaced explicitly on that tab ("9 of your 57 …") rather than left to a cross-check. The one case where they genuinely cannot reconcile: a recipe referenced via `sub_recipe_id` whose own `category` was never set to `'Sub-Recipe'` — counted by the walk but not by the category filter, so used + unused would exceed the master total. That is a data-entry problem on the recipe, and the tab names the offenders instead of silently producing numbers that don't add up.
 
+## The walk is a PAGED read, and its seed list is the client's whole recipe book (S711)
+
+`explodeRecipeTree`'s two reads and `computeRecipeCosts`' two reads all go through
+`fetchAllRowsChunked` with `.order('id')`. They are not optional wrappers on this walk in particular,
+because of what seeds it: **`Variance.js` passes every recipe the client has** — `scopedFrom('recipes',
+'id')`, unfiltered — so the `recipe_ingredients` read is one row per ingredient across the entire
+book. At ~120 recipes averaging 8 ingredients it is already past PostgREST's 1000-row cap, and the
+`.in()` id list is past what a proxy accepts not far above that.
+
+**The direction of the error is what makes it dangerous.** Rows past the cut are absent, so the
+dishes below them explode to nothing, theoretical usage comes out LOW — and a missing theoretical
+usage does not read as missing. It reads as **over-consumption**: false variance flags, overstated
+shrinkage, understated reorder need, understated COGS on both dashboards and in the frozen Monthly
+Owner Report. Nothing errors and no array looks short.
+
+**Test it with a fixture that crosses the cap inside ONE chunk.** `fetchAllRowsChunked` splits at
+150 ids, so 1200 one-ingredient recipes prove only that the chunking works; 200 recipes × 8
+ingredients puts 1200 rows in the first chunk and exercises the paging. `recipeCost.test.js`'s stub
+truncates at `SERVER_MAX_ROWS` silently, exactly as PostgREST does, so the test reproduces the bug
+rather than agreeing with whatever the code happens to do. A stub that resolves at `.in()` will pass
+every assertion in the file while the real client truncates.
+
+## Deleting a recipe: what refuses, what cascades, and what does not care (S711)
+
+Seven things reference `recipes` and — as with `items` in S706 — they do not agree on what a delete
+means, while the calling code cannot see the difference:
+
+| Reference | On delete | Consequence |
+| --- | --- | --- |
+| `sales_entries.recipe_id` | plain FK | **refuses** |
+| `recipe_ingredients.recipe_id` | CASCADE | ingredient rows go with the recipe |
+| `recipe_ingredients.sub_recipe_id` | plain FK | **refuses** (checked by name in `deleteRecipe`) |
+| `demand_forecast_daily` | CASCADE | forecast rows go |
+| `recipe_suggestions` (both cols) | CASCADE | pairing rows go |
+| `pos_kot_removals.recipe_id` | SET NULL | audit row survives, orphaned |
+| `pos_order_items.recipe_id` | **no FK at all** | bill lines silently point at nothing |
+
+**Order the delete so nothing irreversible runs before the step that can still be refused.**
+`deleteRecipeNow` used to clear `recipe_ingredients`, deactivate the mirror item, and only then
+attempt the recipe — so every dish that had ever sold hit the `sales_entries` refusal with its
+ingredient list already destroyed, and the recipe stayed on screen looking untouched. The recipe row
+goes first now; the CASCADE takes its ingredients in the same transaction, and a refusal leaves
+everything intact. Same rule as `PurchaseOrders`' S709 fix: **delete through the cascade rather than
+hand-rolling one in two round trips that can stop between them.**
+
+The pre-check counts `sales_entries` and `pos_order_items` up front and points at **Hide** — the
+soft path is on the same row and loses nothing, since past sales keep their figures either way.
+
+## A sub-recipe ingredient row always inserts fresh, so a failed prune doubles it (S711)
+
+`save()` upserts the new ingredient list before deleting the old rows (S375, so a failed insert never
+leaves the recipe empty), then deletes `not('id','in',(newIds))`. That delete's error was dropped.
+
+Item rows survive a failed prune harmlessly — `onConflict: 'recipe_id,item_id'` updated the existing
+row rather than adding one. **A sub-recipe row has `item_id` NULL, never matches that conflict
+target, and therefore always inserts a new row**, so a silent failure leaves the recipe holding both
+copies and costing twice as much, on this page and in COGS, with the save having reported success.
+The message names that state and says saving again clears it, which is true because the next
+successful prune removes the extras.
+
+**The same asymmetry is why duplicates are refused before the write.** Two rows with the same
+`item_id` make the single upsert statement fail with `21000` (*ON CONFLICT DO UPDATE command cannot
+affect row a second time*), and two rows with the same `sub_recipe_id` do not fail at all — they
+save and double-count. Neither is caught by the picker, which lists every item regardless of what
+the recipe already holds.
+
+## `calcLiveCost` resolves against the `items` array, so what that array excludes costs nothing (S711)
+
+`items` is loaded WITHOUT an `is_active` filter, and the filter lives on `itemOptions` instead. The
+filter used to be on the read, and `calcLiveCost` returns 0 for any ingredient it cannot find in the
+array — so an ingredient whose item had been hidden in Item Master cost **nothing** in the edit form
+while the detail view, which reads the joined `ri.items` row and applies no filter, cost it in full.
+Two numbers for one recipe on two screens one click apart, with the cheaper one on the screen you
+set the price from.
+
+Deactivating an item does not stop recipes consuming it — that is the whole reason Item Master
+offers Hide as the safe alternative to Delete. The picker still offers only active items to ADD, and
+keeps a hidden one visible and labelled where the recipe already uses it, so the choice to keep or
+replace it is the user's rather than being made by a silent zero.
+
+**Generally: when a helper resolves an id against a list and falls back to zero, the list's filter
+is part of the arithmetic.** Load the superset and filter at the point of choice.
+
+## `getSuggestedPrice` returns a VAT-INCLUSIVE figure (S711)
+
+`cost / targetFcPct × (1 + vat)`, rounded up to the nearest NPR 5. On the detail view it sits two
+tiles from "Selling Price (ex. VAT)", so unlabelled the two read as directly comparable and the
+suggestion looks ~13% higher than it is — it is the counterpart of "Menu Price (incl. VAT)" beside
+it. Every label that prints it says `(incl. VAT)`: the detail view, the edit form's live panel and
+the printed cost card.
+
+**`yield_qty` is NOT part of a dish's cost, and that is correct.** No engine divides by it for a
+non-sub-recipe, and the Yield Quantity field renders only on the sub-recipe branch of the form —
+where its tooltip's "cost per unit = total cost ÷ yield qty" is exactly what
+`calcSubRecipeCostPerUnit` does. A recipe converted away from Sub-Recipe keeps its old batch yield
+in the column; it is inert, and resetting it would destroy the value if it were converted back.
+
 ---

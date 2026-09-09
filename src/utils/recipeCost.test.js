@@ -1,9 +1,18 @@
 import { explodeRecipeIngredients, explodeRecipeTree } from './recipeCost'
 
-// Minimal Supabase stub — only the three queries explodeRecipeTree actually makes:
-//   recipe_ingredients .select(...).in('recipe_id', ids)
-//   recipes            .select('id, yield_qty').in('id', ids)
-// `.in()` resolves directly, which is enough for both the awaited call and the Promise.all pair.
+// Minimal Supabase stub — only the two queries explodeRecipeTree actually makes:
+//   recipe_ingredients .select(...).in('recipe_id', ids).order('id').range(from, to)
+//   recipes            .select('id, yield_qty').in('id', ids).order('id').range(from, to)
+//
+// The `.order().range()` tail is not decoration: both reads go through fetchAllRowsChunked now
+// (S711), which pages with `.range()` and requires a uniquely-ordered query to do it safely.
+//
+// SERVER_MAX_ROWS mirrors Supabase's `db-max-rows`, the cap that made this necessary — the stub
+// refuses to return more than that in one response exactly as PostgREST does, silently and with
+// no error, so the "pages past 1000 rows" test below is a real reproduction rather than a mock
+// that agrees with whatever the code happens to do.
+const SERVER_MAX_ROWS = 1000
+
 function makeStub({ ingredients = [], recipes = [] } = {}) {
   return {
     from(table) {
@@ -12,10 +21,20 @@ function makeStub({ ingredients = [], recipes = [] } = {}) {
           return {
             in(_col, ids) {
               const set = new Set(ids)
-              const data = table === 'recipe_ingredients'
+              const rows = table === 'recipe_ingredients'
                 ? ingredients.filter(r => set.has(r.recipe_id))
                 : recipes.filter(r => set.has(r.id))
-              return Promise.resolve({ data })
+              return {
+                order() {
+                  return {
+                    range(from, to) {
+                      // Mirrors PostgREST: an inclusive range, truncated to db-max-rows.
+                      const end = Math.min(to, from + SERVER_MAX_ROWS - 1)
+                      return Promise.resolve({ data: rows.slice(from, end + 1) })
+                    },
+                  }
+                },
+              }
             },
           }
         },
@@ -157,5 +176,56 @@ describe('explodeRecipeIngredients — return shape is unchanged', () => {
   test('empty input returns {}', async () => {
     expect(await explodeRecipeIngredients(makeStub(), [])).toEqual({})
     expect(await explodeRecipeTree(makeStub(), [])).toEqual({})
+  })
+})
+
+describe('explodeRecipeTree — the 1000-row cap (S711)', () => {
+  // THE REGRESSION THIS PAGING EXISTS FOR. Before it, the read was a bare `.select().in()` and
+  // PostgREST handed back the first 1000 rows with no error and nothing in the data to say so.
+  // The dishes whose ingredient rows fell past the cut exploded to NOTHING — and a missing
+  // theoretical usage does not read as missing, it reads as an item that was consumed less than
+  // expected, i.e. as over-consumption on Variance and as stock still on hand on Reorder.
+  //
+  // 200 recipes at 8 ingredients each — a mid-size book once every sub-recipe and inactive dish
+  // is counted, and Variance.js seeds the walk with ALL of them.
+  //
+  // The shape matters: chunking alone would NOT catch this. fetchAllRowsChunked splits at 150
+  // ids, and 150 recipes here is 1200 rows — past the cap inside a single chunk, so the row
+  // paging has to work as well as the URL chunking. A fixture of 1200 one-ingredient recipes
+  // would pass on chunking alone and prove nothing about the cap.
+  const PER_RECIPE = 8
+  test('resolves every recipe past the 1000-row cap, not just the first page', async () => {
+    const N = 200
+    const ids = Array.from({ length: N }, (_, i) => `r${i}`)
+    const db = makeStub({
+      ingredients: ids.flatMap((id, i) => Array.from({ length: PER_RECIPE }, (_, k) => ({
+        recipe_id: id, qty_per_portion: 2, item_id: `item-${i}-${k}`, sub_recipe_id: null,
+        items: { yield_pct: 100 },
+      }))),
+    })
+    const tree = await explodeRecipeTree(db, ids)
+    expect(Object.keys(tree)).toHaveLength(N)
+    // Every recipe resolved with its FULL ingredient list — the pre-fix failure was the recipes
+    // beyond row 1000 coming back with `items: []`, and the one straddling it coming back short.
+    const wrong = ids.filter(id => tree[id].items.length !== PER_RECIPE)
+    expect(wrong).toEqual([])
+    expect(tree[ids[N - 1]].items).toContainEqual({ item_id: `item-${N - 1}-7`, qty: 2 })
+  })
+
+  // The same cap one level down: a single dish whose sub-recipes' own ingredient rows cross it.
+  // The frontier loop's read had the identical shape and so had the identical bug.
+  test('pages the frontier read too, so deep ingredients are not lost', async () => {
+    const N = 1100
+    const subIds = Array.from({ length: N }, (_, i) => `sub${i}`)
+    const db = makeStub({
+      ingredients: [
+        ...subIds.map(id => ({ recipe_id: 'dish', qty_per_portion: 1, item_id: null, sub_recipe_id: id, items: null })),
+        ...subIds.map((id, i) => ({ recipe_id: id, qty_per_portion: 3, item_id: `leaf-${i}`, sub_recipe_id: null, items: { yield_pct: 100 } })),
+      ],
+      recipes: subIds.map(id => ({ id, yield_qty: 1 })),
+    })
+    const tree = await explodeRecipeTree(db, ['dish'])
+    expect(tree.dish.subRecipes).toHaveLength(N)
+    expect(tree.dish.items).toHaveLength(N)
   })
 })
