@@ -156,7 +156,64 @@ which is a different number from the one the user typed and says nothing about i
 Validate in `doSave` and surface it through `fieldErr` + `FieldError`. Any numeric field added to
 this form needs the same treatment; the attribute on the input is documentation, not a guard.
 
-**`items` has no `UNIQUE(client_id, name)`** (stated in `error-messages.md` for a different
-reason — a retried insert can duplicate a row). `doSave` now refuses a name already in the visible
-book, which is a client-side check over a complete list, not a constraint: two tabs can still race
-it. A real unique index would need a dedupe pass over existing data first.
+## One item name per client, enforced (S707, closing S706's client-side check)
+
+**`items_client_name_key` is `UNIQUE (client_id, lower(name))`** — migration `20260909120000`, over
+the WHOLE table. S706's `doSave` check stays as the sentence under the box; the index is what makes
+it true. Three properties of that index are decisions, not defaults:
+
+- **Case-insensitive**, because `push_master_data`'s adoption already matches on `lower(name)` and a
+  case-sensitive index would be uniqueness the push does not agree with.
+- **It covers sub-recipe mirrors.** They are stock-counted alongside real items (Stock Count
+  deliberately does not filter `is_sub_recipe`), so one name/one row has to mean the whole table or
+  it does not mean anything where it matters. The price is real and accepted: a mirror's name is
+  re-derived from its recipe on every save, so a mirror the dedupe renamed fails its next recipe
+  save until someone resolves the clash — `Recipes.js` says exactly that instead of surfacing 23505.
+- **It covers hidden items.** `is_active = false` is what every delete refusal offers as the
+  alternative, so hidden rows accumulate by design and still carry the history the name refers to.
+
+**The check could not see what it most needed to see, and that is the transferable part.**
+`loadItems` filters `.eq('is_sub_recipe', false)`, so the array `doSave` tested against did not
+contain mirrors at all — the one collision class that splits a Stock Count was invisible to the
+guard written to prevent it. `Items.js` now keeps a `book` state (names + codes, unfiltered) built
+from a read `checkAllUsage` was already making. **Before trusting an in-memory list as a uniqueness
+check, ask what its loader filters out.** `getNextItemCode()` had the same blind spot one column
+over and is fixed the same way.
+
+**Three of the four write paths into `items` never ran the check**, which is why an index rather
+than more validation was the answer: the Recipes.js mirror (no check in either direction, now
+checked plus a 23505 backstop), `push_master_data` (three INSERT/UPDATE sites, any of which would
+have raised 23505 and aborted an entire multi-outlet push — the plan gained a `'conflict'` action
+that is reported in the preview and skipped by the apply pass), and the Export/Import restore (which
+breaks a table on its first failing chunk, so one duplicate pair in an old backup would have
+abandoned the client's whole item book — `dedupeItemNames` renames on the way in and reports it).
+
+**`item_code` is deliberately left unconstrained.** Same client-side-max root cause, but nothing
+keys off it, and pushing HQ's codes into a branch that minted its own would turn every such push
+into an abort. Minting from a fresh unfiltered read is the proportionate fix.
+
+## The delete guard is server-side (S707)
+
+The section above this one describes the browser guard, all of which still stands and all of which
+is advice. **`items` carries one permissive policy** (`client_id = my_client_id() OR is_admin()`,
+FOR ALL) plus restrictive fences for POS PIN staff, HR self-service and HR-role staff — and it is
+correctly NOT in the `no_ims_staff` list, so **every IMS account of any rank can `DELETE` an item
+straight through PostgREST**, including `ims_role = 'staff'`, which cannot open Item Master at all.
+Five of the eleven FKs hold that delete; the three `ON DELETE CASCADE` tables go with it, and two of
+those three (`requisition_lines`, `staff_meals`) have no `log_audit` trigger, so the rows leave no
+trace anywhere. Staff meals are inside COGS.
+
+`20260909130000` closes it the way privilege invariant #3 says to — a **BEFORE DELETE trigger**
+(`items_guard_referenced_delete`, SECURITY INVOKER, keyed on `current_user`), not an RPC, because an
+RPC protects only the callers that opt into it and leaves the open policy exactly as wide.
+`force_delete_item(uuid)` is the one way through: SECURITY DEFINER so it passes the trigger,
+`COALESCE(is_admin(), false)` so it matches Item Master's own gate, and **atomic**, which the twelve
+separate HTTP requests it replaced could never be — that loop is what left eight tables emptied and
+the item standing. `itemRefTables.test.js` reads the migration and asserts the SQL list matches
+`ITEM_REF_TABLES` in membership *and* order, and that the INVOKER/DEFINER pair has not been swapped.
+
+**Deleting a client still works**, and it is worth knowing why: `items_client_id_fkey` is
+`ON DELETE CASCADE` and ClientDrawer deletes the `clients` row from the browser, but
+`deleteClientData` (service role) empties `items` first, so the cascade fires on zero rows. If that
+step ever fails partway the client-row delete now refuses instead of cascading a half-deleted book
+away silently, and ClientDrawer's existing handler already says the right thing.

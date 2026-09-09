@@ -675,7 +675,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         }
       }
 
-      setRestoreMsg(`ok:Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}` +
+      // `renamed` is not a failure and must not read as one: those rows DID restore, under a
+      // changed name, because the backup held two items sharing one (S707). Said plainly, with the
+      // names, because each is a real pre-existing split someone now has to merge or retire.
+      const renamedNote = result.renamed?.length
+        ? ` ${result.renamed.length} duplicate item name${result.renamed.length !== 1 ? 's were' : ' was'} restored with a "-DUP" suffix — merge or retire them in Item Master: ${result.renamed.join(', ')}.`
+        : ''
+      setRestoreMsg(`ok:Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}${renamedNote}` +
         (result.skipped.length ? ` Skipped: ${result.skipped.join(', ')}.` : ''))
       onClientUpdated()
     } catch (err) {

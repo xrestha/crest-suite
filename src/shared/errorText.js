@@ -76,6 +76,37 @@ const rules = [
     operator: 'This bill changed while you were editing it (another user edited or deleted it). Nothing was saved — reopen it from the list and try again.',
   },
 
+  // The items BEFORE DELETE guard (S707). Ahead of the 23503/23505 rules below because it is
+  // neither: it is a P0001 the trigger raises for the three ON DELETE CASCADE tables, where
+  // Postgres raises nothing at all and the delete used to SUCCEED, silently taking the
+  // requisition lines, staff meals and vendor returns with it.
+  {
+    test: e => /item_has_references/i.test(e.message || ''),
+    staff: 'That item is used on records that already exist, so it cannot be deleted. Ask your manager to hide it instead.',
+    operator: 'That item already appears on purchases, counts, requisitions or recipes, and deleting it would take those records with it. Hide it instead — it stops being offered on new entries and keeps every record it is already on.',
+  },
+
+  // force_delete_item refused. Both of its refusals happen BEFORE anything is written, which is
+  // the one thing worth saying: the previous browser-side loop could not promise that.
+  {
+    test: e => /force_delete_item_not_permitted/i.test(e.message || ''),
+    staff: 'You do not have permission to do that.',
+    operator: 'Only a Crest operator can force-delete an item along with its records. Nothing was removed. Hide the item instead — it keeps every record it is already on.',
+  },
+  {
+    test: e => /force_delete_item_missing/i.test(e.message || ''),
+    staff: 'That item is no longer there.',
+    operator: 'That item no longer exists — someone else may have deleted it already. Nothing was removed. Reload Item Master.',
+  },
+
+  // One item name per client, case-insensitive, mirrors and hidden items included (S707). Ahead of
+  // the generic 23505 because "that already exists" says nothing about WHAT splits if you proceed.
+  {
+    test: e => /items_client_name_key/i.test(e.message || ''),
+    staff: 'An item with that name already exists. Ask your manager which one to use.',
+    operator: 'This client already has an item — or a sub-recipe, which is stock-counted alongside items — with that name. Two rows with one name split that ingredient’s purchases and stock between them. Rename one of them, or use the existing row.',
+  },
+
   // Something already exists on a unique index.
   {
     test: e => e.code === '23505' || /duplicate key|already exists/i.test(e.message || ''),

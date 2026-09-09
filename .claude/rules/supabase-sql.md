@@ -152,6 +152,36 @@ pass vacuously for an account whose RLS view of `payable_payments` is narrower t
 failed read too. No legacy fallback: the migration must be applied before the frontend deploys, and
 until it is, Save reports the function as unavailable rather than saving the old two-step way.
 
+### The same shape on `items` (S707), and what makes it a pattern
+
+`items_guard_referenced_delete` (`20260909130000`) is the second instance and copies this one
+deliberately: a `BEFORE DELETE` trigger, SECURITY INVOKER, keyed on `current_user IN ('anon',
+'authenticated')`, with a `SECURITY DEFINER` lookup (`item_reference_counts`) so the guard cannot
+pass vacuously for a caller whose RLS view of the child tables is narrower than its view of the
+parent. Three things generalise from having done it twice:
+
+- **The RPC is not the alternative to the trigger; it is the layer above it.** An RPC protects only
+  the callers that choose to call it and leaves the permissive policy exactly as wide (invariant
+  #3). `items` is deliberately absent from the `no_ims_staff` restrictive list, so *any* IMS
+  account — including an `ims_role = 'staff'` that cannot open Item Master at all — could
+  `DELETE /rest/v1/items?id=eq.<uuid>` with its own JWT. A page-level guard is a guard on the page.
+- **`SECURITY DEFINER` is how the sanctioned path gets through its own guard.** `current_user` is
+  the owner inside a DEFINER body, so `force_delete_item()` passes the INVOKER trigger that refuses
+  everyone else — the same seam `set_active_outlet()` uses to be the only writer of
+  `profiles.active_client_id`. That makes the pair worth asserting in a test: swap either keyword
+  and they stop working in opposite directions, silently.
+- **A destructive multi-table action belongs in ONE function body, because that is one
+  transaction.** `force_delete_item()` replaced twelve sequential HTTP requests whose ninth could
+  fail with the first eight tables already emptied — a state no error message can describe
+  correctly. Atomicity is not an optimisation here; it is what lets the failure message say
+  "nothing was removed" and be true.
+
+**A list that must exist in both JS and SQL needs a test that reads both.** `ITEM_REF_TABLES` is now
+mirrored inside two SQL functions, and the server cannot import a `.js` module.
+`itemRefTables.test.js` parses the migration and asserts membership *and* order. Strip `--` comments
+before asserting on a function body — a header explaining why the sibling is `SECURITY DEFINER` will
+otherwise fail the assertion that this one is not.
+
 ## Sales Entry saves through one atomic RPC, not three round trips
 
 Migrated from the root `CLAUDE.md` (S663).

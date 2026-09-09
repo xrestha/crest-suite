@@ -103,4 +103,64 @@ describe('ITEM_REF_TABLES', () => {
     expect(new Set(labels).size).toBe(labels.length)
     for (const t of ITEM_REF_TABLES) expect(t.name).toBeTruthy()
   })
+
+  // ── The SQL twin (S707) ───────────────────────────────────────────────────────────────────
+  //
+  // The list now exists twice: here, and inside 20260909130000 — `item_reference_counts()` (what
+  // the BEFORE DELETE trigger asks) and `force_delete_item()` (what actually clears). It has to,
+  // because a guard the browser can skip is advice, and the server cannot import a .js module.
+  //
+  // Two copies of a list that must never diverge is the exact defect this whole file was written
+  // for, one layer down — so the same technique applies: read the SQL and compare.
+  describe('and its SQL twin in 20260909130000', () => {
+    const sql = fs.readFileSync(
+      path.join(MIGRATIONS_DIR, '20260909130000_items_delete_reference_guard.sql'), 'utf8')
+
+    it('checks the same eleven tables in item_reference_counts()', () => {
+      const body = sql.split('CREATE OR REPLACE FUNCTION public.item_reference_counts')[1]
+        .split('$fn$;')[0]
+      // Each UNION ALL branch reads `FROM <table> x JOIN scoped`, which is the only place a table
+      // name appears in that shape — so a table added to the list but not the union fails here.
+      const checked = [...body.matchAll(/FROM (\w+)\s+x JOIN scoped/g)].map(m => m[1])
+      expect(checked.slice().sort()).toEqual(ITEM_REF_TABLES.map(t => t.table).sort())
+    })
+
+    it('clears the same eleven tables, in the same dependency order, in force_delete_item()', () => {
+      const arr = sql
+        .split('CREATE OR REPLACE FUNCTION public.force_delete_item')[1]
+        .split('FOREACH v_tbl IN ARRAY ARRAY[')[1]
+        .split(']')[0]
+      const cleared = [...arr.matchAll(/'(\w+)'/g)].map(m => m[1])
+      // Order, not just membership: vendor_returns references purchase_entries as well as items,
+      // and the whole point of the array is that it is a dependency order.
+      expect(cleared).toEqual(ITEM_REF_TABLES.map(t => t.table))
+    })
+
+    it('keeps the guard SECURITY INVOKER and the force-delete SECURITY DEFINER', () => {
+      // The guard keys off `current_user`, which under DEFINER would be the owner every time and
+      // could never fire; force_delete_item is DEFINER precisely so it passes that guard. Swap
+      // either and the pair silently stops working in opposite directions.
+      //
+      // Comments are stripped first: this asserts what the function DOES, and the guard's own
+      // header explains why force_delete_item is DEFINER — prose that would otherwise fail the
+      // very assertion it is describing. A source-reading test has to read the source, not the
+      // commentary around it.
+      const code = s => s.replace(/--[^\n]*/g, '')
+      const guard = code(sql.split('CREATE OR REPLACE FUNCTION public.items_guard_referenced_delete')[1]
+        .split('$fn$;')[0])
+      expect(guard).not.toMatch(/SECURITY DEFINER/i)
+      expect(guard).toMatch(/current_user IN \('anon', 'authenticated'\)/)
+
+      const force = code(sql.split('CREATE OR REPLACE FUNCTION public.force_delete_item')[1]
+        .split('$fn$;')[0])
+      expect(force).toMatch(/SECURITY DEFINER/i)
+      // Admin-only, and wrapped — is_admin() returns NULL for a caller with no profiles row, and
+      // `IF NOT NULL THEN` never fires, which is the fail-open trap in its third guise.
+      expect(force).toMatch(/COALESCE\(is_admin\(\), false\)/)
+    })
+
+    it('attaches the guard as a BEFORE DELETE row trigger on items', () => {
+      expect(sql).toMatch(/BEFORE DELETE ON public\.items\s+FOR EACH ROW/)
+    })
+  })
 })

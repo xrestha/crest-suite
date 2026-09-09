@@ -116,9 +116,10 @@ export const IMS_GUIDE_GROUPS = [
           'The master ingredient list — every purchasable/stockable item, its purchase rate, base unit of measure, optional bulk-purchase-unit conversion, and trim/yield loss %. Nearly everything else in the module (Purchases, Recipe Costing, Stock Count, Requisitions) draws from this list.',
         workflow: [
           'If no categories exist yet, a "Load Default Categories" button seeds 7 standard ones (Dairy & Bakery, Meats & Poultry, Groceries, Veg & Fruits, Beverage, Misc. Items).',
-          'Add/Edit via a 2-tab modal: Details (name, category, Yield %, UOM, Purchase Qty, Rate, or an optional "Price per unit (NPR)" field that computes Rate as per-unit × Purchase Qty) and Conversion (Purchase Unit / Base Unit / Conversion Factor).',
+          'Add/Edit via a 2-tab modal: Details (name, category, UOM, Price per <UOM>, Yield %, plus the "Bought a pack?" calculator) and Conversion (Purchase Unit / Conversion Factor). There is no Purchase Qty box and no editable Base Unit: every item is stored in its smallest unit, and the base unit of a conversion is always the item\'s own UOM.',
           'List view: search, category tabs, a "Used In" usage-badge filter (Recipes/Purchases/Stock/Unused), and a "With Conversion" sort toggle.',
-          'Delete is blocked with an explanation if the item is referenced anywhere across 8 tables — unless you\'re admin, in which case a force-delete option cascades the delete across all of them.',
+          'Delete is blocked with an explanation if the item is referenced in any of the eleven tables listed under "Used In" — unless you\'re admin, in which case a force-delete option removes the item and every one of those records together, as a single all-or-nothing step that either completes or changes nothing. The block lives in the database, not only on this screen, so it holds however the delete is attempted.',
+          'Two items cannot share a name within one outlet, and that includes sub-recipes — a sub-recipe is counted alongside your items in Stock Count, so two rows with one name would split that ingredient\'s stock between them. Saving a duplicate is refused, naming the row that already holds it.',
           '"Hide"/"Show" toggles is_active instead of deleting — inactive items disappear from pickers but their history stays intact. Prefer this over delete in almost every real case.',
         ],
         fields: [

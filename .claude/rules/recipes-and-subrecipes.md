@@ -19,6 +19,22 @@ Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_
 .eq('is_sub_recipe', false)
 ```
 
+**A mirror shares one name space with the real item book (S707).** `items` carries
+`items_client_name_key` — `UNIQUE (client_id, lower(name))` — and it deliberately covers mirror rows
+rather than being scoped to `is_sub_recipe = false`. The reason is the tab below: **Stock Count does
+not filter `is_sub_recipe`**, so a mirror and a real item sharing a name are two rows in the same
+count, splitting that ingredient's stock between them exactly as two real items would. Item Master's
+own duplicate check could never see this — it reads an array `loadItems` has already filtered the
+mirrors out of — which is why the constraint had to go in the database.
+
+The cost lands here and is accepted: a mirror's name is **re-derived from the recipe on every save**,
+so a mirror the S707 dedupe pass renamed to `…-DUP2` fails its next recipe save until someone
+resolves the clash. `Recipes.js` therefore checks both directions before writing and words the
+23505 itself (`DUP_MIRROR_MSG`), saying which side already holds the name — an item is renamed in
+Item Master, a sub-recipe here. Use `.eq('name', …)` for that pre-check, never `.ilike`: a name is
+free text and `%`/`_` in it are LIKE wildcards, so a pattern would match the wrong rows on anything
+called `50_KG BAG`.
+
 **A sub-recipe can never appear in `stock_movements`, and that is structural rather than an omission.** `recipe_ingredients` stores a sub-recipe as `sub_recipe_id` with **`item_id` NULL**, so `explode()` in `recipeCost.js` always recurses past it and only emits a row on reaching a real `item_id` at the bottom of the tree — the prep layer is a scaling step that gets discarded, and the table has no column for the path a depletion took. Stock Movements' **Sub-Recipes tab** (S528) therefore *derives* that layer at read time (`subRecipeUsage.js` → `explodeRecipeTree`), filtered through the shared POS-supersedes-manual rule in `salesDepletion.js` so it agrees with the ledger beside it. Do **not** "fix" this by writing sub-recipe rows into `stock_movements`: the mirror item carries its own `per_uom_rate`, so those rows would double-count the page's own Value Depleted KPI against the raw-item rows already there. The two tabs are the same ingredients at different grains and are never additive.
 
 **Sub-recipes nest — a sub-recipe may contain another sub-recipe, to any practical depth (S602).**

@@ -89,6 +89,21 @@ export default function Items() {
   // never "we could not check" (the UsageChip rule), and the delete guard must refuse rather than
   // promise that nothing references an item it failed to look up.
   const [usageScan, setUsageScan] = useState({ ok: false, failed: [] })
+  // The client's WHOLE item book, names and codes, unfiltered — including the sub-recipe mirror
+  // rows `loadItems` excludes and `items` therefore never contains.
+  //
+  // The duplicate-name check cannot be built from `items`: a mirror is stock-counted alongside
+  // real items (Stock Count deliberately does not filter `is_sub_recipe`), so a name shared with
+  // one splits that ingredient's count exactly as a second real item would — and it was the one
+  // collision the S706 check could not see, because the array it reads has the mirrors filtered
+  // out. `getNextItemCode` had the same blind spot one column over: it took its max over the
+  // filtered, possibly-cached array, so a mirror's code never counted and the next item could be
+  // minted onto it.
+  //
+  // Null means "not read yet, or the read failed" — never "the book is empty". The check falls
+  // back to `items` in that state, which is exactly the S706 behaviour, and the unique index added
+  // in 20260909120000 is what makes the fallback safe rather than merely unchanged.
+  const [book, setBook] = useState(null)
   const [filterUsage, setFilterUsage] = useState('all')
   // A failed READ of the item book is not an empty item book. Without this, `data || []` renders
   // "No items yet. Add your first ingredient to get started." over a client's whole master list.
@@ -119,7 +134,7 @@ export default function Items() {
       const cached = readPageCache('items', 'items', clientId)
       setItems(cached ?? [])
       setCategories(readPageCache('items', 'categories', clientId) ?? [])
-      setUsageMap({}); setRefMap({}); setUsageScan({ ok: false, failed: [] })
+      setUsageMap({}); setRefMap({}); setUsageScan({ ok: false, failed: [] }); setBook(null)
       setLoadError(null); setPageError(null)
       setLoading(!cached)
     } else if (items.length === 0) {
@@ -142,13 +157,26 @@ export default function Items() {
     // Paged, because this read is the one that decides whether an item is safe to delete: past
     // 1000 SKUs the bare select silently stopped listing items, and every item after the cap was
     // never checked for usage at all.
+    // `name`, `is_sub_recipe` and `item_code` ride along on a read this page already makes, so the
+    // unfiltered book below costs no extra round trip — see the `book` state above for why the
+    // filtered `items` array cannot answer either question.
     const { data: myItems, error: myItemsErr } = await fetchAllRows(() =>
-      scopedFrom('items', 'id').order('id'))
+      scopedFrom('items', 'id, name, is_sub_recipe, item_code').order('id'))
     if (loadedClientRef.current !== forClient) return
     // A failed read must not blank the usage map — it feeds the delete guard, and an empty map
     // reads as "nothing references this item" (S612 silent-zero class). Record that it failed, so
     // the guard refuses instead of promising the item is unreferenced.
-    if (myItemsErr) { setUsageScan({ ok: false, failed: ['the item list'] }); return }
+    if (myItemsErr) { setUsageScan({ ok: false, failed: ['the item list'] }); setBook(null); return }
+
+    // Keyed on the same lower(name) the DB's unique index uses, so the message the form gives and
+    // the constraint the server enforces cannot disagree about what counts as the same name.
+    const byName = new Map()
+    ;(myItems || []).forEach(i => {
+      const key = (i.name || '').trim().toLowerCase()
+      if (key && !byName.has(key)) byName.set(key, i)
+    })
+    setBook({ byName, codes: (myItems || []).map(i => i.item_code).filter(Boolean) })
+
     const myItemIds = (myItems || []).map(i => i.id)
     if (myItemIds.length === 0) {
       setUsageMap({}); setRefMap({}); setUsageScan({ ok: true, failed: [] }); return
@@ -225,9 +253,16 @@ export default function Items() {
         setPageError(null)
         const { error } = await supabase.from('items').delete().eq('id', item.id)
         if (error) {
-          // Foreign-key violation from a reference the scan didn't see. `23503` is the exact code;
-          // the text match stays only as a fallback for an error that arrives without one.
-          const isFk = error.code === '23503' || /foreign key|violates|referenced/i.test(error.message || '')
+          // A reference the scan didn't see, now arriving two ways.
+          //
+          // `item_has_references` is the BEFORE DELETE trigger (20260909130000), and it is the one
+          // that matters: it fires for the three ON DELETE CASCADE tables, where Postgres itself
+          // raises NOTHING and this delete used to SUCCEED, taking the requisition lines, staff
+          // meals and vendor returns with it. `23503` remains the five plain-FK tables, and the
+          // text match stays only as a fallback for an error that arrives without a code.
+          const isFk = error.code === '23503'
+            || /item_has_references/i.test(error.message || '')
+            || /foreign key|violates|referenced/i.test(error.message || '')
           if (isFk && isAdmin) {
             askForceDelete(item, `"${item.name}" still has references that did not show against it here.`)
             return
@@ -264,38 +299,36 @@ export default function Items() {
     })
   }
 
-  // Admin-only hard delete: clears every FK reference, then removes the item.
+  // Admin-only hard delete, through `force_delete_item` — ONE call, one transaction.
   //
-  // The list is ITEM_REF_TABLES, in its declared order, so this can no longer clear a different
-  // set from the one the badge checks — that divergence is what left par_levels,
-  // purchase_order_items and stock_movements holding the item after everything else had been
-  // destroyed. Order matters: vendor_returns before purchase_entries, which it also references.
+  // This was twelve separate HTTP requests: eleven table clears, then the item. Nothing made them
+  // one unit of work, so a refusal on the ninth left the first eight tables emptied and the item
+  // still standing — a client's purchase history destroyed under a dialog that then said "try
+  // again", which could never get past the same refusal. That is not a message problem; a
+  // half-applied destructive action has no correct message. The RPC either removes the item and
+  // all of its history or leaves every row exactly where it was.
+  //
+  // The dependency order still matters and still lives in ITEM_REF_TABLES — the function's own
+  // list is its SQL twin, and `itemRefTables.test.js` reads the migration and fails if they drift.
   async function forceDeleteItem(item) {
-    const id = item.id
-    const cleared = []
-    const refused = []
-    for (const { table, name } of ITEM_REF_TABLES) {
-      // Sequential on purpose — the order above is a dependency order, not a preference.
-      const { error } = await supabase.from(table).delete().eq('item_id', id)
-      if (error) refused.push(name); else cleared.push(name)
-    }
-    const { error } = await supabase.from('items').delete().eq('id', id)
+    const { error } = await supabase.rpc('force_delete_item', { p_item_id: item.id })
     if (error) {
-      // The reference-clearing loop has already run, so this is never a no-op failure: say what
-      // state the record is in now, and do not tell the operator to retry when a refused clear is
-      // the reason — retrying repeats the same refusal and clears nothing further.
+      // Nothing was written — that is the whole point of the transaction, and it is the one thing
+      // the operator needs told, because the previous version of this function could not say it.
       const { text, detail } = asActionError(error)
-      const gone = cleared.length ? `Its ${cleared.map(n => n.toLowerCase()).join(', ')} records have already been removed and reports covering those periods will have changed.` : 'No referencing records were removed.'
-      const next = refused.length
-        ? `Crest could not clear ${refused.map(n => n.toLowerCase()).join(', ')}, which is what is still holding the item — retrying will not get past it. Remove those records directly, or leave the item in place and hide it.`
-        : 'Try the delete again.'
-      setPageError({ text: `"${item.name}" was not deleted. ${gone} ${next}
-
-${text}`, detail })
+      setPageError({
+        text: `"${item.name}" was not deleted, and nothing else was removed either — the whole action was rolled back. ${text}`,
+        detail,
+      })
       loadItems()
       checkAllUsage()
       return
     }
+    // Silent on success, as before. The function returns what it cleared, per table, and that is
+    // worth showing — but the only page-level channel here is `ActionError`, which is red and
+    // carries role="alert", so a completion report rendered through it reads as a failure. A
+    // neutral notice is its own piece of design work and does not belong in this change; the
+    // force-delete dialog has already named the consequence and the operator approved it.
     loadItems()
     checkAllUsage()
   }
@@ -434,12 +467,18 @@ ${text}`, detail })
     return { ...form, ...val }
   }
 
+  // Minted from `book.codes` — the client's every code, mirrors included — rather than from the
+  // `items` array, which has sub-recipe mirrors filtered out and can be repainted from the session
+  // cache before the fresh read lands. Both of those made the max too low, and a too-low max mints
+  // a code another row already holds. `item_code` carries no unique index (deliberately: nothing
+  // keys off it, and pushing HQ's codes into a branch that minted its own would make every such
+  // push an abort), so nothing downstream would have caught the collision.
   function getNextItemCode() {
     const prefix = (settings?.item_code_prefix || 'ITM').toUpperCase()
+    const codes = book ? book.codes : items.map(i => i.item_code).filter(Boolean)
     let maxNum = 0
-    items.forEach(item => {
-      const code = item.item_code || ''
-      const match = code.match(new RegExp(`^${prefix}-(\\d+)$`))
+    codes.forEach(code => {
+      const match = String(code || '').match(new RegExp(`^${prefix}-(\\d+)$`))
       if (match) {
         const num = parseInt(match[1], 10)
         if (num > maxNum) maxNum = num
@@ -455,8 +494,23 @@ ${text}`, detail })
   // A write that failed. `errorInfo(..., 'operator')` says what happened in words the owner can
   // act on; the raw `code · message` is kept underneath, because whoever diagnoses it still needs
   // it. Deliberately never asserts the row was not written — a fetch can die after the server has
-  // already committed, and `items` has no UNIQUE(client_id, name) to catch a retried duplicate.
+  // already committed, and this code cannot tell that apart from a write that never landed.
+  //
+  // What HAS changed since S706: `items_client_name_key` now catches the retry. A second attempt
+  // over a committed insert is refused as a duplicate name instead of quietly creating the second
+  // master row that made this message's caution necessary in the first place.
   function showSaveError(err) {
+    // A 23505 on this form is always the name — it is the only unique index `items` carries — and
+    // a message about one box belongs under that box, not in the form-level channel (S603).
+    if (err?.code === '23505') {
+      setFieldErr(fe => ({
+        ...fe,
+        name: `Another item called "${form.name.trim().toUpperCase()}" was saved while this dialog was open — two rows with one name split that ingredient's purchases and stock between them. Reload the list, then edit that item instead or give this one a name that tells them apart.`,
+      }))
+      setActiveTab('details')
+      showError('', '')
+      return
+    }
     const { text, detail } = errorInfo(err, 'operator')
     showError(text, detail)
   }
@@ -479,11 +533,22 @@ ${text}`, detail })
     if (form.yield_pct === '' || !isFinite(yieldNum) || yieldNum <= 0 || yieldNum > 100) {
       fe.yield_pct = 'Yield must be a number from 1 to 100 — it is the usable percentage left after trim, so 100 means no loss. Leave it at 100 if you are not sure.'
     }
-    // `items` has no UNIQUE(client_id, name), so a second "CHICKEN BREAST" saves happily and the
-    // client's purchases then split across two master rows that every report treats as two items.
+    // Checked here so the message is a sentence under the right box; ENFORCED by
+    // `items_client_name_key` (20260909120000), because this check is a courtesy — two tabs both
+    // pass it, and three of the four write paths into `items` never run it at all.
+    //
+    // Read from `book` when it is there: it is the unfiltered book, so it sees sub-recipe mirrors,
+    // which `items` does not contain and which share the same Stock Count with real items.
     const nameKey = form.name.trim().toUpperCase()
-    if (nameKey && items.some(i => i.id !== editing && (i.name || '').toUpperCase() === nameKey)) {
-      fe.name = `You already have an item called "${nameKey}". Two items with one name split that ingredient's purchases and stock between them. Edit the existing one, or give this a name that tells them apart.`
+    const clash = nameKey
+      ? (book
+          ? book.byName.get(nameKey.toLowerCase())
+          : items.find(i => (i.name || '').toUpperCase() === nameKey))
+      : null
+    if (clash && clash.id !== editing) {
+      fe.name = clash.is_sub_recipe
+        ? `"${clash.name}" is already a sub-recipe, and a sub-recipe is counted alongside your items in Stock Count — so two rows with this name would split that ingredient's stock between them. Rename the sub-recipe in Recipes, or give this item a name that tells them apart.`
+        : `You already have an item called "${clash.name}". Two items with one name split that ingredient's purchases and stock between them. Edit the existing one, or give this a name that tells them apart.`
     }
     setFieldErr(fe)
     if (fe.name || fe.rate || fe.yield_pct) { setActiveTab('details'); return false }

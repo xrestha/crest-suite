@@ -29,9 +29,19 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   to someone who can only escalate; `'operator'` speaks to the Owner/manager who *is* the person
   who fixes it. "Tell your manager" is as useless to an Owner as `PGRST202` is to a waiter.
 - **No message claims a failed write did not land.** A dead fetch does not prove that — the
-  response can be lost after the server committed — and `items` has no `UNIQUE(client_id, name)`,
-  so a retry over a committed insert silently creates a second item. Say "check your internet and
-  try again", never "nothing was saved"; a test asserts that string never appears.
+  response can be lost after the server committed — and on a table with no unique index the retry
+  then silently creates a second row. Say "check your internet and try again", never "nothing was
+  saved"; a test asserts that string never appears. **`items` was the worked example and is no
+  longer one**: S707 added `items_client_name_key`, so a retry there is refused as a duplicate name
+  rather than doubling the master row. That does not soften the rule — it narrows it to the tables
+  that still have nothing, which is most of them — and it is worth noting for the opposite reason:
+  the *presence* of a unique index is what lets `Items.js` say something specific about a retry, so
+  a call site can only make that claim where it can point at the index that backs it.
+- **A refusal that says nothing was written may only say so when nothing was.** `force_delete_item`
+  earns it — the whole clear-and-delete is one transaction, so a failure genuinely rolls back — and
+  the message says so explicitly, because the browser loop it replaced could not and had shipped a
+  half-destroyed item book under a "try again". Atomicity is not a detail to leave out of the copy:
+  it is the difference between "retry safely" and "check what survived".
 - **Never destroy the technical detail.** `detail` (`code · message`) is returned alongside for a
   fine-print line, never the headline — whoever diagnoses it still needs it.
 - **`ActionError` is where that sentence goes (S658).** `src/components/ActionError.jsx` +

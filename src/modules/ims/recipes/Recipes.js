@@ -537,6 +537,14 @@ export default function Recipes() {
       // constraint a menu item's payload can violate. Name it so the operator fixes the code,
       // rather than surfacing a raw Postgres constraint string.
       const DUP_CODE_MSG = 'That Product Code is already used by another item on this menu. Codes must be unique.'
+      // Names the CONSEQUENCE, not the constraint (S619): a sub-recipe is stock-counted, so the
+      // clash is about a split count, and the way out is a rename on one side or the other. Says
+      // WHICH side is already taken, because the two have different owners — an item is fixed in
+      // Item Master, a sub-recipe in this screen. A mirror the S707 dedupe renamed to "…-DUP2"
+      // reaches its owner through exactly this message on the recipe's next save.
+      const DUP_MIRROR_MSG = (name, isSub) => isSub
+        ? `Another sub-recipe already produces "${name}". Both are counted in Stock Count, so two with one name split that stock between them. Rename this one, or the other.`
+        : `Item Master already has an item called "${name}". A sub-recipe is counted alongside your items in Stock Count, so two rows with one name split that stock between them. Rename this sub-recipe, or rename the item.`
       let recipeId
       if (selectedRecipe) {
         const { error } = await withTimeout(scopedUpdate('recipes', payload).eq('id', selectedRecipe.id), SAVE_TIMEOUT_MS, 'Save')
@@ -631,13 +639,46 @@ export default function Recipes() {
 
         const existingLinkedId = selectedRecipe?.linked_item_id
         let linkedItemId = existingLinkedId
+
+        // A sub-recipe's mirror is an `items` row, and since 20260909120000 `items` carries
+        // `items_client_name_key` — one name per client, case-insensitive, mirrors included. That
+        // index is deliberately not scoped to real items: Stock Count lists mirrors alongside them
+        // (it does not filter `is_sub_recipe`), so two rows with one name split that ingredient's
+        // count exactly as two real items would.
+        //
+        // Nothing here checked names in either direction before, which made this the widest of the
+        // three write paths that never ran Item Master's own duplicate check. Checked first so the
+        // message is about the recipe the user is saving; the 23505 below is the backstop for the
+        // race the check cannot win.
+        //
+        // `.eq`, not `.ilike`: a name is free text and `%`/`_` in it are LIKE wildcards, so an
+        // ilike pattern would silently match the wrong rows on any item called "50_KG BAG". Both
+        // writers store the name uppercased, so eq catches every clash either app created; a
+        // legacy or HQ-pushed row differing only in case falls through to the 23505 below, which
+        // says the same thing.
+        const mirrorClash = await withTimeout(
+          scopedFrom('items', 'id, name, is_sub_recipe').eq('name', itemPayload.name).limit(2),
+          SAVE_TIMEOUT_MS, 'Save'
+        )
+        if (mirrorClash.error) throw new Error('SR sync — name check failed: ' + mirrorClash.error.message)
+        const taken = (mirrorClash.data || []).find(i => i.id !== existingLinkedId)
+        if (taken) throw new Error(DUP_MIRROR_MSG(itemPayload.name, taken.is_sub_recipe))
+
         if (existingLinkedId) {
           const { error: updateErr } = await withTimeout(scopedUpdate('items', itemPayload).eq('id', existingLinkedId), SAVE_TIMEOUT_MS, 'Save')
-          if (updateErr) throw new Error('SR sync — item update failed: ' + updateErr.message)
+          if (updateErr) {
+            throw new Error(updateErr.code === '23505'
+              ? DUP_MIRROR_MSG(itemPayload.name, false)
+              : 'SR sync — item update failed: ' + updateErr.message)
+          }
         } else {
           itemPayload.item_code = payload.recipe_code || selectedRecipe?.recipe_code || null
           const { data: newItem, error: insertErr } = await withTimeout(scopedInsert('items', itemPayload, { single: true }), SAVE_TIMEOUT_MS, 'Save')
-          if (insertErr) throw new Error('SR sync — item insert failed: ' + insertErr.message)
+          if (insertErr) {
+            throw new Error(insertErr.code === '23505'
+              ? DUP_MIRROR_MSG(itemPayload.name, false)
+              : 'SR sync — item insert failed: ' + insertErr.message)
+          }
           linkedItemId = newItem?.id
         }
         if (linkedItemId) {

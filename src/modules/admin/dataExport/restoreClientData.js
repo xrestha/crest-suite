@@ -103,6 +103,34 @@ function chunk(arr, size) {
   return out
 }
 
+// `items_client_name_key` (S707) is one name per client, case-insensitive, covering sub-recipe
+// mirrors and hidden items. Every backup taken before that index existed can carry duplicates —
+// they were exactly what the index was added to stop — and this loop breaks a table on its first
+// failing chunk, so ONE such pair would abandon the client's entire item book and then every table
+// that references it.
+//
+// So the artifact is deduped on the way in, with the same '-DUP<n>' rename the migration uses:
+// a restore must never lose a row, and a renamed item keeps its id, so every purchase, count and
+// recipe line still points at it. The names are returned so the operator is told rather than left
+// to find them — a '-DUP2' is a real pre-existing split that someone now has to merge or retire.
+function dedupeItemNames(rows) {
+  const taken = new Set()
+  const renamed = []
+  const out = rows.map(row => {
+    const original = String(row.name ?? '')
+    let name = original
+    let n = 1
+    while (taken.has(name.trim().toLowerCase())) {
+      n += 1
+      name = `${original}-DUP${n}`
+    }
+    taken.add(name.trim().toLowerCase())
+    if (name !== original) renamed.push(name)
+    return name === original ? row : { ...row, name }
+  })
+  return { rows: out, renamed }
+}
+
 // Refuses to write into a client that already holds data.
 //
 // These are inserts, not upserts, so restoring over a live client would duplicate every row and
@@ -174,13 +202,22 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
   let inserted = 0
   let tables = 0
   const skipped = []
+  // Rows that landed under a changed name. Separate from `skipped`, which means "did not restore":
+  // these DID restore, and reporting them as skipped would say the opposite of what happened.
+  const renamed = []
   let done = 0
 
   for (const table of RESTORE_ORDER) {
     done++
-    const rows = data[table]
+    let rows = data[table]
     if (!rows || rows.length === 0) continue
     onProgress(table, done, RESTORE_ORDER.length)
+
+    if (table === 'items') {
+      const deduped = dedupeItemNames(rows)
+      rows = deduped.rows
+      renamed.push(...deduped.renamed)
+    }
 
     let tableFailed = false
     for (const part of chunk(rows, CHUNK)) {
@@ -232,5 +269,5 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
     if (error) skipped.push(`pos_orders.credit_note_id for ${order.id} (${error.message})`)
   }
 
-  return { inserted, tables, skipped }
+  return { inserted, tables, skipped, renamed }
 }
