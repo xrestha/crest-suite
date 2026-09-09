@@ -14,7 +14,7 @@ import { Navigate, Link } from 'react-router-dom'
 import { FileText, Pencil, Eye, EyeOff, Trash2, Archive as ArchiveIcon, ArchiveRestore, Lock } from 'lucide-react'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
-import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 
 const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '', payment_terms: '' }
 
@@ -62,6 +62,10 @@ export default function Vendors() {
   // writes below used to discard their error entirely: the row simply reloaded unchanged, which
   // reads as "nothing was wrong with that" rather than as a refusal.
   const [listError, setListError] = useState(null)
+  // Separate again from `listError`: that one is a WRITE the user just asked for and can retry.
+  // This is the list read itself failing, which decides whether anything below can be believed —
+  // and it is what stops a dropped read painting the "No vendors yet" empty state (see loadVendors).
+  const [loadError, setLoadError] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -82,9 +86,24 @@ export default function Vendors() {
 
   useEffect(() => { if (clientId) loadVendors() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Drops nothing, and caches nothing it did not get. This loader used to be
+  // `const { data } = await …`: a dropped read then set the list to `[]`, rendered "No vendors yet.
+  // Add your suppliers to get started." over a client's entire supplier book, and WROTE that empty
+  // array into the session cache, so the next visit repainted it instantly with no read in flight
+  // to correct it. Items.js carries the same post-mortem in the same words — this is that bug, one
+  // directory over, and it has a knock-on Items does not: getNextVendorCode() takes its max over
+  // this array, so on an empty one it mints VND-001 again, on top of the real VND-001.
+  //
+  // Paged for the same reason. A bare select stops at PostgREST's 1000 rows with no error and
+  // nothing in the data to say so — a partial supplier list presented as the whole one, and the
+  // same duplicate code minted off the visible slice. `.order('id')` is the unique tiebreaker
+  // paging requires after the display order.
   async function loadVendors() {
     if (vendors.length === 0) setLoading(true) // a cached (or already-loaded) list keeps showing while this refreshes
-    const { data } = await scopedFrom('vendors').order('name')
+    const { data, error } = await fetchAllRows(() =>
+      scopedFrom('vendors').order('name').order('id'))
+    if (error) { setLoadError(asActionError(error)); setLoading(false); return }
+    setLoadError(null)
     setVendors(data || [])
     writePageCache('vendors', 'vendors', clientId, data || [])
     setLoading(false)
@@ -372,6 +391,17 @@ You can put it back from "Show archived".`)) return
         <button className="btn btn-ghost" onClick={() => printWithTitle('Vendors')}>Print</button>
       </div>
 
+      {/* A refresh that failed over a list already on screen (the cached one, or the last good
+          read): the rows below are not the current ones, and the page must say so rather than
+          looking freshly loaded. Add Vendor stays reachable, but its code is minted off this
+          same stale array — which is why the message says the list is out of date, not just that
+          something went wrong. */}
+      {loadError && vendors.length > 0 && (
+        <ActionError
+          error={{ text: `This vendor list could not be refreshed, so it may be out of date. ${loadError.text}`, detail: loadError.detail }}
+          className="action-error--top"
+        />
+      )}
       <ActionError error={listError} />
 
       {showForm && (
@@ -485,6 +515,20 @@ You can put it back from "Show archived".`)) return
       <div className="card">
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+        ) : loadError && vendors.length === 0 ? (
+          // A failed read is not an empty supplier book, and must never offer "add your suppliers
+          // to get started" to a client who already has fifty.
+          <div role="alert">
+            <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-red-text)', margin: '0 0 6px' }}>
+              The vendor list could not be loaded
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
+              This is a failed read, not an empty list — nothing has been lost, and no vendor has
+              been removed. Reload the page, and if it keeps happening send the detail below to support.
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>{loadError.text}</p>
+            {loadError.detail && <p className="action-error-detail">{loadError.detail}</p>}
+          </div>
         ) : viewing.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">⊙</div>
@@ -493,6 +537,13 @@ You can put it back from "Show archived".`)) return
                 ? 'Nothing archived. A vendor you have bought from can be archived once it is deactivated — it leaves this page and keeps its name on every past record.'
                 : 'No vendors yet. Add your suppliers to get started.'}
             </p>
+          </div>
+        ) : filtered.length === 0 ? (
+          // The search matched nothing. Without this the page rendered a header row over an empty
+          // tbody, because the empty state above keys off `viewing`, not `filtered`.
+          <div className="empty-state">
+            <div className="empty-state-icon">⊙</div>
+            <p className="empty-state-text">No vendors match your search.</p>
           </div>
         ) : (
           <div className="table-wrap table-wrap--fab-clear">

@@ -41,7 +41,13 @@ export default function VendorBalanceConfirmation() {
     setLoading(true)
     setLoadError(null)
     const results = await Promise.all([
-      scopedFrom('vendors').eq('is_active', true).order('name'),
+      // Every vendor, active or not — see the optgroup split below. A balance confirmation is a
+      // letter about history, so the vendors it most needs to reach are exactly the ones no longer
+      // being bought from: `.eq('is_active', true)` hid every archived vendor from the picker AND
+      // from the `?vendor=` preselect, which made the Confirm Balance button that Vendors.js
+      // deliberately keeps on an archived row land on "Select a vendor" with that vendor absent
+      // from the list. Archiving forces `is_active = false`, so this was the guaranteed outcome.
+      scopedFrom('vendors').order('name'),
       scopedFrom('monthly_periods').order('bs_year').order('bs_month'),
       supabase.from('clients').select('name').eq('id', effectiveClientId).single(),
     ])
@@ -58,7 +64,9 @@ export default function VendorBalanceConfirmation() {
     setFyOptions(fys)
     if (fys.length > 0) setSelectedFy(fys[0])
 
-    // Arriving from Vendors.js's "Confirm Balance" link (?vendor=<id>) preselects that vendor.
+    // Arriving from Vendors.js's "Confirm Balance" link (?vendor=<id>) preselects that vendor —
+    // including an archived one, which is the row that link exists on. The membership test stays:
+    // it is what stops a hand-typed or stale id selecting a vendor this client cannot see.
     const vendorParam = searchParams.get('vendor')
     if (vendorParam && (v || []).some(x => x.id === vendorParam)) setSelectedVendorId(vendorParam)
 
@@ -196,9 +204,19 @@ export default function VendorBalanceConfirmation() {
         <div className="form-grid form-grid-3">
           <div className="form-field">
             <label htmlFor="vendor-f1">Vendor</label>
+            {/* Split rather than merged: a supplier still being bought from and one archived two
+                years ago are both legitimate here, but they are not equally likely to be the one
+                being looked for, and an unlabelled mix would make a long list harder to scan than
+                the filter that used to hide half of it. The group header is the whole label — no
+                per-option suffix, which would repeat it on every row. */}
             <select id="vendor-f1" className="form-select" value={selectedVendorId} onChange={e => setSelectedVendorId(e.target.value)}>
               <option value="">— Select vendor —</option>
-              {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              {vendors.filter(v => v.is_active).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              {vendors.some(v => !v.is_active) && (
+                <optgroup label="No longer active">
+                  {vendors.filter(v => !v.is_active).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </optgroup>
+              )}
             </select>
           </div>
           <div className="form-field">

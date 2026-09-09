@@ -384,6 +384,17 @@ the read that decides whether an item is safe to delete. **A sweep that pages th
 after and not the read that FEEDS it has not finished**: ask what produces the id list, not only
 what consumes it.
 
+**S708 found the same pair on the Vendors page, and it had been missed for the same reason.**
+`loadUsage` was correctly `fetchAllRowsChunked` over all four referencing tables, while
+`loadVendors` — the read that produces the id list it chunks — was a bare `scopedFrom('vendors')`,
+so past 1000 suppliers the usage chips and the delete guard simply never saw the tail of the book.
+Two pages now, both times the consumer paged and the producer not. The knock-on here is worse than
+a missing chip: `getNextVendorCode()` takes its max over that same array, so a truncated read mints
+a duplicate `VND-` code off the visible slice, exactly as `getNextItemCode()` did. **A page that
+mints a sequential code from a client-side max has a paging bug and a uniqueness bug wearing one
+coat** — `items` answered the second half with `items_client_name_key`; `vendors` has neither index
+yet, so on that page the paging IS the guard.
+
 **Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
 `persistSalesDay`'s legacy three-call fallback.

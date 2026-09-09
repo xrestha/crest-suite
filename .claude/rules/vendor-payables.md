@@ -83,6 +83,72 @@ group by `vendor_id` — so two deleted vendors would both become NULL and **mer
 balances**. A hidden row costs one column; a denormalised name costs an invariant on the module's
 most important table.
 
+### An `is_active` filter on a REPORT is a picker convention one file too far (S708)
+
+S671 kept the `vendors` row so history stays readable, and the Vendors page promises exactly that in
+those words. Two reports broke the promise, because **archiving forces `is_active = false`** and both
+filtered on it — so using the feature was what triggered the defect.
+
+- **`VendorReport.js`** built `vendorSummary`, the Daily Breakdown matrix, the vendor combobox and
+  the Excel export from active vendors, while the footer TOTAL, the four KPI cards and
+  `% of Net Total` were computed over EVERY purchase row in the period. A vendor deactivated
+  mid-year had its spend in the total with no row above it. `vendorSummary` already ends in
+  `.filter(r => r.gross > 0 || r.returned > 0)`, so **dropping the filter adds only vendors that
+  genuinely traded in the month** — it does not lengthen the list with dormant suppliers.
+- **`VendorBalanceConfirmation.js`** was a dead end rather than a wrong number: the `?vendor=` link
+  Vendors.js puts on every row preselects only if the id is in the loaded list, so an archived
+  vendor failed that test silently and the button landed on "Select a vendor" with the vendor
+  absent from the dropdown. The membership test itself is right and stays — it is what stops a
+  stale id selecting a vendor the client cannot see. The picker now loads every vendor and splits
+  the inactive ones under a **No longer active** optgroup.
+
+**The general rule: `.eq('is_active', true)` belongs on a PICKER, which asks what may be chosen
+NOW. A report asks what happened, and its vendor list is its row set.** Before copying that filter
+into a new query, ask which of the two the list is. The live consumers that are correctly pickers:
+`TadaClaims`, `SupplierPriceTracker`, `GatePasses`, `computeVendorPurchasingSection`,
+`ClientDashboard`'s count, and `Purchases.js` — the last of which pairs it with
+`PurchaseBillPage`'s `_inactive` backfill, so an existing bill still names a vendor the picker no
+longer offers. That backfill is the pattern to copy where a picker must also render history.
+
+### The vendor delete guard is a trigger, and there is deliberately no force-delete (S708)
+
+`vendors_guard_referenced_delete` (migration `20260909140000`) is a BEFORE DELETE trigger over
+`vendor_reference_counts()`, the direct sibling of S707's items guard. The browser guard in
+Vendors.js is thorough and stays — it is what words the refusal — but `vendors` carries no
+`no_ims_staff` fence, so every IMS account of any rank could `DELETE /rest/v1/vendors?id=eq.<uuid>`
+with its own JWT, including an `ims_role = 'staff'` account that cannot open the page at all. Two
+of the four referencing tables refuse; `vendor_returns` and `ims_gate_passes` are ON DELETE SET
+NULL, so it succeeded silently. The trigger also closes a race the page cannot: its re-check and
+its DELETE are two round trips.
+
+**`vendors` has no audit trigger**, so a deleted vendor row leaves no snapshot anywhere. That is
+what makes the `vendor_returns` loss unrecoverable rather than merely awkward: the SET NULL is
+logged as an UPDATE carrying the old `vendor_id`, but that id resolves to a row that is gone, and
+`vendors` was the only copy of the name.
+
+**There is no `force_delete_vendor()`, and that is the decision, not an omission.**
+`force_delete_item` exists because an item can be a genuine mis-entry. A vendor with history is a
+supplier the client really did buy from, and the only thing a force-delete could do is destroy the
+record proving it — Archive already loses nothing. No bypass for a client account of any rank,
+operator included; the service role stays the escape hatch that keeps Danger Zone working.
+
+`vendor_reference_counts(p_ids uuid[])` is also the one-round-trip answer to "what points at these
+vendors", where `loadUsage()` currently transfers every purchase line the client has ever entered
+to count them. **The SQL table list is the twin of `VENDOR_REF_TABLES` in `Vendors.js`** — unlike
+`ITEM_REF_TABLES` there is no test holding the two together yet, so change both.
+
+### Still open on vendors, as decisions rather than omissions (S708)
+
+`vendors` has **no `UNIQUE (client_id, lower(name))` and no client-side duplicate check either** —
+it sits where `items` was before S706. A duplicate splits one supplier's payables across two rows
+in Outstanding Payables, two lines in Vendor Report and two balance letters each carrying half the
+balance, and a lost response on Add Vendor retried makes the second row silently (the S619 rule).
+`vendor_code` has the same client-side-max root cause as `item_code` and the same verdict — nothing
+keys off it — but note `getNextVendorCode()` mints from the page's own array, so it is only as good
+as that read. Also unfixed: no `loadedClientRef` guard (switching client leaves the previous one's
+rows up, and a late old response can win the page); the code prefix goes into `new RegExp`
+unescaped, in Items.js too; and Settings' vendor renumber loop checks no error yet reports success.
+
 ### `purchase_entries.created_at` is a BILL-level fact, not a row-level one (S670)
 
 It no longer answers "when was this row written". The edit path in `PurchaseBillForm.jsx` replaces

@@ -176,11 +176,36 @@ parent. Three things generalise from having done it twice:
   correctly. Atomicity is not an optimisation here; it is what lets the failure message say
   "nothing was removed" and be true.
 
+### The third instance, on `vendors` (S708) — and the variation worth noticing
+
+`vendors_guard_referenced_delete` (`20260909140000`) is the same shape again: `BEFORE DELETE`,
+SECURITY INVOKER, the `current_user IN ('anon','authenticated')` seam, a `SECURITY DEFINER` lookup
+(`vendor_reference_counts`) over the four tables that hold a `vendor_id`. `vendors` carries no
+`no_ims_staff` fence either, so the same sentence applies verbatim — every IMS account of any rank
+could delete a supplier over REST, and two of its four FKs are `ON DELETE SET NULL`, so Postgres
+refused nothing on that half.
+
+**The variation: there is deliberately no `force_delete_vendor()`.** That is the first time this
+pattern has shipped without its DEFINER escape hatch, and the reason generalises. `force_delete_item`
+exists because an item can be a genuine mis-entry someone needs gone along with its rows. A vendor
+with history is not a mis-entry — it is a supplier the client really did buy from, and the only
+thing a force-delete could do is destroy the record proving it. **The sanctioned way through a guard
+does not have to be a privileged bypass; where a lossless state change already exists, that is the
+way through.** For vendors it is `archived_at` (S671): the row is kept and hidden, so every FK, join
+and report is untouched. The service role stays exempt via the same `current_user` seam, which is
+what keeps Danger Zone working — and it deletes all four referencing tables before `vendors` anyway.
+
+So the trigger has no bypass for a client account of any rank, operator included. When adding a
+fourth instance, decide which of the two shapes it is before writing the migration: a DEFINER
+force-path is a real answer, but so is refusing outright and pointing at the state change.
+
 **A list that must exist in both JS and SQL needs a test that reads both.** `ITEM_REF_TABLES` is now
 mirrored inside two SQL functions, and the server cannot import a `.js` module.
 `itemRefTables.test.js` parses the migration and asserts membership *and* order. Strip `--` comments
 before asserting on a function body — a header explaining why the sibling is `SECURITY DEFINER` will
-otherwise fail the assertion that this one is not.
+otherwise fail the assertion that this one is not. **`VENDOR_REF_TABLES` has no such test** — it
+is inline in `Vendors.js` and mirrored in `vendor_reference_counts`, correct today and held together
+by nothing, so a fifth table with a `vendor_id` FK reaches neither copy on its own.
 
 ## Sales Entry saves through one atomic RPC, not three round trips
 

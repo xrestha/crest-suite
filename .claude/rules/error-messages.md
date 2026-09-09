@@ -41,7 +41,11 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   earns it — the whole clear-and-delete is one transaction, so a failure genuinely rolls back — and
   the message says so explicitly, because the browser loop it replaced could not and had shipped a
   half-destroyed item book under a "try again". Atomicity is not a detail to leave out of the copy:
-  it is the difference between "retry safely" and "check what survived".
+  it is the difference between "retry safely" and "check what survived". A BEFORE DELETE trigger earns the
+  same claim for free and for a different reason — it raises before the statement writes anything,
+  so `vendor_has_references` and `item_has_references` can both say the record is untouched. **The
+  claim is earned by WHERE the refusal happens, not by how confident the message is**: the same
+  words are a lie in a `catch` around a write whose response was lost.
 - **Never destroy the technical detail.** `detail` (`code · message`) is returned alongside for a
   fine-print line, never the headline — whoever diagnoses it still needs it.
 - **`ActionError` is where that sentence goes (S658).** `src/components/ActionError.jsx` +

@@ -86,6 +86,18 @@ const rules = [
     operator: 'That item already appears on purchases, counts, requisitions or recipes, and deleting it would take those records with it. Hide it instead — it stops being offered on new entries and keeps every record it is already on.',
   },
 
+  // The vendors BEFORE DELETE guard (S708), same shape and here for the same two tables Postgres
+  // stays silent on: vendor_returns and ims_gate_passes are ON DELETE SET NULL, so the delete used
+  // to SUCCEED and strip the supplier off them. Vendors.js pre-checks and words its own refusal, so
+  // this fires on the race that pre-check cannot close — a bill entered on another till between the
+  // check and the delete — which is why it says the record is new rather than that they misread the
+  // page. There is no force-delete to point at: Archive is the way through, and it loses nothing.
+  {
+    test: e => /vendor_has_references/i.test(e.message || ''),
+    staff: 'That supplier now has records against it, so it cannot be deleted. Nothing was removed.',
+    operator: 'That supplier has purchases, orders, returns or gate passes recorded against it — possibly entered just now on another device — and deleting it would take that history with it. Nothing was removed. Deactivate it and then archive it: it leaves the Vendors page and every dropdown, and every past record keeps its supplier.',
+  },
+
   // force_delete_item refused. Both of its refusals happen BEFORE anything is written, which is
   // the one thing worth saying: the previous browser-side loop could not promise that.
   {

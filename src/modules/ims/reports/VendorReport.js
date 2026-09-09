@@ -62,7 +62,17 @@ export default function VendorReport() {
     setLoadError(null)
     const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('vendors').eq('is_active', true).order('name')
+      // Every vendor, ACTIVE OR NOT. This list is not a picker — it is the row set of a historical
+      // report, and `.eq('is_active', true)` was the picker convention applied one file too far.
+      // `vendorSummary` below already drops anything with no activity in the period, so an inactive
+      // vendor only appears here if it genuinely has purchases or returns in the month being read.
+      //
+      // What it cost: the footer TOTAL, the four KPI cards and `% of Net Total` are all computed
+      // over EVERY purchase row in the period, so a vendor deactivated mid-year had its spend in
+      // the total with no row above it — the rows visibly failing to sum to their own footer, which
+      // discredits the rows that were right (S594). S671's archive forces `is_active = false`, so
+      // it turned an occasional divergence into the guaranteed outcome of using the feature.
+      scopedFrom('vendors').order('name')
     ])
     // A failed read must never render as an empty period or NoPeriodState (S612 silent-zero rule).
     const initFailed = firstError(initResults)
