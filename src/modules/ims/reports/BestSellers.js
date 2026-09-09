@@ -82,7 +82,16 @@ export default function BestSellers() {
     // hand-rolled costMap reading only direct item_id ingredients (as this used to) silently
     // costs any sub-recipe-based ingredient at zero, understating COGS/inflating margin here.
     const recipeIds = (recipes || []).map(r => r.id)
-    const costMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}
+    // computeRecipeCosts THROWS on a failed read (S695/S711) and this call site did not catch
+    // it, so a dead `items` read rejected the loader's promise before `setLoading(false)` and
+    // left the page on the loading state indefinitely — no error card, nothing to retry (S715).
+    let costMap = {}
+    try {
+      if (recipeIds.length > 0) costMap = await computeRecipeCosts(supabase, recipeIds)
+    } catch (err) {
+      if (!periodReq.isCurrent(periodId)) return
+      setLoadError(err); setRows([]); setLoading(false); return
+    }
 
     const currentPriceMap = {}
     ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price || 0) })

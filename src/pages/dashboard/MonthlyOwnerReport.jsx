@@ -590,6 +590,13 @@ export default function MonthlyOwnerReport() {
                         <tr><td style={{ color: quadrantColor.Plowhorse, fontWeight: 700 }}>Plowhorse</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Plowhorse}</td><td style={{ color: 'var(--theme-text3)' }}>Profitable, underselling — promote/reposition</td></tr>
                         <tr><td style={{ color: quadrantColor.Puzzle, fontWeight: 700 }}>Puzzle</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Puzzle}</td><td style={{ color: 'var(--theme-text3)' }}>Popular, low profit — consider reprice/portion</td></tr>
                         <tr><td style={{ color: quadrantColor.Dog, fontWeight: 700 }}>Dog</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Dog}</td><td style={{ color: 'var(--theme-text3)' }}>Low profit, low popularity — consider cutting</td></tr>
+                        {/* Not a quadrant — the dishes with no selling price or no costed
+                            ingredients, which have no food cost to be judged on (S715, schema v5).
+                            Guarded because a snapshot frozen before v5 has no such key, and an
+                            absent count must not render as a real 0. */}
+                        {me.quadrantCounts.Unrated > 0 && (
+                          <tr><td style={{ color: 'var(--theme-text2)', fontWeight: 700 }}>Not rated</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Unrated}</td><td style={{ color: 'var(--theme-text3)' }}>No selling price or no costed ingredients — nothing to judge</td></tr>
+                        )}
                       </tbody>
                     </table>
                   </div>

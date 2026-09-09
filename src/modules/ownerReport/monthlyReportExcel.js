@@ -89,9 +89,11 @@ export function exportMonthlyReportExcel(report, bizInfo) {
   if (snapshot.menuEngineering) {
     const me = snapshot.menuEngineering
     const meRows = (me.items || []).map(i => ({
-      Recipe: i.name, Category: i.category, Quadrant: i.quadrant,
+      // `quadrant` is null for a dish with no price or no costed ingredients (schema v5) — the
+      // cell says so rather than leaving a blank that reads as an export fault.
+      Recipe: i.name, Category: i.category, Quadrant: i.quadrant || 'Not rated',
       'Selling Price (NPR)': round2(i.sellingPrice), 'Ingredient Cost (NPR)': round2(i.ingredientCost),
-      'Food Cost %': pct(i.fcPct), 'Qty Sold': i.qtySold, 'Revenue (NPR)': round2(i.revenue),
+      'Food Cost %': i.fcPct == null ? '' : pct(i.fcPct), 'Qty Sold': i.qtySold, 'Revenue (NPR)': round2(i.revenue),
       'Contribution Margin (NPR)': round2(i.contributionMargin), 'Total Contribution (NPR)': round2(i.totalContribution),
     }))
     if (meRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(meRows), 'Menu Engineering')

@@ -276,13 +276,21 @@ one tab of the page and gone from the other three. `salesReads.test.js` reads th
 on either half of the defect — a `.neq` on the column, or a `select()` that omits it — because
 neither has a runtime symptom.
 
-**Still open, deliberately:** ~14 files carry the server-side form (`MenuEngineering`,
+**Still open, deliberately:** ~13 files carry the server-side form (
 `MenuRepricing`, `RecipeMargin`, `Recipes`, `AnnualSummary`, `BestSellers`, `MonthlySummary`,
 `Overheads`, `PeriodComparison`, `ConsolidatedPnl`, `OwnerDashboard`'s revenue read,
 `useSalesPivotData`, and the two `ownerReport` compute files). Every one is display-only and cannot
 delete a row, and each needs its own answer to what its figure is supposed to mean before it is
 changed — `OwnerDashboard`'s stock read was fixed in S696 precisely because the answer there was
 "comps consume ingredients", which is not the answer a revenue read gives.
+
+**`MenuEngineering` came off that list in S715, and why is the useful part.** "Display-only" was
+doing too much work: its qty map sets the period's **median**, which is the popularity cutoff, so
+dropping the legacy rows did not shorten one column — it could move any dish on the menu into a
+different quadrant, and the page then wrote that quadrant back to `recipes.me_class` for the POS
+suggestion engine to act on. **Before filing a read as harmless, ask what else its figure decides**:
+a number that feeds a threshold, a ranking or a write is not display-only.
+`salesReads.test.js` now covers this page alongside `Sales.js`.
 
 **The general shape:** any `.neq`, `.not.eq` or `.not.in` on a NULLABLE column excludes the NULL
 rows as well as the named ones. Check `NOT NULL` before filtering negatively in SQL, or filter
@@ -310,3 +318,73 @@ a statement of intent that a `.neq` beside it silently contradicts.
 MenuPricing and MenuRepricing already carried the fix and the comment explaining it (S683). It did
 not travel, for the same reason nothing else in this file does: a fix reaches the copies someone
 opens.
+
+## Menu Engineering: the quadrant is a verdict, so an unknown input must not produce one (S715)
+
+`src/shared/menuEngineering.js` is now the only definition of `FC_CUTOFF`, `median()`, `classify()`,
+`menuFcPct()` and `unratedReason()`. `MenuEngineering.js` and the frozen
+`computeMenuEngineeringSection.js` both import it. Before this they each held their own copy, with a
+comment on both saying they were mirrored "verbatim" and must never diverge — the shape this repo
+keeps re-learning, and the worst possible file to learn it in, because the owner report's section is
+**immutable**: a quadrant frozen wrong stays wrong, and nothing in the artifact says which of the two
+definitions produced it.
+
+Three properties are load-bearing, each fixing a live defect:
+
+- **`menuFcPct` returns `null`, never 0.** `fcPct` was `sellingPrice > 0 ? cost / price * 100 : 0`,
+  and `0 / 400` is also a real `0` — so "not priced" and "not costed" both arrived at `classify()`
+  as **0% food cost**, cleared the ≤35% cutoff, and came back **Star** or **Plowhorse** with
+  *"Keep on menu. Feature prominently."* beside a green `0.0% ✓`. This is S713's rule one level up:
+  there a zero numerator only mis-COLOURED a cell, here it manufactures a verdict — and
+  `Recipes.js`'s own **+ New Recipe** creates exactly that state, so the page produced its own
+  Stars. `classify()` returns `null` and the caller renders a fifth, neutral **Not rated** bucket
+  carrying the reason, which IS the next step ("No selling price set" / "No costed ingredients").
+- **`highPop` requires `qtySold > 0`.** The median spans every active recipe including the unsold
+  ones, so on a menu where under half the dishes sold in the period the median is **0**, `0 >= 0`
+  holds for everything, Plowhorse and Dog become mathematically unreachable, and a dish that sold
+  nothing renders as a Star. The in-app guide had promised the opposite "by definition" for a year.
+- **The median still spans every recipe, rated or not, sold or not.** Narrowing it would
+  re-classify large parts of a menu at once and pull new snapshots away from historical ones for a
+  reason nobody asked for. Only zero-sale dishes changed.
+
+`CURRENT_SCHEMA_VERSION` went 4 → 5 for it: no shape change beyond `quadrantCounts.Unrated` and a
+nullable `items[].quadrant`, but a v4 matrix and a v5 matrix are not computed the same way, and the
+version is the only trace of that a reader will ever have. Every consumer of `quadrantCounts.Unrated`
+guards on it, because a pre-v5 snapshot has no such key and an absent count must not render as 0.
+
+### A builder that is never awaited sends nothing, and that is a silent dead feature (S715)
+
+`scopedUpdate('recipes', {…}).eq('id', r.id)` — no `await`, no `.then()` — in a `forEach` over every
+recipe. postgrest-js issues the request **inside `then()`** (`PostgrestBuilder.then`), so an
+un-awaited builder is an object that is constructed and dropped. `recipes.me_class` had therefore
+been NULL for every client since the line was written (commit `e8e3d18`, S210), and POS's Pro-tier
+Menu-Engineering suggestion ranking — a feature that is sold, listed in `pricingPlans.js`, and
+described in the guide — has never had data to rank on. Nothing failed, nothing logged, and the S470
+migration that backfilled `'plowhouse'` → `'plowhorse'` on that column ran against zero rows.
+
+**Grep for a `scopedUpdate`/`scopedDelete`/`supabase.from(...).update(...)` whose statement does not
+begin with `await` or end in `.then(`.** A bare builder as an expression statement is always dead
+code, and it reads exactly like a fire-and-forget write.
+
+The rewrite is worth copying: one request **per distinct value** (grouped by class, `runChunkedByIds`
+because the id list rides in the URL) rather than one per row — a 300-dish menu was 300 concurrent
+PATCHes on every period change — and unrated dishes are written back as `NULL` so a dish that loses
+its price stops carrying a stale verdict into the till.
+
+**And it writes only from the CURRENT period** (the open one, else the latest). The write-back is a
+live side effect on another module; browsing last Shrawan out of curiosity must not re-label tonight's
+till suggestions. `computeMenuEngineeringSection.js` had refused to port the write for exactly this
+reason while the live page it mirrors did it on every period change.
+
+### `computeRecipeCosts` throws, and four IMS pages never caught it (S715)
+
+S711 gave it `throwFirstError` and recorded that "the callers that already catch it need no change".
+Four did not catch it at all — `MenuEngineering`, `RecipeMargin`, `MenuRepricing` and `BestSellers`
+— so a failed `items` read rejected the loader's promise **before `setLoading(false)`** and left the
+page on its loading state indefinitely: no error card, nothing to retry, no way to tell it from a
+slow network. Each now wraps the call and routes to its own `setLoadError`, re-checking
+`periodReq.isCurrent` in the catch.
+
+**When you make a shared helper throw, the claim "existing callers already catch it" is a grep, not
+an assumption** — and the symptom of getting it wrong is a hang, which no error branch will ever
+report.

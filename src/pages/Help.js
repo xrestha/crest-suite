@@ -258,8 +258,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '⬢', name: 'Menu Engineering',
-        guide: 'Classifies menu items into Star / Puzzle / Plowhorse / Dog based on profitability and popularity. FC% cutoff is 35%; volume cutoff is median qty sold. Sub-recipes are excluded from this analysis.',
-        tips: ['Stars = high margin + high volume → protect and promote', 'Dogs = low margin + low volume → consider removing from the menu']
+        guide: 'Classifies menu items into Star / Puzzle / Plowhorse / Dog based on profitability and popularity. FC% cutoff is 35%; the volume cutoff is the median qty sold across your whole menu, and a dish that sold nothing is never counted as popular. Sub-recipes are excluded. A dish with no selling price, or with no costed ingredients, has no food cost to judge — it is listed as Not rated rather than being placed in a quadrant.',
+        tips: ['Stars = high margin + high volume → protect and promote', 'Dogs = low margin + low volume → consider removing from the menu', 'Anything in Not rated is a gap in your own data, not a verdict on the dish — the row says which half is missing, so add a selling price in Recipe Costing or give it ingredients (or a manual cost) and it will be classified on the next visit', 'Quadrants move month to month, because the popularity cutoff is that period\'s own median — read them as "as of this period", never as a permanent label on a dish', 'Revenue is what each dish actually charged: rows keep the price they were sold at, so editing a menu price today does not restate last month\'s figures', 'Opening this page on the CURRENT period also refreshes what the POS order screen suggests to your staff (the amber "Chef\'s pick" chips). Opening an old month is read-only and changes nothing.']
       },
       {
         icon: '⊗', name: 'FIFO / Expiry',

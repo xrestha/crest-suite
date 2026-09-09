@@ -453,7 +453,7 @@ export const IMS_GUIDE_GROUPS = [
           'Classic profitability-×-popularity matrix — classifies every sold recipe into one of four quadrants to guide menu decisions (promote, reprice, cut).',
         workflow: [
           'Select a period. Loads recipes (excluding sub-recipes/inactive), computes ingredient cost, and pulls sales qty for the period.',
-          'Classifies every recipe into a quadrant and writes the result back to recipes.me_class in the background — this field is also read live by the POS suggestion engine, so this page\'s classification has an effect beyond its own display.',
+          'Classifies every recipe into a quadrant and writes the result back to recipes.me_class in the background — this field is read live by the POS suggestion engine, so this page\'s classification has an effect beyond its own display. The write only happens when the period on screen is the CURRENT one (the open period, or the latest if none is open): browsing an old month is read-only, because a year-old classification must not become what the till suggests tonight. Before S715 the write never fired at all — the request was built and never sent — so me_class was empty for every client and the POS Menu-Engineering ranking had nothing to rank on.',
           'Three views: Table (sortable list), Matrix (4 grouped panels), Charts (scatter + top-10 bar + category pivot).',
           'Quadrant summary cards act as click-to-filter toggles.',
         ],
@@ -461,15 +461,17 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'Quadrant names', desc: 'Star, Plowhorse, Puzzle, Dog. Note this app\'s Plowhorse/Puzzle definitions are swapped from the traditional restaurant-menu-engineering meaning of those two words: here Plowhorse means high profit / low popularity (the industry\'s usual "Puzzle") and Puzzle means low profit / high popularity (the industry\'s usual "Plowhorse") — worth knowing so it doesn\'t read as backwards when training someone.' },
         ],
         formulas: [
-          'FC% (per recipe) = ingredientCost ÷ sellingPrice × 100 (0 if unpriced).',
-          'medianQty = median qty sold across all active recipes this period.',
-          'Star = FC% ≤35 AND qty ≥ median. Plowhorse = FC% ≤35 AND qty < median. Puzzle = FC% >35 AND qty ≥ median. Dog = FC% >35 AND qty < median.',
+          'FC% (per recipe) = ingredientCost ÷ sellingPrice × 100. Undefined — shown as "—", not 0 — when the recipe has no selling price or no costed ingredients; those dishes are listed as Not rated instead of being given a quadrant.',
+          'medianQty = median qty sold across all active recipes this period, unsold and Not-rated ones included.',
+          'High popularity = qty ≥ median AND qty > 0. Star = FC% ≤35 AND high popularity. Plowhorse = FC% ≤35 AND low. Puzzle = FC% >35 AND high. Dog = FC% >35 AND low.',
+          'Revenue = Σ(qty × the row\'s own unit_price) for rows that captured one, plus (qty with no captured price × the recipe\'s current selling price), minus discounts. Same basis as Sales Entry and Best Sellers, so a past month does not re-value itself when a menu price is edited.',
         ],
         gotchas: [
-          'A recipe with zero sales this period is automatically Dog or Plowhorse (never counts as "high popularity" by definition) — a brand-new or seasonal item will always land in the low-popularity half regardless of how healthy its food cost is.',
+          'A recipe with zero sales this period is automatically Dog or Plowhorse (never counts as "high popularity") — a brand-new or seasonal item lands in the low-popularity half regardless of how healthy its food cost is. This guide claimed it "by definition" long before it was true: until S715 the test was qty ≥ median, and on a menu where under half the dishes sold, the median was 0, so "qty ≥ 0" held for everything and an unsold dish could come back a Star.',
+          'A dish with no selling price, or with no costed ingredients, cannot be rated at all — there is no food cost to judge it on. Those appear in a Not rated group (a fifth summary card, a filter, a full-width panel under the matrix, and a column in the Category Breakdown), never inside a quadrant. Before S715 they were treated as 0% food cost, which passed the ≤35% cutoff and returned them as Stars reading "Keep on menu. Feature prominently."',
           'Because the popularity cutoff is the median qty sold THIS period, quadrant assignments are not stable month to month — always read them as "as of this period\'s sales," not a permanent label.',
         ],
-        connections: 'Reads Recipe Costing and Sales Entry data. Writes recipes.me_class, which the POS module\'s suggestion engine reads.',
+        connections: 'Reads Recipe Costing and Sales Entry data. Writes recipes.me_class, which the POS module\'s suggestion engine reads. The classification rule itself lives in src/shared/menuEngineering.js and is imported — not copied — by the Monthly Owner Report\'s frozen Menu Engineering section, so the live page and the snapshot cannot disagree.',
       },
       {
         id: 'overheads',

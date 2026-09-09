@@ -1,32 +1,25 @@
-// Menu Engineering Matrix — mirrors MenuEngineering.js's classify()/median()/FC_CUTOFF exactly
-// (including zero-sale items in the median) so this report's quadrants always agree with what
-// the live Menu Engineering page shows for the same period. Read-only: deliberately does NOT
-// port MenuEngineering.js's recipes.me_class write-back (a live POS-suggestion-engine side
-// effect) — a report generator run on an arbitrary historical period must never overwrite the
-// CURRENT live classification with whatever period happens to be regenerated last.
+// Menu Engineering Matrix — the quadrants this report freezes must always agree with what the
+// live Menu Engineering page shows for the same period.
+//
+// It used to say so in a comment and then keep its OWN copy of `classify()`, `median()` and
+// `FC_CUTOFF`, "mirrored verbatim". S715 replaced the copy with the real thing: both files import
+// `shared/menuEngineering.js`, so the two cannot drift — which matters more here than anywhere,
+// because this section is FROZEN. A quadrant snapshotted wrong stays wrong for good, and nothing
+// in the artifact says which of the two definitions produced it.
+//
+// Still read-only: deliberately does NOT port MenuEngineering.js's recipes.me_class write-back (a
+// live POS-suggestion-engine side effect) — a report generator run on an arbitrary historical
+// period must never overwrite the CURRENT live classification with whatever period happens to be
+// regenerated last. The live page now applies that same rule to itself (it writes only from the
+// open/latest period), which is where this reasoning came from in the first place.
 import { supabase } from '../../supabaseClient'
 import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { computeRecipeCosts } from '../../utils/recipeCost'
-
-const FC_CUTOFF = 35
-
-function median(nums) {
-  if (nums.length === 0) return 0
-  const sorted = [...nums].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
-}
-
-function classify(fcPct, qtySold, medianQty) {
-  const highProfit = fcPct <= FC_CUTOFF
-  const highPop = qtySold >= medianQty
-  if (highProfit && highPop) return 'Star'
-  if (highProfit && !highPop) return 'Plowhorse'
-  if (!highProfit && highPop) return 'Puzzle'
-  return 'Dog'
-}
+import {
+  FC_CUTOFF, classify, median, menuFcPct, unratedReason, emptyQuadrantCounts,
+} from '../../shared/menuEngineering'
 
 export async function computeMenuEngineeringSection(clientId, period) {
   const results = await Promise.all([
@@ -55,16 +48,17 @@ export async function computeMenuEngineeringSection(clientId, period) {
   const enriched = (recipes || []).map(r => {
     const sellingPrice = parseFloat(r.selling_price) || 0
     const ingredientCost = costMap[r.id] || 0
-    const fcPct = sellingPrice > 0 ? (ingredientCost / sellingPrice) * 100 : 0
+    // null, not 0, when the dish has no price or no costed ingredients — a 0 here passed the
+    // ≤35% test and froze an uncosted dish into the snapshot as a Star (S715).
+    const fcPct = menuFcPct(ingredientCost, sellingPrice)
     const qtySold = qtyMap[r.id] || 0
     // House style: prefer the row's own historical unit_price when present — same basis
-    // computeImsSection.revenueTotal already uses. Deliberately NOT MenuEngineering.js's
-    // current-price-only revenue; only the classification inputs must match that page 1:1, not
-    // the displayed revenue figure.
+    // computeImsSection.revenueTotal already uses. The live page reads this way too as of S715.
     const revenue = revenueMap[r.id] != null ? revenueMap[r.id] : qtySold * sellingPrice
     const contributionMargin = sellingPrice - ingredientCost
     return {
       recipeId: r.id, name: r.name, category: r.category, sellingPrice, ingredientCost, fcPct,
+      unrated: unratedReason(ingredientCost, sellingPrice),
       qtySold, revenue, contributionMargin, totalContribution: contributionMargin * qtySold,
     }
   })
@@ -72,8 +66,8 @@ export async function computeMenuEngineeringSection(clientId, period) {
   const medianQty = median(enriched.map(r => r.qtySold))
   const items = enriched.map(r => ({ ...r, quadrant: classify(r.fcPct, r.qtySold, medianQty) }))
 
-  const quadrantCounts = { Star: 0, Plowhorse: 0, Puzzle: 0, Dog: 0 }
-  items.forEach(i => { quadrantCounts[i.quadrant] += 1 })
+  const quadrantCounts = emptyQuadrantCounts()
+  items.forEach(i => { quadrantCounts[i.quadrant == null ? 'Unrated' : i.quadrant] += 1 })
 
   const topByRevenue = [...items].sort((a, b) => b.revenue - a.revenue).slice(0, 10)
   const topByContribution = [...items].sort((a, b) => b.totalContribution - a.totalContribution).slice(0, 10)

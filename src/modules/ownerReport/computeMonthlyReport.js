@@ -480,7 +480,13 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // 4 (S696): no shape change; `ims.reorder` now comes from the shared `buildStockRows` — wastage
 // and staff meals deducted, sales deduplicated through the POS-supersedes-manual rule, "below
 // par" strictly below — where v3 kept a local copy that did none of those. Same reasoning as v3.
-export const CURRENT_SCHEMA_VERSION = 4
+// 5 (S715): `menuEngineering` classifies through the shared `shared/menuEngineering.js` rather
+// than a local copy of it, and two inputs changed with the move — a dish with no selling price or
+// no costed ingredients is no longer given a food cost of 0% (it was passing the ≤35% test and
+// freezing into the snapshot as a Star), and a dish that sold nothing is no longer "high
+// popularity" when the period's median is 0. `quadrantCounts` gains an `Unrated` key and
+// `items[].quadrant` can be null. A v4 matrix and a v5 matrix are not computed the same way.
+export const CURRENT_SCHEMA_VERSION = 5
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

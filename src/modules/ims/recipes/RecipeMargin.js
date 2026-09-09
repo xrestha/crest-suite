@@ -77,7 +77,16 @@ export default function RecipeMargin() {
     // costs any sub-recipe-based ingredient (sauces, batters, prepped components) at zero and
     // ignores trim/prep loss, understating food cost and margin for exactly those dishes.
     const recipeIds = (recipes || []).map(r => r.id)
-    const costMap = await computeRecipeCosts(supabase, recipeIds)
+    // computeRecipeCosts THROWS on a failed read (S695/S711) and this call site did not catch
+    // it, so a dead `items` read rejected the loader's promise before `setLoading(false)` and
+    // left the page on the loading state indefinitely — no error card, nothing to retry (S715).
+    let costMap = {}
+    try {
+      costMap = await computeRecipeCosts(supabase, recipeIds)
+    } catch (err) {
+      if (!periodReq.isCurrent(periodId)) return
+      setLoadError(err); setRows([]); setLoading(false); return
+    }
 
     const qtyMap = {}, discMap = {}
     for (const s of (salesData || [])) {

@@ -430,6 +430,11 @@ floor. Where a write fails *after* the thing it belongs to is already committed 
 and numbered, so refusing it is not available — surface it non-blockingly and name the downstream
 consequence, not the error (`PosOrders.jsx`'s `warnWrite` + floor banner is the reference).
 
+**A builder that is never `await`ed never runs.** postgrest-js sends inside `then()`, so a bare
+`supabase.from(x).update(y).eq(…)` statement builds an object and drops it — no request, no error.
+It reads like deliberate fire-and-forget, which is why review misses it; S715 found one dead since
+it shipped, a paid feature's column NULL for every client. Fire-and-forget is `void p.then(ok, onErr)`.
+
 ### A bare `.select()` silently truncates at 1000 rows
 
 Supabase sets PostgREST's `db-max-rows` to 1000. A `.select()` with no `.range()` that matches more rows than that returns the first 1000 with **no error and nothing in the data to say so** — every total summed from that array is then wrong, and wrong quietly, which is the dangerous part: it reads as a real figure until someone compares it against another source. Found live (S528) reporting 1000 movements / NPR 49,241 against a real 1753 / NPR 87,043.

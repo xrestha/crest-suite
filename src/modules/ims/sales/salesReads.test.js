@@ -9,15 +9,25 @@
 // save_sales_day's delete covers `source IS NULL OR source = 'manual'` — so the next Save Day
 // removes a row nobody was ever shown. Filter comps in JS, over a `source` column that is selected.
 //
-// Scoped to this file on purpose. ~14 other files still carry the server-side form; every one of
-// them is display-only and cannot delete a row, and each needs its own decision about what its
-// figure is supposed to mean before it is changed.
+// Covers the files that have had this decision MADE, not every file that reads the table. ~13
+// others still carry the server-side form; every one is display-only and cannot delete a row, and
+// each needs its own answer to what its figure is supposed to mean before it is changed.
+//
+// Menu Engineering joined in S715. Its figure is not display-only in the harmless sense: the qty
+// map sets the period's MEDIAN, which is the popularity cutoff, so dropping the legacy rows did
+// not shorten one column — it could move any dish on the menu into a different quadrant, and
+// then write that quadrant back to recipes.me_class for the POS suggestion engine to act on.
 import fs from 'fs'
 import path from 'path'
 
-const SRC = fs.readFileSync(path.join(__dirname, 'Sales.js'), 'utf8')
+const FILES = [
+  ['Sales.js', path.join(__dirname, 'Sales.js')],
+  ['MenuEngineering.js', path.join(__dirname, '..', 'recipes', 'MenuEngineering.js')],
+]
 
-describe('Sales.js reads sales_entries in a way NULL-source rows survive', () => {
+describe.each(FILES)('%s reads sales_entries in a way NULL-source rows survive', (_name, file) => {
+  const SRC = fs.readFileSync(file, 'utf8')
+
   test('no server-side .neq on the source column', () => {
     // Comment lines are skipped: the rule is documented at the top of Sales.js, quoting the form
     // it forbids, and a check that cannot tell code from prose fails on its own explanation.
