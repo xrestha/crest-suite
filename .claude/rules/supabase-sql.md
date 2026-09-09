@@ -152,6 +152,40 @@ pass vacuously for an account whose RLS view of `payable_payments` is narrower t
 failed read too. No legacy fallback: the migration must be applied before the frontend deploys, and
 until it is, Save reports the function as unavailable rather than saving the old two-step way.
 
+## A PO receipt is one transaction too — `receive_purchase_order` (S709)
+
+`receive_purchase_order(p_po_id, p_bs_day, p_payment_method, p_vat_inclusive, p_group_id, p_lines)`
+(migration `20260909150000`) is the third member of this family, and it exists because
+`PurchaseOrders.js` writes `purchase_entries` — the same table the two above protect — through a
+path that had none of their discipline. It was FOUR round trips: insert the bills, one
+`qty_received` update per line, then the status. Same `SECURITY INVOKER` reasoning as its siblings.
+Four properties are load-bearing:
+
+- **`qty_received` is INCREMENTED, not assigned.** The browser used to write
+  `snapshot + receiving`, off a snapshot read when the screen opened — so two people receiving one
+  delivery each banked it and the second erased the first, and the over-receive check was computed
+  off the same stale number. The PO row is taken `FOR UPDATE` first, so concurrent receipts queue
+  and the remaining-quantity check is true at the moment it is applied.
+- **The status write cannot go missing.** It was the one call in the old path with no error check
+  at all, and its absence left the PO on `draft` holding received quantities — the exact state in
+  which Edit (draft-only) replaces the line rows at `qty_received: 0` and the delivery can be
+  received and billed twice. The status is now derived from the table inside the same statement.
+- **It enforces the closed-period lock** (`po_period_closed`, `is_admin()` carve-out wrapped in
+  COALESCE). The first server-side half of a lock that is browser-only on the other five pages —
+  see `closed-periods.md` for why this one needed it.
+- **It writes `purchase_entries.po_id`**, the link back to the order. `save_purchase_bill` was
+  amended in the same migration to CARRY that link through an edit (`max(po_id)` of the superseded
+  rows, read before the delete); without that, correcting a typo on a received bill in Purchases
+  silently cut it loose. **A link that does not survive an ordinary edit is not a link**, and the
+  assertion block checks the carry-through is still there.
+
+`purchase_orders_guard_delete` is the fourth `BEFORE DELETE` trigger of the shape below, refusing
+two things: a non-admin delete (the page's own `if (!isAdmin) return`, which was the whole of the
+enforcement — every IMS account could `DELETE /rest/v1/purchase_orders` including a `staff` rank
+that cannot open the page), and any order with bills against it. `po_id` is `ON DELETE SET NULL`,
+so without that second refusal the delete would SUCCEED and strip the link off the bills — the
+`confdeltype` trap, again, on a column added the same day.
+
 ### The same shape on `items` (S707), and what makes it a pattern
 
 `items_guard_referenced_delete` (`20260909130000`) is the second instance and copies this one

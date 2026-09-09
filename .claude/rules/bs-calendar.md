@@ -106,6 +106,17 @@ and the pickers render) — this one names a day inside the period you already c
 year. Use `bsDayOrdinal(day)` alone where the month is already stated beside it. **Excel exports keep
 the numeric Day column** — text breaks a spreadsheet's sorting and filtering.
 
+**A STORED date renders as `formatAdAsBs(iso)` — "15 Bhadra 2082" (S709).** The sibling of the
+above for the other kind of date: not a day inside a period you already chose, but an arbitrary
+stored value, which is always AD on disk and always BS to the reader. It is `adToBsSafe` plus
+`BS_MONTHS` plus the explicit local-midnight parse (`new Date('2025-08-31')` is UTC midnight, which
+at +05:45 is still the 30th — the same off-by-one `formatAd` prevents on the way in), and out of
+the verified table it renders `YYYY-MM-DD (AD)` rather than a confident wrong date. It exists
+because Purchase Orders' Expected Delivery was picked in BS, stored as AD and printed as AD on the
+document a supplier receives — **a column read raw is a calendar nobody here entered.**
+`SelfServiceHome.jsx` (`fmtBs`) and `LeaveManagement.jsx` still hold their own copies of that
+three-line composition and can adopt it; a NEW site must not write a fourth.
+
 **`BS_MONTHS` has exactly one definition and it lives here.** It was copy-pasted into 31 files until
 S614 (all byte-identical, so nothing rendered wrong — it was simply a list that only had to be edited
 once to disagree with itself). Three of those 31 hid from a `^const BS_MONTHS =` grep: one held the

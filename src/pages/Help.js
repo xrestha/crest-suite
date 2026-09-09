@@ -226,8 +226,14 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '☑', name: 'Purchase Orders',
-        guide: 'Create and manage purchase orders to send to vendors before stock arrives. POs can be drafted, approved, and marked as received. Maintains a proper procurement trail ahead of Purchases entries.',
-        tips: ['Raise a PO before the vendor delivers to keep procurement organised', 'Match the received PO against the actual invoice when entering Purchases']
+        guide: 'Write down what you have ordered from a supplier before it arrives, then tick it off when it does. Raise a PO (vendor, items, quantities, the price you agreed), print or send it, and mark it Sent. When the delivery turns up, press Receive, enter what actually came, and Crest creates the purchase bill for you — one bill, in the month the order belongs to, with the PO number as its reference. Short delivery? Enter what arrived; the order stays Partial and you receive the rest later. Nothing arriving at all? Cancel it. A part-delivered order that is never completed gets Close Short, which keeps what came and closes the rest.',
+        tips: [
+          'Raise a PO before the vendor delivers, so what you ordered and what arrived can be compared',
+          'Receiving IS the purchase entry — do not also type the bill into Purchases, or the month counts it twice',
+          'The delivery is filed in the order\'s own month: receive a Shrawan order in Bhadra and the bill lands in Shrawan, which the screen tells you before you confirm',
+          'You cannot receive more than the order still has outstanding, and two people receiving the same delivery cannot both bank it',
+          'Once bills exist against an order it can no longer be deleted — cancel it instead, so the record of what you ordered stays',
+        ]
       },
     ]
   },

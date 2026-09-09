@@ -309,9 +309,17 @@ also called after a save, after a period close, on a manual refresh, and none of
 `handlePeriodChange`; a counter would treat every one as stale and silently discard a legitimate
 reload. And **it fails open**: before any `begin()` the ref is null and `isCurrent()` returns true, so
 a page that adopts the check and forgets the claim degrades to the old racy behaviour rather than
-rendering permanently blank. Of the two possible mistakes only one is recoverable by the user — which
-is also why a page's own `init()` needs no `begin()`: once the handler claims, init's stale load is
-correctly rejected on its own.
+rendering permanently blank. Of the two possible mistakes only one is recoverable by the user.
+
+**A page's own `init()` DOES need its `begin()`** — this paragraph used to say the opposite, on the
+reasoning that once the handler claims, init's stale load is rejected by its own `isCurrent`. That
+is true of the DATA and not of the LABEL: `init` also calls `setSelectedPeriod`, which no guard
+covers, so a period change during a first load left the dropdown snapping back to the open month
+over another month's table — figures and label disagreeing, the exact thing the guard exists to
+prevent. S698 fixed it in `Purchases.js` and S709 in `PurchaseOrders.js`, both against the hook's
+own documented contract ("anything that auto-selects a period must call `begin()` too"), while this
+file was arguing they did not have to. A page whose dropdown cannot render until loading finishes
+is safe either way; claim it anyway, rather than making every reader re-derive which kind it is.
 
 **S682 took it to 38 pages (measured by grep) and closed the report tail.** The twelve period-driven IMS reports that
 had never been swept — VAT, Non-VAT, Purchase 1L+, Annual Summary, Vendor Balance Confirmation,
@@ -394,6 +402,17 @@ a duplicate `VND-` code off the visible slice, exactly as `getNextItemCode()` di
 mints a sequential code from a client-side max has a paging bug and a uniqueness bug wearing one
 coat** — `items` answered the second half with `items_client_name_key`; `vendors` has neither index
 yet, so on that page the paging IS the guard.
+
+**`getNextPoNumber()` was the third instance (S709)**, and the one that already had the uniqueness
+half: `purchase_orders` carries a `client_id + po_number` unique index and `savePo` retries three
+times on a `23505`. That combination is worse than it sounds — the retry recomputes the max off the
+*same truncated window*, so it produces the same colliding number three times and then surfaces a
+constraint violation, where the paging bug alone would have been one silent duplicate. It also
+shows why the obvious shortcut is not one: ordering by `po_number` and taking the first row is
+wrong at exactly the volume the cap starts mattering, because `'PO-1000'` sorts below `'PO-999'` as
+text. And its failed read now stops the save rather than numbering off a short list — **a code
+minted from a max is only as trustworthy as the completeness of the read behind it**, so "I could
+not read the list" and "the list is empty" must not lead to the same number.
 
 **Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and

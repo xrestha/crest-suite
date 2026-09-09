@@ -46,6 +46,34 @@ bills NET of allocated discounts (S601), and Stock Count's Summary values what a
 ITEM MASTER rate — three legitimately different figures, so no tooltip may claim they match. And
 the Daily Register's Total is a QUANTITY in the base unit, not money.
 
+### Purchase Orders was the un-swept sibling, and a receipt is a purchase (S709)
+
+`PurchaseOrders.js` writes `purchase_entries` — the same table `Purchases.js` does — and every
+piece of discipline S698 put into that page was absent from this one: no closed-period lock, no
+`firstError`, no asserted row counts, no atomic save, four of its writes dropping their errors
+outright. **When one page in a module is repaired, the question to ask is which other page writes
+the same table**, not which other page looks like it. The receipt path is now
+`receive_purchase_order` (see `supabase-sql.md`); the rest of what changed:
+
+- **A receipt links back to its order.** `purchase_entries.po_id`, nullable forever — NULL means
+  "typed in by hand", never "unknown" — and `save_purchase_bill` carries it through an edit. This
+  is the reconciliation `invoice_ref = po_number` could never be: that field is free text and
+  Purchases lets anyone overwrite it.
+- **A PO with bills against it cannot be deleted**, by anyone, operator included; Cancel is the way
+  through, and on a part-received order it is labelled **Close Short** — the goods that arrived
+  keep their bills and their stock, only the outstanding quantity closes. The old Cancel tooltip
+  promised "no purchase entries will be created" on orders whose entries already existed.
+- **Editing needs draft AND nothing received.** An edit replaces the line rows and a replacement
+  starts at `qty_received: 0`, so the draft-only rule was one silent status write away from wiping
+  the evidence of a delivery.
+- **The order's period is where the bill lands, not the month you are in.** The Day Received picker
+  is locked to the PO's own BS month (it was a 1–32 number box pre-filled with *today's* day
+  number, whatever month today was in), and the screen says so when the two differ.
+- **Everything on this page is in BASE units** — `qty_ordered`, `unit_price`, and therefore the
+  `purchase_entries` rows it writes. No conversion factor is applied anywhere on it, unlike a
+  Purchase Bill whose qty is in purchase units. That is why it prefills bare `per_uom_rate`
+  (corrected in `item-master-rates.md`, S698) and why nothing here calls `getCf`.
+
 ### The `vendors` row is the only copy of the supplier's NAME (S671)
 
 `purchase_entries`, `purchase_orders` and `vendor_returns` store a `vendor_id` and nothing else;

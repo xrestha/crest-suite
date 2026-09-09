@@ -43,4 +43,41 @@ describe('errorText', () => {
     expect(errorInfo('boom', 'operator').text).toBe(errorInfo(null, 'operator').text)
     expect(errorInfo(null).detail).toBe('')
   })
+
+  // S709. These come out of `receive_purchase_order`, which is one transaction — so unlike the
+  // dropped-fetch case above, the server raising one of them really does prove nothing landed,
+  // and saying so is what makes the delivery safe to re-enter rather than a coin toss.
+  describe('the purchase order receipt refusals', () => {
+    const raised = name => ({ code: 'P0001', message: `${name}: purchase order PO-004 …` })
+
+    it('a closed period says the month is the problem, and names who can get past it', () => {
+      expect(errorText(raised('po_period_closed'), 'operator')).toMatch(/closed/i)
+      expect(errorText(raised('po_period_closed'), 'operator')).toMatch(/operator/i)
+      expect(errorText(raised('po_period_closed'), 'staff')).toMatch(/ask your manager/i)
+    })
+
+    it('an over-receive points at the order rather than at the number typed', () => {
+      const text = errorText(raised('po_over_receive'), 'operator')
+      expect(text).toMatch(/outstanding/i)
+      expect(text).toMatch(/reopen/i)
+    })
+
+    it('a stale order and a vanished one read the same, because they are the same fact', () => {
+      expect(errorText(raised('po_receipt_stale'), 'operator'))
+        .toBe(errorText(raised('po_not_found'), 'operator'))
+    })
+
+    it('these refusals ARE allowed to say nothing landed — they are raised before the commit', () => {
+      for (const name of ['po_period_closed', 'po_not_receivable', 'po_over_receive', 'po_receipt_stale']) {
+        expect(errorText(raised(name), 'operator')).toMatch(/nothing was received/i)
+      }
+    })
+
+    it('a delete refusal names the way through instead of only the refusal', () => {
+      expect(errorText(raised('po_delete_not_permitted'), 'operator')).toMatch(/cancel it instead/i)
+      expect(errorText(raised('po_has_receipts'), 'operator')).toMatch(/cancel the order instead/i)
+      // The consequence, not the constraint: what deleting it would do to the bills.
+      expect(errorText(raised('po_has_receipts'), 'operator')).toMatch(/bills/i)
+    })
+  })
 })

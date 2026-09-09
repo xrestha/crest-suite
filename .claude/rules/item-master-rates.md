@@ -52,7 +52,9 @@ Four consequences fell out of that, all now fixed and all worth not re-deriving:
   that matches whichever unit the Qty box is counting, in both cases. Purchase Orders prefills
   bare `per_uom_rate` and has no conversion handling at all — its qty is BASE units, so that is
   internally consistent, not the same rule (an earlier version of this line claimed it did `× cf`;
-  it does not, S698). The bill modal was the only place the two units could cross. Each row now also prints
+  it does not, S698). **S709 put that fact on the PO screen itself** — the Unit Price tooltip now
+  says "per BASE unit — the unit shown in the UOM column, not a case or a sack", because a
+  convention that only exists in a rules file is one a user cannot check while typing. The bill modal was the only place the two units could cross. Each row now also prints
   the master rate for that same unit beneath the box, ambered past 5×/⅕, so a unit mix-up is visible
   on the row rather than only in a grand total where a 500× error still reads as a plausible number.
 - **The "Rate changes detected" sync compares and writes in the box's unit** (`PurchaseBillPage.jsx`

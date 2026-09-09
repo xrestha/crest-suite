@@ -1,6 +1,6 @@
 import {
   daysInBsMonth, bsToAd, adToBs, adToBsSafe, getBsFiscalYear, formatAd, bsAddDays, bsDiffDays,
-  BS_YEAR_MIN, BS_YEAR_MAX, BS_MONTHS, BS_MONTHS_SHORT, bsDayOrdinal, formatBsDay,
+  BS_YEAR_MIN, BS_YEAR_MAX, BS_MONTHS, BS_MONTHS_SHORT, bsDayOrdinal, formatBsDay, formatAdAsBs,
 } from './bsCalendar'
 
 const d = s => new Date(s + 'T00:00:00')
@@ -249,5 +249,34 @@ describe('bsDayOrdinal / formatBsDay', () => {
     expect(formatBsDay(null, 5)).toBe('')
     expect(formatBsDay(undefined, 5)).toBe('')
     expect(bsDayOrdinal('')).toBe('')
+  })
+})
+
+// S709 — the display half of the storage convention. A date is picked in BS, stored as AD, and had
+// been read back raw on Purchase Orders' Expected Delivery: in the list, and on the printed order
+// the supplier receives.
+describe('formatAdAsBs', () => {
+  test('renders a stored AD date as the BS date it was picked as', () => {
+    // The round trip its callers actually make: BsCalendarPicker commits formatAd(bsToAd(...)).
+    expect(formatAdAsBs(formatAd(bsToAd(2082, 5, 15)))).toBe('15 Bhadra 2082')
+    expect(formatAdAsBs(formatAd(bsToAd(2082, 1, 1)))).toBe('1 Baisakh 2082')
+    expect(formatAdAsBs(formatAd(bsToAd(2083, 12, 30)))).toBe('30 Chaitra 2083')
+  })
+
+  test('parses a bare YYYY-MM-DD at LOCAL midnight, not UTC', () => {
+    // new Date('2025-08-31') is UTC midnight, which at Nepal's +05:45 is still the 30th — the same
+    // off-by-one formatAd exists to prevent on the way in. Both spellings must agree.
+    expect(formatAdAsBs('2025-08-31')).toBe(formatAdAsBs('2025-08-31T00:00:00'))
+  })
+
+  test('falls back to the truthful AD value outside the verified table, labelled as AD', () => {
+    expect(formatAdAsBs('1901-01-01')).toBe('1901-01-01 (AD)')
+    expect(formatAdAsBs('2200-01-01')).toBe('2200-01-01 (AD)')
+  })
+
+  test('renders the caller\'s own dash for an absent date', () => {
+    expect(formatAdAsBs(null)).toBe('—')
+    expect(formatAdAsBs('')).toBe('—')
+    expect(formatAdAsBs(undefined, { fallback: 'not set' })).toBe('not set')
   })
 })

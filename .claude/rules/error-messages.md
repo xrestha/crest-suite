@@ -87,6 +87,21 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   removed, name what is still holding the record, and say plainly when retrying will not get past
   it. **"Try again" is a claim about the future**, and it is only honest where the failure is
   plausibly transient.
+- **The best consequence message is the one you delete by making the state impossible (S709).**
+  "A PO whose line items were gone" above was a real half-deleted state with a carefully worded
+  apology attached — and it existed only because `deletePoNow` hand-rolled a cascade the FK already
+  performs, in two round trips that could stop between them. Deleting through the cascade removed
+  the state and the sentence together. Before wording a consequence, check whether the two-write
+  sequence that produces it needs to exist: the same session replaced the PO receipt's four writes
+  with one RPC and six messages became one honest set of refusals.
+- **Six of those refusals may say "nothing was received" (S709)**, and it is worth being precise
+  about why: `receive_purchase_order` raises `po_period_closed` / `po_not_receivable` /
+  `po_over_receive` / `po_receipt_stale` inside the single transaction that would write the bills,
+  so the rollback is a property of where they are raised. The message the user sees after a dropped
+  connection to the *same* RPC says no such thing — it falls to the network rule, which claims
+  nothing about what landed. Both paths point at the same next step instead: reopen the order,
+  because what it shows as outstanding is what actually recorded. **When you cannot promise what
+  happened, name the place that can tell them.** `errorText.test.js` asserts both halves.
 - Distinct from the report rule above: that one is about a figure a page *did not compute*; this
   one is about the sentence shown once something has already failed. Rules only get added here for
   shapes genuinely recognisable from the error — everything else takes an honest fallback.

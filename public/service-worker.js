@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crest-v245';
+const CACHE_NAME = 'crest-v246';
 
 self.addEventListener('install', event => {
   event.waitUntil(

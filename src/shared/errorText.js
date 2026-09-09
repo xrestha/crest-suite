@@ -98,6 +98,47 @@ const rules = [
     operator: 'That supplier has purchases, orders, returns or gate passes recorded against it — possibly entered just now on another device — and deleting it would take that history with it. Nothing was removed. Deactivate it and then archive it: it leaves the Vendors page and every dropdown, and every past record keeps its supplier.',
   },
 
+  // ── receive_purchase_order (S709) ─────────────────────────────────────────────────────────
+  // Every one of these is raised BEFORE or INSIDE the one transaction that writes the bills, the
+  // received quantities and the PO's status together — so unlike a dropped fetch, each of them
+  // genuinely does prove nothing landed, and saying so is what makes the delivery safe to re-enter.
+  // That guarantee is the function's whole reason for existing (the old path wrote the bills first
+  // and could stop before the quantities), so these messages are allowed to state it.
+  {
+    test: e => /po_period_closed/i.test(e.message || ''),
+    staff: 'That month is closed, so this delivery cannot be recorded against it. Nothing was received — ask your manager.',
+    operator: 'The period this purchase order belongs to is closed, so nothing was received and no stock moved. A Crest operator can enter it into the closed month; otherwise receive the delivery into the open period instead.',
+  },
+  {
+    test: e => /po_not_receivable/i.test(e.message || ''),
+    staff: 'This order is already closed off, so nothing more can be received against it. Nothing was received.',
+    operator: 'This purchase order is cancelled or already fully received, so nothing was received and no stock moved. Raise a new order for anything still needed from this supplier.',
+  },
+  {
+    test: e => /po_over_receive/i.test(e.message || ''),
+    staff: 'That is more than the order still has outstanding — someone may have received part of it already. Nothing was received; reopen the order to see what is left.',
+    operator: 'The quantity entered is more than this order still has outstanding, measured at the moment you confirmed — another device may have received against it since you opened this screen. Nothing was received and no stock moved. Reopen the order; it will show what is genuinely left.',
+  },
+  {
+    test: e => /po_receipt_stale|po_not_found/i.test(e.message || ''),
+    staff: 'This order changed while you were receiving it. Nothing was received — reopen it from the list and try again.',
+    operator: 'This purchase order changed while the receive screen was open (another user edited, cancelled or deleted it). Nothing was received and no stock moved. Reopen it from the list and try again.',
+  },
+
+  // The purchase_orders BEFORE DELETE guard (S709), the third of its kind after items (S707) and
+  // vendors (S708). Both refusals are raised by the trigger inside the DELETE statement, so the
+  // order is still there, whole.
+  {
+    test: e => /po_delete_not_permitted/i.test(e.message || ''),
+    staff: 'You do not have permission to delete a purchase order. Nothing was removed.',
+    operator: 'Only a Crest operator can delete a purchase order. Nothing was removed. Cancel it instead — it stays on the list as a record and can no longer be received against.',
+  },
+  {
+    test: e => /po_has_receipts/i.test(e.message || ''),
+    staff: 'Goods have already been received against this order, so it cannot be deleted. Nothing was removed.',
+    operator: 'Bills have already been received against this purchase order, and deleting it would cut them loose from the order they came from. Nothing was removed. Cancel the order instead — it keeps the record and stops further receiving — or delete those bills in Purchases first.',
+  },
+
   // force_delete_item refused. Both of its refusals happen BEFORE anything is written, which is
   // the one thing worth saying: the previous browser-side loop could not promise that.
   {

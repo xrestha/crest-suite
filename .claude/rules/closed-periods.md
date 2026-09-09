@@ -20,9 +20,25 @@ Every period-scoped entry page spells the same line:
 const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
 ```
 
-`Purchases.js`, `PurchaseBillPage.jsx`, `Sales.js`, `Stock.js` and `Overheads.js` — five copies, all
-agreeing. **The `!isAdmin` carve-out is the feature, not an oversight**: an admin correcting history
-is a real, expected job, and the alternative (reopen the month) is structurally unavailable.
+`Purchases.js`, `PurchaseBillPage.jsx`, `Sales.js`, `Stock.js`, `Overheads.js` and — since S709 —
+`PurchaseOrders.js`: six copies, all agreeing. **The `!isAdmin` carve-out is the feature, not an
+oversight**: an admin correcting history is a real, expected job, and the alternative (reopen the
+month) is structurally unavailable.
+
+## The page that writes a locked table is not always the page that looks locked (S709)
+
+`PurchaseOrders.js` had no `isLocked` for its whole life, and the reason it went unnoticed is worth
+keeping: **it does not look like an entry page.** It is a document workflow — raise, send, receive —
+and the count of pages that lock was taken from the pages that have a period selector over a grid of
+figures. But Receive writes `purchase_entries`, the same table `Purchases.js` locks four lines away,
+so this was the way around a period close for anyone who happened to be on it. Ask which TABLES a
+page writes, not which shape it has.
+
+It is also the first period lock with a **server-side** half: `receive_purchase_order()` refuses a
+closed period itself (`po_period_closed`), with the same `is_admin()` carve-out, wrapped in
+COALESCE. The other five remain browser-only, which is defensible while they are the only door to
+their tables — but the rule that made this one different is that a receipt is an RPC, and an RPC
+that can be called directly is a door the page does not control.
 
 ## HR is deliberately NOT locked by the close, and the dialog must say so (S683)
 

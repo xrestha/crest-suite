@@ -208,6 +208,29 @@ export function adToBsSafe(adDate) {
   return bs
 }
 
+/**
+ * A STORED date — always AD, per the storage convention — rendered as the BS date the user picked.
+ * "2025-08-31" => "15 Bhadra 2082".
+ *
+ * Every date in this product is chosen in BS through `BsCalendarPicker` and stored as AD, so a
+ * screen that prints the column raw is showing a calendar nobody in Nepal entered. That shipped on
+ * Purchase Orders' Expected Delivery (S709) — picked in BS, listed and PRINTED in AD on the
+ * document the vendor receives — and the same three-line composition had already been hand-copied
+ * into `SelfServiceHome.jsx` and `LeaveManagement.jsx`. This is its one home; those two still hold
+ * their own copies and can adopt it.
+ *
+ * A bare 'YYYY-MM-DD' is parsed as UTC by `new Date`, which at Nepal's +05:45 lands on the
+ * PREVIOUS day — the same off-by-one that `formatAd` exists to prevent on the way in — hence the
+ * explicit local midnight. Out of the verified table (adToBsSafe returns null) it renders the
+ * truthful AD value labelled as such, rather than a confident wrong BS date.
+ */
+export function formatAdAsBs(iso, { fallback = '—' } = {}) {
+  if (!iso) return fallback
+  const s = String(iso)
+  const bs = adToBsSafe(new Date(s.includes('T') ? s : s + 'T00:00:00'))
+  return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${s.slice(0, 10)} (AD)`
+}
+
 const EPOCH_BS = { year: 2079, month: 1, day: 1 }
 const EPOCH_AD = new Date(2022, 3, 14) // 14 April 2022 (months are 0-indexed) — corrected S352, see note above
 
