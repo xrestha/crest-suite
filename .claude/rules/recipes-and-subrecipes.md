@@ -54,6 +54,18 @@ Two things were wrong the moment a third level existed, both fixed:
   `explodeRecipeTree()` has no seen set at all (only a depth cap), so it always counted the shared
   base twice, meaning the printed cost card and the COGS/Variance figures for the same recipe were
   different numbers with nothing on either page saying so.
+
+  **Stating the rule did not stop it recurring — a fourth copy of the walk did (S713).** The fix
+  above landed in `recipeCostCalc.js`, and this file said so, while `MenuPricing.js` quietly kept a
+  private `subCostPerUnit()` that was still the pre-fix visited-set shape. It was the last private
+  copy in `src/`, and being private is precisely why it never received the fix: a rule about how to
+  write the guard only reaches the guards someone opens. **There are two sub-recipe cost walks and
+  there must never be a third** — `calcSubRecipeCostPerUnit` (pure, sync, hand it the recipes with
+  their `recipe_ingredients` attached) and `explodeRecipeTree` (async, reads Supabase). If a page
+  has its ingredients in some other shape, reshape the ingredients, not the walk; Menu Pricing now
+  stitches its separately-fetched rows back onto the sub-recipes and calls the shared one. Grep
+  `subCostPerUnit|function subCost` before adding any recipe-costing page — it should return
+  nothing.
 - **Running out of depth was silent.** `explodeRecipeTree`'s frontier loop stops when its round cap
   is hit and simply returns what it has, so ingredients below the cut vanish from COGS and Variance
   as a believable smaller number. The cap is now `MAX_DEPTH_ROUNDS = 12` (was 5) and an exhausted

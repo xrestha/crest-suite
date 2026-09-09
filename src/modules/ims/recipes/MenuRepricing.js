@@ -67,8 +67,11 @@ export default function MenuRepricing() {
       // Repricing suggestions weigh recipes by sales volume/revenue at the current price —
       // comps (source='pos_comp') never generated revenue at that price, so they're excluded.
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
-      scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, target_fc_pct')
-        .neq('category', 'Sub-Recipe')
+      // `.neq('category', …)` on a NULLABLE column also drops every NULL row, server-side and
+      // silently — a recipe with no category disappeared from the repricing list with nothing to
+      // say it had. Same trap, same fix, as Menu Pricing's own load.
+      scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, target_fc_pct, cost_price')
+        .or('category.is.null,category.neq.Sub-Recipe')
         .eq('is_active', true),
     ])
     // A failed read must not render the celebratory "no underpriced dishes 🎉" empty state (S612).
@@ -92,7 +95,11 @@ export default function MenuRepricing() {
       .filter(r => r.selling_price != null && parseFloat(r.selling_price) > 0)
       .map(r => {
         const price    = parseFloat(r.selling_price || 0)
-        const cost     = parseFloat(costMap[r.id] || 0)
+        // Falls back to the manually-entered cost_price exactly as Menu Pricing does. Without
+        // it the two pages disagreed about the same dish: one showed a cost and a food-cost %,
+        // the other showed 0 — which here meant 0% FC, never above target, and therefore silently
+        // ABSENT from the underpriced list and from the Monthly Opportunity total.
+        const cost     = parseFloat(costMap[r.id]) || parseFloat(r.cost_price) || 0
         const qty      = parseFloat(qtyMap[r.id] || 0)
         const targetPct = parseFloat(r.target_fc_pct) || 30
         const currentFcPct = price > 0 ? (cost / price) * 100 : 0

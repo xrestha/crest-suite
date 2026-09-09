@@ -381,7 +381,7 @@ export const IMS_GUIDE_GROUPS = [
         route: '/recipes',
         plan: 'Growth+',
         summary:
-          'Builds and costs every recipe (dishes and reusable sub-recipes/batches) from Item Master ingredients, sets a target food-cost %, and shows true cost including allocated overhead and nutrition facts. The recursive ingredient-cost engine here (src/utils/recipeCost.js) is shared by Menu Pricing, Menu Engineering, Best Sellers, Recipe Margin, and Menu Repricing — a change here ripples everywhere.',
+          'Builds and costs every recipe (dishes and reusable sub-recipes/batches) from Item Master ingredients, sets a target food-cost %, and shows true cost including allocated overhead and nutrition facts. Two engines cost a recipe and they must agree: src/utils/recipeCost.js (async, reads from Supabase) is shared by Menu Engineering, Best Sellers, Recipe Margin and Menu Repricing, and src/modules/ims/recipes/recipeCostCalc.js (pure) is shared by this page, the printed cost card, the recipe importer, Stock Count\'s sub-recipe usage, nutrition, and Menu Pricing. A change to either ripples everywhere; a change to only one is how the same dish comes to cost two different amounts on two screens.',
         workflow: [
           '"+ New Recipe": Name, Category (a normal category, or the special "Sub-Recipe" category), Product Code (issued automatically, see below), Selling Price (ex-VAT), VAT Rate, Yield Qty + Yield UOM, Target FC %, optional Description/Image/Veg-NonVeg for the guest QR menu.',
           'Ingredient rows are each either an Item or another recipe tagged Sub-Recipe. A sub-recipe can\'t directly list itself; indirect cycles are checked at save time and rejected.',
@@ -420,24 +420,27 @@ export const IMS_GUIDE_GROUPS = [
         route: '/menu-pricing',
         plan: 'Starter+',
         summary:
-          'A fast, spreadsheet-style price-editing surface for every sellable recipe, plus the POS on/off toggle and "Pair With" cross-sell suggestions. Renders two genuinely different branches depending on whether the client has the IMS module at all.',
+          'A fast, spreadsheet-style price-editing surface for every sellable recipe, plus the POS on/off toggle. Renders two genuinely different branches depending on whether the client has the IMS module at all — and "Pair With" cross-sell suggestions are one of the things that differs.',
         workflow: [
           'POS-only clients (no IMS): no Item Master exists, so this page is the only place to create a menu item at all — columns are On POS toggle, Item, a manually-entered Cost Price (used only to value comps), and Price (VAT-inclusive).',
           'IMS clients: full food-cost table — Food Cost is computed from real ingredients (same recursive engine as Recipe Costing), plus Current Price, FC % (color-coded), a New Price (incl. VAT) input, live New FC % preview, and NPR Change. A "↻ Refresh Costs" button recomputes every recipe\'s cost from current Item Master rates.',
           'Both branches: a Search box beside the category tabs filters on item name and category, and shows "N of M items" whenever it has hidden rows — the tab counts still count the whole category.',
           'IMS branch: every column heading except New Price is a sort control (Item, On POS, Food Cost, Current Price, FC %, New FC %, Change); click to sort, click again to reverse, and a figure column opens highest-first so one click on FC % surfaces the worst-margin dishes. New FC % and Change sort on UNSAVED drafts, so rows with nothing typed always sort last and the row order is frozen from the moment a price box takes focus until the reader re-sorts, searches or switches tab — otherwise the row being typed into would jump on every keystroke and take the Save button out from under the pointer.',
-          'Both branches: type a new VAT-inclusive price and press Enter to save; toggle On POS to control order-screen visibility (also how staff "86" an item that\'s run out); click Pair to save cross-sell suggestions shown on the POS order screen.',
+          'Both branches: type a new VAT-inclusive price and press Enter to save; toggle On POS to control order-screen visibility (also how staff "86" an item that\'s run out).',
+          'POS-only branch ONLY: click Pair on a row to pin cross-sell suggestions for the POS order screen. The IMS branch has no Pair control by design — an IMS client\'s order screen derives its suggestions from real "frequently ordered together" sales history instead, which is richer than a hand-pinned list. (It rendered an unreachable copy of the Pair modal until 2026-09-09.)',
           '🖨 Print and ⬇ Excel both export the table exactly as filtered and sorted on screen (the active category tab and any search — the print title and the .xlsx filename both name them, so a narrowed export is never mistaken for the whole menu). Both deliberately leave New Price BLANK: the printed sheet\'s New Price boxes come out as empty ruled boxes to price by hand with a pen, and the Excel has an empty New Price column for the same send-it-out-get-prices-back round trip over email.',
         ],
         fields: [
           { label: 'On POS toggle', desc: 'Controls recipes.pos_enabled — whether the item appears on the POS order screen, and the mechanism staff use to temporarily disable a sold-out item.' },
         ],
         formulas: [
-          'IMS branch: FC% = ingredientCost ÷ exVatPrice × 100. On save: new ex-VAT price = typed incl-VAT price ÷ (1 + vat_rate), written to the same recipes.selling_price field Recipe Costing displays.',
+          'IMS branch: FC% = ingredientCost ÷ exVatPrice × 100, but ONLY when there is an ingredient cost — with no cost the figure is blank ("—"), never 0%. On save: new ex-VAT price = typed incl-VAT price ÷ (1 + vat_rate), written to the same recipes.selling_price field Recipe Costing displays.',
         ],
         gotchas: [
           'The two branches (POS-only vs IMS) share most of their UI but are genuinely different code paths — worth confirming which branch you\'re looking at before troubleshooting a client\'s report, per the project\'s standing "always ask which branch" convention.',
           'In the IMS branch, the manually-entered Cost Price is only used as a fallback when a recipe has literally zero costed ingredients — the moment any ingredient is added in Recipe Costing, the manual cost_price is ignored in favor of real ingredient math.',
+          'A dish with NEITHER costed ingredients NOR a Cost Price shows FC% as "—", not 0.0%. Until 2026-09-09 it printed "0.0% ✓" in green and sorted to the top of the best-margin list, which is the most flattering possible rendering of "we do not know what this costs". Adding an item from this page creates a recipe with no ingredients, so this page manufactured its own examples.',
+          '+ Add Item now issues a Product Code from the category (BEV-001 and so on) exactly as Recipe Costing does. Items added here before 2026-09-09 have none — Settings → Product Codes fills those in without renumbering anything that already has one.',
         ],
         connections: 'Reads/writes the same recipes/recipe_ingredients tables as Recipe Costing. Feeds the POS order screen and every revenue-based report.',
       },

@@ -78,7 +78,7 @@ quotes as the evidence of what a signed contract incorporated by reference, so u
 | [`POS_TODO.md`](POS_TODO.md) | POS open items. Shipping something listed there closes the entry in the same commit. |
 | [`POS_DECISIONS.md`](POS_DECISIONS.md) | POS shipped history and everything decided *against*, rationale intact. Read before proposing POS work. |
 | [`CHANGELOG/`](CHANGELOG/) | The session log, S023 to now, split by S-range. [`CHANGELOG/README.md`](CHANGELOG/README.md) is the index and holds the convention for adding an entry. |
-| [`DOCS-REMEDIATION.md`](DOCS-REMEDIATION.md) | The open work order this layout came from. T1–T13, with mechanical acceptance criteria. |
+| [`DOCS-REMEDIATION.md`](DOCS-REMEDIATION.md) | The open work order this layout came from. T1–T14, with mechanical acceptance criteria. |
 
 There is no `ARCHITECTURE.md` and there should not be. `CLAUDE.md` plus `.claude/rules/` already is
 that document, and a fourth copy of the gate model would drift from the three that exist.
@@ -87,10 +87,16 @@ that document, and a fourth copy of the gate model would drift from the three th
 
 ## Conventions worth knowing before the first commit
 
-- **Line endings.** `.gitattributes` normalises the tree to LF. Do not write files with PowerShell's
-  `Set-Content -Encoding utf8` — it emits a BOM — or read them with `Get-Content`, which reads ANSI
-  and mangles every em dash. Use `[System.IO.File]::ReadAllText` / `WriteAllText`, or a shell that
-  is not PowerShell.
+- **Line endings.** `.gitattributes` normalises the tree to LF **on commit**, which is not the same
+  as the working tree being LF, and it is not. Measured 2026-09-09: `MenuPricing.js` is pure LF and
+  `MenuRepricing.js`, its sibling in the same directory, is pure CRLF; several `.claude/rules/*.md`
+  are mixed within one file. Git never reports this, because it normalises on the way in. So a
+  script that searches for a string containing `\n` silently matches nothing in half the repo —
+  assert your match count, and try `\r\n` before `\n` per replacement block rather than per file.
+  Do not "fix" a file by normalising it: that turns a 12-line diff into a whole-file rewrite.
+  Separately, do not write files with PowerShell's `Set-Content -Encoding utf8` — it emits a BOM —
+  or read them with `Get-Content`, which reads ANSI and mangles every em dash. Use
+  `[System.IO.File]::ReadAllText` / `WriteAllText`, or a shell that is not PowerShell.
 - **The service worker caches aggressively.** Any JS or CSS change that existing users must actually
   receive needs `CACHE_NAME` bumped in `public/service-worker.js` **and `APP_VERSION` in
   `src/shared/appVersion.js` moved to match** — `appVersion.test.js` fails when they disagree.

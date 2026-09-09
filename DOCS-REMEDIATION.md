@@ -326,6 +326,18 @@ and permanently. This is the highest-value ten lines of code in this document.
 **Acceptance criteria.** Script exists, runs clean on the current tree, and is wired into
 `npm run build:verify` so it runs on every pre-push check.
 
+**The limitation, with an instance (S713, 2026-09-09).** The script answers "does this glob match
+anything", which is strictly weaker than "does this glob match the right things" — and the weaker
+question passes in exactly the case that matters most. `ims-figures.md` owns the food-cost banding
+rule and globbed `stockcount/`, `reports/` and `sales/` but **not** `src/modules/ims/recipes/**`,
+where five files print a banded food-cost figure. Every glob it had matched real files, so the
+check ran clean while the rule never loaded for the module it is most about; `MenuPricing.js` then
+shipped a food cost of zero rendered as a healthy 0.0%. This is not fixable by extending the script
+— there is no mechanical test for "the rule should also cover that directory" — which is why it is
+recorded here rather than as a T-item. The cheap manual version: when a rule is edited, grep for
+its subject (`fcBand`, `scopedDb`, `withTimeout`) across `src/` and compare the hit list against
+the `paths:` block. A subject with call sites outside its own globs is the tell.
+
 ---
 
 ## T4 — Automate the lying-stub check

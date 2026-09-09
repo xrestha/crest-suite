@@ -6,18 +6,33 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { useSettings } from '../../../context/SettingsContext'
-import { fcBand, fcThresholds } from '../../../shared/imsFormulas'
+import { fcFigure, fcThresholds } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
-import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { calcSubRecipeCostPerUnit } from './recipeCostCalc'
+import { nextProductCode, productCodePrefix } from '../../../shared/productCode'
 import Modal from '../../../components/Modal'
 
 
 function vatOf(r) {
   return (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
 }
+
+// "VAT 13%" was written out as a literal in the row captions, the column tooltips and the Excel
+// export, while `vat_rate` is a plain numeric column every one of those rows carries its own value
+// of. A client on any other rate read a page confidently stating the wrong one. One formatter, fed
+// the row's own rate.
+function vatLabel(vat) {
+  return vat > 0 ? `VAT ${Number((vat * 100).toFixed(2))}%` : 'No VAT'
+}
+
+// The FC% cell's tooltip when there is no cost to divide. The cell itself reads "—", and a dash on
+// its own does not say what to do about it.
+const NO_COST_TITLE = 'No food cost yet — add ingredients to this recipe in Recipe Costing.'
+const NO_COST_TITLE_POS = 'No cost price yet — add one with Edit on this row.'
 
 const EMPTY_FORM = { name: '', category: '', price: '', vatRate: 0.13, costPrice: '' }
 
@@ -29,12 +44,11 @@ const DRAFT_SORT_KEYS = { newFc: true, change: true }
 export default function MenuPricing() {
   const { clientId, profile, clientModules, hasImsAccess } = useAuth()
   const { settings } = useSettings()
-  // Was a hardcoded 30/38 scale in every one of these files, which disagreed with the client's
-  // own configured fc_warning_pct/fc_critical_pct that Recipe Costing's filter pills use.
-  const fcColor = pct => fcBand(pct, settings).color
-  // The band must not be carried by colour alone (S608) — see fcBand's note.
-  const fcLabel = pct => fcBand(pct, settings).label
-  const fcMark  = pct => fcBand(pct, settings).mark
+  // `fcFigure` is the one rendered form of a banded food-cost figure — colour, the ✓/△/▲ mark and
+  // the band name as a title, together. This page used to take the three apart into its own
+  // wrappers and reassemble them at each cell, which is exactly the shape that lets a call site
+  // keep the colour and drop the mark. It also renders a null pct as "—" with no band, which is
+  // what makes the no-cost case below expressible at all.
 
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -53,6 +67,10 @@ export default function MenuPricing() {
   const [saving, setSaving]     = useState({})   // { id: bool }
   const [errors, setErrors]     = useState({})   // { id: string }
   const [toggling, setToggling] = useState({})   // { id: bool }
+  // A failed write used to have nowhere to go on this page: togglePos dropped its error entirely
+  // and saveRow flattened it to the string 'Save failed'. Both now land here, which has room for
+  // the sentence AND the technical detail (S619).
+  const [pageError, setPageError] = useState(null)
 
   const [addModal,   setAddModal]   = useState(false)
   const [addForm,    setAddForm]    = useState(EMPTY_FORM)
@@ -66,6 +84,12 @@ export default function MenuPricing() {
   const [pairingDraft,  setPairingDraft]  = useState(new Set())
   const [pairingSaving, setPairingSaving] = useState(false)
   const [pairingSearch, setPairingSearch] = useState('')
+  const [pairingError,  setPairingError]  = useState(null)
+
+  // Which branch renders. Also decides whether the pairings read is worth making at all: only the
+  // POS-only branch has a Pair control, so an IMS client was paying for a round trip whose result
+  // nothing could reach.
+  const posOnly = !clientModules?.ims
 
   const load = useCallback(async () => {
     if (!effectiveClientId) return
@@ -73,15 +97,22 @@ export default function MenuPricing() {
 
     setLoadError(null)
     const results = await Promise.all([
-      scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, pos_enabled, cost_price')
+      // `.neq('category', 'Sub-Recipe')` ALSO excluded every recipe whose category is NULL — the
+      // column is nullable, and a server-side .neq drops NULL rows silently. Such a recipe vanished
+      // from the one page that sets its price, with no error and nothing missing from any count.
+      // Paged, too: a bare .select() stops at 1000 rows and says nothing about it.
+      fetchAllRows(() => scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, pos_enabled, cost_price, recipe_code')
         .eq('is_active', true)
-        .neq('category', 'Sub-Recipe')
-        .order('name'),
-      scopedFrom('recipes', 'id, yield_qty')
-        .eq('category', 'Sub-Recipe'),
+        .or('category.is.null,category.neq.Sub-Recipe')
+        .order('name').order('id')),
+      fetchAllRows(() => scopedFrom('recipes', 'id, yield_qty')
+        .eq('category', 'Sub-Recipe')
+        .order('id')),
       // Manual pairings — independent of everything else here; used to be a third serial round
-      // trip at the tail of the load.
-      scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'),
+      // trip at the tail of the load. Only fetched for the branch that can actually show them.
+      posOnly
+        ? fetchAllRows(() => scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id').order('id'))
+        : Promise.resolve({ data: [], error: null }),
     ])
     // A failed read is not "no menu items yet" — that sentence names a button and invites the
     // reader to start adding a menu they already have (S683, the S594 rule on a CRUD page).
@@ -110,25 +141,20 @@ export default function MenuPricing() {
       subIngMap[ri.recipe_id].push(ri)
     }
 
-    // seen guards against a cycle (sub-recipe A contains B, B later edited to contain A) turning
-    // into unbounded recursion — the UI only blocks a sub-recipe referencing itself directly.
-    function subCostPerUnit(srId, seen = new Set()) {
-      if (seen.has(srId)) return 0
-      seen.add(srId)
-      const sr = (subRecipeData || []).find(r => r.id === srId)
-      if (!sr) return 0
-      const ings = subIngMap[srId] || []
-      let total = 0
-      for (const ri of ings) {
-        if (ri.item_id && ri.items) {
-          const yf = (parseFloat(ri.items.yield_pct) || 100) / 100
-          total += (parseFloat(ri.qty_per_portion || 0) / yf) * parseFloat(ri.items.per_uom_rate || 0)
-        } else if (ri.sub_recipe_id) {
-          total += parseFloat(ri.qty_per_portion || 0) * subCostPerUnit(ri.sub_recipe_id, seen)
-        }
-      }
-      return total / (parseFloat(sr.yield_qty) || 1)
-    }
+    // Sub-recipe costing is `calcSubRecipeCostPerUnit` from recipeCostCalc.js — the same walk
+    // Recipes.js, the printed cost card, the recipe importer, Stock Count's sub-recipe usage and
+    // the nutrition roll-up all run. This page used to carry a private copy, and that copy was the
+    // last one in the repo still using a VISITED set where the shared one uses a PATH set: a base
+    // sub-recipe reached down two branches of the same tree costed 0 the second time, so Menu
+    // Pricing quietly UNDER-STATED food cost against every other screen — on the one page where
+    // that number decides a price. See that function's comment for the diamond it under-costs.
+    //
+    // The helper reads `recipe_ingredients` off the recipe and resolves nested ids against the
+    // array it is handed, so the separately-fetched ingredients are stitched back on here. Each
+    // sub-recipe is costed once from a fresh path set, which is what an on-demand call did anyway.
+    const subRecipesFull = (subRecipeData || []).map(sr => ({ ...sr, recipe_ingredients: subIngMap[sr.id] || [] }))
+    const subCost = {}
+    for (const sr of subRecipesFull) subCost[sr.id] = calcSubRecipeCostPerUnit(sr, subRecipesFull)
 
     const mainIdSet = new Set((recipeData || []).map(r => r.id))
     const costMap = {}
@@ -139,7 +165,7 @@ export default function MenuPricing() {
         const yf   = (parseFloat(ri.items.yield_pct) || 100) / 100
         costMap[ri.recipe_id] = (costMap[ri.recipe_id] || 0) + (parseFloat(ri.qty_per_portion || 0) / yf) * rate
       } else if (ri.sub_recipe_id) {
-        costMap[ri.recipe_id] = (costMap[ri.recipe_id] || 0) + parseFloat(ri.qty_per_portion || 0) * subCostPerUnit(ri.sub_recipe_id)
+        costMap[ri.recipe_id] = (costMap[ri.recipe_id] || 0) + parseFloat(ri.qty_per_portion || 0) * (subCost[ri.sub_recipe_id] || 0)
       }
     }
 
@@ -150,7 +176,12 @@ export default function MenuPricing() {
       const vat     = vatOf(r)
       const exVat   = parseFloat(r.selling_price || 0)
       const inclVat = exVat > 0 ? exVat * (1 + vat) : 0
-      const fcPct   = exVat > 0 ? (cost / exVat) * 100 : 0
+      // NULL, not 0, when there is no cost to divide by the price. `(0 / price) * 100` is a real
+      // 0.0%, and fcBand bands 0% as Healthy — so a dish with no ingredients and no cost price
+      // printed "0.0% ✓" in green and sorted to the top of the best performers. This page's own
+      // + Add Item creates exactly those rows, since it writes a recipe with no ingredients. The
+      // New FC % sort already treated a zero cost as unknown; the cells and the FC % sort did not.
+      const fcPct   = exVat > 0 && cost > 0 ? (cost / exVat) * 100 : null
       // pos_enabled defaults to true if null (column newly added)
       return { ...r, cost, vat, exVat, inclVat, fcPct, pos_enabled: r.pos_enabled !== false }
     })
@@ -166,7 +197,7 @@ export default function MenuPricing() {
     setSuggMap(sMap)
 
     setLoading(false)
-  }, [effectiveClientId, scopedFrom])
+  }, [effectiveClientId, scopedFrom, posOnly])
 
   useEffect(() => { load() }, [load])
 
@@ -189,7 +220,7 @@ export default function MenuPricing() {
         case 'pos':    return r.pos_enabled ? 1 : 0
         case 'cost':   return r.cost > 0 ? r.cost : null
         case 'price':  return r.inclVat > 0 ? r.inclVat : null
-        case 'fc':     return r.exVat > 0 ? r.fcPct : null
+        case 'fc':     return r.fcPct
         case 'newFc': {
           const d = parseFloat(drafts[r.id])
           const ex = d > 0 ? d / (1 + r.vat) : 0
@@ -241,9 +272,20 @@ export default function MenuPricing() {
   async function togglePos(recipe) {
     const newVal = !recipe.pos_enabled
     setToggling(t => ({ ...t, [recipe.id]: true }))
+    setPageError(null)
     const { error } = await scopedUpdate('recipes', { pos_enabled: newVal })
       .eq('id', recipe.id)
-    if (!error) {
+    if (error) {
+      // The error used to be dropped on the floor: the checkbox snapped back to its stored value
+      // and nothing said why. On the control that 86s a dish, that reads as a missed click rather
+      // than "this item is still selling". It does not claim the write did not land — a response
+      // can be lost after the row was updated — so it says how to find out what is stored.
+      const a = asActionError(error)
+      setPageError({
+        text: `“${recipe.name}” — the On POS setting may not have changed. Reload the page to see what is stored. ${a.text}`,
+        detail: a.detail,
+      })
+    } else {
       setRecipes(rs => rs.map(r => r.id === recipe.id ? { ...r, pos_enabled: newVal } : r))
     }
     setToggling(t => ({ ...t, [recipe.id]: false }))
@@ -254,14 +296,24 @@ export default function MenuPricing() {
     if (!raw || raw <= 0) { setErrors(e => ({ ...e, [recipe.id]: 'Enter a valid price' })); return }
     const newExVat = raw / (1 + recipe.vat)
     setSaving(s => ({ ...s, [recipe.id]: true }))
+    setPageError(null)
     const { error } = await scopedUpdate('recipes', { selling_price: parseFloat(newExVat.toFixed(4)) })
       .eq('id', recipe.id)
     if (error) {
-      setErrors(e => ({ ...e, [recipe.id]: 'Save failed' }))
+      // Was the bare string 'Save failed', which names neither what state the price is in nor what
+      // to do next (S619). The field keeps a short marker so the row is still findable in a table
+      // of ~100; the sentence and the technical detail go to the page banner, which has room for
+      // both. Neither claims the price was not saved — the response can be lost after the commit.
+      const a = asActionError(error)
+      setErrors(e => ({ ...e, [recipe.id]: 'Save not confirmed' }))
+      setPageError({
+        text: `“${recipe.name}” — the new price may not have been saved. Press ↻ Refresh Costs to see the stored price. ${a.text}`,
+        detail: a.detail,
+      })
     } else {
       setRecipes(rs => rs.map(r => {
         if (r.id !== recipe.id) return r
-        const newFcPct = newExVat > 0 ? (r.cost / newExVat) * 100 : 0
+        const newFcPct = newExVat > 0 && r.cost > 0 ? (r.cost / newExVat) * 100 : null
         return { ...r, exVat: newExVat, inclVat: raw, fcPct: newFcPct, selling_price: newExVat }
       }))
       setDrafts(d => { const n = { ...d }; delete n[recipe.id]; return n })
@@ -284,15 +336,47 @@ export default function MenuPricing() {
       vat_rate:      addForm.vatRate,
       cost_price:    costPriceNum > 0 ? costPriceNum : null,
     }
-    const { error } = editingId
-      ? await scopedUpdate('recipes', payload).eq('id', editingId)
-      : await scopedInsert('recipes', {
-          is_active:   true,
-          pos_enabled: true,
-          ...payload,
-        })
+    let error = null
+    if (editingId) {
+      ;({ error } = await scopedUpdate('recipes', payload).eq('id', editingId))
+    } else {
+      // Recipe Costing issues a Product Code from the category on every recipe it creates, and
+      // Settings → Product Codes exists to backfill the ones that predate the feature. An item
+      // added here got neither: no code to search on the POS order screen, and a blank column on
+      // Item Wise. Same generator, same per-prefix series.
+      const insertPayload = {
+        is_active:   true,
+        pos_enabled: true,
+        ...payload,
+        recipe_code: nextProductCode(productCodePrefix(payload.category), recipes.map(r => r.recipe_code)),
+      }
+      // The code is computed from in-memory state, so a second tab can genuinely take the number
+      // first. That is not the user's mistake and must not be reported as one — recompute from
+      // what is stored and retry, exactly as Recipes.js does. A failed re-read aborts with the
+      // collision rather than restarting the sequence from scratch and colliding again.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        ;({ error } = await scopedInsert('recipes', insertPayload))
+        if (!error || error.code !== '23505') break
+        const { data: fresh, error: freshErr } = await scopedFrom('recipes', 'recipe_code')
+        if (freshErr) { error = freshErr; break }
+        insertPayload.recipe_code = nextProductCode(
+          productCodePrefix(payload.category), (fresh || []).map(r => r.recipe_code))
+      }
+    }
     setAddSaving(false)
-    if (error) { const a = asActionError(error); setAddError({ text: (editingId ? 'The changes were not saved. ' : 'The menu item was not added. ') + a.text, detail: a.detail }); return }
+    if (error) {
+      // Neither half claims the write did not land. For the INSERT that matters most: `recipes`
+      // has no unique index on (client_id, name), so a response lost after the row was committed
+      // turns the retry this sentence would otherwise invite into a duplicate menu item.
+      const a = asActionError(error)
+      setAddError({
+        text: (editingId
+          ? 'The changes may not have been saved — close and reopen this item to see what is stored. '
+          : 'The menu item may not have been added — check the list before trying again, since a second attempt can add it twice. ') + a.text,
+        detail: a.detail,
+      })
+      return
+    }
     setAddModal(false); setAddForm(EMPTY_FORM); setEditingId(null)
     load()
   }
@@ -357,6 +441,8 @@ export default function MenuPricing() {
           {posOffCount > 0 && <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>● {posOffCount} hidden from POS</span>}
         </div>
       )}
+
+      <ActionError error={pageError} />
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
         <input
@@ -429,7 +515,7 @@ export default function MenuPricing() {
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                       {r.category}
                       {r.vat > 0
-                        ? <Tip text="Menu price includes 13% VAT." width={200}> · VAT 13%</Tip>
+                        ? <Tip text={`Menu price includes ${Number((r.vat * 100).toFixed(2))}% VAT.`} width={200}> · {vatLabel(r.vat)}</Tip>
                         : <Tip text="No VAT on this item." width={160}> · No VAT</Tip>}
                       {' · '}
                       <button onClick={() => openEditModal(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'underline' }}>
@@ -444,7 +530,7 @@ export default function MenuPricing() {
                     </div>
                   </td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                    {r.cost_price > 0 ? `NPR ${parseFloat(r.cost_price).toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                    {r.cost_price > 0 ? `NPR ${parseFloat(r.cost_price).toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }} title={NO_COST_TITLE_POS}>—</span>}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>
                     {r.inclVat > 0 ? `NPR ${r.inclVat.toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
@@ -488,6 +574,7 @@ export default function MenuPricing() {
                   </label>
                 ))}
             </div>
+            <ActionError error={pairingError} />
             <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
               <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setSuggestModal(null)}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={savePairings} disabled={pairingSaving}>
@@ -572,24 +659,57 @@ export default function MenuPricing() {
     setSuggestModal(recipe)
     setPairingDraft(new Set(suggMap[recipe.id] || []))
     setPairingSearch('')
+    setPairingError(null)
   }
 
+  // Was delete-every-row-then-insert with BOTH results discarded. If the delete landed and the
+  // insert was refused, every pairing on this item was gone — and the modal still closed on
+  // "Saved" and wrote the intended list into state, so nothing on screen ever said so.
+  //
+  // Three things changed. Only what the user actually changed is touched, so a failure can never
+  // wipe a list they did not edit. Additions go FIRST, the same insert-before-delete order
+  // Recipes.js uses on ingredients, so a half-completed save leaves more than it takes.
+  // `recipe_suggestions` has a UNIQUE (recipe_id, suggest_recipe_id), which is precisely why the
+  // diff has to exclude the unchanged rows rather than re-inserting them. And each error is read.
   async function savePairings() {
     if (!suggestModal || !effectiveClientId) return
     setPairingSaving(true)
+    setPairingError(null)
     const recipeId = suggestModal.id
-    await scopedDelete('recipe_suggestions').eq('recipe_id', recipeId)
-    const newIds = [...pairingDraft]
-    if (newIds.length > 0) {
-      await scopedInsert('recipe_suggestions',
-        newIds.map((suggestRecipeId, i) => ({
+    const before   = new Set(suggMap[recipeId] || [])
+    const added    = [...pairingDraft].filter(id => !before.has(id))
+    const removed  = [...before].filter(id => !pairingDraft.has(id))
+
+    const fail = (what, err) => {
+      const a = asActionError(err)
+      setPairingError({ text: `${what} ${a.text}`, detail: a.detail })
+      setPairingSaving(false)
+    }
+
+    if (added.length > 0) {
+      // sort_order is decorative — the POS order screen reads the pairings unordered — so new rows
+      // simply continue past the existing ones rather than renumbering the whole set.
+      const { error } = await scopedInsert('recipe_suggestions',
+        added.map((suggestRecipeId, i) => ({
           recipe_id:         recipeId,
           suggest_recipe_id: suggestRecipeId,
-          sort_order:        i,
+          sort_order:        before.size + i,
         }))
       )
+      if (error) { fail('The pairings were not changed — the list is still exactly as it was.', error); return }
     }
-    setSuggMap(m => ({ ...m, [recipeId]: newIds }))
+    if (removed.length > 0) {
+      const { error } = await scopedDelete('recipe_suggestions')
+        .eq('recipe_id', recipeId).in('suggest_recipe_id', removed)
+      if (error) {
+        // The additions did land, so the map has to say so — reporting the failure while showing
+        // the list the user asked for would be the same lie in a smaller shape.
+        setSuggMap(m => ({ ...m, [recipeId]: [...before, ...added] }))
+        fail('The items you ticked were saved, but the ones you unticked were not removed.', error)
+        return
+      }
+    }
+    setSuggMap(m => ({ ...m, [recipeId]: [...pairingDraft] }))
     setPairingSaving(false)
     setSuggestModal(null)
   }
@@ -610,10 +730,12 @@ export default function MenuPricing() {
       'On POS': r.pos_enabled ? 'Yes' : 'No',
       'Item': r.name,
       'Category': r.category || '',
-      'VAT': r.vat > 0 ? '13%' : 'No VAT',
+      'VAT': vatLabel(r.vat),
       'Food Cost (NPR)': r.cost > 0 ? Math.round(r.cost * 100) / 100 : '',
       'Current Price incl VAT (NPR)': r.inclVat > 0 ? Math.round(r.inclVat) : '',
-      'FC %': r.exVat > 0 ? `${r.fcPct.toFixed(1)}%` : '',
+      // Blank, not "0.0%", where there is no cost to divide — the sheet is sent out and priced
+      // against, and a 0% food cost reads as a fact rather than as a missing recipe.
+      'FC %': r.fcPct !== null ? `${r.fcPct.toFixed(1)}%` : '',
       'New Price (incl VAT)': '',
     }))
     const ws = XLSX.utils.json_to_sheet(rows)
@@ -670,6 +792,8 @@ export default function MenuPricing() {
           )}
         </div>
       )}
+
+      <ActionError error={pageError} className="no-print" />
 
       {/* Search + category tabs */}
       <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
@@ -728,7 +852,7 @@ export default function MenuPricing() {
               <tr>
                 {th('left',  null, '#', 36)}
                 {th('center', 'Toggle to include or exclude this item from the POS order screen. Turn off for seasonal or discontinued items, or to 86 it for the day when you run out — just remember to turn it back on once restocked.', 'On POS', 72, 'pos')}
-                {th('left',  'Recipe name, category, and VAT status. VAT 13% items: selling price includes 13% VAT. No VAT items are sold at the price as entered.', 'Item', undefined, 'name')}
+                {th('left',  'Recipe name, category, and VAT status. A VAT-registered item\'s selling price includes VAT at the rate set on that item. No VAT items are sold at the price as entered.', 'Item', undefined, 'name')}
                 {th('right', 'Total ingredient cost per portion at current item rates from the Item Master.', 'Food Cost', 100, 'cost')}
                 {th('right', 'Current VAT-inclusive menu price saved in Recipe Costing. Calculated as selling price × (1 + VAT rate).', 'Current Price', 120, 'price')}
                 {th('right', `Food cost ÷ ex-VAT selling price. Green up to ${fcThresholds(settings).warn}%, amber up to ${fcThresholds(settings).critical}%, red above that — the thresholds set in Settings → Thresholds. A plate of momo costing NPR 105 sold at NPR 300 is 35%.`, 'FC %', 80, 'fc')}
@@ -744,10 +868,12 @@ export default function MenuPricing() {
                 const hasDraft   = draft !== undefined && draft !== ''
                 const draftNum   = hasDraft ? parseFloat(draft) : null
                 const draftExVat = draftNum > 0 ? draftNum / (1 + r.vat) : null
-                const newFcPct   = draftExVat > 0 ? (r.cost / draftExVat) * 100 : null
+                const newFcPct   = draftExVat > 0 && r.cost > 0 ? (r.cost / draftExVat) * 100 : null
                 const diff       = draftNum !== null && r.inclVat > 0 ? draftNum - r.inclVat : null
                 const changed    = hasDraft && draftNum !== r.inclVat
                 const dimmed     = !r.pos_enabled
+                const fcFig      = fcFigure(r.fcPct, settings)
+                const newFcFig   = fcFigure(newFcPct, settings)
 
                 return (
                   <tr key={r.id} style={{ opacity: dimmed ? 0.45 : 1, background: changed ? 'rgba(245,158,11,0.05)' : undefined }}>
@@ -767,7 +893,7 @@ export default function MenuPricing() {
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                         {r.category}
                         {r.vat > 0
-                          ? <Tip text="VAT-registered item. Menu price includes 13% VAT. FC% is calculated on the ex-VAT portion." width={260}> · VAT 13%</Tip>
+                          ? <Tip text={`VAT-registered item. Menu price includes ${Number((r.vat * 100).toFixed(2))}% VAT. FC% is calculated on the ex-VAT portion.`} width={260}> · {vatLabel(r.vat)}</Tip>
                           : <Tip text="No VAT on this item. Menu price = ex-VAT price. FC% = food cost ÷ full selling price." width={240}> · No VAT</Tip>
                         }
                       </div>
@@ -778,8 +904,11 @@ export default function MenuPricing() {
                     <td style={{ textAlign: 'right' }}>
                       {r.inclVat > 0 ? `NPR ${r.inclVat.toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: r.exVat > 0 ? fcColor(r.fcPct) : 'var(--theme-text3)' }} title={r.exVat > 0 ? fcLabel(r.fcPct) : undefined}>
-                      {r.exVat > 0 ? `${r.fcPct.toFixed(1)}% ${fcMark(r.fcPct)}` : '—'}
+                    {/* "—" covers two different absences now: no price to divide by, and no cost
+                        to divide. The second used to print 0.0% ✓ in green. */}
+                    <td style={{ textAlign: 'right', fontWeight: r.fcPct !== null ? 700 : 400, color: r.fcPct !== null ? fcFig.style.color : 'var(--theme-text3)' }}
+                      title={fcFig.title || (r.exVat > 0 ? NO_COST_TITLE : undefined)}>
+                      {fcFig.text}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {/* Focusing this box freezes the row order (see DRAFT_SORT_KEYS) and nothing
@@ -813,8 +942,9 @@ export default function MenuPricing() {
                           names WHICH dish as well (S576's template-label rule). */}
                       <FieldError id={`menuprice-${r.id}`} message={errors[r.id]} />
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? fcColor(newFcPct) : 'var(--theme-text3)' }} title={newFcPct !== null ? fcLabel(newFcPct) : undefined}>
-                      {newFcPct !== null ? `${newFcPct.toFixed(1)}% ${fcMark(newFcPct)}` : '—'}
+                    <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? newFcFig.style.color : 'var(--theme-text3)' }}
+                      title={newFcFig.title || (r.cost > 0 ? undefined : NO_COST_TITLE)}>
+                      {newFcFig.text}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: diff !== null ? 600 : 400, color: diff === null ? 'var(--theme-text3)' : diff > 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                       {diff !== null ? `${diff > 0 ? '+' : ''}NPR ${Math.round(diff)}` : '—'}
@@ -839,46 +969,12 @@ export default function MenuPricing() {
         </div>
       )}
 
-      {/* ── Pair With Modal ── */}
-      {suggestModal && (
-        // On the shared Modal since S682 — Escape, focus trap, focus return, role="dialog"; the
-        // hand-rolled overlay had none of them. Same conversion in both branches.
-        <Modal onClose={() => setSuggestModal(null)} title={`Pair with — ${suggestModal.name}`} maxWidth={480}
-          panelStyle={{ maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text3)' }}>
-              Checked items appear as "Pair with" chips when staff tap this item on the POS order screen.
-            </p>
-            <input aria-label="Search items to pair"
-              autoFocus
-              placeholder="Search items…"
-              value={pairingSearch}
-              onChange={e => setPairingSearch(e.target.value)}
-              style={{ background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)', marginBottom: 10, flexShrink: 0 }}
-            />
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {recipes
-                .filter(r => r.id !== suggestModal.id && r.name.toLowerCase().includes(pairingSearch.toLowerCase()))
-                .map(r => (
-                  <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: pairingDraft.has(r.id) ? 'color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card))' : 'transparent' }}>
-                    <input type="checkbox" checked={pairingDraft.has(r.id)}
-                      onChange={() => setPairingDraft(s => { const n = new Set(s); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n })}
-                      style={{ accentColor: 'var(--theme-accent)', cursor: 'pointer', width: 15, height: 15, flexShrink: 0 }}
-                    />
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--theme-text1)' }}>{r.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{r.category} · {r.inclVat > 0 ? `NPR ${r.inclVat.toFixed(0)}` : '—'}</div>
-                    </div>
-                  </label>
-                ))}
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
-              <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setSuggestModal(null)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={savePairings} disabled={pairingSaving}>
-                {pairingSaving ? 'Saving…' : `Save${pairingDraft.size > 0 ? ` (${pairingDraft.size})` : ''}`}
-              </button>
-            </div>
-        </Modal>
-      )}
+      {/* No Pair With modal here. The IMS branch renders no Pair control — `openSuggestModal`
+          is called only from the POS-only table above — so the copy that used to sit here was
+          ~45 lines of JSX nothing could open, plus a `recipe_suggestions` read on every load. An
+          IMS+POS client gets "frequently ordered together" from its own sales history instead
+          (see Help → POS order screen), which is the documented split; if manual pinning is ever
+          wanted here too, it needs a Pair control in the row, not this modal back. */}
 
       {/* ── Add Item Modal ── */}
       {addModal && (
@@ -941,7 +1037,7 @@ export default function MenuPricing() {
                   placeholder="e.g. 290"
                   style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }}
                 />
-                {addForm.price && parseFloat(addForm.price) > 0 && (
+                {addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0 && (
                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
                     Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}
                   </div>

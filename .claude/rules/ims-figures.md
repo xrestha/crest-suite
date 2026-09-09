@@ -6,6 +6,12 @@ paths:
   - "src/modules/ims/stockcount/**"
   - "src/modules/ims/reports/**"
   - "src/modules/ims/sales/**"
+  # Added S713. Five files here PRINT a banded food-cost figure — MenuPricing, MenuRepricing,
+  # MenuEngineering, RecipeMargin, Recipes — and this rule, which is the one that says how, did
+  # not load for any of them. check-rules-globs only reports a glob matching NOTHING; every glob
+  # above matched real files, so nothing ever said the set was missing the module the rule is
+  # most about. MenuPricing then shipped the zero-numerator banding bug documented below.
+  - "src/modules/ims/recipes/**"
   - "src/modules/ims/recipes/**"
   - "src/pages/Settings.js"
   - "src/modules/ownerReport/computeMenuEngineeringSection.js"
@@ -46,7 +52,24 @@ paths:
   Report bands **food** cost through `descendingBand` with `fcThresholds()`'s numbers for exactly
   that reason. Reach for `bandFigure(pct, bander)` rather than `bander(pct).color`: it appends the
   ✓/△/▲ to the number, which is what stops a call site taking the colour and dropping the shape —
-  the Owner Dashboard's hand-written copy of the labour band had done precisely that.
+  the Owner Dashboard's hand-written copy of the labour band had done precisely that. `fcFigure()`
+  is the same idea for food cost, and `MenuPricing.js` had taken it apart into three one-line
+  wrappers (`fcColor`/`fcLabel`/`fcMark`) reassembled at each cell — the shape that makes dropping
+  one of the three a one-character edit. It reassembled them correctly and still shipped the bug
+  below, because what it got wrong was the argument, not the rendering.
+
+- **A ratio with a zero numerator is not a ratio, and `fcBand` will band it Healthy (S713).**
+  `(0 / price) * 100` is a real `0`, `0 <= warn`, and the cell prints **`0.0% ✓` in green** — the
+  single most flattering rendering of "we do not know what this dish costs". Menu Pricing showed
+  exactly that for any recipe with no costed ingredients and no `cost_price`, sorted them to the
+  top of an ascending FC% sort, and exported them to Excel as `0.0%`; its own **+ Add Item** writes
+  a recipe with no ingredients, so the page manufactured its own examples. `fcBand(null)` has
+  always returned `—` with no mark, so the fix is entirely upstream: **carry the absence as `null`
+  from where the figure is computed all the way to the cell.** The first `? :` that defaults a
+  missing input to `0` destroys the distinction, and no amount of care at the call site gets it
+  back. Worth checking the sorts too — Menu Pricing's New FC % sort already guarded `cost > 0`
+  while the cells and the FC % sort did not, which is the tell that the author knew and the
+  knowledge did not travel.
 
 **A settings field with no reader is worse than no field — and "it is wired now" is a claim worth
 re-checking.** `variance_flag_pct` shipped with a hint saying the Variance Report used it while the
