@@ -115,8 +115,8 @@ export const IMS_GUIDE_GROUPS = [
         summary:
           'The master ingredient list — every purchasable/stockable item, its purchase rate, base unit of measure, optional bulk-purchase-unit conversion, and trim/yield loss %. Nearly everything else in the module (Purchases, Recipe Costing, Stock Count, Requisitions) draws from this list.',
         workflow: [
-          'If no categories exist yet, a "Load Default Categories" button seeds 7 standard ones (Dairy & Bakery, Meats & Poultry, Groceries, Veg & Fruits, Beverage, Misc. Items).',
-          'Add/Edit via a 2-tab modal: Details (name, category, Yield %, UOM, Purchase Qty, Rate, or an optional "Price per unit (NPR)" field that computes Rate as per-unit × Purchase Qty) and Conversion (Purchase Unit / Base Unit / Conversion Factor).',
+          'If no categories exist yet, a "Load Default Categories" button seeds the 6 standard ones (Dairy & Bakery, Meats & Poultry, Groceries, Veg & Fruits, Beverage, Misc. Items).',
+          'Add/Edit via a 2-tab modal: Details (name, category, Yield %, UOM, Price per <UOM>, plus the "Bought a pack?" calculator) and Conversion (Purchase Unit + Conversion Factor).',
           'List view: search, category tabs, a "Used In" usage-badge filter (Recipes/Purchases/Stock/Unused), and a "With Conversion" sort toggle.',
           'Delete is blocked with an explanation if the item is referenced anywhere across 8 tables — unless you\'re admin, in which case a force-delete option cascades the delete across all of them.',
           '"Hide"/"Show" toggles is_active instead of deleting — inactive items disappear from pickers but their history stays intact. Prefer this over delete in almost every real case.',
@@ -125,14 +125,14 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'Yield %', desc: 'Usable percentage after trim/prep/cook loss (whole chicken ≈70%, spinach ≈60%, onion ≈85%). Default 100 = no loss. Factors into recipe costing (you must buy more than you serve) but NOT into nutrition (the diner eats exactly what\'s in the recipe).' },
           { label: 'Price per <UOM> (NPR)', desc: 'The one price the form collects and the only one stored — what ONE GM/ML/PCS costs. The label follows the UOM you pick. Every item lives in its smallest form, so this is exactly the figure recipe costing, stock valuation and every report read.' },
           { label: '"Bought a pack?" line', desc: 'A calculator, not a field. Type what you actually bought — 500 GM for NPR 388.50 — and it fills Price per GM with 0.777. Both boxes accept arithmetic too — "12*4" for four dozen commits 48 — so a case count never has to be worked out on a phone first. Neither box is saved and both clear every time you reopen the item. To record that an item ALWAYS comes in a pack, use the Conversion tab instead.' },
-          { label: 'Conversion (Purchase Unit / Base Unit / Conversion Factor)', desc: 'Set only when you buy in one unit (e.g. CTN) but track in another (e.g. BTL). All three fields are required together or not at all — a partial conversion is rejected at save.' },
+          { label: 'Conversion (Purchase Unit + Conversion Factor)', desc: 'Set only when you buy in a bigger unit (e.g. CTN) than you count in (e.g. BTL). Both fields are required together or not at all, and the factor has to be more than 1 — a partial conversion, or a factor of 1 or less, is rejected at save. There is no Base Unit box: the base unit IS the item\'s UOM, since that is the unit stock is counted and valued in everywhere.' },
           { label: 'Why there is no "Purchase Qty" box any more', desc: 'It was always 1, so it taught nothing — and while it existed, "Rate" meant the pack price as you typed and the per-unit price once you reopened the item. One box, two meanings, which is the exact confusion that billed a NPR 388.50 bottle of sauce at NPR 194,250. A field that is only arithmetic must not look like a field that is stored, so the arithmetic moved into the "Bought a pack?" line and the stored price got a label that names its unit.' },
           { label: 'Clear All Conversions (admin)', desc: 'Bulk-resets every item\'s conversion setup to none — an undo-everything button, use with care.' },
         ],
         formulas: [
           '"Bought a pack?" → Price per UOM = pack price ÷ pack qty (388.50 ÷ 500 = 0.777). That result is what is saved; the two pack boxes are not.',
           'per_uom_rate = rate ÷ purchase_qty, and purchase_qty is always 1, so per_uom_rate = rate. This is the field consumed everywhere (recipe costing, stock valuation, every report).',
-          'Conversion preview: 1 {purchase_unit} = {conversion_factor} {base_unit}; cost per purchase unit = rate × conversion_factor.',
+          'Conversion preview: 1 {purchase_unit} = {conversion_factor} {uom}; cost per purchase unit = rate × conversion_factor.',
         ],
         gotchas: [
           'A 1 KG bag tracked as 1000 GM and costing NPR 500 is entered on the "Bought a pack?" line as 1000 GM for NPR 500 and stored as 0.50 per GM. A sub-paisa rate is legitimate (a PCS item bought by the 1000) and displays with up to 6 decimals rather than a misleading flat 0.00.',
@@ -1263,7 +1263,7 @@ export const IMS_GUIDE_GROUPS = [
         summary: 'Six tabs in Settings configure IMS-specific behavior. All are client-facing only — they don\'t appear in the admin\'s own Settings view, which shows a different tab set (Branding/Property/Contact/Plan Pricing/Theme/Data).',
         workflow: [],
         fields: [
-          { label: 'Item Codes', desc: 'Sets item_code_prefix (default ITM). New items get the next sequential number automatically. "Regenerate All" renumbers every item alphabetically from {prefix}-001 — used to close gaps after deletions. Surfaces on Price Tracker, purchase entries, stock sheets, audit trails.' },
+          { label: 'Item Codes', desc: 'Sets item_code_prefix (default ITM). New items get the next sequential number automatically. "Regenerate All" renumbers every Item Master item alphabetically from {prefix}-001 (sub-recipes keep their own recipe codes) — used to close gaps after deletions. Surfaces on Price Tracker, purchase entries, stock sheets, audit trails.' },
           { label: 'Vendor Codes', desc: 'Same pattern for vendor_code_prefix (default VND). Shown as a badge in Vendor Report and used as a secondary search field there.' },
           { label: 'Sub-Recipe Codes', desc: 'Same pattern for sub_recipe_code_prefix (default SRC), scoped to recipes where category = "Sub-Recipe." Gated behind the recipe_costing feature flag.' },
           { label: 'Product Codes', desc: 'Codes for MENU items, and the one tab here with no prefix to configure — the prefix is derived from each recipe\'s own category (Beverage → BEV-001, BEV-002). New recipes are issued one automatically as they are written in Recipe Costing, so this tab holds a single action: "Generate Missing Product Codes", for items created before the feature existed. It ONLY fills blanks and never renumbers — the opposite of the three Regenerate All buttons above it, deliberately, because a Product Code is often the code a client already prints on their own menu.' },

@@ -10,6 +10,7 @@ import UsageChip from '../../../components/UsageChip'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { nextProductCode } from '../../../shared/productCode'
 import { Navigate, Link } from 'react-router-dom'
 import { FileText, Pencil, Eye, EyeOff, Trash2, Archive as ArchiveIcon, ArchiveRestore, Lock } from 'lucide-react'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -196,14 +197,14 @@ export default function Vendors() {
     if (await doSave()) { loadVendors(); openEdit(target) }
   }
 
+  // The counting is nextProductCode(), shared with Recipe Costing, Settings' Product Codes and Item
+  // Master rather than retyped a fourth time — and it escapes the prefix, which matters here because
+  // `settings.vendor_code_prefix` is free text: a prefix carrying a regex metacharacter ("A(") threw
+  // a SyntaxError from inside the save, after `saving` was already true, so the button stuck on
+  // "Saving…" and no vendor was written.
   function getNextVendorCode() {
-    const prefix = (settings?.vendor_code_prefix || 'VND').toUpperCase()
-    let maxNum = 0
-    vendors.forEach(v => {
-      const match = (v.vendor_code || '').match(new RegExp(`^${prefix}-(\\d+)$`))
-      if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10))
-    })
-    return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
+    const prefix = (settings?.vendor_code_prefix || 'VND').toUpperCase() || 'VND'
+    return nextProductCode(prefix, vendors.map(v => v.vendor_code))
   }
 
   async function toggleActive(vendor) {

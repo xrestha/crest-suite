@@ -52,6 +52,16 @@ describe('nextProductCode', () => {
   })
 })
 
+describe('nextProductCode with a free-text prefix', () => {
+  // Item and vendor codes take their prefix from Settings, where an owner types it. An unescaped
+  // prefix threw a SyntaxError from inside the save with the button already reading "Saving…".
+  it('survives a prefix carrying a regex metacharacter', () => {
+    expect(nextProductCode('A(', ['A(-004'])).toBe('A(-005')
+    expect(nextProductCode('C++', ['C++-002'])).toBe('C++-003')
+    expect(nextProductCode('IT.', ['ITM-009'])).toBe('IT.-001')
+  })
+})
+
 describe('assignMissingProductCodes', () => {
   test('only fills blanks and never renumbers an existing code', () => {
     const out = assignMissingProductCodes([

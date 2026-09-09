@@ -342,8 +342,9 @@ All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-uni
 See `.claude/rules/item-master-rates.md` (auto-loads when editing the IMS items or purchases
 modules). Headline rules: `items.rate` is the price of ONE base unit and equals the generated
 `per_uom_rate`, held by a `CHECK (purchase_qty = 1)`; `purchase_qty` no longer mirrors
-`conversion_factor`; a purchase bill prefills `per_uom_rate × cf`, never `items.rate`; and a field
-that is only arithmetic must not look like a field that is stored. Distinct from the
+`conversion_factor`; a purchase bill prefills `per_uom_rate × cf`, never `items.rate`; a field
+that is only arithmetic must not look like a field that is stored; and `base_unit` is the item's UOM
+— derived, never asked — while a conversion factor at or below 1 is no conversion (S706). Distinct from the
 `purchase_entries` qty/rate convention above — different columns, different arithmetic.
 
 ### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere

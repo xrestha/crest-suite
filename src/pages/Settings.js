@@ -217,9 +217,9 @@ export default function Settings() {
       body: (
         <>
           <p style={{ margin: '0 0 8px' }}>
-            Every item is given a new sequential code — <strong>{prefix}-001</strong>, <strong>{prefix}-002</strong> and
-            so on — closing the gaps left by deletions. Codes already printed on past bills, stock sheets and
-            reports will no longer match what this list shows.
+            Every item in Item Master is given a new sequential code — <strong>{prefix}-001</strong>, <strong>{prefix}-002</strong> and
+            so on — closing the gaps left by deletions. Sub-recipes keep their own recipe codes. Codes already
+            printed on past bills, stock sheets and reports will no longer match what this list shows.
           </p>
           <p style={{ margin: 0 }}>This cannot be undone.</p>
         </>
@@ -238,17 +238,34 @@ export default function Settings() {
         await saveSettings({ ...form, item_code_prefix: prefix })
       }
 
+      // Item Master only. A sub-recipe's mirror row in `items` carries its RECIPE code as its
+      // item_code (Recipes.js writes the two together), so renumbering it both destroyed that link
+      // and spent an ITM number on a row Item Master does not list — and Item Master derives the
+      // next code from the rows it lists, so the number handed to the next new item was one an
+      // invisible mirror already held. There is no UNIQUE(client_id, item_code) to catch it, and the
+      // recipe importer resolves a code to whichever row it saw last.
       const { data: items, error: fetchErr } = await scopedFrom('items', 'id, name')
+        .eq('is_sub_recipe', false)
         .order('name')
 
       if (fetchErr) throw fetchErr
 
-      for (let i = 0; i < (items || []).length; i++) {
+      // Each write's error has to be READ: supabase-js resolves with { error } rather than throwing,
+      // so the try/catch around this loop never saw a refusal and every failed renumber still
+      // finished with a green "✓ Renumbered N items". The run is a row at a time and not atomic, so
+      // a failure has to say how far it got — the codes before it have already changed.
+      const total = (items || []).length
+      for (let i = 0; i < total; i++) {
         const code = `${prefix}-${String(i + 1).padStart(3, '0')}`
-        await scopedUpdate('items', { item_code: code }).eq('id', items[i].id)
+        const { error: updErr } = await scopedUpdate('items', { item_code: code }).eq('id', items[i].id)
+        if (updErr) {
+          setRegenerateMsg(`Error: stopped after ${i} of ${total} items — the first ${i} now carry their new codes and the rest keep their old ones. Run it again once this is resolved. ${updErr.message || ''}`.trim())
+          setRegenerating(false)
+          return
+        }
       }
 
-      setRegenerateMsg(`✓ Renumbered ${items?.length || 0} items as ${prefix}-001 through ${prefix}-${String(items?.length || 0).padStart(3, '0')}`)
+      setRegenerateMsg(`✓ Renumbered ${total} items as ${prefix}-001 through ${prefix}-${String(total).padStart(3, '0')}`)
     } catch (e) {
       setRegenerateMsg(`Error: ${e.message}`)
     }

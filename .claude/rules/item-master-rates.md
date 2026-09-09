@@ -72,6 +72,54 @@ Three things worth keeping in mind before touching this form again:
 
 This is distinct from the `purchase_entries` qty/rate convention in `CLAUDE.md` ("Purchases: qty/rate storage convention"): that one is about a *conversion factor* between purchase and base units on a transaction row, this one is about the item master. Both end in base units, but they are different columns with different arithmetic — and the S597 lesson is precisely that a column allowed two meanings will be read with the wrong one somewhere, silently, by code that looks correct.
 
+### Base Unit is the item's UOM, and a conversion factor must be above 1 (S706)
+
+`base_unit` has **no reader**. Every consumer of a conversion goes through `getCf(item)`
+(`purchasesHelpers.js`) — `cf > 1 && purchase_unit` — and converts the purchase unit into
+**`items.uom`**: the qty a purchase entry stores, the unit Purchases/Returns/the printed voucher
+label it with, and the unit stock is counted and valued in. The column is still written (the
+HQ→branch `push_master_data` copies it) but nothing computes from it.
+
+So the Conversion tab no longer **asks** for it. It was a free `UNITS` select, which let an item say
+"1 CTN = 24 BTL" while its stock was priced per GM, and this dialog's own preview printed the per-GM
+rate labelled "per BTL" — the S597 screen-agrees-with-the-reader shape one layer up. `itemPayload()`
+derives `base_unit = form.uom`, and the table's badge prints `item.uom` rather than the stored
+column, so a legacy row whose `base_unit` disagrees stops advertising a promise nothing keeps. Same
+reasoning that took `Purchase Qty` off this form: **a value that is structurally fixed is stated,
+not asked.**
+
+A **factor of 1 or below is not a conversion** and is now refused at save. `getCf` has always
+ignored one, but the row still carried it, the Conversion tab showed its green dot, and the table
+badged `1 CTN = 0.5 BTL` (`!== 1` passes 0.5) — a conversion the reader could see and no bill,
+voucher or report honoured.
+
+### The form's rules are pure, in `itemFormRules.js` (S706)
+
+`nextItemCode`, `perUnitOf`, `validateItemForm` and `itemPayload` moved out of `Items.js` and are
+tested. Two things they hold that the page had been getting wrong:
+
+- **Yield % is 1–100.** The box has carried `min="1" max="100"` from the start, but the dialog is
+  not a `<form>` and nothing submits it, so neither attribute was ever checked: a typed `1000` saved
+  as 1000, and `recipeCostCalc` divides by `yield_pct / 100` at every depth — costing every recipe
+  using that item at a tenth, in green, with nothing to flag it.
+- **Two items may not share a name.** `items` has no `UNIQUE(client_id, name)` and the recipe
+  importer maps an ingredient name to whichever row it saw **last**, so a duplicate means recipes
+  cost off one twin while purchases accumulate against the other. Refused at save, naming the item
+  that already has the name — and **skipped entirely when the items read failed**, since a check
+  against a list that may be missing rows can only produce a false all-clear.
+
+**The next item code is `nextProductCode()`** (`src/shared/productCode.js`), shared with Recipe
+Costing, Settings' Product Codes and Vendors rather than a fourth inline copy. It escapes the
+prefix: `settings.item_code_prefix` / `vendor_code_prefix` are free text, and a prefix carrying a
+regex metacharacter ("A(", "C++") threw a `SyntaxError` from inside the save **after `saving` was
+already true** — the button stuck on "Saving…", nothing was written, nothing named the prefix.
+
+And it is only meaningful over an authoritative list: a failed read left `items` empty, so the next
+item was handed `ITM-001` over codes that already existed — silently, since there is no
+`UNIQUE(client_id, item_code)`. Item Master therefore **refuses to open Add while its list is
+unknown**, and Settings' "Renumber every item" now excludes sub-recipe mirrors (their `item_code`
+IS their recipe code, and a renumbered mirror spent a number Item Master cannot see).
+
 ## `per_uom_rate` is a generated column
 
 Migrated from the root `CLAUDE.md` (S663).

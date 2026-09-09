@@ -12,6 +12,14 @@
 
 export const SUB_RECIPE_CATEGORY = 'Sub-Recipe'
 
+// A prefix reaches nextProductCode() from two very different places. A Product Code's comes from
+// productCodePrefix() below, which has already stripped everything but letters and digits. An item
+// or vendor code's comes from `settings.item_code_prefix` / `settings.vendor_code_prefix` — free
+// text an owner types in Settings — so interpolating it into a RegExp raw made a prefix carrying a
+// metacharacter ("A(", "C++") throw a SyntaxError from inside the save, after `saving` was already
+// true: the button stuck on "Saving…", nothing was written, and nothing on screen named the prefix.
+const escapeRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /**
  * The 3-letter prefix for a category. Strips anything that isn't a letter or digit first, so
  * "Veg & Fruits" → VEG and "Non-Veg" → NON rather than dragging punctuation into a code.
@@ -33,7 +41,7 @@ export function productCodePrefix(category) {
  * instead of handing the next recipe a code that is still on an old one.
  */
 export function nextProductCode(prefix, existingCodes) {
-  const re = new RegExp(`^${prefix}-(\\d+)$`)
+  const re = new RegExp(`^${escapeRe(prefix)}-(\\d+)$`)
   let max = 0
   for (const c of existingCodes || []) {
     const m = String(c || '').trim().toUpperCase().match(re)
