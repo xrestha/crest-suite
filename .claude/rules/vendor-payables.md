@@ -315,14 +315,23 @@ the same pass added `fetchAllRows` paging to all three previously-unpaged sales 
 
 `purchase_entries.discount_amount` is a **BILL-level** figure repeated on every line of the bill.
 `VendorReport.js`, `OutstandingPayables.js`, `VatReport.js`, `NonVatReport.js` and
-`supplierAttribution.js` all dedupe it by bill before use. The P&L was the one place that ignored it
-entirely — `sum(qty * rate)` charged the undiscounted price into COGS, so COGS ran high and Net
-Profit low by the whole discount while the Purchases register showed the discounted total for the
-same bill. Measured on the reference client, one month was **NPR 289,456** overstated.
+`supplierAttribution.js` all dedupe it by bill before use. The P&L was the first place caught
+ignoring it entirely — `sum(qty * rate)` charged the undiscounted price into COGS, so COGS ran
+high and Net Profit low by the whole discount while the Purchases register showed the discounted
+total for the same bill. Measured on the reference client, one month was **NPR 289,456** overstated.
 
-Fixed across the three places that are required to agree, in one change: `ConsolidatedPnl.jsx`,
+Fixed in one change across the three places then known to disagree: `ConsolidatedPnl.jsx`,
 `MonthlySummary.js` (both via `allocateBillDiscounts()` from `supplierAttribution.js`) and
 `get_group_pnl` (migration `20260822140000`, the same arithmetic in SQL).
+
+**The set is now six**, because that fix did not travel on its own: `AnnualSummary.js`,
+`PeriodComparison.js` and `BudgetVsActual.js` each summed a raw `qty * rate` until S720, so COGS
+and their own "Net Purchases" column ran high by the whole bill discount on three pages a client
+reads beside Monthly Summary. Those four summary pages are now held to it by
+`summaryReads.test.js`, which reads their source for `allocateBillDiscounts(`, the five columns it
+needs (`discount_amount`, `purchase_group_id`, `vendor_id`, `invoice_ref`, `bs_day`) and a
+`lineGross`/`lineNet` figure rather than a raw product. **Any page that values purchases joins this
+list.**
 
 Three things not to re-derive:
 

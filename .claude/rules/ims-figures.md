@@ -147,9 +147,11 @@ Three pages named no period at all (`BestSellers` said "for the period", `DeadSt
 `WastageReport` nothing) on reports whose entire claim is period-relative. `PeriodScope` (S659) is
 the chip that replaced it, on **29 IMS pages**; `ReportPage` carries it in a `scope` slot. Pass
 `provisionalWhenOpen` on any report whose figures are incomplete until the closing count lands —
-that is the same set this section's previous paragraph is about. Two pages are deliberately
-excluded and carry a comment saying so: `PeriodComparison` (its scope *is* every period) and
-`OutstandingPayables` (unbounded — payables carry forward).
+that is the same set this section's previous paragraph is about. Two pages carry no chip and a
+comment saying why: `PeriodComparison` (its table spans a RANGE — 6, 12, 24 or all periods — which
+no one-period chip can name) and `OutstandingPayables` (unbounded — payables carry forward). No chip
+is not the same as no scope: `PeriodComparison` states its selected range through one `scopeLine`
+that reaches the subtitle, the print header, both workbook sheets and the filename (S720).
 
 ### Demand Forecast: revenue is ex-VAT, arithmetic is pure, and an average is not a portion (S694)
 
@@ -253,6 +255,117 @@ its inputs paged the way Stock Count pages them — `opening_stock`, `closing_st
 `vendor_returns` are one row per item per period, and a silent 1000-row truncation there would move
 the answer with no error for `firstError()` to catch. `StockReport.js` was swept in the same change
 for the same reason; the two must agree about "available" or the warning contradicts the report.
+
+## The summary family: four pages answering one question, three of them differently (S720)
+
+Monthly Summary, Annual Summary, Period Comparison and Budget vs Actual are the nav's
+"Summary & comparison" group. They answer *what did this month cost* at four altitudes — one month,
+one year, a trend, against a plan — which makes agreeing with each other their entire job. Three of
+them disagreed, in two independent ways.
+
+### The bill discount reached three pages out of six
+
+`purchase_entries.discount_amount` is a BILL-level figure repeated on every line of the bill. S601
+established that it belongs in COGS and fixed it in `ConsolidatedPnl.jsx`, `MonthlySummary.js` and
+`get_group_pnl`. **Annual Summary, Period Comparison and Budget vs Actual were never touched**, so
+all three summed a raw `qty × rate` and charged the undiscounted price into COGS and into a column
+literally headed *Net Purchases*. The same month's cost was two different numbers on two pages a
+client reads side by side, in the direction that flatters nothing: their COGS and FC% ran HIGH.
+
+All six now route through `allocateBillDiscounts()`, and `summaryReads.test.js` pins both the
+import and the five columns the helper needs — `discount_amount` plus `purchase_group_id` and the
+`vendor_id`/`invoice_ref`/`bs_day` fallback key, which is the `a || b` identity rule from
+`vendor-payables.md`: a bill written before grouping existed has no `purchase_group_id`, and a
+select that omits the fallback trio silently gives every such line its own bill.
+
+**Monthly Summary's own column was mislabelled the whole time.** `purchaseVal` was fed `lineNet` —
+the post-discount figure under a header reading **Gross Purchases** — so `gross − net` read as
+"returns" when part of it was the discount, and the Net Purchases cell printed a dash on every bill
+that had a discount and no return. Gross, Discount and Returns are three columns now and Net
+Purchases always prints, because **a column with a TOTAL under it whose cells cannot be added up to
+that total is unreadable** — the `—`-when-equal shortcut is only free on a column nobody sums.
+
+### The paging sweep had never reached the two widest windows in IMS
+
+Every single-period page in the module already pages `opening_stock`, `closing_stock` and
+`staff_meals` — Stock Count, Stock Report, Reorder, Dead Stock, FIFO, Stock Ageing, Requisitions,
+and the three variance pages S719 swept. The **only** three unpaged sites left were the two pages
+that read those tables across **12 and 24 periods at once**, plus Monthly Summary.
+
+The multiplier is the whole finding. One row per item per period × 12 periods crosses PostgREST's
+silent 1000-row cap at about **85 items**, not 1000. Past it a month simply arrives with no opening
+and no closing stock, which is indistinguishable from an uncounted month: `computeUsed` collapses
+COGS to net purchases, the FC% column reports it in confident type, and `firstError()` sees nothing
+because truncation returns **no error**. Worse, none of the three reads carried `.order()`, so
+*which* months lost their stock differed between loads — the same page showed two different years
+on two visits, and neither looked broken.
+
+S719 wrote the rule (*"multiply rows-per-item-per-period by the window length before deciding a
+read is safe"*) against a six-period window. These two are twelve and twenty-four. **The pages with
+the largest windows were the last ones swept**, which is the same ordering failure S708 and S706
+found: a sweep reaches the page it was named after.
+
+### Smaller, and each one live
+
+- **Monthly Summary dropped a category whose only movement was a RETURN.** The activity filter tests
+  opening, purchase, closing, wastage and staff meals — the fix that added the last two missed the
+  sixth column. Returning goods bought in an earlier period is ordinary (the bill is in Shrawan, the
+  spoiled case goes back in Bhadra), such a category has a return and nothing else, and the whole
+  row was dropped: `totalReturn` read **"None this period"** beside a real return, and `totalCOGS`
+  was overstated by the entire credit.
+- **Monthly Summary's food-cost box was banded three ways at once.** S682 routed the *figure*
+  through `fcFigure(settings)` and left the box around it and the sentence under it on a hardcoded
+  35/45, plus a third scale in the tooltip's "Target: 28–35%". A client on a 30% warning level saw
+  a red ▲ figure sitting inside a green box captioned **"✓ Within benchmark (28–35%)"**. One
+  `fcBand()` call now drives the tint, the number and the sentence. **When you route a figure
+  through a band, check what is touching it** — a tint, a caption and a tooltip are all claims
+  about the same threshold.
+- **Period Comparison's FC% tooltip still said "Green ≤30%, Amber 31–38%, Red >38%"** while the cell
+  colour, the chart's reference lines, its dots and its legend all read `fcT`. The comment beside
+  those reference lines celebrates having fixed exactly this drift; the tooltip explaining the
+  colour was the copy it left behind.
+- **Period Comparison had no overlapping-load guard**, on a page whose only reloading control is a
+  closed native `<select>`. Arrowing 6 → 12 → 24 → All starts four concurrent loads; a stale
+  *smaller* result landing last leaves `shown` at 24 periods with figures for 6, and eighteen rows
+  of `—` that read as "nothing happened in those months". `useLatestRequest` keyed on `limit`.
+- **Period Comparison stated a scope it did not have.** The subtitle said "across all BS periods"
+  whatever the control said, and the print header and workbook named no range at all — a printed
+  six-month sheet was indistinguishable from a two-year one, and the file was always
+  `PeriodComparison.xlsx`. One `scopeLine` now reaches the subtitle, the print header, both sheets
+  (through `sheetWithLetterhead`, whose `scopeLine` is required for this exact reason) and the
+  filename.
+- **Annual Summary valued an item deactivated mid-year inconsistently within one row.** `rateMap`
+  is built from active items, so its opening/closing/wastage/staff-meals came out at 0 — while
+  `grossPurch`/`retVal` read the purchase row's OWN rate and kept counting its spend in full. COGS
+  was overstated by exactly the closing value the same row had just discarded. Monthly Summary
+  drops such an item from every column; this page now does too. **An `is_active` filter applied to
+  a rate lookup and not to the rows it values is not a filter, it is a zero.**
+- **Period Comparison's `fmt` dashed a real zero** (`if (!n) return '—'`), so a period with no
+  wastage read identically to a period whose figures had not been computed. `nprOrDash` dashes only
+  null and undefined — the distinction the rest of the product already draws.
+- **Annual Summary's trend column painted a flat month green.** `trend > 0 ? '↑' red : '↓' green`
+  renders a green ↓ 0.0pp for a month that did not move. Period Comparison's `trendIcon` has always
+  had a 0.3pp dead zone; this column now does too (S634's rule: a verdict needs a dead zone or it
+  cries wolf).
+
+### Budget vs Actual: a promise the save could not keep, and spend nothing claimed
+
+- **A failed budget save reached only `console.error`**, under a banner reading *"Budgets are saved
+  automatically"*. The spinner cleared, the number stayed on screen, and the client had every
+  reason to believe it landed — until they came back next month and found it gone. It now names the
+  category through `ActionError`, says the figure is still on screen, and says not to reload before
+  retrying, which is true because nothing on the failure path reloads (S716's rule: write the
+  sentence and the recovery path in the same edit).
+- **Blur fires whether or not anything was typed**, so tabbing across untouched rows upserted
+  `amount: 0` for every category it passed through. Only an edited field saves now.
+- **Spend on an item with no category fell out of the Actual column AND the Totals row**, silently.
+  `items.category_id` is nullable — Monthly Summary already handles this with a synthetic
+  Uncategorized row — so the page reported Under Budget on spend it had not counted, and its total
+  could not be reconciled against Monthly Summary's Net Purchases. There is an
+  **Uncategorised / unbudgetable** row now, counted in Totals and excluded from the variance (there
+  is no budget for it to be over or under), which is the S594 rule that a KPI and a total meaning
+  different things must both say so.
+
 
 ## A `.neq` on `sales_entries.source` drops the legacy rows, and on Sales Entry it deletes them (S699)
 
@@ -398,3 +511,230 @@ slow network. Each now wraps the call and routes to its own `setLoadError`, re-c
 **When you make a shared helper throw, the claim "existing callers already catch it" is a grep, not
 an assumption** — and the symptom of getting it wrong is a hang, which no error branch will ever
 report.
+
+## The stock reports re-analysed: an as-of date, a window, and what "not counted" means (S717)
+
+Six stock reports (`StockReport`, `ReorderReport`, `StockMovements`, `DeadStock`, `FifoReport`,
+`StockAgeing`) went through the same re-analysis the module's other pages have had. Four rules came
+out of it, each of which had already shipped.
+
+### `FifoReport` was `StockAgeing`'s unswept sibling, three times over
+
+Same problem (allocate consumption across batches), same data, one page fixed in S594 and the other
+not touched since. **When one page in a module is repaired, ask which other page answers the same
+question** — the S709 lesson, in the shape it keeps recurring.
+
+- **It aged every batch against `new Date()`, whatever period was selected** — S594's exact bug,
+  still live. Opening a month closed three months ago reported the whole month's stock as "expired
+  90d ago", turned Value at Risk red over nearly all of it, and highlighted every row. It stated an
+  as-of date nowhere: not the subtitle, not a print header (it had no print output at all), not the
+  workbook. `asOfForPeriod()` is the twin of `StockAgeing`'s `asOfForFy` — today for the current BS
+  month, the last day of the period otherwise — and one `scopeLine` now carries it to screen, print
+  and Excel alike.
+- **It read ONE period's purchases and netted that period's WHOLE consumption off them.** Two
+  errors compounding. A batch bought last month and expiring next week was invisible; opened on day
+  3 of an open month it showed three days of purchases under a confident "Items Tracked" — and the
+  long-dated stock an expiry report exists for (tinned, frozen, bottled) is precisely what a
+  one-month window cannot see. Meanwhile the month's consumption included what came off stock
+  carried in from before, so the new batches were over-eaten and exposure was understated. The
+  window is now the fiscal year to the selected period, with the opening count modelled as one
+  **undated carried-forward batch consumed first** — never displayed, since its whole job is
+  absorbing the usage that was genuinely its own.
+- **It summed `sales_entries` raw** — the last page doing so, after S695 (Stock Report) and S696
+  (Reorder Report) each claimed that title. A day sold in both POS and manual entry consumed its
+  ingredients twice, so batches still on the shelf were eaten and simply vanished from an expiry
+  report; a credit note (`pos_credit`, negative `qty_sold`) subtracted from consumption and put
+  stock back. Both directions live, both producing ordinary-looking rows. `salesReads.test.js` now
+  covers all four depletion consumers, and asserts they reach the rule (directly or through
+  `buildStockRows`) rather than merely selecting the column.
+
+**`allocateFifo` is now imported rather than reimplemented.** Extra fields on a batch ride through
+its two spreads untouched, which is what lets FifoReport hang the `purchase_entries` row off each
+batch as `entry`; a test pins that. And it reads **every** purchase in the window, not only the
+dated ones — an undated batch is still stock and still absorbs its share, so reading only the dated
+ones made them swallow the undated ones' usage.
+
+**`daysUntilExpiry`/`parseDateLocal` live in `stockAgeingCalc.js` beside `ageInDays`.**
+`new Date('2026-09-09')` is UTC midnight — 05:45 local in Nepal — so the old
+`Math.ceil(expiry - new Date())` returned `-0` for a batch expiring earlier the same day, which is
+not `< 0`, so it rendered as in-date. Both sides floor to local midnight now. Same family as the
+`.toISOString()` trap, in the other direction: **never compare a bare date string against a local
+clock.**
+
+### `DeadStock` treated "not counted" as "counted zero", so an uncounted month reported nothing wrong
+
+This is the most important finding of the six, because of what it said instead. Consumption here is
+the periodic residual — `computeUsed()`, i.e. `… − closing` — so the closing count is not one input
+among several, it is the only thing separating "we used it all" from "none of it moved". Summing
+`closing_stock` with a filter returned **0** for an item with no row, which is the ordinary state of
+every item in an open month. So an uncounted item computed as **fully consumed**, failed the Dead
+test and the Slow test, and dropped out of the report — and an uncounted period rendered zero rows
+under *"No dead or slow-moving stock this period."* The single most reassuring sentence the page can
+say, said when it knew nothing at all.
+
+It also conflated the two states S695 spent a session separating: `physical_qty = 0` is a COUNT, no
+row is not. Presence is `item.id in closeMap`, as in `buildStockRows`.
+
+Three states now, each with its own sentence: assessed, **not counted** (excluded, counted in an
+amber notice, and an empty report says *"This report needs a stock count"* with a link to Stock
+Count), and **inconsistent** — counted higher than the stock available to it, which used to clamp
+`used` to 0 via `Math.max` and therefore read as **Dead**, the loudest verdict on the page,
+manufactured by a missing purchase bill. The KPI strip is gated on `assessable > 0` for the same
+reason it is gated on `!loading`: with nothing counted, "0 Dead / 0 Slow" is a finding the page has
+not made. **Generally: when a report cannot judge a row, count it and name it — never let it fall
+into the same absence as a row that is fine.**
+
+### A shared calculation is only as good as the reads feeding it, and they were not swept together
+
+S696 gave Stock Report and Reorder Report ONE `buildStockRows`. S710 then paged Stock Report's
+inputs and left Reorder Report's bare — so the shared function was handed two different pictures of
+the same period, and the two pages could disagree about what is on the shelf, silently, past 1000
+items. **Unifying the arithmetic does not unify the inputs.** Now paged everywhere they appear:
+`opening_stock`, `closing_stock`, `staff_meals`, `vendor_returns`, and two producers S710 missed —
+**`items`** (Stock Report, Reorder Report, Dead Stock, Stock Ageing: it is the read that yields the
+ids everything else is joined against, and in Stock Ageing `itemById` is what admits a batch at all)
+and **`par_levels`** (one row per item per client, and a truncated read turns "below par" into "no
+par set" on the page that prints the purchase list). Same shape as S706/S708: the consumer was paged
+and the producer was not.
+
+### Smaller, from the same pass
+
+- **`DeadStock`'s `loading` started `false`**, so the first paint — before any read was issued —
+  rendered the KPI strip and the "no dead stock" empty state. It also had no `NoPeriodState`.
+- **`DeadStock` inlined `computeUsed`'s arithmetic** and its module guide's copy of the formula had
+  drifted (no staff meals). It imports the shared one now.
+- **`DeadStock`'s per-item `sumField` was a `.filter()` per item per table** — six arrays walked once
+  per item. One pass per table instead.
+- **`FifoReport`'s recipe-walk `catch` had no `isCurrent` guard**, so a superseded load's failure
+  replaced the report the reader was looking at with a red banner.
+
+## `selectDepletingSales` is SINGLE-PERIOD, and two reports were feeding it a year (S718)
+
+The POS-supersedes-manual rule is keyed on **`bs_day`, which is a day NUMBER inside a month** — day
+5 exists in every one of them. So the function is only meaningful within one period, and that was a
+property of its callers rather than anything the signature said.
+
+`StockAgeing` has always read a whole fiscal year through it; `FifoReport` joined it in S717, when
+that session widened FIFO's window from one period to the fiscal year to date and kept the
+single-period call. On a client running POS **and** manual entry — the exact population the rule
+exists for — a POS sale of a dish on 5 Shrawan suppressed the MANUAL sale of that dish on 5 Bhadra,
+four months later; and because a Bulk row carries `bs_day 0` and is superseded by a POS sale
+*anywhere in the period*, one POS sale in month one silenced every Bulk row for that dish for the
+rest of the year.
+
+**The rule only ever DROPS manual rows, so the error is one-directional**: consumption comes out
+short, stock that was actually eaten reads as still on the shelf, and both reports move in the
+alarming direction — the 90+ capital figure reads high, expiry exposure reads high. Nothing errors
+and no array looks short.
+
+`selectDepletingSalesAcrossPeriods(rows)` partitions by `period_id` and applies the rule inside each
+group; both pages now select `period_id` and call it. `ShrinkageReport` had been correct all along
+because it needed per-period totals anyway, so the grouping fell out of what it was already doing —
+**the correct caller was correct by accident, which is why nothing pointed at the other two.**
+`salesDepletion.test.js` pins the collision in both directions and asserts the year-wide form
+under-counts (36 against a true 46 on its fixture).
+
+**Generally: when a helper's correctness depends on the SHAPE of what it is handed — one period, one
+day, one bill — say so in its own doc comment, because the next caller will widen the window and
+the function will keep returning a plausible answer.**
+
+## Stock Ageing: a headline that could only say "all clear", and a KPI that added litres to kilos
+
+Four more from the same re-analysis.
+
+**"Capital in 90+ Day Stock" was structurally NPR 0 with a green ✓ for the first three months of
+every fiscal year.** Stock carried into the window is modelled as one batch dated at the window
+start — correct, and the page has always disclosed that its true age is a floor — but the *banding*
+then treats that floor as a measurement. Two months into a year the window is 60 days long, so
+stock that has genuinely sat for three years is 60 days old to this report, cannot reach the 90+
+band, and the headline reports no stale capital at all. Same family as S713's zero-numerator food
+cost and S715's Stars: **an unknown rendered as a flattering known.** `buildAgeing` now returns
+`totals.unknownAgeValue` — carried-forward value that landed in a band younger than the oldest one —
+and while it is above zero the card renders `≥ NPR X` with `△`, never the ✓, the note names the
+window length and the amount, and the tooltip explains why.
+
+**"Carried Into This FY" summed quantities across items and printed them as "units".** Kilograms of
+flour plus litres of oil plus pieces of napkin. The table's own TOTAL row prints `—` in the On Hand
+column for exactly that reason, two hundred pixels below — so the page contained both the mistake
+and its own refutation. It shows `carriedForwardValue` now. **A quantity does not sum across items;
+only value does.**
+
+**The carried-forward batch is valued at the CURRENT master rate**, because it has no purchase line
+behind it — while `stockAgeingCalc.js`'s header and the Stock On Hand tooltip both said the report
+values every batch "at what you actually paid, not the current master rate". The exception is
+unavoidable (nothing in the window records what that stock cost) and `items.rate` is rewritten by
+every purchase bill, so the oldest stock on the report — the stock it exists to surface — is the one
+line valued on a moving basis. Now stated in the tooltip, the c/f card, the row badge, the workbook
+notes and the guide. **An exception that lives in the code and not in the copy is a claim the report
+is making falsely.**
+
+**The TOTAL row ignored the filter above it.** It rendered the whole report's figures under a
+filtered table, labelled "(all items, by value)" — honest, and useless: a reader who has filtered to
+Dairy wants Dairy's total, and a footer that cannot be reconciled with the rows directly above it
+discredits those rows as much as itself (the S594 Supplier Contribution lesson). It follows
+`filtered` now and says which. The KPI cards stay whole-report by their own documented decision.
+
+Two smaller ones: `init()` did not call `fyReq.begin()`, so changing FY during the first load left
+the dropdown snapping back over another year's table — the hook's own contract, and the third page
+to miss it after S698 and S709. And the empty state claimed *"every batch bought this year has been
+used, wasted or returned"* for a year in which nothing was bought at all; it now distinguishes
+"used up" from "nothing to age".
+
+## The variance family: measurability is PER ITEM, and the paging sweep had never reached them (S719)
+
+The four pages in the nav's "Stock & variance" group that S717 deferred — `Variance`,
+`TheoreticalVariance`, `ShrinkageReport`, `WastageReport`.
+
+### `hasClosing` is a period-level answer to a per-item question
+
+`measured: false` was introduced in S659 as the way a caller says "no closing count yet", and both
+variance pages threaded it from `hasClosing = (closing || []).length > 0` — **does the month have
+ANY closing rows.** So on a month where 900 of 1000 items were counted, the other 100 got
+`closeQty = 0`, actual usage came out as *everything on hand plus everything bought*, and each of
+them wore a full red **Over** flag with a fabricated NPR value behind it — on the page a client
+uses to decide whether staff are stealing. Those fabricated values were also summed into
+`totalVarianceValue`, so the headline "potential loss" included the shelves nobody had counted.
+
+Both pages now carry `hasCount = item.id in closeMap` per row (a count of 0 is a real count — the
+S695 rule, so never `> 0`), pass `measured: hasClosingRows && hasCount` to `varianceBand`, compute
+every headline figure over measured rows only, mark the rest **not counted** in the table and the
+export, and name them in a banner. **A period-level caveat does not cover a per-item gap**, and the
+partial case is the common one: the fully-uncounted month already had a banner, and the
+mostly-counted month — which is what an ordinary month close actually looks like — had nothing.
+
+`hasClosingRows` is a LOCAL, not the state value: `setHasClosing` is async, so a row builder reading
+the state variable gets the *previous* period's answer.
+
+### The 1000-row sweep had reached `wastages` and `purchase_entries` and stopped there
+
+Every other per-item-per-period read on all four pages was bare: `items`, `opening_stock`,
+`closing_stock`, `staff_meals`, `vendor_returns`. The direction is what makes it serious — **a
+truncated `closing_stock` read is indistinguishable from an uncounted item**, so it produces exactly
+the false Over variance described above, with no error for `firstError()` to catch.
+
+`ShrinkageReport` was the worst case and the least obvious: its window is *several* periods, so
+every one of those reads is multiplied by the period count. Six periods × 200 items is 1200 opening
+rows — over the cap on a client far smaller than the one that would trip a single-period page.
+**Multiply rows-per-item-per-period by the window length before deciding a read is safe.**
+
+### `WastageReport` was the one page that did not page `wastages`
+
+The table is one row per item per **day** once Daily Wastage is used — the rules file names it as
+the realistic 1000-crosser, and Stock Count, Stock Report, Dead Stock, Reorder, FIFO and Stock
+Ageing all page it. The report whose entire job is totalling the client's wastage was the only
+reader that did not, so past the cap its headline came back short in confident type. **A table's
+own report is not automatically the most careful reader of it** — it is often the oldest.
+
+Same page: `loading` started `false` (first paint rendered the KPI strip and "No wastage entries for
+this period" before any read was issued), there was no `NoPeriodState`, money went through a local
+`toLocaleString` rather than `nepalMoney.js`, the Excel export carried no letterhead or scope line,
+and the footer's "% of Total" was **asserted as `100%`** rather than computed — true today because
+the two sums are identical, and exactly the shape that survives the change which breaks it (the
+S594 Supplier Contribution finding).
+
+### And the stale-failure guard, twice more
+
+`Variance` and `ShrinkageReport` both `catch` their recipe walk without re-checking
+`isCurrent`, so a superseded load's error replaced the report the reader was actually looking at.
+That is now the third and fourth instance after `FifoReport` (S717) — **when a loader has an
+`isCurrent` check after its awaits, its `catch` needs one too.**

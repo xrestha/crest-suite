@@ -316,9 +316,11 @@ reasoning that once the handler claims, init's stale load is rejected by its own
 is true of the DATA and not of the LABEL: `init` also calls `setSelectedPeriod`, which no guard
 covers, so a period change during a first load left the dropdown snapping back to the open month
 over another month's table — figures and label disagreeing, the exact thing the guard exists to
-prevent. S698 fixed it in `Purchases.js` and S709 in `PurchaseOrders.js`, both against the hook's
-own documented contract ("anything that auto-selects a period must call `begin()` too"), while this
-file was arguing they did not have to. A page whose dropdown cannot render until loading finishes
+prevent. S698 fixed it in `Purchases.js`, S709 in `PurchaseOrders.js` and S718 in `StockAgeing.js`
+— all three against the hook's own documented contract ("anything that auto-selects a period must
+call `begin()` too"), while this file was arguing they did not have to. The third instance is worth
+noting because that page is where this whole rule was written: it selects a fiscal YEAR rather than
+a period, and `init()`'s `setSelectedFy` is exactly the unguarded label write the rule describes. A page whose dropdown cannot render until loading finishes
 is safe either way; claim it anyway, rather than making every reader re-derive which kind it is.
 
 **S682 took it to 38 pages (measured by grep) and closed the report tail.** The twelve period-driven IMS reports that
@@ -355,11 +357,13 @@ races on had no guard at all. Two quick clicks start two loads; the later-landin
   `` `${periodId}:${day}` ``. The paragraph below said the composite-key reason was spent
   everywhere it had been given; this was the one place it had never been asked.
 
-**Not swept:** `AttendanceSheet.jsx`, and
-`SupplierPriceTracker.js`/`MonthlyOwnerReport.jsx`, which select an id and derive rather than load.
-The first two were skipped because their loaders take `(bsYear, bsMonth)` rather than one id and
-"would need a composite key" — S657 built exactly that on `GroupDashboard` (a `bsYear-bsMonth` key),
-so the stated reason no longer holds and the pair is simply unswept.
+**Not swept:** `AttendanceSheet.jsx`, whose `handlePeriodChange` awaits `loadAttendance(id)` with
+nothing claiming the page, and `SupplierPriceTracker.js`, which selects an id and derives rather
+than loads. The first was skipped because its loaders take `(bsYear, bsMonth)` rather than one id
+and "would need a composite key" — S657 built exactly that on `GroupDashboard` (a `bsYear-bsMonth`
+key), so the stated reason no longer holds, and it no longer even fits: `loadAttendance` takes one
+period id. `MonthlyOwnerReport.jsx` stood on this list until S682 wired it and holds a `periodReq`
+now.
 
 ## The 1000-row truncation sweeps: S528, S529, S613, S628
 
@@ -413,6 +417,16 @@ wrong at exactly the volume the cap starts mattering, because `'PO-1000'` sorts 
 text. And its failed read now stops the save rather than numbering off a short list — **a code
 minted from a max is only as trustworthy as the completeness of the read behind it**, so "I could
 not read the list" and "the list is empty" must not lead to the same number.
+
+**S720 closed the IMS tail, and where it was found is the lesson.** Every single-period page in
+the module already paged `opening_stock`/`closing_stock`/`staff_meals`; the only three unpaged
+sites left were **the two pages that read those tables across 12 and 24 periods at once** (Annual
+Summary, Period Comparison) plus Monthly Summary. One row per item per period × 12 crosses the cap
+at about **85 items**, so the pages with the largest windows were the ones a client trips first —
+and they were the last swept, exactly as S706 and S708 found for producer-vs-consumer reads. Note
+that Period Comparison's `sales_entries` read carried a comment naming the cap "across up to 24
+periods" while the three reads directly beneath it were bare: **a paging comment on one line of a
+`Promise.all` is not a claim about the others.**
 
 **Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and

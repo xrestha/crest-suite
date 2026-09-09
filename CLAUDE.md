@@ -447,4 +447,4 @@ Use `fetchAllRows(makeQuery)` (`src/shared/fetchAllRows.js`) for any read that c
 
 **An `.in(column, ids)` filter is a URL as well as a row count (S629).** PostgREST spells the id list out in the request URL, so a few hundred uuids is already past what proxies and CDNs accept — a loud 414 — while the 1000-row cap still applies underneath. Reach for `fetchAllRowsChunked(ids, makeQuery)`, or `runChunkedByIds(ids, makeQuery)` for a write filtered the same way (sequential, first error wins, and **not** atomic — some chunks may already have landed).
 
-The four sweeps (S528, S529, S613, S628), their per-table thresholds, and the two traps that cost rounds — a misplaced closing paren that only fails at runtime, and the stale `.eslintcache` that `npm run build:verify` exists to clear — are in `.claude/rules/frontend-performance.md`.
+The sweeps since S528, their per-table thresholds, and the two traps that cost rounds — a misplaced closing paren that only fails at runtime, and the stale `.eslintcache` that `npm run build:verify` exists to clear — are in `.claude/rules/frontend-performance.md`.
