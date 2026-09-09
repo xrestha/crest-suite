@@ -201,6 +201,36 @@ Three things the same audit found on the Reorder Report itself, each with one ri
 for `opening_stock` directly — it should reach for `buildStockRows` and read `onHand`.
 
 
+## A document freezes the rate it was made at; a report recomputes (S710)
+
+`items.per_uom_rate` is generated from `items.rate`, and `PurchaseBillPage.jsx` rewrites `items.rate`
+on every bill carrying the item. That is exactly right for a report — Stock Report, Reorder, the
+valuation columns all want today's cost. It is exactly wrong for a **document**: a store requisition
+is printed, signed by whoever received the goods and filed, so a slip that read NPR 4,120 in Shrawan
+must not reprint as NPR 4,380 in Bhadra because a supplier put its price up in between. Requisitions
+was reading the rate live at render, in all five places it showed money — line value, slip total,
+list column, Excel export, printed slip.
+
+`requisition_lines.rate` now captures it at write time, the way `purchase_entries` always has, and
+one `lineRate(l)` helper reads `l.rate ?? l.items?.per_uom_rate ?? 0` at every one of those five
+sites. Three rules came out of it:
+
+- **The column is NULLABLE and stays that way.** Rows written before the migration have no snapshot,
+  and backfilling them from today's `items.rate` would be fabricating a history rather than
+  recovering one. They fall back to the live rate, which is what they already did.
+- **A correction does not re-snapshot.** Reopening an issued slip to fix a mis-keyed quantity leaves
+  `rate` alone — re-pricing it would reintroduce the fault the column exists to prevent.
+- **Ask whether the screen is a report or a record.** If a printed copy of it can outlive the figures
+  behind it, the figures belong on the row. Requisitions, `purchase_entries` and the frozen
+  `monthly_owner_reports` snapshot are all the same answer to the same question.
+
+The over-issue guard on the same page is the opposite case and stays live: it asks "what is on the
+shelf right now", so it goes through `buildStockRows()` like every other on-hand figure (S696), with
+its inputs paged the way Stock Count pages them — `opening_stock`, `closing_stock`, `staff_meals` and
+`vendor_returns` are one row per item per period, and a silent 1000-row truncation there would move
+the answer with no error for `firstError()` to catch. `StockReport.js` was swept in the same change
+for the same reason; the two must agree about "available" or the warning contradicts the report.
+
 ## A `.neq` on `sales_entries.source` drops the legacy rows, and on Sales Entry it deletes them (S699)
 
 `sales_entries.source` is `text DEFAULT 'manual'` with **no NOT NULL**, so every row written before

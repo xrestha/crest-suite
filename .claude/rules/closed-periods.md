@@ -34,6 +34,8 @@ figures. But Receive writes `purchase_entries`, the same table `Purchases.js` lo
 so this was the way around a period close for anyone who happened to be on it. Ask which TABLES a
 page writes, not which shape it has.
 
+**S710 found the other half of that sentence still wrong.** Eight IMS surfaces carry the lock — `grep -rn "periodClosed\|isLocked" src/modules/ims` returns Purchases, PurchaseBillPage, ReturnsTab, PurchaseOrders, Sales, Stock, Overheads and Requisitions — while the Dashboard's close dialog and the module guide both enumerated **four** of them. Requisitions had locked since it was built and was named nowhere; Purchase Orders joined the list in S709 and the copy did not move with it. Periods.js is fine because it says "IMS entry pages lock" and enumerates nothing. **An enumeration in user-facing copy is a second definition of the lock set, and it rots the moment a page joins.** Prefer the generic phrasing; where a list is genuinely more useful, re-derive it from that grep whenever a page gains or loses `periodClosed`.
+
 It is also the first period lock with a **server-side** half: `receive_purchase_order()` refuses a
 closed period itself (`po_period_closed`), with the same `is_admin()` carve-out, wrapped in
 COALESCE. The other five remain browser-only, which is defensible while they are the only door to

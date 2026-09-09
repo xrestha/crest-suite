@@ -196,8 +196,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '⇄', name: 'Requisitions',
-        guide: 'Internal stock transfer from store to departments. Create a requisition with items and requested qty. Issue mode lets the store manager confirm actual qty issued. Issued requisitions appear as a "Requisitioned" column in the Stock Summary.',
-        tips: ['Save as Draft first, then Issue when stock is physically transferred', 'Requisitioned qty is tracked separately in the Stock Summary — keep it up to date']
+        guide: 'Internal stock transfer from store to departments. Create a requisition with items and requested qty. Issue mode lets the store manager confirm the actual qty issued. Issued requisitions appear as a "Requisitioned" column in the Stock Summary. Each line keeps the item rate it was issued at, so a slip you print again next month still shows the figure it was signed for. Before issuing, the app estimates what is on the shelf and warns — without blocking — if a line would issue more than that.',
+        tips: ['Save as Draft first, then Issue when stock is physically transferred', 'Requisitioned qty is tracked separately in the Stock Summary — keep it up to date', 'Keyed a quantity wrong on an issued slip? A supervisor can reopen it with Correct Quantities, or delete it, until the month is closed']
       },
       {
         icon: '◌', name: 'Dead Stock',

@@ -72,7 +72,7 @@ export const IMS_GUIDE_GROUPS = [
         gotchas: [
           'Gated tiles (Variance, Recipe Costing, Menu Repricing, Reorder, Overheads — all Growth+) don\'t just hide the number on a lower plan — the underlying query is skipped entirely, so a Starter browser never even holds the Growth-tier figures in memory.',
           'The Dashboard\'s "End <month> & Start <next>" button and Periods\' own Close button are the SAME close (since S683): both carry the physical closing count forward as next month\'s opening stock, mint the frozen Monthly Report, and show the closing-count preflight (red when nothing is counted) plus, with HR on, whether payroll is finalized. Before S683 the Dashboard shortcut did neither carry-forward nor report, so any month closed from there before then may need "Resync Opening Stock" on Periods.',
-          'Closing a month locks IMS entry (Purchases, Sales, Stock Count, Overheads) for the client\'s logins. HR pages deliberately stay open — payroll is finalized after the stock month closes, and Payroll Run has its own lock once finalized. The frozen report carries an ESTIMATED labour cost if payroll was not finalized at close; an admin can Regenerate Snapshot after Finalize.',
+          'Closing a month locks IMS entry (Purchases and Returns, Sales, Stock Count, Overheads, Requisitions, Purchase Orders) for the client\'s logins. HR pages deliberately stay open — payroll is finalized after the stock month closes, and Payroll Run has its own lock once finalized. The frozen report carries an ESTIMATED labour cost if payroll was not finalized at close; an admin can Regenerate Snapshot after Finalize.',
         ],
         connections: 'Reads from Periods, Purchases, Sales Entry, Recipe Costing, Stock Count, and Overheads. Links out to all of them plus Variance Report and Reorder Report.',
       },
@@ -296,7 +296,7 @@ export const IMS_GUIDE_GROUPS = [
         ],
         gotchas: [
           'Over-receiving is refused by the database, inside the same transaction that would write the bills, against the quantity as it stands at that instant. Two people receiving the same delivery on two devices can no longer each bank it: the second is refused rather than silently overwriting the first.',
-          'A closed period is read-only here exactly as it is on Purchases, Sales, Stock Count and Overheads — enforced in the page and again in the database. An operator can still receive into a closed month (that is how a missed delivery gets into the month it belongs to), and must regenerate the Monthly Report snapshot afterwards.',
+          'A closed period is read-only here exactly as it is on Purchases, Sales, Stock Count, Overheads and Requisitions — enforced in the page and again in the database. An operator can still receive into a closed month (that is how a missed delivery gets into the month it belongs to), and must regenerate the Monthly Report snapshot afterwards.',
           'Editing is only allowed while a PO is draft AND nothing has been received against it: an edit replaces the line rows, and a replacement row starts at qty_received 0.',
           'Receipts made from S709 onward carry a po_id back to their order, which is what lets the receive screen say what has already been billed and stops an order being deleted out from under its bills. Bills entered by hand in Purchases have no PO and never will; receipts made before S709 have none either.',
           'Deleting a PO-created bill in Purchases does NOT un-receive the PO — the order keeps its received quantities. Stock is corrected in Stock Count, not by deleting history.',
@@ -354,16 +354,18 @@ export const IMS_GUIDE_GROUPS = [
           'Before issuing, the app estimates on-hand stock per item and warns — non-blocking — if a line would issue more than what\'s estimated on hand.',
         ],
         fields: [
-          { label: 'Qty Issued vs Qty Requested', desc: 'Requested is what the department asked for; Issued is what the store actually gave — can be less. Never validated as ≤ requested at the DB level, only nudged by the shortfall warning.' },
+          { label: 'Qty Issued vs Qty Requested', desc: 'Requested is what the department asked for; Issued is what the store actually gave — can be less. Not validated as ≤ requested, only nudged by the shortfall warning; a NEGATIVE quantity is refused outright, in the page and again by a database CHECK.' },
+          { label: 'Rate / UOM on a saved line', desc: 'Captured onto the line when it is written, not read live. items.rate moves with every purchase bill, so before S710 a slip signed in Shrawan reprinted with a different total in Bhadra. Lines written before S710 have no snapshot and still fall back to the live item rate. Correcting an issued slip deliberately leaves the stored rate alone.' },
         ],
         formulas: [
-          'Estimated On-Hand = the same theoretical-stock formula Stock Report uses: Opening + Net Purchases − recipe-driven usage − Wastage − Staff Meals − already-issued Requisitions, clamped to a physical closing count when one exists.',
+          'Estimated On-Hand = the same theoretical-stock formula Stock Report uses, through the same buildStockRows(): Opening + Net Purchases − recipe-driven usage − Wastage − Staff Meals, replaced outright by the physical closing count when one has been entered. Issued requisitions are NOT subtracted — what the store issues is used up by the dishes the kitchen then cooks, which the usage term already counts, and deducting both took every requisitioned-and-cooked item off twice (S695).',
         ],
         gotchas: [
-          'The stock-shortfall check is a soft warning only, never a hard block — this module\'s stock model is periodic/physical-count based, so "on hand" is always an estimate between counts.',
-          'Draft → Issued is one-way in the UI — there is no "un-issue."',
+          'The stock-shortfall check is a soft warning only, never a hard block — this module\'s stock model is periodic/physical-count based, so "on hand" is always an estimate between counts. If the check itself could not run, it says so and asks rather than reporting "no shortfall".',
+          'Draft → Issued is still one-way: there is no "un-issue". What S710 added instead is a supervisor-only "Correct Quantities" on an issued slip (quantities only, rate untouched) and Delete — until the period closes, after which both are gone.',
+          'The stat cards count what the department tabs are showing, so filtering to Bar reports Bar\'s totals, and each card names the department it is on.',
         ],
-        connections: 'Reads the same tables as Stock Report\'s on-hand estimate. Writes requisition_lines, which Stock Count\'s Summary tab reads back as the Requisitioned cross-check column.',
+        connections: 'Reads the same tables as Stock Report\'s on-hand estimate, through the same shared buildStockRows(). Writes requisition_lines, which Stock Count\'s Summary tab reads back as the Requisitioned cross-check column.',
       },
     ],
   },

@@ -67,12 +67,17 @@ export default function StockReport() {
     setLoadError(null)
     const results = await Promise.all([
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
-      supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
+      // Opening, closing, returns and staff meals are paged for the reason Stock Count states on
+      // its own copy: each is one row per item per period, so a client past 1000 items silently
+      // loses stock — and truncation returns NO error, so the firstError() check below passes
+      // straight over it (S528). Unwrapped until S710, which left this report and Requisitions'
+      // over-issue guard able to disagree with Stock Count about what is on the shelf.
+      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       scopedFrom('recipes', 'id'),
       // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup inside
       // buildStockRows — the same rule Variance, Theoretical Variance and Shrinkage apply. Read

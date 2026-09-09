@@ -64,6 +64,11 @@ export default function Requisitions() {
   const [formLines, setFormLines] = useState([{ item_id: '', qty_requested: '', qty_issued: '', _key: 1 }])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // A second error slot on purpose: the form's own `error` renders inside the New Requisition card,
+  // while an Issue or a Delete happens on two other screens. This one is bound to a single
+  // <ActionError> under the page header, so a refused delete says so instead of silently
+  // reappearing in the list on the next reload.
+  const [actionError, setActionError] = useState('')
 
   const itemOptions = useMemo(() => items.map(i => ({ value: i.id, label: `${i.name} (${i.uom})` })), [items])
 
@@ -91,14 +96,19 @@ export default function Requisitions() {
     setItems(i || [])
     const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
     if (open) {
+      // useLatestRequest's contract: anything that auto-selects a period claims it too. Without
+      // this, a period picked while init() was still in flight got the new label over the old
+      // list, because init()'s trailing setLoading(false) landed after the newer load had started.
+      periodReq.begin(open.id)
       setSelectedPeriod(open)
       await loadReqs(open.id)
+      if (!periodReq.isCurrent(open.id)) return
     }
     setLoading(false)
   }
 
   async function loadReqs(periodId) {
-    const { data, error } = await scopedFrom('requisitions', '*, requisition_lines(id, item_id, qty_requested, qty_issued, items(name, uom, per_uom_rate, categories(name)))')
+    const { data, error } = await scopedFrom('requisitions', '*, requisition_lines(id, item_id, qty_requested, qty_issued, rate, items(name, uom, per_uom_rate, categories(name)))')
       .eq('period_id', periodId)
       .order('bs_day', { ascending: false })
       .order('created_at', { ascending: false })
@@ -121,6 +131,7 @@ export default function Requisitions() {
   }
 
   function backToList() {
+    setActionError('')
     setMode('list')
     setSelectedReq(null)
     setSelectedLines([])
@@ -167,14 +178,19 @@ export default function Requisitions() {
   // means. Neither saveReq('issued') nor confirmIssue() checked this before — a requisition could
   // silently issue more of an item than physically exists, corrupting the Requisitioned vs Used
   // reconciliation in Stock.js's Summary tab with no warning at all.
-  async function getOnHandMap(periodId, excludeReqId) {
+  async function getOnHandMap(periodId) {
     const results = await Promise.all([
-      supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
+      // All paged, for the reason Stock Count states on its own copy of these reads: opening,
+      // closing and staff meals are one row per item, so a client past 1000 items silently loses
+      // stock — and a truncated read returns NO error, so the firstError() check below passes
+      // straight over it (S528). Each needs a unique tiebreaker in its sort or paging can repeat a
+      // row on one page and skip it on the next.
+      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       // source + bs_day feed the shared POS-supersedes-manual dedup (S695) — the same rule
       // Stock Report applies, so this guard and that page agree on "available".
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
@@ -211,8 +227,8 @@ export default function Requisitions() {
   // Returns a confirm-worthy warning string if any line would issue more than estimated on-hand,
   // or null if everything's within stock. Not a hard block — this app's stock model is periodic/
   // physical-count based (see CLAUDE.md), so "on hand" here is an estimate, not a live ledger.
-  async function checkStockShortfall(periodId, lines, excludeReqId) {
-    const onHand = await getOnHandMap(periodId, excludeReqId)
+  async function checkStockShortfall(periodId, lines) {
+    const onHand = await getOnHandMap(periodId)
     // The check could not run — say so rather than reporting "no shortfall" (the
     // closing-count-preflight convention: inform, never silently pass).
     if (!onHand) return 'Could not check stock on hand — a read failed (check your internet). Issue anyway without the check?'
@@ -229,23 +245,47 @@ export default function Requisitions() {
     return `This issues more than the estimated stock on hand for:\n\n${shortfalls.join('\n')}\n\nIssue anyway?`
   }
 
+  // `min="0"` on a number input is a hint, not a constraint — nothing enforces it on a paste, and
+  // the shortfall test above (`issuing <= available`) waves a negative straight through. A negative
+  // qty_issued reaches Stock Count's Requisitioned column and SUBTRACTS from a cross-check figure a
+  // month gets closed against. The database refuses it now too (20260909170000); this is the
+  // sentence the user reads instead of a constraint name.
+  function negativeQtyError(lines) {
+    const bad = lines.find(l => parseFloat(l.qty_requested) < 0 || parseFloat(l.qty_issued) < 0)
+    if (!bad) return null
+    const item = items.find(i => i.id === bad.item_id) || bad.items
+    return `${item?.name || 'A line'} has a negative quantity. A quantity can be zero or more — to drop a line, remove it with the × button.`
+  }
+
+  // A saved line carries the rate it was WRITTEN with. items.per_uom_rate is generated from
+  // items.rate, which every purchase bill rewrites, so reading it live meant a slip signed in
+  // Shrawan reprinted with a different total in Bhadra. Only rows written before S710 have no
+  // snapshot, and those fall back to the live rate exactly as they always did.
+  const lineRate = l => parseFloat(l.rate ?? l.items?.per_uom_rate ?? 0)
+
   async function saveReq(statusOverride) {
+    if (saving) return
     if (!effectiveClientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return }
     if (!formDay) { setError('Pick the day this requisition is for.'); return }
+    const negative = negativeQtyError(formLines.filter(l => l.item_id))
+    if (negative) { setError(negative); return }
     const validLines = formLines.filter(l => l.item_id && parseFloat(l.qty_requested) > 0)
     if (validLines.length === 0) { setError('Add at least one item with a requested quantity.'); return }
+
+    // setSaving BEFORE the await, not after it. The shortfall check below is eight network reads
+    // deep, and until this flag is set both buttons are still live and undisabled — a double-click
+    // on Save & Issue ran two complete inserts and left two identical requisitions on the day.
+    setSaving(true)
+    setError('')
 
     if (statusOverride === 'issued') {
       const checkLines = validLines.map(l => ({
         item_id: l.item_id,
         qty_issued: l.qty_issued !== '' ? l.qty_issued : l.qty_requested,
       }))
-      const warning = await checkStockShortfall(selectedPeriod.id, checkLines, null)
-      if (warning && !window.confirm(warning)) return
+      const warning = await checkStockShortfall(selectedPeriod.id, checkLines)
+      if (warning && !window.confirm(warning)) { setSaving(false); return }
     }
-
-    setSaving(true)
-    setError('')
 
     const { data: header, error: hErr } = await scopedInsert('requisitions', {
       period_id: selectedPeriod.id,
@@ -268,7 +308,9 @@ export default function Requisitions() {
       qty_requested: parseFloat(l.qty_requested),
       qty_issued: statusOverride === 'issued'
         ? parseFloat(l.qty_issued !== '' ? l.qty_issued : l.qty_requested)
-        : parseFloat(l.qty_issued || 0)
+        : parseFloat(l.qty_issued || 0),
+      // Captured at write time rather than read live at render — see lineRate() above.
+      rate: parseFloat(items.find(i => i.id === l.item_id)?.per_uom_rate || 0)
     }))
 
     const { error: lErr } = await supabase.from('requisition_lines').insert(lineRows)
@@ -288,32 +330,80 @@ ${text}`, detail })
     setSaving(false)
   }
 
-  async function deleteReq(reqId) {
-    if (!window.confirm('Delete this draft requisition?')) return
-    await scopedDelete('requisitions').eq('id', reqId)
+  async function deleteReq(reqId, status) {
+    if (!window.confirm(status === 'issued'
+      ? 'Delete this ISSUED requisition? Its quantities will stop counting towards the Requisitioned column in Stock Count.'
+      : 'Delete this draft requisition?')) return
+    // A bare `await scopedDelete(...)` discarded the only evidence the delete failed: supabase-js
+    // RESOLVES with { data, error } rather than throwing, so an RLS refusal reloaded the list and
+    // the row simply reappeared, with nothing on screen to say why (S654).
+    const { error: dErr } = await scopedDelete('requisitions').eq('id', reqId)
+    if (dErr) { setActionError(asActionError(dErr)); return }
+    setActionError('')
+    const wasSelected = selectedReq?.id === reqId
     await loadReqs(selectedPeriod.id)
-    if (selectedReq?.id === reqId) backToList()
+    if (wasSelected) backToList()
   }
 
   function startIssuing() {
     setIssuingId(selectedReq.id)
+    setActionError('')
+    // Issuing a draft prefills the requested quantity, since that is what the store is about to
+    // hand over. CORRECTING an issued slip must open on what was actually issued — including a
+    // line issued as 0, which the draft prefill would silently push back up to the requested
+    // figure and quietly change a number nobody touched.
+    const correcting = selectedReq.status === 'issued'
     setIssueLines(selectedLines.map(l => ({
       ...l,
-      qty_issued: l.qty_issued > 0 ? l.qty_issued : l.qty_requested
+      qty_issued: correcting ? l.qty_issued : (l.qty_issued > 0 ? l.qty_issued : l.qty_requested)
     })))
   }
 
+  // Issues a draft, and re-saves the quantities of an already-issued slip (`correcting`) — there
+  // was no way at all to correct a mis-keyed issue before, and no way to remove one either.
   async function confirmIssue() {
-    const warning = await checkStockShortfall(selectedPeriod.id, issueLines, selectedReq.id)
-    if (warning && !window.confirm(warning)) return
+    if (saving) return
+    const correcting = selectedReq.status === 'issued'
+    const negative = negativeQtyError(issueLines)
+    if (negative) { setActionError(negative); return }
 
+    // Same reason as saveReq: the flag goes up before the await, or a double-click runs it twice.
     setSaving(true)
-    const { error: hErr } = await scopedUpdate('requisitions', { status: 'issued' }).eq('id', selectedReq.id)
-    if (hErr) { setSaving(false); return }
-    // The per-line updates are independent of each other — serially they cost one round trip per
-    // line (a 20-line requisition took seconds to issue).
-    await Promise.all(issueLines.map(line =>
-      supabase.from('requisition_lines').update({ qty_issued: parseFloat(line.qty_issued || 0) }).eq('id', line.id)))
+    setActionError('')
+    const warning = await checkStockShortfall(selectedPeriod.id, issueLines)
+    if (warning && !window.confirm(warning)) { setSaving(false); return }
+
+    // LINES FIRST, THEN THE STATUS. The other order flipped the header to `issued` and then fired
+    // per-line updates whose errors were discarded entirely — not destructured at all — so a
+    // failure there left a requisition reading ISSUED with qty_issued = 0 on every line: worth
+    // NPR 0 in the list, worth 0 in Stock Count's Requisitioned column, and beyond repair, because
+    // Issue is only ever offered on a draft. Written this way a failure leaves it exactly where it
+    // started, as a retryable draft. The per-line updates stay parallel; serially they cost one
+    // round trip per line (a 20-line requisition took seconds to issue).
+    const lineResults = await Promise.all(issueLines.map(line => {
+      // On a correction the stored rate is left alone: re-snapshotting would re-price a slip that
+      // has already been signed, which is the very thing the column exists to prevent.
+      const patch = { qty_issued: parseFloat(line.qty_issued || 0) }
+      if (!correcting) patch.rate = parseFloat(line.items?.per_uom_rate || 0)
+      return supabase.from('requisition_lines').update(patch).eq('id', line.id)
+    }))
+    const lineErr = lineResults.find(r => r.error)?.error
+    if (lineErr) {
+      const { text, detail } = asActionError(lineErr)
+      setActionError({ text: correcting
+        ? `The corrected quantities were not saved, so this requisition still shows the quantities it was issued with. ${text}`
+        : `The issued quantities were not saved, so this requisition is still a draft. Nothing has changed — try Issue again. ${text}`, detail })
+      setSaving(false); return
+    }
+
+    if (!correcting) {
+      const { error: hErr } = await scopedUpdate('requisitions', { status: 'issued' }).eq('id', selectedReq.id)
+      if (hErr) {
+        const { text, detail } = asActionError(hErr)
+        setActionError({ text: `The quantities were saved but the requisition is still showing as a draft. Open it and press Issue again — the quantities are already as you left them. ${text}`, detail })
+        setSaving(false); return
+      }
+    }
     await loadReqs(selectedPeriod.id)
     backToList()
     setSaving(false)
@@ -322,7 +412,7 @@ ${text}`, detail })
   function reqIssuedValue(req) {
     return (req.requisition_lines || []).reduce((s, l) => {
       const qty = req.status === 'issued' ? parseFloat(l.qty_issued || 0) : parseFloat(l.qty_requested || 0)
-      return s + qty * parseFloat(l.items?.per_uom_rate || 0)
+      return s + qty * lineRate(l)
     }, 0)
   }
 
@@ -330,7 +420,7 @@ ${text}`, detail })
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
     const rows = lines.map(l => {
-      const rate    = parseFloat(l.items?.per_uom_rate || 0)
+      const rate    = lineRate(l)
       const reqQty  = parseFloat(l.qty_requested || 0)
       const issdQty = parseFloat(l.qty_issued || 0)
       const valueQty = req.status === 'issued' ? issdQty : reqQty
@@ -346,7 +436,10 @@ ${text}`, detail })
     })
     const ws = XLSX.utils.json_to_sheet(rows)
     XLSX.utils.book_append_sheet(wb, ws, 'Requisition')
-    const filename = `Requisition-Day${req.bs_day}-${req.department}-${periodLabel.replace(' ', '')}.xlsx`
+    // Four of the eighteen departments carry a slash ("Pastry / Bakery"), which is not a legal
+    // filename character on Windows and gets silently rewritten by the browser on the way down.
+    const safe = t => String(t || '').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim()
+    const filename = `Requisition-Day${req.bs_day}-${safe(req.department)}-${periodLabel.replace(/\s+/g, '')}.xlsx`
     XLSX.writeFile(wb, filename)
   }
 
@@ -356,9 +449,17 @@ ${text}`, detail })
   const periodClosed = selectedPeriod?.status === 'closed'
   const allDepts = [...new Set(reqs.map(r => r.department).filter(Boolean))].sort()
   const filteredReqs = filterDept === 'all' ? reqs : reqs.filter(r => r.department === filterDept)
-  const issuedReqs = reqs.filter(r => r.status === 'issued')
-  const draftReqs = reqs.filter(r => r.status === 'draft')
+  // The stat strip sits directly above the department tabs, so it counts what those tabs are
+  // showing. Filtering to Bar and leaving "Total Issued Value" on every department's total is a
+  // figure that contradicts the scope stated an inch below it — and the cards say which scope they
+  // are on rather than leaving the reader to infer it.
+  const issuedReqs = filteredReqs.filter(r => r.status === 'issued')
+  const draftReqs = filteredReqs.filter(r => r.status === 'draft')
   const totalIssuedValue = issuedReqs.reduce((s, r) => s + reqIssuedValue(r), 0)
+  const statScope = filterDept === 'all' ? '' : ` — ${filterDept}`
+  // Correcting or removing an issued slip is a supervisor's call, matching Purchases' own
+  // canDeleteAll. Staff can still raise and issue; they cannot rewrite one after the fact.
+  const canAmendIssued = hasImsAccess('supervisor')
 
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
   // the route was reachable by any account at an ims_enabled client regardless of ims_role.
@@ -389,6 +490,10 @@ ${text}`, detail })
           )}
         </div>
       </div>
+
+      {/* Issue and Delete happen on the list and detail screens, neither of which had anywhere to
+          put a failure. role="alert" on ActionError announces it at the moment it appears. */}
+      <ActionError error={actionError} className="action-error--top" />
 
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
@@ -589,10 +694,26 @@ ${text}`, detail })
                   <>
                     <button
                       className="btn btn-ghost"
-                      onClick={() => deleteReq(selectedReq.id)}
+                      onClick={() => deleteReq(selectedReq.id, selectedReq.status)}
                       style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                     >Delete</button>
                     <button className="btn btn-primary" onClick={startIssuing}>Issue</button>
+                  </>
+                )}
+                {/* An issued slip used to be terminal in every direction: no edit, no delete, no
+                    un-issue. A quantity keyed wrong was permanent, and so was a requisition raised
+                    against the wrong department. Both are a supervisor's call, and both are still
+                    closed off once the period is. */}
+                {selectedReq.status === 'issued' && !periodClosed && !issuingId && canAmendIssued && (
+                  <>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => deleteReq(selectedReq.id, selectedReq.status)}
+                      style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
+                    >Delete</button>
+                    <button className="btn btn-ghost" onClick={startIssuing}>
+                      <Tip text="Re-open the issued quantities to correct a mis-keyed figure. The rate this slip was priced at does not change." width={260}>Correct Quantities</Tip>
+                    </button>
                   </>
                 )}
                 <button className="btn btn-ghost" onClick={() => exportExcel(selectedReq, selectedLines)}>Export Excel</button>
@@ -605,7 +726,9 @@ ${text}`, detail })
           {issuingId === selectedReq.id ? (
             <div className="card">
               <div style={{ fontWeight: 600, color: 'var(--theme-text1)', marginBottom: 14 }}>
-                Confirm Issue Quantities — adjust if issuing less than requested
+                {selectedReq.status === 'issued'
+                  ? 'Correct Issued Quantities — this slip keeps the rate it was issued at'
+                  : 'Confirm Issue Quantities — adjust if issuing less than requested'}
               </div>
               <div className="table-wrap table-wrap--fab-clear">
                 <table className="data-table">
@@ -623,7 +746,7 @@ ${text}`, detail })
                   </thead>
                   <tbody>
                     {issueLines.map((line, idx) => {
-                      const rate = parseFloat(line.items?.per_uom_rate || 0)
+                      const rate = lineRate(line)
                       const value = parseFloat(line.qty_issued || 0) * rate
                       return (
                         <tr key={line.id}>
@@ -653,7 +776,9 @@ ${text}`, detail })
               <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
                 <button className="btn btn-ghost" onClick={() => { setIssuingId(null); setIssueLines([]) }} disabled={saving}>Cancel</button>
                 <button className="btn btn-primary" onClick={confirmIssue} disabled={saving}>
-                  {saving ? 'Issuing…' : 'Confirm Issue'}
+                  {saving
+                    ? (selectedReq.status === 'issued' ? 'Saving…' : 'Issuing…')
+                    : (selectedReq.status === 'issued' ? 'Save Corrections' : 'Confirm Issue')}
                 </button>
               </div>
             </div>
@@ -677,7 +802,7 @@ ${text}`, detail })
                   </thead>
                   <tbody>
                     {selectedLines.map(line => {
-                      const rate = parseFloat(line.items?.per_uom_rate || 0)
+                      const rate = lineRate(line)
                       const reqQty = parseFloat(line.qty_requested || 0)
                       const issdQty = parseFloat(line.qty_issued || 0)
                       const displayQty = selectedReq.status === 'issued' ? issdQty : reqQty
@@ -710,7 +835,7 @@ ${text}`, detail })
                     {(() => {
                       const total = selectedLines.reduce((s, l) => {
                         const qty = selectedReq.status === 'issued' ? parseFloat(l.qty_issued || 0) : parseFloat(l.qty_requested || 0)
-                        return s + qty * parseFloat(l.items?.per_uom_rate || 0)
+                        return s + qty * lineRate(l)
                       }, 0)
                       return total > 0 ? (
                         <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
@@ -736,19 +861,19 @@ ${text}`, detail })
           {/* Stat cards */}
           <div className="stat-grid">
             <div className="stat-card">
-              <div className="stat-label">Total Requisitions</div>
-              <div className="stat-value">{reqs.length}</div>
+              <div className="stat-label">Total Requisitions{statScope}</div>
+              <div className="stat-value">{filteredReqs.length}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Issued</div>
+              <div className="stat-label">Issued{statScope}</div>
               <div className="stat-value" style={{ color: 'var(--theme-green-text)' }}>{issuedReqs.length}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Draft / Pending</div>
+              <div className="stat-label">Draft / Pending{statScope}</div>
               <div className="stat-value" style={{ color: draftReqs.length > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>{draftReqs.length}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Total Issued Value</div>
+              <div className="stat-label">Total Issued Value{statScope}</div>
               <div className="stat-value gold" style={{ fontSize: 16 }}>
                 {totalIssuedValue > 0 ? `NPR ${Math.round(totalIssuedValue).toLocaleString('en-IN')}` : '—'}
               </div>
@@ -823,7 +948,7 @@ ${text}`, detail })
                               <button
                                 className="btn btn-ghost"
                                 style={{ fontSize: 12, padding: '4px 10px', marginLeft: 4, color: 'var(--theme-red-text)' }}
-                                onClick={() => deleteReq(req.id)}
+                                onClick={() => deleteReq(req.id, req.status)}
                               >Del</button>
                             )}
                           </td>

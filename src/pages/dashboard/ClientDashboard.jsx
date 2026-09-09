@@ -2459,8 +2459,11 @@ export default function ClientDashboard() {
                 <p style={{ margin: '0 0 8px' }}>Closing the month is how its figures become final:</p>
                 <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
                   {/* HR is deliberately NOT locked by the close — payroll is finalized after the
-                      stock month closes — so the sentence names exactly what locks. */}
-                  <li>Purchases, Sales, Stock Count and Overheads for {BS_MONTHS[activePeriod.bs_month - 1]} become read-only for your team (Crest admin can still correct figures later).{clientModules?.hr ? ' HR pages stay open — Payroll Run locks itself once finalized.' : ''}</li>
+                      stock month closes — so the sentence names exactly what locks. And it must name
+                      ALL of it: eight IMS surfaces carry the lock (grep `periodClosed|isLocked` under
+                      src/modules/ims) while this list said four, so a team told the month was
+                      read-only could still raise a requisition or receive a PO into it (S710). */}
+                  <li>Purchases and Returns, Sales, Stock Count, Overheads, Requisitions and Purchase Orders for {BS_MONTHS[activePeriod.bs_month - 1]} become read-only for your team (Crest admin can still correct figures later).{clientModules?.hr ? ' HR pages stay open — Payroll Run locks itself once finalized.' : ''}</li>
                   <li>Closing stock carries forward as {BS_MONTHS[nextAdvMonth - 1]}&apos;s opening stock.</li>
                   <li>The Monthly Owner Report snapshot is captured from the figures as they stand now.</li>
                 </ul>
