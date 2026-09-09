@@ -18,7 +18,9 @@ const PERIOD = { id: 'p-bhadra', bs_year: 2083, bs_month: 5 }
 // A chainable, thenable stand-in for a PostgrestBuilder that resolves to `result`.
 function builder(result) {
   const b = {
-    eq: () => b, not: () => b, select: () => b, maybeSingle: () => b,
+    // `order`/`range` are here for carryForwardOpeningStock's fetchAllRows paging — it calls
+    // makeQuery().range(from, to) per page, and a short page ends the loop.
+    eq: () => b, not: () => b, select: () => b, maybeSingle: () => b, order: () => b, range: () => b,
     then: (res, rej) => Promise.resolve(result).then(res, rej),
   }
   return b
@@ -96,6 +98,27 @@ describe('performPeriodClose', () => {
     const r = await performPeriodClose({ clientId: 'c1', period: PERIOD })
     expect(r.failures.map(f => f.stage)).toEqual(['carry_forward'])
     expect(r.reportSaved).toBe(true)
+  })
+
+  test('the closing count is PAGED — a client past 1000 items carries all of them forward', async () => {
+    // The read is one row per item, so it sat exactly on PostgREST's 1000-row cap: rows 1001+
+    // were dropped with no error, and closingCountPreflight() counts with `head: true`, which is
+    // NOT capped — so the dialog said "All 1,203 active items have a closing count" while 203 of
+    // them entered the new month at zero. Page 1 is full, so a second read must follow it.
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({ item_id: `i${i}`, physical_qty: 1 }))
+    const page2 = Array.from({ length: 203 }, (_, i) => ({ item_id: `j${i}`, physical_qty: 2 }))
+    const pages = [page1, page2]
+    // `range` has to live on the builder the WHOLE chain returns — fetchAllRows calls it after
+    // .select().eq().order(), so overriding it only on the object select() hands back would be
+    // silently bypassed and the test would pass against the unfixed code.
+    const pager = { eq: () => pager, select: () => pager, order: () => pager, not: () => pager,
+      range: () => builder({ data: pages.shift() ?? [], error: null }) }
+    const upsert = jest.fn(() => builder({ error: null }))
+    supabase.from.mockReturnValue({ select: () => pager, upsert })
+    const r = await performPeriodClose({ clientId: 'c1', period: PERIOD })
+    expect(r.failures).toEqual([])
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(upsert.mock.calls[0][0]).toHaveLength(1203)
   })
 
   test('a failed report never blocks the close, and is not reported as saved', async () => {

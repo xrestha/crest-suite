@@ -51,7 +51,11 @@ Three properties worth not re-deriving:
   The check is a courtesy to the operator, not a gate the close depends on.
 - **It counts rows with a real `physical_qty`**, the same test `carryForwardOpeningStock` uses to
   decide what carries into next month — so the sentence and the carry-forward can never disagree
-  about what "counted" means.
+  about what "counted" means. **The two can still disagree about HOW MANY, and did (S705):** this
+  side counts with `count: 'exact', head: true`, which PostgREST's 1000-row cap does not touch,
+  while the carry-forward read the rows themselves and stopped at 1000. An invariant asserted
+  between two queries is only as true as the smaller query's limit — the carry-forward is paged
+  through `fetchAllRows` now. See `closed-periods.md`.
 
 ### What happens AFTER the close (S651)
 

@@ -95,7 +95,7 @@ Two rules fall out of it, both of which had already been broken:
 
 ## A page reachable by URL needs the guard its nav item implies (S601)
 
-Migrated from the root `CLAUDE.md` (S663). The root keeps the rule and the audit method; this is the leak that produced it and the five pages it has recurred on.
+Migrated from the root `CLAUDE.md` (S663). The root keeps the rule and the audit method; this is the leak that produced it and the seven pages it has recurred on.
 
 `/pnl` and `/owner-dashboard` are rendered in `Layout.js` only for `isAdmin || isOwner`, but both sat
 inside `ProtectedRoute` + `SuiteGate` alone and **neither of those checks a role**. `SuiteGate` gates
@@ -149,6 +149,21 @@ route two modules share), and `App.js` had **no `path="*"`** anywhere, so a typo
 rendered an empty `#root` — `NotFound.jsx` is nested inside the Layout group on purpose (a
 signed-out visitor is sent to `/login` by `ProtectedRoute` first, and a second splat outside the
 group would never match).
+
+**A gate CONDITIONAL on a module was the seventh (S705), and it was invisible because the condition
+reads as care.** `Periods.js` had
+`if (clientModules?.ims && !hasImsAccess('supervisor')) return <Navigate …>`, and the carve-out is
+genuinely necessary: `hasImsAccess()` returns false for everyone but admin once `ims_enabled` is
+off, so the IMS rank alone locks a POS-only client's own Owner out of their own periods. But
+skipping the check entirely when IMS is off leaves the page **role-less for exactly the clients the
+carve-out was written for** — the nav item is tagged `minImsRole: 'supervisor'`, and a
+`pos_role: 'staff'` waiter who typed `/periods` got in, with the "Post POS bills to Inventory"
+button, which writes `sales_entries` and `stock_movements` and whose module carries no check of its
+own. Now `!isAdmin && !isOwner && !hasImsAccess('supervisor')`. **The general rule: a guard whose
+condition is a module flag must name what happens when that flag is off** — falling through to
+`true` is a decision, not a default, and the audit grep for `min*Role` cannot see it because the
+`min*Role` tag is present and correct on the nav item. `MenuPricing.js:339` is the same line and
+still carries it (no write exposed in that state, and its two branches are an ask-first file).
 
 ## Four gates, one grammar for "you cannot have this" (S683)
 

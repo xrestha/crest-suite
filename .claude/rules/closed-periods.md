@@ -78,6 +78,18 @@ properties of the commit are load-bearing:
 and the S682 "failed closing_stock read is a failure, not an empty count" rule. Change the commit
 there, not in a page.
 
+**The carry-forward read is PAGED (S705).** It is one
+row per item, so a bare `.select()` sat exactly on PostgREST's 1000-row cap and a 1000-SKU client
+carried forward only the first 1000 — no error, nothing in the data to say so. What makes it worse
+than an ordinary truncation is that `closingCountPreflight()` counts with `count: 'exact', head:
+true`, which is **not** capped: the dialog said *"All 1,203 active items have a closing count"*
+while 203 of them entered the new month at zero. S616 aligned those two populations deliberately
+("the sentence and the carry-forward cannot disagree") and the row cap silently un-aligned them
+above 1000 — **an invariant asserted between two queries is only as true as the smaller query's
+limit.** `fetchAllRows` with `.order('item_id')` as the tiebreaker; `closePeriod.test.js` pins it
+with a 1000-row first page, and that test was verified to fail against the unfixed code before
+being kept.
+
 ## Reopen is not the admin path, and cannot become one
 
 `monthly_periods_one_open_per_client` is a partial unique index, so at most one period per client is

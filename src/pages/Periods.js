@@ -3,7 +3,9 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import { scopedInsert as scopedInsertRaw, scopedUpdate as scopedUpdateRaw } from '../shared/scopedDb'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
-import { BS_MONTHS, getBsToday } from '../utils/bsCalendar'
+import { BS_MONTHS, BS_YEAR_MAX, getBsToday, formatBsDay } from '../utils/bsCalendar'
+import { nepalBs, nepalDateAd } from '../shared/nepalTime'
+import { fetchAllRows } from '../shared/fetchAllRows'
 import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
 import ConfirmModal from '../components/ConfirmModal'
@@ -12,17 +14,38 @@ import CloseConfirmBody from './periods/CloseConfirmBody'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
 import { closingCountNote } from './periods/closingCountNote'
-import { errorInfo } from '../shared/errorText'
+import { errorInfo, errorLine } from '../shared/errorText'
 import ActionError from '../components/ActionError'
 import ReportLoadError from '../components/ReportLoadError'
 
+// The BS year a period may be created or edited into. The floor is a typo guard — 2070 BS is
+// 2013 AD, well before any client existed. The ceiling is the verified calendar table's own limit
+// and must NEVER be typed out here (it was "2100" in five places): past BS_YEAR_MAX,
+// daysInBsMonth() falls back to a flat 30-day approximation, so a period out there carries dates
+// the app converts wrongly — and the table moves, see .claude/rules/bs-calendar.md.
+const YEAR_MIN = 2070
+const YEAR_MAX = BS_YEAR_MAX
+const yearRangeError = `Enter a valid BS year (${YEAR_MIN}–${YEAR_MAX}).`
+
+// The Created cell. Every other date on this page is BS, and this one was
+// `new Date(created_at).toLocaleDateString()` — AD, in the VIEWER's locale and timezone, so an
+// operator reviewing a client's periods from outside Nepal read a period as created on a
+// different day than the client did (the S670 rule: a timestamptz is rendered by nepalTime.js,
+// never by a bare toLocale*). `nepalBs` returns null past the verified calendar table, where the
+// AD date is the honest fallback rather than a confident wrong BS one.
+function createdLabel(ts) {
+  const bs = nepalBs(ts)
+  return bs ? `${formatBsDay(bs.day, bs.month)} ${bs.year}` : nepalDateAd(ts)
+}
+
 export default function Periods() {
-  const { isAdmin, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()
+  const { isAdmin, isOwner, clientId, profile, switchAdminClient, hasImsAccess, clientModules } = useAuth()
   const posEnabled = !!clientModules?.pos
   const { scopedFrom, scopedInsert, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
   const [periods, setPeriods] = useState([])
   const [backfillBusy, setBackfillBusy] = useState(null) // period id currently posting POS bills
+  const [closeBusy, setCloseBusy] = useState(false) // preflighting or committing a close
   // One shared ConfirmModal for the page's consequential actions (S575 rule — period close is that
   // rule's #1 named case, and this page ran it on window.confirm until S612). Shape:
   // { title, body, confirmLabel, danger, run }. Rendered in BOTH returns below — this page has two.
@@ -33,6 +56,11 @@ export default function Periods() {
   // These were ten window.alert()s until S682 — a blocking native box with no theme, no
   // role="status", and a Postgres message where an owner needs a consequence. `fail()` writes the
   // consequence as the headline and keeps the raw detail as ActionError's fine print.
+  //
+  // EVERY action calls setNotice(null) before it starts, not only the ones that end by writing
+  // one. A close, a resync, a create or a reactivate that SUCCEEDS writes no notice at all — so
+  // without that reset the red ActionError from the failed attempt before it stayed on screen and
+  // read as the verdict on the action that had just worked. Only reopenPeriod was doing it.
   const [notice, setNotice] = useState(null) // { kind: 'ok' | 'error', text, detail }
   const fail = (text, err) => setNotice({
     kind: 'error', text,
@@ -78,9 +106,17 @@ export default function Periods() {
     setAllLoading(true)
     const results = await Promise.all([
       supabase.from('clients').select('id, name, is_active, hr_enabled').order('name'),
-      supabase.from('monthly_periods').select('*')
+      // Every period of every client: rows are clients × months, so 30 clients over three years
+      // is already past PostgREST's 1000-row cap — and the sort drops the OLDEST rows first,
+      // which means the client this read silently erases is the dormant one whose open period is
+      // months behind. That is precisely the client `needsAttention` and the amber count below
+      // exist to surface: it would render as "NO PERIOD" with a + Create Period button, and every
+      // Total in the table would be short. `.order('id')` is the unique tiebreaker paging needs.
+      fetchAllRows(() => supabase.from('monthly_periods')
+        .select('id, client_id, bs_year, bs_month, status')
         .order('bs_year', { ascending: false })
-        .order('bs_month', { ascending: false }),
+        .order('bs_month', { ascending: false })
+        .order('id')),
     ])
     const failed = results.find(r => r && r.error)
     if (failed) {
@@ -133,6 +169,7 @@ export default function Periods() {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
     const hrOn = adminHrOn(cid)
+    setNotice(null)
     setActionClientId(cid)
     const notes = await closeNotes(period, cid, hrOn)
     setActionClientId(null)
@@ -155,6 +192,7 @@ export default function Periods() {
 
   async function adminEndPeriod(period, cid) {
     const hrOn = adminHrOn(cid)
+    setNotice(null)
     setActionClientId(cid)
     const notes = await closeNotes(period, cid, hrOn)
     setActionClientId(null)
@@ -176,17 +214,26 @@ export default function Periods() {
   }
 
   async function adminCreatePeriod(cid) {
+    setNotice(null)
     setActionClientId(cid)
     const existing = (allClientPeriods[cid] || []).find(
       p => p.bs_year === bsToday.year && p.bs_month === bsToday.month
     )
-    if (existing) {
-      await scopedUpdateRaw('monthly_periods', cid, { status: 'open' }).eq('id', existing.id)
-    } else {
-      const { error } = await scopedInsertRaw('monthly_periods', cid, {
-        bs_year: bsToday.year, bs_month: bsToday.month, status: 'open'
-      })
-      if (error) fail('The period was not created.', error)
+    const label = `${BS_MONTHS[bsToday.month - 1]} ${bsToday.year}`
+    // BOTH branches surface their error. The reactivate branch used to be a bare `await` with
+    // nothing destructured — supabase-js RESOLVES with { data, error } rather than throwing, so a
+    // refusal there was a click, a "Working…", a reload, and a row that had not changed, with
+    // nothing said (CLAUDE.md: a bare await discards the only evidence the call failed).
+    const { error } = existing
+      ? await scopedUpdateRaw('monthly_periods', cid, { status: 'open' }).eq('id', existing.id)
+      : await scopedInsertRaw('monthly_periods', cid, {
+          bs_year: bsToday.year, bs_month: bsToday.month, status: 'open'
+        })
+    if (error) {
+      fail(existing
+        ? `${label} was not reopened for this client — it is still closed, so they still cannot record anything.`
+        : `${label} was not created for this client — they still have no open period, so no purchases, sales or stock can be recorded.`,
+        error)
     }
     await loadAllClientPeriods()
     setActionClientId(null)
@@ -196,12 +243,16 @@ export default function Periods() {
     setEditAllError('')
     const year = parseInt(editAllForm.bs_year)
     const month = parseInt(editAllForm.bs_month)
-    if (!year || year < 2070 || year > 2100) { setEditAllError('Enter a valid BS year (2070–2100).'); return }
+    if (!year || year < YEAR_MIN || year > YEAR_MAX) { setEditAllError(yearRangeError); return }
     const duplicate = (allClientPeriods[cid] || []).find(p => p.id !== periodId && p.bs_year === year && p.bs_month === month)
     if (duplicate) { setEditAllError('A period for this month already exists.'); return }
     setSavingAll(true)
     const { error } = await scopedUpdateRaw('monthly_periods', cid, { bs_year: year, bs_month: month }).eq('id', periodId).eq('status', 'open')
-    if (error) { setEditAllError(error.message.includes('unique') ? 'A period for this month already exists.' : error.message) }
+    // `errorLine`, not `error.message` — the sentence leads and the raw `code · message` rides
+    // along in parentheses (S619). These three edit paths were the ones S682's alert sweep did
+    // not reach. `.message` is also optional-chained: a fetch that never reached Postgres has no
+    // message, and `.includes` on undefined throws inside the very handler meant to report it.
+    if (error) { setEditAllError(/unique/i.test(error.message || '') ? 'A period for this month already exists.' : errorLine(error, 'operator')) }
     else { setEditingAllClientId(null); await loadAllClientPeriods() }
     setSavingAll(false)
   }
@@ -221,11 +272,16 @@ export default function Periods() {
 
   async function createPeriod() {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before creating a period.'); return }
+    const year = parseInt(form.bs_year)
+    const month = parseInt(form.bs_month)
+    // Both inline edit paths validated the year and this one — the path that MINTS a period —
+    // did not, so a cleared field posted NaN and came back as a Postgres type error.
+    if (!year || year < YEAR_MIN || year > YEAR_MAX) { setError(yearRangeError); return }
     setError('')
     setCreating(true)
     const { error } = await scopedInsert('monthly_periods', {
-      bs_year: parseInt(form.bs_year),
-      bs_month: parseInt(form.bs_month),
+      bs_year: year,
+      bs_month: month,
       status: 'open'
     })
     if (error) {
@@ -233,9 +289,9 @@ export default function Periods() {
       // trying to open a new period while a DIFFERENT month is already open would confusingly
       // say "a period for THIS month already exists" (the wrong constraint's message).
       setError(
-        error.message.includes('one_open_per_client') ? 'A period is already open for this client. Close it before opening another.'
-          : error.message.includes('unique') ? 'A period for this month already exists.'
-          : error.message
+        (error.message || '').includes('one_open_per_client') ? 'A period is already open for this client. Close it before opening another.'
+          : /unique/i.test(error.message || '') ? 'A period for this month already exists.'
+          : errorLine(error, 'operator')
       )
     } else {
       setShowForm(false)
@@ -248,7 +304,14 @@ export default function Periods() {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
     const hrOn = !!clientModules?.hr
+    // The two preflights are each bounded at 10s by withTimeout, so on a bad connection this
+    // await is ten seconds long — and it runs BEFORE the dialog appears. The admin paths show
+    // "Working…" through it (setActionClientId); this one, the Owner's month-end button, showed
+    // nothing at all, so pressing it looked like nothing happening.
+    setNotice(null)
+    setCloseBusy(true)
     const notes = await closeNotes(period, clientId || profile?.client_id, hrOn)
+    setCloseBusy(false)
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'Close & Start Next',
@@ -259,11 +322,18 @@ export default function Periods() {
   }
 
   async function performCloseAndAdvance(period) {
-    const result = await performPeriodClose({ clientId: clientId || profile?.client_id, period, openNext: true, actorId: profile?.id })
-    surfaceCloseFailures(result, period)
-    // "Report is ready" only when it is — a failed generation used to show this banner anyway.
-    if (result.reportSaved) setJustClosedReport({ bsYear: period.bs_year, bsMonth: period.bs_month })
-    loadPeriods()
+    setCloseBusy(true)
+    try {
+      const result = await performPeriodClose({ clientId: clientId || profile?.client_id, period, openNext: true, actorId: profile?.id })
+      surfaceCloseFailures(result, period)
+      // "Report is ready" only when it is — a failed generation used to show this banner anyway.
+      if (result.reportSaved) setJustClosedReport({ bsYear: period.bs_year, bsMonth: period.bs_month })
+      await loadPeriods()
+    } finally {
+      // performPeriodClose is contractually non-throwing, but a stuck busy flag would leave the
+      // month with no way to close it — the finally costs nothing and removes that branch.
+      setCloseBusy(false)
+    }
   }
 
   async function reopenPeriod(id) {
@@ -299,6 +369,7 @@ export default function Periods() {
     // a supabase-js call that hangs never settles at all, so even the finally would never run
     // (see CLAUDE.md: .abortSignal() does not save you, only a wall clock does). Found the hard
     // way immediately after shipping this button.
+    setNotice(null)
     setBackfillBusy(period.id)
     try {
       const waiting = await withTimeout(
@@ -343,6 +414,7 @@ export default function Periods() {
   }
 
   async function resyncOpeningStock(period) {
+    setNotice(null)
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
     const { data: nextPeriod, error: nextErr } = await scopedFrom('monthly_periods', 'id')
@@ -388,8 +460,8 @@ export default function Periods() {
     const year = parseInt(editForm.bs_year)
     const month = parseInt(editForm.bs_month)
 
-    if (!year || year < 2070 || year > 2100) {
-      setEditError('Enter a valid BS year (2070–2100).')
+    if (!year || year < YEAR_MIN || year > YEAR_MAX) {
+      setEditError(yearRangeError)
       return
     }
 
@@ -408,7 +480,7 @@ export default function Periods() {
       .eq('status', 'open') // safety guard — DB-level protection
 
     if (error) {
-      setEditError(error.message.includes('unique') ? 'A period for this month already exists.' : error.message)
+      setEditError(/unique/i.test(error.message || '') ? 'A period for this month already exists.' : errorLine(error, 'operator'))
     } else {
       setEditingId(null)
       loadPeriods()
@@ -421,9 +493,19 @@ export default function Periods() {
     const monthsAgo = (bsToday.year - p.bs_year) * 12 + (bsToday.month - p.bs_month)
     return monthsAgo <= 12
   }
-  // Periods is a shared cross-module page (HR/POS-only clients use it too, not just IMS) — the
-  // role gate must only apply when the client actually has IMS, same reasoning as MenuPricing.js.
-  if (clientModules?.ims && !hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  // Periods is a shared cross-module page — an HR-only or POS-only client has periods too — and
+  // hasImsAccess() returns false for EVERYONE but admin once ims_enabled is off (AuthContext),
+  // so the IMS rank alone would lock a POS-only client's own Owner out of their own periods.
+  //
+  // The previous shape carved that out by skipping the check entirely when IMS is off, which
+  // left the page role-LESS for exactly those clients: the nav item is tagged
+  // minImsRole:'supervisor', but a pos_role:'staff' waiter who typed /periods got in, and got
+  // the "Post POS bills to Inventory" button with it — a write into sales_entries and
+  // stock_movements, and backfillPosToIms.js carries no check of its own. That is the S601
+  // shape: a page reachable by URL needs the guard its nav item implies, and a gate that is
+  // conditional on a module can be no gate at all for the clients without it. Fall back to the
+  // rank the module system always has an answer for (admin/Owner) instead of to nothing.
+  if (!isAdmin && !isOwner && !hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const visiblePeriods = showAll ? periods : periods.filter(p => p.status === 'open' || isRecent(p))
   const archivedCount  = periods.length - visiblePeriods.length
@@ -531,7 +613,7 @@ export default function Periods() {
                               <input aria-label="BS year"
                                 type="number" value={editAllForm.bs_year}
                                 onChange={e => setEditAllForm(f => ({ ...f, bs_year: e.target.value }))}
-                                min="2070" max="2100"
+                                min={YEAR_MIN} max={YEAR_MAX}
                                 style={{ width: 90, padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)' }}
                               />
                               <select aria-label="BS month"
@@ -661,7 +743,7 @@ export default function Periods() {
                 type="number"
                 value={form.bs_year}
                 onChange={e => setForm({ ...form, bs_year: e.target.value })}
-                min="2070" max="2100"
+                min={YEAR_MIN} max={YEAR_MAX}
               />
             </div>
             <div className="form-field">
@@ -694,16 +776,24 @@ export default function Periods() {
                 Finish your month-end stock count, then close this period and open {BS_MONTHS[nextAdvMonth - 1]}.
               </p>
             </div>
+            {/* Inline-styled, so it escapes `.btn:disabled`'s shared treatment (design-system.md)
+                — the disabled look has to be stated here. `aria-busy` is the in-flight signal for
+                the one button just pressed. */}
             <button
               onClick={() => closeAndAdvance(openPeriod)}
+              disabled={closeBusy}
+              aria-busy={closeBusy}
               style={{
                 flexShrink: 0, background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)',
                 border: '1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent)', color: 'var(--theme-amber-text)',
-                borderRadius: 'var(--radius-sm)', padding: '8px 18px', cursor: 'pointer',
+                borderRadius: 'var(--radius-sm)', padding: '8px 18px',
+                cursor: closeBusy ? 'default' : 'pointer', opacity: closeBusy ? 0.55 : 1,
                 fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap'
               }}
             >
-              End {BS_MONTHS[openPeriod.bs_month - 1]} & Start {BS_MONTHS[nextAdvMonth - 1]} →
+              {closeBusy
+                ? 'Working…'
+                : `End ${BS_MONTHS[openPeriod.bs_month - 1]} & Start ${BS_MONTHS[nextAdvMonth - 1]} →`}
             </button>
           </div>
         </div>
@@ -725,6 +815,12 @@ export default function Periods() {
         </div>
       )}
 
+      {/* Unreachable under monthly_periods_one_open_per_client, the partial unique index added
+          2026-07-13 — and kept deliberately rather than deleted. The wording is the tell that it
+          predates the index ("it's recommended"), and if a second open row ever does appear, the
+          app breaks quietly (every page resolves the current period with a bare
+          `.eq('status','open').limit(1).single()`), so a page that says so is worth its 6 lines.
+          See .claude/rules/closed-periods.md. */}
       {openCount > 1 && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)' }}>
           <p style={{ color: 'var(--theme-amber-text)', fontSize: 13, margin: 0 }}>
@@ -774,7 +870,7 @@ export default function Periods() {
                                 type="number"
                                 value={editForm.bs_year}
                                 onChange={e => setEditForm({ ...editForm, bs_year: e.target.value })}
-                                min="2070" max="2100"
+                                min={YEAR_MIN} max={YEAR_MAX}
                                 style={{
                                   width: 90, padding: '4px 8px', fontSize: 13,
                                   background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
@@ -803,7 +899,7 @@ export default function Periods() {
                             <span className="badge badge-green">OPEN</span>
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>
-                            {new Date(p.created_at).toLocaleDateString()}
+                            {createdLabel(p.created_at)}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -841,7 +937,7 @@ export default function Periods() {
                             )}
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>
-                            {new Date(p.created_at).toLocaleDateString()}
+                            {createdLabel(p.created_at)}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -878,8 +974,10 @@ export default function Periods() {
                                   className="btn btn-ghost"
                                   style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
                                   onClick={() => closeAndAdvance(p)}
+                                  disabled={closeBusy}
+                                  aria-busy={closeBusy}
                                 >
-                                  Close &amp; Start Next
+                                  {closeBusy ? 'Working…' : <>Close &amp; Start Next</>}
                                 </button>
                               ) : (
                                 <>

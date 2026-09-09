@@ -1,6 +1,7 @@
 import { supabase } from '../../supabaseClient'
 import { scopedFrom, scopedInsert, scopedUpdate } from '../../shared/scopedDb'
 import { withTimeout } from '../../utils/withTimeout'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { generateMonthlyReport, saveGeneratedReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 
@@ -108,8 +109,16 @@ export function payrollNote(pre, monthLabel) {
 /** Copies the closed month's counted closing stock into the new month's opening stock. */
 export async function carryForwardOpeningStock(closedPeriodId, newPeriodId) {
   if (!closedPeriodId || !newPeriodId) return { error: null }
-  const { data: closingRows, error: readErr } = await supabase.from('closing_stock')
-    .select('item_id, physical_qty').eq('period_id', closedPeriodId)
+  // Paged, never bare. This is one row per ITEM, so a 1000-SKU client hit PostgREST's
+  // db-max-rows cap and carried forward only the first 1000 — with no error and nothing in the
+  // data to say so. The bite is that closingCountPreflight() above counts with `head: true`,
+  // which is NOT capped: the dialog said "All 1,200 active items have a closing count" while 200
+  // of them entered the new month at zero. S616 aligned those two populations for exactly this
+  // reason, and the cap silently un-aligned them again above 1000. `item_id` is the unique
+  // tiebreaker paging needs — closing_stock_period_id_item_id_key makes it unique per period.
+  const { data: closingRows, error: readErr } = await fetchAllRows(() =>
+    supabase.from('closing_stock')
+      .select('item_id, physical_qty').eq('period_id', closedPeriodId).order('item_id'))
   if (readErr) return { error: readErr }
   const rows = (closingRows || [])
     .filter(r => r.physical_qty != null)
