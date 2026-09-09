@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Fab from '../../../components/Fab'
@@ -16,6 +16,7 @@ import { errorInfo } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { ITEM_REF_TABLES, USAGE_LABELS, REF_TABLE_PROSE } from './itemRefTables'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -28,14 +29,18 @@ const DEFAULT_CATEGORIES = [
 
 const UNITS = ['GM', 'ML', 'KG', 'LTR', 'PCS', 'PKT', 'BTL', 'BOX', 'ROLL', 'BUNCH', 'JAR', 'CTN', 'BAG', 'TIN', 'SACHET']
 
-const USAGE_LABELS = { OS: 'Opening Stock', CS: 'Closing Stock', R: 'Recipes', P: 'Purchases', W: 'Wastage', SM: 'Staff Meals', RQ: 'Requisitions', VR: 'Vendor Returns' }
+const HIDE_INSTEAD =
+  'Hide it instead: it stops being offered on new entries and keeps every record it is already on. ' +
+  'Note that a hidden item is also left out of stock valuation and the monthly summary, so hide it once its stock is down to zero.'
 
 // `rate` here is the price of ONE base unit — the only price the form collects and the exact value
 // written to items.rate. There is no pack size on the form or in the row; see the note on `pack`.
+// No `base_unit`: it is always the item's own UOM, so a box for it was a choice that only had one
+// correct answer — the sibling of the `Purchase Qty` field S597 removed for the same reason.
 const EMPTY_FORM = {
   name: '', category_id: '', uom: 'GM',
   rate: '', yield_pct: '100',
-  purchase_unit: '', base_unit: '', conversion_factor: ''
+  purchase_unit: '', conversion_factor: ''
 }
 
 export default function Items() {
@@ -73,8 +78,22 @@ export default function Items() {
   const [search, setSearch] = useState('')
   const [sortConvFirst, setSortConvFirst] = useState(false)
   const [initingCats, setInitingCats] = useState(false)
+  // TWO maps out of one set of reads, because the badge and the delete guard ask different
+  // questions. `usageMap` is live usage (qty > 0 where the table has a qty) and drives the chip and
+  // the Used In filter. `refMap` is any referencing row at all, and is the only thing the delete
+  // guard may consult — three of the eleven tables cascade, so a zero-quantity row that does not
+  // earn a badge still gets destroyed by a delete that thinks the item is unreferenced.
   const [usageMap, setUsageMap] = useState({})
+  const [refMap, setRefMap] = useState({})
+  // Whether the usage scan actually answered. An absent chip must always mean "no records" and
+  // never "we could not check" (the UsageChip rule), and the delete guard must refuse rather than
+  // promise that nothing references an item it failed to look up.
+  const [usageScan, setUsageScan] = useState({ ok: false, failed: [] })
   const [filterUsage, setFilterUsage] = useState('all')
+  // A failed READ of the item book is not an empty item book. Without this, `data || []` renders
+  // "No items yet. Add your first ingredient to get started." over a client's whole master list.
+  const [loadError, setLoadError] = useState(null)
+  const [togglingId, setTogglingId] = useState(null)
   // Working-out, never data: "I bought 500 GM for NPR 388.50" → NPR 0.777 per GM, which is what
   // actually gets stored. Deliberately cleared every time the dialog opens — items.purchase_qty is
   // always 1 and there is no column to remember a pack size in. If the pack is a standing fact
@@ -84,70 +103,112 @@ export default function Items() {
   // while you typed and the per-unit price once you reopened it (S597).
   const [pack, setPack] = useState({ qty: '', total: '' })
 
+  // Which client the list on screen belongs to. An admin switching clients in the top bar does not
+  // remount this page, and `loading` was only raised when the list happened to be empty — so the
+  // previous client's items stayed on screen, under the new client's name, filterable and
+  // editable, until the fetch landed. A ref rather than state: it is read synchronously by the
+  // loaders below to reject a response that belongs to the client we just left.
+  const loadedClientRef = useRef(clientId)
+
   useEffect(() => {
     if (!clientId) return
-    if (items.length === 0) setLoading(true) // a cached list keeps showing while this refreshes
-    Promise.all([loadCategories(), loadItems(), checkAllUsage()])
-      .finally(() => setLoading(false))
+    const switched = loadedClientRef.current !== clientId
+    loadedClientRef.current = clientId
+    if (switched) {
+      // Repaint from the NEW client's cache (or nothing), never leave the old client's rows up.
+      const cached = readPageCache('items', 'items', clientId)
+      setItems(cached ?? [])
+      setCategories(readPageCache('items', 'categories', clientId) ?? [])
+      setUsageMap({}); setRefMap({}); setUsageScan({ ok: false, failed: [] })
+      setLoadError(null); setPageError(null)
+      setLoading(!cached)
+    } else if (items.length === 0) {
+      setLoading(true) // a cached list keeps showing while this refreshes
+    }
+    Promise.all([loadCategories(clientId), loadItems(clientId), checkAllUsage(clientId)])
+      .finally(() => { if (loadedClientRef.current === clientId) setLoading(false) })
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function checkAllUsage() {
-    // None of these 8 tables were filtered at all — for an admin "viewing as" a client, RLS
+  async function checkAllUsage(forClient = clientId) {
+    // None of these tables were filtered at all — for an admin "viewing as" a client, RLS
     // allows every tenant's rows, so this pulled every client's ENTIRE purchase/stock/wastage/
     // requisition/return history into the browser just to compute a "Used In" badge (a real
     // cross-tenant data exposure + unbounded-payload perf bug). Most of these tables are
     // period/parent-scoped rather than client_id-scoped directly (see CLAUDE.md), so the
-    // reliable fix across all 8 is to intersect on this client's own item ids instead — an
+    // reliable fix across all of them is to intersect on this client's own item ids instead — an
     // item_id can only ever belong to one client, so this is exactly as tight as a client_id
     // filter would be, without needing per-table-specific scoping logic.
-    const { data: myItems, error: myItemsErr } = await scopedFrom('items', 'id')
+    //
+    // Paged, because this read is the one that decides whether an item is safe to delete: past
+    // 1000 SKUs the bare select silently stopped listing items, and every item after the cap was
+    // never checked for usage at all.
+    const { data: myItems, error: myItemsErr } = await fetchAllRows(() =>
+      scopedFrom('items', 'id').order('id'))
+    if (loadedClientRef.current !== forClient) return
     // A failed read must not blank the usage map — it feeds the delete guard, and an empty map
-    // reads as "nothing references this item" (S612 silent-zero class).
-    if (myItemsErr) return
+    // reads as "nothing references this item" (S612 silent-zero class). Record that it failed, so
+    // the guard refuses instead of promising the item is unreferenced.
+    if (myItemsErr) { setUsageScan({ ok: false, failed: ['the item list'] }); return }
     const myItemIds = (myItems || []).map(i => i.id)
-    if (myItemIds.length === 0) { setUsageMap({}); return }
+    if (myItemIds.length === 0) {
+      setUsageMap({}); setRefMap({}); setUsageScan({ ok: true, failed: [] }); return
+    }
 
-    // Every table whose FK references items.id — any row here blocks a DB delete.
-    // qtyCol present = also require qty > 0 to count it as "active" usage for the badge.
-    const referenceTables = [
-      { table: 'recipe_ingredients', label: 'R',  qtyCol: null },
-      { table: 'purchase_entries',   label: 'P',  qtyCol: 'qty' },
-      { table: 'opening_stock',      label: 'OS', qtyCol: 'qty' },
-      { table: 'closing_stock',      label: 'CS', qtyCol: 'physical_qty' },
-      { table: 'wastages',           label: 'W',  qtyCol: 'qty' },
-      { table: 'staff_meals',        label: 'SM', qtyCol: 'qty' },
-      { table: 'requisition_lines',  label: 'RQ', qtyCol: null },
-      { table: 'vendor_returns',     label: 'VR', qtyCol: 'qty' },
-    ]
-    const map = {}
-    // The eight reads are fully independent of each other — awaiting them one by one put 8 serial
-    // round trips on the critical path of every Items page load. Fetch them together; the paging
-    // (S528/S529) is unchanged: purchase_entries alone crosses PostgREST's silent 1000-row cap on
-    // any real client, and a truncated read here reported a used item as unused — feeding both the
-    // "unused" filter and the force-delete guard.
-    const results = await Promise.all(referenceTables.map(({ table, qtyCol }) =>
-      fetchAllRows(() => supabase.from(table)
-        .select(qtyCol ? `item_id, ${qtyCol}` : 'item_id').in('item_id', myItemIds).order('id'))
-        .catch(() => ({ data: null, error: true }))))
-    referenceTables.forEach(({ label, qtyCol }, idx) => {
+    // CHUNKED, not one big `.in()`. A `.in()` list is spelled out in the request URL and a uuid
+    // costs ~37 characters, so the reference client's 254 items already put ~9 KB of ids on every
+    // one of these requests — past what proxies accept, and the resulting 414 was then SKIPPED
+    // QUIETLY below, blanking the whole Used In column and opening the delete guard. The row cap
+    // still applies underneath: purchase_entries alone crosses 1000 on any real client.
+    //
+    // The reads are independent of each other, so they run together rather than as one round trip
+    // per table on the critical path of every page load.
+    const results = await Promise.all(ITEM_REF_TABLES.map(({ table, qtyCol }) =>
+      fetchAllRowsChunked(myItemIds, ids => supabase.from(table)
+        .select(qtyCol ? `item_id, ${qtyCol}` : 'item_id').in('item_id', ids).order('id'))
+        .catch(err => ({ data: null, error: err }))))
+    if (loadedClientRef.current !== forClient) return
+
+    const map = {}      // live usage — the badge
+    const refs = {}     // any reference at all — the delete guard
+    const failed = []
+    ITEM_REF_TABLES.forEach(({ label, name, qtyCol }, idx) => {
       const { data, error } = results[idx]
-      if (error || !data) return // table may not exist for this client/plan — skip quietly
+      // A table that could not be read is NOT a table with no rows. Name it, so the guard can say
+      // what it was unable to check rather than silently treating it as clear.
+      if (error || !data) { failed.push(name); return }
       data.forEach(row => {
         if (!row.item_id) return
+        if (!refs[row.item_id]) refs[row.item_id] = []
+        if (!refs[row.item_id].includes(label)) refs[row.item_id].push(label)
         if (qtyCol && (!row[qtyCol] || parseFloat(row[qtyCol]) <= 0)) return
         if (!map[row.item_id]) map[row.item_id] = []
         if (!map[row.item_id].includes(label)) map[row.item_id].push(label)
       })
     })
     setUsageMap(map)
+    setRefMap(refs)
+    setUsageScan({ ok: failed.length === 0, failed })
   }
 
   async function deleteItem(item) {
-    const refs = usageMap[item.id] || []
+    setPageError(null)
+    // The guard reads refMap, not usageMap: a zero-quantity row earns no badge and still cascades.
+    const refs = refMap[item.id] || []
+    // And it refuses outright when the scan did not answer. Three of the eleven referencing tables
+    // are ON DELETE CASCADE, so "the database will stop me" is true for five of them and false for
+    // three — a delete run on an unchecked item does not fail safely, it destroys requisition
+    // lines, staff meals and vendor returns without asking.
+    if (refs.length === 0 && !usageScan.ok) {
+      setPageError(
+        `Crest could not check where "${item.name}" is used${usageScan.failed.length ? ` — ${usageScan.failed.join(', ')} could not be read` : ''}, so it will not delete it. ` +
+        'Some of those records would be removed along with the item rather than blocking the delete, and there is no undo. Reload the page and try again; if the check keeps failing, hide the item instead.'
+      )
+      return
+    }
     if (refs.length > 0) {
       const fullNames = refs.map(code => USAGE_LABELS[code] || code).join(', ')
       if (!isAdmin) {
-        setPageError(`"${item.name}" can't be deleted — it already appears in ${fullNames}, and deleting it would take those records with it. Hide it instead: it stops being offered on new entries, and everything it is already on keeps its item.`)
+        setPageError(`"${item.name}" can't be deleted — it already appears in ${fullNames}, and deleting it would take those records with it. ${HIDE_INSTEAD}`)
         return
       }
       // Admin: offer to force-delete (removes the referencing records too). The most destructive
@@ -164,14 +225,15 @@ export default function Items() {
         setPageError(null)
         const { error } = await supabase.from('items').delete().eq('id', item.id)
         if (error) {
-          // Foreign-key violation from a reference the badge didn't show (e.g. a zero-quantity row).
-          const isFk = /foreign key|violates|referenced/i.test(error.message || '')
+          // Foreign-key violation from a reference the scan didn't see. `23503` is the exact code;
+          // the text match stays only as a fallback for an error that arrives without one.
+          const isFk = error.code === '23503' || /foreign key|violates|referenced/i.test(error.message || '')
           if (isFk && isAdmin) {
-            askForceDelete(item, `"${item.name}" still has hidden references (e.g. a zero-quantity stock or purchase row).`)
+            askForceDelete(item, `"${item.name}" still has references that did not show against it here.`)
             return
           }
           if (isFk) {
-            setPageError(`"${item.name}" can't be deleted — an older record still refers to it (a purchase, stock count, wastage, staff meal, requisition, vendor return or recipe line) even though nothing shows against it here. Hide it instead, which keeps that history intact.`)
+            setPageError(`"${item.name}" can't be deleted — an older record still refers to it (a purchase, stock count, wastage, requisition, vendor return, par level, purchase order, stock movement or recipe line) even though nothing shows against it here. ${HIDE_INSTEAD}`)
           } else {
             const { text, detail } = asActionError(error)
             setPageError({ text: `"${item.name}" was not deleted. ${text}`, detail })
@@ -192,9 +254,8 @@ export default function Items() {
         <>
           <p style={{ margin: '0 0 8px' }}>{lead}</p>
           <p style={{ margin: '0 0 8px' }}>
-            Force-delete permanently removes the item <strong>and every record that references it</strong> — purchases, stock
-            counts, wastage, staff meals, requisitions, vendor returns and recipe lines. Every report covering those periods
-            changes.
+            Force-delete permanently removes the item <strong>and every record that references it</strong> — {REF_TABLE_PROSE}.
+            Every report covering those periods changes.
           </p>
           <p style={{ margin: 0 }}>To keep the history, hide the item instead. This cannot be undone.</p>
         </>
@@ -204,24 +265,35 @@ export default function Items() {
   }
 
   // Admin-only hard delete: clears every FK reference, then removes the item.
-  // Order matters — vendor_returns before purchase_entries (it references both).
+  //
+  // The list is ITEM_REF_TABLES, in its declared order, so this can no longer clear a different
+  // set from the one the badge checks — that divergence is what left par_levels,
+  // purchase_order_items and stock_movements holding the item after everything else had been
+  // destroyed. Order matters: vendor_returns before purchase_entries, which it also references.
   async function forceDeleteItem(item) {
     const id = item.id
-    const refTables = [
-      'vendor_returns', 'recipe_ingredients', 'requisition_lines', 'staff_meals',
-      'wastages', 'opening_stock', 'closing_stock', 'purchase_entries',
-    ]
-    for (const table of refTables) {
-      // Best-effort: ignore errors (missing table / already-clear); the final item delete is the gate.
-      await supabase.from(table).delete().eq('item_id', id)
+    const cleared = []
+    const refused = []
+    for (const { table, name } of ITEM_REF_TABLES) {
+      // Sequential on purpose — the order above is a dependency order, not a preference.
+      const { error } = await supabase.from(table).delete().eq('item_id', id)
+      if (error) refused.push(name); else cleared.push(name)
     }
     const { error } = await supabase.from('items').delete().eq('id', id)
     if (error) {
-      // The reference-clearing loop above has already run, so this is not a no-op failure.
+      // The reference-clearing loop has already run, so this is never a no-op failure: say what
+      // state the record is in now, and do not tell the operator to retry when a refused clear is
+      // the reason — retrying repeats the same refusal and clears nothing further.
       const { text, detail } = asActionError(error)
-      setPageError({ text: `"${item.name}" was not deleted, but every record that referenced it has already been removed — its purchases, stock counts, wastage, staff meals, requisitions, vendor returns and recipe lines are gone. Reports covering those periods will have changed. Try the delete again.
+      const gone = cleared.length ? `Its ${cleared.map(n => n.toLowerCase()).join(', ')} records have already been removed and reports covering those periods will have changed.` : 'No referencing records were removed.'
+      const next = refused.length
+        ? `Crest could not clear ${refused.map(n => n.toLowerCase()).join(', ')}, which is what is still holding the item — retrying will not get past it. Remove those records directly, or leave the item in place and hide it.`
+        : 'Try the delete again.'
+      setPageError({ text: `"${item.name}" was not deleted. ${gone} ${next}
 
 ${text}`, detail })
+      loadItems()
+      checkAllUsage()
       return
     }
     loadItems()
@@ -237,7 +309,11 @@ ${text}`, detail })
       confirmLabel: 'Clear Conversions', danger: true, busyLabel: 'Clearing…',
       body: <p style={{ margin: 0 }}>Purchase Unit, Base Unit, Conversion Factor and Purchase Qty reset to 1 on each affected item, so the next purchase bill for any of them is entered in the base unit. Existing purchases keep the quantities they were stored with. This cannot be undone.</p>,
       run: async () => {
+        // `.eq('is_sub_recipe', false)` so the update matches the population the count above was
+        // taken from — `items` excludes sub-recipe mirror rows, and without this the dialog said
+        // "12 items" and cleared however many mirrors also carried a purchase unit.
         const { error } = await scopedUpdate('items', { purchase_unit: null, base_unit: null, conversion_factor: 1, purchase_qty: 1 })
+          .eq('is_sub_recipe', false)
           .not('purchase_unit', 'is', null)
         if (error) { setPageError(asActionError(error)); return }
         await loadItems()
@@ -245,20 +321,35 @@ ${text}`, detail })
     })
   }
 
-  async function loadCategories() {
-    const { data } = await scopedFrom('categories').order('sort_order')
+  // Both loaders drop nothing. A dropped read error rendered as an empty book — "No items yet.
+  // Add your first ingredient to get started" over a client's entire master list — and then WROTE
+  // that empty array into the 10-minute session cache, so the next visit repainted it instantly
+  // with no read in flight to correct it. Neither loader caches a result it did not get.
+  async function loadCategories(forClient = clientId) {
+    const { data, error } = await scopedFrom('categories').order('sort_order')
+    if (loadedClientRef.current !== forClient) return []
+    if (error) { setLoadError(asActionError(error)); return [] }
     const filtered = (data || []).filter(c => c.name !== 'Sub-Recipes')
     setCategories(filtered)
-    writePageCache('items', 'categories', clientId, filtered)
+    writePageCache('items', 'categories', forClient, filtered)
     return filtered
   }
 
-  async function loadItems() {
-    const { data } = await scopedFrom('items', '*, categories(name)')
-      .eq('is_sub_recipe', false)
-      .order('name')
+  async function loadItems(forClient = clientId) {
+    // Paged: a bare select stops at PostgREST's 1000 rows with no error and nothing in the data to
+    // say so, which on this page means a partial item book presented as the whole one — and
+    // getNextItemCode() then takes its max over the visible slice and mints a duplicate code.
+    // `.order('id')` is the unique tiebreaker paging requires after the display order.
+    const { data, error } = await fetchAllRows(() =>
+      scopedFrom('items', '*, categories(name)')
+        .eq('is_sub_recipe', false)
+        .order('name')
+        .order('id'))
+    if (loadedClientRef.current !== forClient) return
+    if (error) { setLoadError(asActionError(error)); return }
+    setLoadError(null)
     setItems(data || [])
-    writePageCache('items', 'items', clientId, data || [])
+    writePageCache('items', 'items', forClient, data || [])
   }
 
   async function initDefaultCategories() {
@@ -327,7 +418,6 @@ ${text}`, detail })
       rate: item.per_uom_rate ?? item.rate,
       yield_pct: item.yield_pct != null ? String(item.yield_pct) : '100',
       purchase_unit: item.purchase_unit || '',
-      base_unit: item.base_unit || '',
       conversion_factor: item.conversion_factor && item.conversion_factor !== 1 ? item.conversion_factor : ''
     })
     setActiveTab('details')
@@ -380,16 +470,30 @@ ${text}`, detail })
     // parseFloat, not truthiness: "0" is truthy as a string, and a price of NPR 0 stored here
     // misprices the item in every valuation at once with nothing to flag it (S612).
     if (!form.rate || !(parseFloat(form.rate) > 0)) fe.rate = `Price per ${form.uom} is required and must be above zero — type it in, or use "Bought a pack?" to work it out.`
+    // `min`/`max` on the input are decorative: this dialog is not a <form> and Save is a plain
+    // onClick, so nothing enforced them. yield_pct is numeric(5,2), and every recipe cost divides
+    // by it — a typed 500 makes every dish using this item cost a fifth of what it does, silently
+    // and everywhere at once. A 0 or a negative used to become 100 with no message, which is a
+    // different number from the one the user typed.
+    const yieldNum = parseFloat(form.yield_pct)
+    if (form.yield_pct === '' || !isFinite(yieldNum) || yieldNum <= 0 || yieldNum > 100) {
+      fe.yield_pct = 'Yield must be a number from 1 to 100 — it is the usable percentage left after trim, so 100 means no loss. Leave it at 100 if you are not sure.'
+    }
+    // `items` has no UNIQUE(client_id, name), so a second "CHICKEN BREAST" saves happily and the
+    // client's purchases then split across two master rows that every report treats as two items.
+    const nameKey = form.name.trim().toUpperCase()
+    if (nameKey && items.some(i => i.id !== editing && (i.name || '').toUpperCase() === nameKey)) {
+      fe.name = `You already have an item called "${nameKey}". Two items with one name split that ingredient's purchases and stock between them. Edit the existing one, or give this a name that tells them apart.`
+    }
     setFieldErr(fe)
-    if (fe.name || fe.rate) { setActiveTab('details'); return false }
+    if (fe.name || fe.rate || fe.yield_pct) { setActiveTab('details'); return false }
 
-    // Conversion validation
+    // Conversion validation. Base Unit is no longer collected — it is always the item's own UOM
+    // (see the Conversion tab), so the rule is the remaining pair.
     const hasPurchaseUnit = form.purchase_unit.trim() !== ''
-    const hasBaseUnit = form.base_unit.trim() !== ''
     const hasFactor = form.conversion_factor !== '' && parseFloat(form.conversion_factor) > 0
-    const hasAny = hasPurchaseUnit || hasBaseUnit || hasFactor
-    if (hasAny && !(hasPurchaseUnit && hasBaseUnit && hasFactor)) {
-      showError('Conversion requires all three fields: Purchase Unit, Base Unit, and Conversion Factor.')
+    if (hasPurchaseUnit !== hasFactor) {
+      showError('Conversion needs both fields: the Purchase Unit you buy in, and how many ' + form.uom + ' come in one of them.')
       setActiveTab('conversion')
       return false
     }
@@ -404,15 +508,20 @@ ${text}`, detail })
     // Purchase Bill reads to pick its qty unit. Mirroring it here would store a per-CTN price in a
     // column every valuation reads as per-BTL.
     const payload = {
-      name: form.name.trim().toUpperCase(),
+      name: nameKey,
       category_id: form.category_id || null,
       uom: form.uom,
       purchase_qty: 1,
       rate: parseFloat(parseFloat(form.rate).toFixed(6)),
       purchase_unit: hasPurchaseUnit ? form.purchase_unit.trim().toUpperCase() : null,
-      base_unit: hasBaseUnit ? form.base_unit.trim().toUpperCase() : null,
+      // Always the item's own UOM. `base_unit` is read by NOTHING downstream — the Purchase Bill
+      // scales qty × conversion_factor into `uom` — so a base_unit that disagreed with the UOM was
+      // always a mistake, and the only screen showing it (this form's own preview) labelled the
+      // rate "per {base_unit}" when the rate is per UOM. Storing the derived value keeps the badge
+      // and the preview honest and repairs a legacy row on its next save.
+      base_unit: hasPurchaseUnit ? form.uom : null,
       conversion_factor: cf,
-      yield_pct: parseFloat(form.yield_pct) > 0 ? parseFloat(form.yield_pct) : 100,
+      yield_pct: yieldNum,
     }
 
     if (editing) {
@@ -438,9 +547,23 @@ ${text}`, detail })
     if (await doSave()) { loadItems(); openEdit(target) }
   }
 
+  // Hide / Show. A bare `await` with nothing destructured discarded the only evidence this failed,
+  // and the row then reloaded unchanged — which reads as the item already being in that state.
+  // It matters more here than on most rows: hiding is what every delete refusal above offers as
+  // the alternative, so a silently-failed Hide leaves the operator with no working option at all.
   async function toggleActive(item) {
-    await supabase.from('items').update({ is_active: !item.is_active }).eq('id', item.id)
-    loadItems()
+    if (togglingId) return
+    setTogglingId(item.id)
+    setPageError(null)
+    const hiding = item.is_active
+    const { error } = await supabase.from('items').update({ is_active: !item.is_active }).eq('id', item.id)
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setPageError({ text: `"${item.name}" is still ${hiding ? 'visible' : 'hidden'} — the change was not saved. ${text}`, detail })
+    } else {
+      await loadItems()
+    }
+    setTogglingId(null)
   }
 
   // A sub-paisa unit rate is legitimate (a PCS item bought by the 1000), so `toFixed(2)` alone
@@ -499,6 +622,15 @@ ${text}`, detail })
 
   // .panel-tab is the shared class for exactly this row (it carries the underline, the type, the
   // 40px height, the coarse-pointer target and a focus ring); this file had hand-rolled it.
+  // What the printed sheet is actually a list of, in the same words as the controls that narrowed
+  // it. Built here rather than inline so the header and the sheet cannot describe different things.
+  const usageScopeLabel = { all: null, R: 'used in recipes', P: 'used in purchases', stock: 'in stock counts', unused: 'unused items only' }
+  const printScope = [
+    filterCat === 'all' ? 'All categories' : (categories.find(c => c.id === filterCat)?.name || 'One category'),
+    search.trim() ? `matching "${search.trim()}"` : null,
+    usageScopeLabel[filterUsage],
+  ].filter(Boolean).join(' · ')
+
   const tabProps = (tab) => ({
     type: 'button',
     role: 'tab',
@@ -509,9 +641,15 @@ ${text}`, detail })
 
   return (
     <div>
-      {/* Print-only header */}
+      {/* Print-only header. The scope line is not decoration: every filter control on this page is
+          `no-print`, so a sheet printed while a category tab, a search or a Used In chip was active
+          showed a SUBSET of the book under the bare title "Item Master" — a partial list vouched
+          for as the whole one. A report that states a scope must state it everywhere it goes. */}
       <div className="print-only" style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Item Master</h2>
+        <p style={{ margin: '4px 0 0', fontSize: 12 }}>
+          {printScope} — {filtered.length} of {items.length} item{items.length !== 1 ? 's' : ''}
+        </p>
       </div>
 
       <div className="page-header page-header--split no-print">
@@ -546,6 +684,21 @@ ${text}`, detail })
         </div>
       )}
 
+      {/* A refresh that failed over a list already on screen: the rows below are the last good
+          read, not the current one, and the page must say so rather than looking freshly loaded. */}
+      {loadError && items.length > 0 && (
+        <ActionError
+          error={{ text: `This list could not be refreshed, so it may be out of date. ${loadError.text}`, detail: loadError.detail }}
+          className="action-error--top"
+        />
+      )}
+      {/* Same for the usage scan: with it unanswered, an empty Used In cell means "not checked". */}
+      {!loading && !usageScan.ok && items.length > 0 && (
+        <ActionError
+          error={`Crest could not check where these items are used${usageScan.failed.length ? ` — ${usageScan.failed.join(', ')} could not be read` : ''}, so the Used In column is incomplete and deleting is blocked. Everything else on this page works normally.`}
+          className="action-error--top"
+        />
+      )}
       <ActionError error={pageError} className="action-error--top" />
 
       {showForm && (
@@ -557,7 +710,7 @@ ${text}`, detail })
             </button>
             <button {...tabProps('conversion')}>
               Conversion
-              {form.purchase_unit && form.base_unit && form.conversion_factor
+              {form.purchase_unit && form.conversion_factor
                 ? <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-green-text)' }}>●</span>
                 : null}
             </button>
@@ -597,8 +750,10 @@ ${text}`, detail })
                     value={form.yield_pct}
                     onChange={e => setForm(f({ yield_pct: e.target.value }))}
                     placeholder="100"
+                    {...fieldAria('items-f3', fieldErr.yield_pct)}
                   />
-                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Usable % after trim/prep. 100 = no loss</span>
+                  <FieldError id="items-f3" message={fieldErr.yield_pct} />
+                  {!fieldErr.yield_pct && <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Usable % after trim/prep. 100 = no loss</span>}
                 </div>
                 <div className="form-field">
                   <label htmlFor="items-f4">UOM (base unit)</label>
@@ -683,16 +838,14 @@ ${text}`, detail })
                   </select>
                   <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Unit you buy in</span>
                 </div>
+                {/* Base Unit is the item's own UOM and nothing downstream reads the stored column,
+                    so this states the value rather than offering a choice that has one answer. */}
                 <div className="form-field">
-                  <label htmlFor="items-f9">Base Unit</label>
-                  <select id="items-f9"
-                    value={form.base_unit}
-                    onChange={e => setForm(f({ base_unit: e.target.value }))}
-                  >
-                    <option value="">— Select —</option>
-                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Unit used in kitchen</span>
+                  <span className="field-label">Base Unit</span>
+                  <div className="form-input" style={{ display: 'flex', alignItems: 'center', color: 'var(--theme-text2)' }}>
+                    {form.uom}
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Always the UOM you count in — change it on the Details tab</span>
                 </div>
                 <div className="form-field">
                   <label htmlFor="items-f10">Conversion Factor</label>
@@ -704,12 +857,12 @@ ${text}`, detail })
                     onChange={e => setForm(f({ conversion_factor: e.target.value }))}
                     placeholder="e.g. 24"
                   />
-                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Base units per purchase unit</span>
+                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>{form.uom} per purchase unit</span>
                 </div>
               </div>
 
               {/* Live preview */}
-              {conversionPreview(form.purchase_unit, form.base_unit, form.conversion_factor) && (
+              {conversionPreview(form.purchase_unit, form.uom, form.conversion_factor) && (
                 <div style={{
                   marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 10,
                   background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)',
@@ -718,11 +871,11 @@ ${text}`, detail })
                   <span style={{ fontSize: 18 }}>🔄</span>
                   <div>
                     <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--theme-green-text)' }}>
-                      {conversionPreview(form.purchase_unit, form.base_unit, form.conversion_factor)}
+                      {conversionPreview(form.purchase_unit, form.uom, form.conversion_factor)}
                     </p>
                     {form.rate && form.conversion_factor && (
                       <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
-                        NPR {fmtPerUom(form.rate)} per {form.base_unit?.toUpperCase()} → NPR {(parseFloat(form.rate) * parseFloat(form.conversion_factor)).toFixed(2)} per {form.purchase_unit?.toUpperCase()}
+                        NPR {fmtPerUom(form.rate)} per {form.uom} → NPR {(parseFloat(form.rate) * parseFloat(form.conversion_factor)).toFixed(2)} per {form.purchase_unit?.toUpperCase()}
                       </p>
                     )}
                   </div>
@@ -730,12 +883,12 @@ ${text}`, detail })
               )}
 
               {/* Clear conversion */}
-              {(form.purchase_unit || form.base_unit || form.conversion_factor) && (
+              {(form.purchase_unit || form.conversion_factor) && (
                 <div style={{ marginTop: 12 }}>
                   <button
                     className="btn btn-ghost"
                     style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
-                    onClick={() => setForm(f({ purchase_unit: '', base_unit: '', conversion_factor: '' }))}
+                    onClick={() => setForm(f({ purchase_unit: '', conversion_factor: '' }))}
                   >
                     ✕ Clear Conversion
                   </button>
@@ -843,6 +996,20 @@ ${text}`, detail })
       <div className="card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+        ) : loadError && items.length === 0 ? (
+          // A failed read is not an empty book, and must never offer "add your first ingredient"
+          // to a client who already has hundreds.
+          <div role="alert">
+            <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-red-text)', margin: '0 0 6px' }}>
+              Item Master could not be loaded
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
+              This is a failed read, not an empty list — nothing has been lost. Reload the page, and
+              if it keeps happening send the detail below to support.
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>{loadError.text}</p>
+            {loadError.detail && <p className="action-error-detail">{loadError.detail}</p>}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">≡</div>
@@ -871,13 +1038,16 @@ ${text}`, detail })
                   </th>
                   <th><Tip text="Purchase unit → base unit mapping (e.g. 1 carton = 12 bottles). Set this when your vendor sells in bulk but you track stock in individual units." width={280}>Conversion</Tip></th>
                   <th>Status</th>
-                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — deactivate it instead, which hides it everywhere but keeps its history. R = Recipes, P = Purchases, OS/CS = Stock counts, W = Wastage, SM = Staff Meals, RQ = Requisitions, VR = Vendor Returns." width={300}>Used In</Tip></th>
+                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead, which keeps its history but also leaves it out of stock valuation. R = Recipes, P = Purchases, OS/CS = Stock counts, W = Wastage, SM = Staff Meals, RQ = Requisitions, VR = Vendor Returns, PAR = Par Levels, PO = Purchase Orders, MV = Stock Movements." width={320}>Used In</Tip></th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(item => {
-                  const hasConversion = item.purchase_unit && item.base_unit && item.conversion_factor && item.conversion_factor !== 1
+                  // `base_unit` is deliberately NOT part of this test and not what the chip prints:
+                  // it is derived from the UOM on save and a legacy row may hold something else or
+                  // nothing at all, which used to hide the badge on a real conversion.
+                  const hasConversion = item.purchase_unit && item.conversion_factor && item.conversion_factor !== 1
                   return (
                     <tr key={item.id}>
                       <td style={{ color: 'var(--theme-accent-ink)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
@@ -905,7 +1075,7 @@ ${text}`, detail })
                             color: 'var(--theme-green-text)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)',
                             borderRadius: 'var(--radius-xs)', padding: '2px 7px', whiteSpace: 'nowrap'
                           }}>
-                            🔄 1 {item.purchase_unit} = {item.conversion_factor} {item.base_unit}
+                            🔄 1 {item.purchase_unit} = {item.conversion_factor} {item.uom}
                           </span>
                         ) : (
                           <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>
@@ -920,19 +1090,31 @@ ${text}`, detail })
                         {usageMap[item.id]?.length > 0 ? (
                           <UsageChip codes={usageMap[item.id]}
                             text={`Has records in: ${usageMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} />
+                        ) : !usageScan.ok ? (
+                          // The chip must never be able to mean two things: with the scan
+                          // unanswered, a dash would read as "no records" when it means "we could
+                          // not check", and this column is what the delete guard is read from.
+                          <Tip text="Crest could not read every table this item could appear in, so this is unknown rather than empty. Deleting is blocked until the check succeeds." width={280}>
+                            <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>not checked</span>
+                          </Tip>
                         ) : (
                           <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>
                         )}
                       </td>
-                      <td style={{ textAlign: 'right', display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      {/* `display: flex` was on the <td> itself, which takes the cell out of the
+                          row's layout — the row's other cells then size against a box that is no
+                          longer a table cell. The flex row belongs to a div inside it. */}
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
                           onClick={() => openEdit(item)}>Edit</button>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
-                          onClick={() => toggleActive(item)}>
-                          {item.is_active ? 'Hide' : 'Show'}
+                          onClick={() => toggleActive(item)} disabled={togglingId != null}>
+                          {togglingId === item.id ? '…' : item.is_active ? 'Hide' : 'Show'}
                         </button>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                           onClick={() => deleteItem(item)}>Del</button>
+                        </div>
                       </td>
                     </tr>
                   )

@@ -196,6 +196,15 @@ runs the chunks together; `runChunkedByIds(ids, makeQuery)` is the write-side eq
 `UPDATE`/`DELETE` filtered the same way (sequential, first error wins, and **not** atomic — some
 chunks may already have landed).
 
+**Items' usage scan was the same shape with the opposite failure (S706).** It passed every one of
+the client's item ids — 254 in the reference client, ~9 KB of uuids — into eight `.in()` reads, and
+each read's failure was then `if (error || !data) return`, skipped quietly as "table may not exist
+for this client". So the loud 414 this rule promises was caught and silenced one line later,
+blanking the whole Used In column and opening a delete guard that three `ON DELETE CASCADE` tables
+do not back up. **A 414 is only loud if the call site lets it be**: check what the caller does with
+the error before counting on the failure being visible, and never spend a table's read error on a
+"that table might not exist" assumption that no longer holds.
+
 The POS→IMS backfill is the worked example and shows why both halves matter at once: its
 already-posted guard read `sales_entries` by `.in('pos_order_id', everyCandidate)`, so on a real
 month it was both too long for the URL and far past 1000 rows — and either failure makes posted
@@ -365,7 +374,17 @@ by calling it "the save-time fallback baseline for every item the user did not t
 from the comment on the function. That was never true — the baselines are `sales` for Bulk and
 `dailySales` for Daily — and the claim survived two sessions because it argued for the right
 action. **A wrong reason attached to a correct fix is the hardest kind of stale doc to notice**;
-S699 corrected both the comment and this sentence.) **Deliberately not wrapped**, so the next sweep does not
+S699 corrected both the comment and this sentence.)
+
+**S706 found the `checkAllUsage` half of that was itself half a fix.** `fetchAllRows` had been
+wrapped around the eight per-table reads and around neither the `scopedFrom('items','id')` that
+builds their `.in()` list nor `loadItems()` itself — so past 1000 SKUs the page showed a partial
+item book as the whole one, and every item after the cap was never checked for usage at all, on
+the read that decides whether an item is safe to delete. **A sweep that pages the read it was named
+after and not the read that FEEDS it has not finished**: ask what produces the id list, not only
+what consumes it.
+
+**Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
 `persistSalesDay`'s legacy three-call fallback.
 

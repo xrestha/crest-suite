@@ -66,6 +66,13 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   which a user reads as the row already being in that state. Note where the message can appear
   before assuming a page has a slot: on all three of those pages the existing `error` state renders
   inside a modal, and every one of those actions fires from the LIST.
+- **A message must not offer a retry that cannot work (S706).** Item Master's force-delete failure
+  said "Try the delete again" — but the reason the final delete was refused was a reference the
+  clearing loop could not remove, so retrying repeats the same refusal forever while the history it
+  already destroyed stays destroyed. The next step is part of the consequence: name what was
+  removed, name what is still holding the record, and say plainly when retrying will not get past
+  it. **"Try again" is a claim about the future**, and it is only honest where the failure is
+  plausibly transient.
 - Distinct from the report rule above: that one is about a figure a page *did not compute*; this
   one is about the sentence shown once something has already failed. Rules only get added here for
   shapes genuinely recognisable from the error — everything else takes an honest fallback.

@@ -77,3 +77,86 @@ This is distinct from the `purchase_entries` qty/rate convention in `CLAUDE.md` 
 Migrated from the root `CLAUDE.md` (S663).
 
 - `per_uom_rate` on `items` is a **generated column** — never include it in INSERT/UPDATE payloads.
+
+## Deleting an item: the database backs up five of eleven tables (S706)
+
+**`src/modules/ims/items/itemRefTables.js` is the one list of every table with an FK to
+`items.id`**, in an order that is safe to delete in, with a `cascades` flag per table. Read it, and
+`itemRefTables.test.js` beside it, before changing anything about the delete path.
+
+**Three of the eleven are `ON DELETE CASCADE`** — `requisition_lines`, `staff_meals`,
+`vendor_returns`. This is the `confdeltype` rule from `vendor-payables.md` landing in the one place
+where the consequence is destroyed history rather than a refused click: for those three, "the
+database will stop me" is simply false. A delete the guard failed to warn about is not refused; it
+succeeds and takes the rows with it, and nothing errors.
+
+So the guard fails CLOSED, in three specific ways that each shipped as a live bug:
+
+- **The badge map is not the guard map.** `usageMap` only counts a row when `qty > 0`, which is
+  right for a chip that means "does this item have live usage" and catastrophic for a delete guard,
+  because **`staff_meals.qty` DEFAULTS TO 0**. A zero-quantity staff meal earned no badge, passed
+  the guard, and cascaded away under a confirm dialog reading *"Nothing references this item, so no
+  purchase, count or recipe changes."* One set of reads builds two maps now: `usageMap` for the
+  chip, `refMap` (any row at all) for the guard. Never point the guard at the badge.
+- **A scan that could not run must not read as a scan that found nothing.** `usageScan.ok` is what
+  separates "no records" from "we could not check". With it false the column says **"not checked"**
+  rather than a dash, a banner names the tables that failed, and the delete refuses outright — the
+  `UsageChip` rule (a chip must never be able to mean two things) applied to the *absence* of the
+  chip, which is the half that is easy to miss.
+- **The clearing loop and the badge read the same list.** They had diverged: the loop knew eight
+  tables while eleven referenced `items`, so force-delete emptied the eight and Postgres then
+  refused the final delete because `par_levels`, `purchase_order_items` and `stock_movements` still
+  held the row. The item survived with its history gone. Deriving both from `ITEM_REF_TABLES` is
+  what makes that unrepresentable; the test is what makes a NEW referencing table reach it.
+
+**The test reads the migrations** (the `nepalMoney.test.js` technique) and asserts three things a
+comment could not: that every FK to `items(id)` is listed, that each `cascades` flag matches the
+schema, and that `vendor_returns` precedes `purchase_entries` — it references both. It was verified
+to fail against the pre-fix list on the omission *and* on a wrong cascade flag, because a schema
+test that silently matches nothing passes vacuously; the first assertion guards the parser itself.
+`recipes.linked_item_id` is deliberately excluded and named in the test, since Item Master lists
+only `is_sub_recipe = false` rows.
+
+**A message must not offer a retry that cannot work.** Force-delete's failure text said "Try the
+delete again" while a refused clear was the reason — retrying repeats the same refusal forever. It
+now names what was already destroyed, what is still holding the item, and says plainly that
+retrying will not get past it. Same family as the consequence-not-constraint rule in
+`error-messages.md`.
+
+**Hiding is not the free alternative every refusal implies.** Six report reads carry
+`.eq('is_active', true)` per the S436 rule that stock is never valued off an inactive item, so
+hiding an item that still holds stock takes its value out of stock valuation and the monthly
+summary. `HIDE_INSTEAD` is the one string all the refusals share, and it says so. Hide once the
+stock is at zero.
+
+## `base_unit` is derived, never chosen (S706)
+
+**Nothing downstream reads `items.base_unit`.** The Purchase Bill scales `qty × conversion_factor`
+into the item's `uom` (`PurchaseBillForm.jsx`), so the base unit of a conversion is *always* the
+UOM, and a stored value disagreeing with it was always a mistake. The only screen that showed it —
+this form's own conversion preview — then labelled the rate `per {base_unit}` when the rate is per
+UOM, which is the screen-agrees-with-the-user shape again.
+
+The Conversion tab states the UOM instead of offering a `<select>`, `doSave` writes
+`base_unit: form.uom`, and a legacy row repairs itself on its next save. The row badge and the
+`hasConversion` test read `item.uom` and no longer require `base_unit` at all — a legacy row with a
+null base unit used to hide the badge on a real conversion. **Same move as S597's `Purchase Qty`: a
+field with exactly one correct answer must not look like a choice**, and conversion validation is
+now the remaining pair (Purchase Unit + Factor), not a trio.
+
+## `min`/`max` on an input in this dialog enforces nothing (S706)
+
+The Add/Edit modal is **not a `<form>`** and Save is a plain `onClick`, so constraint validation
+never runs — `min="1" max="100"` on Yield % was decorative for as long as it existed. `yield_pct`
+is `numeric(5,2)` with no CHECK, and every recipe cost divides by it
+(`qty / (yield_pct / 100)`), so a typed `500` makes every dish using that item cost **a fifth** of
+what it does, silently and everywhere at once. A `0` or a negative was quietly rewritten to 100,
+which is a different number from the one the user typed and says nothing about it.
+
+Validate in `doSave` and surface it through `fieldErr` + `FieldError`. Any numeric field added to
+this form needs the same treatment; the attribute on the input is documentation, not a guard.
+
+**`items` has no `UNIQUE(client_id, name)`** (stated in `error-messages.md` for a different
+reason — a retried insert can duplicate a row). `doSave` now refuses a name already in the visible
+book, which is a client-side check over a complete list, not a constraint: two tabs can still race
+it. A real unique index would need a dedupe pass over existing data first.
