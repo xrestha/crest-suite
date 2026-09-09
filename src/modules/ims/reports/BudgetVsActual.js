@@ -11,6 +11,9 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { allocateBillDiscounts } from './supplierAttribution'
+import { printWithTitle } from '../../../utils/printTitle'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 export default function BudgetVsActual() {
@@ -24,8 +27,11 @@ export default function BudgetVsActual() {
   const [actuals, setActuals] = useState({})   // { category_id: netPurchaseValue }
   const [budgets, setBudgets] = useState({})   // { category_id: amount }
   const [saving, setSaving] = useState({})     // { category_id: bool }
+  const [dirty, setDirty] = useState({})       // { category_id: bool } — typed into since last save
+  const [unbudgeted, setUnbudgeted] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  const [saveError, setSaveError] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -52,36 +58,60 @@ export default function BudgetVsActual() {
     const catList = cats || categories
     setLoadError(null)
     const results = await Promise.all([
-      scopedFrom('items', 'id, category_id').eq('is_active', true),
-      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate').eq('period_id', periodId).order('id')),
-      supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', periodId),
+      fetchAllRows(() => scopedFrom('items', 'id, category_id').eq('is_active', true).order('id')),
+      // `discount_amount` + the bill-key columns feed allocateBillDiscounts(). "Actual net" here
+      // was gross − returns with the bill-level discount left in, so the figure a client checks
+      // their budget against was higher than the Net Purchases figure Monthly Summary shows for
+      // the identical period — the page could report Over Budget on spend that was not over.
+      fetchAllRows(() => supabase.from('purchase_entries')
+        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', periodId).order('id')),
       supabase.from('budgets').select('*').eq('period_id', periodId).eq('client_id', effectiveClientId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must not render NPR-0 actuals beside real budgets — or blank budget boxes a
     // save would then write zeros over (S612).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setActuals({}); setBudgets({}); return }
+    if (failed) { setLoadError(failed); setActuals({}); setBudgets({}); setUnbudgeted(0); setDirty({}); return }
     const [{ data: items }, { data: purchases }, { data: returns }, { data: budgetRows }] = results
 
-    // NPR value per item from purchase_entries (qty × rate — both base units)
+    // NPR value per item from purchase_entries, NET of the bill's allocated discount
+    // (base units both sides — see item-master-rates.md).
     const purchMap = {}
-    ;(purchases || []).forEach(p => {
-      purchMap[p.item_id] = (purchMap[p.item_id] || 0) + parseFloat(p.qty) * parseFloat(p.rate)
+    ;allocateBillDiscounts(purchases).forEach(p => {
+      purchMap[p.item_id] = (purchMap[p.item_id] || 0) + p.lineNet
     })
     const retMap = {}
     ;(returns || []).forEach(r => {
       retMap[r.item_id] = (retMap[r.item_id] || 0) + parseFloat(r.qty) * parseFloat(r.rate)
     })
 
-    // Net purchase value per category
+    // Net purchase value per category.
+    //
+    // `items.category_id` is NULLABLE, and the loop below only ever claimed items belonging to a
+    // real category — so every rupee spent on an uncategorised item fell out of the Actual column
+    // AND out of the Totals row, silently. The page then reported Under Budget on spend it had
+    // not counted, and its total disagreed with Monthly Summary's Net Purchases for the same
+    // period with nothing on either page saying why. Monthly Summary fixed this by grouping the
+    // orphans into a synthetic row; same answer here, and it is deliberately not budgetable —
+    // there is no category to set a budget against, so it reports what was spent and says so.
     const actualMap = {}
     catList.forEach(cat => {
       const catItems = (items || []).filter(i => i.category_id === cat.id)
       actualMap[cat.id] = catItems.reduce((s, i) => s + (purchMap[i.id] || 0) - (retMap[i.id] || 0), 0)
     })
+    const uncatItems = (items || []).filter(i => !i.category_id)
+    const uncategorised = uncatItems.reduce((s, i) => s + (purchMap[i.id] || 0) - (retMap[i.id] || 0), 0)
+    // A purchase line whose item is inactive, or absent from the item master entirely, is claimed
+    // by no category either — count it rather than losing it, on the S567 rule that a rollup which
+    // silently fails to claim a row produces a believable wrong total.
+    const claimed = new Set((items || []).map(i => i.id))
+    const unclaimed = Object.entries(purchMap).reduce((s, [id, v]) => claimed.has(id) ? s : s + v, 0)
+      - Object.entries(retMap).reduce((s, [id, v]) => claimed.has(id) ? s : s + v, 0)
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setActuals(actualMap)
+    setUnbudgeted(uncategorised + unclaimed)
 
     // Budget map: category_id → amount
     const budgetMap = {}
@@ -93,6 +123,8 @@ export default function BudgetVsActual() {
     periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
+    setSaveError(null)
+    setDirty({})   // an unsaved draft belongs to the period it was typed in, not the next one
     setLoading(true)
     await loadData(periodId, categories)
     setLoading(false)
@@ -100,17 +132,38 @@ export default function BudgetVsActual() {
 
   function updateBudget(categoryId, value) {
     setBudgets(prev => ({ ...prev, [categoryId]: value }))
+    setDirty(prev => prev[categoryId] ? prev : { ...prev, [categoryId]: true })
   }
 
   async function saveBudget(categoryId) {
+    // Blur fires whether or not anything was typed, so tabbing across an untouched row used to
+    // upsert `amount: 0` for every category it passed through — writing rows nobody had asked for.
+    if (!dirty[categoryId]) return
+    if (!selectedPeriod?.id || !effectiveClientId) return
     const amount = parseFloat(budgets[categoryId]) || 0
     setSaving(prev => ({ ...prev, [categoryId]: true }))
+    setSaveError(null)
     const { error } = await supabase.from('budgets').upsert(
       { client_id: effectiveClientId, period_id: selectedPeriod.id, category_id: categoryId, amount },
       { onConflict: 'period_id,category_id' }
     )
-    if (error) console.error('Budget save error:', error)
     setSaving(prev => ({ ...prev, [categoryId]: false }))
+    // The banner above this table says "Budgets are saved automatically". A failure that reaches
+    // only console.error makes that sentence a lie: the spinner clears, the number stays on
+    // screen, and the reader has every reason to believe it landed until they come back next
+    // month and find it gone. Name the category and say the figure is still on screen (S716's
+    // rule: write the recovery path and the sentence in the same edit — nothing here reloads
+    // on failure, which is what makes "click out of the box again" true).
+    if (error) {
+      const name = categories.find(c => c.id === categoryId)?.name || 'this category'
+      const { text, detail } = asActionError(error)
+      setSaveError({
+        text: `The budget for ${name} was NOT saved. What you typed is still on screen — click out of the box again to retry. Do not reload the page first. ${text}`,
+        detail,
+      })
+      return
+    }
+    setDirty(prev => { const next = { ...prev }; delete next[categoryId]; return next })
   }
 
   const periodLabel = selectedPeriod
@@ -118,8 +171,14 @@ export default function BudgetVsActual() {
     : '—'
 
   const totalBudget   = categories.reduce((s, c) => s + (parseFloat(budgets[c.id]) || 0), 0)
-  const totalActual   = categories.reduce((s, c) => s + (actuals[c.id] || 0), 0)
-  const totalVariance = totalBudget - totalActual
+  // The Totals row is the client's whole net spend for the period, so it INCLUDES the unbudgeted
+  // remainder — that is what makes it reconcile against Monthly Summary's Net Purchases. The
+  // variance is deliberately measured against the budgeted categories only, since there is no
+  // budget for the remainder to be over or under; the row above the total names the gap rather
+  // than letting the two figures disagree silently (the S594 rule).
+  const totalBudgetedActual = categories.reduce((s, c) => s + (actuals[c.id] || 0), 0)
+  const totalActual   = totalBudgetedActual + unbudgeted
+  const totalVariance = totalBudget - totalBudgetedActual
 
   const fmt = npr2
   const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
@@ -138,22 +197,29 @@ export default function BudgetVsActual() {
             <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
           </div>
         </div>
-        <select aria-label="Period"
-          style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
-          value={selectedPeriod?.id || ''}
-          onChange={e => handlePeriodChange(e.target.value)}
-        >
-          {periods.map(p => (
-            <option key={p.id} value={p.id}>
-              {BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}
-            </option>
-          ))}
-        </select>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <select aria-label="Period"
+            style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
+            value={selectedPeriod?.id || ''}
+            onChange={e => handlePeriodChange(e.target.value)}
+          >
+            {periods.map(p => (
+              <option key={p.id} value={p.id}>
+                {BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}
+              </option>
+            ))}
+          </select>
+          <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => printWithTitle(`Budget vs Actual - ${periodLabel}`)}>⎙ Print</button>
+        </div>
       </div>
 
       <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }}>
-        Enter a budget for each category — the app compares it against net purchases (purchases − returns) for the selected period. Budgets are saved automatically.
+        Enter a budget for each category — the app compares it against net purchases (purchases − bill discounts − returns) for the selected period, the same figure Monthly Summary shows. Budgets are saved automatically when you click out of the box.
       </div>
+
+      {/* role="alert", above the table: someone who typed a budget, tabbed away and heard nothing
+          has been told it saved. */}
+      <ActionError error={saveError} className="action-error--top" />
 
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
@@ -225,16 +291,40 @@ export default function BudgetVsActual() {
                     </tr>
                   )
                 })}
+                {/* Spend that belongs to no budgetable category — an item with no category set,
+                    an item deactivated since the bill was entered, or a purchase line whose item
+                    is no longer in the master. It used to be dropped from the Actual column and
+                    from the Totals row alike, so this page's total could not be reconciled
+                    against Monthly Summary's Net Purchases and the reader was never told why. */}
+                {unbudgeted !== 0 && (
+                  <tr>
+                    <td style={{ textAlign: 'center', color: 'var(--theme-text2)' }}>{categories.length + 1}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--theme-text2)' }}>
+                      <Tip text="Net purchases of items with no category set, items deactivated since the bill was entered, or lines whose item is no longer in the item master. Set a category on the item in Item Master to bring this spend into a budget line." width={280}>Uncategorised / unbudgetable</Tip>
+                    </td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(unbudgeted)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>No Budget</span>
+                    </td>
+                  </tr>
+                )}
               </tbody>
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td></td>
-                  <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>Totals</td>
+                  <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                    {unbudgeted !== 0
+                      ? <Tip text="Budget totals the categories you have set one for. Actual is the period's whole net purchase value, including the unbudgetable row above — which is what lets it reconcile against Monthly Summary. Variance compares budget against the budgeted categories only." width={290}>Totals</Tip>
+                      : 'Totals'}
+                  </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
                     {totalBudget > 0 ? fmt(totalBudget) : '—'}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text3)' }}>
-                    {totalActual > 0 ? fmt(totalActual) : '—'}
+                    {totalActual !== 0 ? fmt(totalActual) : '—'}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     {totalBudget > 0 ? (totalVariance >= 0 ? '+' : '') + fmt(totalVariance) : '—'}

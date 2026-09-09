@@ -7,7 +7,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { COGS_FORMULA, fcFigure } from '../../../shared/imsFormulas'
+import { COGS_FORMULA, fcBand, fcFigure } from '../../../shared/imsFormulas'
 import { useSettings } from '../../../context/SettingsContext'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
@@ -56,15 +56,19 @@ export default function MonthlySummary() {
     setLoadError(null)
     const results = await Promise.all([
       scopedFrom('categories').order('sort_order'),
-      scopedFrom('items', '*, categories(id, name)').eq('is_active', true).eq('is_sub_recipe', false),
-      supabase.from('opening_stock').select('*').eq('period_id', periodId),
-      supabase.from('closing_stock').select('*').eq('period_id', periodId),
+      // Every per-item-per-period read below is paged: one row per item per period is already
+      // within reach of PostgREST's silent 1000-row cap on a large item master, and staff_meals
+      // is per-item-per-DAY. A truncated opening/closing read is indistinguishable from an
+      // uncounted shelf and produces a believable wrong COGS (S719's rule, applied here).
+      fetchAllRows(() => scopedFrom('items', '*, categories(id, name)').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries')
         .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
         .eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for. See
       // migration 20260706170000 for why sales_entries now carries that source separately.
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
@@ -92,15 +96,21 @@ export default function MonthlySummary() {
     const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + parseFloat(r.qty) })
     const staffMealMap = {}; (staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
 
-    // Purchase map: item_id -> { qty, value }
+    // Purchase map: item_id -> { qty, gross, value }
     // `value` is NET of bill discounts (allocateBillDiscounts spreads each bill's single
     // discount_amount across its own lines by line value); `qty` is untouched, since a discount
     // changes what was paid, not what arrived. Consolidated P&L uses the same helper on the same
     // rows, which is what keeps the two pages' COGS tied.
+    //
+    // `gross` is kept separately because the column headed "Gross Purchases" was being fed
+    // `lineNet` — the post-discount figure under a pre-discount label — so gross − net read as
+    // "returns" when part of it was the bill discount, and the Net Purchases column printed a
+    // dash on every bill that had a discount but no return.
     const purchMap = {}
     ;allocateBillDiscounts(purchases).forEach(p => {
-      if (!purchMap[p.item_id]) purchMap[p.item_id] = { qty: 0, value: 0 }
+      if (!purchMap[p.item_id]) purchMap[p.item_id] = { qty: 0, gross: 0, value: 0 }
       purchMap[p.item_id].qty += parseFloat(p.qty)
+      purchMap[p.item_id].gross += p.lineGross
       purchMap[p.item_id].value += p.lineNet
     })
 
@@ -131,16 +141,17 @@ export default function MonthlySummary() {
     // indication. Grouped into a synthetic "Uncategorized" row instead, same shape as a real one.
     function buildCatRow(catName, catItems) {
       const openingVal  = catItems.reduce((s, i) => s + (openMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const purchaseVal = catItems.reduce((s, i) => s + (purchMap[i.id]?.value || 0), 0)
+      const purchaseVal = catItems.reduce((s, i) => s + (purchMap[i.id]?.gross || 0), 0)
+      const discountVal = purchaseVal - catItems.reduce((s, i) => s + (purchMap[i.id]?.value || 0), 0)
       const returnVal   = catItems.reduce((s, i) => s + (retMap[i.id]?.value || 0), 0)
-      const netPurchaseVal = purchaseVal - returnVal
+      const netPurchaseVal = purchaseVal - discountVal - returnVal
       const wastageVal    = catItems.reduce((s, i) => s + (wasteMap[i.id]     || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const staffMealsVal = catItems.reduce((s, i) => s + (staffMealMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const closingVal    = catItems.reduce((s, i) => s + (closeMap[i.id]     || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const cogsVal = openingVal + netPurchaseVal - wastageVal - staffMealsVal - closingVal
       return {
         category: catName,
-        openingVal, purchaseVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal,
+        openingVal, purchaseVal, discountVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal,
         itemCount: catItems.length
       }
     }
@@ -153,12 +164,19 @@ export default function MonthlySummary() {
       // A category whose only activity this period was wastage/staff-meals (no opening/purchase/
       // closing) used to be dropped here entirely — including its wastage/staff-meals value —
       // from every downstream total (totalWastage, totalStaffMeals, totalCOGS).
-      .filter(r => r.openingVal > 0 || r.purchaseVal > 0 || r.closingVal > 0 || r.wastageVal > 0 || r.staffMealsVal > 0)
+      //
+      // `returnVal` was the column that fix missed. Returning goods bought in an EARLIER period
+      // is ordinary — the bill is in Shrawan, the spoiled case goes back in Bhadra — and such a
+      // category has a return and nothing else, so it was dropped, its credit never reached
+      // totalReturn (the KPI read "None this period" beside a real return) and totalCOGS was
+      // overstated by the whole amount.
+      .filter(r => r.openingVal > 0 || r.purchaseVal > 0 || r.closingVal > 0 || r.wastageVal > 0 || r.staffMealsVal > 0 || r.returnVal > 0)
 
     const totalOpening     = catRows.reduce((s, r) => s + r.openingVal, 0)
     const totalPurchase    = catRows.reduce((s, r) => s + r.purchaseVal, 0)
+    const totalDiscount    = catRows.reduce((s, r) => s + r.discountVal, 0)
     const totalReturn      = catRows.reduce((s, r) => s + r.returnVal, 0)
-    const totalNetPurchase = totalPurchase - totalReturn
+    const totalNetPurchase = totalPurchase - totalDiscount - totalReturn
     const totalWastage     = catRows.reduce((s, r) => s + r.wastageVal, 0)
     const totalStaffMeals  = catRows.reduce((s, r) => s + (r.staffMealsVal || 0), 0)
     const totalClosing     = catRows.reduce((s, r) => s + r.closingVal, 0)
@@ -168,7 +186,7 @@ export default function MonthlySummary() {
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setReport({
-      catRows, totalOpening, totalPurchase, totalReturn, totalNetPurchase,
+      catRows, totalOpening, totalPurchase, totalDiscount, totalReturn, totalNetPurchase,
       totalWastage, totalStaffMeals, totalClosing, totalCOGS, totalRevenue, fcPct, purchaseFcPct
     })
   }
@@ -223,7 +241,9 @@ export default function MonthlySummary() {
               { label: 'Opening Stock',    value: fmt(report.totalOpening),     color: 'var(--theme-text1)' },
               { label: 'Gross Purchases',  value: fmt(report.totalPurchase),    color: 'var(--theme-accent-ink)' },
               { label: 'Returns',          value: fmt(report.totalReturn),      color: 'var(--theme-red-text)',
-                sub: report.totalReturn > 0 ? `Net: ${fmt(report.totalNetPurchase)}` : 'None this period' },
+                sub: report.totalReturn > 0 || report.totalDiscount > 0
+                  ? `Net purchases: ${fmt(report.totalNetPurchase)}${report.totalDiscount > 0 ? ` (after ${fmt(report.totalDiscount)} discount)` : ''}`
+                  : 'None this period' },
               { label: 'Wastage',          value: fmt(report.totalWastage),     color: 'var(--theme-red-text)' },
               { label: 'Closing Stock',    value: fmt(report.totalClosing),     color: 'var(--theme-green-text)' },
               { label: 'COGS',             value: fmt(report.totalCOGS),        color: 'var(--theme-accent-ink)',
@@ -238,14 +258,19 @@ export default function MonthlySummary() {
             ))}
           </div>
 
-          {/* Food cost summary box */}
+          {/* Food cost summary box.
+              The BOX and the sentence under the figure were the two things S682 left behind when
+              it routed the number through fcFigure(): both kept a hardcoded 35/45, so a client who
+              set fc_warning_pct to 30 got a ▲ red figure sitting inside a green box captioned
+              "✓ Within benchmark (28–35%)". One band now drives the tint, the number and the
+              sentence, all off the client's own thresholds. */}
+          {(() => { const box = fcBand(report.fcPct, settings)
+          const tint = () =>
+            box.key === 'none' ? 'var(--theme-text2)' : box.key === 'good' ? 'var(--theme-green)' : box.key === 'watch' ? 'var(--theme-accent)' : 'var(--theme-red)'
+          return (
           <div style={{
-            background: report.fcPct == null ? 'color-mix(in srgb, var(--theme-text2) 8%, transparent)' :
-              report.fcPct <= 35 ? 'color-mix(in srgb, var(--theme-green) 6%, transparent)' :
-              report.fcPct <= 45 ? 'color-mix(in srgb, var(--theme-accent) 6%, transparent)' : 'color-mix(in srgb, var(--theme-red) 6%, transparent)',
-            border: `1px solid ${report.fcPct == null ? 'var(--theme-border)' :
-              report.fcPct <= 35 ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' :
-              report.fcPct <= 45 ? 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' : 'color-mix(in srgb, var(--theme-red) 20%, transparent)'}`,
+            background: `color-mix(in srgb, ${tint()} ${box.key === 'none' ? 8 : 6}%, transparent)`,
+            border: `1px solid ${box.key === 'none' ? 'var(--theme-border)' : `color-mix(in srgb, ${tint()} 20%, transparent)`}`,
             borderRadius: 'var(--radius-md)', padding: '20px 24px', marginBottom: 24,
             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px,1fr))', gap: 20
           }}>
@@ -263,7 +288,7 @@ export default function MonthlySummary() {
             </div>
             <div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>
-                <Tip text="COGS ÷ Net Sales Revenue × 100. Tells you how much of every rupee earned went to ingredients. Target: 28–35%." width={240}>Food Cost %</Tip>
+                <Tip text={`COGS ÷ Net Sales Revenue × 100. Tells you how much of every rupee earned went to ingredients. Healthy up to ${box.warn}%, watch to ${box.critical}%, above that needs review — set in Settings → Thresholds.`} width={240}>Food Cost %</Tip>
               </div>
               {/* Banded through fcFigure(settings) — this was a local 35/45 ternary with no mark, a
                   third definition beside fcBand and Recipes' own, so the same month read green here
@@ -272,10 +297,10 @@ export default function MonthlySummary() {
                 <div style={{ fontSize: 24, fontWeight: 800, ...f.style }} title={f.title}>{f.text}</div>
               ) })()}
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>
-                {report.fcPct == null ? 'Add sales entries to calculate' :
-                  report.fcPct <= 35 ? '✓ Within benchmark (28–35%)' :
-                  report.fcPct <= 45 ? '⚠ Above benchmark — review purchases' :
-                  '✗ Critical — immediate review needed'}
+                {box.key === 'none' ? 'Add sales entries to calculate' :
+                  box.key === 'good'  ? `✓ Within your target (≤${box.warn}%)` :
+                  box.key === 'watch' ? `△ Above target — review purchases (${box.warn}–${box.critical}%)` :
+                  `▲ Critical — immediate review needed (>${box.critical}%)`}
               </div>
             </div>
             <div>
@@ -288,6 +313,7 @@ export default function MonthlySummary() {
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>Net purchases ÷ revenue</div>
             </div>
           </div>
+          ) })()}
 
           {/* Category breakdown table */}
           <div className="card">
@@ -300,9 +326,10 @@ export default function MonthlySummary() {
                   <tr>
                     <th>Category</th>
                     <th style={{ textAlign: 'right' }}>Opening Stock</th>
-                    <th style={{ textAlign: 'right' }}>Gross Purchases</th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Bill value before any bill-level discount and before returns — what was invoiced." width={230}>Gross Purchases</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Bill-level discounts, spread across each bill's lines in proportion to line value. Vendor Report and Consolidated P&amp;L net the same amount off." width={250}>Discount</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Gross purchases minus returns to vendor. The true amount spent on stock this period." width={220}>Net Purchases</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Gross purchases minus bill discounts minus returns to vendor. The true amount spent on stock this period, and what COGS is built from." width={240}>Net Purchases</Tip></th>
                     <th style={{ textAlign: 'right' }}>Wastage</th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from COGS separately from wastage." width={240}>Staff Meals</Tip></th>
                     <th style={{ textAlign: 'right' }}>Closing Stock</th>
@@ -326,10 +353,16 @@ export default function MonthlySummary() {
                           {row.purchaseVal > 0 ? fmt(row.purchaseVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
+                          {row.discountVal > 0 ? `−${fmt(row.discountVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                        </td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
                           {row.returnVal > 0 ? `−${fmt(row.returnVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
+                        {/* Always printed, never a dash: this column has a TOTAL under it, and a
+                            column whose cells cannot be added up to its own total is unreadable.
+                            It previously showed "—" whenever net equalled gross. */}
                         <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
-                          {row.netPurchaseVal !== row.purchaseVal ? fmt(row.netPurchaseVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                          {fmt(row.netPurchaseVal)}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
                           {row.wastageVal > 0 ? fmt(row.wastageVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
@@ -363,6 +396,9 @@ export default function MonthlySummary() {
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 14 }}>{fmt(report.totalOpening)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totalPurchase)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>
+                      {report.totalDiscount > 0 ? `−${fmt(report.totalDiscount)}` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 14 }}>
                       {report.totalReturn > 0 ? `−${fmt(report.totalReturn)}` : '—'}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 14 }}>{fmt(report.totalNetPurchase)}</td>
@@ -378,6 +414,7 @@ export default function MonthlySummary() {
 
             <div style={{ marginTop: 20, padding: '12px 16px', background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: 'var(--theme-text3)' }}>
               COGS = {COGS_FORMULA} &nbsp;·&nbsp;
+              Net Purchases = Gross − bill discounts − returns &nbsp;·&nbsp;
               Food Cost % = COGS ÷ Net Sales Revenue × 100
               {/* Sub-recipe disclosure — Stock Count's Summary counts prep as stock, this page
                   deliberately excludes it (is_sub_recipe = false), so the two COGS figures differ

@@ -17,8 +17,13 @@ import {
 } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
 import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
+import { allocateBillDiscounts } from './supplierAttribution'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useSettings } from '../../../context/SettingsContext'
 import { BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
+import { nprOrDash } from '../../../shared/nepalMoney'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 
 // Fallback categorical rotation for any recipe category beyond Food/Beverage (which get fixed
 // semantic colors) — mirrors the Dashboard's Sales Mix convention (ClientDashboard.jsx) so a
@@ -87,6 +92,7 @@ export default function PeriodComparison() {
   const fcLabel = pct => fcBand(pct, settings).label
   const fcMark  = pct => fcBand(pct, settings).mark
   const fcT = fcThresholds(settings)
+  const biz = useBizInfo()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const [periods, setPeriods] = useState([])
@@ -95,6 +101,12 @@ export default function PeriodComparison() {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState(null)
   const [showYoy, setShowYoy] = useState(false)
+  // The one control on this page that reloads is a closed native <select>, which fires `change` on
+  // EVERY arrow keypress — so arrowing 6 → 12 → 24 → All starts four concurrent loads and the last
+  // to land wins `stats`. A stale SMALLER result landing last is the bad case: `shown` is still 24
+  // periods, only 6 of them have figures, and the other 18 render a full row of — that reads as
+  // "nothing happened in those months" rather than as a load that was cancelled (S601).
+  const limitReq = useLatestRequest()
 
   useEffect(() => {
     if (!effectiveClientId) return
@@ -115,6 +127,7 @@ export default function PeriodComparison() {
   }
 
   async function fetchData() {
+    const key = limitReq.begin(limit)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
     const shownList = periods.slice(0, limit)
@@ -125,20 +138,34 @@ export default function PeriodComparison() {
     const ids = Array.from(new Set([...shownList.map(p => p.id), ...yoyList.map(p => p.id)]))
     if (!ids.length) { setLoading(false); return }
 
+    // The sales read below carries a comment naming PostgREST's silent 1000-row cap "across up to
+    // 24 periods" — and opening_stock, closing_stock and staff_meals, one row per item per period
+    // over that same 24-period window (48 on "All periods"), were the three reads it did not page.
+    // Two hundred items is 4,800 opening rows. A truncated opening/closing read is indistinguishable
+    // from an uncounted month: COGS collapses to net purchases, FC% is nonsense, and with no
+    // `.order()` the months that lose their stock differ between loads. S719's rule, on the page
+    // with the longest window in IMS.
     const results = await Promise.all([
-      fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', ids).order('id')),
-      scopedFrom('vendor_returns', 'period_id, qty, rate').in('period_id', ids),
+      // `discount_amount` + the bill-key columns feed allocateBillDiscounts(): a bill-level
+      // discount is repeated on every line of the bill, and until it was deduped and spread this
+      // page's "Net Purchases" and COGS sat above MonthlySummary's and Consolidated P&L's for the
+      // identical month by the whole discount (S601's rule, on the page it never reached).
+      fetchAllRows(() => supabase.from('purchase_entries')
+        .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .in('period_id', ids).order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, qty, rate').in('period_id', ids).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('period_id, qty, items(per_uom_rate)').in('period_id', ids).order('id')),
       // Staff meals belong in COGS (src/shared/imsFormulas.js) — omitted here until 2026-08-13,
       // which put this page's COGS and FC% below MonthlySummary's for the identical month.
-      supabase.from('staff_meals').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
-      supabase.from('opening_stock').select('period_id, qty, items(per_uom_rate)').in('period_id', ids),
-      supabase.from('closing_stock').select('period_id, physical_qty, items(per_uom_rate)').in('period_id', ids),
+      fetchAllRows(() => supabase.from('staff_meals').select('period_id, qty, items(per_uom_rate)').in('period_id', ids).order('id')),
+      fetchAllRows(() => supabase.from('opening_stock').select('period_id, qty, items(per_uom_rate)').in('period_id', ids).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('period_id, physical_qty, items(per_uom_rate)').in('period_id', ids).order('id')),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
       // Paged like its purchase_entries sibling above: sales across up to 24 periods crosses
       // PostgREST's silent 1000-row cap easily (S528).
       fetchAllRows(() => supabase.from('sales_entries').select('period_id, qty_sold, unit_price, discount, recipes(selling_price, category)').in('period_id', ids).neq('source', 'pos_comp').order('id')),
     ])
+    if (!limitReq.isCurrent(key)) return   // superseded — a stale load's failure must not clobber the current view either
     // A failed read must not render as a quiet run of NPR 0 periods (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setStats({}); setLoading(false); return }
@@ -152,19 +179,38 @@ export default function PeriodComparison() {
       { data: sales },
     ] = results
 
+    // One pass per table instead of a `.filter()` per period per table — 24 periods × 7 arrays.
+    const byPeriod = rows => {
+      const m = new Map()
+      for (const r of rows || []) {
+        const list = m.get(r.period_id); if (list) list.push(r); else m.set(r.period_id, [r])
+      }
+      return m
+    }
+    const purchBy = byPeriod(allocateBillDiscounts(purchases))
+    const retBy   = byPeriod(returns)
+    const wasteBy = byPeriod(wastes)
+    const staffBy = byPeriod(staffMeals)
+    const openBy  = byPeriod(openings)
+    const closeBy = byPeriod(closings)
+    const salesBy = byPeriod(sales)
+    const at = (m, pid) => m.get(pid) || []
+
     const result = {}
     for (const pid of ids) {
-      const purchV   = (purchases||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.rate||0),0)
-      const retV     = (returns||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.rate||0),0)
-      const wasteV   = (wastes||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
-      const staffV   = (staffMeals||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
-      const openV    = (openings||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
-      const closeV   = (closings||[]).filter(r=>r.period_id===pid).reduce((s,r)=>s+parseFloat(r.physical_qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
+      const purchRows= at(purchBy, pid)
+      const purchV   = purchRows.reduce((s,r)=>s+r.lineGross,0)
+      const discV    = purchV - purchRows.reduce((s,r)=>s+r.lineNet,0)
+      const retV     = at(retBy,   pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.rate||0),0)
+      const wasteV   = at(wasteBy, pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
+      const staffV   = at(staffBy, pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
+      const openV    = at(openBy,  pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
+      const closeV   = at(closeBy, pid).reduce((s,r)=>s+parseFloat(r.physical_qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
       // Uses unit_price captured on the row (the price actually charged that period) when
       // present, falling back to the joined recipe's current price only for rows recorded before
       // that column existed — otherwise the "vs Prev" trend was comparing today's menu price
       // against itself across periods, not what was actually charged in each one.
-      const periodSales = (sales||[]).filter(r=>r.period_id===pid&&(r.unit_price!=null||r.recipes?.selling_price))
+      const periodSales = at(salesBy, pid).filter(r=>r.unit_price!=null||r.recipes?.selling_price)
       const revenue  = periodSales.reduce((s,r)=>{
         const price = r.unit_price != null ? parseFloat(r.unit_price) : parseFloat(r.recipes?.selling_price||0)
         return s + parseFloat(r.qty_sold||0) * price - (parseFloat(r.discount) || 0)
@@ -180,16 +226,26 @@ export default function PeriodComparison() {
         const amt = parseFloat(r.qty_sold||0) * price - (parseFloat(r.discount) || 0)
         catRev[cat] = (catRev[cat] || 0) + amt
       })
-      const netPurch = purchV - retV
+      const netPurch = purchV - discV - retV
       const cogs     = computeUsed({ opening: openV, purchases: netPurch, wastage: wasteV, staffMeals: staffV, closing: closeV })
       const fcPct    = revenue > 0 ? (cogs / revenue) * 100 : null
-      result[pid]    = { purchV, retV, netPurch, wasteV, openV, closeV, revenue, cogs, fcPct, catRev }
+      result[pid]    = { purchV, discV, retV, netPurch, wasteV, openV, closeV, revenue, cogs, fcPct, catRev }
     }
+    if (!limitReq.isCurrent(key)) return   // superseded by a newer range selection
     setStats(result)
     setLoading(false)
   }
 
   const shown        = periods.slice(0, limit)
+  // The page's SCOPE, stated once and carried everywhere the report goes — subtitle, print
+  // header, workbook sheet and filename. The subtitle read "across all BS periods" while the
+  // control beside it said "Last 6 periods", and the print title and the .xlsx carried no range
+  // at all: a printed sheet of six months was indistinguishable from a printed sheet of two
+  // years, and the file was always PeriodComparison.xlsx.
+  const scopeLine    = shown.length === 0 ? 'No periods'
+    : `${periodLabel(shown[shown.length - 1])} → ${periodLabel(shown[0])} (${shown.length} period${shown.length === 1 ? '' : 's'})${showYoy ? ', with same-month last-year comparison' : ''}`
+  const scopeSlug    = shown.length === 0 ? 'no-periods'
+    : `${periodLabel(shown[shown.length - 1])}-to-${periodLabel(shown[0])}`.replace(/\s+/g, '')
   const latestStats  = shown.length > 0 ? stats[shown[0]?.id] : null
   const prevStats    = shown.length > 1 ? stats[shown[1]?.id] : null
   const fcTrend      = latestStats?.fcPct != null && prevStats?.fcPct != null
@@ -217,10 +273,10 @@ export default function PeriodComparison() {
     return best
   }, null)
 
-  function fmt(n) {
-    if (!n) return '—'
-    return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
-  }
+  // `if (!n) return '—'` treated a genuine NPR 0 as an unknown — a period with no wastage read
+  // identically to a period whose figures had not been computed. `nprOrDash` dashes only null
+  // and undefined, which is the distinction the rest of the product already draws.
+  const fmt = nprOrDash
 
   function trendIcon(curr, prev) {
     if (curr == null || prev == null) return null
@@ -280,7 +336,10 @@ export default function PeriodComparison() {
       const row = {
         'Period':                `${periodLabel(p)}`,
         'Status':                p.status.toUpperCase(),
-        'Net Purchases (NPR)':   s.netPurch ? s.netPurch.toFixed(0) : '',
+        'Gross Purchases (NPR)': s.purchV   != null ? s.purchV.toFixed(0)   : '',
+        'Bill Discounts (NPR)':  s.discV    != null ? s.discV.toFixed(0)    : '',
+        'Returns (NPR)':         s.retV     != null ? s.retV.toFixed(0)     : '',
+        'Net Purchases (NPR)':   s.netPurch != null ? s.netPurch.toFixed(0) : '',
         'Purchases Δ% vs Prev':  (() => { const d = pctDelta(s.netPurch, prev?.netPurch); return d != null ? d.toFixed(1) + '%' : '' })(),
         'Wastage Value (NPR)':   s.wasteV   ? s.wasteV.toFixed(0)   : '',
         'COGS (NPR)':            s.cogs     ? s.cogs.toFixed(0)     : '',
@@ -297,15 +356,21 @@ export default function PeriodComparison() {
       }
       return row
     })
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Period Comparison')
+    // sheetWithLetterhead's scopeLine is required, for the reason this page needed it: a sheet
+    // that does not state what it covers cannot be reconciled later by the person who made it.
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Period-over-Period Comparison', biz, scopeLine, rows: data,
+    }), 'Period Comparison')
     if (categories.length > 0) {
       const catData = categoryChartData.map(row => ({
         Period: row.label,
         ...Object.fromEntries(categories.map(c => [c, Math.round(row[c] || 0)])),
       }))
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catData), 'Revenue by Category')
+      XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+        title: 'Revenue by Category', biz, scopeLine, rows: catData,
+      }), 'Revenue by Category')
     }
-    XLSX.writeFile(wb, `PeriodComparison.xlsx`)
+    XLSX.writeFile(wb, `PeriodComparison-${scopeSlug}.xlsx`)
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
@@ -315,6 +380,7 @@ export default function PeriodComparison() {
 
       <div className="print-only" style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Period-over-Period Comparison</h2>
+        <div style={{ fontSize: 12 }}>{scopeLine}</div>
       </div>
 
       <div className="page-header page-header--split no-print">
@@ -323,7 +389,7 @@ export default function PeriodComparison() {
           {/* No <PeriodScope> here, deliberately: this report's scope IS every period, so a chip
               naming one would contradict the table under it. Left as prose so the next sweep does
               not churn it. Same for OutstandingPayables, which is unbounded by period. */}
-          <p className="page-subtitle">Net Purchases, Wastage, COGS, Revenue and FC% across all BS periods</p>
+          <p className="page-subtitle">Net Purchases, Wastage, COGS, Revenue and FC% — {scopeLine}</p>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -344,7 +410,7 @@ export default function PeriodComparison() {
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn btn-ghost" onClick={() => printWithTitle('Period-over-Period Comparison')}>Print</button>
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`Period-over-Period Comparison - ${scopeLine}`)}>Print</button>
             <button className="btn btn-ghost" onClick={exportExcel} disabled={!shown.length}>Export Excel</button>
           </div>
         </div>
@@ -569,7 +635,7 @@ export default function PeriodComparison() {
               <tr>
                 <th>Period</th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Gross purchases minus vendor returns (NPR value). The line beneath shows the % change vs the previous period, and vs the same month last year when that toggle is on." width={280}>Net Purchases</Tip>
+                  <Tip text="Gross purchases minus bill-level discounts minus vendor returns (NPR value) — the same figure Monthly Summary and Consolidated P&L build COGS from. The line beneath shows the % change vs the previous period, and vs the same month last year when that toggle is on." width={290}>Net Purchases</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Total value of wastage logged in Stock Count (qty × per-unit rate)." width={240}>Wastage</Tip>
@@ -581,7 +647,12 @@ export default function PeriodComparison() {
                   <Tip text="Qty Sold × Selling Price ex-VAT from Sales Entry. Shows — if no sales data entered for this period. The line beneath shows the % change vs the previous period, and vs the same month last year when that toggle is on." width={300}>Revenue (ex-VAT)</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="COGS ÷ Revenue. Green ≤30%, Amber 31–38%, Red >38%. Shows — when revenue is zero." width={260}>FC%</Tip>
+                  {/* Said "Green ≤30%, Amber 31–38%, Red >38%" while the cell colour, the chart's
+                      reference lines, its dots and its legend all read fcT — the client's own
+                      Settings → Thresholds values. The comment beside those reference lines
+                      celebrates having fixed exactly this drift; the tooltip explaining the colour
+                      was the copy it left behind. */}
+                  <Tip text={`COGS ÷ Revenue. Green ≤${fcT.warn}%, amber up to ${fcT.critical}%, red above that — set in Settings → Thresholds. Shows — when revenue is zero.`} width={260}>FC%</Tip>
                 </th>
                 <th style={{ textAlign: 'center' }}>
                   <Tip text="FC% change vs previous period. ↓ green = improving, ↑ red = worsening." width={240}>vs Prev</Tip>
