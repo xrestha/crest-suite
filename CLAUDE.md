@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Where a new rule goes
 
 **Default to `.claude/rules/`, not this file.** Everything here loads on *every* request, so a rule
-that only matters while one module is open is paid for by every session that never opens it. Five
-`/doctor` passes have now had to migrate sections out (2026-08-18, S605, S615, S663, S678 — the
-S663 one halved the file, 110k → 51k chars), and between the second and third the root file regrew
+that only matters while one module is open is paid for by every session that never opens it. Six
+`/doctor` passes have now had to migrate sections out (2026-08-18, S605, S615, S663, S678, S712 —
+the S663 one halved the file, 110k → 51k chars), and between the second and third the root file regrew
 7,052 chars in three days — not through carelessness, but because a new
 rule has one obvious home and no single session can see that it is the fortieth to pick it.
 **S678 found the file at 391 chars of headroom against its own 53,000 ceiling**, and what it cut was
@@ -30,8 +30,9 @@ table-provenance in `.claude/rules/bs-calendar.md`.
 **A `paths:` glob that no longer matches is a rule that silently stopped loading.** Four had rotted
 by S663 — `src/contexts/AuthContext.js` (the directory is `context`, singular) meant
 `accounts-and-logins.md` never loaded for the file it is most about, and three more pointed at pages
-that had moved from `src/pages/` into `src/modules/`. Nothing warns. After moving or renaming a file,
-grep `.claude/rules/*.md` for its old path, and check each glob still resolves.
+that had moved from `src/pages/` into `src/modules/`. Nothing warned until `npm run check:docs`,
+which `build:verify` runs — a rotted glob now fails a pre-push check. It still cannot tell you a
+glob is scoped to the *wrong* file, only that it matches nothing.
 
 **Never embed a value that moves** (a cache version, a table count, a file count) in a rule that is
 otherwise permanent: the rule stays correct while the number rots inside it, and a derivability
@@ -57,8 +58,8 @@ meaning.
 
 - **React 19 (CRA)** — no Vite, no custom webpack config, no TypeScript
 - **Supabase JS v2** — single client at `src/supabaseClient.js`; anon key only in the browser bundle
-- **Code splitting (S440)** — every page component in `App.js` is route-level `React.lazy(() => import(...))`; only structural pieces stay eager (contexts, `Layout`, `ProtectedRoute`, `ModuleGate`/`PremiumGate`). Keep new page routes lazy too. Two `Suspense` boundaries: one around `Layout.js`'s `<Outlet />` (so the top bar persists during in-app navigation — only the content area shows `RouteFallback`) and a top-level one in `App.js` for the public routes. Any `import './x.css'` must stay **above** the lazy `const`s or ESLint's `import/first` fails the CI build. This cut initial JS from ~931 kB → ~165 kB gzipped (the rest lazy-loads as ~97 on-demand chunks)
-- **`xlsx` is always `import('xlsx')` inside the click handler, never a top-level `import * as XLSX from 'xlsx'` (S522).** Route-level lazy-loading (S440 above) only defers a *page's own* code — it does nothing about a library that page statically imports, which webpack still must fetch the moment the route loads. `xlsx` is 138 kB gzipped and is only ever touched by an explicit Export/Import click, so a static import paid it on every visit to all 37 pages with an Excel button. Make the handler `async` and put `const XLSX = await import('xlsx')` on its first line. `recharts` (102 kB) is deliberately left static — charts are above-the-fold content, not a deferred click. The three files that needed a different shape, and how the fix was verified in the built output, are in `.claude/rules/frontend-performance.md`.
+- **Code splitting (S440)** — every page component in `App.js` is route-level `React.lazy(() => import(...))`; only structural pieces stay eager (contexts, `Layout`, `ProtectedRoute`, `ModuleGate`/`PremiumGate`). Keep new page routes lazy too. Two `Suspense` boundaries: one around `Layout.js`'s `<Outlet />` (so the top bar persists during in-app navigation — only the content area shows `RouteFallback`) and a top-level one in `App.js` for the public routes. Any `import './x.css'` must stay **above** the lazy `const`s or ESLint's `import/first` fails the CI build
+- **`xlsx` is always `import('xlsx')` inside the click handler, never a top-level `import * as XLSX from 'xlsx'` (S522).** Route-level lazy-loading (S440 above) only defers a *page's own* code — it does nothing about a library that page statically imports, which webpack still must fetch the moment the route loads. `xlsx` is 138 kB gzipped and is only ever touched by an explicit Export/Import click, so a static import paid it on every visit to every page with an Excel button. Make the handler `async` and put `const XLSX = await import('xlsx')` on its first line. `recharts` (102 kB) is deliberately left static — charts are above-the-fold content, not a deferred click. The three files that needed a different shape, and how the fix was verified in the built output, are in `.claude/rules/frontend-performance.md`.
 - **Vercel** for deployment — `vercel.json` sets `no-cache` on `index.html` to prevent CDN serving stale bundles
 - **PWA service worker** at `public/service-worker.js` — registered only in production (`src/index.js`). `CACHE_NAME` (read the current value from the file — it moves constantly) must be bumped on **every** JS/CSS change you want existing users to actually receive, not just breaking ones — the fetch handler is cache-first for static assets, so a plain deploy (or even a hard refresh) leaves already-cached chunks serving the old code indefinitely until this constant changes and `activate` purges the old cache (S452 found a real fix silently never reached the browser because of this)
 
@@ -168,7 +169,7 @@ Every Supabase table is client-scoped. **Use the scoped data-access layer, not h
 
 Admin switches clients via the top-bar dropdown → `switchAdminClient(id, name)` → all pages re-fetch via `useEffect([clientId, ...])`.
 
-As of 2026-07-05 every IMS, HR and POS page, plus `Dashboard.js`, `Periods.js` and `Settings.js`, goes through `scopedDb`. Two pages are **correctly exempt, not pending**: `AuditLog.js` (a cross-client admin viewer — `audit_logs.client_id` is nullable and its "All Clients" filter is incompatible with auto-scoping to one client) and `AdminClients.js` (has no `clientId` of its own — it loops over an explicit client list and acts on whichever `client.id` a row targets, so it calls the raw `scopedFrom`/`scopedInsert`/`scopedUpdate`/`scopedDelete` functions from `scopedDb.js` directly with that `client.id`, instead of the `useScopedDb()` hook). `Periods.js`'s admin "all clients" view and `Dashboard.js`'s `loadAdminStats()` use that same raw-function-with-explicit-id pattern, while their genuinely cross-tenant reads stay on plain `supabase.from()`.
+Every IMS, HR and POS page, plus `Dashboard.js`, `Periods.js` and `Settings.js`, goes through `scopedDb`. Two pages are **correctly exempt, not pending**: `AuditLog.js` (a cross-client admin viewer — `audit_logs.client_id` is nullable and its "All Clients" filter is incompatible with auto-scoping to one client) and `AdminClients.js` (has no `clientId` of its own — it loops over an explicit client list and acts on whichever `client.id` a row targets, so it calls the raw `scopedFrom`/`scopedInsert`/`scopedUpdate`/`scopedDelete` functions from `scopedDb.js` directly with that `client.id`, instead of the `useScopedDb()` hook). `Periods.js`'s admin "all clients" view and `Dashboard.js`'s `loadAdminStats()` use that same raw-function-with-explicit-id pattern, while their genuinely cross-tenant reads stay on plain `supabase.from()`.
 
 ### Modules
 
@@ -266,15 +267,16 @@ these before hand-rolling an overlay, a numeric field or a report shell.
 
 ### A gating wrapper cannot protect an eagerly-evaluated children expression (S601)
 
-**JSX children are an ARGUMENT**: the expression is fully evaluated by the parent and handed over as a finished element tree, so a gate inside the wrapper never gets a say. `ConsolidatedPnl.jsx` passed its whole table as `ReportPage`'s `children` and crashed on **every** visit before `SuiteGate` even rendered. Only an early return, a guard at the call site (`{!stmt ? null : …}`), or a render prop can protect it — and the same applies to `banners`/`stats`/`note`/`filters`/`footnote`.
+**JSX children are an ARGUMENT**: the expression is fully evaluated by the parent and handed over as a finished element tree, so a gate inside the wrapper never gets a say. Only an early return, a guard at the call site (`{!stmt ? null : …}`), or a render prop can protect it — and the same applies to `banners`/`stats`/`note`/`filters`/`footnote`.
 
-Detail in `.claude/rules/report-pages.md`.
+The `ConsolidatedPnl.jsx` crash this came from, and three related instances, are in
+`.claude/rules/report-pages.md`.
 
 ### An overlapping load must not win the page (S601)
 
 A closed native `<select>` fires `change` on every arrow keypress, so arrowing a 12-period list starts twelve concurrent loads and **the last response to land wins the figures** while the label is whatever was clicked last — which on Consolidated P&L drives the subtitle, print title, workbook and filename alike. `src/shared/hooks/useLatestRequest.js` is the one guard: call `periodReq.begin(id)` synchronously in the handler before any await, and `if (!periodReq.isCurrent(periodId)) return` after the last await and before the first setter.
 
-**The key is the period id, not a counter**, and **it fails open**. The current adoption list (22 pages), the two properties behind those choices, and the pages still unswept are in `.claude/rules/frontend-performance.md`.
+**The key is the period id, not a counter**, and **it fails open**. The current adoption list, the two properties behind those choices, and the pages still unswept are in `.claude/rules/frontend-performance.md`.
 
 ### A page reachable by URL needs the guard its nav item implies (S601)
 
@@ -284,7 +286,7 @@ This matters more than a plain leak, because the staff-isolation policies are **
 
 **Audit by grepping `Layout.js` for `minPosRole`/`minImsRole`/`minHrRole` and the `isAdmin || isOwner` render conditions, then checking each named route has a matching early return in its own component.** **A SUB-route has no nav item to audit and inherits nothing from its parent page (S647)** — `/purchases/new` and `/purchases/:groupId/edit` are typeable but appear in no nav, and turning a modal into a route makes its record id a URL parameter, so a filter the parent page did in memory has to become a real check. **A team allowlist in the nav was the sixth (S683)** — `KITCHEN_TEAM_ALLOWED_PATHS` fail-closed the sidebar and nothing else; `canReachPosPath()` now runs inside `ModuleGate` on every POS route, and `App.js` finally has a `path="*"`. Detail in `.claude/rules/access-control.md`.
 
-The five pages this has recurred on, and what each one did or didn't leak, are in `.claude/rules/access-control.md`.
+The pages this has recurred on, and what each one did or didn't leak, are in `.claude/rules/access-control.md`.
 
 ### A report page must not show a number it has not computed (S594)
 
@@ -328,23 +330,14 @@ See `.claude/rules/auth-and-pins.md` (auto-loads when editing Login/ResetPasswor
 
 The three invariants from S623 (detection must cover everything `tokenize()` normalises; `QtyInput` never hands a raw unparseable string up; Escape's cancel is a ref, not state) are in `.claude/rules/input-arithmetic.md`, each with the live bug it came from.
 
-### Purchases: qty/rate storage convention
-
-`purchase_entries.qty` and `rate` are stored in **base units**, not purchase units:
-
-- `stored_qty = entered_qty × conversion_factor`
-- `stored_rate = entered_rate ÷ conversion_factor`
-
-All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-unit values directly.
-
 ### Every item is stored in its SMALLEST unit — `purchase_qty` is always 1 (S597)
 
 See `.claude/rules/item-master-rates.md` (auto-loads when editing the IMS items or purchases
 modules). Headline rules: `items.rate` is the price of ONE base unit and equals the generated
 `per_uom_rate`, held by a `CHECK (purchase_qty = 1)`; `purchase_qty` no longer mirrors
 `conversion_factor`; a purchase bill prefills `per_uom_rate × cf`, never `items.rate`; and a field
-that is only arithmetic must not look like a field that is stored. Distinct from the
-`purchase_entries` qty/rate convention above — different columns, different arithmetic.
+that is only arithmetic must not look like a field that is stored. That file also holds the
+`purchase_entries` base-unit qty/rate convention — different columns, different arithmetic.
 
 ### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere
 

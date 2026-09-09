@@ -72,7 +72,7 @@ Three things worth keeping in mind before touching this form again:
 - **`Rate (NPR)` had no `Tip`** while every field around it did — and it is the one field whose meaning is genuinely ambiguous. Any new field in this form needs one from the start, per the tooltip rule below.
 - **The pack helper keeps ONE division** (S623): `perUnitOf()` feeds both the "→ NPR x per uom" preview and the rate written into the form — two independent copies of that division briefly existed with different rounding, which is the screen-agrees-with-the-user shape above, one layer up. It coerces with `Number()`, never `parseFloat`, so a prefix-parseable string ("5oo" → 5, "1,200" → 1) can never price an item even if one slips past `QtyInput`. And when both boxes are filled but the division can't run (zero, negative, unparseable), both boxes go invalid — through `fieldAria` with ONE shared id and a single `FieldError` saying Price per UOM still shows its last value (S624; a hand-rolled `aria-invalid` + inline span preceded it, drifting from `.field-error` and binding the message to nothing) — because the rate box deliberately keeps that value, so the state must be visible or the pack line and the saved price silently disagree on screen.
 
-This is distinct from the `purchase_entries` qty/rate convention in `CLAUDE.md` ("Purchases: qty/rate storage convention"): that one is about a *conversion factor* between purchase and base units on a transaction row, this one is about the item master. Both end in base units, but they are different columns with different arithmetic — and the S597 lesson is precisely that a column allowed two meanings will be read with the wrong one somewhere, silently, by code that looks correct.
+This is distinct from the `purchase_entries` qty/rate convention below ("Purchases: qty/rate storage convention", migrated from the root `CLAUDE.md` by the 2026-09-09 /doctor pass): that one is about a *conversion factor* between purchase and base units on a transaction row, this one is about the item master. Both end in base units, but they are different columns with different arithmetic — and the S597 lesson is precisely that a column allowed two meanings will be read with the wrong one somewhere, silently, by code that looks correct.
 
 ## `per_uom_rate` is a generated column
 
@@ -219,3 +219,15 @@ the item standing. `itemRefTables.test.js` reads the migration and asserts the S
 `deleteClientData` (service role) empties `items` first, so the cascade fires on zero rows. If that
 step ever fails partway the client-row delete now refuses instead of cascading a half-deleted book
 away silently, and ClientDrawer's existing handler already says the right thing.
+
+## Purchases: qty/rate storage convention
+
+Migrated from the root `CLAUDE.md` (2026-09-09 /doctor pass) — it is reachable only from the IMS
+purchases and items modules, which this file already loads for.
+
+`purchase_entries.qty` and `rate` are stored in **base units**, not purchase units:
+
+- `stored_qty = entered_qty × conversion_factor`
+- `stored_rate = entered_rate ÷ conversion_factor`
+
+All downstream calculations (Stock, Variance, FIFO, Reorder) read these base-unit values directly.
