@@ -87,6 +87,16 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   removed, name what is still holding the record, and say plainly when retrying will not get past
   it. **"Try again" is a claim about the future**, and it is only honest where the failure is
   plausibly transient.
+- **"Try again" is a promise the CODE has to keep (S716).** S706 is about not offering a retry that
+  cannot work; this is the case where it can work and the handler takes it away. Overheads' save
+  clears the period and re-inserts, so after a failed insert the only surviving copy of the figures
+  is the unsaved React state on screen — and the function's last line was `await loadOverheads()`,
+  which reloads, finds nothing, and seeds the previous month's numbers over them. The message says
+  "everything you entered is still on screen and has NOT been lost — press Save again. Do not
+  reload the page first", and the early return that skips the reload is what makes each of those
+  three claims true. **Write the sentence and the recovery path in the same edit**, and name the
+  thing that would destroy it — a reload is not obviously dangerous, so a reader who is not told
+  will do it.
 - **The best consequence message is the one you delete by making the state impossible (S709).**
   "A PO whose line items were gone" above was a real half-deleted state with a carefully worded
   apology attached — and it existed only because `deletePoNow` hand-rolled a cascade the FK already

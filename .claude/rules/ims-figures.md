@@ -276,9 +276,9 @@ one tab of the page and gone from the other three. `salesReads.test.js` reads th
 on either half of the defect — a `.neq` on the column, or a `select()` that omits it — because
 neither has a runtime symptom.
 
-**Still open, deliberately:** ~13 files carry the server-side form (
+**Still open, deliberately:** ~11 files carry the server-side form (
 `MenuRepricing`, `RecipeMargin`, `Recipes`, `AnnualSummary`, `BestSellers`, `MonthlySummary`,
-`Overheads`, `PeriodComparison`, `ConsolidatedPnl`, `OwnerDashboard`'s revenue read,
+`PeriodComparison`, `ConsolidatedPnl`, `OwnerDashboard`'s revenue read,
 `useSalesPivotData`, and the two `ownerReport` compute files). Every one is display-only and cannot
 delete a row, and each needs its own answer to what its figure is supposed to mean before it is
 changed — `OwnerDashboard`'s stock read was fixed in S696 precisely because the answer there was
@@ -291,6 +291,16 @@ different quadrant, and the page then wrote that quadrant back to `recipes.me_cl
 suggestion engine to act on. **Before filing a read as harmless, ask what else its figure decides**:
 a number that feeds a threshold, a ranking or a write is not display-only.
 `salesReads.test.js` now covers this page alongside `Sales.js`.
+
+**`Overheads` came off it in S716, on a third reading of "display-only".** Its revenue read feeds
+no threshold and no write — but it is the **denominator of every percentage on the page**, while the
+numerator (food cost, from purchases) comes from a different table and stayed whole. A one-sided
+short therefore does not shrink a figure, it **moves a ratio**: Food Cost % and every "% of revenue"
+read high, break-even read high, and Net Profit read low — and Net Profit's SIGN is what picks
+between a green "✓ Profitable this period" and a red "✗ Operating at a loss this period". So the
+question to ask a read is not only what its number feeds, but **what else is divided by it**. A
+denominator shared with a numerator the defect cannot touch is never display-only.
+`salesReads.test.js` covers this page too.
 
 **The general shape:** any `.neq`, `.not.eq` or `.not.in` on a NULLABLE column excludes the NULL
 rows as well as the named ones. Check `NOT NULL` before filtering negatively in SQL, or filter

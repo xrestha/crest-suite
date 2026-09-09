@@ -116,6 +116,21 @@ Three rules came out of it:
   exactly the double-payment it exists to prevent. **A check that could not run has not passed**:
   refuse and say why, never wave through. Ask of any new guard, "what does this do when its own read
   fails?" — if the answer is "allows the action", it is not a guard.
+- **A page can be the reference for the read half and still have no write half at all (S716).**
+  `Overheads.js` is cited three times in this file as the pattern an entry page copies for a failed
+  READ — and its `save()` was a `scopedDelete` then a `scopedInsert` with neither error
+  destructured, ninety lines below a comment reading *"on a data-entry page the silent-zero class
+  is a data-loss class"*. Delete lands, insert fails, the period is empty, `loadOverheads()` finds
+  nothing, falls into the carry-forward branch, and seeds the PREVIOUS month's figures as an
+  editable draft — so the owner saw plausible numbers under a "✓ Saved" tick over data that no
+  longer existed. Three things generalise. **Order the two writes so the one that can refuse goes
+  first**, and its failure is then a clean no-op the message may say so about. **The recovery path
+  is part of the message**: after the failed insert the rows in React state are the only surviving
+  copy, so the handler must NOT reload — the reload is what destroys them — and the copy has to
+  say "press Save again, do not reload the page first". And **being the named exemplar of a rule is
+  not evidence of following its siblings**: S658, whose subject line was *"a failed write stops
+  reading as a no-op"*, edited line 242 of this exact function to reword an `alert()` and left 244
+  and 257 bare. When a page is cited as a pattern, check the half it is not cited for.
 - **The KPI strip does not render while loading or after a failure.** Both pages painted four stat
   cards *above* their `loading` guard, so a multi-second fiscal-year read showed "Capital in 90+ Day
   Stock: NPR 0" in green until the real number arrived — and on a failed read it stayed there. A

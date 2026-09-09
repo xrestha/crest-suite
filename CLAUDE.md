@@ -133,7 +133,7 @@ See `.claude/rules/data-export.md` (auto-loads when working in `src/modules/admi
 
 ### Three dashboards, deliberately not one
 
-See `.claude/rules/dashboards.md` (auto-loads when editing dashboard files). Headline rules: /dashboard, /hr/dashboard and /owner-dashboard are different altitudes/gates — don't merge them; the `overheads` three-bucket trap (labor double-count) is documented there.
+See `.claude/rules/dashboards.md` (auto-loads when editing dashboard files). Headline rules: /dashboard, /hr/dashboard and /owner-dashboard are different altitudes/gates — don't merge them; the `overheads` three-bucket trap (labor counted twice, or not at all) is documented there.
 
 ### Monthly Owner/Manager Report (frozen snapshot, S434)
 
