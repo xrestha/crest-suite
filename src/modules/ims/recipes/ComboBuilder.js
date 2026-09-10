@@ -201,14 +201,20 @@ export default function ComboBuilder() {
       {menuError && <ReportLoadError error={menuError} />}
       {saveError && <ActionError error={saveError} />}
 
+      {/* DESIGN.md's tint pattern — alpha fill, full-opacity signal text, uniform 1px border —
+          matching `ConsolidatedPnl`'s `warnStyle`, which is the closest analogue in the product:
+          a report telling its reader that a module it depends on is not enabled. Not a
+          single-side accent border; nothing else in `src/` has one. */}
       {!posEnabled && (
-        <div className="card" style={{ padding: 16, marginBottom: 20, borderLeft: '3px solid var(--theme-amber)' }}>
-          <strong style={{ display: 'block', marginBottom: 4, fontSize: 13 }}>This report reads POS bills</strong>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
-            Which items are ordered together can only be seen from bills that were rung up on a till, so Combo Builder
-            needs the Crest POS module. Without it this page has nothing to read — that is not a shortage of sales
-            history, and no amount of waiting will fill it in. Talk to Crest about adding POS to see pairings here.
-          </p>
+        <div style={{
+          background: 'color-mix(in srgb, var(--theme-amber) 13%, transparent)',
+          border: '1px solid var(--theme-amber)', borderRadius: 'var(--radius-md)',
+          padding: '10px 14px', marginBottom: 20, fontSize: 13, color: 'var(--theme-amber-text)',
+        }}>
+          <strong>This report reads POS bills.</strong>{' '}
+          Which items are ordered together can only be seen from bills that were rung up on a till, so Combo Builder
+          needs the Crest POS module. Without it this page has nothing to read — that is not a shortage of sales
+          history, and no amount of waiting will fill it in. Talk to Crest about adding POS to see pairings here.
         </div>
       )}
 
