@@ -194,9 +194,9 @@ Each axis gates two things that must both be kept in sync when adding a page: th
 ### Who logs in where, and how an Owner account comes to exist
 
 See `.claude/rules/accounts-and-logins.md` (auto-loads when editing AuthContext, Login, or any
-staff/employee management screen). Headline rules: there are three front doors (`/login` for Owner,
-IMS staff, HR staff and admin; `/pos/login` and `/hr/self-service` for PINs) and an owner never uses
-a PIN; **Owner is the ABSENCE of staff markers, so giving the owner's own login a staff role demotes
+staff/employee management screen). Headline rules: there are four front doors (`/login` for Owner,
+IMS staff, HR staff and admin; `/pos/login`, `/hr/self-service` and `/ims/count` for PINs) and an
+owner never uses a PIN; **Owner is the ABSENCE of staff markers, so giving the owner's own login a staff role demotes
 them**; and `hr_employees.status` is payroll eligibility only — `access_blocked` is what revokes a
 Self-Service login.
 

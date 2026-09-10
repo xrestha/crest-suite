@@ -165,6 +165,20 @@ condition is a module flag must name what happens when that flag is off** — fa
 `min*Role` tag is present and correct on the nav item. `MenuPricing.js:339` is the same line and
 still carries it (no write exposed in that state, and its two branches are an ask-first file).
 
+**The eighth is an account axis, and it could NOT go in `ModuleGate` (S737).** An IMS count PIN
+account exists to enter a closing count on a shared store-room tablet, so it reaches `/stock` and
+nothing else — the same shape as `pos_team`, one module over. But `canReachPosPath` sits in
+`ModuleGate`, and **`/dashboard` carries no `ModuleGate` at all**, which is exactly where a fresh
+sign-in lands: the guard would have been bypassed by the first screen the account ever sees. It
+lives in **`ProtectedRoute`** instead — the one choke point every in-app route mounts through, the
+same argument `accessLocked` and `legalReacceptRequired` are already there for. `imsCountOnly` in
+`AuthContext` is the predicate, keyed on the raw `ims_email` COLUMN rather than the resolved rank
+(admin and Owner resolve to `'manager'` on every axis, which makes the rank the wrong test for "is
+this a tablet session"), and `shared/imsCountAccess.js` holds the allowlist that the guard, the
+sidebar and the command palette all read. **Ask which choke point actually covers the landing
+route before choosing where a new account-level guard goes** — "every module route" is not "every
+route".
+
 ## Four gates, one grammar for "you cannot have this" (S683)
 
 The critique found four gates with four grammars. `ModuleGate` was three silent

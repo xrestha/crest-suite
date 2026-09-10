@@ -81,6 +81,27 @@ The Supabase CLI is installed and linked to the live project (`supabase link`, r
 
 **A plpgsql body is NOT validated at `CREATE` time, so a migration that applies cleanly can still ship a function that fails on its first call (S735).** Postgres parses the body for syntax only; every SQL expression inside is resolved the first time that statement executes. `save_purchase_bill` shipped `SELECT max(po_id) …` over a uuid column in S709 — Postgres has no `max(uuid)` — and the migration ran green, the source-text assertion (`prosrc LIKE '%v_po_id%'`) passed, and every bill *edit* then failed with `42883 function max(uuid) does not exist` until S735. Two consequences: **a `prosrc LIKE` assertion proves a feature is mentioned, not that it runs** — when a migration changes a function's body, the verification block should call it once inside a `BEGIN … ROLLBACK`; and **`42883` does not always mean an unapplied migration** — `errorText.js` words it that way, which is right for a missing RPC and wrong for an applied function calling something that does not exist. `min`/`max` exist for the ordered types only; for "the one non-NULL value in this set" of a uuid column use `WHERE col IS NOT NULL … LIMIT 1`.
 
+**And a CALL only exercises the body it actually reaches (S737).** The rule above says a migration
+that changes a function body should call it once inside `BEGIN … ROLLBACK`. S737 did exactly that
+for `get_ims_staff_list`, the block passed, and the function raised `42804 structure of query does
+not match function result type` on **every** real call — IMS Staff and Stock Count → Settings both
+rendering their failed-read card. The verification ran in the SQL editor, where `auth.uid()` is
+NULL, so the function's own caller check was false and `RETURN QUERY` never executed. The call
+proved the function could be ENTERED, not that its body works.
+
+So: **where the body sits behind an authorisation check, a call that the guard rejects is not a
+test.** Either give the block a caller the guard accepts, or — simpler and what
+`20260910150000` does — create a scratch `pg_temp` function holding the identical SELECT and the
+identical `RETURNS TABLE`, call it, and drop it, so the tuple descriptors really are compared.
+Have it print the source column types with `RAISE NOTICE` too: plpgsql's 42804 names no column, so
+a failure is otherwise a guess.
+
+The underlying trap is worth knowing on its own: **`RETURN QUERY` compares attribute type OIDs
+EXACTLY**, and `character varying` is not `text` even though the two are binary-coercible.
+`auth.users.email` is varchar. Cast every returned column to the type the signature declares —
+that is a property of the statement rather than of whatever schema sits underneath it, so it
+cannot break again when GoTrue changes a column.
+
 ## `updated_at` is not maintained by the database — check before you trust it (S620)
 
 **Only ONE table in this schema maintains `updated_at` by trigger: `pos_reservations`
@@ -123,7 +144,8 @@ Migrated from the root `CLAUDE.md` (S663).
 - Admin operations that need the service role key go through the Supabase Edge Function `admin-user-ops` (deployed at `supabase/functions/admin-user-ops/`). Never put `SUPABASE_SERVICE_ROLE_KEY` in the frontend bundle.
 - Real Web Push (Roster publish + shift-swap notifications) is sent from the Edge Function `hr-push` (`supabase/functions/hr-push/`) — the only place holding the VAPID private key (`VAPID_PRIVATE_KEY` secret; the public half is `REACT_APP_VAPID_PUBLIC_KEY`, safe to expose). `src/utils/webPush.js` handles the frontend subscribe flow, including the iOS Safari quirk where the Push API is only available to a page added to the Home Screen, never a regular tab.
 - `hr-selfservice-login` (`supabase/functions/hr-selfservice-login/`, added S464) completes HR Self-Service PIN login server-side: takes `{ staff_id, pin }`, resolves the real email with the service role, calls `signInWithPassword` itself, and returns only the resulting session tokens — added specifically so the browser never has to hold or transmit the account's actual email during login. `SelfServiceLogin.jsx` calls it via `supabase.functions.invoke(...)` and then `supabase.auth.setSession({access_token, refresh_token})` on success, since `signInWithPassword` used to do that step implicitly and now the real auth call happens off-browser.
-- **Staff accounts are same-client at the RLS level** — POS PIN staff (`pos_email IS NOT NULL`), IMS staff (`ims_role IS NOT NULL`), HR staff (`hr_role IS NOT NULL`), and HR self-service accounts (`hr_self_service = true`) all share `role='client'` + `client_id` with the owner, so the standard admin-or-same-client policy alone gives any of them owner-level data access. S316 (`20260708130000_staff_account_business_table_isolation.sql`) fenced off POS/self-service with **RESTRICTIVE** `no_self_service_accounts` / `no_pos_pin_staff` policies per table; S419 added `no_ims_staff` for IMS staff; S430 added `no_hr_role_staff` for HR staff (helpers: `is_hr_self_service()`, `is_pos_pin_staff()`, `is_ims_staff()`, `is_hr_role_staff()`). **When creating a new business table, add it to every matching restrictive-policy list** — a new table doesn't inherit the exclusions, and a bare same-client policy re-opens the hole for whichever staff-account type's JWT touches it.
+- `ims-staff-login` (`supabase/functions/ims-staff-login/`, added S737) is the stock-count tablet's equivalent — `{ client_id, device_secret, staff_id, pin }`, the device gate first, then the lockout, then the derived password, returning only session tokens. `verify_jwt = false` for the same reason: it runs before there is a session. Its device secret is `client_secrets.ims_device_secret`, which a tablet obtains only by redeeming a short-lived enrolment token off the QR a manager shows in Stock Count → Settings — never by pressing a button on the device, which a store-room tablet has no manager session to press.
+- **Staff accounts are same-client at the RLS level** — POS PIN staff (`pos_email IS NOT NULL`), IMS staff (`ims_role IS NOT NULL`, whether they sign in with a password or an S737 count PIN), HR staff (`hr_role IS NOT NULL`), and HR self-service accounts (`hr_self_service = true`) all share `role='client'` + `client_id` with the owner, so the standard admin-or-same-client policy alone gives any of them owner-level data access. S316 (`20260708130000_staff_account_business_table_isolation.sql`) fenced off POS/self-service with **RESTRICTIVE** `no_self_service_accounts` / `no_pos_pin_staff` policies per table; S419 added `no_ims_staff` for IMS staff; S430 added `no_hr_role_staff` for HR staff (helpers: `is_hr_self_service()`, `is_pos_pin_staff()`, `is_ims_staff()`, `is_hr_role_staff()`). **When creating a new business table, add it to every matching restrictive-policy list** — a new table doesn't inherit the exclusions, and a bare same-client policy re-opens the hole for whichever staff-account type's JWT touches it.
 
 ## A purchase bill saves through `save_purchase_bill`, and a paid bill cannot be deleted (S698)
 

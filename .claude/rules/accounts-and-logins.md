@@ -8,6 +8,7 @@ paths:
   - "src/modules/hr/selfservice/**"
   - "src/modules/pos/staff/**"
   - "src/modules/ims/staff/**"
+  - "src/modules/ims/count/**"
 ---
 
 # Who logs in where, and how an Owner account comes to exist
@@ -17,15 +18,21 @@ paths:
 
 ### Who logs in where, and how an Owner account comes to exist
 
-Asked directly (S554) and answerable only by reading three files, so it belongs here. **There are three front doors, and a client owner uses exactly one of them.**
+Asked directly (S554) and answerable only by reading three files, so it belongs here. **There are four front doors, and a client owner uses exactly one of them.**
 
 | Door | Route | Credential | Who |
 | --- | --- | --- | --- |
 | Main | `/login` | email + password | Owner, **IMS staff, HR staff**, Crest admin |
 | POS | `/pos/login` | 4–6 digit PIN on a device-bound picker | POS till staff |
 | Self-Service | `/hr/self-service` | 4–6 digit PIN | Employees checking payslips/leave/roster |
+| Stock count | `/ims/count` | 4–6 digit PIN on a QR-enrolled device | IMS count staff (S737) |
 
-IMS and HR staff share the owner's front door and are separated by role, not by entrance — which is what IMS Staff's own subtitle ("Staff log in with their email and password, same as you do") means. Only POS and Self-Service have their own PIN entrances, and **an owner never uses a PIN.**
+IMS and HR staff share the owner's front door and are separated by role, not by entrance — which is what IMS Staff's own subtitle ("Staff log in with their email and password, same as you do") means. **An owner never uses a PIN.**
+
+**IMS is now the one module with TWO doors, and which one an account uses is a property of the ROW, not of the module.** An IMS staff account created with an email and password signs in at `/login`; one created from IMS Staff → Count PIN carries `profiles.ims_email` (synthetic, never returned to the browser) and signs in at `/ims/count`. Both hold `ims_role`, so `is_ims_staff()` and every RESTRICTIVE policy treat them identically — the difference is only the credential and the reach. Two consequences worth knowing before touching that screen:
+
+- **A count account is count-only**, and the guard is in `ProtectedRoute`, not `ModuleGate` — `/dashboard` carries no `ModuleGate` and is exactly where a fresh sign-in lands. The predicate is `imsCountOnly` in `AuthContext` (keyed on the raw `ims_email` COLUMN, never the resolved rank, since admin and Owner resolve to `'manager'` on every axis) plus `shared/imsCountAccess.js`, read by the guard, the sidebar and the command palette alike — the `posTeamAccess.js` shape.
+- **Its rank is fixed at `'staff'` server-side.** A supervisor or manager count PIN would be a rank that unlocks pages the account cannot reach, so `create_ims_pin_staff` sets it and IMS Staff hides the role picker in that mode. `get_ims_staff_list` returns `has_pin` so the row offers Reset PIN or Reset Password against the right credential, and returns NULL rather than the synthetic address for a PIN account — nobody types it, and it is half a credential.
 
 An Owner account is created by one of two paths, and they produce a byte-identical profile: `register_trial` (the public trial form on `/signup`, split out of `/login` in S689 — creates the `clients` row, the auth user and a `profiles` row of `role:'client'` + `client_id`, then signs them straight in), or Admin → Clients → Manage → Users, which calls the generic `createUser` action and upserts the same `{ id, client_id, full_name, role:'client' }` (`ClientDrawer.js`). Nothing anywhere writes an "owner" flag, because there isn't one.
 

@@ -8,6 +8,7 @@ paths:
   - "src/utils/weakPasswords.js"
   - "src/modules/pos/staff/**"
   - "src/modules/hr/selfservice/**"
+  - "src/modules/ims/count/**"
   - "supabase/functions/**"
 ---
 
@@ -46,12 +47,13 @@ Worth generalising: **a fix that removes a constraint does not go back and updat
 
 ### The PIN vault: staff PINs are recoverable by the platform admin, on purpose (S539)
 
-`staff_pin_vault` (`20260812110000`) stores every POS / HR Self-Service PIN encrypted with AES-GCM under `app_secrets.pin_vault_key`, admin-only at the RLS level. **Its primary purpose is disaster recovery, not lookup**: with plaintext PINs recoverable, a lost or rotated pepper becomes `admin-user-ops`' `rederive_pin_passwords` action (walk the vault, re-derive, `updateUserById` each) instead of a mass manual reset. That is the *only* reason the pepper is now rotatable.
+`staff_pin_vault` (`20260812110000`) stores every POS / HR Self-Service / IMS count PIN encrypted with AES-GCM under `app_secrets.pin_vault_key`, admin-only at the RLS level. **Its primary purpose is disaster recovery, not lookup**: with plaintext PINs recoverable, a lost or rotated pepper becomes `admin-user-ops`' `rederive_pin_passwords` action (walk the vault, re-derive, `updateUserById` each) instead of a mass manual reset. That is the *only* reason the pepper is now rotatable.
 
 **This is a deliberate weakening and should be described as one.** PINs stop being one-way; a compromised admin session now yields every staff PIN where before it yielded only the ability to reset them. Accepted because these are employer-assigned 4–6 digit till codes the assigning manager already types themselves (`PosStaff.jsx` has always been a plain input, never a generator), mitigated by admin-only RLS, AES-GCM at rest under a separate key, and an `audit_logs` row per reveal that records who looked at which account and never the PIN itself. **Scope is PINs only** — `create_ims_staff`/`create_hr_staff` passwords are user-chosen, 8+ chars and very likely reused elsewhere, so they stay one-way and must never be added to this vault.
 
 Three things worth knowing before touching it:
 
+- **A new PIN KIND is four lists, and three of them fail silently (S737).** `ims_count` was the third, and adding a fourth means: the `kind` CHECK on `staff_pin_vault`; `rederive_pin_passwords`' salt lookup — a wrong salt mints a password no login can ever reproduce, so it is a `SALT_COLUMN` map now and an unknown kind FAILS rather than defaulting to the other branch of a ternary; `restore_staff_accounts`' branch **together with** the account's email column in `exportClientData.js`'s roster select, since a kind present in one and not the other reports a fully restorable account as unrecoverable; and `log_audit()`'s `profiles` noise-skip array, or every wrong PIN writes a zero-content row into `audit_logs`. Only the first of those four raises anything.
 - **Vault writes are best-effort and must stay that way.** `vaultPin()` in `admin-user-ops` logs and continues on failure. The account is fully valid without a vault row — the PIN works, login works, only admin recovery is unavailable — so failing a staff creation over a vault error would trade a recovery convenience for an outage on a live restaurant floor.
 - **The login functions' legacy-PIN branch is the only place a pre-existing account's plaintext PIN is ever observable**, so it doubles as the backfill: it writes the vault row alongside the password upgrade. Accounts that never sign in and are never reset simply stay unrecoverable, which `rederive_pin_passwords` reports (`unrecoverable` count) rather than hides.
 - **Viewing is platform-admin only** (`view_staff_pin` gates on `isCallerAdmin`), surfaced in Admin → Clients → Staff PINs, deliberately *not* on `PosStaff.jsx` where Owners and POS managers would see it. A forgotten PIN is still the Owner's one-click Reset PIN. Widening the gate is one line, but it exposes every PIN to every client login.

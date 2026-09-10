@@ -23,10 +23,10 @@ Eight days later the rules corpus had grown ~70% and `DESIGN.md` ~39%, which is 
 corpus is where the growth goes.** That is the intended direction, and it is also what makes T13's
 per-file audit worth repeating rather than treating as done.
 
-- **`CLAUDE.md`** (52,841 chars, hard ceiling 53,000 — see T11) — stack, access control and the
+- **`CLAUDE.md`** (52,854 chars, hard ceiling 53,000 — see T11) — stack, access control and the
   three gate types, tier thesis, multi-outlet, subscription access, the four S531 privilege
   invariants, multi-tenant isolation and `scopedDb`, staff role axes, BS calendar rules,
-  page-splitting, Supabase/DB traps. **Running at 159 chars of headroom**, so the next section
+  page-splitting, Supabase/DB traps. **Running at 146 chars of headroom**, so the next section
   added here has to pay for itself out of an existing one.
 - **`.claude/rules/*.md`** (27 files, ~759k chars) — everything scoped by `paths:`, loaded only when
   a matching file is open. Up ~50k in the ten days since the previous line was written, all of it
