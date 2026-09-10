@@ -331,9 +331,37 @@ export default function VendorReport() {
       const total = billEntries.reduce((s, p) => s + p.qty * p.rate, 0)
       const disc  = Math.max(0, ...billEntries.map(p => parseFloat(p.discount_amount) || 0))
       const billReturns = billEntries.flatMap(p => ix.retByEntry.get(p.id) || [])
-      const returnedAmt = billReturns.reduce((s, r) => s + r.qty * r.rate, 0)
-      const net = total - disc - returnedAmt
-      const paymentMethod = e.payment_method || 'Cash'
+      // The SAME two lookups the summary row uses, so the modal and the row that opened it cannot
+      // disagree. This block was the one part of the page left on the pre-S725 basis — list-rate
+      // returns against a raw `total - disc`, which meant fixing the summary WIDENED the gap
+      // rather than closing it: one click apart, two Net figures for one bill.
+      const returnedAmt = billReturns.reduce((s, r) => s + ix.retValueOf(r), 0)
+      const net = billEntries.reduce((s, p) => s + ix.lineNetOf(p), 0) - returnedAmt
+      const paymentMethod = methodOf(e)
+
+      // What the vendor actually invoiced, which is the only thing `payable_payments.amount` can
+      // honestly be measured against. Outstanding Payables — the sole WRITER of those rows — nets
+      // returns off each line at list rate and then runs `calcBillTotals`, so the discount and the
+      // 13% VAT land on the returns-netted base. Replicated exactly here rather than approximated,
+      // because a settlement check that disagrees with the page doing the settling is worse than
+      // no check.
+      //
+      // It used to compare `paid` against `total`: ex-VAT, pre-discount and pre-return. A 10,000
+      // bill with a 1,000 discount, paid in full at 9,000, therefore read **Partial — NPR 1,000
+      // outstanding** on a bill that was settled.
+      const returnedByEntry = {}
+      billReturns.forEach(r => {
+        returnedByEntry[r.purchase_entry_id] =
+          (returnedByEntry[r.purchase_entry_id] || 0) + (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+      })
+      const owed = calcBillTotals(
+        billEntries.map(p => ({
+          qty: 1,
+          rate: Math.max(0, (parseFloat(p.qty) || 0) * (parseFloat(p.rate) || 0) - (returnedByEntry[p.id] || 0)),
+          vat_inclusive: p.vat_inclusive,
+        })),
+        disc
+      ).grandTotal
 
       let status, remaining = 0
       if (paymentMethod !== 'Credit') {
@@ -341,8 +369,12 @@ export default function VendorReport() {
       } else {
         const paid = billEntries.reduce((s, p) =>
           s + (paymentsMap[p.id] || []).reduce((s2, pm) => s2 + parseFloat(pm.amount), 0), 0)
-        remaining = Math.max(0, total - paid)
-        if (remaining <= EPS) status = { label: 'Paid', color: 'var(--theme-green-text)' }
+        // No Math.max(0, …) — S723. A return against an already-settled bill makes the vendor owe
+        // US, and clamping that to zero deletes the state rather than reporting it. Outstanding
+        // Payables dropped the same clamp for the same reason and surfaces it as a Credit.
+        remaining = Math.round((owed - paid) * 100) / 100
+        if (remaining < -EPS) status = { label: 'Credit', color: 'var(--theme-purple-text)' }
+        else if (remaining <= EPS) status = { label: 'Paid', color: 'var(--theme-green-text)' }
         else if (paid > EPS) status = { label: 'Partial', color: 'var(--theme-purple-text)' }
         else if (selectedPeriod) {
           const adDate = bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, e.bs_day || 1)
@@ -358,7 +390,7 @@ export default function VendorReport() {
       bills.push({
         key: gid, vendor_id: e.vendor_id, vendorName: e.vendors?.name || 'Unassigned',
         day: e.bs_day, invoice: e.invoice_ref, itemCount: billEntries.length,
-        total, discount: disc, returned: returnedAmt, net, paymentMethod, status, remaining,
+        total, discount: disc, returned: returnedAmt, net, owed, paymentMethod, status, remaining,
         entries: billEntries, billReturns, payments,
       })
     })
@@ -1024,7 +1056,8 @@ export default function VendorReport() {
                       <th style={{ textAlign: 'right' }}>Bill Total</th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>Discount</th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returns</th>
-                      <th style={{ textAlign: 'right' }}>Net</th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Ex-VAT, after discount and returns — the same basis as the Net Spend column on the vendor row that opened this." width={250}>Net</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="What the vendor actually invoiced: returns netted off, bill discount applied, 13% VAT on the taxable part. This is the figure payments are measured against, and it is what Outstanding Payables shows for the same bill." width={280}>Payable</Tip></th>
                       <th>Status</th>
                       <th></th>
                     </tr>
@@ -1047,6 +1080,14 @@ export default function VendorReport() {
                             <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{b.discount > 0 ? `−NPR ${b.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{b.returned > 0 ? `−NPR ${b.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {b.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
+                              NPR {b.owed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                              {b.paymentMethod === 'Credit' && Math.abs(b.remaining) > EPS && (
+                                <div style={{ fontSize: 11, color: b.remaining < 0 ? 'var(--theme-purple-text)' : 'var(--theme-red-text)' }}>
+                                  {b.remaining < 0 ? 'credit ' : 'due '}NPR {Math.abs(b.remaining).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                </div>
+                              )}
+                            </td>
                             <td>
                               <span style={{ fontSize: 11, fontWeight: 700, color: b.status.color, background: `color-mix(in srgb, ${b.status.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.status.color} 40%, transparent)`, borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.status.label}</span>
                             </td>
@@ -1064,7 +1105,10 @@ export default function VendorReport() {
 
                           {isExpanded && (
                             <tr>
-                              <td colSpan={9} style={{ padding: 0, background: 'var(--theme-bg)' }}>
+                              {/* 11 columns now (Payable added S727). It was colSpan={9} against
+                                  10, so the detail panel had always left the last column outside
+                                  it — the row it belongs to did not span its own table. */}
+                              <td id={`vendor-bill-detail-${b.key}`} colSpan={11} style={{ padding: 0, background: 'var(--theme-bg)' }}>
                                 <div style={{ padding: '16px 20px' }}>
                                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Items in this bill ({b.entries.length})</div>
                                   <table style={{ borderCollapse: 'collapse', fontSize: 13, width: '100%', maxWidth: 620, marginBottom: b.payments.length > 0 || b.billReturns.length > 0 ? 20 : 0 }}>

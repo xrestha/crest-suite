@@ -55,6 +55,39 @@ export function allocateBillDiscounts(purchases) {
   return out
 }
 
+/**
+ * entry id -> lineNet / lineGross: the fraction of list price that survived the bill's discount.
+ *
+ * Lives HERE, beside `allocateBillDiscounts`, because it is derived from that function's own
+ * output and nothing else. It sat in `purchaseTaxSplit.js` until S727, which made it unreachable
+ * from this file — `purchaseTaxSplit` imports `allocateBillDiscounts` from here, so importing back
+ * the other way is a cycle. `purchaseTaxSplit` re-exports both, so its own callers are unchanged.
+ */
+export function netFactors(allocated) {
+  const f = new Map()
+  for (const p of allocated) f.set(p.id, p.lineGross > 0 ? p.lineNet / p.lineGross : 1)
+  return f
+}
+
+/**
+ * The value of a returned line, net of the discount its original purchase carried.
+ *
+ * `vendor_returns.rate` stores the linked line's LIST rate, which is pre-discount, while the base
+ * it is subtracted from is post-discount — so a fully returned discounted bill goes NEGATIVE by
+ * exactly the discount unless the return is scaled the same way.
+ *
+ * It falls back to the list rate rather than dropping the row: a return nobody can price is still
+ * a return. **That fallback is why the caller's SELECT matters** — a query that omits
+ * `purchase_entry_id` (on the return) or `id` (on the purchase) produces a factor map that misses
+ * every row, and this function then silently returns the list rate for all of them. The failure is
+ * a no-op, not an error. See `supplierAttribution.test.js`.
+ */
+export function returnBase(r, factors) {
+  const gross = (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+  const f = factors.get(r.purchase_entry_id)
+  return gross * (f === undefined ? 1 : f)
+}
+
 // → { [item_id]: { total, byVendor: { [vendor_id]: net } } }
 // Values are the true net and may be negative (a return larger than the period's purchases);
 // that is preserved here so the displayed column ties to Vendor Report, and clamped only where a
@@ -62,7 +95,9 @@ export function allocateBillDiscounts(purchases) {
 export function vendorNetByItem(purchases, returns) {
   const byItem = {}
   const ensure = itemId => byItem[itemId] = byItem[itemId] || { total: 0, byVendor: {} }
-  for (const p of allocateBillDiscounts(purchases)) {
+  const allocated = allocateBillDiscounts(purchases)
+  const factors = netFactors(allocated)
+  for (const p of allocated) {
     if (!p.item_id) continue
     const b = ensure(p.item_id)
     const vid = p.vendor_id || NO_VENDOR
@@ -73,7 +108,18 @@ export function vendorNetByItem(purchases, returns) {
     if (!r.item_id) continue
     const b = ensure(r.item_id)
     const vid = r.vendor_id || NO_VENDOR
-    const amt = (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+    // `returnBase`, not a raw `qty * rate`. The purchase side above is NET of the bill discount
+    // and `vendor_returns.rate` is the LIST rate, so subtracting the list value from a discounted
+    // base drives a fully-returned discounted bill negative by exactly the discount — the S722
+    // defect, which was fixed on the VAT reports and on Vendor Report (S725) and left standing
+    // here. That is what made this file's own header claim ("the vendor totals still sum to
+    // Vendor Report's figure") false: S725 moved Vendor Report onto the discounted basis and this
+    // page stayed on the list basis, so the two disagreed by the discount on the returned part.
+    //
+    // It is worse than a mismatched column. A negative net drops the vendor out of `vendorShares`
+    // (positive parts only), so the item's whole consumed value can fall into "Not attributed" —
+    // the RANKING moves, not just the Net Purchases cell.
+    const amt = returnBase(r, factors)
     b.byVendor[vid] = (b.byVendor[vid] || 0) - amt
     b.total -= amt
   }

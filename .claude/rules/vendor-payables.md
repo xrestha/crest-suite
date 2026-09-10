@@ -10,6 +10,61 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
+### Fixing one side of a two-sided invariant is how you break it (S727)
+
+S725 moved `VendorReport`'s returns onto the discounted basis (`returnBase`, the S722 rule) and
+left `supplierAttribution.js`'s `vendorNetByItem` on the list rate. The two pages' Net Spend /
+Net Purchases then silently stopped agreeing — on a figure **three places still asserted was the
+same one**: `supplierAttribution.js`'s own header comment, the column tooltip on
+`SupplierContribution.js`, and the S580 section of this file.
+
+```text
+bill 10,000 gross · 1,000 discount · fully returned
+  Vendor Report       9,000 − 9,000  =      0
+  Supplier Contrib.   9,000 − 10,000 = −1,000
+```
+
+And it is not confined to one column: `vendorShares` takes **positive parts only**, so a negative
+net drops that vendor out of the split and the item's whole consumed value falls into
+**Not attributed**. The ranking moves, not the cell.
+
+**Before applying a rule to one page, grep for the other pages that assert they agree with it.**
+The S580 tie-out is stated in prose in three files and enforced nowhere, which is what let a
+careful single-page fix break it. It is now pinned in `supplierAttribution.test.js`.
+
+**The correction would have been a silent no-op without widening two SELECTs.** `netFactors` keys
+on the purchase row's `id`; `returnBase` looks up `purchase_entry_id` on the return. Supplier
+Contribution selected neither, and `returnBase` **falls back to the list rate** rather than
+dropping the row — deliberately, since a return nobody can price is still a return. So the wrong
+answer and the un-fixed answer are byte-identical, with no error anywhere. **A helper whose
+fallback is "behave as before" needs its join keys asserted by a test, not by a reviewer** — the
+tests were verified to fail against the pre-fix arithmetic before being kept.
+
+`netFactors`/`returnBase` now live in `supplierAttribution.js` beside `allocateBillDiscounts`,
+which is the only thing they are derived from; `purchaseTaxSplit.js` imports that file, so it could
+not have been the other way round without a cycle, and it re-exports both.
+
+### A drilldown is a page that nobody re-reads (S727)
+
+`VendorReport`'s `allBills` was the one block S725 never opened, so it kept the pre-S725
+arithmetic — raw `qty × rate`, list-rate returns — while every figure around it moved. **Repairing
+the summary therefore WIDENED the divergence**: the modal now contradicted the row that opened it.
+
+Worse, `remaining = Math.max(0, total − paid)` measured `payable_payments.amount` — which
+Outstanding Payables writes **VAT-inclusive, discount-net and return-net** — against an ex-VAT,
+pre-discount, pre-return total. A 10,000 bill with a 1,000 discount, paid in full, read
+**`Partial — NPR 1,000 outstanding`**.
+
+**Settle against the basis used by whatever WRITES the payment rows, and replicate it rather than
+approximating it.** Outstanding Payables nets returns per line at list rate and then runs
+`calcBillTotals`, so the discount and the VAT land on the returns-netted base; the drilldown now
+does exactly that. The `Math.max(0, …)` is gone for S723's reason — a credit is money — so an
+over-returned bill reads **Credit**.
+
+**And show the number the badge is judged against.** A `Partial` chip beside a Net column it was
+not computed from is unfalsifiable; the reader cannot tell a real balance from a phantom one. The
+drilldown carries a **Payable** column now.
+
 ### A page can disagree with itself, and a TAB is where it hides (S725)
 
 S723's rule above is a tab filter deciding which ROWS a record is valued from. This is the next one

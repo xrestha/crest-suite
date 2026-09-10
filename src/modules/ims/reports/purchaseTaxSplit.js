@@ -27,31 +27,15 @@
 // discounted bill therefore drove the taxable base NEGATIVE by the discount — a negative input VAT
 // claim on a statutory report. Every return here is scaled by its own line's net factor, so a full
 // return nets to exactly zero.
-import { allocateBillDiscounts } from './supplierAttribution'
+import { allocateBillDiscounts, netFactors, returnBase } from './supplierAttribution'
 import { calcBillTotals, billKeyOf } from '../purchases/purchasesHelpers'
 
 export const VAT_RATE = 0.13
 
-/** entry id -> lineNet / lineGross: the fraction of list price that survived the bill's discount. */
-export function netFactors(allocated) {
-  const f = new Map()
-  for (const p of allocated) f.set(p.id, p.lineGross > 0 ? p.lineNet / p.lineGross : 1)
-  return f
-}
-
-/**
- * The value of a returned line, net of the discount its original purchase carried.
- *
- * Returns are always recorded against a purchase in the SAME period (ReturnsTab only offers that
- * period's purchases, and saving without one is refused), so the lookup effectively always hits.
- * It falls back to the list rate rather than dropping the row: a return nobody can price is still
- * a return, and silently omitting one is the failure mode this whole file exists to stop.
- */
-export function returnBase(r, factors) {
-  const gross = (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
-  const f = factors.get(r.purchase_entry_id)
-  return gross * (f === undefined ? 1 : f)
-}
+// `netFactors` and `returnBase` moved to supplierAttribution.js in S727, beside the
+// `allocateBillDiscounts` they are derived from — that file needed them and could not import them
+// from here without a cycle. Re-exported so every existing caller of this module is unchanged.
+export { netFactors, returnBase }
 
 /** Whether the return's original purchase line carried VAT. `vendor_returns` has no column of its
  *  own for this — it is only ever knowable through the join to `purchase_entries`. */

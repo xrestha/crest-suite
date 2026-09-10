@@ -116,10 +116,14 @@ export default function SupplierContribution() {
       // raw supabase.from() — scopedDb deliberately rejects them.
       fetchAllRows(() => supabase.from('sales_entries')
         .select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
+      // `id` and `purchase_entry_id` are the join keys `returnBase` prices a return through, and
+      // omitting either is a SILENT no-op rather than an error: `netFactors` keys on the purchase
+      // row's `id`, so without it every factor lookup misses and every return falls back to its
+      // list rate — which is precisely the defect being fixed. Neither column is rendered.
       fetchAllRows(() => supabase.from('purchase_entries')
-        .select('item_id, vendor_id, qty, rate, bs_day, invoice_ref, discount_amount, purchase_group_id')
+        .select('id, item_id, vendor_id, qty, rate, bs_day, invoice_ref, discount_amount, purchase_group_id')
         .eq('period_id', periodId).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, vendor_id, qty, rate')
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, vendor_id, qty, rate, purchase_entry_id')
         .eq('period_id', periodId).order('id')),
       // is_active only: valuing stock off an inactive item is the S436 rule, and per_uom_rate is
       // what every other IMS valuation uses (it is rate ÷ purchase_qty, generated in the DB).
