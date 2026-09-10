@@ -419,6 +419,12 @@ denominator shared with a numerator the defect cannot touch is never display-onl
 rows as well as the named ones. Check `NOT NULL` before filtering negatively in SQL, or filter
 positively (`.in(...)`) and let the NULLs fall where you decide.
 
+**`purchase_entries.payment_method` is the third (S723)**, on Vendor Balance Confirmation's cash-bill
+read — the column every screen renders through `|| 'Cash'`, so a bill written before it existed was
+in NEITHER the Credit read nor the not-Credit one and dropped out of a statutory letter's Purchases
+total. Detail in `vendor-payables.md`, which already carried the display-fallback half of that rule
+(S650's `methodOf`) and was not loaded by the file that broke it.
+
 ## `recipes.category` is the second column with that shape, on ten reads (S714)
 
 `category text` — nullable, **no default** — and `.neq('category', 'Sub-Recipe')` is how nine pages

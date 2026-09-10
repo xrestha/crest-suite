@@ -10,6 +10,114 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
+### A tab filter is not a valuation boundary (S723)
+
+The S722 rule below is a report reading half a bill because its QUERY narrowed the rows. This is the
+same defect produced by a UI affordance instead, and it is worth stating separately because nothing
+about the query looks like scoping — it looks like a tab.
+
+Outstanding Payables' two tabs are `.is('paid_at', null)` and its complement. **`paid_at` is stamped
+PER LINE**, and `allocatePayment` settles a bill's lines oldest-first, so a PARTIAL payment on a
+multi-line bill stamps some lines and not others and the tab filter then hands each tab half a bill.
+The page valued whatever arrived, and `calcBillTotals` is **not linear in the bill-level discount**:
+
+```text
+2-line VAT-inclusive bill, 1,000 + 1,000, bill discount 200  →  true total 2,034.00
+pay 1,017.00                                                 →  the older line settles
+Outstanding then shows   Bill Total 904.00   Remaining 904.00   Paid —   (no payment history)
+Paid History shows the same bill, at 904.00, as settled
+```
+
+113 short of what is owed, the recorded payment invisible on the bill it belongs to, and one bill
+present on both tabs at once. Without a discount the arithmetic is linear and only the *display* is
+wrong, which is why this survived: the failure needs a bill discount to become a wrong number.
+
+**A tab, a filter or a search may decide which RECORDS are shown; it must never decide which rows a
+record is computed from.** The fix is to let the filter select the bills and then complete each one
+(`.in('purchase_group_id', …)`, chunked) before valuing it. Two properties are load-bearing: tab
+membership is a property of the whole bill (outstanding while ANY line is unsettled), and it is
+keyed on `paid_at` rather than on `remaining > 0`, because a bill settled before `payable_payments`
+existed carries the stamp and no payment rows — a remaining-based test drags every one of those back
+into Outstanding as a full balance owed.
+
+The tell is a page whose query carries a WHERE clause on a per-line column and whose arithmetic is
+per-bill. Grep for a `.eq`/`.is`/`.not` on `paid_at`, `vat_inclusive`, `source` or `status` sitting
+above a `calcBillTotals`, an `allocateBillDiscounts` or any `Object.values(byBill)` regroup.
+
+### A paged read whose follow-up reads are bare has not been paged (S723)
+
+Outstanding Payables' bills read is `fetchAllRows`-wrapped under a comment calling it *"the single
+most likely place in the app to cross PostgREST's silent 1000-row cap"*. The two reads that hang off
+its id list — `payable_payments` and `vendor_returns` — were bare `.in('purchase_entry_id', ids)`.
+Same shape on Vendor Balance Confirmation, whose own comment says a truncated read *"would
+understate the balance on a document sent to the vendor for signature"*, four lines above two
+unpaged reads.
+
+**`payable_payments` is one row per LINE per settlement, so it grows FASTER than the bills it hangs
+off** — a client settling 50 eight-line bills a month writes 400 payment rows a month. Truncate it
+and paid bills render as unpaid and Total Remaining inflates; truncate `vendor_returns` and every
+returned bill overstates what is owed. Neither returns an error, so no guard on either page fires.
+The id list is also a URL: on Paid History it is every settled credit line the client has ever
+recorded, on the letter every credit line ever billed to that vendor (S629). `fetchAllRowsChunked`
+answers both halves.
+
+This is S706/S708's producer-and-consumer rule pointing the other way — there the consumer was paged
+and the producer was not; here the seed read was paged and everything downstream of it was not.
+**Ask what else is read FROM the ids a paged read produces**, and remember that a child table's
+cardinality is the parent's multiplied by something.
+
+### A credit is money, and clamping it to zero is not neutral (S723)
+
+`Math.max(0, value − paid)` reads as defensive and is a decision: it deletes the state where the
+VENDOR owes US. That state is ordinary — goods returned against an already-settled bill — and
+`ReturnsTab` has no guard against creating it, nor should it, since that is exactly what a credit
+note is.
+
+It was clamped per line in Outstanding Payables and per bill in `computeOpeningBalance`, while the
+confirmation letter's FY schedule applies returns with **no clamp at all** — so one credit note
+appeared in the letter if it fell after Shrawan 1 and vanished if it fell before it, on the two
+halves of one document. Decision, Aashish 2026-09-10: show it. A bill in that state wears a
+**Credit** badge, Paid History totals them in a card rendered only when there is one, and the pay
+form is replaced by a sentence — Save on such a bill had been a button that did nothing silently,
+since `allocatePayment` skips every line at or under `EPS`.
+
+**Before writing a `Math.max(0, …)` around a money figure, name the state on the other side of the
+zero and say what happens to it.** If the answer is "it cannot happen", check whether any screen in
+the product can create it; if it is "it does not belong on this page", it still has to go somewhere.
+
+### `purchase_entries.payment_method` is the third nullable column a `.neq` has silently emptied (S723)
+
+After `sales_entries.source` (S699) and `recipes.category` (S714). Vendor Balance Confirmation read
+its cash bills with `.neq('payment_method', 'Credit')`, and the column is NULL on every bill written
+before it existed — `NULL <> 'Credit'` is NULL, not true, so those rows appeared in NEITHER read and
+a vendor's legacy cash purchases were simply absent from the FY's Purchases total on the letter.
+
+Two things make this one worth naming despite the rule already existing twice. **It is a column this
+file already documents as needing a fallback** — S650's `methodOf(p)` rule says a value displayed
+through `|| 'Cash'` must also be filtered, grouped and counted through it — and the `.neq` was
+written anyway, in a different module, by someone who would have found that rule only by loading
+this file. And **`groupRawBills` was passing the raw NULL through**, so the schedule's Particulars
+column rendered "Purchase (null)" for any legacy bill that did reach it; the fallback is resolved
+once at the grouping boundary now rather than at each of the four places downstream that compare or
+print it.
+
+### A headline that counts money the schedule below it does not show (S723)
+
+The confirmation letter's "Payments (FY)" box added every Cash/FonePay bill's net settlement, while
+those bills printed in the supporting schedule only as **purchases**. Arithmetically consistent —
+the purchase and the settlement cancel, so the letter's own sentence still reconciled — and useless
+to the reader it exists for: a vendor asked to verify the letter line by line finds a payments total
+the payment lines do not add up to. The Amount column's own total had the same problem from the
+other side, summing cash purchases that never touch the balance.
+
+A cash bill now emits its settlement as its own row (net of that bill's returns, moving the running
+balance by nothing), every payment total is read off the schedule rather than computed beside it,
+and the Amount column totals to exactly (Closing − Opening).
+
+**On a document someone else checks, "the total is correct" is not the standard — "the reader can
+derive the total from what is printed" is.** Same family as S594's Supplier Contribution finding: a
+footer that cannot be reconciled against the rows above it discredits the rows as much as itself.
+
 ### A bill is mixed, so a query cannot be the split (S722)
 
 **`vat_inclusive` is PER LINE and `discount_amount` is PER BILL.** `PurchaseBillForm` puts a VAT

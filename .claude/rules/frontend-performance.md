@@ -457,6 +457,16 @@ down the rows-per-what.** Neither had a comment either way. Same pass: the `.ord
 has to be added with the wrapper, since a `vendor_returns` read ordered only by `bs_day` repeats a
 row on one page and skips it on the next the moment it does page.
 
+**S723 found the direction nobody had swept: a PAGED read whose FOLLOW-UP reads are bare.** Both
+payables pages wrapped the read they were named after — under comments calling it the likeliest read
+in the app to cross the cap, and warning that truncation would understate a document sent to a
+vendor for signature — and then hung two bare `.in('purchase_entry_id', ids)` reads off its id list.
+`payable_payments` is one row per LINE per settlement, so it grows FASTER than the bills it hangs
+off: truncate it and paid bills render as unpaid and Total Remaining inflates. This is S706/S708's
+producer-and-consumer rule pointing backwards — there the consumer was paged and the producer was
+not. **Ask what else is read FROM the ids a paged read produces**, and price a child table at the
+parent's cardinality multiplied by something.
+
 **Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
 `persistSalesDay`'s legacy three-call fallback.
