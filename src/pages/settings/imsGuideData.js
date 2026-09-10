@@ -1095,13 +1095,15 @@ export const IMS_GUIDE_GROUPS = [
         fields: [],
         formulas: [
           'Revenue per recipe = Σ(qty × price), using each sale\'s own snapshotted unit_price where available rather than a single blended current price.',
-          'Margin% = (Revenue − COGS) ÷ Revenue × 100, using computeRecipeCosts() — the same recursive cost engine as Recipe Costing.',
+          'Margin% = (Revenue − COGS) ÷ Revenue × 100, using computeRecipeCosts() — the same recursive cost engine as Recipe Costing — falling back to the manual cost_price from Menu Pricing when a dish has no ingredients.',
+          'A dish with NEITHER costed ingredients nor a manual cost shows — for margin, is left out of the By Margin ranking and out of COGS/Gross Profit/Overall Margin, and is counted in a line under the summary. Before S724 it computed as 100% margin and sorted to the top of the chart and the table.',
         ],
         gotchas: [
-          'Comped sales (source=pos_comp) are excluded — comps never sold at menu price and would misleadingly inflate rank if included.',
-          'Recipes with zero sales this period never appear at all, even in "Bottom 10" — that list is the bottom of the sold list, not a list of unsold items. With very few active recipes, Top 10 and Bottom 10 can overlap.',
+          'Comped sales (source=pos_comp) are excluded — comps never sold at menu price and would misleadingly inflate rank if included. Credit-note reversals (pos_credit) ARE included, and land in the period the note was issued in, not the original bill\'s.',
+          'Recipes with zero sales this period never appear at all, even in "Bottom 10" — that list is the bottom of the sold list, not a list of unsold items. Since S724 the two lists no longer overlap: Bottom 10 starts where Top 10 ends, so with under 20 items sold it is shorter, and it shows each dish\'s real rank rather than 1-10.',
+          'The chart footer\'s average margin is a SIMPLE average of each dish\'s margin; the Summary strip\'s "Overall Margin" is revenue-weighted. They will not match, and both are correct — the weighted one is the business figure.',
         ],
-        connections: 'Shares computeRecipeCosts() with Recipe Margin and Menu Repricing — one cost engine, three views on it.',
+        connections: 'Shares computeRecipeCosts() and recipeCostOf() with Recipe Margin and Menu Repricing — one cost engine, three views on it.',
       },
       {
         id: 'recipe-margin',
@@ -1114,14 +1116,17 @@ export const IMS_GUIDE_GROUPS = [
         ],
         fields: [],
         formulas: [
-          'Margin/Portion = Selling Price − Cost. Total Contribution = Margin/Portion × Qty Sold (the headline number and default sort).',
+          'Margin/Portion = Selling Price − Cost, at TODAY\'s price — what one more sale earns right now.',
+          'Total Contribution = period revenue − (cost × qty sold), where revenue values each sale at the price actually charged on it (sales_entries.unit_price), less discounts. Since S724 it will NOT always equal Margin/Portion × Qty: a price change or a POS bill discount during the period is exactly that difference. Before S724 it used today\'s price for every historical row, so a closed period restated itself whenever a menu price was edited.',
           'Weighted Avg FC% (footer) = totalCost ÷ totalRevenue × 100 — a revenue-weighted average, not a simple average of each recipe\'s own FC%.',
         ],
         gotchas: [
           'Sorting defaults to Total Contribution, not Margin per Portion — a high-margin-but-rarely-sold dish won\'t rank at the top unless you explicitly re-sort by Margin/Portion. Both views answer genuinely different questions.',
           'Recipes with no selling_price set are excluded entirely, even in "all" mode.',
+          'A dish with no food cost (no costed ingredients and no manual cost from Menu Pricing) shows — for cost, contribution and FC%, sorts last, and is excluded from every total, with a line above the table saying how many. Before S724 it showed 0.0% FC in green and its full selling price as contribution, which was enough to win the Top Contributor card.',
+          'The table footer follows the category tab; the three KPI cards above are always the whole period. Before S724 the footer was the whole period too, sitting directly under a filtered table.',
         ],
-        connections: 'Shares computeRecipeCosts() with Best Sellers and Menu Repricing.',
+        connections: 'Shares computeRecipeCosts() and recipeCostOf() with Best Sellers and Menu Repricing.',
       },
       {
         id: 'combo-builder',
@@ -1134,13 +1139,18 @@ export const IMS_GUIDE_GROUPS = [
         ],
         fields: [],
         formulas: [
-          'Combo price = (anchor price + paired price) × (1 − discount%/100). Savings = combined − combo.',
+          'Suggested combo price = (anchor price + paired price) × (1 − discount%/100), then grossed up for VAT and rounded UP to the next NPR 5 — the number to print, matching Menu Repricing. Savings = combined − discounted, both ex-VAT.',
+          'Combo FC% = (anchor cost + paired cost) ÷ the discounted ex-VAT combo price, banded against Settings → Thresholds. Added S724: the page previously suggested a discount with no idea what either dish costs to make.',
+          'Bills Together = COUNT(DISTINCT bill) over PAID bills in the window. Before S724 it counted line pairs, so a bill where either item was partly comped counted twice — and voided and still-open bills counted at all.',
+          'Frequency = Bills Together ÷ the number of paid bills containing the anchor item. Before S724 the bar was drawn relative to the top pairing, so the first row was always a full bar by construction.',
         ],
         gotchas: [
           'Only items toggled On POS in Menu Pricing are eligible as anchors or pairing suggestions at all.',
           'This tool never writes anything back to the menu — the "Create as Menu Item" link only opens Menu Pricing; the bundle has to be created there manually.',
+          'It reads POS bills and nothing else, so a client without the Crest POS module can never get a row here no matter how long they wait. The page says so rather than blaming the sales history.',
+          'The window is measured on when the bill was CLOSED, in real (AD) days — not BS periods like every other IMS report.',
         ],
-        connections: 'Reads recipes.selling_price and POS-enabled flags from Menu Pricing.',
+        connections: 'Reads recipes.selling_price and POS-enabled flags from Menu Pricing; shares recipeCostOf()/fcBand() with the other menu-analysis reports. Data comes from get_cooccurrence() over pos_order_items/pos_orders.',
       },
       {
         id: 'menu-repricing',
@@ -1154,13 +1164,14 @@ export const IMS_GUIDE_GROUPS = [
         fields: [],
         formulas: [
           'Underpriced = current FC% > target_fc_pct (defaults to 30 if unset on the recipe).',
-          'Price Gap = max(0, target ex-VAT price − current price) — never negative; overpriced dishes show 0 and are excluded from "underpriced."',
-          'Monthly Opportunity = Price Gap × Qty Sold — the extra margin already left on the table this period.',
           'Suggested Menu Price = ceil((cost ÷ target FC%) × (1 + VAT rate) ÷ 5) × 5 — the ONE VAT-inclusive, retail-rounded number on an otherwise all-ex-VAT page.',
+          'Price Gap = max(0, that Suggested Menu Price taken back to ex-VAT − current price) — never negative; overpriced dishes show 0 and are excluded from "underpriced." Since S724 it is measured against the ROUNDED price actually suggested, so repricing to what the page says captures exactly the Monthly Opportunity shown.',
+          'Monthly Opportunity = Price Gap × Qty Sold — the extra margin already left on the table this period.',
         ],
         gotchas: [
           'Suggested Menu Price is VAT-inclusive while every other price/cost column here is ex-VAT — flag this explicitly when explaining the table to a client.',
           'target_fc_pct is per-recipe (set in Recipe Costing) and silently defaults to 30% if never set — may not reflect the client\'s actual target for that dish category.',
+          'A dish with no food cost cannot be compared against a target at all, so it is NOT underpriced and NOT fine — it appears with — in the cost, FC%, suggested-price and gap columns, and is counted on its own "Not Costed" KPI card. Before S724 it computed as 0% FC, was therefore never above target, and was silently absent from the list, the count and the Monthly Opportunity total — so an entirely uncosted menu showed the celebratory "No underpriced dishes" empty state.',
         ],
         connections: 'Shares computeRecipeCosts() and getSuggestedPrice() with Recipe Costing and Best Sellers/Recipe Margin. The "what to do about it" companion to Recipe Margin\'s "current state" view.',
       },

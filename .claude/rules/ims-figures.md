@@ -12,7 +12,6 @@ paths:
   # above matched real files, so nothing ever said the set was missing the module the rule is
   # most about. MenuPricing then shipped the zero-numerator banding bug documented below.
   - "src/modules/ims/recipes/**"
-  - "src/modules/ims/recipes/**"
   - "src/pages/Settings.js"
   - "src/modules/ownerReport/computeMenuEngineeringSection.js"
 ---
@@ -809,3 +808,184 @@ printed as **"0"** in five Dead Stock columns while its own Value at Risk stayed
 Both now format with `NPR_LOCALE` and `maximumFractionDigits: 3`, keeping the Nepali grouping.
 **Applying a rule past its subject is its own defect**, and this one was introduced by two sessions
 that were otherwise tightening the same family.
+
+## The menu-analysis reports re-analysed: a cost of zero is not a cost (S724)
+
+Best & Worst Sellers, Recipe Margin, Menu Repricing and Combo Builder — the four pages that answer
+what to promote, what to reprice and what to bundle. S713 fixed the zero-cost band on Menu Pricing
+and S714/S715 on Menu Engineering; this pass found it still standing on three of these four, plus
+the Dashboard's Menu Health tile, wearing a different mask on each.
+
+### `recipeCostOf()` exists because two lines of arithmetic were retyped at six sites
+
+`src/shared/imsFormulas.js`. Computed cost, else the manually entered `cost_price`, else **null**.
+Every site had written it by hand and each got a different amount of it right:
+
+| Site | Before |
+| --- | --- |
+| Menu Pricing | fallback present, absence collapsed to `0` |
+| Menu Repricing | fallback added S713, `|| 0` left underneath it |
+| Recipe Margin | no fallback, `parseFloat(costMap[r.id] || 0)` |
+| Best Sellers | no fallback, `costMap[r.id] || 0` |
+| Menu Engineering (live + frozen) | no fallback |
+| Dashboard Menu Health | no fallback, `recipeCostMap[r.id] || 0` |
+
+Two consequences, and they are different bugs from the same zero:
+
+**A dish costed by hand read as costed on the page that created it and free to make on the pages
+that rank it.** Menu Pricing's *+ Add Item* writes a recipe with no ingredients and a `cost_price`;
+three reports never selected that column.
+
+**A dish with no cost at all became the best thing on the menu.** `0 / 400` is a real `0` and
+`(revenue − 0) / revenue` is a real `100`, so the absence arrived at each page as the most
+flattering number it can print — `0.0% ✓` green Healthy on Recipe Margin, **100% gross margin** at
+the top of Best Sellers' By Margin sort and its chart, and the whole selling price as Contribution
+per Portion, which is enough to win Recipe Margin's **Top Contributor** card. `Recipes.js`'s own
+*+ New Recipe* manufactures exactly this state on every click.
+
+**S713's rule generalises past the band: a rate computed from a zero numerator is not a rate, and
+neither is a margin computed from a zero subtrahend.** Carry the absence as `null` from
+`recipeCostOf` to the cell; the first `|| 0` in between destroys it and no care downstream gets it
+back. `recipeCostOf.test.js` pins the function and reads all six sources for the two shapes that
+were live.
+
+Decided with Aashish (2026-09-10): the row **stays**, the figure is an em-dash carrying the reason,
+the row leaves the ranking and the totals, and each page carries a **count** of what it could not
+judge — a dash in one cell is not something a reader can total.
+
+### Menu Repricing's silence was the dangerous one
+
+`underpriced = currentFcPct > targetPct`, and an uncosted dish's `0` is never above target. So it
+was not merely mis-coloured: it was **absent** — from the list, from Monthly Opportunity, and from
+the Underpriced Dishes count — and with *Only underpriced* on by default, a menu nobody had costed
+rendered **"No underpriced dishes — every priced dish is at or below its target food cost. 🎉"**.
+That is the S612 shape on a page that already guards its load failures against it: the celebratory
+empty state is a claim about every priced dish, so it may only be made when every priced dish was
+testable. It now names how many could not be, and a fourth KPI card appears only when there is one.
+
+Untick the filter and the same dish printed **NPR 0, in green**, under a column captioned *the
+number to print on the menu*.
+
+### A suggested price and the opportunity of taking it must be the same number
+
+`priceGap` was `cost / target − price`; the Suggested Menu Price beside it is that figure grossed up
+for VAT and **rounded up to NPR 5**. So repricing to what the page told you to charge captured a
+different amount from the Monthly Opportunity it promised. The gap now de-VATs the rounded price —
+the one actually being suggested. The Dashboard's Menu Health tile carries the same arithmetic, so
+the tile and the report agree to the rupee.
+
+### The Menu Health tile read *healthier* the more uncosted dishes a client had
+
+It renders "N of M" — underpriced of costed-and-priced — and an uncosted dish landed in the
+**denominator** while being mathematically unable to reach the numerator. It also filtered
+`is_active === false` in JS while the report it mirrors used `.eq('is_active', true)`, and
+`recipes.is_active` is nullable (`DEFAULT true`, no `NOT NULL`) — so the tile and the page it links
+to were measured over different populations. **One NULL-safe form, not two dialects of it**: both
+test in JS now. Same trap as `category`, one column over.
+
+### Best Sellers: two averages, one count, and a Top 10 that was also the Bottom 10
+
+- The chart footer averaged `filteredRows` and printed the count of `rows`, so under a category
+  filter the number was the category's and the count was the whole menu's.
+- That footer's average is **unweighted** and the Summary strip's "Overall Margin" is
+  **revenue-weighted**. Both are legitimate and they disagree by design; neither said which it was.
+  They say so now, and the strip's three cost-derived figures cover only the costed dishes, with a
+  line underneath saying how many that is.
+- `bot10` was `[...sorted].reverse().slice(0, 10)` — the bottom of the whole list — so with 12
+  dishes sold, eight appeared in **both** panels, each simultaneously a Top 10 Performer and a
+  Bottom 10 Performer. The bottom list starts after the top one now, shows the dish's real rank
+  rather than 1..10, and says so when everything sold is already in the Top 10. The module guide
+  had recorded the overlap as a gotcha since the page was written; the page never had.
+- The Revenue tooltip said `qty sold × selling price`, which is neither what the code does nor what
+  migration `20260713065928` exists to make it do.
+
+### Recipe Margin was still pricing a closed period at today's menu price
+
+It never selected `unit_price`. That is the exact defect
+`20260713065928_sales_entries_price_at_sale.sql` was written to fix — its comment lists the reports
+it covered and Recipe Margin was not among them — so a closed period's contribution silently
+restated itself whenever anyone edited a price. It also made **every POS bill discount invisible**,
+because `writeSalesEntries` folds a bill-level discount into `unit_price` and never writes
+`sales_entries.discount`.
+
+Revenue is now built the way `Sales.js`'s `recipeRevenue()` builds it, and Total Contribution is
+`revenue − cogs` rather than `margin × qty`. Those two are no longer the same number, which is the
+point: **a price change or a bill discount during the period is exactly the difference between
+them**, and the tooltip says so. Contribution per Portion keeps meaning today's list-price margin.
+
+Its footer row also totalled the whole period directly under a category-filtered table. Every total
+follows the filter now; the KPI strip stays page-level and says so.
+
+### Combo Builder counted bills that never happened, and bills twice
+
+`get_cooccurrence` (migration `20260910120000`) had three faults, all inflating a pairing:
+
+- **`COUNT(*)` over a self-join counts ROW PAIRS.** Usually one bill has one row per recipe, because
+  `addItem` merges by `recipe_id` — except `apply_pos_item_comp`, which deliberately splits a
+  partially comped line into a second row with the same `order_id` and `recipe_id`. That bill
+  counted 2×, or 4× if both items were split. `COUNT(DISTINCT a.order_id)` is what the column
+  header, the tooltip and the module guide had all claimed since it shipped.
+- **No filter on the order.** `status = 'open'` bills still being built on a table, and
+  `close_type = 'void'` bills explicitly cancelled, both fed the ranking. `close_type = 'paid'` is
+  the house definition — `SalesReport` and `CoversReport` both scope that way, and a co-occurrence
+  report disagreeing with the revenue reports about which bills exist is a third opinion.
+- **The window was on `created_at`.** A bill belongs to the day it was billed.
+
+It also returns `anchor_bills` now, so Frequency means *the share of this dish's own bills* rather
+than *relative to the top pairing*, which made the top row a full bar by construction.
+
+**`get_cooccurrence` has TWO callers and the second is a till screen.** `PosOrders.jsx`'s
+suggestion engine re-ranks the *goes well with* panel from these counts, so all three faults were
+steering a live upsell prompt, not only a report. It reads `paired_recipe_id`/`co_count` by name,
+so the added column is inert there — check that again before altering either of those two.
+
+### And the page around it dropped every error it could
+
+Three reads and a write, none checked. `Promise.all(...).then(([{ data }, { data }]) => …)` with no
+`error` destructured and no `.catch()`, so a failed recipes read rendered **"No POS-enabled items
+yet — toggle items on in Menu Pricing first"**; the RPC — which `RAISE`s on an authorisation
+failure — rendered **"needs more bills with this item on them"**. Both are confident instructions to
+go and fix something that is not broken.
+
+`saveDiscountPct` was the only `settings` writer in `src/` with **neither** an error check nor an
+insert-if-missing branch: `.update(…).eq('client_id', …)` on a client with no settings row matches
+nothing and reports success. It follows `PosTableManagement`'s read-then-branch shape now, including
+its rule that a failed existing-row read must not fall through into INSERT (S613).
+
+### A Growth feature that cannot work without a module the client did not buy
+
+Combo Builder is sold in the Growth **IMS** list and reads only `pos_orders`/`pos_order_items`. An
+IMS-only client could pick an anchor and be told forever that it *needs more bills* — a sentence
+describing a fixable shortage when the real answer is that they have no till. Decided with Aashish
+(2026-09-10): keep the IMS gate, because removing it takes the feature off a plan people already
+bought; the page states what it needs instead of blaming the data.
+
+Same decision added a banded **Combo FC%** column. The page suggested a discount off two menu prices
+with no idea what either dish costs — a 25% bundle of two dishes already at 38% food cost prices the
+pair past 50% while the row says "Savings" in green. It is also the one page in this module that
+suggested a price and did not round it, and quoted it ex-VAT, so it was not what a guest would pay
+either; it now rounds up to NPR 5 VAT-inclusive like Menu Repricing's.
+
+### Smaller, from the same pass
+
+- **A blank category tab.** `['All', ...new Set(rows.map(r => r.category))]` with no
+  `.filter(Boolean)` on Recipe Margin and Menu Repricing — reachable only since S714 made
+  NULL-category recipes visible, which is the tell that a fix can create the next finding.
+- **A negative Monthly Opportunity was hidden by the table and summed by the KPI.** A Credit Note
+  posts `qty_sold: -qty` into TODAY's open period, so a period's net qty can go negative; the cell
+  read `> 0 ? … : '—'` while the card above it added the negative. Clamped at source.
+- **`.neq('source', 'pos_comp')` on all three reports.** They were among the ~12
+  `salesReads.test.js` left on the server-side form pending "its own answer to what its figure is
+  supposed to mean". The answer for all three is that the figure is a **rank**, or the multiplier on
+  one — Best Sellers orders the menu and the guide's advice for the bottom of that order is
+  *candidates for menu removal* — so a dropped legacy row does not shorten a column, it moves a
+  dish. All three joined the suite.
+- **`price` on Best Sellers was computed and rendered nowhere**, and Menu Repricing kept three
+  separate `fcBand` wrappers of the shape S713 took apart on Menu Pricing. Both gone.
+- **Both Excel exports wrote `0.0%` and `NPR 0` for an unknown figure.** Those sheets leave the
+  building and get priced against; blank is the only honest cell. Menu Repricing's gains a Status
+  column so *not costed* survives the export at all.
+- **`<a href="/menu-pricing">`** in Combo Builder, reloading the whole SPA. `<Link>`.
+- **No `useLatestRequest` on Combo Builder's pair load** — anchor and window are both one-click
+  controls, so overlapping loads were easy and the last response won regardless of the anchor
+  selected.
