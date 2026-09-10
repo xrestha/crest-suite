@@ -201,6 +201,16 @@ So the rule has a second half worth stating: **gating the stat-grid is not gatin
 element that reports a COUNT or a FIGURE needs the guard, including tab labels, filter-bar counts
 and footnotes. Grep the file for `stat-grid` *and* for count expressions in the filter bar.
 
+**And a third half: the EXPORT BUTTON is a figure-bearing control (S728).** `VendorReport`'s was
+`disabled={!!loadError}` with no `loading` in the gate, so it stayed live for the whole duration of
+the three reads — and the workbook is built from the stale `ix`/`vendorSummary` while `scopeLine`,
+the print title and the FILENAME all come from the already-updated `selectedPeriod`. That is one
+month's figures leaving the building inside another month's workbook, which is precisely what S601
+exists to prevent; the stale KPI strip beside it is transient and self-correcting, this is not.
+**Gate every export, print and share control on `loading` as well as on the error**, and check what
+the filename is derived from — a control that emits a FILE is the one place a stale render becomes
+permanent.
+
 **And `loading` only covers what the loader awaits (S721).** `StockMovements` fires its sub-recipe
 derivation as a deliberate fire-and-forget promise, so `loading` goes false without it — and the
 reconciliation note then compared the PREVIOUS period's derived value against the NEW period's

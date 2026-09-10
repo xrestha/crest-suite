@@ -10,6 +10,79 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
+### A tolerance in ABSOLUTE currency, on a PER-UNIT rate, is a percentage that moves (S728)
+
+Price Tracker's Stable band was `Math.abs(last - prev) < 0.01`. That reads like a rounding guard
+and is really a threshold of **`0.01 / prev`** — a continuum across the item book:
+
+| Item | Rate | Effective "stable" band |
+| --- | --- | --- |
+| A bottle | NPR 250 / BTL | 0.004% |
+| Cooking oil | NPR 0.3 / ML | 3.3% |
+| Sugar | NPR 0.115 / GM | 8.7% |
+| Rice by the sack | NPR 0.05 / GM | **20%** |
+
+So the page called a fifth of a price rise "Stable" on exactly the staples a kitchen buys most of,
+and the **↑ Rising Only** filter — the control an owner uses to find price creep — hid them. The
+expensive items it judged correctly, which is why nothing looked wrong.
+
+**A band on a RATIO is a percentage; a band on a per-unit RATE has to be one too.** Use the S644
+pair — a percentage plus a small absolute floor for float noise, whichever is more forgiving — and
+never a bare currency epsilon. `items.rate` is per BASE unit (S597), so the rates on this page span
+four orders of magnitude by construction; any constant is wrong at one end.
+
+### A legitimate zero is excluded from the ARITHMETIC, not from the record (S728)
+
+`lineState()` has accepted rate 0 as free goods since S698 — buy ten get one free: stock up, spend
+unchanged. Price Tracker read every one as a price observation, and the failures compounded in both
+directions: a gift crate rendered **"↓ Down −100%" in green**, printed `Last Rate 0.0000`, and
+switched **off** the >5% master-rate ⚠ (`lastRate &&` is falsy at 0) on the very item whose master
+rate had just diverged most — then the *next* real purchase read as a rise from zero.
+
+The fix is one predicate (`priced()`) applied at every site that picks a "last" or a "previous" —
+there were five, and a fix at two of them would have looked complete. **The rows stay in the
+expanded history.** A free receipt is a real event worth seeing; it is simply not a price point.
+Same shape as S713/S715/S724's zero-cost family: an absence dressed as a value, arriving at the
+most flattering reading available.
+
+### A matrix's COLUMNS and its TOTALS must describe one population (S728)
+
+Vendor Report's Daily Breakdown drew a column per vendor with at least one PURCHASE, while its
+"Day Net Total" and TOTAL row summed every row in the period — returns-only vendors and
+`vendor_id IS NULL` bills included. Every figure was individually correct and the rows still could
+not be added across to the total beside them.
+
+This is the S725 tab rule and S594's footer rule in a third shape: **the defect is not a wrong
+number, it is a population mismatch between what is shown and what is totalled**, and it is the
+harder one to see precisely because nothing is wrong on its own. Ask of any matrix or rollup: what
+set builds the columns, what set builds the total, and are they the same set? Where they cannot be
+(a filter is active), say so on the page rather than letting the reader assume.
+
+### A count is a claim, and the drilldown one click away is the check (S728)
+
+"Transactions" counted `purchase_entries` LINES while the drilldown for the same vendor counted
+BILLS off the same index and said so — a 12-bill vendor with 8 lines a bill read as **96**. No money
+figure was affected, which is why it survived: it is a label defect, and the reader who notices is
+the one who clicks through. Count bills off `billKeyOf`/`billKey`, the same key the drilldown uses,
+and keep the line count as its own column where it is genuinely wanted (the export).
+
+### A risk headline must not read SAFER the less it knows (S728)
+
+Supplier Contribution's **Top Supplier Share** divided by `total`, which includes the
+`Not attributed` bucket — so the more of a period's cost the page could not trace, the lower the
+concentration figure, on a card that turns amber at 50%. A month half-fed from earlier stock made a
+sole supplier look like half your exposure. It is measured against NAMED suppliers now, and
+`No vendor recorded` — a data-entry gap, not a supplier you depend on — can no longer be named as
+your largest.
+
+**Reliance Gap had the same fault one column over**: `attributedPct` (share of everything consumed)
+minus `purchasedPct` (share of positive net spend) subtracts two percentages taken over different
+denominators, biasing every supplier low by its own share of the untraceable part. **Before
+subtracting two percentages, check they have the same denominator** — and the same for the
+Ingredient Detail sheet, which paired a per-supplier SHARE of value with the item's WHOLE-period
+quantity, so a two-supplier item printed its full quantity twice and the column totalled to a
+multiple of what was consumed. A share and an absolute on one row is a reading error waiting.
+
 ### Fixing one side of a two-sided invariant is how you break it (S727)
 
 S725 moved `VendorReport`'s returns onto the discounted basis (`returnBase`, the S722 rule) and

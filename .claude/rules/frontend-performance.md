@@ -467,6 +467,19 @@ producer-and-consumer rule pointing backwards — there the consumer was paged a
 not. **Ask what else is read FROM the ids a paged read produces**, and price a child table at the
 parent's cardinality multiplied by something.
 
+**S728 found the producer/consumer pair once more, and the giveaway was a COMMENT.**
+`SupplierPriceTracker` paged its `purchase_entries` read under a six-line comment about the 1000-row
+cap — and left the `items` read directly above it bare. `itemMap` is what every purchase row is
+gated on (`if (!item) return`), so the truncation does not shorten a column: past 1000 SKUs it
+deletes the **entire price history** of every item after the cut, from the table, both Excel sheets
+and the vendor dropdown's item count. `SupplierContribution` had the same unpaged `items` read, and
+there it silently understates Cost of Sales. Fourth and fifth instances after S706, S708 and S721.
+
+The transferable part: **a careful paging comment on one line of a `Promise.all` is evidence that
+someone thought about the cap, and no evidence at all about the line above it** — S720 recorded the
+same tell on Period Comparison. When you find a paged read, look at its neighbours and at whatever
+produces the ids it filters on, in both directions.
+
 **Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
 `persistSalesDay`'s legacy three-call fallback.
