@@ -183,6 +183,25 @@ grep -n "stat-grid" <file>          # then read the five lines above it
 The same applies to any slot `ReportPage` would have gated — `note`, `filters`, `footnote`. A page
 that hand-rolls the shell inherits the whole rule, not the error card alone.
 
+**Two more instances in S721, and both are on pages this rule had already named.**
+`StockMovements`' KPI strip opened on `{loadError ? <ReportLoadError/> : <>` with `loading`
+mentioned nowhere between that line and either `stat-grid`, so every visit and every period change
+painted `Movements 0` and a gold `NPR 0` for the period's depletion directly above a card reading
+"Building report…" — the table bodies below WERE gated, which is what produced the split screen.
+And `DeadStock` — the file S616 was recorded against — had its stat-grid correctly gated by S717
+and its **filter tabs** left ungated forty lines below, so `All (0) Dead (0) Slow (0)` sat above the
+failed-read card saying "no dead stock, no slow movers" about a period the page never read.
+
+So the rule has a second half worth stating: **gating the stat-grid is not gating the page.** Every
+element that reports a COUNT or a FIGURE needs the guard, including tab labels, filter-bar counts
+and footnotes. Grep the file for `stat-grid` *and* for count expressions in the filter bar.
+
+**And `loading` only covers what the loader awaits (S721).** `StockMovements` fires its sub-recipe
+derivation as a deliberate fire-and-forget promise, so `loading` goes false without it — and the
+reconciliation note then compared the PREVIOUS period's derived value against the NEW period's
+ledger and printed the difference in NPR under the new month's label. A second async source needs
+its own flag, and the stale value must be cleared BEFORE the load rather than overwritten after it.
+
 ## A gating wrapper cannot protect an eagerly-evaluated children expression (S601)
 
 Migrated from the root `CLAUDE.md` (S663).

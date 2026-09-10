@@ -316,12 +316,21 @@ reasoning that once the handler claims, init's stale load is rejected by its own
 is true of the DATA and not of the LABEL: `init` also calls `setSelectedPeriod`, which no guard
 covers, so a period change during a first load left the dropdown snapping back to the open month
 over another month's table — figures and label disagreeing, the exact thing the guard exists to
-prevent. S698 fixed it in `Purchases.js`, S709 in `PurchaseOrders.js` and S718 in `StockAgeing.js`
-— all three against the hook's own documented contract ("anything that auto-selects a period must
-call `begin()` too"), while this file was arguing they did not have to. The third instance is worth
-noting because that page is where this whole rule was written: it selects a fiscal YEAR rather than
-a period, and `init()`'s `setSelectedFy` is exactly the unguarded label write the rule describes. A page whose dropdown cannot render until loading finishes
-is safe either way; claim it anyway, rather than making every reader re-derive which kind it is.
+prevent. S698 fixed it in `Purchases.js`, S709 in `PurchaseOrders.js`, S718 in `StockAgeing.js`
+and S721 in `StockMovements.js` — all four against the hook's own documented contract ("anything
+that auto-selects a period must call `begin()` too"), while this file was arguing they did not have
+to. **S721 is the instance that shows the stakes are not always a flicker**: once
+`handlePeriodChange` has run even once the ref is permanently non-null, so `isCurrent` stops
+failing open — and an ADMIN SWITCHING CLIENT re-runs `init()` on a still-mounted component with the
+previous client's period id still in the ref. Every setter in the loader is then skipped, and the
+new tenant gets the old period chip over an empty ledger. The fail-open property that makes a
+missed `begin()` survivable only holds until the FIRST claim.
+
+The S718 instance is worth noting separately because that page is where this whole rule was
+written: `StockAgeing` selects a fiscal YEAR rather than a period, and `init()`'s `setSelectedFy`
+is exactly the unguarded label write the rule describes. A page whose dropdown cannot render until
+loading finishes is safe either way; claim it anyway, rather than making every reader re-derive
+which kind it is.
 
 **S682 took it to 38 pages (measured by grep) and closed the report tail.** The twelve period-driven IMS reports that
 had never been swept — VAT, Non-VAT, Purchase 1L+, Annual Summary, Vendor Balance Confirmation,
@@ -406,6 +415,15 @@ a duplicate `VND-` code off the visible slice, exactly as `getNextItemCode()` di
 mints a sequential code from a client-side max has a paging bug and a uniqueness bug wearing one
 coat** — `items` answered the second half with `items_client_name_key`; `vendors` has neither index
 yet, so on that page the paging IS the guard.
+
+**`recipe_ingredients` was the fourth producer/consumer instance (S721)**, and its direction is
+the interesting part. Stock Movements pages the `sales_entries` read that produces `soldRecipeIds`
+and then fed that list to a bare `.in()` on `recipe_ingredients` — one row per ingredient per
+recipe, so ~130 sold dishes at ~8 ingredients each is past the cap. The truncation lands on the
+**wrong side of a comparison**: recipes whose rows fell past the cut are absent from
+`withIngredients`, so the page's amber banner names them as having NO ingredients and sends the
+owner to Recipes to add ones that are already there. A truncated read usually shortens a figure;
+here it LENGTHENED a warning list, which is the same silence wearing the opposite sign.
 
 **`getNextPoNumber()` was the third instance (S709)**, and the one that already had the uniqueness
 half: `purchase_orders` carries a `client_id + po_number` unique index and `savePo` retries three

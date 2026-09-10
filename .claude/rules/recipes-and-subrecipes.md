@@ -37,6 +37,26 @@ called `50_KG BAG`.
 
 **A sub-recipe can never appear in `stock_movements`, and that is structural rather than an omission.** `recipe_ingredients` stores a sub-recipe as `sub_recipe_id` with **`item_id` NULL**, so `explode()` in `recipeCost.js` always recurses past it and only emits a row on reaching a real `item_id` at the bottom of the tree — the prep layer is a scaling step that gets discarded, and the table has no column for the path a depletion took. Stock Movements' **Sub-Recipes tab** (S528) therefore *derives* that layer at read time (`subRecipeUsage.js` → `explodeRecipeTree`), filtered through the shared POS-supersedes-manual rule in `salesDepletion.js` so it agrees with the ledger beside it. Do **not** "fix" this by writing sub-recipe rows into `stock_movements`: the mirror item carries its own `per_uom_rate`, so those rows would double-count the page's own Value Depleted KPI against the raw-item rows already there. The two tabs are the same ingredients at different grains and are never additive.
 
+**And neither are the ROWS within the Sub-Recipes tab (S721)** — which is the half that sentence
+did not cover, and it shipped as a live 2× error. `computeRecipeCosts` is built on
+`explodeRecipeIngredients`, so a sub-recipe's cost per batch is **fully exploded**: a parent's
+already contains every child beneath it. `explodeRecipeTree` meanwhile threads ONE `subs` array
+down the recursion, so `node.subRecipes` is a flat list of every sub-recipe at every depth. Sum
+`batches × batchCost` across those rows and a nested prep item is paid for twice — once inside its
+parent and once on its own row. On this file's own nested fixture (House Sauce made from Herb Base)
+that is NPR 40 against a true raw-ingredient value of NPR 20.
+
+`explodeRecipeTree` now also reports **`topBatches`** — the part the DISH reaches directly, at
+depth 0 — and `subRecipeUsage` carries it through as `topValue`, which is what every TOTAL uses.
+The per-row `value` is deliberately unchanged, because "what it cost to make this much of it" is a
+real figure; the consequence is that the rows do not sum to their own footer, and the footer says
+so. **It has to be a per-OCCURRENCE depth, not an "is this ever nested?" flag**: a sub-recipe can
+be used directly by one dish AND nested inside another, and only its direct share may be charged.
+
+The general shape is worth naming, because neither half was wrong and both were correctly
+commented: **a fully-exploded cost and a flat all-depths list are each individually correct, and
+adding them is what is not.** Before summing a column, ask whether its rows are at one grain.
+
 **Sub-recipes nest — a sub-recipe may contain another sub-recipe, to any practical depth (S602).**
 This was already true and needed no new feature: the ingredient picker excludes only the recipe
 being edited (`Recipes.js`'s `subRecipeOptions`), `calcSubRecipeCostPerUnit()` recurses, and

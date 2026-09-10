@@ -738,3 +738,68 @@ S594 Supplier Contribution finding).
 `isCurrent`, so a superseded load's error replaced the report the reader was actually looking at.
 That is now the third and fourth instance after `FifoReport` (S717) — **when a loader has an
 `isCurrent` check after its awaits, its `catch` needs one too.**
+
+## Stock Movements re-analysed: a total that added a nested prep item twice (S721)
+
+### The Sub-Recipes tab's Value total double-counted nesting
+
+`computeRecipeCosts` is built on `explodeRecipeIngredients`, so a sub-recipe's cost per batch is
+**fully exploded** — a parent's batch cost already contains every child beneath it. The page's own
+Cost / Batch tooltip says exactly that ("nested sub-recipes included"). Meanwhile
+`explodeRecipeTree` threads ONE `subs` array down the recursion, so `node.subRecipes` is a FLAT list
+of every sub-recipe at every depth, each at its own scale — also documented, one function up.
+
+Put those two together and `subRows.reduce((s, r) => s + r.value, 0)` pays for a nested prep item
+twice: once inside its parent's row and once on its own. On the repo's own nested fixture — House
+Sauce made from Herb Base — that is `0.25 × 80` plus `0.05 × 400` = **NPR 40 against a true
+raw-ingredient value of NPR 20**, exactly 2×, in the KPI card, the table footer and the Excel sheet,
+while the card's tooltip called the figure "a slice of the raw-item value on the Raw Items tab".
+
+**Neither half was wrong on its own, and both were correctly documented** — the defect lived only in
+the addition. `explodeRecipeTree` now reports `topBatches` (the part the DISH reaches directly, at
+depth 0), `subRecipeUsage` carries it through as `topValue`, and every TOTAL uses that; the per-row
+`value` is unchanged, because "what it cost to make this much of it" is a real and useful figure.
+The rows therefore do not sum to their own footer, which the footer's tooltip now states.
+
+**A per-occurrence depth is required, not an "is this ever nested?" flag** — a sub-recipe can be
+used directly by one dish AND nested inside another, and only its direct share may be charged.
+`subRecipeUsage.test.js` pins both cases, and asserts the total now ties to `derivedItemValue`.
+
+### And four more on the same page
+
+- **The no-BOM banner named recipes whose ingredients are fully configured.** `recipe_ingredients`
+  was read with a bare `.in()` over every recipe that sold — one row per ingredient per recipe, so
+  ~130 dishes at the project's own ~8-ingredient average is past the 1000-row cap. Truncation lands
+  on the wrong side of the comparison: a recipe whose rows fell past the cut is absent from
+  `withIngredients`, so the amber banner lists it as having no BOM and sends the owner to Recipes to
+  add ingredients that are already there. `firstError` cannot see it, because truncation is not an
+  error.
+- **`init()` never claimed the page**, and here the consequence is not a flicker. Once
+  `handlePeriodChange` has run even once the ref is permanently non-null, so `isCurrent` stops
+  failing open — an admin switching client in the top bar re-runs `init()` on a still-mounted
+  component with the PREVIOUS client's period id in the ref, and every setter in `loadReport` is
+  skipped: the new tenant sees the old period chip over an empty ledger. Fourth instance after
+  S698/S709/S718. It also had no fallback to the latest period when none is open, and its KPI strip
+  was gated on `!loadError` but never `!loading` (S616's positional rule again).
+- **`usage` was never cleared on a period change, and `loading` does not cover it** — the
+  sub-recipe derivation is deliberately fire-and-forget, so `loading` goes false without it. The
+  reconciliation note therefore compared the OLD period's `derivedItemValue` against the NEW
+  period's ledger total and reported a gap in NPR that never existed, under the new month's label.
+  It is cleared before the load now, with its own `usageLoading` flag gating the note and the subs
+  KPI strip. **A second async source needs a second flag**; one `loading` covering the awaited half
+  is not coverage.
+- **The Day range filter dropped every Bulk row.** A Bulk manual Sales Entry writes `bs_day 0` and
+  the From dropdown starts at 1, so `0 >= 1` removed those rows from the table, all four KPI cards
+  and the export, unrecoverably — and on a period whose manual sales were all Bulk it emptied the
+  page. The reasoning was already written twelve lines below, as the sub-recipe tab's stated reason
+  for refusing the day filter outright. An undated row belongs to no single day, so it belongs to
+  all of them.
+
+### `nepalMoney.js` is for MONEY, and a quantity is not money (S721)
+
+S717 and S719 routed quantity columns through `nprInt()`, which is `Math.round` — so a 0.4 kg count
+printed as **"0"** in five Dead Stock columns while its own Value at Risk stayed non-zero, and
+0.75 kg of wastage printed as "1" on the report whose entire job is saying how much was thrown away.
+Both now format with `NPR_LOCALE` and `maximumFractionDigits: 3`, keeping the Nepali grouping.
+**Applying a rule past its subject is its own defect**, and this one was introduced by two sessions
+that were otherwise tightening the same family.
