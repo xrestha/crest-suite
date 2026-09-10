@@ -1144,6 +1144,15 @@ is ~1,750 lines and none of this is counting).
   the link. **The offline queue stamps both at ENQUEUE time**: on a shared tablet the person who
   counted is routinely not the session that syncs.
 
+**The tab set is an INCLUSION map, and that is load-bearing (S737c).** `FIELD_TAB` /
+`fieldKeyOf(tab)` at the top of `Stock.js` decide both which tabs render the entry grid and which
+stored field each one writes. It was an exclusion list plus four ternaries ending in `: 'wastage'`
+until the Settings tab was added, at which point the grid rendered underneath the settings panel
+with a Save All button wired to the WASTAGE column — a screen with no quantities on it, one click
+from blanking the month's wastage for every visible item. `saveRow`, `performSaveAll` and
+`clearAll` now return early on a null field rather than falling back to one. **Adding a tab to
+this page means adding it to that map, or it renders no grid** — which is the safe direction.
+
 **PIN login for counters** (`/ims/count`, `ImsCountLogin.jsx`, `ims-staff-login`) is the POS
 architecture reused — synthetic `profiles.ims_email` that never reaches the browser, the derived
 password from `_shared/pinPassword.ts`, the lockout enforced on the request that signs in. Two

@@ -560,11 +560,17 @@ export default function Purchases() {
               }}>{tab.label}</button>
           ))}
         </div>
-        {!isLocked && !loadError && canDeleteAll && activeTab !== 'register' && (
+        {/* An INCLUSION test, not `activeTab !== 'register'` (S737c). This is a Delete All button
+            gated by an exclusion list, with a target resolved by a ternary whose last arm is
+            'returns' — the exact shape that put a wastage-writing Save All under Stock Count's new
+            Settings tab. Correct today because the page has three tabs and both arms are covered;
+            a fourth would have inherited a destructive control aimed at returns. Naming the two
+            tabs that own the action means a new one gets nothing until someone decides otherwise. */}
+        {!isLocked && !loadError && canDeleteAll && (activeTab === 'purchases' || activeTab === 'returns') && (
           <button
             className="btn btn-ghost"
             style={{ fontSize: 12, padding: '5px 12px', marginBottom: 4, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
-            onClick={() => setDeleteAllTarget(activeTab === 'purchases' ? 'purchases' : 'returns')}
+            onClick={() => setDeleteAllTarget(activeTab)}
             disabled={activeTab === 'purchases' ? purchases.length === 0 : returns.length === 0}
           >
             Delete All
