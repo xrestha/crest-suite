@@ -69,13 +69,20 @@ export default function ShrinkageReport() {
     setPeriodsUsed(selected.length)
 
     const results = await Promise.all([
-      scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
-      supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', periodIds),
-      supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', periodIds),
+      // Every per-item-per-period read below is paged (S719). Each is one row per item per period,
+      // so a client past 1000 items — or a multi-period window — truncates silently, and
+      // truncation returns NO error for the firstError() check to catch. The direction is what
+      // matters here: a missing CLOSING row makes actual usage read as "everything on the shelf
+      // plus everything bought", which is a false Over variance on the report a client uses to
+      // chase shrinkage. The `items` read is paged for the same reason S717 gave on Stock Report —
+      // it is the read that produces the ids every other one is joined against.
+      fetchAllRows(() => scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      fetchAllRows(() => supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
-      scopedFrom('vendor_returns', 'period_id, item_id, qty').in('period_id', periodIds),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, item_id, qty').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
-      supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds),
+      fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       // source + bs_day feed the per-period POS-supersedes-manual dedup below; paged because a
       // multi-period sales_entries read crosses the silent 1000-row cap readily.
       fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
@@ -113,6 +120,9 @@ export default function ShrinkageReport() {
         ? await explodeRecipeIngredients(supabase, shrinkRecipeIds)
         : {}
     } catch (err) {
+      // The isCurrent guard belongs on the failure path too: without it a superseded load's
+      // error replaces the report the reader is actually looking at with a red banner (S719).
+      if (!windowReq.isCurrent(key)) return
       setLoadError(err); setReport([]); setSummary(null); setLoading(false); return
     }
 

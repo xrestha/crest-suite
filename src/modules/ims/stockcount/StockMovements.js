@@ -9,7 +9,7 @@ import PeriodScope from '../../../components/PeriodScope'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { BS_MONTHS, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import { loadSubRecipeUsage, usageForSource, subRecipeHasIngredient, EMPTY_USAGE } from './subRecipeUsage'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -53,6 +53,10 @@ export default function StockMovements() {
   const [noBomRecipes, setNoBomRecipes] = useState([])
   const [tab, setTab] = useState('items')
   const [usage, setUsage] = useState(EMPTY_USAGE)
+  // `loading` covers the LEDGER read only. The sub-recipe derivation is deliberately fire-and-
+  // forget (it resolves independently), so it needs its own flag — without one the subs tab, its
+  // KPI strip and the reconciliation note all keep answering for the PREVIOUS period (S720).
+  const [usageLoading, setUsageLoading] = useState(true)
   const [ingSearch, setIngSearch] = useState('')
   // Sort is per-tab: the two tables share no columns, so one shared key would be meaningless on
   // whichever tab wasn't selected when it was set.
@@ -76,8 +80,24 @@ export default function StockMovements() {
     // rather than adding a second, hidden filter mode alongside the visible one.
     const periodParam = searchParams.get('period')
     const itemParam = searchParams.get('item')
-    const target = (p || []).find(x => x.id === periodParam) || (p || []).find(x => x.status === 'open')
-    if (target) { setSelectedPeriod(target); await loadReport(target.id, itemParam) }
+    // Falls back to the LATEST period when none is open (S720) — between closing one month and
+    // opening the next this page loaded nothing at all and rendered a full ledger of zeros. Same
+    // fix ReorderReport got in S696 and FifoReport in S717.
+    const target = (p || []).find(x => x.id === periodParam)
+      || (p || []).find(x => x.status === 'open')
+      || (p || [])[0]
+    if (target) {
+      // init() must claim the page too (S720). It is not about THIS load's data — loadReport's own
+      // isCurrent check covers that — it is that once handlePeriodChange has run even once the ref
+      // is permanently non-null, so `isCurrent` stops failing open. An admin switching client in
+      // the top bar re-runs init() on a still-mounted component with the ref holding the PREVIOUS
+      // client's period id, and every setter in loadReport is then skipped: the new tenant's page
+      // renders the old period chip over an empty ledger. The hook's own contract says init()
+      // claims; S698, S709 and S718 each fixed the same omission elsewhere.
+      periodReq.begin(target.id)
+      setSelectedPeriod(target)
+      await loadReport(target.id, itemParam)
+    }
     setLoading(false)
   }
 
@@ -89,7 +109,9 @@ export default function StockMovements() {
     setDayTo('')
     setLoading(true)
     await loadReport(periodId)
-    setLoading(false)
+    // Only the load that still owns the page may clear its loading state — otherwise a superseded
+    // load un-gates the newer one's half-built view (S720).
+    if (periodReq.isCurrent(periodId)) setLoading(false)
   }
 
   async function loadReport(periodId, presetItemId) {
@@ -97,14 +119,22 @@ export default function StockMovements() {
     // Sub-recipe usage is derived from sales_entries, not from the ledger below — see
     // subRecipeUsage.js. Loaded alongside rather than lazily on tab switch: it shares the period
     // and feeds the reconciliation note, which has to be right the moment the page paints.
+    // Cleared BEFORE the load, not merely overwritten after it (S720). `usage` used to hold the
+    // previous period's rows for the whole of the new period's load, and because this promise is
+    // not awaited, `loading` goes false without it — so the reconciliation note compared the OLD
+    // period's derivedItemValue against the NEW period's ledger total and reported a gap that
+    // never existed, in NPR, under the new month's label. The tab badge counted the old rows too.
+    setUsage(EMPTY_USAGE)
+    setUsageLoading(true)
     loadSubRecipeUsage(supabase, scopedFrom, periodId)
-      .then(u => { if (periodReq.isCurrent(periodId)) setUsage(u) })
+      .then(u => { if (periodReq.isCurrent(periodId)) { setUsage(u); setUsageLoading(false) } })
       .catch(err => {
         console.error('sub-recipe usage failed:', err)
         if (!periodReq.isCurrent(periodId)) return   // a stale load's failure must not clobber the current view
         // The helper now throws on a failed read — degrading to EMPTY_USAGE rendered a believable
         // "quiet period" over an error (S612 silent-zero rule).
         setUsage(EMPTY_USAGE)
+        setUsageLoading(false)
         setLoadError(err?.message || String(err))
       })
 
@@ -137,9 +167,19 @@ export default function StockMovements() {
     // otherwise vanish silently.
     const soldRecipeIds = [...new Set((soldEntries || []).map(s => s.recipe_id).filter(Boolean))]
     if (soldRecipeIds.length > 0) {
+      // Chunked AND paged (S720). `recipe_ingredients` is one row per ingredient per recipe, so a
+      // 130-dish month at the project's own ~8-ingredients average is already past PostgREST's
+      // silent 1000-row cap — and the truncation lands on the WRONG SIDE of this comparison:
+      // every recipe whose ingredient rows fell past the cut is absent from `withIngredients`, so
+      // the amber banner names it as having no BOM. That banner tells the owner stock was not
+      // depleted for those dishes and sends them to Recipes to add ingredients that are already
+      // there. `firstError` below cannot see it, because truncation is not an error. The id list
+      // rides in the URL as well, which is what `fetchAllRowsChunked` splits.
       const bomResults = await Promise.all([
-        supabase.from('recipe_ingredients').select('recipe_id').in('recipe_id', soldRecipeIds),
-        scopedFrom('recipes', 'id, name').in('id', soldRecipeIds),
+        fetchAllRowsChunked(soldRecipeIds, ids =>
+          supabase.from('recipe_ingredients').select('recipe_id').in('recipe_id', ids).order('id')),
+        fetchAllRowsChunked(soldRecipeIds, ids =>
+          scopedFrom('recipes', 'id, name').in('id', ids).order('id')),
       ])
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       // S612: a failed read here would silently hide the no-BOM warning banner.
@@ -187,7 +227,17 @@ export default function StockMovements() {
     const filtered = rows.filter(r => {
       const matchSource = filterSource === 'all' || r.source === filterSource
       const matchSearch = (r.item.name || '').toLowerCase().includes(q)
-      const matchDay = (dayFrom === '' || (r.bsDay || 0) >= Number(dayFrom)) && (dayTo === '' || (r.bsDay || 0) <= Number(dayTo))
+      // An UNDATED movement stays in range whatever the day filter says (S721). A Bulk manual
+      // Sales Entry writes bs_day 0 (persistSalesDay), and the From dropdown's smallest option is
+      // 1 — so `0 >= 1` dropped every Bulk-derived row from the table, from all four KPI cards and
+      // from the Excel export, with no way to select them back and nothing on screen saying a
+      // class of row had been excluded. On a period whose manual sales were all entered in Bulk
+      // that emptied the page. This is the same reasoning the sub-recipe tab twenty lines below
+      // already states as its reason for refusing the day filter outright: a whole-period row
+      // belongs to no single day, so it belongs to all of them.
+      const isUndated = !(r.bsDay > 0)
+      const matchDay = isUndated
+        || ((dayFrom === '' || r.bsDay >= Number(dayFrom)) && (dayTo === '' || r.bsDay <= Number(dayTo)))
       return matchSource && matchSearch && matchDay
     }).sort((a, b) => cmp(ITEM_SORTS[itemSort].get(a), ITEM_SORTS[itemSort].get(b)))
 
@@ -205,7 +255,13 @@ export default function StockMovements() {
         && (r.name || '').toLowerCase().includes(q)
         && subRecipeHasIngredient(r, ingQ))
       .sort((a, b) => cmp(SUB_SORTS[subSort].get(a), SUB_SORTS[subSort].get(b)))
-    const subValueTotal = subRows.reduce((s, r) => s + r.value, 0)
+    // topValue, not value (S721). A row's `value` includes the cost of any prep nested INSIDE it
+    // — computeRecipeCosts is fully exploded, which the Cost / Batch tooltip already states — so
+    // summing the column pays for a nested sub-recipe twice: once on its parent's row and once on
+    // its own. On the repo's own nested fixture that was NPR 40 against a true NPR 20. `topValue`
+    // is the share the dish reaches directly, so the total counts each raw ingredient once and can
+    // legitimately be compared with the Raw Items tab, which is what the KPI tooltip promises.
+    const subValueTotal = subRows.reduce((s, r) => s + (r.topValue || 0), 0)
     const subBatchTotal = subRows.reduce((s, r) => s + r.batches, 0)
     const subQtyIsComparable = new Set(subRows.map(r => r.yieldUom)).size === 1
 
@@ -223,7 +279,7 @@ export default function StockMovements() {
   // `!loading` matters: the usage derivation resolves independently of the ledger fetch, so
   // without it there's a window where usage has landed but `rows` is still empty and the gap
   // reads as the entire period's value.
-  const showRecon = !loading && usage.rows.length > 0 &&
+  const showRecon = !loading && !usageLoading && usage.rows.length > 0 &&
     Math.abs(reconGap) > Math.max(1, usage.derivedItemValue * 0.005)
 
   // Titles the print job after the tab actually on screen — printWithTitle sets document.title so
@@ -297,9 +353,13 @@ export default function StockMovements() {
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <Tip text="Prints exactly what's on screen — the active tab, with the current search, source and sort filters applied, including the totals row." width={280}>
-            <button className="btn btn-ghost" onClick={printCurrentTab} style={{ fontSize: 12 }}>🖨 Print</button>
+            <button className="btn btn-ghost" onClick={printCurrentTab} style={{ fontSize: 12 }}
+              disabled={loading || !!loadError}>🖨 Print</button>
           </Tip>
-          <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>Export Excel</button>
+          {/* A workbook is a document that leaves the building, so it must never be built from a
+              period that has not loaded or that failed to (S721). Both were enabled throughout. */}
+          <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}
+            disabled={loading || !!loadError}>Export Excel</button>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
           </select>
@@ -309,7 +369,12 @@ export default function StockMovements() {
       {/* A failed read renders as a failure — never as a quiet ledger of zeros (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
-      {tab === 'subs' ? (
+      {/* The strip waits for the load as well as for the absence of an error (S720). It was gated
+          on `loadError` alone, so every visit and every period change painted `Movements 0` and a
+          gold `NPR 0` for the period's depletion above a card reading "Building report…". S616's
+          rule is positional: the guard has to OPEN before the stat-grid, not merely exist in the
+          file. */}
+      {!loading && (tab === 'subs' ? (usageLoading ? null : (
         <div className="stat-grid">
           <div className="stat-card">
             <div className="stat-label">Sub-Recipes Used</div>
@@ -322,12 +387,12 @@ export default function StockMovements() {
             <div className="stat-sub">summed across all sub-recipes</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Batches used × cost per batch. This is a slice of the raw-item value on the Raw Items tab, not an addition to it — the same ingredients, grouped by the prep item they went through." width={280}>Value</Tip></div>
+            <div className="stat-label"><Tip text="The raw-ingredient value of everything that passed through a prep item this period. This is a slice of the raw-item value on the Raw Items tab, not an addition to it — the same ingredients, grouped by the prep item they went through. Each ingredient is counted once: where one sub-recipe is made from another, only the outer one is charged, because its cost per batch already contains the inner one." width={320}>Value</Tip></div>
             <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {subValueTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
             <div className="stat-sub">at ingredient cost</div>
           </div>
         </div>
-      ) : (
+      )) : (
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">Movements</div>
@@ -335,9 +400,9 @@ export default function StockMovements() {
           <div className="stat-sub">depletion entries this period</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Sum of qty depleted × per-unit rate across every movement below — the food-cost value POS activity consumed this period." width={260}>Value Depleted</Tip></div>
+          <div className="stat-label"><Tip text="Sum of qty depleted × per-unit rate across every movement below — the food-cost value this period's sales consumed. Covers POS sales and comps AND manual Sales Entry, which has written depletion movements since 2026-07-30." width={300}>Value Depleted</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 18 }}>NPR {totalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
-          <div className="stat-sub">POS sale + comp, at cost</div>
+          <div className="stat-sub">POS + manual entry, at cost</div>
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Same calc, restricted to POS Comp rows — the food-cost value of dishes given away complimentary, with zero revenue collected." width={260}>Comp Value</Tip></div>
@@ -350,7 +415,7 @@ export default function StockMovements() {
           <div className="stat-sub">distinct items depleted</div>
         </div>
       </div>
-      )}
+      ))}
 
       <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
         <button className={`tab-btn ${tab === 'items' ? 'tab-btn--active' : ''}`} onClick={() => setTab('items')}>
@@ -546,7 +611,9 @@ export default function StockMovements() {
                   </td>
                   <td style={{ paddingTop: 12 }} />
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12, fontSize: 14 }}>
-                    {subValueTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    <Tip width={320} text="Raw-ingredient value, counting each ingredient once. It is deliberately NOT the sum of the Value column: a sub-recipe made from another sub-recipe has the inner one's cost inside its own, so adding every row would pay for it twice.">
+                      {subValueTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </Tip>
                   </td>
                 </tr>
               </tfoot>

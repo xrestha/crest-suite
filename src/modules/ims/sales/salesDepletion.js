@@ -54,8 +54,17 @@ export function posSupersedesManual(recipeId, bsDay, posIndex) {
   return posIndex.byDay.get(Number(bsDay))?.has(recipeId) ?? false
 }
 
-// Read-path convenience: given every sales_entries row for a period, return only those that
+// Read-path convenience: given every sales_entries row for A SINGLE PERIOD, return only those that
 // (should have) depleted stock. Same rule as above, applied in one pass.
+//
+// SINGLE PERIOD IS PART OF THE CONTRACT, not an incidental fact about the callers (S718). The
+// supersedes test is keyed on `bs_day`, and `bs_day` is a day NUMBER within a month — day 5 exists
+// in every one of them. Hand this function a fiscal year's worth of rows and a POS sale of a dish
+// on 5 Shrawan suppresses the MANUAL sale of that same dish on 5 Bhadra, four months later; a Bulk
+// row (bs_day 0) is suppressed if POS sold that dish anywhere in the whole year, since `anyDay` is
+// then year-wide. Suppressed rows are dropped from consumption, so stock that was eaten reads as
+// still on the shelf — which on an ageing report inflates the 90+ figure and on an expiry report
+// inflates what is at risk. Use `selectDepletingSalesAcrossPeriods` for any multi-period window.
 export function selectDepletingSales(rows) {
   const posIndex = buildPosIndex((rows || []).filter(r => isPosSource(r.source)))
   return (rows || []).filter(r => {
@@ -63,4 +72,29 @@ export function selectDepletingSales(rows) {
     if (!isManualSource(r.source)) return false // pos_credit, and anything added later
     return !posSupersedesManual(r.recipe_id, dayOf(r), posIndex)
   })
+}
+
+/**
+ * The same rule over a window spanning SEVERAL periods: partition by `period_id`, apply the
+ * single-period rule inside each, concatenate.
+ *
+ * Rows must carry `period_id` — a row without one is its own group rather than being lumped in
+ * with another month's, since guessing which period it belongs to is exactly the mistake this
+ * function exists to stop. Source order is preserved within each period and periods come back in
+ * first-seen order, so a caller that only sums is unaffected by the grouping.
+ *
+ * ShrinkageReport has always done this by hand (it needed per-period totals anyway, so the
+ * grouping fell out of what it was already doing). StockAgeing and FifoReport did not, and were
+ * the two pages reading a whole fiscal year through the single-period form.
+ */
+export function selectDepletingSalesAcrossPeriods(rows) {
+  const byPeriod = new Map()
+  for (const r of rows || []) {
+    const key = r.period_id == null ? `__none__${byPeriod.size}` : r.period_id
+    if (!byPeriod.has(key)) byPeriod.set(key, [])
+    byPeriod.get(key).push(r)
+  }
+  const out = []
+  for (const group of byPeriod.values()) out.push(...selectDepletingSales(group))
+  return out
 }

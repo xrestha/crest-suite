@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { npr, NPR_LOCALE } from '../../../shared/nepalMoney'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
+import NoPeriodState from '../../../components/NoPeriodState'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
@@ -14,13 +19,16 @@ export default function WastageReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const biz = useBizInfo()
   const periodReq = useLatestRequest()
   const [periods, setPeriods]           = useState([])
   const [selectedPeriod, setSelected]   = useState(null)
   const [rows, setRows]                 = useState([])
   const [reasons, setReasons]           = useState([])
   const [catFilter, setCatFilter]       = useState('All')
-  const [loading, setLoading]           = useState(false)
+  // Starts TRUE. It used to start false, so the first paint — before any read had been issued —
+  // rendered the KPI strip as NPR 0 / 0 items above "No wastage entries for this period" (S594).
+  const [loading, setLoading]           = useState(true)
   const [loadError, setLoadError]       = useState(null)
 
   useEffect(() => {
@@ -29,9 +37,10 @@ export default function WastageReport() {
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
         // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-        if (error) { setLoadError(error.message); return }
+        if (error) { setLoadError(error.message); setLoading(false); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
+        else setLoading(false)   // nothing will call fetchData, so nothing else clears it
       })
   }, [effectiveClientId, scopedFrom])
 
@@ -43,10 +52,16 @@ export default function WastageReport() {
     periodReq.begin(periodId)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
-    const { data, error } = await supabase
+    // PAGED (S719). `wastages` is one row per item per DAY once Daily Wastage is used, which the
+    // rules file names as the realistic 1000-crosser — and every OTHER page that reads this table
+    // pages it. The report that exists to total the client's wastage was the one place that did
+    // not, so past the cap its headline came back short, in confident type, with no error for the
+    // check below to catch. `id` is the unique tiebreaker the paging needs to be stable.
+    const { data, error } = await fetchAllRows(() => supabase
       .from('wastages')
       .select('item_id, qty, bs_day, reason, items(name, uom, per_uom_rate, categories(name))')
       .eq('period_id', periodId)
+      .order('id'))
     // A failed read must never flow through the `|| []` below into a confident NPR-0 report (S612 silent-zero rule).
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     if (error) { setLoadError(error); setRows([]); setReasons([]); setLoading(false); return }
@@ -93,10 +108,20 @@ export default function WastageReport() {
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
     : ''
 
+  // Money goes through nepalMoney.js (S683), never a local toLocaleString.
   function fmt(n) {
-    if (!n) return '—'
-    return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+    return n ? npr(n) : '—'
   }
+
+  // A QUANTITY, not money — so it keeps its decimals. S719 rendered these through nprInt(), which
+  // is `Math.round`, so 0.75 kg of wastage printed as "1" on the report whose entire job is saying
+  // how much was thrown away. nepalMoney.js is for MONEY; the "render money through the shared
+  // helper" rule does not extend to quantities. NPR_LOCALE keeps the Nepali digit grouping.
+  function fmtQty(n) {
+    return n ? Number(n).toLocaleString(NPR_LOCALE, { maximumFractionDigits: 3 }) : '—'
+  }
+
+  const scopeLine = `Wastage Report · ${periodLabel}${catFilter === 'All' ? '' : ` · ${catFilter}`}`
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
@@ -109,7 +134,10 @@ export default function WastageReport() {
       'Value (NPR)':  r.value ? r.value.toFixed(0) : '',
       '% of Total':   totalValue ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '0%',
     }))
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Wastage')
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Wastage Report', biz, scopeLine, rows: data,
+      notes: ['Value = quantity wasted × the item\'s current per-unit rate, not the rate paid at the time.'],
+    }), 'Wastage')
     if (reasons.length) {
       const rData = reasons.map(r => ({
         'Reason':      r.reason,
@@ -123,13 +151,16 @@ export default function WastageReport() {
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the wastage report" />
 
   return (
     <div className="page-container">
 
       {/* Print-only header */}
       <div className="print-only" style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Wastage Report — {periodLabel}</h2>
+        <h2 style={{ margin: 0 }}>Wastage Report</h2>
+        <div style={{ fontSize: 12 }}>{scopeLine}</div>
       </div>
 
       {/* Screen header */}
@@ -147,8 +178,8 @@ export default function WastageReport() {
               <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year}</option>
             ))}
           </select>
-          <button className="btn btn-ghost" onClick={() => printWithTitle(`Wastage Report - ${periodLabel}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={!rows.length}>Export Excel</button>
+          <button className="btn btn-ghost" disabled={loading || !!loadError} onClick={() => printWithTitle(`Wastage Report — ${scopeLine}`)}>Print</button>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length}>Export Excel</button>
         </div>
       </div>
 
@@ -194,7 +225,7 @@ export default function WastageReport() {
                 {reasons.map(r => (
                   <tr key={r.reason}>
                     <td><span className="badge badge-yellow">{r.reason}</span></td>
-                    <td style={{ textAlign: 'right' }}>{Number(r.qty).toLocaleString('en-IN')}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(r.value)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{totalValue ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '—'}</td>
                   </tr>
@@ -243,7 +274,7 @@ export default function WastageReport() {
                   <td><strong>{r.name}</strong></td>
                   <td>{r.category}</td>
                   <td>{r.uom}</td>
-                  <td style={{ textAlign: 'right' }}>{Number(r.qty).toLocaleString('en-IN')}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(r.value)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                     {totalValue ? ((r.value / totalValue) * 100).toFixed(1) + '%' : '—'}
@@ -256,8 +287,11 @@ export default function WastageReport() {
                 <td colSpan={3}>Total ({filtered.length} items)</td>
                 <td />
                 <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(filtered.reduce((s, r) => s + r.value, 0))}</td>
+                {/* Computed, never asserted. A hardcoded 100% is right only for as long as the
+                    two sums stay identical, and it is exactly the shape that survives the change
+                    that breaks it (S594's Supplier Contribution finding). */}
                 <td style={{ textAlign: 'right' }}>
-                  {catFilter === 'All' ? '100%' : totalValue ? ((filtered.reduce((s,r) => s+r.value, 0) / totalValue * 100).toFixed(1) + '%') : '—'}
+                  {totalValue ? ((filtered.reduce((s, r) => s + r.value, 0) / totalValue * 100).toFixed(1) + '%') : '—'}
                 </td>
               </tr>
             </tfoot>

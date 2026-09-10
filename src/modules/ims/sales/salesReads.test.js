@@ -26,10 +26,25 @@
 import fs from 'fs'
 import path from 'path'
 
+// The four stock reads joined in S717. Their figure is CONSUMPTION, which is subtracted from what
+// was bought — so a short read does not shorten a column, it leaves stock on the shelf that is not
+// there (Stock Report / Reorder Report: on-hand and "below par", i.e. what gets bought) or takes
+// batches off one that is (FIFO / Stock Ageing: what is about to go off). FifoReport was the last
+// page summing these rows raw rather than through selectDepletingSales; the other three already
+// went through it and are listed so they cannot quietly stop.
 const FILES = [
   ['Sales.js', path.join(__dirname, 'Sales.js')],
   ['MenuEngineering.js', path.join(__dirname, '..', 'recipes', 'MenuEngineering.js')],
   ['Overheads.js', path.join(__dirname, '..', 'reports', 'Overheads.js')],
+  ['FifoReport.js', path.join(__dirname, '..', 'reports', 'FifoReport.js')],
+  ['StockAgeing.js', path.join(__dirname, '..', 'reports', 'StockAgeing.js')],
+  ['StockReport.js', path.join(__dirname, '..', 'stockcount', 'StockReport.js')],
+  ['ReorderReport.js', path.join(__dirname, '..', 'stockcount', 'ReorderReport.js')],
+  // The variance family joined in S719, when the same sweep reached them. All three already
+  // complied; they are listed so they cannot quietly stop.
+  ['Variance.js', path.join(__dirname, '..', 'variance', 'Variance.js')],
+  ['TheoreticalVariance.js', path.join(__dirname, '..', 'variance', 'TheoreticalVariance.js')],
+  ['ShrinkageReport.js', path.join(__dirname, '..', 'variance', 'ShrinkageReport.js')],
 ]
 
 describe.each(FILES)('%s reads sales_entries in a way NULL-source rows survive', (_name, file) => {
@@ -53,5 +68,28 @@ describe.each(FILES)('%s reads sales_entries in a way NULL-source rows survive',
     reads.forEach(read => {
       expect(read.includes("'*'") || /\bsource\b/.test(read)).toBe(true)
     })
+  })
+})
+
+// Selecting `source` is only half of it: a page can carry the column and still sum the rows raw,
+// which is exactly what FifoReport did until S717 — a day sold in both POS and manual entry
+// consumed its ingredients twice, and a credit note ('pos_credit', negative qty_sold) put stock
+// back that never physically returned. These four turn sales into DEPLETION, so they must go
+// through the one shared rule — directly, or via buildStockRows, which applies it internally.
+const DEPLETION_FILES = [
+  ['FifoReport.js', path.join(__dirname, '..', 'reports', 'FifoReport.js')],
+  ['StockAgeing.js', path.join(__dirname, '..', 'reports', 'StockAgeing.js')],
+  ['StockReport.js', path.join(__dirname, '..', 'stockcount', 'StockReport.js')],
+  ['ReorderReport.js', path.join(__dirname, '..', 'stockcount', 'ReorderReport.js')],
+  ['Variance.js', path.join(__dirname, '..', 'variance', 'Variance.js')],
+  ['TheoreticalVariance.js', path.join(__dirname, '..', 'variance', 'TheoreticalVariance.js')],
+  ['ShrinkageReport.js', path.join(__dirname, '..', 'variance', 'ShrinkageReport.js')],
+]
+
+describe.each(DEPLETION_FILES)('%s runs sales through the shared depletion rule', (_name, file) => {
+  const SRC = fs.readFileSync(file, 'utf8')
+
+  test('imports selectDepletingSales, or buildStockRows which applies it', () => {
+    expect(/selectDepletingSales|buildStockRows/.test(SRC)).toBe(true)
   })
 })

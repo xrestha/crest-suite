@@ -75,10 +75,12 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
     const node = tree[row.recipe_id]
     if (!node) return
     const src = ledgerSource(row.source)
-    node.subRecipes.forEach(({ sub_recipe_id, qty, batches }) => {
-      const e = agg[sub_recipe_id] || (agg[sub_recipe_id] = { qty: 0, batches: 0, bySource: {} })
+    node.subRecipes.forEach(({ sub_recipe_id, qty, batches, topBatches }) => {
+      const e = agg[sub_recipe_id] || (agg[sub_recipe_id] = { qty: 0, batches: 0, topBatches: 0, bySource: {} })
       e.qty += qty * qtySold
       e.batches += batches * qtySold
+      // The non-double-counting half of the figure — see `topValue` below.
+      e.topBatches += (topBatches || 0) * qtySold
       e.bySource[src] = (e.bySource[src] || 0) + qty * qtySold
     })
     node.items.forEach(({ item_id, qty }) => {
@@ -128,7 +130,18 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
       yieldUom: meta.yield_uom || 'unit',
       qty: agg[id].qty,
       batches: agg[id].batches,
+      // `value` is what it cost to make every batch of THIS sub-recipe that the period consumed,
+      // and it is correct per row — but the rows are NOT ADDITIVE, because batchCost is fully
+      // exploded (the tooltip on the Cost / Batch column says so: "nested sub-recipes included").
+      // Summing it double-counted a nested prep item: on the repo's own nested fixture, House
+      // Sauce 0.25 × 80 plus Herb Base 0.05 × 400 totalled NPR 40 against a true raw-ingredient
+      // value of NPR 20 — exactly 2× — while the KPI card's tooltip called the figure "a slice of
+      // the raw-item value on the Raw Items tab" (S721).
       value: agg[id].batches * batchCost,
+      // `topValue` is the part of that cost the dish reaches DIRECTLY, so summing it across rows
+      // counts each raw ingredient once. This is the figure every TOTAL on the page uses.
+      topValue: agg[id].topBatches * batchCost,
+      topBatches: agg[id].topBatches,
       batchCost,
       bySource: agg[id].bySource,
       // Fully exploded, so a nested sub-recipe's own raw ingredients are searchable from the
@@ -203,5 +216,12 @@ export function usageForSource(row, source) {
   if (source === 'all') return row
   const qty = row.bySource[source] || 0
   const share = row.qty > 0 ? qty / row.qty : 0
-  return { ...row, qty, batches: row.batches * share, value: row.value * share }
+  // topValue rescales by the same share: qty, batches and both values are all linear in qty.
+  return {
+    ...row, qty,
+    batches: row.batches * share,
+    topBatches: (row.topBatches || 0) * share,
+    value: row.value * share,
+    topValue: (row.topValue || 0) * share,
+  }
 }

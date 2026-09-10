@@ -37,8 +37,19 @@ export async function explodeRecipeIngredients(supabase, recipeIds) {
 //
 // Returns { [recipeId]: { items: [{ item_id, qty }], subRecipes: [{ sub_recipe_id, qty, batches }] } }
 // per one unit/portion of the parent, both arrays aggregated by id:
-//   qty     — output units of the sub-recipe consumed (the unit its yield_uom names)
-//   batches — qty ÷ that sub-recipe's own yield_qty, i.e. fraction of a batch
+//   qty        — output units of the sub-recipe consumed (the unit its yield_uom names)
+//   batches    — qty ÷ that sub-recipe's own yield_qty, i.e. fraction of a batch
+//   topBatches — the part of `batches` the DISH reaches directly (depth 0), i.e. not through
+//                another sub-recipe. This exists because sub-recipe COSTS are fully exploded
+//                (computeRecipeCosts is built on explodeRecipeIngredients, so a parent's
+//                batch cost already contains its nested children's), which makes the per-row
+//                values correct individually and NOT ADDITIVE. Sum `batches × batchCost` over
+//                every row and a nested sub-recipe is paid for twice — once inside its parent
+//                and once on its own row. Sum `topBatches × batchCost` and each raw ingredient
+//                is counted exactly once, because a top-level node already carries everything
+//                beneath it. A sub-recipe used directly by one dish AND nested inside another
+//                correctly gets only its direct share here, which is why this is a per-
+//                occurrence depth and not a set of "is this ever nested" flags.
 // Nested sub-recipes are reported at their own output-unit scale, not the top parent's, so a
 // base sauce used inside another sauce shows its real consumption rather than being folded away.
 export async function explodeRecipeTree(supabase, recipeIds) {
@@ -166,7 +177,7 @@ export async function explodeRecipeTree(supabase, recipeIds) {
           // it), and the recursion scale below is the same figure expressed in batches — so both
           // reported numbers are the ones the walk already had to compute, not a re-derivation.
           const batches = qty / (parseFloat(sr.yield_qty) || 1)
-          subs.push({ sub_recipe_id: r.sub_recipe_id, qty, batches })
+          subs.push({ sub_recipe_id: r.sub_recipe_id, qty, batches, depth })
           result.push(...explode(r.sub_recipe_id, batches, depth + 1, subs))
         }
       }
@@ -180,10 +191,12 @@ export async function explodeRecipeTree(supabase, recipeIds) {
     const subs = []
     explode(recipeId, 1, 0, subs).forEach(({ item_id, qty }) => { agg[item_id] = (agg[item_id] || 0) + qty })
     const subAgg = {}
-    subs.forEach(({ sub_recipe_id, qty, batches }) => {
-      const e = subAgg[sub_recipe_id] || (subAgg[sub_recipe_id] = { qty: 0, batches: 0 })
+    subs.forEach(({ sub_recipe_id, qty, batches, depth }) => {
+      const e = subAgg[sub_recipe_id] || (subAgg[sub_recipe_id] = { qty: 0, batches: 0, topBatches: 0 })
       e.qty += qty
       e.batches += batches
+      // Only the occurrences the DISH reaches directly. See the topBatches note above the function.
+      if (depth === 0) e.topBatches += batches
     })
     out[recipeId] = {
       items: Object.entries(agg).map(([item_id, qty]) => ({ item_id, qty })),

@@ -1,4 +1,7 @@
-import { AGE_BANDS, bandOf, ageInDays, allocateFifo, buildAgeing } from './stockAgeingCalc'
+import {
+  AGE_BANDS, bandOf, ageInDays, allocateFifo, buildAgeing,
+  daysUntilExpiry, parseDateLocal,
+} from './stockAgeingCalc'
 
 const AS_OF = new Date('2026-08-19T12:00:00')
 const daysAgo = n => new Date(AS_OF.getTime() - n * 24 * 60 * 60 * 1000)
@@ -79,6 +82,79 @@ describe('allocateFifo', () => {
     const out = allocateFifo([{ item_id: 'A', qty: 3, rate: 1, date: daysAgo(5) }], { A: 999 })
     expect(out[0].remaining).toBe(0)
   })
+
+  // FifoReport hangs the purchase_entries row off each batch as `entry` and reads it back to
+  // render the expiry date, the rate and the bill's period. Narrowing either spread inside
+  // allocateFifo to a fixed field list would empty that report with no error anywhere (S717).
+  test('carries a caller’s own fields through untouched', () => {
+    const entry = { id: 'pe-1', expiry_date: '2026-10-01' }
+    const out = allocateFifo([
+      { item_id: 'A', qty: 10, rate: 5, date: daysAgo(20), entry, returnedQty: 2 },
+    ], { A: 4 })
+    expect(out[0].entry).toBe(entry)
+    expect(out[0].returnedQty).toBe(2)
+    expect(out[0].consumed).toBe(4)
+    expect(out[0].remaining).toBe(6)
+  })
+
+  // The carried-forward batch is FifoReport's whole answer to "the month's consumption came off
+  // stock that was already here". Without it the dated batches absorb usage that was never theirs
+  // and an expiry report understates its exposure.
+  test('stock carried into the window shields later batches from its consumption', () => {
+    const out = allocateFifo([
+      { item_id: 'A', qty: 30, rate: 0, date: daysAgo(60), carriedForward: true },
+      { item_id: 'A', qty: 10, rate: 5, date: daysAgo(10), entry: { id: 'pe-1' } },
+    ], { A: 30 })
+    expect(out.find(b => b.carriedForward).remaining).toBe(0)
+    expect(out.find(b => b.entry).remaining).toBe(10)   // untouched, still at risk
+  })
+})
+
+describe('daysUntilExpiry', () => {
+  // 12:00 local on the 19th — the middle of a working day, which is where the old UTC-parsed
+  // version went wrong.
+  const noon = new Date(2026, 7, 19, 12, 0, 0)
+
+  test('counts whole days forward and backward from local midnight', () => {
+    expect(daysUntilExpiry('2026-08-26', noon)).toBe(7)
+    expect(daysUntilExpiry('2026-08-20', noon)).toBe(1)
+    expect(daysUntilExpiry('2026-08-18', noon)).toBe(-1)
+  })
+
+  // The regression this exists for: `new Date('2026-08-19')` is UTC midnight, i.e. 05:45 local in
+  // Nepal, so at noon the difference was negative-but-tiny and `Math.ceil` returned -0 — which is
+  // not `< 0`, so a batch expiring TODAY was flagged OK rather than expiring.
+  test('a batch expiring today is 0, not a fraction of a day either side', () => {
+    expect(daysUntilExpiry('2026-08-19', noon)).toBe(0)
+    expect(daysUntilExpiry('2026-08-19', new Date(2026, 7, 19, 23, 59))).toBe(0)
+    expect(daysUntilExpiry('2026-08-19', new Date(2026, 7, 19, 0, 1))).toBe(0)
+  })
+
+  test('yesterday is -1 all day, so an expired batch reads expired from midnight', () => {
+    expect(daysUntilExpiry('2026-08-18', new Date(2026, 7, 19, 0, 1))).toBe(-1)
+    expect(daysUntilExpiry('2026-08-18', new Date(2026, 7, 19, 23, 59))).toBe(-1)
+  })
+
+  test('an unparseable or absent date is null, never 0', () => {
+    // 0 would render as "expires today" on a row that has no expiry date at all.
+    expect(daysUntilExpiry(null, noon)).toBeNull()
+    expect(daysUntilExpiry('', noon)).toBeNull()
+    expect(daysUntilExpiry('not a date', noon)).toBeNull()
+  })
+
+  test('accepts a timestamp string by taking its date part', () => {
+    expect(daysUntilExpiry('2026-08-26T00:00:00+05:45', noon)).toBe(7)
+  })
+})
+
+describe('parseDateLocal', () => {
+  test('reads a bare date string as LOCAL midnight, not UTC', () => {
+    const d = parseDateLocal('2026-08-19')
+    expect(d.getFullYear()).toBe(2026)
+    expect(d.getMonth()).toBe(7)
+    expect(d.getDate()).toBe(19)
+    expect(d.getHours()).toBe(0)
+  })
 })
 
 describe('buildAgeing', () => {
@@ -128,6 +204,53 @@ describe('buildAgeing', () => {
       [{ item_id: 'A', qty: 5, rate: 10, date: daysAgo(200), carriedForward: true }], {}, AS_OF)
     expect(items[0].carriedForwardQty).toBe(5)
     expect(items[0].bands['90+'].qty).toBe(5)
+  })
+
+  // The KPI card summed carriedForwardQty across every item and printed it as "units" — kilograms
+  // added to litres added to pieces. Value is the only figure that sums across items (S718).
+  test('carried-forward VALUE is tracked per item and in the totals', () => {
+    const { items, totals } = buildAgeing([
+      { item_id: 'A', qty: 5, rate: 10, date: daysAgo(200), carriedForward: true },
+      { item_id: 'B', qty: 2, rate: 300, date: daysAgo(200), carriedForward: true },
+      { item_id: 'B', qty: 1, rate: 400, date: daysAgo(3) },
+    ], {}, AS_OF)
+    expect(items.find(i => i.item_id === 'A').carriedForwardValue).toBe(50)
+    expect(items.find(i => i.item_id === 'B').carriedForwardValue).toBe(600)
+    expect(totals.carriedForwardValue).toBe(650)
+    // The ordinary purchase is not counted as carried forward.
+    expect(totals.value).toBe(1050)
+  })
+
+  // Early in a fiscal year the window is shorter than 90 days, so carried-in stock lands in a
+  // young band however long it has really been on the shelf — and the 90+ headline then read
+  // NPR 0 with a green ✓. `unknownAgeValue` is what lets the page withhold that verdict.
+  test('carried-forward stock in a young band is reported as unknown-age', () => {
+    const { items, totals } = buildAgeing(
+      // 40 days is the whole window: this stock could be four years old.
+      [{ item_id: 'A', qty: 5, rate: 10, date: daysAgo(40), carriedForward: true }], {}, AS_OF)
+    expect(items[0].carriedForwardBand).toBe('31-60')
+    expect(totals.bands['90+'].value).toBe(0)     // the figure the card used to tick
+    expect(totals.unknownAgeValue).toBe(50)       // ...and the reason it must not
+  })
+
+  test('carried-forward stock that HAS reached the oldest band is not unknown-age', () => {
+    const { totals } = buildAgeing(
+      [{ item_id: 'A', qty: 5, rate: 10, date: daysAgo(200), carriedForward: true }], {}, AS_OF)
+    expect(totals.unknownAgeValue).toBe(0)
+    expect(totals.carriedForwardValue).toBe(50)
+  })
+
+  test('a fully consumed carried-forward batch reports nothing at all', () => {
+    const { totals } = buildAgeing(
+      [{ item_id: 'A', qty: 5, rate: 10, date: daysAgo(40), carriedForward: true }], { A: 5 }, AS_OF)
+    expect(totals.carriedForwardValue).toBe(0)
+    expect(totals.unknownAgeValue).toBe(0)
+  })
+
+  test('an ordinary batch in a young band is never counted as unknown-age', () => {
+    const { totals } = buildAgeing(
+      [{ item_id: 'A', qty: 5, rate: 10, date: daysAgo(40) }], {}, AS_OF)
+    expect(totals.unknownAgeValue).toBe(0)
   })
 
   test('empty input produces empty output, not NaN', () => {

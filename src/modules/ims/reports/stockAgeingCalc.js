@@ -8,8 +8,9 @@
 //
 //   There is no batch-level consumption ledger in this schema — sales_entries, wastages and
 //   staff_meals record item-level totals, never which purchase lot they came out of. So this
-//   cannot be a batch-precise allocation, and neither can FifoReport, which solves the same
-//   problem the same way (see its own comment). What it does instead is the standard FIFO
+//   cannot be a batch-precise allocation, and neither can FifoReport — which as of S717 does not
+//   merely solve the problem "the same way" but imports `allocateFifo` from here, because two
+//   pages carrying the same FIFO walk is how they drift. What it does instead is the standard FIFO
 //   ASSUMPTION: each item's total consumption over the window is eaten off that item's own
 //   batches oldest-first, and whatever survives is what is still on the shelf. That is the same
 //   level of precision every other stock figure in this app already works at.
@@ -48,10 +49,47 @@ export function ageInDays(from, asOf) {
 }
 
 /**
+ * `'YYYY-MM-DD'` as LOCAL midnight, or null.
+ *
+ * `new Date('2026-09-09')` is parsed as UTC midnight — at Nepal's +05:45 that is 05:45 on the 9th
+ * local, so a bare date string compared against a local wall clock is out by most of a day. Same
+ * family as the `.toISOString()` trap the BS rules name, in the other direction.
+ */
+export function parseDateLocal(iso) {
+  const [y, m, d] = String(iso || '').split('T')[0].split('-').map(Number)
+  if (!y || !m || !d) return null
+  const dt = new Date(y, m - 1, d)
+  return isNaN(dt) ? null : dt
+}
+
+/**
+ * Whole days from `asOf` to a stored date, negative once it has passed. `null` if unparseable —
+ * never 0, which would read as "expires today".
+ *
+ * The mirror of `ageInDays`: that one looks back from a purchase, this one looks forward to an
+ * expiry. Both sides are floored to local midnight so the answer is a whole number of days rather
+ * than a fraction of one — FifoReport's own copy mixed a UTC-parsed date with `new Date()` and
+ * `Math.ceil`'d the result, which produced `-0` for a batch that expired earlier the same day and
+ * therefore rendered it as in-date (S717).
+ */
+export function daysUntilExpiry(expiryIso, asOf) {
+  const e = parseDateLocal(expiryIso)
+  const b = asOf instanceof Date ? asOf : new Date(asOf)
+  if (!e || isNaN(b)) return null
+  const bMid = new Date(b.getFullYear(), b.getMonth(), b.getDate())
+  return Math.round((e - bMid) / MS_PER_DAY)
+}
+
+/**
  * Eat each item's consumption off its own batches, oldest first.
  *
  * batches: [{ item_id, qty, rate, date, carriedForward? }]  (qty already net of returns)
  * consumedByItem: { [item_id]: qty consumed over the window }
+ *
+ * Extra fields on a batch ride through untouched (the two spreads below copy the whole object) and
+ * FifoReport depends on that: it hangs the `purchase_entries` row itself off each batch as `entry`
+ * so it can render the expiry date and rate of whatever survives. Do not narrow the spreads to a
+ * fixed field list.
  *
  * Returns a NEW array of batches with `remaining` set; input is not mutated. Batches are returned
  * in the same oldest-first order they were consumed in, which is also the order the page renders.
@@ -91,7 +129,21 @@ export function allocateFifo(batches, consumedByItem) {
  * Returns { items, totals } where items is one row per item carrying a per-band {qty, value} and
  * `oldestDays`, and totals is the same shape aggregated. Value uses each batch's OWN rate (the
  * price actually paid for the stock still sitting there), not the current master rate — ageing is
- * about capital already committed.
+ * about capital already committed. **The carried-forward batch is the exception and the caller
+ * supplies its rate**: there is no purchase line behind it, so the page passes the current master
+ * rate and says so. Do not let that exception quietly become the rule for real batches.
+ *
+ * `carriedForwardValue` and `carriedForwardBand` are surfaced per item (S718) because the page has
+ * to disclose two things the age arithmetic cannot express on its own:
+ *
+ *   - **A quantity total across items is meaningless.** Carried-forward stock is kg of flour plus
+ *     litres of oil plus pieces of napkin, and the page used to add them up and print the result as
+ *     "units" in a KPI card — while the table's own TOTAL row printed "—" in the On Hand column for
+ *     exactly that reason, two hundred pixels away. Value is the only figure that sums.
+ *   - **Its age is a floor, not a measurement.** It is dated at the window start, so early in a
+ *     fiscal year it necessarily lands in a young band: two months in, stock that has genuinely sat
+ *     for three years is 60 days old to this report, and the 90+ headline reads NPR 0 in green with
+ *     a ✓. `carriedForwardBand` lets the caller withhold that verdict.
  */
 export function buildAgeing(batches, consumedByItem, asOf = new Date()) {
   const allocated = allocateFifo(batches, consumedByItem)
@@ -107,22 +159,35 @@ export function buildAgeing(batches, consumedByItem, asOf = new Date()) {
     if (!items.has(b.item_id)) {
       items.set(b.item_id, {
         item_id: b.item_id, qty: 0, value: 0, oldestDays: 0,
-        carriedForwardQty: 0, bands: emptyBands(),
+        carriedForwardQty: 0, carriedForwardValue: 0, carriedForwardBand: null,
+        bands: emptyBands(),
       })
     }
     const row = items.get(b.item_id)
     row.qty += b.remaining
     row.value += value
     row.oldestDays = Math.max(row.oldestDays, age)
-    if (b.carriedForward) row.carriedForwardQty += b.remaining
+    if (b.carriedForward) {
+      row.carriedForwardQty += b.remaining
+      row.carriedForwardValue += value
+      row.carriedForwardBand = band
+    }
     row.bands[band].qty += b.remaining
     row.bands[band].value += value
   }
 
-  const totals = { qty: 0, value: 0, bands: emptyBands() }
+  const totals = { qty: 0, value: 0, carriedForwardValue: 0, unknownAgeValue: 0, bands: emptyBands() }
+  const oldestKey = AGE_BANDS[AGE_BANDS.length - 1].key
   for (const row of items.values()) {
     totals.qty += row.qty
     totals.value += row.value
+    totals.carriedForwardValue += row.carriedForwardValue
+    // Carried-forward stock that did NOT land in the oldest band is the part whose true age the
+    // report is actively unable to see: it is at least window-old and could be years older, and
+    // the only reason it is not in the 90+ column is that the window itself is not 91 days long.
+    if (row.carriedForwardBand && row.carriedForwardBand !== oldestKey) {
+      totals.unknownAgeValue += row.carriedForwardValue
+    }
     for (const b of AGE_BANDS) {
       totals.bands[b.key].qty += row.bands[b.key].qty
       totals.bands[b.key].value += row.bands[b.key].value

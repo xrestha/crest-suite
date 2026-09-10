@@ -46,7 +46,7 @@ export default function TheoreticalVariance() {
     setLoadError(null)
     const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
+      fetchAllRows(() => scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
       scopedFrom('categories').order('sort_order'),
       scopedFrom('recipes', 'id, name, yield_qty'),
     ])
@@ -82,7 +82,7 @@ export default function TheoreticalVariance() {
       // Deliberately UNFILTERED, unlike the `items` fetch above that backs the display table: a
       // recipe can legitimately reference an inactive item or a sub-recipe mirror row, and its
       // trim loss is still real. Filtering here is what made yield_pct silently default to 100%.
-      scopedFrom('items', 'id, yield_pct'),
+      fetchAllRows(() => scopedFrom('items', 'id, yield_pct').order('id')),
     ])
     // S612: a failed ingredient/yield read silently understates theoretical usage — surface it.
     const ingFailed = firstError(ingResults)
@@ -174,12 +174,20 @@ export default function TheoreticalVariance() {
       // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup; paged so a busy
       // POS period's sales_entries can't truncate theoretical usage at 1000 rows.
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
-      supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
+      // Every per-item-per-period read below is paged (S719). Each is one row per item per period,
+      // so a client past 1000 items — or a multi-period window — truncates silently, and
+      // truncation returns NO error for the firstError() check to catch. The direction is what
+      // matters here: a missing CLOSING row makes actual usage read as "everything on the shelf
+      // plus everything bought", which is a false Over variance on the report a client uses to
+      // chase shrinkage. init()'s two `items` reads are paged for the same reason S717 gave on
+      // Stock Report — they produce the ids every one of these is joined against, and the second
+      // (yield_pct) is deliberately unfiltered, so it is the LONGER of the two.
+      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
@@ -209,7 +217,10 @@ export default function TheoreticalVariance() {
     ;(opening || []).forEach(r => { openMap[r.item_id]  = parseFloat(r.qty || 0) })
     ;(closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty || 0) })
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    setHasClosing((closing || []).length > 0)
+    // Local, not the state value: setState is async, so the row builder below would otherwise read
+    // the PREVIOUS period's answer.
+    const hasClosingRows = (closing || []).length > 0
+    setHasClosing(hasClosingRows)
     ;(purch   || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + parseFloat(r.qty || 0) })
     ;(rets    || []).forEach(r => { retMap[r.item_id]   = (retMap[r.item_id]   || 0) + parseFloat(r.qty || 0) })
     ;(wast    || []).forEach(r => { wastMap[r.item_id]  = (wastMap[r.item_id]  || 0) + parseFloat(r.qty || 0) })
@@ -226,7 +237,13 @@ export default function TheoreticalVariance() {
         const variancePct = theor > 0 ? (variance / theor) * 100 : 0
         const rate        = parseFloat(item.per_uom_rate || 0)
         const varianceVal = variance * rate
-        return { item, theor, actual, variance, variancePct, varianceVal, rate }
+        // Measurability is PER ITEM (S719), exactly as on Variance.js, which this page must agree
+        // with. `hasClosing` only asks whether the month has ANY closing rows; an item missing from
+        // the count got closeQty 0, so actual usage read as everything on hand plus everything
+        // bought and the row wore a full Over verdict built out of an absence. A count of 0 is a
+        // real count (S695), so presence is `in closeMap`, never `> 0`.
+        const hasCount    = item.id in closeMap
+        return { item, theor, actual, variance, variancePct, varianceVal, rate, hasCount, measured: hasClosingRows && hasCount }
       })
 
     setRows(computed)
@@ -251,7 +268,7 @@ export default function TheoreticalVariance() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
-    const data = filteredRows().map(({ item, theor, actual, variance, variancePct, varianceVal }) => ({
+    const data = filteredRows().map(({ item, theor, actual, variance, variancePct, varianceVal, hasCount }) => ({
       'Item':                item.name,
       'Category':            item.categories?.name || '',
       'UOM':                 item.uom,
@@ -260,22 +277,28 @@ export default function TheoreticalVariance() {
       'Variance Qty':        +variance.toFixed(3),
       'Variance %':          +variancePct.toFixed(1),
       'Variance Value (NPR)': Math.round(varianceVal),
+      'Closing counted':     hasCount ? 'yes' : 'no',
     }))
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Theoretical Variance')
     XLSX.writeFile(wb, `Theoretical-Variance-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
 
   const visible          = filteredRows()
-  const totalTheorVal    = rows.reduce((s, r) => s + r.theor   * r.rate, 0)
-  const totalActualVal   = rows.reduce((s, r) => s + r.actual  * r.rate, 0)
-  const totalVarianceVal = rows.reduce((s, r) => s + r.varianceVal, 0)
+  // Measured rows only (S719). An item with no closing count has a variance manufactured out of an
+  // absence; adding it to the period total is how the page reports a loss that is really an
+  // uncounted shelf. Same rule as Variance.js, which this page must agree with.
+  const measuredRows     = rows.filter(r => r.measured)
+  const uncountedRows    = rows.filter(r => !r.hasCount)
+  const totalTheorVal    = measuredRows.reduce((s, r) => s + r.theor   * r.rate, 0)
+  const totalActualVal   = measuredRows.reduce((s, r) => s + r.actual  * r.rate, 0)
+  const totalVarianceVal = measuredRows.reduce((s, r) => s + r.varianceVal, 0)
   // Counted by BAND, not by `variance > 0.01`. At a quantity threshold of a hundredth of a unit
   // essentially every item in a real month counts as over-used, so the tile below was permanently
   // red and its number contradicted the rows it sat above — the table flagged a handful, the KPI
   // claimed hundreds. Both now answer the same question: how many items are outside the client's
   // configured tolerance and material enough to act on.
-  const overCount        = rows.filter(r => varianceBand(r.variancePct, r.varianceVal, settings, { measured: hasClosing }).key === 'over').length
-  const underCount       = rows.filter(r => varianceBand(r.variancePct, r.varianceVal, settings, { measured: hasClosing }).key === 'under').length
+  const overCount        = measuredRows.filter(r => varianceBand(r.variancePct, r.varianceVal, settings, { measured: true }).key === 'over').length
+  const underCount       = measuredRows.filter(r => varianceBand(r.variancePct, r.varianceVal, settings, { measured: true }).key === 'under').length
   // The aggregate the Total Variance tile is judged on — a rupee total alone has no percentage to
   // band, and `> 0 ? red : green` gave a NPR 40 whole-period variance the same red as NPR 40,000.
   const totalVariancePct = totalTheorVal > 0 ? (totalVarianceVal / totalTheorVal) * 100 : null
@@ -298,7 +321,7 @@ export default function TheoreticalVariance() {
   // the page is how a report stops being read.
   // `measured: false` while the closing count is missing — every figure is then an artefact of
   // the gap rather than a finding, and the banner above already says so.
-  const band = (pct, value) => varianceBand(pct, value, settings, { measured: hasClosing })
+  const band = (pct, value, measured = hasClosing) => varianceBand(pct, value, settings, { measured })
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="this comparison" />
@@ -337,6 +360,18 @@ export default function TheoreticalVariance() {
           The “Actual” column subtracts the closing count, so until it exists everything still on
           your shelves is counted as consumed and every item looks over-used. Finish the Stock
           Count for this month, or pick a closed month above.
+        </div>
+      )}
+
+      {/* The PARTIAL case, which had no voice before S719: the month is counted, but not all of
+          it, and every uncounted item was carrying an Over verdict built out of a closing count of
+          zero. They are excluded from the totals and marked in the table. */}
+      {!loading && !computing && hasClosing && uncountedRows.length > 0 && (
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>△ {uncountedRows.length} item{uncountedRows.length === 1 ? ' has' : 's have'} no closing count for {periodLabel}.</strong>{' '}
+          Their “Actual” is everything that was on hand, which is a figure rather than a finding, so
+          they are marked <em>not counted</em> in the table and left out of the totals — those cover
+          the {measuredRows.length} item{measuredRows.length === 1 ? '' : 's'} that were counted.
         </div>
       )}
 
@@ -452,11 +487,18 @@ export default function TheoreticalVariance() {
                 </tr>
               </thead>
               <tbody>
-                {visible.map(({ item, theor, actual, variance, variancePct, varianceVal }) => {
-                  const b = band(variancePct, varianceVal)
+                {visible.map(({ item, theor, actual, variance, variancePct, varianceVal, hasCount, measured }) => {
+                  const b = band(variancePct, varianceVal, measured)
                   return (
                     <tr key={item.id}>
-                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.name}</td>
+                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                        {item.name}
+                        {!hasCount && (
+                          <Tip text="No closing count was entered for this item, so its actual usage is everything that was on hand — a figure, not a finding. It is left out of the totals above." width={300}>
+                            <span className="badge badge-gray" style={{ marginLeft: 6, display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>not counted</span>
+                          </Tip>
+                        )}
+                      </td>
                       <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
                       <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmtQty(theor)}</td>

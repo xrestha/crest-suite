@@ -701,9 +701,10 @@ export const IMS_GUIDE_GROUPS = [
         title: 'Stock Movements',
         route: '/stock-movements',
         plan: 'Growth+',
-        summary: 'A raw, non-editable transactional ledger of every POS-driven stock depletion (sale or comp) for a period — the audit trail behind Book Stock and usage calculations. Two tabs: Raw Items (the ledger) and Sub-Recipes (a derived prep-level rollup).',
+        summary: 'A raw, non-editable transactional ledger of every stock depletion for a period — POS sales and comps AND saved manual Sales Entry days, which have written movements since 2026-07-30 — the audit trail behind Book Stock and usage calculations. Two tabs: Raw Items (the ledger) and Sub-Recipes (a derived prep-level rollup).',
         workflow: [
-          'Select period (or arrive via a deep link from Reorder Report). Search by item, filter by source (POS Sale / POS Comp). Export Excel.',
+          'Select period (or arrive via a deep link from Reorder Report). Search by item, filter by source (POS Sale / POS Comp / Manual Entry). Export Excel.',
+          'The Day range filter never hides an UNDATED movement: a Bulk manual Sales Entry writes bs_day 0 and belongs to the whole period rather than any one day, so those rows stay in range whatever the From/To say. Until S721 `0 >= 1` dropped every one of them from the table, the KPI cards and the export, with no way to select them back.',
           'Order # is clickable and opens the original POS bill.',
           'Sub-Recipes tab: how many batches of each prep item this period\'s sales consumed. Shares the search + source filters; has no Day filter (see gotchas). Exports as a second Excel sheet, "Sub-Recipe Usage", leaving the first sheet unchanged.',
           'Both tabs: a Sort dropdown (per-tab keys, shared asc/desc toggle), a TOTAL footer row summing the Value of the current filtered set, and a Print button (printWithTitle, so "Save as PDF" gets a useful filename). Filters/tabs/buttons carry no-print so the printout is the header, stat cards and table only.',
@@ -722,7 +723,7 @@ export const IMS_GUIDE_GROUPS = [
         ],
         gotchas: [
           'A warning banner appears if any recipe sold this period has zero recipe_ingredients — those sales deplete no stock at all and would otherwise silently vanish from this ledger; it lists the offending recipes by name.',
-          'This table is never manually editable — movements appear automatically the instant a POS bill is charged or comped.',
+          'This table is never manually editable — movements appear automatically the instant a POS bill is charged or comped, and when a manual Sales Entry day is saved.',
           'The Sub-Recipes tab is DERIVED from sales_entries, not read from stock_movements — recipe_ingredients stores a sub-recipe as sub_recipe_id with item_id NULL, so a sub-recipe can never be a leaf and never reaches the ledger, and the table has no column for the path a depletion took. It re-walks the recipes at read time via explodeRecipeTree (src/utils/recipeCost.js), filtered through the same POS-supersedes-manual rule the write path uses (src/modules/ims/sales/salesDepletion.js, shared with depleteManualSales so the two cannot drift).',
           'Sub-recipe rows are deliberately NOT written into stock_movements: a sub-recipe\'s mirror item (items.is_sub_recipe) carries its own per_uom_rate, so extra ledger rows would double-count this page\'s own "Value Depleted" KPI against the raw-item rows already there. The two tabs are the same ingredients at different grains — never add them together.',
           'No Day filter on the Sub-Recipes tab: the derivation includes Bulk Sales Entry rows, which carry bs_day 0 and belong to the whole period, so a day filter would silently drop them rather than narrow the view.',

@@ -145,6 +145,72 @@ describe('loadSubRecipeUsage', () => {
     expect(byName['Herb Base'].batches).toBeCloseTo(0.05, 6)
   })
 
+  // THE ROWS ARE NOT ADDITIVE, and the page's total used to add them anyway (S721).
+  // computeRecipeCosts is fully exploded, so House Sauce's cost per batch (80) already contains
+  // the Herb Base inside it; Herb Base's own row is 400/batch. Summing `value` therefore pays for
+  // the herb twice — 0.25×80 + 0.05×400 = 40 against a true raw-ingredient value of 20.
+  test('topValue counts a nested sub-recipe once, where value counts it twice', async () => {
+    const { supabase, scopedFrom } = makeStub({
+      ingredients: [
+        { recipe_id: 'dish',  qty_per_portion: 50,  item_id: null, sub_recipe_id: 'sauce', items: null },
+        { recipe_id: 'sauce', qty_per_portion: 100, item_id: null, sub_recipe_id: 'base',  items: null },
+        { recipe_id: 'base',  qty_per_portion: 200, item_id: 'herb', sub_recipe_id: null, items: { yield_pct: 100 } },
+      ],
+      recipes: [
+        { id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', category: 'Sub-Recipe', cost_price: null },
+        { id: 'base',  yield_qty: 500,  yield_uom: 'g',  name: 'Herb Base',   category: 'Sub-Recipe', cost_price: null },
+      ],
+      items: [{ id: 'herb', per_uom_rate: 2 }],
+      sales: [{ recipe_id: 'dish', qty_sold: 10, bs_day: 1, source: 'pos' }],
+    })
+    const { rows, derivedItemValue } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    const byName = Object.fromEntries(rows.map(r => [r.name, r]))
+
+    // Per row: still the full cost of making that much of it. Correct, and unchanged.
+    expect(byName['House Sauce'].value).toBeCloseTo(20, 6)   // 0.25 batch × 80
+    expect(byName['Herb Base'].value).toBeCloseTo(20, 6)     // 0.05 batch × 400
+    expect(rows.reduce((s, r) => s + r.value, 0)).toBeCloseTo(40, 6)  // the old total: 2× the truth
+
+    // Only the outer one is reached directly by the dish, so only it is charged.
+    expect(byName['House Sauce'].topBatches).toBeCloseTo(0.25, 6)
+    expect(byName['Herb Base'].topBatches).toBeCloseTo(0, 6)
+    expect(byName['Herb Base'].topValue).toBeCloseTo(0, 6)
+
+    // The figure every total on the page uses, and it ties to the raw-item tab exactly — which is
+    // what the KPI card's tooltip claims it does.
+    expect(rows.reduce((s, r) => s + r.topValue, 0)).toBeCloseTo(derivedItemValue, 6)
+    expect(derivedItemValue).toBeCloseTo(20, 6)              // 10 g herb × 2
+  })
+
+  // A sub-recipe can be BOTH nested and used directly. Only its direct share may be charged, so a
+  // simple "is this ever nested?" flag would have been wrong.
+  test('a sub-recipe used directly and nested is charged only for the direct part', async () => {
+    const { supabase, scopedFrom } = makeStub({
+      ingredients: [
+        { recipe_id: 'dishA', qty_per_portion: 2000, item_id: null, sub_recipe_id: 'sauce', items: null },
+        { recipe_id: 'sauce', qty_per_portion: 500,  item_id: null, sub_recipe_id: 'base',  items: null },
+        { recipe_id: 'dishB', qty_per_portion: 500,  item_id: null, sub_recipe_id: 'base',  items: null },
+        { recipe_id: 'base',  qty_per_portion: 200, item_id: 'herb', sub_recipe_id: null, items: { yield_pct: 100 } },
+      ],
+      recipes: [
+        { id: 'sauce', yield_qty: 2000, yield_uom: 'ml', name: 'House Sauce', category: 'Sub-Recipe', cost_price: null },
+        { id: 'base',  yield_qty: 500,  yield_uom: 'g',  name: 'Herb Base',   category: 'Sub-Recipe', cost_price: null },
+      ],
+      items: [{ id: 'herb', per_uom_rate: 2 }],
+      sales: [
+        { recipe_id: 'dishA', qty_sold: 1, bs_day: 1, source: 'pos' },
+        { recipe_id: 'dishB', qty_sold: 1, bs_day: 1, source: 'pos' },
+      ],
+    })
+    const { rows, derivedItemValue } = await loadSubRecipeUsage(supabase, scopedFrom, 'p1')
+    const byName = Object.fromEntries(rows.map(r => [r.name, r]))
+    // Herb Base: 1 batch nested under House Sauce (dishA) + 1 batch direct (dishB) = 2 batches.
+    expect(byName['Herb Base'].batches).toBeCloseTo(2, 6)
+    // ...but only dishB's batch is charged here; dishA's is already inside House Sauce's cost.
+    expect(byName['Herb Base'].topBatches).toBeCloseTo(1, 6)
+    expect(rows.reduce((s, r) => s + r.topValue, 0)).toBeCloseTo(derivedItemValue, 6)
+  })
+
   test('a dish with no sub-recipes yields no rows but still values its raw items', async () => {
     const { supabase, scopedFrom } = makeStub({
       ingredients: [{ recipe_id: 'dish', qty_per_portion: 20, item_id: 'tomato', sub_recipe_id: null, items: { yield_pct: 100 } }],

@@ -1,33 +1,69 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { npr, NPR_LOCALE } from '../../../shared/nepalMoney'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { COGS_FORMULA } from '../../../shared/imsFormulas'
+import NoPeriodState from '../../../components/NoPeriodState'
+import { COGS_FORMULA, computeUsed } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
-import { Navigate } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 // Item is "Slow" if used < 20% of net available
 const SLOW_THRESHOLD = 0.2
 
+// THIS REPORT CANNOT RUN WITHOUT A CLOSING COUNT, AND USED TO PRETEND OTHERWISE (S717).
+//
+// Consumption here is the periodic COGS residual — opening + purchases − returns − wastage −
+// staff meals − CLOSING — so the closing count is not one input among several, it is the only
+// thing standing between "we used it all" and "none of it moved".
+//
+// The old code summed `closing` with a filter that returned 0 for an item with no `closing_stock`
+// row at all, which is the ordinary state of every item in an open month before the count is
+// done. An uncounted item therefore computed as **fully consumed**, failed both the Dead test and
+// the Slow test, and was dropped from the report — so an uncounted period rendered zero rows and
+// the sentence *"No dead or slow-moving stock this period."* That is the single most reassuring
+// thing this page can say, and it was what it said when it knew nothing at all.
+//
+// It also conflated the two states S695 spent a session separating: a `closing_stock` row with
+// `physical_qty = 0` is a COUNT ("we looked and there was none"), and no row is not. Presence is
+// tested with `item.id in closeMap` here, as it is in `buildStockRows`.
+const num = v => parseFloat(v) || 0
+function sumByItem(rows, field) {
+  const out = {}
+  for (const r of rows || []) out[r.item_id] = (out[r.item_id] || 0) + num(r[field])
+  return out
+}
+
 export default function DeadStock() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const biz = useBizInfo()
   const periodReq = useLatestRequest()
   const [periods, setPeriods]           = useState([])
   const [selectedPeriod, setSelected]   = useState(null)
   const [rows, setRows]                 = useState([])
   const [statusFilter, setStatusFilter] = useState('All')
   const [catFilter, setCatFilter]       = useState('All')
-  const [loading, setLoading]           = useState(false)
+  // Starts TRUE. It used to start false, so the first paint — before any read had been issued —
+  // rendered the KPI strip as `0 Dead / 0 Slow / —` above the empty state's "No dead or slow-moving
+  // stock this period." Every one of those is a claim the page had not yet earned (S594/S616).
+  const [loading, setLoading]           = useState(true)
   const [loadError, setLoadError]       = useState(null)
+  // How many items could not be judged, and why. An item the report cannot assess must be counted
+  // and named, never silently dropped into the same absence as an item that is fine.
+  const [uncounted, setUncounted]       = useState(0)
+  const [inconsistent, setInconsistent] = useState(0)
+  const [assessable, setAssessable]     = useState(0)
 
   useEffect(() => {
     if (!effectiveClientId) return
@@ -35,9 +71,10 @@ export default function DeadStock() {
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .then(({ data, error }) => {
         // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-        if (error) { setLoadError(error.message); return }
+        if (error) { setLoadError(error.message); setLoading(false); return }
         setPeriods(data || [])
         if (data?.length) setSelected(data[0])
+        else setLoading(false)   // nothing will call fetchData, so nothing else will clear it
       })
   }, [effectiveClientId, scopedFrom])
 
@@ -50,15 +87,24 @@ export default function DeadStock() {
     setLoading(true)
     setLoadError(null)
     const results = await Promise.all([
-      scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
-      supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
+      // Every read is paged, not just purchases and wastage (S717). `opening_stock`,
+      // `closing_stock` and `staff_meals` are one row per item per period, so a client past 1000
+      // items truncates silently — and truncation returns NO error, so the firstError() check
+      // below walks straight over it. The consequence here is specific and bad: a missing
+      // `closing_stock` row is indistinguishable from "not counted", so the tail of a large item
+      // book would drop out of the report exactly as if nobody had counted it. Stock Count and
+      // Stock Report already page these three; this page and Reorder Report were the two that
+      // could still disagree with them about what is on the shelf.
+      fetchAllRows(() => scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)')
+        .eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       // Staff meals count as consumption (src/shared/imsFormulas.js). Without them an item only
       // ever eaten by staff read as "Dead — no movement", which is the opposite of true.
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
     ])
     // A failed read must never flow through the `|| []`s below — every item would read as "Dead"
     // or vanish, both believable (S612 silent-zero rule).
@@ -75,23 +121,56 @@ export default function DeadStock() {
       { data: closings },
     ] = results
 
-    function sumField(arr, field, itemId) {
-      return (arr || []).filter(r => r.item_id === itemId).reduce((s, r) => s + parseFloat(r[field] || 0), 0)
-    }
+    // One pass per table instead of a `.filter()` per item per table. The old `sumField` walked
+    // every row of all six arrays once for each item — at 800 items and a busy month that is tens
+    // of millions of element visits on a page load.
+    const openMap  = sumByItem(openings, 'qty')
+    const purchMap = sumByItem(purchases, 'qty')
+    const retMap   = sumByItem(rets, 'qty')
+    const wasteMap = sumByItem(wastes, 'qty')
+    const staffMap = sumByItem(staffMealRows, 'qty')
+    // Built directly rather than through sumByItem: presence is the fact this page turns on, and
+    // an item counted at 0 must be present in the map. There is at most one row per item.
+    const closeMap = {}
+    for (const r of closings || []) closeMap[r.item_id] = num(r.physical_qty)
 
     const built = []
+    let uncountedCount = 0
+    let inconsistentCount = 0
+    let assessableCount = 0
     for (const item of (itemsData || [])) {
-      const opening   = sumField(openings,  'qty',          item.id)
-      const purchased = sumField(purchases, 'qty',          item.id)
-      const returned  = sumField(rets,      'qty',          item.id)
-      const wasted    = sumField(wastes,    'qty',          item.id)
-      const staffUsed = sumField(staffMealRows, 'qty',      item.id)
-      const closing   = sumField(closings,  'physical_qty', item.id)
+      const opening   = openMap[item.id]  || 0
+      const purchased = purchMap[item.id] || 0
+      const returned  = retMap[item.id]   || 0
+      const wasted    = wasteMap[item.id] || 0
+      const staffUsed = staffMap[item.id] || 0
+      const hasCount  = item.id in closeMap
+      const closing   = hasCount ? closeMap[item.id] : 0
       const available = opening + purchased - returned
-      const used      = Math.max(available - wasted - staffUsed - closing, 0)
 
-      // Skip items with no stock presence at all
+      // Skip items with no stock presence at all — nothing in the data says this item was ever on
+      // the shelf this period, so it is neither dead nor unassessed, it is simply absent.
+      if (available <= 0 && !hasCount) continue
+
+      // No closing count: consumption is not merely unknown, it is unknowable in this model.
+      // Counted, not classified — the banner names how many, because the alternative is a report
+      // that quietly gets shorter the less anyone counts.
+      if (!hasCount) { uncountedCount += 1; continue }
+
+      // Counted, and the count is zero on an item nothing was available of either: the original
+      // "no stock presence" skip, which the hasCount split above would otherwise have let through
+      // as a Dead item worth NPR 0 — noise on a report about capital tied up.
       if (available <= 0 && closing <= 0) continue
+
+      // A count larger than what was theoretically available means a purchase is missing or the
+      // count is wrong. `used` then goes negative and the old `Math.max(…, 0)` turned that into a
+      // flat 0, i.e. **Dead** — the loudest verdict on the page, produced by a data fault. Stock
+      // Report already surfaces this class as "negative theoretical stock"; here it is excluded
+      // and counted, since "write this stock off" is the wrong thing to say about a bad number.
+      const rawUsed = computeUsed({ opening, purchases: purchased, returns: returned, wastage: wasted, staffMeals: staffUsed, closing })
+      if (rawUsed < 0) { inconsistentCount += 1; continue }
+      assessableCount += 1
+      const used = rawUsed
 
       const status = used === 0
         ? 'Dead'
@@ -122,6 +201,9 @@ export default function DeadStock() {
 
     built.sort((a, b) => b.valueAtRisk - a.valueAtRisk)
     setRows(built)
+    setUncounted(uncountedCount)
+    setInconsistent(inconsistentCount)
+    setAssessable(assessableCount)
     setStatusFilter('All')
     setCatFilter('All')
     setLoading(false)
@@ -140,13 +222,23 @@ export default function DeadStock() {
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
     : ''
 
+  // The scope this report is read under, in one line — on screen, in the print header and in the
+  // workbook alike. It has to carry the coverage, not just the month: "3 dead items" means one
+  // thing across a fully counted book and something else across 40 of 900 items (S594).
+  const scopeLine = `${periodLabel} · ${assessable} item${assessable === 1 ? '' : 's'} assessed`
+    + (uncounted > 0 ? ` · ${uncounted} not counted` : '')
+    + (inconsistent > 0 ? ` · ${inconsistent} with inconsistent figures` : '')
+
   function fmt(n) {
-    if (!n) return '—'
-    return 'NPR ' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })
+    return n ? npr(n) : '—'
   }
 
+  // A QUANTITY, not money — so it keeps its decimals. S717/S719 routed these through nprInt(),
+  // which is `Math.round`, so a 0.4 kg count printed as "0" while its own Value at Risk stayed
+  // non-zero and the row contradicted itself. nepalMoney.js is for MONEY; the "render money through
+  // the shared helper" rule does not extend to quantities. NPR_LOCALE keeps the Nepali grouping.
   function fmtQty(n) {
-    return n ? Number(n).toLocaleString('en-IN') : '—'
+    return n ? Number(n).toLocaleString(NPR_LOCALE, { maximumFractionDigits: 3 }) : '—'
   }
 
   async function exportExcel() {
@@ -166,18 +258,31 @@ export default function DeadStock() {
       'Closing Qty':        r.closing   || '',
       'Value at Risk (NPR)':r.valueAtRisk ? r.valueAtRisk.toFixed(0) : '',
     }))
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Dead Stock')
+    const ws = sheetWithLetterhead(XLSX, {
+      title: 'Dead Stock / Slow Movers',
+      biz,
+      scopeLine,
+      rows: data,
+      notes: [
+        `Consumption is ${COGS_FORMULA}.`,
+        'Only items with a closing count for this period can be judged; the rest are excluded and counted in the scope line above.',
+      ],
+    })
+    XLSX.utils.book_append_sheet(wb, ws, 'Dead Stock')
     XLSX.writeFile(wb, `DeadStock-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the dead stock report" />
 
   return (
     <div className="page-container">
 
       {/* Print-only header */}
       <div className="print-only" style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Dead Stock / Slow Movers — {periodLabel}</h2>
+        <h2 style={{ margin: 0 }}>Dead Stock / Slow Movers</h2>
+        <div style={{ fontSize: 12 }}>{scopeLine}</div>
       </div>
 
       {/* Screen header */}
@@ -186,7 +291,9 @@ export default function DeadStock() {
           <h1 className="page-title">Dead Stock / Slow Movers</h1>
           <p className="page-subtitle">Items with zero or low consumption — capital tied up in stock</p>
           <div className="page-scope-row">
-            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+            {/* provisionalWhenOpen: this report is computed from the closing count, so before the
+                month is counted it is not merely provisional, it is mostly blank (S717). */}
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -195,14 +302,33 @@ export default function DeadStock() {
               <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year}</option>
             ))}
           </select>
-          <button className="btn btn-ghost" onClick={() => printWithTitle(`Dead Stock - Slow Movers - ${periodLabel}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={!rows.length}>Export Excel</button>
+          <button className="btn btn-ghost" disabled={loading || !!loadError}
+            onClick={() => printWithTitle(`Dead Stock / Slow Movers — ${scopeLine}`)}>Print</button>
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length}>Export Excel</button>
         </div>
       </div>
 
+      {/* What the report could NOT judge. It goes above the figures because it qualifies all of
+          them: "no dead stock" across 12 assessed items out of 900 is not the same sentence as
+          "no dead stock" across a counted month, and until S717 the page said both identically. */}
+      {!loading && !loadError && (uncounted > 0 || inconsistent > 0) && (
+        <div className="no-print" style={{
+          background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--theme-amber) 20%, transparent)',
+          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
+          fontSize: 13, color: 'var(--theme-text2)',
+        }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>△ {assessable} of {assessable + uncounted + inconsistent} items could be judged</strong>
+          {uncounted > 0 && <> — <strong>{uncounted}</strong> {uncounted === 1 ? 'has' : 'have'} no closing count for {periodLabel}, and consumption cannot be worked out without one (it is opening + purchases − wastage − staff meals − <em>closing</em>). Enter the count in <strong>Stock Count</strong> and this report fills in.</>}
+          {inconsistent > 0 && <> {uncounted > 0 ? 'A further' : '—'} <strong>{inconsistent}</strong> {inconsistent === 1 ? 'item was' : 'items were'} counted higher than the stock available to them, which usually means a purchase bill is missing. Those figures are excluded rather than reported as “never used”.</>}
+        </div>
+      )}
+
       {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
-          Dead Stock Items / Value at Risk read as a confident 0 (S594). */}
-      {!loading && !loadError && (
+          Dead Stock Items / Value at Risk read as a confident 0 (S594). `assessable > 0` is the
+          same rule one step further — with nothing counted the page has computed nothing, and
+          "0 Dead / 0 Slow" is a finding it has not made (S717). */}
+      {!loading && !loadError && assessable > 0 && (
       <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">Dead Stock Items</div>
@@ -223,7 +349,14 @@ export default function DeadStock() {
       </div>
       )}
 
-      {/* Filters */}
+      {/* Filters. Gated exactly like the KPI strip above (S720). S717 gated the strip and left this
+          row forty lines below it ungated, so `All (0) Dead (0) Slow (0)` painted for the whole of
+          the seven-query load and stayed there permanently above ReportLoadError's "Could not load
+          this report" — three counts saying "no dead stock, no slow movers" about a period the page
+          never read. S616's rule is positional and this is the file it was recorded against: the
+          guard has to open before the element, and every slot ReportPage would gate needs it, not
+          just the stat-grid. */}
+      {!loading && !loadError && assessable > 0 && (
       <div className="no-print" style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         {['All', 'Dead', 'Slow'].map(s => (
           <button
@@ -242,13 +375,37 @@ export default function DeadStock() {
           </div>
         )}
       </div>
+      )}
 
       {loading ? (
         <div className="loading-state">Loading...</div>
       ) : loadError ? (
         <ReportLoadError error={loadError} />
+      ) : assessable === 0 && uncounted > 0 ? (
+        /* "Nothing is dead" and "we could not look" are different facts, and this page used to
+           render them with the same sentence — the reassuring one (S717). */
+        <div className="empty-state">
+          <div className="empty-state-icon">◷</div>
+          <p className="empty-state-text">
+            This report needs a stock count. None of the {uncounted} item{uncounted === 1 ? '' : 's'} with
+            stock in {periodLabel} has a closing count yet, so there is no way to tell what moved and
+            what did not. <Link to="/stock">Enter the closing count</Link> and come back.
+          </p>
+        </div>
+      ) : assessable === 0 ? (
+        /* A third fact again: no opening, no purchases, no count — there is simply nothing in
+           this period to have an opinion about. */
+        <div className="empty-state">
+          <div className="empty-state-icon">◈</div>
+          <p className="empty-state-text">No stock recorded in {periodLabel} yet — nothing to assess.</p>
+        </div>
       ) : rows.length === 0 ? (
-        <div className="empty-state">No dead or slow-moving stock this period.</div>
+        <div className="empty-state">
+          <div className="empty-state-icon">✓</div>
+          <p className="empty-state-text">
+            No dead or slow-moving stock among the {assessable} item{assessable === 1 ? '' : 's'} counted in {periodLabel}.
+          </p>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">◈</div>

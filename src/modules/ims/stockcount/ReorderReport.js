@@ -103,15 +103,22 @@ export default function ReorderReport() {
   async function loadReport(periodId) {
     setLoadError(null)
     const results = await Promise.all([
-      scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
-      supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
+      // S696 gave this page and Stock Report ONE calculation; S710 then paged Stock Report's
+      // inputs and left this page's bare, so the shared function was still being handed two
+      // different pictures of the same period. Past 1000 items the items list itself was short,
+      // and opening/closing/staff-meals/returns are all one row per item per period — so the two
+      // pages disagreed about what is on the shelf, silently, on the one that prints a purchase
+      // list. Truncation returns NO error, so the firstError() check below never saw it (S717).
+      fetchAllRows(() => scopedFrom('items', '*, categories(name)')
+        .eq('is_active', true).eq('is_sub_recipe', false).order('name').order('id')),
+      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       // Staff meals come off the shelf (S696) — Stock Report already deducted them and this page
       // did not, so an item Stock Report called Low read OK on the page a purchase list prints from.
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       // Both paged rather than bare selects — either can exceed PostgREST's silent 1000-row cap
       // on a busy period, and a truncated read here understates theoretical usage and Book Stock
       // with no error to notice. Book Stock is a figure people place orders against, so a
@@ -120,7 +127,10 @@ export default function ReorderReport() {
       // was the last page summing sales_entries raw, so a day sold in both POS and manual entry
       // consumed its ingredients twice and a credit note put stock back on the shelf.
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
-      scopedFrom('par_levels'),
+      // One row per item per client, so it truncates at exactly the volume par levels start being
+      // worth having — and a missing par reads as "no par set", which means the item can never
+      // flag for reorder on the page whose whole job is flagging it (S717).
+      fetchAllRows(() => scopedFrom('par_levels').order('id')),
       fetchAllRows(() => scopedFrom('stock_movements', 'item_id, qty').eq('period_id', periodId).order('id'))
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection

@@ -66,7 +66,13 @@ export default function StockReport() {
   async function loadReport(periodId) {
     setLoadError(null)
     const results = await Promise.all([
-      scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
+      // The item list is paged too (S717). S710 wrapped the per-period tables below and left the
+      // read that PRODUCES the ids they are joined against — so past 1000 SKUs the report was
+      // complete-looking and simply had no rows for the tail of the book, and Total Stock Value
+      // was short by whatever those items were worth. Same shape as S706/S708: the consumer was
+      // paged and the producer was not.
+      fetchAllRows(() => scopedFrom('items', '*, categories(name)')
+        .eq('is_active', true).eq('is_sub_recipe', false).order('name').order('id')),
       // Opening, closing, returns and staff meals are paged for the reason Stock Count states on
       // its own copy: each is one row per item per period, so a client past 1000 items silently
       // loses stock — and truncation returns NO error, so the firstError() check below passes
@@ -84,7 +90,9 @@ export default function StockReport() {
       // raw, a day sold in both POS and manual entry consumed its ingredients twice here, and a
       // credit note (negative qty, 'pos_credit') put stock back on the shelf (S695).
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
-      scopedFrom('par_levels', 'item_id, par_qty'),
+      // One row per item per client — a truncated read here silently turns "below par" into "no
+      // par set" for the tail of the book, so Low Stock reads low on both this page and Reorder.
+      fetchAllRows(() => scopedFrom('par_levels', 'item_id, par_qty').order('id')),
       // Requisitions are deliberately NOT read here any more — see stockReportCalc.js. Issued
       // stock is consumed by the recipes the kitchen cooks, which the sales read above already
       // covers; deducting both took every cooked-and-requisitioned item off twice.
