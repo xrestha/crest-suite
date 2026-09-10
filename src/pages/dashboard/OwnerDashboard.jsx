@@ -1,5 +1,5 @@
 import { npr } from '../../shared/nepalMoney'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { TriangleAlert } from 'lucide-react'
 import {
@@ -10,7 +10,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { useSettings } from '../../context/SettingsContext'
 import { fcBand } from '../../shared/imsFormulas'
@@ -63,6 +63,7 @@ export default function OwnerDashboard() {
   // source Variance/Recipes/MenuPricing use — a hardcoded 35/45 here could colour the same month
   // differently from the Variance page this card links to whenever a client customised them.
   const { settings } = useSettings()
+  const fcCardBand = pct => fcBand(pct, settings)
 
   const [loading, setLoading] = useState(true)
   const [activePeriod, setActivePeriod] = useState(null)
@@ -81,35 +82,49 @@ export default function OwnerDashboard() {
   // sub-loader so one section's failure doesn't clobber another's message.
   const [loadErrors, setLoadErrors] = useState({})
 
+  // Guards against a stale response overwriting the current view (S734). This page had NO
+  // cancellation check at all — the only one of the five dashboards without one, while both
+  // ClientDashboard and HrDashboard carry a `loadIdRef` and say why. Its five loaders each run
+  // several seconds of queries, so an admin switching "view as" client (or an owner switching
+  // outlet) while one was in flight let the PREVIOUS tenant's revenue, payroll and payables land
+  // last and repaint the page — under the new client's name in the header, with no tell. That is
+  // worse here than on the pages that already guard: these are cross-module money figures on the
+  // surface an owner acts on, and the two tenants' numbers are indistinguishable once mixed.
+  // Each loader captures the id current at its own start and re-checks it after every await.
+  const loadIdRef = useRef(0)
+
   function retryLoad(section) {
-    if (section === 'period') loadAll()
-    else if (section === 'ims') loadImsFigures(activePeriod)
-    else if (section === 'reorder') loadReorderStats(activePeriod)
-    else if (section === 'payables') loadOverduePayables()
-    else if (section === 'labor' && activePeriod) loadLaborCost(activePeriod)
-    else if (section === 'trend') loadTrend()
+    const myId = ++loadIdRef.current
+    if (section === 'period') { loadAll(myId); loadTrend(myId) }
+    else if (section === 'ims') loadImsFigures(activePeriod, myId)
+    else if (section === 'reorder') loadReorderStats(activePeriod, myId)
+    else if (section === 'payables') loadOverduePayables(myId)
+    else if (section === 'labor' && activePeriod) loadLaborCost(activePeriod, myId)
+    else if (section === 'trend') loadTrend(myId)
   }
 
   useEffect(() => {
     if (authLoading || !effectiveClientId) return
-    if (clientModules.ims && clientModules.hr) { loadAll(); loadTrend() } else { setLoading(false); setTrendLoading(false) }
+    const myId = ++loadIdRef.current
+    if (clientModules.ims && clientModules.hr) { loadAll(myId); loadTrend(myId) } else { setLoading(false); setTrendLoading(false) }
   }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Last 12 closed periods' frozen combined metrics (Food/Labor/Prime Cost %, Net Margin %) —
   // same 'combined' shape computeMonthlyReport.js already writes, read directly rather than
   // re-derived, so this trend can never disagree with what the Monthly Owner Report itself shows
   // for the same periods.
-  async function loadTrend() {
+  async function loadTrend(myId) {
     setTrendLoading(true)
     const { data, error } = await scopedFrom('monthly_owner_reports', 'bs_year, bs_month, snapshot')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .limit(12)
+    if (loadIdRef.current !== myId) return // superseded by a newer client switch
     setLoadErrors(prev => ({ ...prev, trend: error ? 'Trend chart failed to load — may be incomplete or stale.' : '' }))
     setTrendReports((data || []).slice().reverse())
     setTrendLoading(false)
   }
 
-  async function loadAll() {
+  async function loadAll(myId) {
     setLoading(true)
     // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
     // this query that just means "no open period right now," a normal state, not a failure.
@@ -117,15 +132,17 @@ export default function OwnerDashboard() {
       .eq('status', 'open')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .limit(1).single()
+    if (loadIdRef.current !== myId) return // superseded by a newer client switch
     setActivePeriod(period)
     setLoadErrors(prev => ({ ...prev, period: (periodErr && periodErr.code !== 'PGRST116') ? 'Could not check for an open period — figures below may be wrong.' : '' }))
 
     await Promise.all([
-      loadImsFigures(period),
-      loadReorderStats(period),
-      loadOverduePayables(),
-      period ? loadLaborCost(period) : Promise.resolve(setLaborCostTotal(null)),
+      loadImsFigures(period, myId),
+      loadReorderStats(period, myId),
+      loadOverduePayables(myId),
+      period ? loadLaborCost(period, myId) : Promise.resolve(setLaborCostTotal(null)),
     ])
+    if (loadIdRef.current !== myId) return
     setLoading(false)
   }
 
@@ -135,16 +152,35 @@ export default function OwnerDashboard() {
   // bucket='overhead' only (unlike ClientDashboard's), since this page's True Net Margin
   // also subtracts a separately-computed HR-payroll laborCostTotal — without the bucket
   // filter, the Overheads page's "Labor Costs" tab rows would get subtracted a second time.
-  async function loadImsFigures(period) {
+  async function loadImsFigures(period, myId) {
     const results = await Promise.all([
       period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, payment_method').eq('period_id', period.id).order('id')) : { data: [] },
-      period ? supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id) : { data: [] },
-      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')) : { data: [] },
-      scopedFrom('recipes', 'id, selling_price'),
+      // Paged (S734): subtracted from net purchases, so a truncation OVERSTATES Food Cost %
+      // and understates True Net Margin — the wrong direction on a banded tile.
+      period ? fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id).order('id')) : { data: [] },
+      // `source` is SELECTED and comps are filtered in JS below, never `.neq('source','pos_comp')`
+      // (S734). `sales_entries.source` is nullable (DEFAULT 'manual', no NOT NULL), and in SQL
+      // `NULL <> 'pos_comp'` evaluates to NULL rather than true — so the server-side form silently
+      // dropped every legacy row whose source predates the column from REVENUE. That is the
+      // denominator of all five figures in the row above: Food Cost %, Labor Cost % and Prime Cost
+      // % each read HIGH against a short revenue base and True Net Margin % read LOW, on the one
+      // page whose whole purpose is figures trustworthy enough to act on — and each disagreed with
+      // ClientDashboard's own figure for the very same month, which has always filtered in JS.
+      // Same defect class as the reorder read below, and the last of the two on this page.
+      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', period.id).order('id')) : { data: [] },
+      // Paged (S734), and it is a PRODUCER: this is the price fallback for any sales row with
+      // no `unit_price`, so a recipe past the 1000-row cap prices its sales at zero. That is
+      // the denominator of all five tiles in the Profitability row — the same failure the
+      // `.neq` on the sales read had, arriving by a different route.
+      fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
+      // Deliberately NOT paged: one row per named fixed cost per period, tens of rows.
       period ? supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead') : { data: [] },
       period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
-      scopedFrom('items', 'id, per_uom_rate'),
+      // Paged (S734): itemRateMap values Wastage Value, and an item past the cut is valued at
+      // RATE 0 rather than dropped — so the tile reads LOW and looks like a good month.
+      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').order('id')),
     ])
+    if (loadIdRef.current !== myId) return // superseded by a newer client switch
     setLoadErrors(prev => ({ ...prev, ims: results.some(r => r.error) ? 'Revenue/food cost figures failed to load — may be incomplete or stale.' : '' }))
     const [{ data: purchases }, { data: returns }, { data: salesData }, { data: recipes }, { data: overheadsData }, { data: wastagesData }, { data: items }] = results
 
@@ -157,6 +193,7 @@ export default function OwnerDashboard() {
     // this dashboard exists specifically to make trustworthy enough to act on.
     const priceMap = {}; (recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0 })
     const revenueTotal = (salesData || []).reduce((s, r) => {
+      if (r.source === 'pos_comp') return s // a comped dish was never paid for; see the read above
       const price = r.unit_price != null ? parseFloat(r.unit_price) : (priceMap[r.recipe_id] || 0)
       return s + parseFloat(r.qty_sold || 0) * price - (parseFloat(r.discount) || 0)
     }, 0)
@@ -178,15 +215,20 @@ export default function OwnerDashboard() {
   }
 
   // ── Items below reorder par — a live inventory position, not a period total ──
-  async function loadReorderStats(period) {
+  async function loadReorderStats(period, myId) {
     const results = await Promise.all([
       period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
-      period ? supabase.from('vendor_returns').select('item_id, qty').eq('period_id', period.id) : { data: [] },
-      period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
-      period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
-      scopedFrom('items', 'id, per_uom_rate, yield_pct').eq('is_active', true).eq('is_sub_recipe', false),
-      scopedFrom('par_levels', 'item_id, par_qty'),
-      scopedFrom('recipes', 'id, selling_price'),
+      // Six paged reads (S734). `buildStockRows` looks every transaction row up in these, so
+      // a truncated master list does not shorten the below-par count — it removes items from
+      // it silently, and an opening or closing row past the cut reads as a ZERO count, which
+      // makes the item look freshly restocked rather than empty. This tile links to the
+      // Reorder Report, which S696 aligned it with precisely so the two could not disagree.
+      period ? fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id).order('id')) : { data: [] },
+      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate, yield_pct').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      fetchAllRows(() => scopedFrom('par_levels', 'item_id, par_qty').order('id')),
+      fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
       // Every source, with bs_day + source for the shared depletion rule (S696). This read used
       // to carry `.neq('source', 'pos_comp')`, which was wrong twice over: a comped dish still
       // consumed its ingredients, and a .neq on a NULLABLE column also drops every legacy manual
@@ -195,8 +237,12 @@ export default function OwnerDashboard() {
       // Wastage and staff meals come off the shelf in the shared calculation (S696); this tile
       // deducted neither, so it disagreed with the Reorder Report it summarises.
       period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
-      period ? supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id) : { data: [] },
+      // Paged for the same reason `wastages` directly above it is (S734) — one row per item per
+      // day crosses 1000 inside one month, and an under-read here UNDER-deducts staff meals, so
+      // on-hand reads high and items drop off the below-par count this tile reports.
+      period ? fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
     ])
+    if (loadIdRef.current !== myId) return // superseded by a newer client switch
     setLoadErrors(prev => ({ ...prev, reorder: results.some(r => r.error) ? 'Reorder figures failed to load — may be incomplete or stale.' : '' }))
     const [{ data: purchases }, { data: returns }, { data: opening }, { data: closing }, { data: items }, { data: parLevels }, { data: recipes }, { data: sales }, { data: wastages }, { data: staffMeals }] = results
 
@@ -224,11 +270,12 @@ export default function OwnerDashboard() {
       items, opening, closing, purchases, returns, wastages, staffMeals,
       sales, breakdown: ingredientBreakdown, pars: parLevels,
     })
+    if (loadIdRef.current !== myId) return // superseded again after the recipe walk
     setReorderStats(summarizeReorder(rows))
   }
 
   // ── Overdue vendor payables (>60 days) — cross-period by nature, doesn't wait on `period` ──
-  async function loadOverduePayables() {
+  async function loadOverduePayables(myId) {
     // Paged: every unpaid credit bill across all periods, so this grows without bound as the
     // system is used and would silently stop counting overdue payables past 1000 rows (S529).
     const { data, error } = await fetchAllRows(() => supabase
@@ -241,7 +288,16 @@ export default function OwnerDashboard() {
 
     const rows = data || []
     const ids = rows.map(e => e.id)
-    const { data: pmts, error: pmtsErr } = ids.length ? await scopedFrom('payable_payments').in('purchase_entry_id', ids) : { data: [] }
+    // Chunked AND paged (S734). `ids` is every unpaid credit bill the client has ever raised —
+    // the read above is deliberately paged because it grows without bound — and PostgREST spells
+    // an `.in()` list out in the request URL, so a few hundred uuids is already a 414 and the
+    // 1000-row cap still applies to the payments underneath. Both failure modes bias the SAME
+    // way: a short `paidMap` makes bills look less paid than they are, so Overdue Payables
+    // OVERSTATES what is owed, and the 414 zeroes it out entirely.
+    const { data: pmts, error: pmtsErr } = ids.length
+      ? await fetchAllRowsChunked(ids, chunk => scopedFrom('payable_payments', 'purchase_entry_id, amount').in('purchase_entry_id', chunk).order('id'))
+      : { data: [] }
+    if (loadIdRef.current !== myId) return // superseded again after the payments read
     setLoadErrors(prev => ({ ...prev, payables: (error || pmtsErr) ? 'Overdue payables failed to load — may be incomplete or stale.' : '' }))
     const paidMap = {}
     ;(pmts || []).forEach(p => { paidMap[p.purchase_entry_id] = (paidMap[p.purchase_entry_id] || 0) + parseFloat(p.amount || 0) })
@@ -269,7 +325,7 @@ export default function OwnerDashboard() {
   // prorated employer SSF. Deliberately a simplification for daily/hourly staff — assumes a
   // standard day/hours every elapsed calendar day rather than looking up real attendance; refined
   // once Payroll Run is finalized for the month. ──
-  async function loadLaborCost(period) {
+  async function loadLaborCost(period, myId) {
     const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
     const bsToday = getBsToday()
     const isCurrentMonth = period.bs_year === bsToday.year && period.bs_month === bsToday.month
@@ -281,6 +337,7 @@ export default function OwnerDashboard() {
       scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
         .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
     ])
+    if (loadIdRef.current !== myId) return // superseded by a newer client switch
     setLoadErrors(prev => ({ ...prev, labor: results.some(r => r.error) ? 'Labor cost failed to load — may be incomplete or stale.' : '' }))
     const [{ data: employees }, { data: components }, { data: otEntries }] = results
 
@@ -361,6 +418,38 @@ export default function OwnerDashboard() {
 
   const periodLabel = activePeriod ? `${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}` : '—'
   const fmt = npr
+
+  // HOW FAR INTO THE MONTH WE ARE (S734) — the same guard ClientDashboard has carried since the
+  // `periodTooEarly` note was written, and this page had none of it while labelling every tile
+  // "(MTD)".
+  //
+  // Food cost divides a numerator that arrives in LUMPS (a bulk restock) by a denominator that
+  // accrues DAILY, so on day 3 an outlet that has just bought the month's rice reads a Food Cost
+  // % in the hundreds — and here that lands as a red ▲ under a tooltip inviting the owner to
+  // act on it, then reads a healthy 31% ✓ by day 30 with nothing having changed. Prime Cost %
+  // and True Net Margin % both CONTAIN food cost, so they inherit it.
+  //
+  // Labor Cost % deliberately keeps its band throughout: it is prorated by elapsed days against
+  // revenue that accrues over the same days, so the ratio is meaningful from day one. Greying a
+  // figure that IS settled would be its own lie, and the point of this guard is that a verdict
+  // is only shown once it has been earned — not that early-month figures are all suspect. (Its
+  // one unprorated input is approved OT for the whole month, a small share of the total; that is
+  // noise around a real figure rather than the lumpiness above.)
+  const bsNow = getBsToday()
+  const isCurrentPeriod = !!activePeriod && activePeriod.bs_year === bsNow.year && activePeriod.bs_month === bsNow.month
+  const periodDays = activePeriod ? daysInBsMonth(activePeriod.bs_year, activePeriod.bs_month) : 30
+  const dayOfPeriod = isCurrentPeriod ? bsNow.day : periodDays
+  const SETTLE_DAY = 10 // matches ClientDashboard's own threshold, deliberately
+  const periodTooEarly = isCurrentPeriod && dayOfPeriod < SETTLE_DAY
+  const partialNote = periodTooEarly ? `Day ${dayOfPeriod} of ${periodDays} · settles at month end` : null
+  // The banded figure, with both the colour AND the ✓/△/▲ withheld before SETTLE_DAY — a mark
+  // on a day-4 food cost is the same claim in a quieter voice.
+  const settledFigure = (pct, bander) => {
+    const f = bandFigure(pct, bander)
+    if (pct == null) return { color: 'var(--theme-text2)', title: undefined, text: f.text }
+    if (periodTooEarly) return { color: 'var(--theme-text1)', title: undefined, text: `${pct.toFixed(1)}%` }
+    return { color: f.style.color, title: f.title, text: f.text }
+  }
 
   const trendChartData = trendReports.map(r => {
     const c = r.snapshot?.combined || {}
@@ -501,10 +590,10 @@ export default function OwnerDashboard() {
             <div style={kpiLabelStyle}>
               <Tip text={`Net purchases ÷ revenue × 100. Coloured against your own Settings thresholds — watch above ${fcBand(fcPct, settings).warn}%, too high above ${fcBand(fcPct, settings).critical}% — the same scale Variance and Recipes use. Nepal F&B benchmark: 28–35%.`} width={260}>Food Cost % (MTD)</Tip>
             </div>
-            <div title={fcPct != null ? fcBand(fcPct, settings).label : undefined} style={{ ...kpiValueStyle(24), color: fcBand(fcPct, settings).color }}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}% ${fcBand(fcPct, settings).mark}` : '—'}
+            <div title={settledFigure(fcPct, fcCardBand).title} style={{ ...kpiValueStyle(24), color: settledFigure(fcPct, fcCardBand).color }}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : settledFigure(fcPct, fcCardBand).text}
             </div>
-            <div style={kpiSubtextStyle}>Your target ≤{fcBand(fcPct, settings).warn}% →</div>
+            <div style={kpiSubtextStyle}>{partialNote || `Your target ≤${fcBand(fcPct, settings).warn}% →`}</div>
           </div>
 
           <div {...kpiCard(() => navigate('/hr/payroll'))}>
@@ -526,8 +615,8 @@ export default function OwnerDashboard() {
             <div style={kpiLabelStyle}>
               <Tip text="Food Cost % + Labor Cost % — the two controllable costs combined, the number operators actually benchmark against. Industry standard: 60-65% of revenue." width={280}>Prime Cost % (MTD)</Tip>
             </div>
-            <div style={{ ...kpiValueStyle(24), color: pcBand(primeCostPct).color }} title={primeCostPct != null ? pcBand(primeCostPct).label : undefined}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : bandFigure(primeCostPct, pcBand).text}
+            <div style={{ ...kpiValueStyle(24), color: settledFigure(primeCostPct, pcBand).color }} title={settledFigure(primeCostPct, pcBand).title}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : settledFigure(primeCostPct, pcBand).text}
             </div>
             {/* Prime and True Net Margin both CONTAIN the prorated labour estimate, and both used
                 to present themselves as exact — only the Labor card said "Estimate", and only in
@@ -535,7 +624,9 @@ export default function OwnerDashboard() {
                 green verdict has to disclose its basis where it is read, not on hover. Matches how
                 the Monthly Owner Report prints "· estimated — no payroll finalized for this
                 period" inline. */}
-            <div style={kpiSubtextStyle}>Target ≤60-65% · includes labour estimate</div>
+            {/* The labour-estimate disclosure is load-bearing (S660) and must survive the
+                partial-period note rather than being replaced by it. */}
+            <div style={kpiSubtextStyle}>{partialNote ? `Day ${dayOfPeriod} of ${periodDays} · includes labour estimate` : 'Target ≤60-65% · includes labour estimate'}</div>
           </div>
 
           {/* The ternary was inverted: a client who HAS Overheads got the non-clickable card (the
@@ -548,12 +639,15 @@ export default function OwnerDashboard() {
             {/* `canOverheads` gates the FIGURE, not just its colour: without Overheads this is not
                 a margin at all, so it must stay unbanded and unmarked rather than being painted a
                 verdict on a number the page cannot compute. */}
-            <div style={{ ...kpiValueStyle(24), color: canOverheads ? nmBand(netMarginPct).color : 'var(--theme-text2)' }}
-              title={canOverheads && netMarginPct != null ? nmBand(netMarginPct).label : undefined}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : bandFigure(netMarginPct, nmBand).text}
+            <div style={{ ...kpiValueStyle(24), color: canOverheads ? settledFigure(netMarginPct, nmBand).color : 'var(--theme-text2)' }}
+              title={canOverheads ? settledFigure(netMarginPct, nmBand).title : undefined}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : settledFigure(netMarginPct, nmBand).text}
             </div>
             <div style={kpiSubtextStyle}>
-              {!canOverheads ? 'Requires Overheads (Pro) →' : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered' : 'After food, labour & overhead · includes labour estimate'}
+              {!canOverheads ? 'Requires Overheads (Pro) →'
+                : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered'
+                : partialNote ? `Day ${dayOfPeriod} of ${periodDays} · includes labour estimate`
+                : 'After food, labour & overhead · includes labour estimate'}
             </div>
           </div>
         </div>

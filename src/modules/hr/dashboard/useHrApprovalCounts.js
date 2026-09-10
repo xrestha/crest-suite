@@ -12,6 +12,14 @@ export function useHrApprovalCounts() {
   const { scopedFrom } = useScopedDb()
   const [counts, setCounts] = useState({ leave: 0, ot: 0, tada: 0, swap: 0, total: 0 })
   const [loading, setLoading] = useState(true)
+  // A FAILED READ IS NOT AN EMPTY QUEUE (S734). Every one of these four destructured `{ count }`
+  // and discarded `{ error }`, and on a refusal or a dropped connection `count` comes back null —
+  // which fell through `|| 0` into a zero. Both consumers then painted that zero as the GOOD
+  // state: HrDashboard's four cards read "0 · all clear" in green, and ClientDashboard's Pending
+  // Approvals headline read 0 in neutral text. So the one failure mode where a manager most needs
+  // to look at the queue is the one that told them there was nothing in it. Carried out to the
+  // callers rather than swallowed here, because only they can decide how to say so.
+  const [error, setError] = useState(false)
   const loadIdRef = useRef(0)
 
   useEffect(() => {
@@ -25,14 +33,26 @@ export function useHrApprovalCounts() {
       // Only pending_admin needs a manager action — pending_target is still waiting on the
       // coworker's own accept/decline, same filter SwapRequestsPanel.jsx uses.
       scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('status', 'pending_admin'),
-    ]).then(([{ count: leave }, { count: ot }, { count: tada }, { count: swap }]) => {
+    ]).then(results => {
       if (loadIdRef.current !== myId) return // superseded by a newer client switch
+      const [{ count: leave }, { count: ot }, { count: tada }, { count: swap }] = results
+      const failed = results.some(r => r.error)
+      if (failed) console.error('HR approval counts failed to load', results.find(r => r.error).error)
       const l = leave || 0, o = ot || 0, t = tada || 0, s = swap || 0
+      setError(failed)
       setCounts({ leave: l, ot: o, tada: t, swap: s, total: l + o + t + s })
+      setLoading(false)
+    }, err => {
+      // supabase-js resolves with { data, error } rather than throwing, so this only fires on a
+      // genuine rejection — but without it `loading` would stay true forever and both consumers
+      // would sit on a skeleton with no way out.
+      if (loadIdRef.current !== myId) return
+      console.error('HR approval counts failed to load', err)
+      setError(true)
       setLoading(false)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId])
 
-  return { ...counts, loading }
+  return { ...counts, loading, error }
 }

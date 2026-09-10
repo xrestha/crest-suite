@@ -7,6 +7,7 @@ import Tip from '../../components/Tip'
 import { BS_MONTHS, adToBs } from '../../utils/bsCalendar'
 import { getSubStatus, getDateStatus } from '../../utils/subscription'
 import { clientMRR } from '../../shared/clientMrr'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 
 // Cross-tenant admin overview — every client's periods/profiles in one unscoped read to build
 // the platform-wide table, so this stays on raw supabase.from() rather than scopedDb (there is
@@ -21,6 +22,13 @@ export default function AdminDashboardOverview() {
   const [adminLoading, setAdminLoading]   = useState(true)
   const [activeTodayClients, setActiveTodayClients] = useState([])
   const [search, setSearch]               = useState('')
+  // A FAILED READ IS NOT AN EMPTY PLATFORM (S734). All three queries below destructured only
+  // `{ data }`, so a refusal or a dropped connection rendered "0 active · 0 inactive · 0 total
+  // properties" over "Est. Monthly Revenue NPR 0" — a confident, entirely fabricated report of
+  // the business, on the one screen whose job is to say how the business is doing. Same rule the
+  // client-facing dashboards were given: surface it, offer a retry, and do not dress a number
+  // nobody computed as a figure.
+  const [loadError, setLoadError]         = useState('')
   // Which attention KPI card is currently narrowing the table below. null = show everything.
   const [filter, setFilter]               = useState(null)
 
@@ -29,19 +37,32 @@ export default function AdminDashboardOverview() {
   async function loadAdminStats() {
     setAdminLoading(true)
     const since24h = new Date(Date.now() - 86400000).toISOString()
-    const [{ data: clients }, { data: periods }, { data: recentProfiles }] = await Promise.all([
+    const results = await Promise.all([
       supabase.from('clients')
         .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, trial_approved_at, subscribe_requested, trial_expires_at')
         .order('name'),
-      supabase.from('monthly_periods')
+      // Paged (S734). This is EVERY client's every period — one row per tenant per BS month, so
+      // 30 properties two years in is already past PostgREST's 1000-row cap, and a bare select
+      // returns the first 1000 with no error. The descending sort meant the rows that fell off
+      // were the OLDEST, which sounds harmless and is not: an outlet whose open period has sat
+      // un-advanced for a while is exactly the row that gets cut, and losing it moves that
+      // client into the "No Open Period" tile — the red count an operator rings people about.
+      // `.order('id')` is the unique tiebreaker fetchAllRows requires; without it paging a
+      // (bs_year, bs_month) sort repeats a row on one page and skips it on the next.
+      fetchAllRows(() => supabase.from('monthly_periods')
         .select('client_id, bs_year, bs_month, status')
         .order('bs_year', { ascending: false })
-        .order('bs_month', { ascending: false }),
+        .order('bs_month', { ascending: false })
+        .order('id')),
       supabase.from('profiles')
         .select('client_id')
         .not('client_id', 'is', null)
         .gte('last_seen_at', since24h),
     ])
+    const [{ data: clients }, { data: periods }, { data: recentProfiles }] = results
+    setLoadError(results.some(r => r.error)
+      ? 'Platform data failed to load — the counts and revenue below may be incomplete or missing entirely.'
+      : '')
     const openMap = {}, latestMap = {}
     ;(periods || []).forEach(p => {
       if (p.status === 'open') openMap[p.client_id] = p
@@ -226,6 +247,22 @@ export default function AdminDashboardOverview() {
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => navigate('/admin/clients')}>Manage Clients →</button>
       </div>
+
+      {loadError && (
+        <div role="alert" className="card dash-row" style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
+          borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+        }}>
+          <p style={{ color: 'var(--theme-red-text)', margin: 0, fontSize: 13 }}>
+            <span aria-hidden="true">⚠</span> {loadError}
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={loadAdminStats}>Retry</button>
+            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setLoadError('')} aria-label="Dismiss">×</button>
+          </div>
+        </div>
+      )}
 
       {adminLoading ? (
         <>

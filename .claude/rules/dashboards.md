@@ -22,12 +22,19 @@ A client with 2+ modules sees three separate dashboard destinations, each a diff
 
 Both dashboards were bitten by this and both now select `source` and filter comps in JS, with the
 reasoning at the call site (`ClientDashboard.jsx`'s trend read, `OwnerDashboard.jsx`'s reorder
-read). `NULL <> 'pos_comp'` evaluates to NULL, not true, so the server-side form drops every legacy
-row whose source predates the column default — and on the Client Dashboard it dropped them from
-REVENUE ONLY, leaving a short denominator under a full numerator and every Food Cost % on the chart
-failing HIGH. `OwnerDashboard`'s remaining `.neq` on the revenue read is still there and is on the
-open list. Full rule, including why the same defect on `Sales.js` DELETED rows rather than merely
-undercounting them, is in `.claude/rules/ims-figures.md`.
+read AND its revenue read). `NULL <> 'pos_comp'` evaluates to NULL, not true, so the server-side
+form drops every legacy row whose source predates the column default — and on the Client Dashboard
+it dropped them from REVENUE ONLY, leaving a short denominator under a full numerator and every
+Food Cost % on the chart failing HIGH. Full rule, including why the same defect on `Sales.js`
+DELETED rows rather than merely undercounting them, is in `.claude/rules/ims-figures.md`.
+
+**`OwnerDashboard`'s revenue read was the last one and it stood for three sessions after being
+written down here as open (fixed S734).** Worth noting what the delay cost, because the entry read
+like a loose end and was not: that read is the DENOMINATOR of every figure in the page's
+Profitability row, so Food Cost %, Labor Cost % and Prime Cost % each read HIGH against a short
+base while True Net Margin % read LOW — four banded verdicts, all wrong in the direction that
+alarms, on the page sold as the one an owner can act on. **A known defect on a denominator is not
+the same size as a known defect on a figure**; when one is left open, say what divides by it.
 
 **S556 added a frozen month-end forecast line to Daily Purchases vs Sales, on the same "capture once, never move" principle as the Monthly Owner Report snapshot above.** The existing dashed projection (`salesProjection`/`purchProjection`) is deliberately *live* — `projectTrend()` refits to every actual day on every load, so it answers "if today's pace continues, where do we land" but has no memory of what it said yesterday. `monthly_periods.sales_projection_snapshot`/`purch_projection_snapshot` (nullable jsonb, migration `20260814130000`) hold `{slope, intercept, cap, capturedDay, projectedMonthEnd}`, captured the first time each metric crosses `projectTrend()`'s own 5-point threshold in the open period and never overwritten afterward — `targetLineValue()` reconstructs a full month-1-to-month-end reference line from that frozen fit, rendered as a third, distinctly-hued dotted line (`DAILY_TREND_COLORS.salesTarget`/`purchTarget` — blue/orange, deliberately not gold/green, since a third same-hue series at that point reads as dash-pattern soup rather than a distinguishable line) alongside the still-live adaptive tail. The write is a best-effort `scopedUpdate(...).is('sales_projection_snapshot', null)` — the `.is()` guard means a second tab racing the same capture can't stomp a snapshot the other just wrote, and both would compute the identical fit from the identical data anyway. Same session, the X-axis ticks were extended to show the BS weekday initial (S/M/T/W/T/F/S, Sunday-first, duplicate letters accepted on purpose — that's literally what was asked for) below each day number, via a custom Recharts `tick` render function closed over `activePeriod.bs_year`/`bs_month` and `bsToAd(...).getDay()`.
 
@@ -242,3 +249,124 @@ the data landed. A skeleton that does not match is a layout shift with extra ste
 `:last-child` fires, what the compact gutter actually renders as (the declared 8px had been coming
 out as **7px**, because `.stat-card`'s seam pull is meaningless once there is space between cells).
 Specificity reasoning is a hypothesis; the computed value is the fact.
+
+## Every KPI tile re-analysed, S734 — the three shapes it came back in
+
+A sweep across all five KPI surfaces (`/dashboard`, `/hr/dashboard`, `/owner-dashboard`,
+`/group-dashboard`, the admin overview). The findings were not five unrelated bugs; they were three
+shapes, each appearing on more than one dashboard, and each worth checking on the sixth.
+
+**1. A tile reads a table without paging it — and the MASTER-DATA reads were the ones left.** The rule lives in the root `CLAUDE.md`
+and the sweep histories in `frontend-performance.md`; what dashboards add is that a KPI tile is the
+LAST place a truncation is noticed, because there is no row list beside it to look short. Three
+were found: `pos_orders` on `loadPosStats` (Revenue, Covers, Bills, Avg Check — one row per bill,
+so 40 bills a day crosses 1,000 inside one period, while `SalesReport` and `CoversReport`, the two
+pages those tiles link to, already page the same table); `staff_meals` on both the Client and Owner
+dashboards, each sitting in the same `Promise.all` as a `wastages` read that WAS paged; and
+`payable_payments` on Overdue Payables, hung off a paged read's id list with a bare `.in()`, which
+is a 414 at a few hundred uuids and a silent truncation under 1,000 either way. **Ask rows-per-what
+for every read behind a tile, and check its neighbours in the same batch** — in all three cases the
+correct version was one array element or one page away.
+
+The second pass found nine more, and every one was **master data**: `items`, `recipes`,
+`par_levels`, `opening_stock`, `closing_stock`, `vendor_returns` across both dashboards, plus an
+unpaged `pos_orders` feeding a paged `pos_order_items` in `useSalesPivotData`. They had survived
+every previous sweep because a transaction table obviously grows and a master table obviously does
+not — which is the wrong question. **On a dashboard these reads are MAPS, and the transaction rows
+looked up in them are already complete**, so a truncation does not shorten a visible list; it
+deletes rows from a figure computed over everything:
+
+| producer | what a row past the cut does |
+| --- | --- |
+| `recipes` | prices its sales at **0** — Revenue understated, so every ratio dividing by it fails HIGH |
+| `items` | values its wastage and spend at **rate 0** — reads low, i.e. like a good month |
+| `par_levels` | reads as "no par set" — the item can never surface as below par |
+| `opening_stock` / `closing_stock` | reads as a **zero count** — a large false over-consumption in Variance |
+
+None of those shortens anything on screen, which is why none of them was ever reported. Ask what a
+missing row does to the ARITHMETIC, not to the list. And when leaving one bare, write its
+rows-per-what down beside it — `overheads` (one row per named fixed cost per period, tens of rows)
+is the only read on these two pages that is deliberately unpaged, and it now says so.
+
+**2. A count of zero that nobody computed, painted as the good state.** `useHrApprovalCounts`
+discarded `{ error }` from four `head: true` queries, so a refusal returned null, `|| 0` made it a
+zero, and both consumers spent their reassuring vocabulary on it — "0 · all clear" in green on
+HrDashboard's four tiles, a neutral 0 on ClientDashboard's Pending Approvals. The Admin Dashboard
+had it at platform scale: "0 active · 0 inactive · 0 total properties" over "NPR 0" MRR.
+
+The general rule ("a failed read is not an empty list") is already everywhere in this repo. The
+dashboard-specific corollary is sharper and is what these sites missed: **on a queue tile, zero is
+the OUTCOME THE READER WANTS, so a failed read does not merely show a wrong number — it actively
+tells them not to look.** A tile whose empty state is good news needs a third rendering, distinct
+from both the good state and the loading state; ours is an em-dash plus "count unavailable — open
+the page". Hold a shared hook to the same standard: it must RETURN the failure, because only the
+consumer knows how its own tile says so.
+
+**3. The same metric banded differently one page over.** `operatingBands.js` was written to end
+this and its own header names the three copies it found. `GroupDashboard` was a fourth, unlisted,
+with its own `pctColor(v, good, warn)` on `(35, 45)` food / `(25, 35)` labour — so 26% labour was
+amber there and green on the Owner Dashboard. And all three ratio tiles on `ClientDashboard` printed
+a bare percentage in a verdict colour with **no ✓/△/▲**, while the identical metrics on three other
+surfaces carry it.
+
+Two things generalise past this sweep:
+
+- **`bandFigure(pct, bander).text`, never `bander(pct).color`.** Already the stated rule; what S734
+  adds is that the drift reappears wherever a call site needs to wrap the band in something else —
+  here a settle-day guard — because the wrapper is written around the COLOUR and the mark is
+  dropped in passing. Wrap the whole figure (`verdictFigure` in `ClientDashboard.jsx` returns
+  `{ color, title, text }`), not the hue.
+- **A hardcoded 35/45 is not merely a duplicate, it is an override.** Those two numbers are the
+  DEFAULTS behind `fc_warning_pct`/`fc_critical_pct`, so a local copy silently un-honours a setting
+  the client changed — and does it only on the page that copied it, which is the hardest kind of
+  inconsistency to report.
+
+**A settle guard belongs on every lumpy ratio on the page, not on the ones someone remembered.**
+`periodTooEarly` greys Food Cost % and Est. Net Margin % before day 10 and had never been applied
+to **Fixed Costs %**, which is the lumpiest of the three: a month's rent is one row entered on
+whatever day someone gets to it, so a day-3 outlet read several hundred percent in red. Two of
+three ratios greying out and the third not also makes the two that do look like the exception. And
+withhold the MARK with the colour — a ✓ on a day-4 figure is the same claim in a quieter voice.
+
+## Two tiles called "Revenue", 13% apart, on one screen (S734)
+
+An IMS+POS client sees the Inventory section's **Revenue** (`sales_entries` at the ex-VAT,
+post-discount `unit_price` — which already CONTAINS every POS bill, since `PosOrders` stamps a row
+per closure) beside the POS section's **Revenue** (`pos_orders.paid_amount`, the amount actually
+tendered, VAT included). The same trade, counted twice, under one word, in two columns.
+
+**Neither figure is wrong and neither should be changed to match**: every ratio on the page divides
+by the ex-VAT base, and a till total that excluded VAT would not tie to the cash drawer. The defect
+was that nothing on either card said which was which. Both now name their basis in the subtext
+(`Sales entries, excl. VAT` / `billed, incl. VAT`) and each tip points at the other.
+
+The transferable test: **when two tiles on one page share a label, they must differ in their
+subtext, not only in their source code.** A reader comparing two numbers assumes the label is the
+definition.
+
+## Two gaps the Owner Dashboard had that no other dashboard did (S734)
+
+Worth naming separately, because both were absences rather than mistakes — nothing on the page was
+wrong to read, so neither could be found by looking at a figure.
+
+**It was the only one of the five with no load-cancellation guard.** ClientDashboard and
+HrDashboard each carry a `loadIdRef` with a comment explaining it; this page ran five multi-second
+loaders with nothing identifying which load was current, so an admin switching "view as" client
+mid-load let the PREVIOUS tenant's revenue, payroll and payables land last and repaint the page
+under the new client's name in the header. The stakes are higher here than on the pages that
+already guard: these are cross-module money figures, and once two tenants' numbers are mixed there
+is nothing on screen that could tell them apart. Each loader now takes `myId` and re-checks after
+every await — including the extra awaits (`payable_payments`, the recipe walk) that sit after the
+main batch, which is where a single check at the top of the function would have missed it.
+
+**And it labelled every tile "(MTD)" while carrying none of the settle guard.** `periodTooEarly`
+has greyed ClientDashboard's lumpy ratios before day 10 for a long time; the page that exists to
+make these figures trustworthy had none of it, so a day-3 outlet that had just bought the month's
+rice wore a red ▲ on Food Cost % under a tooltip inviting the owner to act, with Prime Cost % and
+True Net Margin % inheriting it.
+
+**The interesting half is what was NOT greyed.** Labor Cost % keeps its band from day one: it is
+prorated by elapsed days against revenue accruing over the same days, so the ratio is settled even
+when the month is not. Greying it "for consistency" would be its own lie — the guard's claim is
+that a verdict is shown once it has been earned, not that early-month figures are all suspect.
+Apply it per metric, by asking whether the numerator accrues on the same clock as the denominator.

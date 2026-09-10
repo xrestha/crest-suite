@@ -11,6 +11,9 @@ import { errorText } from '../../shared/errorText'
 import OutletAccessPanel from './OutletAccessPanel'
 import MasterPushPanel from './MasterPushPanel'
 import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
+import { useSettings } from '../../context/SettingsContext'
+import { fcBand } from '../../shared/imsFormulas'
+import { lcBand, bandFigure } from '../../shared/operatingBands'
 
 // Multi-Outlet Group Console — every branch in the group on one screen.
 //
@@ -35,20 +38,41 @@ import { BS_MONTHS, getBsToday, bsToAd, daysInBsMonth, formatAd } from '../../ut
 const StatSkeleton = () => <span className="skeleton" style={{ display: 'inline-block', width: '3.5em', height: '0.8em', verticalAlign: 'middle' }} />
 
 const fmtNpr = nprOrDash
-const fmtPct = n => n == null || !isFinite(n) ? '—' : `${n.toFixed(1)}%`
 
-// Every percentage on this page is TEXT, so these are the -text variants, not the base tokens.
-// The base signal colours are tuned as fills and dots; used as type on a light preset
-// they measure as low as 2.05:1, well under AA.
-function pctColor(v, good, warn) {
-  if (v == null || !isFinite(v)) return 'var(--theme-text3)'
-  if (v <= good) return 'var(--theme-green-text)'
-  if (v <= warn) return 'var(--theme-amber-text)'
-  return 'var(--theme-red-text)'
-}
+// FOOD COST AND LABOUR BAND THROUGH THE SHARED DEFINITIONS, NOT A LOCAL LADDER (S734).
+//
+// This page had its own `pctColor(v, good, warn)`, called with `(35, 45)` for food cost and
+// `(25, 35)` for labour — the FOURTH copy of a decision `operatingBands.js` exists to end, and
+// unlike the three that file names, this one disagreed on the numbers. An outlet at 26% labour
+// read AMBER here and healthy green on the Owner Dashboard and in the Monthly Owner Report; 36%
+// read red here and "watch" there. Two owner-altitude screens, one metric, opposite verdicts —
+// on the screen an owner uses to decide which branch to go and look at.
+//
+// The food-cost ladder was worse than merely different: 35/45 are only the DEFAULTS behind
+// `fc_warning_pct`/`fc_critical_pct`, so a client who had tuned their own thresholds in Settings
+// had them honoured on every per-outlet surface and ignored on the one that compares outlets.
+//
+// `bandFigure` rather than `band(pct).color`, so the ✓/△/▲ arrives with the colour. That mark
+// is what carries the verdict for a reader who cannot separate the hues (S608), and every figure
+// here is a number a person reads and acts on rather than a chart axis.
+//
+// One judgement call worth stating: `settings` is the SELECTED outlet's row, so a group whose
+// branches carry different thresholds is banded against whichever one the owner is currently
+// inside. That is the same row every other figure in this session reads, and it is strictly
+// better than a hardcoded pair matching no outlet at all.
 
 export default function GroupDashboard() {
   const { groupId, clientId, canSwitchOutlet, switchOutlet, isAdmin, isOwner } = useAuth()
+  // The client's own fc_warning_pct/fc_critical_pct, so the Group Console bands food cost on the
+  // same scale as every per-outlet page instead of a hardcoded 35/45.
+  const { settings } = useSettings()
+  const fcBandOf = pct => fcBand(pct, settings)
+  // One banded right-aligned cell: colour, the band name as a title, and the figure with its
+  // shape mark. Stated once so a row and the tfoot beneath it cannot drift.
+  const bandCell = (pct, band) => {
+    const f = bandFigure(pct, band)
+    return { style: { textAlign: 'right', color: f.style.color }, title: f.title, children: f.text }
+  }
   const [switching, setSwitching] = useState(null)
   const today = getBsToday()
   const [bsYear, setBsYear] = useState(today.year)
@@ -204,16 +228,19 @@ export default function GroupDashboard() {
                 <div className="stat-value">{loading ? <StatSkeleton /> : fmtNpr(groupRevenue)}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-label"><Tip text="Group net purchases ÷ group revenue. Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one.">Group Food Cost %</Tip></div>
-                <div className="stat-value" style={{ color: loading ? undefined : pctColor(groupFc, 35, 45) }}>{loading ? <StatSkeleton /> : fmtPct(groupFc)}</div>
+                <div className="stat-label"><Tip text={`Group net purchases ÷ group revenue. Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one. Banded against your own Settings thresholds: watch above ${fcBandOf(groupFc).warn}%, too high above ${fcBandOf(groupFc).critical}%.`}>Group Food Cost %</Tip></div>
+                <div className="stat-value" style={{ color: loading ? undefined : fcBandOf(groupFc).color }} title={loading ? undefined : bandFigure(groupFc, fcBandOf).title}>{loading ? <StatSkeleton /> : bandFigure(groupFc, fcBandOf).text}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-label"><Tip text="Finalized payroll (gross + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate.">Group Labour %</Tip></div>
-                <div className="stat-value" style={{ color: loading ? undefined : pctColor(groupLabour, 25, 35) }}>{loading ? <StatSkeleton /> : fmtPct(groupLabour)}</div>
+                <div className="stat-label"><Tip text="Finalized payroll (gross + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate. Banded on the product's published 25–30% target, the same scale the Owner Dashboard and the Monthly Owner Report use.">Group Labour %</Tip></div>
+                <div className="stat-value" style={{ color: loading ? undefined : lcBand(groupLabour).color }} title={loading ? undefined : bandFigure(groupLabour, lcBand).title}>{loading ? <StatSkeleton /> : bandFigure(groupLabour, lcBand).text}</div>
               </div>
               <div className="stat-card">
                 <div className="stat-label"><Tip text="Covers across included outlets, from paid POS bills closed within this BS month's AD date range. Outlets without POS contribute zero.">Group Covers</Tip></div>
-                <div className="stat-value">{loading ? <StatSkeleton /> : groupCovers ? groupCovers.toLocaleString('en-IN') : '—'}</div>
+                {/* Zero covers is a COUNT, not a missing figure — an em-dash here says "we could not
+                    work this out" about a group whose outlets simply took no POS bills, on a page
+                    whose coverage banner above already explains any real gap (S734). */}
+                <div className="stat-value">{loading ? <StatSkeleton /> : groupCovers.toLocaleString('en-IN')}</div>
               </div>
             </div>}
 
@@ -264,9 +291,9 @@ export default function GroupDashboard() {
                         </td>
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.revenue) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.net_purchases) : '—'}</td>
-                        <td style={{ textAlign: 'right', color: pctColor(fc, 35, 45) }}>{fmtPct(fc)}</td>
+                        <td {...bandCell(fc, fcBandOf)} />
                         <td style={{ textAlign: 'right' }}>{r.is_included ? fmtNpr(r.payroll) : '—'}</td>
-                        <td style={{ textAlign: 'right', color: pctColor(lab, 25, 35) }}>{fmtPct(lab)}</td>
+                        <td {...bandCell(lab, lcBand)} />
                         <td style={{ textAlign: 'right' }}>{r.is_included ? (Number(r.covers) || 0).toLocaleString('en-IN') : '—'}</td>
                       </tr>
                     )
@@ -280,10 +307,10 @@ export default function GroupDashboard() {
                       <td>Group total ({included.length} outlet{included.length === 1 ? '' : 's'})</td>
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupRevenue)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupPurchases)}</td>
-                      <td style={{ textAlign: 'right', color: pctColor(groupFc, 35, 45) }}>{fmtPct(groupFc)}</td>
+                      <td {...bandCell(groupFc, fcBandOf)} />
                       <td style={{ textAlign: 'right' }}>{fmtNpr(groupPayroll)}</td>
-                      <td style={{ textAlign: 'right', color: pctColor(groupLabour, 25, 35) }}>{fmtPct(groupLabour)}</td>
-                      <td style={{ textAlign: 'right' }}>{groupCovers ? groupCovers.toLocaleString('en-IN') : '—'}</td>
+                      <td {...bandCell(groupLabour, lcBand)} />
+                      <td style={{ textAlign: 'right' }}>{groupCovers.toLocaleString('en-IN')}</td>
                     </tr>
                   </tfoot>
                 )}

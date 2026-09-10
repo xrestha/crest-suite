@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { useSettings } from '../../context/SettingsContext'
-import { fcThresholds, recipeCostOf } from '../../shared/imsFormulas'
+import { fcBand, fcThresholds, recipeCostOf } from '../../shared/imsFormulas'
+import { nmBand, descendingBand, bandFigure } from '../../shared/operatingBands'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
@@ -360,14 +361,33 @@ export default function ClientDashboard() {
       // NULL-safe (S714): .neq drops NULL-category rows, which undercounted the menu.
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).or('category.is.null,category.neq.Sub-Recipe'),
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'),
-      scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct, cost_price, vat_rate'),
-      scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
-      scopedFrom('par_levels', 'item_id, par_qty'),
+      // THE FOUR MASTER-DATA READS BELOW ARE PAGED (S734), AND THEY ARE THE PRODUCERS.
+      //
+      // The three transaction reads in the batch below were paged long ago; these were not,
+      // because master data "is small". It is not small at a hotel, and every one of these is a
+      // MAP the transaction rows are looked up in — so a truncation here does not shorten a
+      // list, it silently deletes rows from figures built out of a full transaction set:
+      //
+      //   `recipes`      → currentPriceMap (a sold dish past the cut falls back to price 0, so
+      //                    REVENUE is understated) and dashRecipeIds (its ingredients never enter
+      //                    theoretical usage at all).
+      //   `items`        → the Variance top-5 and, via buildStockRows, Items to Reorder.
+      //   `par_levels`   → a par past the cut reads as "no par set", so the item can never
+      //                    surface as below par.
+      //   `allItems`     → itemRateMap, which values Wastage Value and Top Items by Spend; an
+      //                    item past the cut is valued at RATE 0 rather than dropped, which is
+      //                    the quietest failure of the four.
+      //
+      // Same producer-and-consumer rule S706 found on Items and S708 on Vendors: the consumer
+      // was paged and the read that feeds it was not. `.order('id')` is the unique tiebreaker.
+      fetchAllRows(() => scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct, cost_price, vat_rate').order('id')),
+      fetchAllRows(() => scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      fetchAllRows(() => scopedFrom('par_levels', 'item_id, par_qty').order('id')),
       // Unfiltered by is_active — an item deactivated mid-period still has real purchase/wastage
       // history for that period. Used for Top Items by Spend and itemRateMap below so those don't
       // silently drop/zero-cost that history, unlike the active-only `items` fetch above (which
       // still correctly limits Variance/Reorder/the item COUNT to currently-active stock items).
-      scopedFrom('items', 'id, name, per_uom_rate').eq('is_sub_recipe', false),
+      fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate').eq('is_sub_recipe', false).order('id')),
     ])
 
     // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
@@ -392,24 +412,41 @@ export default function ClientDashboard() {
 
     const dependentPromise = Promise.all([
       period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, bs_day').eq('period_id', period.id).order('id')) : { data: [] },
-      period ? supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id) : { data: [] },
+      // Paged (S734). Returns are usually few — but "usually small" is not a decision, and this
+      // one is SUBTRACTED from Net Purchases and from every daily bar on the trend chart, so a
+      // truncation overstates spend and Food Cost % rather than understating a list. Same call
+      // S722 made on the two statutory reports, which paged purchases and left returns bare.
+      period ? fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate, bs_day').eq('period_id', period.id).order('id')) : { data: [] },
       // Fetches every source (including 'pos_comp') — revenue figures below filter comps out
       // client-side, but theoreticalMap (Reorder + Variance widgets) needs every source counted,
       // matching every other consumption-facing report (ReorderReport, Variance, ShrinkageReport
       // etc. per PosOrders.jsx's own source-taxonomy comment) — a comped dish still used real
       // stock even though it collected no revenue.
       period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source').eq('period_id', period.id).order('id')) : { data: [] },
-      period ? supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id) : { data: [] },
-      period ? supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id) : { data: [] },
+      // Both paged (S734): one row per item per period, so they cross the cap at the same item
+      // count the master-data reads above do. An opening or closing row past the cut reads as
+      // ZERO on that item — which flows straight into the Variance top-5 (actual usage comes out
+      // as opening + purchases, i.e. a large false over-consumption) and into on-hand, where a
+      // missing closing count makes the item look freshly restocked. S720's precedent.
+      period ? fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
+      period ? fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id).order('id')) : { data: [] },
       // `bucket` is selected (not just `amount`) because the Overheads page splits fixed costs
       // into three buckets — overhead / labor / tax_fees — and the Revenue vs Cost Breakdown pie
       // needs them apart. The KPI cards still use the all-bucket sum; see overheadBuckets below.
+      // Deliberately NOT paged: this is one row per named fixed cost per period — rent, wifi,
+      // a few salary lines — so it is tens of rows for a client with a hundred of them, not
+      // hundreds. Written down rather than assumed, per the S722 rule that a read is exempt
+      // because someone decided its rows-per-what, not because its table is usually small.
       period ? supabase.from('overheads').select('amount, bucket').eq('period_id', period.id) : { data: [] },
       period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
       // Staff meals come off the shelf in the shared on-hand calculation (S696) — the Items to
       // Reorder panel used to deduct neither wastage nor staff meals, so it disagreed with the
       // Reorder Report it links to.
-      period ? supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id) : { data: [] },
+      // Paged for the same reason `wastages` directly above it is (S734): one row per item per
+      // day, so a 40-item kitchen crosses 1000 rows inside a single month — and an under-read
+      // here UNDER-deducts staff meals, which makes on-hand look higher than it is and quietly
+      // drops items off the "below par" list this tile exists to show.
+      period ? fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
     ])
 
     const independentResults = await independentPromise
@@ -795,9 +832,19 @@ export default function ClientDashboard() {
       const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
       const lastDay = daysInBsMonth(period.bs_year, period.bs_month)
       const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, lastDay, true)
-      const { data, error } = await scopedFrom('pos_orders', 'id, covers, paid_amount, credit_note_id, close_type, closed_at')
-        .eq('close_type', 'paid')
-        .gte('closed_at', fromTs).lte('closed_at', toTs)
+      // Paged (S734). This is one row per BILL for a whole month: a restaurant closing 40 bills a
+      // day crosses PostgREST's 1000-row cap inside one period, and a bare .select() returns the
+      // first 1000 with no error and nothing in the data to say so — so Revenue, Covers, Bills and
+      // Avg Check would all quietly stop growing partway through a busy month while still reading
+      // as real figures. Both reports these tiles link to (SalesReport.jsx, CoversReport.jsx)
+      // already page the same table; the dashboard was the one surface that did not, so it would
+      // have disagreed with them without either screen saying why. `.order('id')` is the unique
+      // tiebreaker fetchAllRows requires.
+      const { data, error } = await fetchAllRows(() =>
+        scopedFrom('pos_orders', 'id, covers, paid_amount, credit_note_id, close_type, closed_at')
+          .eq('close_type', 'paid')
+          .gte('closed_at', fromTs).lte('closed_at', toTs)
+          .order('id'))
       ordersErr = error
       // Same exclusion as Sales/Covers Report — a since-Credit-Noted bill's revenue correction
       // posts on the day the Credit Note is issued, not retroactively here.
@@ -949,7 +996,11 @@ export default function ClientDashboard() {
       // denominator was truncated, every Food Cost % on the chart failed HIGH. A believable wrong
       // number, on the figure the product is sold on.
       periodIds.length ? fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source').in('period_id', periodIds).order('id')) : { data: [] },
-      scopedFrom('recipes', 'id, selling_price'),
+      // Paged (S734): this map is the price fallback for any sales row with no `unit_price`, so
+      // a recipe past the cut prices its sales at 0 — and this chart's whole subject is the
+      // RATIO, so a short denominator makes every month's Food Cost % fail HIGH. Exactly the
+      // failure the comment two entries above describes for the `.neq` that used to sit there.
+      fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
     ])
     const [{ data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData }] = trendResults
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
@@ -1032,10 +1083,22 @@ export default function ClientDashboard() {
   const partialNote = isCurrentPeriod ? `Day ${dayOfPeriod} of ${periodDays} · settles at month end` : null
   // Grey, not green/amber/red, while the ratio is still meaningless. A neutral number that says
   // "not yet meaningful" is more trustworthy than a red one that isn't true.
-  const verdict = (value, bands) => {
-    if (value == null) return 'var(--theme-text2)'
-    if (periodTooEarly) return 'var(--theme-text1)'
-    return bands(value)
+  //
+  // Returns the whole figure rather than just a colour (S734), for two reasons. The three ratio
+  // cards on this page — Food Cost %, Fixed Costs %, Est. Net Margin % — each carried their
+  // verdict in HUE ALONE, while the identical metrics on the Owner Dashboard, the Group Console
+  // and the Monthly Owner Report all carry the ✓/△/▲ shape mark beside the number. A band
+  // carried by colour alone fails WCAG 1.4.1, and green/accent-ink measured close enough under
+  // deuteranopia that Healthy and Watch were one colour for roughly 1 in 12 men (S608) — which
+  // is why `bandFigure` appends the mark rather than leaving it to each call site to remember.
+  //
+  // And the mark is withheld with the colour before SETTLE_DAY, not kept alongside a grey number:
+  // a ✓ on a day-4 food cost is the same claim in a quieter voice.
+  const verdictFigure = (value, bander) => {
+    const f = bandFigure(value, bander)
+    if (value == null) return { color: 'var(--theme-text2)', title: undefined, text: f.text }
+    if (periodTooEarly) return { color: 'var(--theme-text1)', title: undefined, text: `${value.toFixed(1)}%` }
+    return { color: f.style.color, title: f.title, text: f.text }
   }
 
   const fcPct = stats?.revenueTotal > 0 ? (stats.purchaseTotal / stats.revenueTotal) * 100 : null
@@ -1096,6 +1159,17 @@ export default function ClientDashboard() {
   const fcTrendBest    = fcSettled.length > 0 ? fcSettled.reduce((best, p) => p.fc < best.fc ? p : best) : null
   const fcTrendWorst   = fcSettled.length > 0 ? fcSettled.reduce((worst, p) => p.fc > worst.fc ? p : worst) : null
   const fcBands        = fcThresholds(settings)
+  // The three KPI ratios' banders, resolved once. Food cost reads the client's own Settings
+  // thresholds; net margin is `nmBand`'s published ≥20 / ≥10 rather than a second copy of the
+  // same two numbers (they were written out inline here, which is exactly the drift
+  // operatingBands.js was created to stop — identical today, and nothing kept them so).
+  //
+  // Fixed Costs % has no shared bander because no other surface prints it, so it keeps its own
+  // 50/65 ladder — but through `descendingBand`, which supplies the mark and the band name and
+  // yields byte-identical colours to the inline ternary it replaces.
+  const fcCardBand = pct => fcBand(pct, settings)
+  const FIXED_COST_WARN = 50, FIXED_COST_CRITICAL = 65
+  const ohCardBand = pct => descendingBand(pct, FIXED_COST_WARN, FIXED_COST_CRITICAL)
   // fcBand() returns CSS var() strings, which do not resolve inside an SVG fill — so the bands come
   // from the client's own thresholds while the colours come from the resolved theme palette.
   const fcDotColor = pct => pct == null ? colors.text3
@@ -1352,13 +1426,25 @@ export default function ClientDashboard() {
     </div>
   )
 
+  // TWO CARDS ON THIS PAGE ARE CALLED "REVENUE" AND THEY ARE NOT THE SAME FIGURE (S734).
+  //
+  // This one sums `sales_entries` — which for a POS client ALREADY CONTAINS the POS rows, since
+  // PosOrders stamps one per closed bill — at the ex-VAT, post-discount `unit_price`. The POS
+  // section's own Revenue tile sums `pos_orders.paid_amount`, which is the final tendered amount
+  // WITH VAT. So an IMS+POS client sees the same trade twice, roughly 13% apart, under one word,
+  // in two columns of the same screen, with nothing anywhere saying which is which. Neither
+  // figure is wrong and neither should change — every ratio on this page divides by the ex-VAT
+  // base, and a till total that excluded VAT would not tie to the cash drawer. What was missing
+  // is the sentence, so each card now names its own basis in its subtext.
   const revenueCard = canSales ? (
     <div {...kpiCard(() => navigate('/sales'))}>
-      <div style={kpiLabelStyle}>Revenue</div>
+      <div style={kpiLabelStyle}>
+        <Tip text="Sales recorded for this period, before VAT and after discounts. For a POS client this already includes every bill the till closed — the POS section's own Revenue tile is the same trade counted WITH VAT, which is why the two figures differ by roughly the VAT rate." width={280}>Revenue</Tip>
+      </div>
       <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green-text)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
       </div>
-      <div style={kpiSubtextStyle}>From sales entries →</div>
+      <div style={kpiSubtextStyle}>Sales entries, excl. VAT →</div>
     </div>
   ) : null
 
@@ -1374,13 +1460,10 @@ export default function ClientDashboard() {
             Whether the whole product should adopt a more literal name is a product-wide call. */}
         <Tip text="What you spent on stock this period, against what you sold. Buy a month of rice in one go and this spikes — it settles once you finish the month-end stock count. Healthy range once settled: 28–35% for Nepal F&B." width={260}>Food Cost %</Tip>
       </div>
-      <div style={{
-        ...kpiValueStyle(22, 800),
-        // Client-configured thresholds, not a fourth hardcoded copy of 35/45 — Settings offers
-        // fc_warning_pct/fc_critical_pct and this card is the headline they were added for.
-        color: verdict(fcPct, v => v <= fcBands.warn ? 'var(--theme-green-text)' : v <= fcBands.critical ? 'var(--theme-amber-text)' : 'var(--theme-red-text)')
-      }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : fcPct != null ? `${fcPct.toFixed(1)}%` : '—'}
+      {/* Client-configured thresholds, not a fourth hardcoded copy of 35/45 — Settings offers
+          fc_warning_pct/fc_critical_pct and this card is the headline they were added for. */}
+      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(fcPct, fcCardBand).color }} title={verdictFigure(fcPct, fcCardBand).title}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(fcPct, fcCardBand).text}
       </div>
       <div style={kpiSubtextStyle}>
         {partialNote
@@ -1393,16 +1476,22 @@ export default function ClientDashboard() {
   const fixedCostsCard = canOverheads ? (
     <div {...kpiCard(() => navigate('/overheads'))}>
       <div style={kpiLabelStyle}>
-        <Tip text="All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Target: under 60% combined. See Overheads page for the full breakdown." width={250}>Fixed Costs % of Revenue</Tip>
+        {/* The tip used to say "Target: under 60% combined" while the colours banded at 50 and
+            65 — so a 58% read amber under a sentence calling it on target. The card states the
+            ladder it actually paints (S734). */}
+        <Tip text={`All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Healthy up to ${FIXED_COST_WARN}%, worth watching to ${FIXED_COST_CRITICAL}%, too high above that. See the Overheads page for the full breakdown.`} width={250}>Fixed Costs % of Revenue</Tip>
       </div>
-      <div style={{
-        ...kpiValueStyle(22, 800),
-        color: ohPct == null ? 'var(--theme-text2)' : ohPct <= 50 ? 'var(--theme-green-text)' : ohPct <= 65 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)'
-      }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : ohPct != null ? `${ohPct.toFixed(1)}%` : '—'}
+      {/* Carries the same settle guard as Food Cost % and Est. Net Margin % beside it (S734).
+          It had none, and it is the LUMPIEST of the three: a month's rent is entered as one row
+          on whatever day someone gets to it, against revenue that accrues daily — so on day 3 a
+          perfectly healthy outlet read several hundred percent, in red, with nothing on the card
+          saying the month was three days old. Two of the three ratios greyed out and the third
+          did not, which made the two that did look like the exception. */}
+      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(ohPct, ohCardBand).color }} title={verdictFigure(ohPct, ohCardBand).title}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(ohPct, ohCardBand).text}
       </div>
       <div style={kpiSubtextStyle}>
-        {stats?.overheadTotal ? `NPR ${stats.overheadTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} total →` : 'No overhead data'}
+        {partialNote || (stats?.overheadTotal ? `NPR ${stats.overheadTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} total →` : 'No overhead data')}
       </div>
     </div>
   ) : (
@@ -1414,11 +1503,8 @@ export default function ClientDashboard() {
       <div style={kpiLabelStyle}>
         <Tip text="Revenue minus food cost and every overhead bucket — including labor and tax & fees — as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
       </div>
-      <div style={{
-        ...kpiValueStyle(22, 800),
-        color: verdict(netMarginPct, v => v >= 20 ? 'var(--theme-green-text)' : v >= 10 ? 'var(--theme-accent-ink)' : 'var(--theme-red-text)')
-      }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
+      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(netMarginPct, nmBand).color }} title={verdictFigure(netMarginPct, nmBand).title}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(netMarginPct, nmBand).text}
       </div>
       {/* Inherits Food Cost's lumpiness through purchaseTotal, so it carries the same caveat. */}
       <div style={kpiSubtextStyle}>{partialNote || 'After food & overheads · target ≥20%'}</div>
@@ -1500,14 +1586,19 @@ export default function ClientDashboard() {
   // at-a-glance read of the business, and hiding numbers people check daily is the most common
   // way to break that) never hidden. Everything below still renders unconditionally; only the
   // headline card gets extra visual weight in the 2+ module layout.
+  // A failed count read is not an empty queue (S734) — the hook reports it now, and a zero that
+  // nobody computed must not render as one. `0 · 0 Leave · 0 OT …` is the most reassuring thing
+  // this tile can say, and it was exactly what a refused or dropped read produced.
   const hrHeadlineCard = (
     <div {...kpiCard(() => navigate('/hr/dashboard'))}>
       <div style={kpiLabelStyle}>Pending Approvals</div>
-      <div style={{ ...kpiValueStyle(22, 800), color: hrApprovals.total > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
-        {hrApprovals.loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrApprovals.total}
+      <div style={{ ...kpiValueStyle(22, 800), color: hrApprovals.error ? 'var(--theme-text2)' : hrApprovals.total > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
+        {hrApprovals.loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrApprovals.error ? '—' : hrApprovals.total}
       </div>
       <div style={kpiSubtextStyle}>
-        {hrApprovals.loading ? 'Loading…' : `${hrApprovals.leave} Leave · ${hrApprovals.ot} OT · ${hrApprovals.tada} TADA · ${hrApprovals.swap} Swap →`}
+        {hrApprovals.loading ? 'Loading…'
+          : hrApprovals.error ? 'Count unavailable — open HR Dashboard →'
+          : `${hrApprovals.leave} Leave · ${hrApprovals.ot} OT · ${hrApprovals.tada} TADA · ${hrApprovals.swap} Swap →`}
       </div>
     </div>
   )
@@ -1592,13 +1683,17 @@ export default function ClientDashboard() {
     </>
   )
 
+  // See the note on `revenueCard` above: this is `pos_orders.paid_amount`, the amount actually
+  // tendered, VAT included — the IMS Revenue tile beside it is the same trade before VAT.
   const posFrontHeadlineCard = (
     <div {...kpiCard(() => navigate('/pos/sales-report'))}>
-      <div style={kpiLabelStyle}>Revenue</div>
+      <div style={kpiLabelStyle}>
+        <Tip text="Total billed on paid POS orders closed in this period, as tendered — VAT included, credit notes excluded. The Inventory section's Revenue tile counts the same sales before VAT, so the two will not match." width={280}>Revenue</Tip>
+      </div>
       <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green-text)' }}>
         {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-IN')}`}
       </div>
-      <div style={kpiSubtextStyle}>{periodLabel} · billed →</div>
+      <div style={kpiSubtextStyle}>{periodLabel} · billed, incl. VAT →</div>
     </div>
   )
 

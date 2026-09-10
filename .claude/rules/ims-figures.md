@@ -402,10 +402,23 @@ gone stale the moment code changed twice now. The grep is
 `grep -rn "\.neq(\s*['\"]source['\"]" src/`, skipping comment lines and `salesReads.test.js`:
 
 ```text
-useSalesPivotData  Recipes  AnnualSummary  MonthlySummary  PeriodComparison
-ConsolidatedPnl    OwnerDashboard's revenue read    computeMonthlyReport
-computeMenuEngineeringSection
+Recipes  AnnualSummary  MonthlySummary  PeriodComparison  ConsolidatedPnl
+computeMonthlyReport  computeMenuEngineeringSection
 ```
+
+Re-derived S734, which took **`OwnerDashboard`'s revenue read and `useSalesPivotData`** off it.
+Both are worth reading as arguments for shortening this list rather than curating it:
+
+- `OwnerDashboard`'s was the **denominator of an entire KPI row** — Food Cost %, Labor Cost % and
+  Prime Cost % all read HIGH against the short base and True Net Margin % read LOW, four banded
+  verdicts wrong in the direction that alarms, on the page sold as the one an owner acts on. It
+  sat here as a one-line "still open" for three sessions. **When leaving one open, say what
+  divides by it** — a defect on a denominator is not the same size as a defect on a figure.
+- `useSalesPivotData` carried **two chained `.neq`s** (`pos_comp` and `pos`) feeding the pivot
+  titled *Manual Sales by Category* and the Sales Mix pie built from the same loader. So the read
+  whose entire job was to isolate hand-entered rows was the one dropping every legacy hand-entered
+  row. **A `.neq` whose purpose is to SELECT a subset, rather than to exclude a rare one, fails
+  loudest** — check those first.
 
 Each needs its own answer to what its figure is supposed to mean before it is changed —
 `OwnerDashboard`'s stock read was fixed in S696 precisely because the answer there was

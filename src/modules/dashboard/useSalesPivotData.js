@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { supabase } from '../../supabaseClient'
 import { firstError } from '../../shared/queryError'
 import { errorLine } from '../../shared/errorText'
@@ -30,7 +30,15 @@ export async function loadFromSalesEntries(period, scopedFrom) {
     // Excludes both pos_comp (never billed) and pos (already counted by the POS-sourced pivot —
     // PosOrders.jsx stamps a source:'pos' row per bill at close) so this "manual" pivot and the
     // POS pivot can render side by side without double-counting the same revenue.
-    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').neq('source', 'pos').order('id')),
+    //
+    // FILTERED IN JS, never as `.neq('source', …)` (S734). `sales_entries.source` is nullable
+    // (DEFAULT 'manual', no NOT NULL) and in SQL `NULL <> 'pos_comp'` is NULL rather than true,
+    // so the two chained `.neq`s dropped every legacy row written before that column had a
+    // default — i.e. exactly the hand-entered rows this pivot is titled "Manual Sales by
+    // Category" to show. An older client's manual pivot could come back empty under a card that
+    // reads as fact. Third instance of this defect on the dashboards; see the rule in
+    // `.claude/rules/dashboards.md`.
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, unit_price, discount, source').eq('period_id', period.id).order('id')),
     scopedFrom('recipes', 'id, category, selling_price'),
   ])
   // Same rule as loadFromPos below: a failed read here would render as "No sales recorded yet
@@ -42,6 +50,7 @@ export async function loadFromSalesEntries(period, scopedFrom) {
   ;(recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0; catMap[r.id] = r.category || 'Uncategorized' })
   const agg = {}
   ;(sales || []).forEach(s => {
+    if (s.source === 'pos_comp' || s.source === 'pos') return // see the read above
     const day = parseInt(s.bs_day) || 0
     const price = s.unit_price != null ? parseFloat(s.unit_price) : (priceMap[s.recipe_id] || 0)
     const amount = (parseFloat(s.qty_sold) || 0) * price - (parseFloat(s.discount) || 0)
@@ -61,8 +70,15 @@ export async function loadFromPos(period, scopedFrom) {
   const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, lastDay, true)
   // Same exclusions as SalesReport.jsx/computePosSection — credit-noted bills' revenue
   // correction posts on the day the Credit Note is issued, not retroactively here.
-  const { data: orders, error: ordersErr } = await scopedFrom('pos_orders', 'id, closed_at, credit_note_id')
-    .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs)
+  // Paged (S734), for the same reason the line list below it already is: this is one row per
+  // BILL for a whole month, so a till closing 40 a day crosses PostgREST's 1000-row cap inside
+  // one period — and a truncated ORDER list silently shortens the very `orderIds` the paged
+  // item read filters on, so paging the child while leaving the parent bare buys nothing. The
+  // producer-and-consumer rule (S706/S708) pointing at a read that had the consumer half right.
+  const { data: orders, error: ordersErr } = await fetchAllRows(() =>
+    scopedFrom('pos_orders', 'id, closed_at, credit_note_id')
+      .eq('close_type', 'paid').gte('closed_at', fromTs).lte('closed_at', toTs)
+      .order('id'))
   // A failed read must not render as "No sales recorded yet this period" — that is the silent-zero
   // shape on the dashboard card an owner glances at between services (S682). Throw so the hook can
   // say the figure could not be built.
@@ -72,10 +88,12 @@ export async function loadFromPos(period, scopedFrom) {
   const orderDayMap = {}
   validOrders.forEach(o => { orderDayMap[o.id] = adToBs(new Date(o.closed_at)).day })
   const orderIds = validOrders.map(o => o.id)
-  // Paged: a month of bill lines runs to thousands, past PostgREST's silent 1000-row cap, which
-  // would quietly shrink the dashboard's POS Sales by Category pivot to a fraction of the
-  // month while still reading as a complete one (S529).
-  const { data: items, error: itemsErr } = await fetchAllRows(() => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, comped').in('order_id', orderIds).order('id'))
+  // Paged AND chunked: a month of bill lines runs to thousands, past PostgREST's silent 1000-row
+  // cap, which would quietly shrink the dashboard's POS Sales by Category pivot to a fraction of
+  // the month while still reading as a complete one (S529) — and the `.in()` list is spelled out
+  // in the request URL at ~37 characters per uuid, so a month's worth of order ids is a 414
+  // before the row cap is even reached (S629, applied here S734).
+  const { data: items, error: itemsErr } = await fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', 'order_id, category, qty, unit_price, comped').in('order_id', ids).order('id'))
   if (itemsErr) throw new Error(errorLine(itemsErr))
   const agg = {}
   ;(items || []).forEach(i => {

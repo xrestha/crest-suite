@@ -317,6 +317,30 @@ not re-query forever. Related: `rejected_by_target` and `cancelled` never reach 
 `admin_decided_by` is null on both; name the coworker who declined or the requester who withdrew
 instead of printing a dash.
 
+### A pending count of zero is the reader's good news, so a failed read must not produce one (S734)
+
+HR runs five approval queues and both dashboards summarise them from one hook,
+`useHrApprovalCounts` — four `head: true` counts, which destructured `{ count }` and discarded
+`{ error }`. A refusal or a dropped connection returns `count: null`, `|| 0` turns that into a
+zero, and both consumers then spent their most reassuring vocabulary on it: HrDashboard's four
+tiles read **"0 · all clear" in green**, ClientDashboard's Pending Approvals headline a neutral 0.
+
+The general rule ("a failed read is not an empty list") is everywhere in this repo. What HR adds
+is the sharper case: **on a queue tile, empty is the OUTCOME THE MANAGER WANTS**, so a failed read
+does not merely show a wrong number — it tells them not to open the page. A tile whose empty state
+is good news needs a THIRD rendering, distinct from both the good state and the loading skeleton;
+ours is an em-dash plus "count unavailable — open the page", with the section label saying so too.
+
+Two corollaries worth holding:
+
+- **A shared hook must RETURN the failure, never swallow it.** Only the consumer knows how its own
+  tile says so, and these two say it differently.
+- **The same page had it again one row down.** HrDashboard's Headcount tiles rendered "Active
+  Staff 0" in green over "no probation" and "Basic Payroll / Month NPR 0" whenever the employee
+  read failed — `empStats` was set from `(emps || [])` regardless, so the `?? '—'` fallback the
+  cards already had could never be reached. `setEmpStats(err ? null : {…})`. When you find this
+  shape, check the rest of the screen before moving on.
+
 ### One status vocabulary, and one labour band (S660)
 
 **`HR_REQUEST_STATUS` / `TADA_REQUEST_STATUS` in `payrollConstants.js` are the module's only status

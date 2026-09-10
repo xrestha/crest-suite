@@ -150,7 +150,7 @@ export default function HrDashboard() {
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
     const [
-      { data: emps },
+      { data: emps, error: empsErr },
       { data: ltypes },
       { data: leaves },
       { data: otPending },
@@ -179,7 +179,14 @@ export default function HrDashboard() {
         if (days >= 0 && days <= RETIRE_DAYS) retiringSoon++
       }
     })
-    setEmpStats({
+    // A failed employee read leaves empStats NULL rather than a set of zeros (S734). The KCards
+    // below already render `—` for a null and had no way to reach it: `emps` comes back null on
+    // a refusal, every `(emps || [])` collapsed to an empty array, and the Headcount row then
+    // asserted "Active Staff 0" in GREEN over "no probation", plus "Basic Payroll / Month
+    // NPR 0". The page banner said a read had failed; the tiles said the business had no staff
+    // and no wage bill, in the vocabulary this page reserves for good news. Same shape as the
+    // approval counts above — an unread figure must not borrow a settled one's colour.
+    setEmpStats(empsErr ? null : {
       total:      (emps || []).length,
       active:     (emps || []).filter(e => e.status === 'active').length,
       probation:  (emps || []).filter(e => e.status === 'probation').length,
@@ -262,6 +269,15 @@ export default function HrDashboard() {
   const pendingTada  = pendingCounts.tada
   const pendingSwap  = pendingCounts.swap
   const pendingTotal = pendingLeave + pendingOt + pendingTada + pendingSwap
+  // A failed count read is not an empty queue (S734). The hook now says so instead of handing
+  // back a zero, and these four cards must not spend the word "all clear" or the colour green on
+  // a number nobody computed — that is the reassurance a manager acts on by NOT opening the page.
+  const approvalsFailed = pendingCounts.error
+  // The three parts of a pending-approval card that all turn on the same question, stated once so
+  // the four call sites below can only differ where a difference is meant.
+  const approvalCard = (n, clearSub) => approvalsFailed
+    ? { value: '—', sub: 'count unavailable — open the page', color: 'var(--theme-text2)', alert: false }
+    : { value: n, sub: n > 0 ? clearSub : 'all clear', color: n > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', alert: n > 0 }
 
   return (
     <div>
@@ -294,44 +310,34 @@ export default function HrDashboard() {
 
       {/* ── KPI Row 1 — Approvals (everything a staff submission needs a manager to act on) ── */}
       <SectionLabel>
-        Approvals {pendingTotal > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTotal} pending)</span>}
+        Approvals {approvalsFailed
+          ? <span style={{ color: 'var(--theme-red-text)' }}>(counts unavailable)</span>
+          : pendingTotal > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTotal} pending)</span>}
       </SectionLabel>
       <div className="stat-grid dash-section">
         <KCard
           label="Leave Pending"
-          value={pendingLeave}
-          sub={pendingLeave > 0 ? 'awaiting approval' : 'all clear'}
-          color={pendingLeave > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'}
+          {...approvalCard(pendingLeave, 'awaiting approval')}
           tip="Leave requests with status Pending — click to go to the Leave page and approve or reject."
           onClick={() => navigate('/hr/leave')}
-          alert={pendingLeave > 0}
         />
         <KCard
           label="OT Pending"
-          value={pendingOt}
-          sub={pendingOt > 0 ? 'awaiting approval' : 'all clear'}
-          color={pendingOt > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'}
+          {...approvalCard(pendingOt, 'awaiting approval')}
           tip="Overtime entries not yet approved. Only approved OT feeds into payroll — approve before running payroll."
           onClick={() => navigate('/hr/overtime')}
-          alert={pendingOt > 0}
         />
         <KCard
           label="TADA Pending"
-          value={pendingTada}
-          sub={pendingTada > 0 ? 'awaiting approval' : 'all clear'}
-          color={pendingTada > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'}
+          {...approvalCard(pendingTada, 'awaiting approval')}
           tip="TADA (travel/daily allowance) claims with status Pending, whether entered by a manager or submitted by the employee themselves via Self-Service — click to go to TADA Claims and approve or reject."
           onClick={() => navigate('/hr/tada')}
-          alert={pendingTada > 0}
         />
         <KCard
           label="Swap Pending"
-          value={pendingSwap}
-          sub={pendingSwap > 0 ? 'awaiting your approval' : 'all clear'}
-          color={pendingSwap > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)'}
+          {...approvalCard(pendingSwap, 'awaiting your approval')}
           tip="Shift swap requests where the coworker has already accepted and it's now waiting on manager approval (requests still waiting on the coworker aren't shown here — nothing for a manager to do yet)."
           onClick={() => navigate('/hr/roster')}
-          alert={pendingSwap > 0}
         />
       </div>
 
@@ -341,16 +347,16 @@ export default function HrDashboard() {
         <KCard
           label="Active Staff"
           value={empStats?.active ?? '—'}
-          sub={empStats?.probation > 0 ? `+ ${empStats.probation} on probation` : 'no probation'}
-          color="var(--theme-green-text)"
+          sub={!empStats ? 'headcount unavailable' : empStats.probation > 0 ? `+ ${empStats.probation} on probation` : 'no probation'}
+          color={empStats ? 'var(--theme-green-text)' : 'var(--theme-text2)'}
           tip="Active employees only. Probation shown separately — both are included in payroll."
           onClick={() => navigate('/hr/employees')}
         />
         <KCard
           label="Basic Payroll / Month"
-          value={`NPR ${fmt(empStats?.payrollBase)}`}
-          sub="active + probation, basic only"
-          color="var(--theme-accent-ink)"
+          value={empStats ? `NPR ${fmt(empStats.payrollBase)}` : '—'}
+          sub={empStats ? 'active + probation, basic only' : 'could not be read'}
+          color={empStats ? 'var(--theme-accent-ink)' : 'var(--theme-text2)'}
           tip="Sum of basic salary for active and probation employees. Full payroll (allowances, SSF, TDS) is computed during the payroll run."
           onClick={() => navigate('/hr/payroll')}
         />
@@ -363,9 +369,9 @@ export default function HrDashboard() {
         />
         <KCard
           label="Retiring Soon"
-          value={empStats?.retiringSoon ?? 0}
-          sub="within 180 days"
-          color={empStats?.retiringSoon > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)'}
+          value={empStats?.retiringSoon ?? '—'}
+          sub={empStats ? 'within 180 days' : 'could not be read'}
+          color={!empStats ? 'var(--theme-text2)' : empStats.retiringSoon > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)'}
           tip="Active or probation employees whose retirement date (DOB + 60 years) falls within the next 180 days."
           onClick={() => navigate('/hr/employees')}
           alert={empStats?.retiringSoon > 0}

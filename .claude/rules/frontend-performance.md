@@ -481,9 +481,32 @@ someone thought about the cap, and no evidence at all about the line above it** 
 same tell on Period Comparison. When you find a paged read, look at its neighbours and at whatever
 produces the ids it filters on, in both directions.
 
+**S734 swept the five dashboards and found the producer half again — nine times, and every one
+was MASTER DATA.** `items`, `recipes`, `par_levels`, `opening_stock`, `closing_stock` and
+`vendor_returns` across ClientDashboard and OwnerDashboard, plus an unpaged `pos_orders` feeding a
+paged (and unchunked) `pos_order_items` in `useSalesPivotData`. Every transaction read on those
+pages had been paged years earlier; these had survived every sweep because a transaction table
+obviously grows and a master table obviously does not.
+
+**That is the wrong question on a dashboard, because these reads are MAPS and the rows looked up
+in them are already complete** — so a truncation does not shorten anything a reader can see, it
+deletes rows from a figure computed over everything:
+
+| producer | what a row past the cut does |
+| --- | --- |
+| `recipes` | prices its sales at **0** — Revenue understated, so every ratio dividing by it fails HIGH |
+| `items` | values its wastage and spend at **rate 0** — reads low, i.e. like a good month |
+| `par_levels` | reads as "no par set" — the item can never surface as below par |
+| `opening_stock` / `closing_stock` | reads as a **zero count** — a large false over-consumption in Variance |
+
+Note the direction: three of those four make the business look BETTER, which is the half nobody
+reports. Ask what a missing row does to the arithmetic, not to the list — and prefer that question
+to "is this table big", which is the one that let nine of these through.
+
 **Deliberately not wrapped**, so the next sweep does not
-churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and
-`persistSalesDay`'s legacy three-call fallback.
+churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups,
+`persistSalesDay`'s legacy three-call fallback, and `overheads` (one row per named fixed cost per
+period — tens of rows, and now written down beside both dashboard reads rather than assumed).
 
 **S628 found four more of that exact shape in HR** — `HrReports`' YTD TDS, Festival Allowance's and
 Incentive Run's YTD gross, and `fetchSsfStartMap` — every one on a tax or gratuity figure, all
