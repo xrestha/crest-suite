@@ -11,61 +11,25 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
-
-const VAT_RATE = 0.13
+import NoPeriodState from '../../../components/NoPeriodState'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { VAT_RATE, splitPurchaseVat, buildVendorSummary } from './purchaseTaxSplit'
 
 function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
-// entries: the purchase_entries rows to aggregate (caller decides which — VatReport wants only
-// VAT-inclusive ones, PurchaseOneLakhAboveReport wants every purchase from the vendor). discount
-// proration defaults to the VAT-taxable portion of each bill only (VatReport's "Taxable" column
-// only cares about VAT-attributable discount); pass discountScope:'all' to prorate a bill-level
-// discount across every line on the bill instead — used by Annexure-13 disclosure, which is about
-// total purchase value net of discount, not just the VAT-taxable slice of it.
-export function buildVendorSummary(entries, returns, billGroups, { discountScope = 'vat' } = {}) {
-  const map = {}
-  entries.forEach(e => {
-    const key  = e.vendor_id || '__unknown__'
-    const name = e.vendors?.name || 'Unknown Vendor'
-    const pan  = e.vendors?.pan_vat_no || ''
-    if (!map[key]) map[key] = { name, pan, count: 0, gross: 0, discount: 0, returned: 0 }
-    map[key].count += 1
-    map[key].gross += e.qty * e.rate
-  })
-  // Prorate bill-level discount to each entry's vendor
-  Object.values(billGroups).forEach(bill => {
-    if (!bill.disc) return
-    const billTotal   = bill.all.reduce((s, e) => s + e.qty * e.rate, 0)
-    const scopedItems = discountScope === 'all' ? bill.all : bill.all.filter(e => e.vat_inclusive)
-    const scopedBase  = scopedItems.reduce((s, e) => s + e.qty * e.rate, 0)
-    const scopedDisc  = billTotal > 0 ? bill.disc * (scopedBase / billTotal) : 0
-    scopedItems.forEach(e => {
-      const key = e.vendor_id || '__unknown__'
-      if (!map[key]) return
-      map[key].discount += scopedBase > 0 ? scopedDisc * ((e.qty * e.rate) / scopedBase) : 0
-    })
-  })
-  returns.forEach(r => {
-    const key  = r.vendor_id || '__unknown__'
-    const name = r.vendors?.name || 'Unknown Vendor'
-    const pan  = r.vendors?.pan_vat_no || ''
-    if (!map[key]) map[key] = { name, pan, count: 0, gross: 0, discount: 0, returned: 0 }
-    map[key].returned += r.qty * r.rate
-  })
-  return Object.values(map).sort((a, b) => (b.gross - b.returned) - (a.gross - a.returned))
 }
 
 export default function VatReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const biz = useBizInfo()
   const periodReq = useLatestRequest()
   const [periods, setPeriods]         = useState([])
   const [selectedPeriod, setSelected] = useState(null)
   const [entries, setEntries]         = useState([])
-  const [vatReturns, setVatReturns]   = useState([])
+  const [returns, setReturns]         = useState([])
   const [loading, setLoading]         = useState(false)
   const [loadError, setLoadError]     = useState(null)
   const [tab, setTab]                 = useState('entries')
@@ -99,132 +63,132 @@ export default function VatReport() {
         .order('bs_day')
         .order('created_at')
         .order('id')),
-      scopedFrom('vendor_returns', '*, items(name, uom, categories(name)), vendors(name, pan_vat_no), purchase_entries(vat_inclusive)')
+      // Paged for the same reason the purchases read is: PostgREST truncates at 1000 rows with no
+      // error, and a return that silently vanishes overstates the input VAT this page is filed on.
+      fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name, uom, categories(name)), vendors(name, pan_vat_no), purchase_entries(vat_inclusive)')
         .eq('period_id', periodId)
-        .order('bs_day'),
+        .order('bs_day')
+        .order('id')),
     ])
     // A failed read must never reach the arithmetic below: everything flows through `|| []`, so an
     // RLS rejection or a stalled token would render a complete, confident VAT return of NPR 0 —
     // and this is a figure an accountant files on. See shared/queryError.js.
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setEntries([]); setVatReturns([]); setLoading(false); return }
+    if (failed) { setLoadError(failed); setEntries([]); setReturns([]); setLoading(false); return }
     const [{ data: entData }, { data: retData }] = results
+    // Every entry and every return of the period, both halves. The VAT/non-VAT split happens in
+    // splitPurchaseVat() rather than in the query, because a bill's discount cannot be apportioned
+    // from one half of itself.
     setEntries(entData || [])
-    setVatReturns((retData || []).filter(r => r.purchase_entries?.vat_inclusive))
+    setReturns(retData || [])
     setLoading(false)
   }
 
-  const vatEntries    = entries.filter(e => e.vat_inclusive)
-  const nonVatEntries = entries.filter(e => !e.vat_inclusive)
+  // One split for the whole period. Non-VAT Report runs the same function over the same rows, so
+  // the two halves of the filing cannot disagree about the same bill's discount — which they did,
+  // by the full discount of every mixed bill. See purchaseTaxSplit.js.
+  //
+  // Discount is applied before VAT throughout (per Nepal IRD: VAT is on the net taxable amount).
+  const split = splitPurchaseVat(entries, returns)
+  const {
+    vatLines, nonVatLines, vatReturns,
+    vatGross: vatBaseList, vatDiscount: totalVatDiscount,
+    vatBase: vatBaseGross, vatAmt: vatAmtGross, vatTotal: vatTotalGross,
+    vatReturnBase: retBaseTotal, vatReturnAmt: retVatTotal, vatReturnTotal: retTotal,
+    netVatBase, netVatAmt, netVatTotal,
+    nonVatNet, totalNet, totalNetExVat,
+  } = split
 
-  // Bill groups — needed to prorate bill-level discount to VAT entries
-  const billGroups = {}
-  entries.forEach(e => {
-    const gid = e.purchase_group_id || e.id
-    if (!billGroups[gid]) billGroups[gid] = { all: [], disc: parseFloat(e.discount_amount) || 0 }
-    billGroups[gid].all.push(e)
-  })
-  const totalVatDiscount = Object.values(billGroups).reduce((sum, bill) => {
-    if (!bill.disc) return sum
-    const billTotal = bill.all.reduce((s, e) => s + e.qty * e.rate, 0)
-    const vatBase   = bill.all.filter(e => e.vat_inclusive).reduce((s, e) => s + e.qty * e.rate, 0)
-    return sum + (billTotal > 0 ? bill.disc * (vatBase / billTotal) : 0)
-  }, 0)
-
-  // Purchases — discount applied before VAT (per Nepal IRD: VAT is on net taxable amount)
-  const nonVatTotal    = nonVatEntries.reduce((s, e) => s + e.qty * e.rate, 0)
-  const vatBaseList    = vatEntries.reduce((s, e) => s + e.qty * e.rate, 0)   // list price, pre-discount
-  const vatBaseGross   = vatBaseList - totalVatDiscount                        // taxable base after discount
-  const vatAmtGross    = vatBaseGross * VAT_RATE
-  const vatTotalGross  = vatBaseGross * (1 + VAT_RATE)
-
-  // Returns (VAT-inclusive only)
-  const retBaseTotal   = vatReturns.reduce((s, r) => s + r.qty * r.rate, 0)
-  const retVatTotal    = retBaseTotal * VAT_RATE
-  const retTotal       = retBaseTotal * (1 + VAT_RATE)
-
-  // Net
-  const netVatBase     = vatBaseGross - retBaseTotal
-  const netVatAmt      = netVatBase * VAT_RATE
-  const netVatTotal    = netVatBase * (1 + VAT_RATE)
-  const totalNet       = nonVatTotal + netVatTotal
-
-  const vendorRows  = buildVendorSummary(vatEntries, vatReturns, billGroups)
+  const vendorRows  = buildVendorSummary(vatLines, vatReturns, split.factors)
   const periodLabel = (p) => p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : ''
+
+  // A VAT return handed to a CA is a document, not a grid. sheetWithLetterhead puts the company
+  // name, PAN/VAT number and address on every sheet, and — the part that matters most here — the
+  // PERIOD AND ITS STATUS: figures pulled from a period that is still open can change after the
+  // export, and a bare json_to_sheet gave the filer no way to know which they were holding.
+  const scopeLineFor = (p) =>
+    `Period : ${periodLabel(p)}${p?.status === 'open'
+      ? ' (PROVISIONAL — period still open, figures can change)'
+      : ' (period closed)'}`
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
+    const scopeLine = scopeLineFor(selectedPeriod)
 
-    // VAT Purchases sheet
-    const entryRows = vatEntries.map(e => {
-      const base  = e.qty * e.rate
-      const vat   = base * VAT_RATE
-      return {
-        'Day':               e.bs_day,
-        'Item':              e.items?.name || '',
-        'Category':          e.items?.categories?.name || '',
-        'Vendor':            e.vendors?.name || '',
-        'PAN/VAT No.':       e.vendors?.pan_vat_no || '',
-        'Qty':               Number(e.qty),
-        'UOM':               e.items?.uom || '',
-        'Base (ex-VAT)':     Number(base.toFixed(2)),
-        'VAT (13%)':         Number(vat.toFixed(2)),
-        'Total (incl. VAT)': Number((base + vat).toFixed(2)),
-        'Invoice Ref':       e.invoice_ref || '',
-      }
-    })
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(entryRows), 'VAT Purchases')
+    // VAT Purchases sheet. Each line carries its own share of the bill discount, so the sheet's
+    // Taxable column sums to the Taxable Base the CA Summary and the on-screen totals both show.
+    const entryRows = vatLines.map(e => ({
+      'Day':               e.bs_day,
+      'Item':              e.items?.name || '',
+      'Category':          e.items?.categories?.name || '',
+      'Vendor':            e.vendors?.name || '',
+      'PAN/VAT No.':       e.vendors?.pan_vat_no || '',
+      'Qty':               Number(e.qty),
+      'UOM':               e.items?.uom || '',
+      'Gross (ex-VAT)':    Number(e.lineGross.toFixed(2)),
+      'Discount Share':    Number((e.lineGross - e.lineNet).toFixed(2)),
+      'Taxable (ex-VAT)':  Number(e.lineNet.toFixed(2)),
+      'VAT (13%)':         Number((e.lineNet * VAT_RATE).toFixed(2)),
+      'Total (incl. VAT)': Number((e.lineNet * (1 + VAT_RATE)).toFixed(2)),
+      'Invoice Ref':       e.invoice_ref || '',
+    }))
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'VAT Report — Input VAT on Purchases', biz, scopeLine, rows: entryRows,
+    }), 'VAT Purchases')
 
     // VAT Returns sheet
     if (vatReturns.length > 0) {
-      const retRows = vatReturns.map(r => {
-        const base = r.qty * r.rate
-        const vat  = base * VAT_RATE
-        return {
-          'Day':                  r.bs_day,
-          'Item':                 r.items?.name || '',
-          'Category':             r.items?.categories?.name || '',
-          'Vendor':               r.vendors?.name || '',
-          'PAN/VAT No.':          r.vendors?.pan_vat_no || '',
-          'Returned Qty':         Number(r.qty),
-          'UOM':                  r.items?.uom || '',
-          'Base Returned (ex-VAT)':  Number(base.toFixed(2)),
-          'VAT Reversed (13%)':      Number(vat.toFixed(2)),
-          'Total Returned (incl. VAT)': Number((base + vat).toFixed(2)),
-          'Notes':                r.notes || '',
-        }
-      })
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(retRows), 'VAT Returns')
+      const retRows = vatReturns.map(r => ({
+        'Day':                        r.bs_day,
+        'Item':                       r.items?.name || '',
+        'Category':                   r.items?.categories?.name || '',
+        'Vendor':                     r.vendors?.name || '',
+        'PAN/VAT No.':                r.vendors?.pan_vat_no || '',
+        'Returned Qty':               Number(r.qty),
+        'UOM':                        r.items?.uom || '',
+        'Base Returned (ex-VAT)':     Number(r.base.toFixed(2)),
+        'VAT Reversed (13%)':         Number((r.base * VAT_RATE).toFixed(2)),
+        'Total Returned (incl. VAT)': Number((r.base * (1 + VAT_RATE)).toFixed(2)),
+        'Notes':                      r.notes || '',
+      }))
+      XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+        title: 'VAT Report — Returns (input VAT reversed)', biz, scopeLine, rows: retRows,
+        notes: ['Returned goods are valued at the discounted rate their original bill carried.'],
+      }), 'VAT Returns')
     }
 
     // CA Summary sheet
     const caRows = vendorRows.map(v => {
-      const grossBase  = v.gross
-      const discBase   = v.discount || 0
-      const taxBase    = grossBase - discBase
-      const retBase    = v.returned
-      const netBase    = taxBase - retBase
+      const discBase = v.discount || 0
+      const taxBase  = v.gross - discBase
+      const netBase  = taxBase - v.returned
       return {
         'Vendor':                    v.name,
         'PAN/VAT No.':               v.pan,
         '# Bills':                   v.count,
-        'Gross Base (ex-VAT)':       Number(grossBase.toFixed(2)),
+        'Gross Base (ex-VAT)':       Number(v.gross.toFixed(2)),
         'Trade Discount':            discBase > 0 ? Number((-discBase).toFixed(2)) : 0,
         'Taxable Base (ex-VAT)':     Number(taxBase.toFixed(2)),
-        'Returned Base (ex-VAT)':    Number(retBase.toFixed(2)),
+        'Returned Base (ex-VAT)':    Number(v.returned.toFixed(2)),
         'Net Taxable (ex-VAT)':      Number(netBase.toFixed(2)),
         'Net Input VAT (13%)':       Number((netBase * VAT_RATE).toFixed(2)),
         'Net Total (incl. VAT)':     Number((netBase * (1 + VAT_RATE)).toFixed(2)),
       }
     })
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(caRows), 'CA Summary')
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'VAT Report — Vendor-wise Summary', biz, scopeLine, rows: caRows,
+      notes: ['For reference only — verify bills with your CA before filing.'],
+    }), 'CA Summary')
 
     XLSX.writeFile(wb, `VAT-Report-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
+  // With no period at all, every figure below is a confident NPR 0 and the empty state blames the
+  // VAT toggle for it. The period selector would also be an empty <select> (S551 / NoPeriodState).
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the VAT report" />
 
   return (
     <div>
@@ -241,8 +205,8 @@ export default function VatReport() {
             {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
           </select>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={!vatEntries.length || !!loadError}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={!vatEntries.length}>Export Excel</button>
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={!vatLines.length || !!loadError}>Print</button>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={!vatLines.length}>Export Excel</button>
           </div>
         </div>
       </div>
@@ -254,20 +218,20 @@ export default function VatReport() {
       {!loadError && !loading && (
       <div className="stat-grid">
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Total net purchases this period (non-VAT + VAT-inclusive net of returns)." width={240}>Total Net Purchases</Tip></div>
+          <div className="stat-label"><Tip text="Total net purchases this period: non-VAT plus VAT-inclusive, both after bill discounts and after goods returned. Includes VAT on the VAT-inclusive half." width={260}>Total Net Purchases</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {Math.round(totalNet).toLocaleString('en-IN')}</div>
           <div className="stat-sub">{entries.length} purchase entries</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Non-VAT Purchases</div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(nonVatTotal).toLocaleString('en-IN')}</div>
-          <div className="stat-sub">{nonVatEntries.length} entries</div>
+          <div className="stat-label"><Tip text="Non-VAT purchases after their share of any bill discount and after goods returned — the same figure the Non-VAT Report shows." width={270}>Non-VAT Purchases</Tip></div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(nonVatNet).toLocaleString('en-IN')}</div>
+          <div className="stat-sub">{nonVatLines.length} entries</div>
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Gross VAT-inclusive purchases minus VAT-inclusive returns (incl. VAT)." width={260}>Net VAT Purchases</Tip></div>
           <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-amber-text)' }}>NPR {Math.round(netVatTotal).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
-            {vatEntries.length} purchases
+            {vatLines.length} purchases
             {vatReturns.length > 0 && <span style={{ color: 'var(--theme-red-text)' }}> − {vatReturns.length} returns</span>}
           </div>
         </div>
@@ -282,7 +246,7 @@ export default function VatReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Net cost basis excluding VAT — actual expense recorded for accounting." width={230}>Net (ex-VAT)</Tip></div>
-          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(nonVatTotal + netVatBase).toLocaleString('en-IN')}</div>
+          <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-text1)' }}>NPR {Math.round(totalNetExVat).toLocaleString('en-IN')}</div>
           <div className="stat-sub">Actual cost basis</div>
         </div>
       </div>
@@ -303,11 +267,11 @@ export default function VatReport() {
           <div className="card" style={{ marginBottom: 16 }}>
             <h3 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>VAT-Inclusive Purchases</span>
-              {!loading && <span style={{ fontSize: 12, color: 'var(--theme-text2)', fontWeight: 400 }}>{vatEntries.length} of {entries.length} entries</span>}
+              {!loading && <span style={{ fontSize: 12, color: 'var(--theme-text2)', fontWeight: 400 }}>{vatLines.length} of {entries.length} entries</span>}
             </h3>
             {loading ? (
               <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
-            ) : vatEntries.length === 0 ? (
+            ) : vatLines.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-state-icon">₨</div>
                 <p className="empty-state-text">No VAT-inclusive purchases this period. Tick "VAT Incl. (13%)" when adding purchases.</p>
@@ -330,7 +294,7 @@ export default function VatReport() {
                     </tr>
                   </thead>
                   <tbody>
-                    {vatEntries.map(e => {
+                    {vatLines.map(e => {
                       const base  = e.qty * e.rate
                       const vat   = base * VAT_RATE
                       const total = base + vat
@@ -399,7 +363,7 @@ export default function VatReport() {
                       <th>Vendor</th>
                       <th style={{ textAlign: 'right' }}>Returned Qty</th>
                       <th>UOM</th>
-                      <th style={{ textAlign: 'right' }}>Base Returned</th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Value credited back, at the discounted rate the original bill carried — not the list rate." width={250}>Base Returned</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>VAT Reversed</th>
                       <th style={{ textAlign: 'right' }}>Total Returned</th>
                       <th>Notes</th>
@@ -407,7 +371,10 @@ export default function VatReport() {
                   </thead>
                   <tbody>
                     {vatReturns.map(r => {
-                      const base  = r.qty * r.rate
+                      // r.base, not qty x rate: a return is credited at the discounted rate its
+                      // original bill carried, so these rows sum to the TOTAL RETURNS row below
+                      // and a fully-returned discounted bill nets to zero rather than negative.
+                      const base  = r.base
                       const vat   = base * VAT_RATE
                       const total = base + vat
                       return (

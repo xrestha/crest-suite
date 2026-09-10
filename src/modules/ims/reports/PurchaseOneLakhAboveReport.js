@@ -8,7 +8,8 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { getBsFiscalYear } from '../../../utils/bsCalendar'
-import { buildVendorSummary } from './VatReport'
+import { allocateBillDiscounts } from './supplierAttribution'
+import { buildVendorSummary, netFactors } from './purchaseTaxSplit'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { Navigate } from 'react-router-dom'
 
@@ -68,21 +69,16 @@ export default function PurchaseOneLakhAboveReport() {
     const [{ data: entData }, { data: retData }] = results
     const entries = entData || []
 
-    const billGroups = {}
-    entries.forEach(e => {
-      const gid = e.purchase_group_id || e.id
-      if (!billGroups[gid]) billGroups[gid] = { all: [], disc: parseFloat(e.discount_amount) || 0 }
-      billGroups[gid].all.push(e)
-    })
-
     // Annexure 13 discloses a vendor's TOTAL cumulative purchases for the fiscal year, not just
-    // the VAT-taxable portion — the previous vatEntries/vatReturns filter (borrowed from
-    // VatReport's own vendor summary, which genuinely only cares about VAT-taxable purchases)
-    // silently dropped every non-VAT bill from the vendor total, understating or fully omitting
-    // a vendor who should have been disclosed. Pass every entry, with the bill-level discount
-    // prorated across the whole bill (discountScope:'all') rather than just its VAT-taxable lines.
+    // the VAT-taxable portion — an earlier vatEntries/vatReturns filter (borrowed from VatReport's
+    // own vendor summary, which genuinely only cares about VAT-taxable purchases) silently dropped
+    // every non-VAT bill from the vendor total, understating or fully omitting a vendor who should
+    // have been disclosed. So EVERY allocated line goes in, not just the VAT ones. Which lines the
+    // caller passes is now the only difference between this rollup and VatReport's — per-line
+    // allocation makes the discount arithmetic identical either way (purchaseTaxSplit.js).
+    const allocated = allocateBillDiscounts(entries)
     if (!fyReq.isCurrent(key)) return   // superseded by a newer FY selection
-    setVendors(buildVendorSummary(entries, retData || [], billGroups, { discountScope: 'all' }))
+    setVendors(buildVendorSummary(allocated, retData || [], netFactors(allocated)))
     setLoading(false)
   }, [effectiveClientId, selectedFy, periods, scopedFrom, fyReq])
 

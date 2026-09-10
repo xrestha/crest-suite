@@ -111,8 +111,8 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '◎', name: 'Payment Summary',
-        guide: 'Breaks down total revenue by payment method — Cash, Credit, and FonePay. Shows gross sales, returns, and net per method with a daily breakdown for the selected period.',
-        tips: ['Match this against your POS or daily cash counts for reconciliation', 'Revenue here comes from Sales Entry — make sure sales are entered first']
+        guide: 'Breaks down what you SPENT on purchases by how each bill was settled — Cash, Credit and FonePay. Shows gross, returns and net per method with a daily breakdown for the selected period. Amounts are whole bill totals: net of the bill discount and including VAT where the supplier charged it, so they match the Purchases register and Outstanding Payables.',
+        tips: ['This is money going OUT to suppliers, not sales revenue — the figures come from Purchases, not Sales Entry', 'Credit means billed but not yet paid. Outstanding Payables is where you see what is still owed and record payments against it', 'A bill counts once in the Bills column however many lines it has, because the payment method is chosen for the whole bill']
       },
       {
         icon: '◻', name: 'Monthly Summary',
@@ -141,18 +141,18 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '⊛', name: 'VAT Report',
-        guide: 'Summarises input VAT on purchases. Toggle the VAT-inclusive flag per purchase entry in the Purchases page. Shows total VAT paid per period for use in your IRD VAT return.',
-        tips: ['Only purchases marked as VAT-inclusive are counted in the VAT total', 'Match this against your supplier VAT invoices before filing']
+        guide: 'Summarises input VAT on purchases. Toggle the VAT-inclusive flag per purchase entry in the Purchases page. Shows total VAT paid per period for use in your IRD VAT return. A bill can mix VAT and non-VAT lines, and its discount is split between this report and the Non-VAT Report in proportion to line value, so the two halves add back to the bill.',
+        tips: ['Only purchases marked as VAT-inclusive are counted in the VAT total', 'The "Non-VAT Purchases" card here shows exactly the same figure the Non-VAT Report headlines — if they ever disagree, something is wrong', 'Goods sent back are credited at the discounted rate their bill carried, so returning a whole discounted bill leaves nothing to claim rather than a negative figure', 'Match this against your supplier VAT invoices before filing. The Excel export carries your company name, PAN/VAT number and the period — and says so when the period is still open and the figures can still change']
       },
       {
         icon: '⚑', name: 'Purchase One Lakh Above Report',
         guide: 'Nepal VAT return Annexure 13 (अनुसूची १३): any single vendor whose cumulative purchases exceed NPR 1,00,000 in a fiscal year must be disclosed by name + PAN. Aggregates purchases by vendor across a full BS fiscal year and flags who crosses the threshold — the purchase-side counterpart to the POS One Lakh Above Report.',
-        tips: ['⚠ Missing PAN means a vendor crossed NPR 1,00,000 without a PAN/VAT No. on file', 'Only VAT-inclusive purchase entries are counted, netted against vendor returns', 'Spans every period in the selected BS fiscal year, not just one month']
+        tips: ['⚠ Missing PAN means a vendor crossed NPR 1,00,000 without a PAN/VAT No. on file', 'EVERY purchase from the vendor counts, VAT and non-VAT alike, netted against vendor returns — the disclosure is about total purchase value, not just the taxable part', 'Spans every period in the selected BS fiscal year, not just one month']
       },
       {
         icon: '⊘', name: 'Non-VAT Report',
-        guide: 'Lists all purchases from non-VAT registered vendors. Useful for accounting and for separating VAT vs non-VAT purchase records. Totals are net of bill discounts and of any non-VAT goods returned to the vendor, matching how the VAT Report treats its own half of the filing.',
-        tips: ['Non-VAT purchases are those not marked as VAT-inclusive in the Purchases entry', 'Returns are deducted from both the headline total and each vendor row. A Returns column appears only when there were returns in the period.']
+        guide: 'Lists all purchases entered without the VAT flag. Useful for accounting and for separating VAT vs non-VAT purchase records. Totals are net of bill discounts and of any non-VAT goods returned to the vendor, matching how the VAT Report treats its own half of the filing.',
+        tips: ['Non-VAT purchases are those not marked as VAT-inclusive in the Purchases entry', 'A bill can be mixed. When it is, only the share of its discount that falls on the non-VAT lines is deducted here — the rest is deducted on the VAT Report, so the discount is never counted twice', 'Returns are deducted from both the headline total and each vendor row. A Returns column appears only when there were returns in the period.', 'The Entries table shows the gross total, then the discount and returns on their own lines, then the net — so the column adds up to the figure underneath it']
       },
       {
         icon: '⚠', name: 'Wastage Report',
