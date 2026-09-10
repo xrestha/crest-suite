@@ -447,7 +447,10 @@ the same table**, not which other page looks like it. The receipt path is now
 - **A receipt links back to its order.** `purchase_entries.po_id`, nullable forever — NULL means
   "typed in by hand", never "unknown" — and `save_purchase_bill` carries it through an edit. This
   is the reconciliation `invoice_ref = po_number` could never be: that field is free text and
-  Purchases lets anyone overwrite it.
+  Purchases lets anyone overwrite it. **The carry-through shipped as `max(po_id)` and broke every
+  bill edit for a day (S735)** — Postgres has no `max(uuid)`, and a plpgsql body is not checked at
+  CREATE time, so the migration applied green; it is `WHERE po_id IS NOT NULL … LIMIT 1` now
+  (`supabase-sql.md` has the rule).
 - **A PO with bills against it cannot be deleted**, by anyone, operator included; Cancel is the way
   through, and on a part-received order it is labelled **Close Short** — the goods that arrived
   keep their bills and their stock, only the outstanding quantity closes. The old Cancel tooltip
