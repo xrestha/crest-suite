@@ -45,6 +45,10 @@ const GROWTH_KEYS = new Set([
   // Recipes' True Cost allocation. A data-entry page must not sit above the tier of any figure
   // that consumes it, or the consumer renders blank with no explanation.
   'overheads',
+  // Assigned stock counting (S737): section assignment, recount protection, blind count and PIN
+  // login for counters. Stock Count itself stays Starter — recording a count is Record & Comply.
+  // Deciding who may count what, and holding them to it, is Control, which is Growth.
+  'stock_count_assignment',
 ])
 // Requires Pro plan
 const PRO_KEYS = new Set([
@@ -386,6 +390,15 @@ export function AuthProvider({ children }) {
   const stationTeam = isStationTeam(posTeam)
   const canReachPosPath = path => posPathReachable(posTeam, path)
 
+  // A PIN count account (S737) exists to do one job on a shared store-room tablet, so it reaches
+  // Stock Count and nothing else. Keyed on the raw ims_email COLUMN, never the resolved imsRole —
+  // admin and Owner both resolve to 'manager' on every axis, which makes the rank the wrong test
+  // for "is this a till/tablet session" (the same trap CLAUDE.md names for pos_role).
+  //
+  // Enforced in ModuleGate, beside canReachPosPath. Hiding nav items would not be a guard: these
+  // routes are typeable, and a sub-route has no nav item to hide in the first place.
+  const imsCountOnly = !isAdmin && !!profile?.ims_email
+
   // ── Multi-outlet ──
   // An Owner reaches every outlet in the group. Anyone else reaches their home outlet plus
   // whatever they have been explicitly allowlisted into (S617, profile_outlet_access). The case
@@ -619,6 +632,7 @@ export function AuthProvider({ children }) {
       isStationTeam: stationTeam,
       canReachPosPath,
       imsRole,
+      imsCountOnly,
       hrRole,
       isOwner,
       hasPosAccess,

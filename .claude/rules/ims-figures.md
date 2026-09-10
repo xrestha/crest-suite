@@ -1110,3 +1110,61 @@ new ones (a one-pass loop hands row A the code row B still holds and the index r
 sub-recipe's mirror row in `items` carries the same code in `item_code`**, written once at insert
 by `Recipes.js` and updated by nothing but Settings' renumber — so a renumber of items must skip
 `is_sub_recipe = true`, and a renumber of sub-recipes must write both columns.
+
+## Assigned stock counting: who counts what, and who counted it (S737)
+
+Stock Count can be handed to staff. Four switches, all off by default, gated behind the Growth key
+`stock_count_assignment`, configured in **Stock Count → Settings**
+(`src/modules/ims/stockcount/StockCountSettings.jsx`, manager-only, its own file because `Stock.js`
+is ~1,750 lines and none of this is counting).
+
+- **The section scope is a POLICY, not the screen.** `ims_count_assignments` is staff × category —
+  categories are the only grouping `items` has — and three RESTRICTIVE policies on `closing_stock`
+  **INSERT/UPDATE/DELETE** call `ims_count_scope_allows(item_id)`. Deliberately **not SELECT**:
+  those are the client's own rows, and a per-row subquery on every read is paid on a 1,000-item
+  sheet at every page load. `Stock.js` filters the same set for display, so the screen and the lock
+  agree — but the lock is what holds, per invariant #3.
+- **It fails CLOSED, and that has to be said on screen.** A staff-rank account with scoping on and
+  no assignments can save nothing. That is the honest reading of "only their sections"; without the
+  banner it is a blank item list under a working Save button. The settings tab also warns by name
+  when someone is in that state, because the manager creates it by switching the master toggle on
+  before filling the grid.
+- **An item with no `category_id` is assignable to nobody**, so a scoped counter never sees it. The
+  settings tab counts them and says so rather than letting them vanish.
+- **Recount protection is a BEFORE UPDATE OR DELETE trigger** (`closing_stock_guard_recount`),
+  SECURITY INVOKER on the `current_user IN ('anon','authenticated')` seam. Only a `staff` rank is
+  blocked; supervisor and above correcting a figure is the sanctioned way through, so there is no
+  force-path RPC (`vendors`' S708 variation).
+- **Blind count is a DISPLAY rule and the UI says so.** It takes Purchased/Returned/Value off the
+  Closing tab for a staff-rank counter. The figures still reach the browser; calling it a lock in
+  the copy would be the claim `fcBand`-on-a-zero teaches against.
+- **`counted_by` is written at last.** It had existed since the baseline and nothing had ever
+  written it. It is `uuid` now with a `counted_by_name` snapshot beside it — the FK is
+  `ON DELETE SET NULL`, so deleting the account would otherwise erase the attribution and not just
+  the link. **The offline queue stamps both at ENQUEUE time**: on a shared tablet the person who
+  counted is routinely not the session that syncs.
+
+**PIN login for counters** (`/ims/count`, `ImsCountLogin.jsx`, `ims-staff-login`) is the POS
+architecture reused — synthetic `profiles.ims_email` that never reaches the browser, the derived
+password from `_shared/pinPassword.ts`, the lockout enforced on the request that signs in. Two
+things differ and both are deliberate:
+
+- **Enrolment is inverted.** POS activates a device by pressing a button ON it while signed in;
+  a store-room tablet has no such session. The manager displays a QR and the tablet scans it. **The
+  QR carries a short-lived token, never `ims_device_secret`** — it is shown in a room with people
+  in it, and the secret is what gates the anonymous roster read. Valid 15 minutes, any number of
+  devices, revocable.
+- **A PIN account is count-only**, fixed at `ims_role = 'staff'`, and the guard is in
+  **`ProtectedRoute`** rather than `ModuleGate` — `/dashboard` carries no `ModuleGate` and is
+  exactly where a fresh sign-in lands. `shared/imsCountAccess.js` is the one predicate, read by the
+  guard, the sidebar and the command palette (the `posTeamAccess.js` shape).
+
+**A new PIN kind is four lists, not one**, and three of them fail silently: `staff_pin_vault`'s
+`kind` CHECK, `rederive_pin_passwords`' salt lookup (a wrong salt mints a password no login can
+reproduce — it now REFUSES an unknown kind rather than defaulting), `restore_staff_accounts`'
+branch plus the `ims_email` column in `exportClientData.js` (they move together, or a restorable
+account is reported as unrecoverable), and `log_audit()`'s profiles noise-skip array.
+
+**`ims_count_assignments` is deliberately absent from `RESTORE_ORDER`**, for `legal_acceptances`'
+reason: every row keys on `profile_id` and a restore re-creates staff accounts with new ids, so the
+rows would either fail their FK or point at whoever inherited the id.

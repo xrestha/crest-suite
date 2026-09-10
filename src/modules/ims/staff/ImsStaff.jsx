@@ -27,7 +27,7 @@ const DEFAULT_ROLES = [
   { label: 'Supervisor', level: 'supervisor' },
   { label: 'Manager',    level: 'manager' },
 ]
-const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', employee_id: '', existing_user_id: '' }
+const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', employee_id: '', existing_user_id: '', pin: '' }
 const EMPTY_ROLE  = { label: '', level: 'staff' }
 
 function emailValid(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) }
@@ -73,7 +73,7 @@ export default function ImsStaff() {
   // Add staff modal
   const [addModal,    setAddModal]    = useState(false)
   const [addForm,     setAddForm]     = useState(EMPTY_ADD)
-  const [addMode,     setAddMode]     = useState('hr') // 'hr' | 'existing' | 'manual'
+  const [addMode,     setAddMode]     = useState('hr') // 'hr' | 'existing' | 'manual' | 'pin'
   const [adding,      setAdding]      = useState(false)
   const [addMsg,      setAddMsg]      = useState('')
 
@@ -303,8 +303,10 @@ export default function ImsStaff() {
   }
 
   async function addStaff() {
+    // A count PIN account has no role to pick — its rank is fixed at 'staff' by the server, and
+    // the role select is not rendered in that mode. Every other mode still requires one.
     const role = effectiveRoles.find(r => r.label === addForm.job_title)
-    if (!role) { setAddMsg('Pick a role — it decides which IMS pages this person can open.'); return }
+    if (!role && addMode !== 'pin') { setAddMsg('Pick a role — it decides which IMS pages this person can open.'); return }
 
     // 'existing' assigns an ims_role to an account that already exists for this client (e.g.
     // created via Admin → Clients → Manage → Users) — no new login is created, so it skips the
@@ -326,6 +328,31 @@ export default function ImsStaff() {
       }
       const who = eligibleUsers.find(u => u.id === addForm.existing_user_id)
       setNotice(`${who?.full_name || who?.email || 'The login'} now has IMS access as ${addForm.job_title}.`)
+      setAddModal(false); setAdding(false); load()
+      return
+    }
+
+    // A count PIN account (S737): name + PIN, no email, no password. Its rank is fixed at 'staff'
+    // server-side — the account is count-only in the app, so a supervisor or manager PIN would be
+    // a rank that cannot reach anything it unlocks.
+    if (addMode === 'pin') {
+      if (!addForm.full_name.trim()) { setAddMsg('Enter the staff member’s full name.'); return }
+      if (!/^\d{4,6}$/.test(addForm.pin)) { setAddMsg('The PIN must be 4 to 6 digits.'); return }
+      setAdding(true); setAddMsg('')
+      const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+        body: {
+          action:        'create_ims_pin_staff',
+          client_id:     clientId,
+          full_name:     addForm.full_name.trim(),
+          pin:           addForm.pin,
+          ims_job_title: addForm.job_title || 'Stock Counter',
+        },
+      })
+      if (error || data?.error) {
+        setAddMsg(await invokeDetail(data, error, 'The counting login was not created. Check your internet and try again.'))
+        setAdding(false); return
+      }
+      setNotice(`${addForm.full_name.trim()} can now count stock with that PIN. Set the device up from Stock Count → Settings — they tap their name and type the PIN, nothing else.`)
       setAddModal(false); setAdding(false); load()
       return
     }
@@ -387,17 +414,30 @@ export default function ImsStaff() {
   function openReset(p) { setPwTarget(p); setNewPassword(''); setPwMsg('') }
 
   async function resetPassword() {
-    const pwProblem = passwordProblem(newPassword, { email: pwTarget.email, businessName })
-    if (pwProblem) { setPwMsg(pwProblem); return }
+    // One dialog, two credentials. A count PIN account has no password and no email of its own,
+    // so it takes the digit rule and the PIN action; everything else keeps the password policy.
+    const isPin = !!pwTarget.has_pin
+    if (isPin) {
+      if (!/^\d{4,6}$/.test(newPassword)) { setPwMsg('The PIN must be 4 to 6 digits.'); return }
+    } else {
+      const pwProblem = passwordProblem(newPassword, { email: pwTarget.email, businessName })
+      if (pwProblem) { setPwMsg(pwProblem); return }
+    }
     setResetting(true); setPwMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-      body: { action: 'reset_ims_password', userId: pwTarget.id, password: newPassword },
+      body: isPin
+        ? { action: 'reset_ims_pin', userId: pwTarget.id, pin: newPassword }
+        : { action: 'reset_ims_password', userId: pwTarget.id, password: newPassword },
     })
     if (error || data?.error) {
-      setPwMsg(await invokeDetail(data, error, 'The password was not changed — the old one still works.'))
+      setPwMsg(await invokeDetail(data, error, isPin
+        ? 'The PIN was not changed — the old one still works.'
+        : 'The password was not changed — the old one still works.'))
       setResetting(false); return
     }
-    setNotice(`Password for ${pwTarget.full_name} changed — the old one no longer works. Share the new one with them directly.`)
+    setNotice(isPin
+      ? `PIN for ${pwTarget.full_name} changed — the old one no longer works. Tell them the new one directly.`
+      : `Password for ${pwTarget.full_name} changed — the old one no longer works. Share the new one with them directly.`)
     setPwTarget(null); setResetting(false)
   }
 
@@ -553,8 +593,11 @@ export default function ImsStaff() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        {/* A count PIN account has no password to reset and no email to sign in
+                            with, so the two are mutually exclusive (S737). get_ims_staff_list
+                            returns has_pin for exactly this. */}
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}>
-                          Reset Password
+                          {p.has_pin ? 'Reset PIN' : 'Reset Password'}
                         </button>
                         {isSelf ? (
                           <Tip text="You cannot delete or re-rank your own login from here — the account owner or an administrator can.">
@@ -686,17 +729,19 @@ export default function ImsStaff() {
       {addModal && (
         <Modal onClose={() => { if (!adding) setAddModal(false) }} title="Add Staff Member" maxWidth={380}>
 
-            {(hrEnabled || eligibleUsers.length > 0) && (
-              <div className="tab-bar" role="group" aria-label="How to add this staff member" style={{ marginBottom: 16 }}>
-                {hrEnabled && (
-                  <button aria-pressed={addMode === 'hr'} className={`tab-btn${addMode === 'hr' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('hr')}>HR Employee</button>
-                )}
-                {eligibleUsers.length > 0 && (
-                  <button aria-pressed={addMode === 'existing'} className={`tab-btn${addMode === 'existing' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('existing')}>Existing User</button>
-                )}
-                <button aria-pressed={addMode === 'manual'} className={`tab-btn${addMode === 'manual' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('manual')}>IMS-only Staff</button>
-              </div>
-            )}
+            {/* Always rendered: Count PIN is offered whatever else this client has (S737), so there
+                are always at least two ways in. It used to appear only for a client with HR or a
+                spare login. */}
+            <div className="tab-bar" role="group" aria-label="How to add this staff member" style={{ marginBottom: 16 }}>
+              {hrEnabled && (
+                <button aria-pressed={addMode === 'hr'} className={`tab-btn${addMode === 'hr' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('hr')}>HR Employee</button>
+              )}
+              {eligibleUsers.length > 0 && (
+                <button aria-pressed={addMode === 'existing'} className={`tab-btn${addMode === 'existing' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('existing')}>Existing User</button>
+              )}
+              <button aria-pressed={addMode === 'manual'} className={`tab-btn${addMode === 'manual' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('manual')}>IMS-only Staff</button>
+              <button aria-pressed={addMode === 'pin'} className={`tab-btn${addMode === 'pin' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('pin')}>Count PIN</button>
+            </div>
 
             {addMode === 'hr' && (
               <div style={{ marginBottom: 14 }}>
@@ -751,7 +796,42 @@ export default function ImsStaff() {
               </div>
             )}
 
-            {addMode !== 'existing' && (
+            {addMode === 'pin' && (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={labelStyle} htmlFor="imssta-pin-name">Full Name</label>
+                  <input id="imssta-pin-name"
+                    className="form-input"
+                    placeholder="e.g. Ram Bahadur"
+                    value={addForm.full_name}
+                    onChange={e => setAddForm(f => ({ ...f, full_name: e.target.value }))}
+                    autoFocus
+                  />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={labelStyle} htmlFor="imssta-pin">
+                    <Tip text="They tap their name on the counting tablet and type this PIN — no email, no password. Five wrong tries locks the account for 15 minutes. You can reset it here at any time." width={280}>
+                      PIN (4–6 digits)
+                    </Tip>
+                  </label>
+                  <input id="imssta-pin"
+                    className="form-input"
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={6}
+                    autoComplete="new-password"
+                    placeholder="••••"
+                    value={addForm.pin}
+                    onChange={e => setAddForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, '') }))}
+                  />
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: -4, marginBottom: 14 }}>
+                  This login opens Stock Count and nothing else. Set the tablet up from Stock Count → Settings.
+                </p>
+              </>
+            )}
+
+            {addMode !== 'existing' && addMode !== 'pin' && (
               <>
                 <div style={{ marginBottom: 14 }}>
                   <label style={labelStyle} htmlFor="imssta-f4">
@@ -781,7 +861,9 @@ export default function ImsStaff() {
               </>
             )}
 
-            <div style={{ marginBottom: 20 }}>
+            {/* Not in Count PIN mode: that account's rank is fixed at 'staff' by the server, so a
+                role picker here would be a control whose only answer is already decided. */}
+            <div style={{ marginBottom: 20, display: addMode === 'pin' ? 'none' : undefined }}>
               <label style={labelStyle} htmlFor="imssta-f6">
                 <Tip text="The role shown for this staff member. Permission level is shown in brackets.">Role</Tip>
               </label>
@@ -812,20 +894,24 @@ export default function ImsStaff() {
 
       {/* ── Reset Password modal ─────────────────────────────────────────────── */}
       {pwTarget && (
-        <Modal onClose={() => { if (!resetting) setPwTarget(null) }} title="Reset Password" maxWidth={340}>
+        <Modal onClose={() => { if (!resetting) setPwTarget(null) }} title={pwTarget.has_pin ? 'Reset PIN' : 'Reset Password'} maxWidth={340}>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)' }}>
-              New password for <strong style={{ color: 'var(--theme-text1)' }}>{pwTarget.full_name}</strong>
+              New {pwTarget.has_pin ? 'PIN' : 'password'} for <strong style={{ color: 'var(--theme-text1)' }}>{pwTarget.full_name}</strong>
             </p>
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle} htmlFor="imssta-f7">New Password ({MIN_PASSWORD_LENGTH}+ characters)</label>
+              <label style={labelStyle} htmlFor="imssta-f7">
+                {pwTarget.has_pin ? 'New PIN (4–6 digits)' : `New Password (${MIN_PASSWORD_LENGTH}+ characters)`}
+              </label>
               <input id="imssta-f7"
                 className="form-input"
                 type="password"
+                inputMode={pwTarget.has_pin ? 'numeric' : undefined}
+                maxLength={pwTarget.has_pin ? 6 : undefined}
                 autoComplete="new-password"
-                placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`}
+                placeholder={pwTarget.has_pin ? '••••' : `Min. ${MIN_PASSWORD_LENGTH} characters`}
                 value={newPassword}
                 autoFocus
-                onChange={e => setNewPassword(e.target.value)}
+                onChange={e => setNewPassword(pwTarget.has_pin ? e.target.value.replace(/\D/g, '') : e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && !resetting && resetPassword()}
               />
             </div>
@@ -833,7 +919,7 @@ export default function ImsStaff() {
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: pwMsg ? 12 : 0 }}>
               <button className="btn btn-ghost" onClick={() => setPwTarget(null)} disabled={resetting}>Cancel</button>
               <button className="btn btn-primary" onClick={resetPassword} disabled={resetting}>
-                {resetting ? 'Saving…' : 'Save Password'}
+                {resetting ? 'Saving…' : pwTarget.has_pin ? 'Save PIN' : 'Save Password'}
               </button>
             </div>
         </Modal>

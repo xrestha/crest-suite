@@ -154,6 +154,9 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
   await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')
   await del(admin.from('vendors').delete().eq('client_id', clientId), 'vendors')
+  // Before categories: category_id cascades, so this is belt-and-braces rather than required,
+  // but CLAUDE.md step 7 asks for every client-scoped table to be listed explicitly (S737).
+  await del(admin.from('ims_count_assignments').delete().eq('client_id', clientId), 'ims_count_assignments')
   await del(admin.from('categories').delete().eq('client_id', clientId), 'categories')
   // Cascades from both profiles and clients, so this is belt-and-braces rather than required —
   // but CLAUDE.md step 7 asks for every client-scoped table to be listed explicitly, and a
@@ -193,7 +196,7 @@ Deno.serve(async (req) => {
     // admin recovery is unavailable -- and the next reset, or the login functions' lazy-upgrade
     // branch, repopulates it. Failing the create/reset here would trade a recovery convenience
     // for an outage on the restaurant floor, which is the wrong way round.
-    const vaultPin = async (userId: string, clientId: string, kind: 'pos' | 'hr_self_service', pin: string) => {
+    const vaultPin = async (userId: string, clientId: string, kind: 'pos' | 'hr_self_service' | 'ims_count', pin: string) => {
       try {
         const { vaultKey } = await getAppSecrets(admin)
         if (!vaultKey) {
@@ -659,7 +662,8 @@ Deno.serve(async (req) => {
     if (action === 'create_pos_staff' || action === 'reset_pos_pin' || action === 'delete_pos_staff' || action === 'update_pos_role') {
       if (!isPosPrivileged) return json({ error: 'Forbidden' }, 403)
     }
-    if (action === 'create_ims_staff' || action === 'reset_ims_password' || action === 'delete_ims_staff' || action === 'update_ims_role') {
+    if (action === 'create_ims_staff' || action === 'reset_ims_password' || action === 'delete_ims_staff' || action === 'update_ims_role'
+        || action === 'create_ims_pin_staff' || action === 'reset_ims_pin') {
       if (!isImsPrivileged) return json({ error: 'Forbidden' }, 403)
     }
     if (action === 'create_hr_staff' || action === 'reset_hr_password' || action === 'delete_hr_staff' || action === 'update_hr_role') {
@@ -879,9 +883,20 @@ Deno.serve(async (req) => {
       const manual:   Array<{ full_name: string; kind: string; reason: string }> = []
 
       for (const p of roster) {
+        // Three PIN kinds now (S737): POS, Self-Service and IMS stock count. An account is
+        // restorable when it has a generated login email in the roster AND a vaulted PIN — the
+        // two halves of the original derivation. A `kind` added without a branch here does not
+        // fail: it silently reports a restorable account as unrecoverable, which is why the
+        // email column and this list have to move together.
         const isPos = !!p.pos_email
         const isSelfService = !!p.hr_self_service_email
-        if (!isPos && !isSelfService) {
+        const isImsCount = !!p.ims_email
+        const email = isPos ? p.pos_email : isSelfService ? p.hr_self_service_email : p.ims_email
+        const kindLabel = isPos ? 'POS' : isSelfService ? 'Self-Service' : 'IMS count'
+        const vaultKind: 'pos' | 'hr_self_service' | 'ims_count' =
+          isPos ? 'pos' : isSelfService ? 'hr_self_service' : 'ims_count'
+
+        if (!isPos && !isSelfService && !isImsCount) {
           manual.push({
             full_name: p.full_name || '(unnamed)',
             kind: p.ims_role ? 'IMS staff' : p.hr_role ? 'HR staff' : 'Owner / admin',
@@ -892,7 +907,7 @@ Deno.serve(async (req) => {
 
         const cipher = cipherByUser[p.id]
         if (!cipher || !vaultKey) {
-          manual.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service', reason: 'no vaulted PIN in this backup' })
+          manual.push({ full_name: p.full_name, kind: kindLabel, reason: 'no vaulted PIN in this backup' })
           continue
         }
 
@@ -901,11 +916,10 @@ Deno.serve(async (req) => {
           pin = await decryptPin(cipher, vaultKey)
         } catch {
           // Almost always means pin_vault_key was rotated after this backup was taken.
-          manual.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service', reason: 'vaulted PIN could not be decrypted (vault key rotated?)' })
+          manual.push({ full_name: p.full_name, kind: kindLabel, reason: 'vaulted PIN could not be decrypted (vault key rotated?)' })
           continue
         }
 
-        const email = isPos ? p.pos_email : p.hr_self_service_email
         const { data: authData, error: authErr } = await admin.auth.admin.createUser({
           email,
           password:      await derivePinPassword(email, pin, pepper),
@@ -913,7 +927,7 @@ Deno.serve(async (req) => {
           user_metadata: { full_name: p.full_name },
         })
         if (authErr || !authData?.user) {
-          manual.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service', reason: authErr?.message || 'account creation failed' })
+          manual.push({ full_name: p.full_name, kind: kindLabel, reason: authErr?.message || 'account creation failed' })
           continue
         }
 
@@ -931,9 +945,15 @@ Deno.serve(async (req) => {
             // Omitted when absent so the column's own DEFAULT 'foh' applies rather than a null
             // colliding with NOT NULL — same reasoning as create_pos_staff.
             ...(p.pos_team ? { pos_team: p.pos_team } : {}),
-          } : {
+          } : isSelfService ? {
             hr_self_service:       true,
             hr_self_service_email: email,
+          } : {
+            // A count PIN is always ims_role 'staff' — create_ims_pin_staff fixes it there for
+            // the same reason, so the roster's value is taken only as a fallback.
+            ims_role:      p.ims_role || 'staff',
+            ims_job_title: p.ims_job_title || null,
+            ims_email:     email,
           }),
           // hr_employee_id points at the restored hr_employees row, which keeps its original id
           // because restoreClientData inserts rows verbatim.
@@ -942,12 +962,12 @@ Deno.serve(async (req) => {
 
         if (profileErr) {
           await admin.auth.admin.deleteUser(authData.user.id)
-          manual.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service', reason: profileErr.message })
+          manual.push({ full_name: p.full_name, kind: kindLabel, reason: profileErr.message })
           continue
         }
 
-        await vaultPin(authData.user.id, client_id, isPos ? 'pos' : 'hr_self_service', pin)
-        restored.push({ full_name: p.full_name, kind: isPos ? 'POS' : 'Self-Service' })
+        await vaultPin(authData.user.id, client_id, vaultKind, pin)
+        restored.push({ full_name: p.full_name, kind: kindLabel })
       }
 
       return json({ success: true, restored, manual })
@@ -1223,26 +1243,36 @@ Deno.serve(async (req) => {
 
       const { pepper, vaultKey } = await getAppSecrets(admin)
 
-      // Every vaulted account, with the email each derivation must be salted with. pos_email and
-      // hr_self_service_email are the two salts, picked by `kind` — using the wrong one produces
-      // a password nobody can ever reproduce.
+      // Every vaulted account, with the email each derivation must be salted with. There are
+      // THREE salts — pos_email, hr_self_service_email and ims_email (S737) — picked by `kind`;
+      // using the wrong one produces a password nobody can ever reproduce. A `kind` added to
+      // staff_pin_vault without a branch here is an account this rotation silently bricks.
       const { data: vaulted } = await admin
         .from('staff_pin_vault').select('user_id, kind, pin_cipher')
       const { data: emails } = await admin
-        .from('profiles').select('id, pos_email, hr_self_service_email')
+        .from('profiles').select('id, pos_email, hr_self_service_email, ims_email')
         .in('id', (vaulted ?? []).map((v: { user_id: string }) => v.user_id))
 
       const emailById = new Map(
-        (emails ?? []).map((p: { id: string; pos_email: string | null; hr_self_service_email: string | null }) => [p.id, p]),
+        (emails ?? []).map((p: { id: string; pos_email: string | null; hr_self_service_email: string | null; ims_email: string | null }) => [p.id, p]),
       )
+      const SALT_COLUMN: Record<string, 'pos_email' | 'hr_self_service_email' | 'ims_email'> = {
+        pos: 'pos_email',
+        hr_self_service: 'hr_self_service_email',
+        ims_count: 'ims_email',
+      }
 
       let updated = 0
       const failures: { user_id: string; reason: string }[] = []
 
       for (const row of vaulted ?? []) {
         try {
-          const prof  = emailById.get(row.user_id) as { pos_email: string | null; hr_self_service_email: string | null } | undefined
-          const salt  = row.kind === 'pos' ? prof?.pos_email : prof?.hr_self_service_email
+          const prof   = emailById.get(row.user_id) as Record<string, string | null> | undefined
+          const column = SALT_COLUMN[row.kind as string]
+          // An unknown kind must FAIL rather than fall through to a default salt: a wrong salt
+          // produces a valid-looking password that no login can ever reproduce.
+          if (!column) { failures.push({ user_id: row.user_id, reason: `unknown vault kind '${row.kind}'` }); continue }
+          const salt = prof?.[column]
           if (!salt) { failures.push({ user_id: row.user_id, reason: 'no login email on profile' }); continue }
 
           const pin = await decryptPin(row.pin_cipher, vaultKey)
@@ -1260,7 +1290,7 @@ Deno.serve(async (req) => {
       // rather than hidden, because those are exactly the ones that still need a manual reset.
       const { count: totalPinAccounts } = await admin
         .from('profiles').select('id', { count: 'exact', head: true })
-        .or('pos_email.not.is.null,hr_self_service.eq.true')
+        .or('pos_email.not.is.null,hr_self_service.eq.true,ims_email.not.is.null')
 
       return json({
         success:       true,
@@ -1342,6 +1372,107 @@ Deno.serve(async (req) => {
       }
 
       return json({ success: true, userId: authData.user.id })
+    }
+
+    // ── Create an IMS stock-count PIN account — name + PIN, generated email (S737) ───────────
+    // The POS-shaped sibling of create_ims_staff above: same ims_role axis, same restrictive
+    // policies, but the login is a 4-6 digit PIN on a shared store-room tablet rather than an
+    // email and password. A kitchen store-keeper needing an email address to count a shelf is
+    // the friction this exists to remove.
+    //
+    // Deliberately fixed at ims_role 'staff'. The PIN account is count-only in the app
+    // (AuthContext's imsCountOnly, enforced in ProtectedRoute), so a supervisor or manager PIN
+    // would be a rank that cannot reach anything its rank unlocks.
+    if (action === 'create_ims_pin_staff') {
+      const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
+      if (!targetClientId) return json({ error: 'client_id required' }, 400)
+
+      const { pin, ims_job_title, employee_id } = params
+      let { full_name } = params
+      if (!pin) return json({ error: 'pin is required' }, 400)
+      if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
+
+      if (employee_id) {
+        const { data: employee } = await admin
+          .from('hr_employees').select('id, full_name, client_id')
+          .eq('id', employee_id).eq('client_id', targetClientId).single()
+        if (!employee) return json({ error: 'Employee not found' }, 400)
+
+        const { data: existingLink } = await admin
+          .from('profiles').select('id').eq('hr_employee_id', employee_id).not('ims_role', 'is', null).maybeSingle()
+        if (existingLink) return json({ error: 'This employee already has an IMS staff account' }, 400)
+
+        full_name = employee.full_name
+      }
+      if (!full_name) return json({ error: 'full_name is required' }, 400)
+
+      // A stable internal email nobody ever sees or types, matching create_pos_staff's shape.
+      // get_ims_count_staff does not return it and ims-staff-login never echoes it back.
+      const slug   = full_name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)
+      const suffix = Math.random().toString(36).slice(2, 7)
+      const email  = `${slug}_${suffix}@ims.internal`
+
+      // The stored password is derived, never the PIN itself — see _shared/pinPassword.ts.
+      const { pepper: imsPepper } = await getAppSecrets(admin)
+      const { data: authData, error: authErr } = await admin.auth.admin.createUser({
+        email,
+        password:      await derivePinPassword(email, pin, imsPepper),
+        email_confirm: true,
+        user_metadata: { full_name },
+      })
+      if (authErr || !authData?.user) {
+        return json({ error: authErr?.message || 'Failed to create user' }, 400)
+      }
+
+      const { error: profileErr } = await admin.from('profiles').upsert({
+        id:             authData.user.id,
+        full_name,
+        role:           'client',
+        client_id:      targetClientId,
+        ims_role:       'staff',
+        ims_job_title:  ims_job_title || null,
+        ims_email:      email,
+        hr_employee_id: employee_id || null,
+      }, { onConflict: 'id' })
+
+      if (profileErr) {
+        await admin.auth.admin.deleteUser(authData.user.id)
+        return json({ error: profileErr.message }, 400)
+      }
+
+      await vaultPin(authData.user.id, targetClientId, 'ims_count', pin)
+
+      return json({ success: true, userId: authData.user.id })
+    }
+
+    // ── Reset a count PIN (S737) ─────────────────────────────────────────────────────────────
+    if (action === 'reset_ims_pin') {
+      const { userId, pin } = params
+      if (!userId || !pin) return json({ error: 'userId and pin are required' }, 400)
+      if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
+
+      const pinTarget = await loadTarget(userId)
+      const pinDenied = requireStaffTarget(pinTarget, 'ims')
+      if (pinDenied) return pinDenied
+      const pinRank = requireManageableTarget(pinTarget!, 'ims')
+      if (pinRank) return pinRank
+
+      // The salt must be this account's EXISTING ims_email: ims-staff-login derives from whatever
+      // the column currently holds, so salting with a fresh one would produce a password nobody
+      // can ever reproduce. A password-login IMS account has none, and takes reset_ims_password.
+      if (!pinTarget?.ims_email) {
+        return json({ error: 'This account signs in with an email and password — use Reset Password instead' }, 400)
+      }
+
+      const { pepper: resetImsPepper } = await getAppSecrets(admin)
+      const { error: updateErr } = await admin.auth.admin.updateUserById(userId, {
+        password: await derivePinPassword(pinTarget.ims_email as string, pin, resetImsPepper),
+      })
+      if (updateErr) return json({ error: updateErr.message }, 400)
+
+      await vaultPin(userId, pinTarget.client_id as string, 'ims_count', pin)
+
+      return json({ success: true })
     }
 
     // ── Update an IMS staff member's role ────────────────────────────────────

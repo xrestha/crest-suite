@@ -54,6 +54,7 @@ export const FEATURE_GROUPS = [
     { key: 'variance_report',      label: 'Variance Report' },
     { key: 'reorder_report',       label: 'Reorder Report' },
     { key: 'stock_movement_log',   label: 'Stock Movements' },
+    { key: 'stock_count_assignment', label: 'Assigned Stock Counting' },
     // stock_report moved Starter→Growth in the S551 retier (its On-hand figure subtracts a
     // recipe-explosion usage term, meaningless on Starter). AuthContext/App/Layout all moved
     // then; this grid lagged a session behind, which made the feature ungrantable to Starter

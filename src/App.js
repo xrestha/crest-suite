@@ -108,6 +108,7 @@ const KotLog = lazy(() => import('./modules/pos/reports/KotLog'))
 const CoversReport = lazy(() => import('./modules/pos/reports/CoversReport'))
 const PurchaseOneLakhAboveReport = lazy(() => import('./modules/ims/reports/PurchaseOneLakhAboveReport'))
 const PosLogin = lazy(() => import('./modules/pos/login/PosLogin'))
+const ImsCountLogin = lazy(() => import('./modules/ims/count/ImsCountLogin'))
 const GuestMenu = lazy(() => import('./modules/pos/guestmenu/GuestMenu'))
 const KitchenDisplay = lazy(() => import('./modules/pos/kds/KitchenDisplay'))
 const Legal = lazy(() => import('./pages/Legal'))
@@ -150,6 +151,10 @@ export default function App() {
             <Route path="/legal/:docType" element={<Legal />} />
             <Route path="/legal/:docType/:version" element={<Legal />} />
             <Route path="/pos/login" element={<PosLogin />} />
+            {/* The stock-count tablet's PIN screen (S737). Public for the same reason
+                /pos/login is: it runs before there is a session. Enrolment arrives as a
+                #e=<token> fragment off the QR a manager shows from Stock Count -> Settings. */}
+            <Route path="/ims/count" element={<ImsCountLogin />} />
             <Route path="/pos/menu/:tableId" element={<GuestMenu />} />
             {/* Public booking page (S677): the outlet's booking QR / link. The client UUID is the
                 credential, as the table UUID is for the guest menu; the RPCs gate on pos_enabled

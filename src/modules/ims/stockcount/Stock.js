@@ -25,6 +25,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { WASTAGE_REASON_GROUPS, DEFAULT_WASTAGE_REASON } from '../../../shared/constants/wastageReasons'
+import StockCountSettings from './StockCountSettings'
 
 function dispPurch(baseQty, item) {
   const cf = parseFloat(item.conversion_factor) || 1
@@ -56,9 +57,29 @@ export default function Stock() {
   const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
-  const [items, setItems] = useState([])
+  const [allItems, setItems] = useState([])
+  const [allCategories, setCategories] = useState([])
+  // Which categories THIS account has been given to count (S737). null = not read yet / not
+  // applicable. Only ever populated for a raw ims_role of 'staff' — admin and Owner resolve to
+  // 'manager' on every axis, which makes the RESOLVED rank the wrong test for "is this a counter".
+  const [myCategoryIds, setMyCategoryIds] = useState(null)
+
+  // The scope is DERIVED rather than applied at load, so it settles correctly when the settings
+  // row arrives after the first read. It is a display rule only: the lock that actually holds is
+  // the RESTRICTIVE policy on closing_stock writes (migration 20260910120000). Showing an item a
+  // counter may not save would just move the refusal to the Save button.
+  const scopeOn = !isAdmin && profile?.ims_role === 'staff' && !!settings?.ims_count_scope_enforced
+  // Fail CLOSED while the assignment read is still outstanding: an empty list is the honest
+  // rendering of "we do not yet know what is yours", and the server would refuse those writes.
+  const items = useMemo(
+    () => (scopeOn ? allItems.filter(i => myCategoryIds?.has(i.category_id)) : allItems),
+    [allItems, scopeOn, myCategoryIds],
+  )
+  const categories = useMemo(
+    () => (scopeOn ? allCategories.filter(c => myCategoryIds?.has(c.id)) : allCategories),
+    [allCategories, scopeOn, myCategoryIds],
+  )
   const itemOptions = useMemo(() => items.map(i => ({ value: i.id, label: i.name })), [items])
-  const [categories, setCategories] = useState([])
   const [stockData, setStockData] = useState({})
   const [purchases, setPurchases] = useState({})
   const [returns, setReturns] = useState({}) // { item_id: total_returned_qty }
@@ -200,15 +221,25 @@ export default function Stock() {
     // dequeued but not on screen — and the next Save All wrote the stale screen back over them.
     await flushQueue()
 
+    // The assignment read is issued for a staff-rank account whether or not scoping is switched on
+    // — `settings` may not have landed yet, and a second read fired later would be a waterfall on
+    // the one page a month is counted on. It is a handful of rows.
+    const isCounter = !isAdmin && profile?.ims_role === 'staff'
     const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       scopedFrom('items', '*, categories(name)').eq('is_active', true).order('name'),
-      scopedFrom('categories').order('sort_order')
+      scopedFrom('categories').order('sort_order'),
+      isCounter
+        ? scopedFrom('ims_count_assignments', 'category_id').eq('profile_id', profile.id)
+        : Promise.resolve({ data: [], error: null }),
     ])
-    // A failed read is not "no periods yet" — that empty state is a claim about the client.
+    // A failed read is not "no periods yet" — that empty state is a claim about the client. The
+    // assignment read is in this check on purpose: dropping its error would leave myCategoryIds
+    // null, which renders as "nothing is yours" — a claim, not an absence.
     const initFailed = firstError(initResults)
     if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: i }, { data: c }] = initResults
+    const [{ data: p }, { data: i }, { data: c }, { data: assigned }] = initResults
+    setMyCategoryIds(new Set((assigned || []).map(a => a.category_id)))
     setPeriods(p || [])
     setItems(i || [])
     setCategories(c || [])
@@ -367,9 +398,24 @@ export default function Stock() {
   const fail = (error, cleared = false) => {
     if (error) throw Object.assign(new Error(error.message || String(error)), { supabase: error, cleared })
   }
+  // Who counted, as the closing row records it (S737). `counted_by` had existed since the baseline
+  // schema and nothing had ever written it, so a month's count was anonymous.
+  //
+  // The NAME is snapshotted beside the id on purpose: the FK is ON DELETE SET NULL, so removing a
+  // staff account would otherwise erase the attribution rather than just the link. Same reasoning
+  // as the owner report's "resolve FK display values at generation time".
+  const countedByFields = () => ({
+    counted_by: profile?.id || null,
+    counted_by_name: profile?.full_name || null,
+  })
+
   // `qty` is null for a blank cell (see toQty). Closing keeps a 0 as a row — a count of nothing
   // is still a count; every other field treats 0 and blank alike.
-  async function persistValueDirect(periodId, itemId, fieldKey, qty) {
+  //
+  // `countedBy` is passed in rather than read live because of the offline queue: the person who
+  // counted is not necessarily the session that syncs, and a shared tablet is exactly where those
+  // differ. Stamped at enqueue time, replayed as stamped.
+  async function persistValueDirect(periodId, itemId, fieldKey, qty, countedBy = countedByFields()) {
     const noRow = isNoRow(fieldKey, qty)
     if (fieldKey === 'opening') {
       if (noRow) {
@@ -382,7 +428,7 @@ export default function Stock() {
       if (noRow) {
         fail((await supabase.from('closing_stock').delete().eq('period_id', periodId).eq('item_id', itemId)).error)
       } else {
-        fail((await supabase.from('closing_stock').upsert({ period_id: periodId, item_id: itemId, physical_qty: qty, counted_at: new Date().toISOString() }, { onConflict: 'period_id,item_id' })).error)
+        fail((await supabase.from('closing_stock').upsert({ period_id: periodId, item_id: itemId, physical_qty: qty, counted_at: new Date().toISOString(), ...countedBy }, { onConflict: 'period_id,item_id' })).error)
       }
     }
     if (fieldKey === 'wastage') {
@@ -436,7 +482,7 @@ export default function Stock() {
     if (!isNetworkError(err?.supabase || err)) return false
     try {
       for (const e of entries) {
-        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId: e.itemId, fieldKey, qty: e.qty })
+        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId: e.itemId, fieldKey, qty: e.qty, countedBy: countedByFields() })
       }
     } catch (_) {
       return false   // no local store either; fall through to the ordinary failure message
@@ -455,7 +501,7 @@ export default function Stock() {
       if (!navigator.onLine) {
         // `clientId` is what lets flushQueue() tell this outlet's counts from those of whoever
         // used the device before — see the note there.
-        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId, fieldKey, qty })
+        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId, fieldKey, qty, countedBy: countedByFields() })
         setPendingSync(prev => prev + 1)
         setPendingItems(prev => new Set([...prev, itemId]))
         return true
@@ -507,7 +553,7 @@ export default function Stock() {
     let lastErr = null
     for (const item of mine) {
       try {
-        await persistValueDirect(item.periodId, item.itemId, item.fieldKey, item.qty)
+        await persistValueDirect(item.periodId, item.itemId, item.fieldKey, item.qty, item.countedBy)
         await dequeue(item.id)
         remaining--
         setPendingSync(remaining)
@@ -617,8 +663,9 @@ export default function Stock() {
         if (zeros.length) fail((await runChunkedByIds(zeros, ids => supabase.from('closing_stock').delete().eq('period_id', periodId).in('item_id', ids))).error)
         if (positives.length) {
           const countedAt = new Date().toISOString()
+          const by = countedByFields()
           fail((await supabase.from('closing_stock').upsert(
-            positives.map(e => ({ period_id: periodId, item_id: e.itemId, physical_qty: e.qty, counted_at: countedAt })), { onConflict: 'period_id,item_id' })).error)
+            positives.map(e => ({ period_id: periodId, item_id: e.itemId, physical_qty: e.qty, counted_at: countedAt, ...by })), { onConflict: 'period_id,item_id' })).error)
         }
       } else if (fieldKey === 'wastage') {
         // Same shape as persistValueDirect: only the undated catch-all rows are this tab's to replace.
@@ -932,6 +979,21 @@ export default function Stock() {
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
 
+  // Blind count (S737): a counter writes what is on the shelf rather than confirming what the
+  // system expected, so the derived columns come off the Closing tab for a staff-rank account.
+  // Closing ONLY — opening, wastage and staff meals are not the count being blinded, and hiding
+  // the reference figures there would just make those tabs harder to use.
+  //
+  // This is a DISPLAY rule and the settings tab says so where it is switched on: the figures still
+  // reach the browser. Making it a real boundary would mean a second read path for scoped
+  // accounts, which is not worth it for a control whose purpose is counting discipline.
+  const blindCount = !isAdmin && profile?.ims_role === 'staff'
+    && !!settings?.ims_count_blind && activeTab === 'closing'
+
+  // Manager-only, and last: it configures the page rather than being part of counting it. Same
+  // conditional shape the staff_meals tab already uses on this array.
+  const canManageCounts = isAdmin || hasImsAccess('manager')
+
   const TABS = [
     { id: 'opening',    label: 'Opening Stock', desc: 'Stock at start of month' },
     { id: 'closing',    label: 'Closing Stock', desc: 'Physical count at month end' },
@@ -940,6 +1002,9 @@ export default function Stock() {
     ...(hasFeature('staff_meals') ? [{ id: 'staff_meal', label: 'Staff Meals', desc: 'Staff & complimentary consumption — tracked separately from wastage' }] : []),
     { id: 'summary',    label: 'Summary',       desc: 'Full picture per item' },
     { id: 'print',      label: 'Print Sheet',   desc: 'Physical count sheet for the floor' },
+    ...(canManageCounts && hasFeature('stock_count_assignment')
+      ? [{ id: 'settings', label: 'Settings', desc: 'Who counts what, blind counting, recount protection and the count-page QR' }]
+      : []),
   ]
 
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
@@ -980,6 +1045,19 @@ export default function Stock() {
       )}
 
       {loadError && <ReportLoadError error={loadError} />}
+
+      {/* Section scope (S737). Says WHY the list is short, because a counter given three of nine
+          categories otherwise reads a two-thirds-empty item book as items missing from the system.
+          The no-assignment case is fail-closed and is stated as such — it is the state a manager
+          leaves behind by switching scoping on before filling the grid in, and without this the
+          page is a blank list under a working Save button. */}
+      {scopeOn && !loadError && (
+        <div className="no-print" role="status" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-text1)' }}>
+          {items.length === 0
+            ? 'No sections have been assigned to you yet, so there is nothing here for you to count. Ask your manager to assign your sections in Stock Count → Settings.'
+            : `You are counting ${categories.length} of your outlet's sections${blindCount ? ', without the expected quantities' : ''}. Anything outside them is another counter's and is not shown.`}
+        </div>
+      )}
 
       {isLocked && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
@@ -1231,6 +1309,16 @@ export default function Stock() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Settings Tab (S737) — the panel lives in its own file: this one is already 1,700 lines,
+          and nothing in it is shared with counting. */}
+      {activeTab === 'settings' && canManageCounts && (
+        <StockCountSettings
+          clientId={effectiveClientId}
+          categories={allCategories}
+          uncategorisedCount={allItems.filter(i => !i.category_id).length}
+        />
       )}
 
       {/* Print Sheet Tab */}
@@ -1535,10 +1623,10 @@ export default function Stock() {
                       </div>
                       <div className="mobile-stock-card-meta">
                         <span className="mobile-stock-uom">{item.uom}</span>
-                        {purchases[item.id] > 0 && (
+                        {!blindCount && purchases[item.id] > 0 && (
                           <span className="mobile-stock-ref">Purchased: {dispPurch(Number(purchases[item.id]), item)}</span>
                         )}
-                        {returned > 0 && (
+                        {!blindCount && returned > 0 && (
                           <span className="mobile-stock-ref" style={{ color: 'var(--theme-red-text)' }}>Returned: −{Number(returned).toLocaleString('en-IN')}</span>
                         )}
                       </div>
@@ -1553,7 +1641,7 @@ export default function Stock() {
                           wrapperStyle={{ flex: 1, minWidth: 0 }}
                         />
                         <span className="mobile-stock-unit">{item.uom}</span>
-                        {lineValue != null && (
+                        {!blindCount && lineValue != null && (
                           <span className="mobile-stock-value">NPR {lineValue.toLocaleString('en-IN')}</span>
                         )}
                         {saving[item.id] && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>…</span>}
@@ -1566,7 +1654,7 @@ export default function Stock() {
                 <span style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Total — {visible.length} item{visible.length !== 1 ? 's' : ''}</span>
                 <span style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
                   <span style={{ color: 'var(--theme-text1)', fontSize: 13 }}>{totalQty > 0 ? Number(totalQty).toLocaleString('en-IN') : '—'}</span>
-                  <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>{totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}</span>
+                  {!blindCount && <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>{totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}</span>}
                 </span>
               </div>
               </>
@@ -1585,11 +1673,13 @@ export default function Stock() {
                           <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                             {activeTab === 'opening' ? 'Opening Qty' : activeTab === 'closing' ? 'Physical Count' : activeTab === 'staff_meal' ? 'Staff Meals Qty' : 'Wastage Qty'}
                           </th>
-                          <th style={{ textAlign: 'right' }}>Purchased</th>
-                          <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returned</th>
-                          <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
-                            <Tip text="Qty entered × unit rate (per_uom_rate). Gives the NPR value of this item's stock entry." width={220}>Value (NPR)</Tip>
-                          </th>
+                          {!blindCount && <th style={{ textAlign: 'right' }}>Purchased</th>}
+                          {!blindCount && <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returned</th>}
+                          {!blindCount && (
+                            <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
+                              <Tip text="Qty entered × unit rate (per_uom_rate). Gives the NPR value of this item's stock entry." width={220}>Value (NPR)</Tip>
+                            </th>
+                          )}
                           <th></th>
                         </tr>
                       </thead>
@@ -1624,15 +1714,21 @@ export default function Stock() {
                                   }}
                                 />
                               </td>
-                              <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 13 }}>
-                                {purchases[item.id] ? `${Number(purchases[item.id]).toLocaleString('en-IN')} ${item.uom}` : '—'}
-                              </td>
-                              <td style={{ textAlign: 'right', color: returned > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)', fontSize: 13 }}>
-                                {returned > 0 ? `−${Number(returned).toLocaleString('en-IN')} ${item.uom}` : '—'}
-                              </td>
-                              <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 13, fontWeight: lineValue ? 600 : 400 }}>
-                                {lineValue != null ? `NPR ${lineValue.toLocaleString('en-IN')}` : '—'}
-                              </td>
+                              {!blindCount && (
+                                <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 13 }}>
+                                  {purchases[item.id] ? `${Number(purchases[item.id]).toLocaleString('en-IN')} ${item.uom}` : '—'}
+                                </td>
+                              )}
+                              {!blindCount && (
+                                <td style={{ textAlign: 'right', color: returned > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)', fontSize: 13 }}>
+                                  {returned > 0 ? `−${Number(returned).toLocaleString('en-IN')} ${item.uom}` : '—'}
+                                </td>
+                              )}
+                              {!blindCount && (
+                                <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 13, fontWeight: lineValue ? 600 : 400 }}>
+                                  {lineValue != null ? `NPR ${lineValue.toLocaleString('en-IN')}` : '—'}
+                                </td>
+                              )}
                               <td style={{ width: 40, textAlign: 'center' }}>
                                 {isSaving && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>…</span>}
                               </td>
@@ -1648,10 +1744,12 @@ export default function Stock() {
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>
                             {totalQty > 0 ? Number(totalQty).toLocaleString('en-IN') : '—'}
                           </td>
-                          <td colSpan={2}></td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
-                            {totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}
-                          </td>
+                          {!blindCount && <td colSpan={2}></td>}
+                          {!blindCount && (
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
+                              {totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}
+                            </td>
+                          )}
                           <td></td>
                         </tr>
                       </tfoot>

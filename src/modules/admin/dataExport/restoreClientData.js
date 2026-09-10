@@ -8,6 +8,13 @@
 //
 // Scope: this restores DATA. Logins are a separate concern (reprovisionAccounts.js) because
 // passwords live in GoTrue and are not exportable at any privilege level.
+//
+// `ims_count_assignments` is DELIBERATELY not in the order below (S737), for the same reason
+// `legal_acceptances` is not: every row keys on `profile_id`, and the restore re-provisions staff
+// accounts as NEW auth users with new ids — so the rows would either fail their FK or, worse,
+// point at whoever happened to inherit the id. Stock-count section assignments are half a dozen
+// ticks in Stock Count → Settings and are re-made by the manager after a restore; the alternative
+// is a silently wrong answer to "who counts the bar".
 import { supabase } from '../../../supabaseClient'
 
 // Reverse of the delete sequence: parents before children, so every FK target exists first.

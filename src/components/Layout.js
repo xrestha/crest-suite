@@ -17,6 +17,7 @@ import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
 import { colorTint } from '../data/pricingPlans'
 import { APP_VERSION } from '../shared/appVersion'
+import { imsCountPathReachable } from '../shared/imsCountAccess'
 import {
   Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
   Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
@@ -313,6 +314,7 @@ export default function Layout() {
           accessReason, graceDaysLeft, clientId,
           outlets, switchableOutlets, canSwitchOutlet, switchOutlet,
           hasPosAccess, posRole, canReachPosPath, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
+          imsCountOnly,
           suitePlan } = useAuth()
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
@@ -523,6 +525,11 @@ export default function Layout() {
     if (item.minPosRole && !canReachPosPath(item.to)) return false
     if (item.minImsRole && !hasImsAccess(item.minImsRole)) return false
     if (item.minHrRole && !hasHrAccess(item.minHrRole)) return false
+    // A PIN count account counts stock and nothing else (S737). Unlike the POS line above this is
+    // not scoped to one module's tag — the account holds ims_role 'staff' but has no business on
+    // any page in the product bar Stock Count, so every item is tested. ProtectedRoute enforces
+    // the same predicate on the route; this only decides what is OFFERED.
+    if (!imsCountPathReachable(imsCountOnly, item.to)) return false
     return true
   }
 

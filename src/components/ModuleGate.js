@@ -13,6 +13,10 @@ import { STATION_TEAM_HOME } from '../shared/posTeamAccess'
  * and nothing else, and until S683 that allowlist lived only in the sidebar — a nav condition,
  * not a guard. It now sits here, on every POS route, so a page nobody has written yet is already
  * unreachable to a station team. See shared/posTeamAccess.js. Admin passes everything, as before.
+ *
+ * The IMS PIN count account (S737) is the same shape on the IMS side, but its guard is in
+ * `ProtectedRoute`, not here — `/dashboard` carries no ModuleGate, so this file is not a choke
+ * point for it. See shared/imsCountAccess.js.
  */
 export default function ModuleGate({ children, module, anyOf }) {
   const { isAdmin, imsEnabled, hrEnabled, posEnabled, canReachPosPath } = useAuth()

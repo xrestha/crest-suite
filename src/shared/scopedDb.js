@@ -19,6 +19,7 @@ export const CLIENT_SCOPED_TABLES = [
   'overheads', 'purchase_orders', 'vendor_returns', 'feature_flags',
   'par_levels', 'payable_payments', 'recipe_suggestions',
   'demand_forecast_daily', 'demand_forecast_run_log', 'stock_movements', 'ims_gate_passes',
+  'ims_count_assignments',
   // Fixed Assets — assets_depreciation_schedule/assets_tax_pool_lines get their own direct
   // client_id (denormalized from their parent run) rather than following the parent-scoped
   // precedent (recipe_ingredients) below, because each is independently queried three different

@@ -1,10 +1,12 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import SubscriptionLock from './SubscriptionLock'
 import LegalReacceptance from './LegalReacceptance'
+import { IMS_COUNT_HOME, imsCountPathReachable } from '../shared/imsCountAccess'
 
 export default function ProtectedRoute({ children, adminOnly = false }) {
-  const { session, profile, ready, loading, accessLocked, legalReacceptRequired } = useAuth()
+  const { session, profile, ready, loading, accessLocked, legalReacceptRequired, imsCountOnly } = useAuth()
+  const { pathname } = useLocation()
 
   // A session whose profile is still loading is NOT a signed-out user. Redirecting to /login
   // there raced Login's own `if (ready && session) -> /dashboard` guard and ping-ponged between
@@ -29,6 +31,13 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
   // An HR self-service account's whole app is /hr/self-service (outside this Layout) — it has
   // no business on any Layout route, and RLS blocks its data there anyway.
   if (profile.hr_self_service) return <Navigate to="/hr/self-service" replace />
+  // An IMS PIN count account's whole app is Stock Count (S737). Enforced HERE for the same reason
+  // the lock below is: this is the one choke point every in-app route mounts through, so the guard
+  // cannot be forgotten on a route added later — and ModuleGate could not do it, since /dashboard
+  // carries none and is exactly where a fresh sign-in lands. Ordered before the lock so a lapsed
+  // client's counter still sees the lock screen, not a redirect loop; imsCountOnly is false for
+  // admin, so an adminOnly route is unaffected.
+  if (imsCountOnly && !imsCountPathReachable(true, pathname)) return <Navigate to={IMS_COUNT_HOME} replace />
   // A lapsed subscription is enforced at this single choke point — every in-app route, IMS/HR/POS
   // alike, mounts through the one <ProtectedRoute><Layout/></ProtectedRoute> in App.js. Admin is
   // already exempted inside accessLocked, so an adminOnly route is unaffected.

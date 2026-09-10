@@ -395,6 +395,13 @@ verify_jwt = false
 [functions.pos-staff-login]
 verify_jwt = false
 
+# ims-staff-login is the stock-count tablet's equivalent (S737), and needs the flag for exactly the
+# same reason: it runs before there is a session. Authenticated by client_secrets.ims_device_secret
+# (the same check get_ims_count_staff does), then the account's own PIN, with the lockout enforced
+# on this request rather than around it.
+[functions.ims-staff-login]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

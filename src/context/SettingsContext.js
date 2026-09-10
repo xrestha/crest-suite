@@ -28,6 +28,14 @@ const DEFAULT_SETTINGS = {
   plan_prices: DEFAULT_PLAN_PRICES,
   block_negative_stock: false,
   warn_below_cost_pricing: true,
+  // Stock Count → Settings (S737). All three default OFF so an existing client counts exactly as
+  // it did before a manager opts in — and so a bundle deployed ahead of the migration reads false
+  // rather than undefined. ims_count_scope_enforced and require_count_attribution are mirrored
+  // server-side (a RESTRICTIVE policy and a BEFORE UPDATE trigger); ims_count_blind is a display
+  // rule only, and the UI says so where it is switched on.
+  ims_count_scope_enforced: false,
+  ims_count_blind: false,
+  require_count_attribution: false,
 }
 
 export const DEFAULT_RECIPE_CATS = ['Food', 'Beverage', 'Dessert', 'Snack', 'Other']
@@ -60,6 +68,7 @@ const DEFAULT_FLAGS = {
   stock_movement_log: false,
   fixed_asset_register: false,
   multi_outlet: false,
+  stock_count_assignment: false,
 }
 
 export function SettingsProvider({ children }) {

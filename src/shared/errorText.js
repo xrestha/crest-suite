@@ -65,6 +65,17 @@ const rules = [
     operator: "That account isn't authorized for this action.",
   },
 
+  // The section-scope lock on closing_stock (S737). Ahead of the generic RLS rule below because
+  // that one can only say "you're not allowed" — true, but it sends a counter to their manager to
+  // ask about a permission when the real answer is that this item belongs to someone else's
+  // section, or to nobody's. An RLS refusal carries no policy name, so the table is the only
+  // thing to key on; every other write to closing_stock goes through the same page.
+  {
+    test: e => /row-level security|violates row-level/i.test(e.message || '') && /closing_stock/i.test(e.message || ''),
+    staff: 'That item is not in a section you have been given to count, so it was not saved. Ask your manager which sections are yours.',
+    operator: 'This account is limited to its assigned sections and that item is in another one — or in no category at all, which cannot be assigned. Nothing was saved. Change it in Stock Count → Settings → Who counts what, or file the item into a category in Item Master.',
+  },
+
   // RLS refused, or EXECUTE was never granted on a new function signature.
   {
     test: e => e.code === '42501' || /permission denied|row-level security|violates row-level/i.test(e.message || ''),
@@ -109,6 +120,15 @@ const rules = [
     test: e => /vendor_has_references/i.test(e.message || ''),
     staff: 'That supplier now has records against it, so it cannot be deleted. Nothing was removed.',
     operator: 'That supplier has purchases, orders, returns or gate passes recorded against it — possibly entered just now on another device — and deleting it would take that history with it. Nothing was removed. Deactivate it and then archive it: it leaves the Vendors page and every dropdown, and every past record keeps its supplier.',
+  },
+
+  // The closing_stock recount guard (S737). Names who holds the row and what to do about it,
+  // rather than the trigger — the counter's next move is to fetch a supervisor, not to retry.
+  // The count itself is safe either way: this is a BEFORE trigger, so nothing was overwritten.
+  {
+    test: e => /closing_count_locked/i.test(e.message || ''),
+    staff: 'Someone else has already counted this item, so your figure was not saved. A supervisor can change it.',
+    operator: 'This item was already counted by another staff member and recount protection is on, so nothing was overwritten. A supervisor, manager or Owner can enter the corrected figure — or switch the protection off in Stock Count → Settings.',
   },
 
   // ── receive_purchase_order (S709) ─────────────────────────────────────────────────────────
