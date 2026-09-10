@@ -49,6 +49,17 @@ function toQty(v) {
 // Blank means "no row"; for every field but closing a 0 means the same thing.
 const isNoRow = (fieldKey, qty) => qty == null || (fieldKey !== 'closing' && qty <= 0)
 
+// Which tabs are ENTRY grids, and which stored field each one writes.
+//
+// An INCLUSION list on purpose. Until S737b this was an exclusion list — the grid rendered for
+// `activeTab !== 'summary' && !== 'print' && !== 'daily_wastage'` — and every fieldKey ternary
+// ended in `: 'wastage'`. So the Settings tab added hours earlier fell straight in: the wastage
+// table rendered underneath the settings panel, and its Save All button was wired to write the
+// WASTAGE column of every visible item. A new tab now renders no grid, and resolves no field,
+// until it is named here — which is the direction that fails safe.
+const FIELD_TAB = { opening: 'opening', closing: 'closing', wastage: 'wastage', staff_meal: 'staff_meal' }
+const fieldKeyOf = tab => FIELD_TAB[tab] || null
+
 export default function Stock() {
   const { clientId, profile, loading: authLoading, isAdmin, hasFeature, hasImsAccess } = useAuth()
   const { settings } = useSettings()
@@ -579,8 +590,9 @@ export default function Stock() {
   // same tick it calls updateField, so `stockData` read here would still hold the pre-commit
   // value. Save All passes nothing and reads state, which is correct for it.
   async function saveRow(itemId, overrideQty) {
+    const fieldKey = fieldKeyOf(activeTab)
+    if (!fieldKey) return   // not an entry tab; nothing on screen writes a stored field
     setSaving(prev => ({ ...prev, [itemId]: true }))
-    const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
     const source = overrideQty !== undefined ? overrideQty : (stockData[itemId] || {})[fieldKey]
     await persistValue(itemId, fieldKey, toQty(source))
     setSaving(prev => ({ ...prev, [itemId]: false }))
@@ -694,9 +706,10 @@ export default function Stock() {
   }
 
   async function performSaveAll(visibleItems) {
+    const fieldKey = fieldKeyOf(activeTab)
+    if (!fieldKey) return   // void, like every other exit from this function
     setSaveAllLoading(true)
     setSaveError(null)
-    const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
     // Same source saveRow reads for Save All: current on-screen state, no override.
     const entries = visibleItems.map(item => ({
       itemId: item.id,
@@ -747,7 +760,8 @@ export default function Stock() {
   }
 
   function clearAll() {
-    const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
+    const fieldKey = fieldKeyOf(activeTab)
+    if (!fieldKey) return
     const label = TABS.find(t => t.id === activeTab)?.label || 'these'
     const visibleItems = filteredItems()
     setPendingConfirm({
@@ -1532,8 +1546,8 @@ export default function Stock() {
         )
       })()}
 
-      {activeTab !== 'summary' && activeTab !== 'print' && activeTab !== 'daily_wastage' && (() => {
-        const fieldKey = activeTab === 'opening' ? 'opening' : activeTab === 'closing' ? 'closing' : activeTab === 'staff_meal' ? 'staff_meal' : 'wastage'
+      {fieldKeyOf(activeTab) && (() => {
+        const fieldKey = fieldKeyOf(activeTab)
         const counted = countedItems(fieldKey)
         const pct = visible.length > 0 ? Math.round(counted / visible.length * 100) : 0
         const totalQty = visible.reduce((s, item) => s + (parseFloat(stockData[item.id]?.[fieldKey]) || 0), 0)
