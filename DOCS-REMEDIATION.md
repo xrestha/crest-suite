@@ -14,8 +14,8 @@ migration, no service-worker version bump. T6–T8 do change app code and shippi
 Before doing anything below, note what the repo already has. This plan was first written without
 sight of these files and has been corrected against them.
 
-**Sizes re-measured 2026-09-10 (S723); first measured 2026-09-02 (S668), and every figure had
-rotted by the time it was next read.** They move every session — read them as scale, not as figures
+**Sizes re-measured 2026-09-10 (S733); before that 2026-09-10 (S723) and first 2026-09-02 (S668),
+and every figure had rotted by the time it was next read.** They move every session — read them as scale, not as figures
 to check against. The S668 note recorded three that had rotted badly: `POS_TODO.md` still listed at
 its pre-T5 size, the checklist at a step count it outgrew, and `POS_DECISIONS.md` not listed at all.
 Eight days later the rules corpus had grown ~70% and `DESIGN.md` ~39%, which is the useful reading:
@@ -28,8 +28,9 @@ per-file audit worth repeating rather than treating as done.
   invariants, multi-tenant isolation and `scopedDb`, staff role axes, BS calendar rules,
   page-splitting, Supabase/DB traps. **Running at 159 chars of headroom**, so the next section
   added here has to pay for itself out of an existing one.
-- **`.claude/rules/*.md`** (27 files, ~709k chars) — everything scoped by `paths:`, loaded only when
-  a matching file is open.
+- **`.claude/rules/*.md`** (27 files, ~759k chars) — everything scoped by `paths:`, loaded only when
+  a matching file is open. Up ~50k in the ten days since the previous line was written, all of it
+  into existing files rather than new ones, which is the direction T11 intends.
 - **`.claude/skills/new-feature-checklist/SKILL.md`** — the nine-step ship checklist.
 - **`DESIGN.md`** (86,722 chars) — full design system: token set for both presets, the scoped guest
   menu palette, print ramp, typography, layout, components, do/don't. Nothing auto-loads it
@@ -37,14 +38,14 @@ per-file audit worth repeating rather than treating as done.
 - **`PRODUCT.md`** (6,377 chars) — platform, users (owner/manager primary, accountant secondary),
   purpose, competitive positioning, brand personality, anti-references, design principles, data
   ownership, accessibility.
-- **`README.md`** (7,507 chars) — the map T1 produced: quick start, env vars, repo layout, and a
+- **`README.md`** (8,582 chars) — the map T1 produced: quick start, env vars, repo layout, and a
   pointer table. Deliberately not a summary of anything it points at.
-- **`POS_TODO.md`** (7,522 chars) — open POS work only: status key and the open items. See T5, which
+- **`POS_TODO.md`** (8,915 chars) — open POS work only: status key and the open items. See T5, which
   cut it from 48,595 by moving everything settled into `POS_DECISIONS.md`.
 - **`POS_DECISIONS.md`** (54,315 chars) — the other half of that split: everything POS has shipped
   or deliberately decided against, rationale intact. It is the record of what has already been
   considered, and the reason a closed question does not get re-asked.
-- **`docs/CROSS-REPO.md`** (34,746 chars) — the hss-suite ledger, created after this plan was
+- **`docs/CROSS-REPO.md`** (44,273 chars) — the hss-suite ledger, created after this plan was
   written: what is genuinely shared with the sister repo, what only looks it, and which side owes
   which fix.
 
@@ -79,8 +80,10 @@ Specific staleness confirmed by grep against the file itself:
 
 ## T1 — Split `README.md` into a map and a changelog
 
-**DONE — S666, 2026-09-01, commits `e38b22d` and `bc24fe2`.** `README.md` is 90 lines / 5,288
-chars. The log is 16 range files under `CHANGELOG/`, largest 148,309 chars, plus an index and
+**DONE — S666, 2026-09-01, commits `e38b22d` and `bc24fe2`.** `README.md` was 90 lines / 5,288
+chars **as shipped by this task** — the figures in this section are what S666 produced, not current
+ones; the Context list at the top of this file carries the live sizes (8,582 chars at S733, still
+inside the spec's 12,000). The log is 16 range files under `CHANGELOG/`, largest 148,309 chars, plus an index and
 `CHANGELOG/S000-ORIGINAL-HEAD.md` holding the stale head verbatim. All four acceptance criteria
 verified; criterion 3 was upgraded to reconstruction *by* this task and passed byte-identical at
 1,801,834 bytes. The spec below is kept as a record and corrected only where it named files that
@@ -480,6 +483,34 @@ it was deferred.
 
 **This is the only task on this list that is a launch blocker.**
 
+**PARTLY DONE. Items 1 and 3 have shipped; item 2, the actual monitoring, has not — so the task
+stays open and stays the blocker.** Read the item statuses below rather than the paragraph after
+this one, which is preserved as it was written.
+
+- **Item 1 — DONE, S673.** `src/components/AppErrorBoundary.jsx`, mounted twice: at app scope in
+  `App.js` above `ThemeProvider`, and at page scope in `Layout.js` around the `<Outlet />` only, so
+  a page crash leaves the top bar and navigation working and `resetKey={location.pathname}` clears
+  it on navigation. It carries a redacted "Copy details" payload and a support contact, because
+  the reporting channel is still a person. **The POS-specific boundary this item asked for was
+  deliberately not built**: `PosOrders.jsx` is one component holding the live order state, so a
+  boundary around it that "never unmounts the order state" is not something a boundary can do —
+  React unmounts the subtree it catches. What protects an in-progress order there is the IndexedDB
+  queue, not a boundary. Full rationale in `.claude/rules/support-contact.md`.
+- **Item 3 — DONE for Stock Count, S731/S732; still open for POS.** `flushQueue()` in `Stock.js`
+  had a bare `catch (_) {}`, so a count queued against a month closed while the device was offline
+  was retried on every page load for ever and never mentioned — and the "N pending" badge lived
+  inside the offline banner, so once back online the stuck entries were invisible from every
+  screen. Failures now surface through the page's `ActionError`, held entries get their own banner
+  with a **Sync Now** button, and queued ops carry a `clientId` so they cannot replay under the
+  next login on a shared tablet. **`flushPosOrderQueue` in `PosOrders.jsx` is the remaining half**:
+  it leaves a failed order queued and reports it with `console.error`, which is a log, not a
+  breadcrumb. It is better placed than Stock Count was — `pendingOrderIds` and the conflict list
+  are real UI — but a sync that keeps failing for a reason the cashier could act on still says
+  nothing. Filed in `POS_TODO.md` under B3.
+- **Item 2 — NOT DONE.** No error reporting service is wired. This is what keeps T6 open: a
+  boundary tells the person in front of the screen, and tells nobody else. When a till throws at
+  8pm on a Friday the detection mechanism is still the client phoning.
+
 Zero occurrences of `Sentry`, `monitoring`, or `error boundary` in 15,364 lines. A POS is going into
 live restaurant service with no error reporting. When a terminal throws at 8pm on a Friday, the
 detection mechanism is currently the client phoning you, and there is no stack trace waiting when
@@ -498,7 +529,15 @@ they do.
    are currently invisible and are the highest-consequence silent failure in the product.
 
 **Acceptance criteria.** A deliberately thrown error in POS surfaces in the dashboard within 60
-seconds, tagged, with no PII in the payload.
+seconds, tagged, with no PII in the payload. **Unmet** — nothing leaves the browser today.
+
+**One thing the boundary work added that this task did not ask for, and that should not be undone:**
+a dynamic-import failure is not a crash, it is a deploy. Every page is `React.lazy` and `xlsx` is
+imported inside 43 click handlers, so after a deploy an open tab cannot load its own code —
+surfacing as a generic crash card on a route and as *nothing at all* on an Export button, since an
+event handler's rejection is what a React boundary structurally cannot catch.
+`src/shared/chunkReload.js` recognises it and reloads once (S732). Any monitoring wired under item 2
+must **not** report those as application errors, or the first week of data is mostly deploys.
 
 ---
 
@@ -941,7 +980,9 @@ check is watching.
    `.claude/rules/auth-and-pins.md` were updated to the re-measured numbers rather than left
    asserting a fit the page no longer achieves.
 6. T5 (backlog) — **T5a and T5c DONE, S665/S666. T5b outstanding**, before the contractor starts.
-7. T6 (monitoring) — before launch. Jump the queue if a launch date lands.
+7. T6 (monitoring) — before launch. Jump the queue if a launch date lands. **Items 1 and 3 are
+   done (S673, S731/S732); only item 2, the reporting service, is left** — plus the POS half of
+   item 3, filed in `POS_TODO.md`.
 8. T7 (staging) — before the contractor starts.
 9. T8 (money-math coverage audit).
 10. T9, T10 (debt register, origins).

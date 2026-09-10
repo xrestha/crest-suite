@@ -102,6 +102,18 @@ that document, and a fourth copy of the gate model would drift from the three th
   `src/shared/appVersion.js` moved to match** — `appVersion.test.js` fails when they disagree.
   They had drifted nine bumps apart before S689 noticed, so the test is doing real work.
   `CLAUDE.md` explains why a plain deploy is not enough.
+- **A deploy breaks the tabs that are already open, and that is handled rather than avoided.** Every
+  page is `React.lazy` and `xlsx` is imported inside the click handler, so the app fetches its own
+  code by hashed filename; Vercel replaces those files and the worker's `activate` deletes the
+  cached copies on the same event. `src/shared/chunkReload.js` recognises that failure and reloads
+  once — never more than once a minute, never while offline. Do not widen its patterns to catch
+  ordinary errors: a real crash misread as a stale deploy is hidden by the mechanism meant to
+  recover from it.
+- **The service worker precaches the app SHELL only** — `/` plus the one js/css pair named in the
+  build's `asset-manifest.json`. A route whose own chunk has not been fetched since the last deploy
+  still cannot render offline, and the error boundary says so in those words. No Supabase response
+  is ever cached; anything that must survive a lost connection needs its own IndexedDB store, which
+  is what Stock Count and POS order-taking have and nothing else does.
 - **Every session gets a changelog entry**, written into the newest `CHANGELOG/` range file. The
   convention, including when to start a new range, is in `CHANGELOG/README.md`.
 - **A design token lives in four layers and only one of them ships.** `PRESETS` in

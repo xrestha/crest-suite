@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-09 (S711 — added B's `pos_order_items.recipe_id` missing-FK entry, found while enumerating what references `recipes`)
+Last updated: 2026-09-10 (S733 — added B3's offline-sync breadcrumb entry, the POS half of a fix Stock Count took in S731/S732)
 
 ---
 
@@ -34,6 +34,21 @@ Last updated: 2026-09-09 (S711 — added B's `pos_order_items.recipe_id` missing
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
 
+- [ ] 🟡 **A failed offline sync tells the cashier nothing it can act on.**
+  `flushPosOrderQueue` catches per order, leaves the order queued for the next flush, and reports
+  the reason with `console.error` — a log, not a breadcrumb. Better placed than Stock Count was
+  before S731 (`pendingOrderIds` and the conflict list are real UI, and the shape here is a retry
+  rather than a silent drop), which is why this is 🟡: the order is not lost. But a sync that keeps
+  failing for a reason someone could act on — a closed period, a refused RLS write, a table another
+  device has since billed — says the same "still pending" as one that is merely waiting for signal,
+  for ever. **Stock Count is the worked precedent, S731/S732**: collect the failures rather than
+  dropping them, convert with `asActionError` at the call site, and surface them where the person
+  is looking, keeping `console.error` as the floor for anything they cannot act on. Two things
+  from that fix apply here and one does not — POS orders already carry a `client_id` through
+  `scopedUpsert`, so the shared-device replay problem does not arise, but `navigator.onLine` is
+  just as unreliable on the floor as it is in the storeroom, and `save_pos_order_items` is an
+  atomic RPC, so a network failure around it is as safe to re-queue as Stock Count's upserts.
+  Closes the POS half of `DOCS-REMEDIATION.md` T6 item 3.
 - [ ] 🟡 `PosOrders.jsx` has no breakpoint — a two-panel flex with a fixed 320px cart, so below
   ~600px the menu side collapses to almost nothing. Deferred rather than missed: restructuring the
   live billing screen is not a layout-pass change, and the till is a tablet/desktop device today.
