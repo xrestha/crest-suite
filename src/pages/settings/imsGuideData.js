@@ -1194,6 +1194,10 @@ export const IMS_GUIDE_GROUPS = [
         gotchas: [
           'Editing the Master Rate here is a live, immediate write to Item Master — not a preview. The affected-recipes banner only appears AFTER saving, as a heads-up, not as a pre-save confirmation.',
           'The 5% mismatch warning can\'t distinguish "stale rate that needs updating" from "a rate the admin deliberately overrode ahead of an expected price change" — use judgment before applying it.',
+          'A failed rate save now says so. Until S725 the write dropped its error: the box snapped back to the old rate with nothing on screen, which reads as the edit having been rejected as invalid rather than as never having landed. If the recipe list itself cannot be read, the banner says the rate saved but the affected dishes are unknown — it never claims zero recipes were affected.',
+          'The Vendor filter lists archived suppliers under "No longer active". They are kept because "All Vendors" is a report over EVERY purchase row, including a vendor since archived — those rows used to render with a blank Vendor cell, since archiving forces is_active = false.',
+          'Print and Excel now follow the Search and Trend filters as well as Vendor and Month. Filtering to "↑ Rising Only", reading six items and pressing Export used to hand you a sheet of every item, with nothing to say the two were different lists.',
+          'Items hidden in Item Master (is_active = false) carry no price history here — the page reads active items only, the same rule every stock valuation follows.',
         ],
         connections: 'Writes directly to items.rate/per_uom_rate — the exact field Best Sellers, Recipe Margin, and Menu Repricing all read via computeRecipeCosts(), so an edit here ripples into all three on next load.',
       },
@@ -1205,19 +1209,25 @@ export const IMS_GUIDE_GROUPS = [
         summary:
           'The most comprehensive vendor-spend report: net spend per vendor (discount- and return-aware, split by Cash/Credit/FonePay), a clickable Daily Breakdown grid, a Discounts Received tab, and a 3-level drill-down (Vendor → Day → Bill → Line items/payments).',
         workflow: [
-          'Defaults to the open period. Three tabs: Vendor Summary, Daily Breakdown, Discounts Received. A vendor search combobox filters by name or vendor code.',
+          'Defaults to the open period, and falls back to the most recent period when none is open — so the month you just closed is what you land on, rather than an empty NPR 0 report (S725).',
+          'Three tabs: Vendor Summary, Daily Breakdown, Discounts Received. All three now quote the SAME net: gross less the bill discount allocated across that bill\'s own lines, less returns. Until S725 the Daily Breakdown and its totals left the bill discount out while the Summary beside it took it off, so one bill of 10,000 with a 1,000 discount read 9,000 on one tab and 10,000 on the other.',
+          'A vendor search combobox filters by name or vendor code. The footer TOTAL follows the search — it used to print the whole period\'s totals under a one-row filtered table, with a hardcoded 100% beside them.',
           'Click a vendor name (Summary) or a day-cell (Daily Breakdown) to open the drill-down modal — lists that vendor\'s bills, each expandable to line items, any returns against it, and full payment history.',
         ],
         fields: [
           { label: 'Net Spend', desc: 'Gross − Discount − Returns — explicitly contrasted against Payment Summary\'s Gross, which does NOT subtract discount.' },
         ],
         formulas: [
-          'Per vendor: Net = Gross − Discount (unique per bill, summed once regardless of line count) − Returns.',
+          'Per vendor: Net = Gross − Discount (unique per bill, summed once regardless of line count) − Returns. The discount is allocated across the bill\'s own lines proportionally through allocateBillDiscounts() — the same helper Monthly Summary, the P&L and Supplier Contribution use — so the per-day, per-method and per-vendor figures are all slices of one arithmetic rather than three.',
+          'A return is credited at the price actually PAID: vendor_returns.rate stores the original line\'s list rate, so it is scaled by that line\'s discount factor before being subtracted (returnBase(), shared with VAT/Non-VAT Report). Return a whole discounted bill and Net Spend comes back to exactly zero — before S725 it went negative by the discount.',
+          'Cash/Credit/FonePay resolve the method through methodOf(), so a bill recorded before the payment-method column existed counts as Cash rather than falling out of all three columns. The three add up to Net Spend.',
           'Bill-level payment status reuses the same aging buckets as Outstanding Payables (Current/31-60/61-90/90+), but is independently reimplemented in this file rather than shared code.',
         ],
         gotchas: [
           'The vendor color palette in the Net Spend Split chart maxes out at 8 distinct colors and cycles beyond that — with more than 8 active vendors, two will visually share a color.',
           'The Discounts tab\'s Grand Total includes VAT, while the Vendor Summary tab\'s Net Spend figures are all ex-VAT — not directly comparable line-for-line without adjusting for VAT.',
+          'Bills entered with no vendor selected appear as their own "Unassigned" row rather than being left out of the rows while staying in the totals. They are excluded while a vendor search is active, since they cannot match one.',
+          '% of Net Total is COMPUTED, never asserted. It reads 100.0% only when nothing is filtered and the period has no unassigned bills; anything else shows the real share, which is the divergence worth seeing.',
         ],
         connections: 'Overlaps conceptually with Outstanding Payables (bill status/aging) and VAT Report (discount-VAT proration), both independently implemented here rather than shared — a good report to present first when introducing vendor analytics, with Payment Summary, Outstanding Payables, and VAT/Non-VAT as narrower cuts of the same underlying data.',
       },
@@ -1250,6 +1260,7 @@ export const IMS_GUIDE_GROUPS = [
           'POS-synced and manual bulk sales for the same period are deduplicated through the shared POS-supersedes-manual rule (same as Stock Movements) — the dishes are never double-counted.',
           'The "Attributed Cost of Sales" KPI and the table\'s TOTAL row are DIFFERENT figures on purpose: the KPI excludes the "Not attributed" row, the TOTAL includes it, and the gap is exactly the Not Attributed card. The TOTAL row says "incl. not attributed" for this reason — before S594 both were labelled Cost of Sales and an accountant reconciling them found they did not tie.',
           'The "% of Purchases" total is COMPUTED, not asserted. A vendor whose returns exceeded its purchases this period makes the column genuinely sum to something other than 100, and that divergence is worth seeing — it used to be hardcoded as 100.0%.',
+          'An ingredient hidden in Item Master (is_active = false) cannot be valued here — the page reads active items only, matching Variance, Theoretical Variance and Shrinkage. If a dish you sold used one, an amber banner names how many and which dishes, and says Cost of Sales below is understated. Until S725 those ingredients were dropped in silence, so the figure was short with nothing on the page admitting it.',
         ],
         connections: 'Shares its net-spend definition with Vendor Report (verify against its Net Spend if a figure is disputed), its recipe explosion with Variance/Recipe Costing, and its sales-source dedup rule with Stock Movements. Reads sales_entries, purchase_entries, vendor_returns, items, recipes.',
       },

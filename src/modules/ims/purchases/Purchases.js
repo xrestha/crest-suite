@@ -12,7 +12,7 @@ import Tip from '../../../components/Tip'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import PeriodScope from '../../../components/PeriodScope'
 import SearchableSelect from '../../../components/SearchableSelect'
-import { getCf, calcBillTotals, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
+import { getCf, calcBillTotals, methodOf, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -21,11 +21,6 @@ import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-
-// A bill row's payment method as every screen displays it. NULL means Cash — the form's default,
-// and what pre-column bills hold — so the filter, the option list and the row badge all resolve it
-// the same way here rather than each repeating `|| 'Cash'`.
-const methodOf = p => p.payment_method || 'Cash'
 
 export default function Purchases() {
   const { clientId, profile, loading: authLoading, isAdmin, hasImsAccess } = useAuth()

@@ -4,6 +4,9 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import RowDisclosure from '../../../components/RowDisclosure'
 import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -17,6 +20,7 @@ export default function SupplierPriceTracker() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
+  const biz = useBizInfo()
 
   const [vendors, setVendors]           = useState([])
   const [items, setItems]               = useState([])
@@ -34,6 +38,7 @@ export default function SupplierPriceTracker() {
   const [editingPrice, setEditingPrice]     = useState({})
   const [savingPrice, setSavingPrice]       = useState({})
   const [affectedRecipes, setAffectedRecipes] = useState(null)
+  const [saveError, setSaveError]           = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [effectiveClientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -41,7 +46,13 @@ export default function SupplierPriceTracker() {
     setLoading(true)
     setLoadError(null)
     const results = await Promise.all([
-      scopedFrom('vendors', 'id, name').eq('is_active', true).order('name'),
+      // Every vendor, ACTIVE OR NOT. The dropdown is a picker, but the "All Vendors" mode is a
+      // REPORT over every purchase row — including rows belonging to a vendor since archived, since
+      // `allPurchases` is not vendor-filtered. Those rows still appeared, with an EMPTY Vendor cell,
+      // because `vendorMap` could not resolve them (S708 on a third page: archiving forces
+      // `is_active = false`, so using the feature was what triggered the defect). The picker still
+      // separates the two — see the `No longer active` optgroup below.
+      scopedFrom('vendors', 'id, name, is_active').order('name'),
       scopedFrom('items', 'id, name, item_code, uom, rate, per_uom_rate, purchase_qty, purchase_unit, conversion_factor, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       scopedFrom('monthly_periods').order('bs_year').order('bs_month'),
       // Paged: every purchase line this client has ever recorded, across all periods — price
@@ -87,6 +98,16 @@ export default function SupplierPriceTracker() {
 
   const selectedPeriod = selectedPeriodId === 'all' ? null : periodMap[selectedPeriodId]
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : 'All Months'
+  // The workbook stated its scope only in the FILENAME, and only the vendor and month halves of it
+  // — the trend filter and the search box could both have narrowed the sheet with nothing inside
+  // saying so, which is how a partial price list gets read as a complete one (S594).
+  const exportScopeLine = [
+    `Scope : ${periodLabel}`,
+    selectedVendorId === 'all' ? 'All vendors' : `Vendor : ${vendorMap[selectedVendorId]?.name || '—'}`,
+    filterTrend !== 'all' ? `Trend filter : ${filterTrend}` : null,
+    search ? `Search : “${search}”` : null,
+  ].filter(Boolean).join('  ·  ')
+  const PRICE_BASIS_NOTE = 'Rates are ex-VAT and per base unit, as stored on the purchase line. "Rate (per pack)" multiplies by the item’s CURRENT conversion factor — if that factor has since changed, older rows are restated at today’s pack size. Trend and Change % compare the last two purchases inside the selected scope.'
 
   function getPurchasesForVendor(vendorId) {
     // Month filter applies before grouping, so within a selected month the trend/change figures
@@ -135,7 +156,15 @@ export default function SupplierPriceTracker() {
       byItem[key].push(entry)
     })
     Object.keys(byItem).forEach(k => {
-      byItem[k].sort((a, b) => a.sort_key - b.sort_key || (a.bs_day || 1) - (b.bs_day || 1))
+      // `id` is the tiebreaker, and it is load-bearing rather than tidy: Trend and Change % read
+      // the LAST TWO entries, so two bills for the same item from the same vendor on the same day
+      // decide the badge between them. Without an explicit tiebreaker that answer rests on the
+      // read's `.order('id')` plus sort stability — true today, and not something a trend arrow
+      // should depend on silently.
+      byItem[k].sort((a, b) =>
+        a.sort_key - b.sort_key
+        || (a.bs_day || 1) - (b.bs_day || 1)
+        || String(a.id).localeCompare(String(b.id)))
     })
     return byItem
   }
@@ -171,7 +200,11 @@ export default function SupplierPriceTracker() {
       setEditingPrice(p => { const n = { ...p }; delete n[item.id]; return n })
       return
     }
-    const { data: recipeIngs } = await supabase
+    setSaveError(null)
+    // The affected-recipe list is advisory, but a FAILED read must not read as "no recipes use
+    // this item" — that is the sentence the banner prints, and it is the one thing telling the
+    // owner that changing this rate re-costs their menu.
+    const { data: recipeIngs, error: ingErr } = await supabase
       .from('recipe_ingredients').select('recipe_id, recipes(name)').eq('item_id', item.id)
     const affected = (recipeIngs || []).filter(ri => ri.recipes).map(ri => ri.recipes.name).filter((v, i, a) => a.indexOf(v) === i)
 
@@ -180,11 +213,20 @@ export default function SupplierPriceTracker() {
     // price and needs no scaling. Multiplying by purchase_qty here was correct only while that
     // column could hold a pack size; keeping it would silently re-introduce a pack price.
     const { error } = await scopedUpdate('items', { rate: newPerUomRate }).eq('id', item.id)
-    if (!error) {
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, rate: newPerUomRate, per_uom_rate: newPerUomRate } : i))
-      if (affected.length > 0) setAffectedRecipes({ itemName: item.name, recipes: affected, newRate: newPerUomRate, uom: item.uom })
-    }
     setSavingPrice(p => { const n = { ...p }; delete n[item.id]; return n })
+    if (error) {
+      // A dropped write error is silent data loss. This branch was `if (!error) { … }` with no
+      // else: the row snapped back to the old rate and nothing said why, which reads as the edit
+      // having been rejected as invalid rather than as having failed. The master rate is what
+      // every recipe cost, stock valuation and COGS figure is computed from, so "it looks like it
+      // didn't take" is not an acceptable way to learn the write did not land.
+      setSaveError(asActionError(error, 'operator'))
+      return   // keep the typed value in the box so it can be retried without re-typing
+    }
+    setSaveError(null)
+    setItems(prev => prev.map(i => i.id === item.id ? { ...i, rate: newPerUomRate, per_uom_rate: newPerUomRate } : i))
+    if (affected.length > 0) setAffectedRecipes({ itemName: item.name, recipes: affected, newRate: newPerUomRate, uom: item.uom })
+    else if (ingErr) setAffectedRecipes({ itemName: item.name, recipes: null, newRate: newPerUomRate, uom: item.uom })
     setEditingPrice(p => { const n = { ...p }; delete n[item.id]; return n })
   }
 
@@ -197,7 +239,11 @@ export default function SupplierPriceTracker() {
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
-    const byItem = getPurchasesForVendor(selectedVendorId)
+    // The rows ON SCREEN, not a second, wider query. It exported every item for the vendor and
+    // month while ignoring the Search box and the Trend filter — so filtering to "↑ Rising Only",
+    // reading 6 items, and pressing Export handed you a sheet of 240 with nothing to say the two
+    // were different lists. It also re-ran the full regroup rather than reading the memo beside it.
+    const byItem = Object.fromEntries(filteredKeys.map(k => [k, vendorPurchases[k]]))
     const wb = XLSX.utils.book_new()
     const vendorLabel = selectedVendorId === 'all' ? 'All_Vendors' : (vendorMap[selectedVendorId]?.name?.replace(/\s+/g, '_') || 'Vendor')
 
@@ -213,14 +259,20 @@ export default function SupplierPriceTracker() {
         'Category': item?.categories?.name || '',
         'UOM': item?.uom || '',
         'Master Rate (per UOM)': parseFloat(item?.per_uom_rate) || 0,
-        'Last Purchase Rate': lastEntry?.perUomRate?.toFixed(4) || '',
+        // A NUMBER, not `.toFixed(4)`. A rate written as a string is not summable, not sortable
+        // and not formattable in the sheet — on an export whose entire purpose is to compare
+        // prices, which means sorting by them.
+        'Last Purchase Rate': lastEntry ? Number(lastEntry.perUomRate.toFixed(4)) : '',
         'Last Period': lastEntry?.period_label || '',
         'Trend': trend,
-        'Change %': pct != null ? parseFloat(pct.toFixed(2)) : '',
+        'Change %': pct != null ? Number(pct.toFixed(2)) : '',
         'Total Purchases': history.length
       }
     })
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary')
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Supplier Price Tracker — Purchase price history', biz, scopeLine: exportScopeLine,
+      rows: summaryRows, notes: [PRICE_BASIS_NOTE],
+    }), 'Summary')
 
     const detailRows = []
     Object.entries(byItem).forEach(([key, history]) => {
@@ -233,13 +285,16 @@ export default function SupplierPriceTracker() {
           'UOM': item?.uom || '',
           'Period': entry.period_label,
           'Day': entry.bs_day ?? '',
-          'Rate (per pack)': entry.rate,
-          'Rate (per UOM)': entry.perUomRate?.toFixed(4),
+          'Rate (per pack)': Number(entry.rate.toFixed(4)),
+          'Rate (per UOM)': Number(entry.perUomRate.toFixed(4)),
           'Qty': entry.qty
         })
       })
     })
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailRows), 'Purchase History')
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Supplier Price Tracker — Purchase History', biz, scopeLine: exportScopeLine,
+      rows: detailRows, notes: [PRICE_BASIS_NOTE],
+    }), 'Purchase History')
     const periodSuffix = selectedPeriod ? `_${periodLabel.replace(/\s+/g, '_')}` : ''
     XLSX.writeFile(wb, `PriceTracker_${vendorLabel}${periodSuffix}.xlsx`)
   }
@@ -252,6 +307,29 @@ export default function SupplierPriceTracker() {
   const vendorPurchases = useMemo(
     () => getPurchasesForVendor(selectedVendorId),
     [allPurchases, selectedVendorId, selectedPeriodId, periodMap, itemMap]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activeVendors   = useMemo(() => vendors.filter(v => v.is_active !== false), [vendors])
+  const inactiveVendors = useMemo(() => vendors.filter(v => v.is_active === false), [vendors])
+
+  // One pass, not one full regroup per vendor. The dropdown rendered
+  // `Object.keys(getPurchasesForVendor(v.id)).length` inside its own `.map()` — and that function
+  // scans and regroups the client's ENTIRE purchase history, which is unbounded by construction on
+  // this page. So the option list cost N_vendors full passes over all history on every render,
+  // i.e. on every keystroke of the search box and every character of an inline price edit — the
+  // exact cost the `vendorPurchases` memo two lines up was added to remove, paid straight back.
+  const vendorItemCounts = useMemo(() => {
+    const sets = {}
+    const rows = selectedPeriodId === 'all'
+      ? allPurchases
+      : allPurchases.filter(p => p.period_id === selectedPeriodId)
+    rows.forEach(p => {
+      if (!periodMap[p.period_id] || !itemMap[p.item_id] || !p.vendor_id) return
+      ;(sets[p.vendor_id] = sets[p.vendor_id] || new Set()).add(p.item_id)
+    })
+    const out = {}
+    Object.keys(sets).forEach(k => { out[k] = sets[k].size })
+    return out
+  }, [allPurchases, selectedPeriodId, periodMap, itemMap])
 
   const { filteredKeys, risingCount } = useMemo(() => {
     const q = search.toLowerCase()
@@ -323,17 +401,28 @@ export default function SupplierPriceTracker() {
         </div>
       </div>
 
+      {saveError && <ActionError error={saveError} className="no-print" />}
+
       {/* Recipe impact banner */}
       {affectedRecipes && (
         <div className="card no-print" style={{ marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-accent) 40%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
             <div>
-              <p style={{ fontSize: 13, color: 'var(--theme-accent-ink)', margin: '0 0 6px', fontWeight: 600 }}>
-                ⚠ Rate updated — {affectedRecipes.recipes.length} recipe{affectedRecipes.recipes.length !== 1 ? 's' : ''} affected for {affectedRecipes.itemName}
-              </p>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {affectedRecipes.recipes.map(r => <span key={r} className="badge badge-yellow">{r}</span>)}
-              </div>
+              {/* `recipes: null` is "the rate saved but we could not read which recipes use this
+                  item" — a third state. Printing "0 recipes affected" for it would be the one
+                  reading that is definitely wrong, and it is the reassuring one. */}
+              {affectedRecipes.recipes === null ? (
+                <p style={{ fontSize: 13, color: 'var(--theme-amber-text)', margin: 0, fontWeight: 600 }}>
+                  ⚠ Rate updated for {affectedRecipes.itemName} — but the recipe list could not be read, so this may have re-costed dishes not shown here. Check Recipes before relying on this month's food cost.
+                </p>
+              ) : <>
+                <p style={{ fontSize: 13, color: 'var(--theme-accent-ink)', margin: '0 0 6px', fontWeight: 600 }}>
+                  ⚠ Rate updated — {affectedRecipes.recipes.length} recipe{affectedRecipes.recipes.length !== 1 ? 's' : ''} affected for {affectedRecipes.itemName}
+                </p>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {affectedRecipes.recipes.map(r => <span key={r} className="badge badge-yellow">{r}</span>)}
+                </div>
+              </>}
             </div>
             <button className="btn btn-ghost" style={{ fontSize: 12, flexShrink: 0 }} onClick={() => setAffectedRecipes(null)}>Dismiss</button>
           </div>
@@ -348,10 +437,16 @@ export default function SupplierPriceTracker() {
           onChange={e => { setSelectedVendorId(e.target.value); setExpandedItems({}) }}
         >
           <option value="all">All Vendors ({vendors.length})</option>
-          {vendors.map(v => {
-            const count = Object.keys(getPurchasesForVendor(v.id)).length
-            return <option key={v.id} value={v.id}>{v.name} ({count} item{count !== 1 ? 's' : ''})</option>
-          })}
+          {activeVendors.map(v => (
+            <option key={v.id} value={v.id}>{v.name} ({vendorItemCounts[v.id] || 0} item{(vendorItemCounts[v.id] || 0) !== 1 ? 's' : ''})</option>
+          ))}
+          {inactiveVendors.length > 0 && (
+            <optgroup label="No longer active">
+              {inactiveVendors.map(v => (
+                <option key={v.id} value={v.id}>{v.name} ({vendorItemCounts[v.id] || 0} item{(vendorItemCounts[v.id] || 0) !== 1 ? 's' : ''})</option>
+              ))}
+            </optgroup>
+          )}
         </select>
 
         <select aria-label="Filter by month"

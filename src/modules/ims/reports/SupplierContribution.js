@@ -72,6 +72,7 @@ export default function SupplierContribution() {
   // hardcoded total that can be false is worse than no total: it forecloses the check an
   // accountant came to the page to make.
   const [purchaseShareBase, setPurchaseShareBase] = useState(0)
+  const [unvalued, setUnvalued] = useState({ items: 0, recipes: [] })
 
   // authLoading in the deps for the same reason ConsolidatedPnl has it: a hard load lands here
   // while auth is still resolving, the guard fails once, and nothing re-fires (S594).
@@ -132,7 +133,7 @@ export default function SupplierContribution() {
     // reconciles against Vendor Report. See shared/queryError.js.
     const failed = firstError(results)
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    if (failed) { setLoadError(failed); setRows([]); setTotals({ attributed: 0, consumed: 0, unattributed: 0 }); return }
+    if (failed) { setLoadError(failed); setRows([]); setUnvalued({ items: 0, recipes: [] }); setTotals({ attributed: 0, consumed: 0, unattributed: 0 }); return }
 
     const [
       { data: sales }, { data: purchases }, { data: returns },
@@ -162,19 +163,29 @@ export default function SupplierContribution() {
       breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
     } catch (err) {
       if (!periodReq.isCurrent(periodId)) return
-      setLoadError(err); setRows([]); setTotals({ attributed: 0, consumed: 0, unattributed: 0 }); return
+      setLoadError(err); setRows([]); setUnvalued({ items: 0, recipes: [] }); setTotals({ attributed: 0, consumed: 0, unattributed: 0 }); return
     }
 
     // breakdown[recipeId] is per-one-portion, yield_pct-adjusted and already recursed through any
     // sub-recipe nesting, so a prep item never appears here — only the raw items at the bottom of
     // the tree, which are the only things a vendor ever supplied.
     const consumedByItem = {}
+    // Ingredients a sold dish consumed that this report cannot value: the item is hidden
+    // (`is_active = false`) or gone. The filter stays — Variance, Theoretical Variance and
+    // Shrinkage all read `items` the same way, and S588 aligned the four deliberately, so
+    // dropping it here alone would make this page disagree with the three it is reconciled
+    // against. What was wrong is that the exclusion was SILENT: the cost of those ingredients
+    // is simply missing from Cost of Sales, and the page's own invariant — attributed plus not
+    // attributed equals the whole consumed value — held only over the items that survived the
+    // filter. A rollup that cannot claim a row must say so (S567), and this one said nothing.
+    const unvaluedItemIds = new Set()
+    const unvaluedRecipeIds = new Set()
     for (const [recipeId, ingredients] of Object.entries(breakdown)) {
       const sold = soldByRecipe[recipeId] || 0
       if (sold <= 0) continue
       for (const { item_id, qty } of ingredients) {
         const item = itemById[item_id]
-        if (!item) continue // inactive or deleted — excluded from valuation by the same S436 rule
+        if (!item) { unvaluedItemIds.add(item_id); unvaluedRecipeIds.add(recipeId); continue }
         const usedQty = sold * qty
         const value = usedQty * (parseFloat(item.per_uom_rate) || 0)
         const c = consumedByItem[item_id] = consumedByItem[item_id] || { qty: 0, value: 0, byRecipe: {} }
@@ -221,6 +232,10 @@ export default function SupplierContribution() {
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRows(built)
+    setUnvalued({
+      items: unvaluedItemIds.size,
+      recipes: [...unvaluedRecipeIds].map(id => (recipes || []).find(r => r.id === id)?.name).filter(Boolean),
+    })
     setPurchaseShareBase(purchaseTotal)
     setTotals({
       attributed: total - (byVendor[UNATTRIBUTED]?.value || 0),
@@ -256,6 +271,11 @@ export default function SupplierContribution() {
       notes: [
         'Recipe-theoretical consumption (what the sold dishes should have used), not count-based COGS.',
         'Wastage and staff meals excluded — this is the cost of what was sold.',
+        // The caveat has to travel with the sheet: the workbook is what gets mailed on, and a
+        // banner the reader never saw cannot qualify a figure they are reconciling against.
+        ...(unvalued.items > 0
+          ? [`INCOMPLETE: ${unvalued.items} ingredient(s) consumed this period are hidden in Item Master and are NOT costed here — Cost of Sales below is understated.`]
+          : []),
       ],
     }), 'Suppliers')
 
@@ -337,6 +357,26 @@ export default function SupplierContribution() {
     </div>
   )
 
+  // Guarded at the CALL SITE, not inside ReportPage: `banners` is an eagerly-evaluated argument,
+  // so a gate in the wrapper never gets a say (S601). It is also deliberately not rendered over a
+  // failed read — `unvalued` is reset on both failure paths, so this cannot outlive the load that
+  // produced it.
+  const unvaluedBanner = unvalued.items > 0 ? (
+    <div className="card" style={{
+      marginBottom: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 40%, transparent)',
+      background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)',
+    }}>
+      <p style={{ fontSize: 13, color: 'var(--theme-amber-text)', margin: 0, fontWeight: 600 }}>
+        ⚠ {unvalued.items} ingredient{unvalued.items !== 1 ? 's' : ''} used by dishes sold this period {unvalued.items !== 1 ? 'are' : 'is'} hidden in Item Master, so {unvalued.items !== 1 ? 'their' : 'its'} cost is <strong>not</strong> in the figures below.
+      </p>
+      <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '6px 0 0' }}>
+        Cost of Sales here is lower than what those dishes actually consumed.
+        {unvalued.recipes.length > 0 && <> Affected: {unvalued.recipes.slice(0, 8).join(', ')}{unvalued.recipes.length > 8 ? ` and ${unvalued.recipes.length - 8} more` : ''}.</>}
+        {' '}Re-activate the item in Item Master to bring it back into this report.
+      </p>
+    </div>
+  ) : null
+
   const note = (
     <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 16px', maxWidth: 900 }}>
       Each ingredient your sales used is split across the suppliers you bought it from this period,
@@ -360,6 +400,7 @@ export default function SupplierContribution() {
       empty={rows.length === 0}
       emptyIcon="🚚"
       emptyText={`No sales or purchases recorded for ${periodLabel}.`}
+      banners={unvaluedBanner}
       stats={stats}
       note={note}
     >

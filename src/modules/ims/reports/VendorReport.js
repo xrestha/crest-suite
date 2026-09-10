@@ -1,8 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
+import { calcBillTotals, methodOf } from '../purchases/purchasesHelpers'
+import { allocateBillDiscounts } from './supplierAttribution'
+import { netFactors, returnBase } from './purchaseTaxSplit'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -39,6 +44,7 @@ export default function VendorReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const biz = useBizInfo()
   const periodReq = useLatestRequest()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
@@ -80,8 +86,17 @@ export default function VendorReport() {
     const [{ data: p }, { data: v }] = initResults
     setPeriods(p || [])
     setVendors(v || [])
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) { setSelectedPeriod(open); await loadData(open.id) }
+    // Defaulting to the open period is not a default (S722, Payment Summary). Close the month and
+    // `find` returns undefined — the page then selected nothing, loaded nothing, and still rendered
+    // the whole stat grid at NPR 0 with a footer reading 100% and a period chip reading "—", over a
+    // dropdown still listing every period. `periods` is ordered newest-first, so [0] is the month
+    // just closed, which is the one an owner opens this page to reconcile.
+    const target = (p || []).find(x => x.status === 'open') || (p || [])[0]
+    if (target) {
+      periodReq.begin(target.id)   // the auto-select claims the page too (S721): once ANY claim has
+      setSelectedPeriod(target)    // been made the ref stops failing open, and an admin switching
+      await loadData(target.id)    // client re-runs init() with the previous client's id in the ref
+    }
     setLoading(false)
   }
 
@@ -109,9 +124,15 @@ export default function VendorReport() {
     setPurchases(p || [])
     setReturns(r || [])
 
-    const creditIds = (p || []).filter(e => e.payment_method === 'Credit').map(e => e.id)
+    const creditIds = (p || []).filter(e => methodOf(e) === 'Credit').map(e => e.id)
     if (creditIds.length > 0) {
-      const { data: pmts, error: pmtErr } = await scopedFrom('payable_payments').in('purchase_entry_id', creditIds)
+      // Chunked AND paged (S723). `payable_payments` is one row per LINE per settlement, so it
+      // grows faster than the bills it hangs off — a bare read truncates at 1000 with no error and
+      // renders settled credit bills as unpaid, and the id list is a URL besides. Outstanding
+      // Payables and Vendor Balance Confirmation both read this table the same way and were fixed;
+      // this was the third page and it was still bare.
+      const { data: pmts, error: pmtErr } = await fetchAllRowsChunked(creditIds, ids =>
+        scopedFrom('payable_payments').in('purchase_entry_id', ids).order('id'))
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       // Cash/Credit splits and the payment-status column derive from this map — refuse rather
       // than render every credit bill as unpaid (S612).
@@ -127,13 +148,38 @@ export default function VendorReport() {
     }
   }
 
-  // Per-vendor discount: sum unique bill discounts attributed to each vendor
   // One pass over purchases/returns into index maps. Everything below reads these — the old shape
   // re-filtered the full purchases array per vendor (eight passes each), per bill, and per CELL of
   // the Daily Breakdown matrix (days × vendors × entries — millions of element visits on every
   // keystroke of the vendor search box).
   const ix = useMemo(() => {
     const billKey = e => e.purchase_group_id || `${e.vendor_id}|${e.invoice_ref || ''}|${e.bs_day}`
+
+    // ── The one definition of "net" on this page ──────────────────────────────
+    // Every net figure the page prints — the summary column, the Daily Breakdown matrix, the
+    // per-method columns, the drilldown and both Excel sheets — comes from these two lookups.
+    //
+    // They used to disagree. The maps below were built from a raw `qty * rate` with returns
+    // subtracted and NO bill discount, while `vendorSummary` beside them computed
+    // `gross - discount - returned`, and both were labelled "Net". One bill of 10,000 with a 1,000
+    // trade discount read 9,000 on the Vendor Summary tab and 10,000 on the Daily Breakdown tab —
+    // under a KPI card, still on screen, saying 9,000. That is the S551 defect class one tab apart.
+    //
+    // `allocateBillDiscounts` is the one way a bill-level discount reaches a line (S601): max not
+    // sum, apportioned proportionally over the bill's own gross. `returnBase` credits a return at
+    // its bill's DISCOUNTED rate (S722) — `vendor_returns.rate` stores the line's LIST rate, so
+    // subtracting it from a base that has already lost the discount drives a fully-returned
+    // discounted bill negative by exactly that discount. Returning all of the 10,000 bill above
+    // used to leave this vendor at Net Spend −1,000; it nets to 0.
+    const allocated = allocateBillDiscounts(purchases)
+    const factors = netFactors(allocated)
+    const netById = new Map(allocated.map(r => [r.id, r.lineNet]))
+    const lineNetOf = p => {
+      const v = netById.get(p.id)
+      return v === undefined ? (parseFloat(p.qty) || 0) * (parseFloat(p.rate) || 0) : v
+    }
+    const retValueOf = r => returnBase(r, factors)
+
     const purByVendor = new Map()     // vendor_id (or null) -> purchase entries
     const retByVendor = new Map()
     const retByEntry = new Map()      // purchase_entry_id -> return rows
@@ -157,7 +203,7 @@ export default function VendorReport() {
       let bl = billMap.get(gid)
       if (!bl) { bl = []; billMap.set(gid, bl) }
       bl.push(p)
-      addNet(vid, p.bs_day, p.qty * p.rate)
+      addNet(vid, p.bs_day, lineNetOf(p))
     })
     returns.forEach(r => {
       const vid = r.vendor_id ?? null
@@ -169,49 +215,71 @@ export default function VendorReport() {
         if (!l) { l = []; retByEntry.set(r.purchase_entry_id, l) }
         l.push(r)
       }
-      addNet(vid, r.bs_day, -(r.qty * r.rate))
+      addNet(vid, r.bs_day, -retValueOf(r))
     })
-    return { billKey, purByVendor, retByVendor, retByEntry, billMap, netByVendorDay, netByDay, netByVendor }
+    return { billKey, lineNetOf, retValueOf, purByVendor, retByVendor, retByEntry, billMap, netByVendorDay, netByDay, netByVendor }
   }, [purchases, returns])
 
-  const vendorDiscountMap = useMemo(() => {
-    const map = {}
-    ix.billMap.forEach(entries => {
-      const disc = Math.max(0, ...entries.map(p => parseFloat(p.discount_amount) || 0))
-      if (disc <= 0) return
-      const vid = entries[0].vendor_id || '__none__'
-      map[vid] = (map[vid] || 0) + disc
-    })
-    return map
-  }, [ix])
+  // (`vendorDiscountMap` lived here — a second, independent per-vendor discount rollup. Every
+  // consumer now derives its discount as `gross - allocatedNet`, so the Discount column, the Net
+  // Spend beside it and the Daily Breakdown behind it are one arithmetic rather than three.)
 
   // Vendor summary — net spend (ex-VAT, after discount and returns)
   const vendorSummary = useMemo(() => vendors.map(vendor => {
     const vPurchases  = ix.purByVendor.get(vendor.id) || []
     const vReturns    = ix.retByVendor.get(vendor.id) || []
     const gross       = vPurchases.reduce((s, p) => s + p.qty * p.rate, 0)
-    const discount    = vendorDiscountMap[vendor.id] || 0
-    const returned    = vReturns.reduce((s, r) => s + r.qty * r.rate, 0)
-    const net         = gross - discount - returned
+    const netPurch    = vPurchases.reduce((s, p) => s + ix.lineNetOf(p), 0)
+    // Derived from the allocation rather than read from a parallel map, so the Discount column and
+    // the Net Spend beside it can never be computed two different ways. They are equal for every
+    // ordinary bill; they diverge only on a degenerate one (every line free, a discount recorded
+    // against it), where the allocation's answer — nothing to discount — is the right one and the
+    // parallel map's was a negative net spend conjured out of a zero-value bill.
+    const discount    = gross - netPurch
+    const returned    = vReturns.reduce((s, r) => s + ix.retValueOf(r), 0)
+    const net         = netPurch - returned
     const count       = vPurchases.length
     const returnCount = vReturns.length
     const days        = [...new Set(vPurchases.map(p => p.bs_day))].length
-    const cash    = vPurchases.filter(p => p.payment_method === 'Cash').reduce((s, p) => s + p.qty * p.rate, 0)
-      - vReturns.filter(r => r.payment_method === 'Cash').reduce((s, r) => s + r.qty * r.rate, 0)
-    const credit  = vPurchases.filter(p => p.payment_method === 'Credit').reduce((s, p) => s + p.qty * p.rate, 0)
-      - vReturns.filter(r => r.payment_method === 'Credit').reduce((s, r) => s + r.qty * r.rate, 0)
-    const fonepay = vPurchases.filter(p => p.payment_method === 'FonePay').reduce((s, p) => s + p.qty * p.rate, 0)
-      - vReturns.filter(r => r.payment_method === 'FonePay').reduce((s, r) => s + r.qty * r.rate, 0)
+    // `methodOf`, not the raw column: NULL is Cash everywhere else in the product (S650), and a
+    // raw test put every bill written before that column existed into NONE of these three, so the
+    // trio could not sum to the Net Spend two cells to its left. Net of the allocated discount for
+    // the same reason — the header says "(Net)".
+    const byMethod = m =>
+      vPurchases.filter(p => methodOf(p) === m).reduce((s, p) => s + ix.lineNetOf(p), 0)
+      - vReturns.filter(r => methodOf(r) === m).reduce((s, r) => s + ix.retValueOf(r), 0)
+    const cash    = byMethod('Cash')
+    const credit  = byMethod('Credit')
+    const fonepay = byMethod('FonePay')
     return { vendor, gross, discount, returned, net, count, returnCount, days, cash, credit, fonepay }
-  }).filter(r => r.gross > 0 || r.returned > 0), [vendors, ix, vendorDiscountMap])
+  }).filter(r => r.gross > 0 || r.returned > 0), [vendors, ix])
 
+  // A bill with no vendor is still a bill, and it used to appear as a count and a gross with
+  // `colSpan={8}` swallowing its discount, returns and net — while the footer counted all three.
+  // It gets the same shape as a vendor row now, so the column can be added up on screen.
   const unassigned = ix.purByVendor.get(null) || []
-  const unassignedTotal = unassigned.reduce((s, p) => s + p.qty * p.rate, 0)
+  const unassignedReturns = ix.retByVendor.get(null) || []
+  const unassignedGross = unassigned.reduce((s, p) => s + p.qty * p.rate, 0)
+  const unassignedNetPurch = unassigned.reduce((s, p) => s + ix.lineNetOf(p), 0)
+  const unassignedDiscount = unassignedGross - unassignedNetPurch
+  const unassignedReturned = unassignedReturns.reduce((s, r) => s + ix.retValueOf(r), 0)
+  const unassignedNet = unassignedNetPurch - unassignedReturned
+  const unassignedTotal = unassignedGross
+  const unassignedByMethod = m =>
+    unassigned.filter(p => methodOf(p) === m).reduce((s, p) => s + ix.lineNetOf(p), 0)
+    - unassignedReturns.filter(r => methodOf(r) === m).reduce((s, r) => s + ix.retValueOf(r), 0)
+  const unassignedRow = {
+    count: unassigned.length, gross: unassignedGross, discount: unassignedDiscount,
+    returned: unassignedReturned, net: unassignedNet,
+    cash: unassignedByMethod('Cash'), credit: unassignedByMethod('Credit'),
+    fonepay: unassignedByMethod('FonePay'),
+  }
 
   const grandGross    = purchases.reduce((s, p) => s + p.qty * p.rate, 0)
-  const grandDiscount = Object.values(vendorDiscountMap).reduce((s, d) => s + d, 0)
-  const grandReturn   = returns.reduce((s, r) => s + r.qty * r.rate, 0)
-  const grandNet      = grandGross - grandDiscount - grandReturn
+  const grandNetPurch = purchases.reduce((s, p) => s + ix.lineNetOf(p), 0)
+  const grandDiscount = grandGross - grandNetPurch
+  const grandReturn   = returns.reduce((s, r) => s + ix.retValueOf(r), 0)
+  const grandNet      = grandNetPurch - grandReturn
 
   const allDays = useMemo(() => [...ix.netByDay.keys()].sort((a, b) => a - b), [ix])
   const activeVendors = useMemo(
@@ -225,16 +293,18 @@ export default function VendorReport() {
       const disc = Math.max(0, ...billEntries.map(p => parseFloat(p.discount_amount) || 0))
       if (disc <= 0) return
       const e = billEntries[0]
-      const billTotal   = billEntries.reduce((s, p) => s + p.qty * p.rate, 0)
-      const vatSubtotal = billEntries.filter(p => p.vat_inclusive).reduce((s, p) => s + p.qty * p.rate, 0)
-      const vatTaxable  = billTotal > 0 ? vatSubtotal * (1 - disc / billTotal) : 0
-      const vat         = vatTaxable * 0.13
+      // `calcBillTotals`, not a fourth copy of the same expression. This page was named in
+      // `purchaseTaxSplit.js`'s own comment and in the rules file as one of the four that reach it
+      // — and it never imported it; it re-typed the discount-apportioned VAT base inline. The
+      // arithmetic was identical, which is exactly what makes an independent copy dangerous: it
+      // agrees until someone changes one of them.
+      const t = calcBillTotals(billEntries, disc)
       bills.push({
         day: e.bs_day, vendor: e.vendors?.name || 'Unknown', vendor_id: e.vendor_id,
-        invoice: e.invoice_ref, billTotal, discount: disc,
-        discPct: billTotal > 0 ? (disc / billTotal) * 100 : 0,
-        vat, grand: (billTotal - disc) + vat,
-        paymentMethod: e.payment_method,
+        invoice: e.invoice_ref, billTotal: t.subTotal, discount: t.discount,
+        discPct: t.subTotal > 0 ? (t.discount / t.subTotal) * 100 : 0,
+        vat: t.vatTotal, grand: t.grandTotal,
+        paymentMethod: methodOf(e),
       })
     })
     return bills.sort((a, b) => a.day - b.day)
@@ -313,6 +383,28 @@ export default function VendorReport() {
         (v.vendor_code || '').toLowerCase().includes(searchLower)
       )
     : activeVendors
+  // The footer totals EXACTLY the rows rendered above it. It used to print the whole period's
+  // grand totals under a search-filtered list — narrow to one vendor and you got one row above a
+  // TOTAL for every vendor — and it asserted a hardcoded `100%` in the `% of Net Total` column,
+  // which is S594's Supplier Contribution finding verbatim on a page it never travelled to. The
+  // divergence was never only the search: `grandNet` also carries the Unassigned bills, which had
+  // no Net cell of their own to be added up.
+  const showUnassigned = unassignedTotal > 0 && !vendorSearch
+  const footRows = showUnassigned ? filteredSummary.concat([unassignedRow]) : filteredSummary
+  const foot = footRows.reduce((a, r) => ({
+    count:    a.count + r.count,
+    gross:    a.gross + r.gross,
+    discount: a.discount + r.discount,
+    returned: a.returned + r.returned,
+    net:      a.net + r.net,
+    cash:     a.cash + r.cash,
+    credit:   a.credit + r.credit,
+    fonepay:  a.fonepay + r.fonepay,
+  }), { count: 0, gross: 0, discount: 0, returned: 0, net: 0, cash: 0, credit: 0, fonepay: 0 })
+  // Computed, never asserted. It reads 100.0% when nothing is filtered and the period has no
+  // unassigned bills, and states the real share the moment either is false.
+  const footPct = grandNet !== 0 ? (foot.net / grandNet) * 100 : 0
+
   // A search narrowed to exactly one vendor switches Daily Breakdown into a
   // per-vendor view: blank days dropped, each day drills into its bill(s).
   const singleVendor = vendorSearch && filteredActiveVendors.length === 1 ? filteredActiveVendors[0] : null
@@ -345,47 +437,103 @@ export default function VendorReport() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
-    const summaryData = vendorSummary.map(r => ({
-      'Vendor': r.vendor.name,
+    // Every money cell is a NUMBER. Two sheets in this one workbook disagreed: 'Discounts
+    // Received' wrote `Number(x.toFixed(2))` while 'Vendor Summary' and 'Daily Breakdown' wrote
+    // `x.toFixed(0)` — a string, which Excel neither sums, sorts nor formats as currency, on the
+    // sheet an accountant opens precisely to total it.
+    const n = v => Number((v || 0).toFixed(2))
+    const share = v => grandNet !== 0 ? Number(((v / grandNet) * 100).toFixed(1)) : 0
+    const summaryRow = (name, r, days) => ({
+      'Vendor': name,
       'Transactions': r.count,
-      'Days Active': r.days,
-      'Gross Purchases (NPR)': r.gross.toFixed(0),
-      'Discount Received (NPR)': r.discount > 0 ? (-r.discount).toFixed(0) : 0,
-      'Returns (NPR)': r.returned.toFixed(0),
-      'Net Spend (NPR)': r.net.toFixed(0),
-      '% of Net Total': grandNet > 0 ? ((r.net / grandNet) * 100).toFixed(1) + '%' : '0%'
-    }))
-    if (unassignedTotal > 0) summaryData.push({
-      'Vendor': 'Unassigned', 'Transactions': unassigned.length,
-      'Days Active': [...new Set(unassigned.map(p => p.bs_day))].length,
-      'Gross Purchases (NPR)': unassignedTotal.toFixed(0), 'Returns (NPR)': '0',
-      'Net Spend (NPR)': unassignedTotal.toFixed(0),
-      '% of Net Total': grandNet > 0 ? ((unassignedTotal / grandNet) * 100).toFixed(1) + '%' : '0%'
+      'Days Active': days,
+      'Gross Purchases (NPR)': n(r.gross),
+      'Discount Received (NPR)': n(-r.discount),
+      'Returns (NPR)': n(-r.returned),
+      'Net Spend (NPR)': n(r.net),
+      '% of Net Total': share(r.net),
+      'Cash Net (NPR)': n(r.cash),
+      'Credit Net (NPR)': n(r.credit),
+      'FonePay Net (NPR)': n(r.fonepay),
     })
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), 'Vendor Summary')
+    const summaryData = vendorSummary.map(r => summaryRow(r.vendor.name, r, r.days))
+    // The unassigned row used to omit Discount entirely (a blank cell, not a zero), hardcode
+    // Returns to '0', and report its GROSS as its Net Spend — so the one row on the sheet nobody
+    // can chase down to a supplier was also the one whose arithmetic did not hold.
+    if (unassignedTotal > 0) {
+      summaryData.push(summaryRow('Unassigned', unassignedRow,
+        [...new Set(unassigned.map(p => p.bs_day))].length))
+    }
+    // A sheet a reader is asked to reconcile needs the total printed on it (S723). Without one,
+    // the only way to check the export against the screen is to sum eleven columns by hand.
+    summaryData.push(summaryRow('TOTAL', {
+      count: purchases.length, gross: grandGross, discount: grandDiscount,
+      returned: grandReturn, net: grandNet,
+      cash: vendorSummary.reduce((s, r) => s + r.cash, 0) + (unassignedTotal > 0 ? unassignedRow.cash : 0),
+      credit: vendorSummary.reduce((s, r) => s + r.credit, 0) + (unassignedTotal > 0 ? unassignedRow.credit : 0),
+      fonepay: vendorSummary.reduce((s, r) => s + r.fonepay, 0) + (unassignedTotal > 0 ? unassignedRow.fonepay : 0),
+    }, allDays.length))
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Vendor Purchase Report — Net spend by supplier', biz, scopeLine,
+      rows: summaryData, notes: [BASIS_NOTE],
+    }), 'Vendor Summary')
+
+    // Columns are keyed by vendor NAME, and `vendors` still has no unique-name constraint (S708) —
+    // so two suppliers entered under one name silently merged into a single column and one of them
+    // vanished from the sheet. The code disambiguates where the product cannot yet prevent it.
+    const nameCount = {}
+    activeVendors.forEach(v => { nameCount[v.name] = (nameCount[v.name] || 0) + 1 })
+    const colOf = v => (nameCount[v.name] > 1 && v.vendor_code) ? `${v.name} (${v.vendor_code})` : v.name
     const dailyData = allDays.map(day => {
       const row = { 'Day': day }
-      activeVendors.forEach(v => { const val = vendorDayNet(v.id, day); row[v.name] = val !== 0 ? val.toFixed(0) : '' })
-      row['Day Net Total (NPR)'] = dayNet(day).toFixed(0)
+      activeVendors.forEach(v => { const val = vendorDayNet(v.id, day); row[colOf(v)] = val !== 0 ? n(val) : '' })
+      row['Day Net Total (NPR)'] = n(dayNet(day))
       return row
     })
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dailyData), 'Daily Breakdown')
+    const dailyTotal = { 'Day': 'TOTAL' }
+    activeVendors.forEach(v => { const val = vendorNet(v.id); dailyTotal[colOf(v)] = val !== 0 ? n(val) : '' })
+    dailyTotal['Day Net Total (NPR)'] = n(grandNet)
+    dailyData.push(dailyTotal)
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Vendor Purchase Report — Daily Breakdown', biz, scopeLine,
+      rows: dailyData, notes: [BASIS_NOTE],
+    }), 'Daily Breakdown')
+
     if (discountedBills.length > 0) {
       const discData = discountedBills.map(b => ({
         'Day': b.day, 'Vendor': b.vendor, 'Invoice Ref': b.invoice || '',
-        'Bill Total (ex-VAT)': Number(b.billTotal.toFixed(2)),
-        'Discount (NPR)': Number(b.discount.toFixed(2)),
-        'Discount %': Number(b.discPct.toFixed(2)),
-        'VAT on Taxable (13%)': Number(b.vat.toFixed(2)),
-        'Grand Total (incl. VAT)': Number(b.grand.toFixed(2)),
+        'Bill Total (ex-VAT)': n(b.billTotal),
+        'Discount (NPR)': n(b.discount),
+        'Discount %': n(b.discPct),
+        'VAT on Taxable (13%)': n(b.vat),
+        'Grand Total (incl. VAT)': n(b.grand),
         'Payment Method': b.paymentMethod || '',
       }))
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(discData), 'Discounts Received')
+      discData.push({
+        'Day': 'TOTAL', 'Vendor': '', 'Invoice Ref': '',
+        'Bill Total (ex-VAT)': n(discountedBills.reduce((s, b) => s + b.billTotal, 0)),
+        'Discount (NPR)': n(discountedBills.reduce((s, b) => s + b.discount, 0)),
+        'Discount %': '',
+        'VAT on Taxable (13%)': n(discountedBills.reduce((s, b) => s + b.vat, 0)),
+        'Grand Total (incl. VAT)': n(discountedBills.reduce((s, b) => s + b.grand, 0)),
+        'Payment Method': '',
+      })
+      XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+        title: 'Vendor Purchase Report — Discounts Received', biz, scopeLine,
+        rows: discData, notes: [BASIS_NOTE],
+      }), 'Discounts Received')
     }
     XLSX.writeFile(wb, `Vendor-Report-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
+  // A report that states a scope must state it everywhere the report goes (S594). The workbook
+  // carried the period in its FILENAME and nowhere inside it, so a sheet detached from its
+  // download — mailed on, or opened weeks later — named no month and no business at all.
+  const scopeLine = `Period : ${periodLabel}${selectedPeriod?.status === 'open'
+    ? ' (PROVISIONAL — period still open, figures can change)'
+    : ' (period closed)'}`
+  const BASIS_NOTE = 'Figures are ex-VAT and net of bill discounts, apportioned across each bill’s own lines. Returns are credited at the price actually paid, i.e. net of that bill’s discount. Bill totals including VAT are on the Discounts Received sheet and in Outstanding Payables.'
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
   // !loadError: a failed periods read leaves periods empty, and NoPeriodState would wear the
@@ -555,13 +703,13 @@ export default function VendorReport() {
                   <th style={{ textAlign: 'right' }}>Transactions</th>
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
                   <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}><Tip text="Trade/promo discount received from this vendor — deducted from net spend." width={230}>Discount</Tip></th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Total value of items returned to this vendor this period.">Returns</Tip></th>
+                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Value of goods returned to this vendor this period, credited at the price actually paid — if the original bill carried a trade discount, the return is credited net of its share. Return a whole discounted bill and net spend comes back to zero, not to minus the discount." width={280}>Returns</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Net spend = Gross − Discount − Returns (ex-VAT). Your true cost obligation to this vendor." width={250}>Net Spend</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="This vendor's share of total net purchase spend for the period." width={220}>% of Net Total</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Average daily spend (net) across days this vendor had deliveries.">Avg/Day</Tip></th>
-                  <th style={{ textAlign: 'right' }}>Cash (Net)</th>
-                  <th style={{ textAlign: 'right' }}>Credit (Net)</th>
-                  <th style={{ textAlign: 'right' }}>FonePay (Net)</th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Net spend on bills settled in cash. A bill has one payment method for all its lines; a bill recorded before the method was tracked counts as Cash. These three columns add up to Net Spend." width={250}>Cash (Net)</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Net spend on bills bought on credit — what became a payable. Outstanding Payables tracks what is still owed against them." width={250}>Credit (Net)</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Net spend on bills settled by FonePay." width={220}>FonePay (Net)</Tip></th>
                 </tr>
               </thead>
               <tbody>
@@ -606,24 +754,45 @@ export default function VendorReport() {
                     </tr>
                   )
                 })}
-                {unassignedTotal > 0 && (
+                {showUnassigned && (
                   <tr>
-                    <td style={{ color: 'var(--theme-text3)', fontStyle: 'italic' }}>Unassigned</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{unassigned.length}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>NPR {unassignedTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                    <td colSpan={8}></td>
+                    <td style={{ color: 'var(--theme-text3)', fontStyle: 'italic' }}>
+                      <Tip text="Purchase bills recorded with no vendor selected. They are in every total on this page, so they are shown as their own row rather than left to make the column fail to add up." width={260}>Unassigned</Tip>
+                    </td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{unassignedRow.count}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>NPR {unassignedRow.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{unassignedRow.discount > 0 ? `−NPR ${unassignedRow.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{unassignedRow.returned > 0 ? `−NPR ${unassignedRow.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>NPR {unassignedRow.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
+                      {grandNet !== 0 ? `${((unassignedRow.net / grandNet) * 100).toFixed(1)}%` : '—'}
+                    </td>
+                    <td></td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(unassignedRow.cash)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(unassignedRow.credit)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(unassignedRow.fonepay)}</td>
                   </tr>
                 )}
                 <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                   <td style={{ fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 12 }}>TOTAL</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{purchases.length}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 12 }}>{grandDiscount > 0 ? `−NPR ${grandDiscount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>{grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>100%</td>
-                  <td colSpan={4}></td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>{foot.count}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>NPR {foot.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-green-text)', paddingTop: 12 }}>{foot.discount > 0 ? `−NPR ${foot.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)', paddingTop: 12 }}>{foot.returned > 0 ? `−NPR ${foot.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>NPR {foot.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{footPct.toFixed(1)}%</td>
+                  <td style={{ paddingTop: 12 }}></td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{fmt(foot.cash)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{fmt(foot.credit)}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>{fmt(foot.fonepay)}</td>
                 </tr>
+                {vendorSearch && (
+                  <tr>
+                    <td colSpan={11} style={{ fontSize: 12, color: 'var(--theme-text3)', paddingTop: 6 }}>
+                      Filtered by “{vendorSearch}”. The period's own totals are NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })} gross / NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })} net across {purchases.length} entries.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

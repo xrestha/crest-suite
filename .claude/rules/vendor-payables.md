@@ -10,6 +10,109 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
+### A page can disagree with itself, and a TAB is where it hides (S725)
+
+S723's rule above is a tab filter deciding which ROWS a record is valued from. This is the next one
+along: **two tabs of one page computing the same figure from two different expressions**, both
+labelled Net.
+
+`VendorReport.js`'s `vendorSummary` computed `gross − discount − returns`. The `netByDay` /
+`netByVendor` / `netByVendorDay` maps behind the Daily Breakdown matrix summed a raw `qty × rate`
+with returns subtracted and **no bill discount at all**:
+
+```text
+one bill, 10,000 gross, 1,000 trade discount, no returns
+  Vendor Summary tab  →  Net Spend        9,000
+  Daily Breakdown tab →  TOTAL / Day Net  10,000
+  KPI card above BOTH →  Net Spend        9,000
+  Excel 'Daily Breakdown' sheet →         10,000
+```
+
+The stat strip renders above the tab switch, so the wrong total sat directly under a card stating
+the right one. Nothing on the page cross-checks the two, and each was individually plausible.
+
+**The fix is one arithmetic exposed once, not two expressions kept in step.** `allocateBillDiscounts()`
+runs at the top of the `ix` memo and `lineNetOf(p)` / `retValueOf(r)` come out of it; the summary
+column, the matrix, the per-method columns, the drilldown and every workbook sheet read those. The
+per-vendor Discount column is **derived** as `gross − allocatedNet` rather than read from a parallel
+rollup, so the Discount cell and the Net Spend beside it cannot be computed two ways.
+
+**The tell is a page with tabs or view modes over one dataset, where each mode builds its own
+totals.** Ask which expression each mode's money comes from, and make it one.
+
+### `VendorReport` now genuinely reaches `calcBillTotals` (S725)
+
+The section below ("Four pages value a bill") named it as one of the four, and so did
+`purchaseTaxSplit.js`'s own header comment. **It never imported it** — it re-typed the
+discount-apportioned VAT base inline in `discountedBills`. The arithmetic was identical, which is
+exactly what makes an independent copy dangerous rather than harmless: it agrees until one of them
+is changed, and nothing points at the other.
+
+**A rules file saying a page uses a helper is not evidence that it does.** Grep the import before
+trusting a claim of this shape — in either direction. Both claims are true now.
+
+### The hardcoded `100%` footer, third instance (S725)
+
+S594 found it on Supplier Contribution. S719 found it on Wastage Report. `VendorReport`'s
+`% of Net Total` footer was the third, and it diverged for **two independent reasons at once**:
+
+- the rows divide by `grandNet`, which carries the **Unassigned** (`vendor_id IS NULL`) bills — and
+  those had no Net cell of their own, only a count and a gross under a `colSpan={8}`;
+- the footer printed the whole period's grand totals under a **search-filtered** row list, so
+  narrowing to one vendor showed one row above a TOTAL for every vendor.
+
+**A footer totals the rows rendered above it, and a percentage is computed.** Where the footer is
+deliberately page-level while the rows are filtered, say so on the page (this one prints the
+period's own totals in a line beneath the filtered footer). And when a report has a catch-all row,
+give it every column the real rows have — a row that cannot be added up is why the column does not.
+
+### An `is_active` picker filter, third page (S725)
+
+After `VendorReport` and `VendorBalanceConfirmation` (S708). `SupplierPriceTracker` loaded vendors
+with `.eq('is_active', true)` — correct for its dropdown, which is a picker — but its **"All
+Vendors" mode scans every purchase row**, including rows belonging to a vendor since archived. Those
+rows rendered with a blank Vendor cell, because `vendorMap` could not resolve them. Archiving forces
+`is_active = false`, so *using the feature* was what produced the defect, as it was both times before.
+
+**A page can need both answers at once.** Load every vendor for RESOLUTION and split the picker —
+active first, an inactive `No longer active` optgroup after — rather than choosing one population
+for the page. That is `VendorBalanceConfirmation`'s shape and it is the one to copy.
+
+### An export that ignores the filters on screen is a different report (S725)
+
+`SupplierPriceTracker`'s Export re-derived its rows from vendor and month and ignored the **Search
+box and the Trend filter**. Filtering to "↑ Rising Only", reading six items and pressing Export
+handed you a sheet of 240 with nothing in it to say the two were different lists — and the filename
+named only the two filters it had honoured.
+
+Export the rows the reader is looking at, and state **every** active filter in the `scopeLine`. Same
+family as S594's rule that a report stating a scope must state it everywhere it goes; the failure
+here is one step earlier, in the report not having the scope it appeared to.
+
+**And a money cell in a workbook is a NUMBER.** Two of Vendor Report's three sheets wrote
+`x.toFixed(0)` — a string Excel will not sum, sort or format — while the third sheet in the same
+file wrote `Number(x.toFixed(2))`. Price Tracker wrote its rates as `.toFixed(4)` strings on a sheet
+whose entire purpose is sorting by price. `Number(v.toFixed(2))` at every money site, and a TOTAL
+row on any sheet a reader is expected to reconcile.
+
+### An exclusion a report cannot value must be counted and named (S725)
+
+`SupplierContribution` walked its consumed ingredients with `if (!item) continue` over an
+`is_active = true` read. The filter is right and stays — `Variance`, `TheoreticalVariance` and
+`ShrinkageReport` all read `items` that way, and S588 aligned the four deliberately, so dropping it
+here alone would make this page disagree with the three it is reconciled against.
+
+What was wrong is that the exclusion was **silent**. The cost of a hidden ingredient a sold dish
+consumed is simply absent from Cost of Sales, and the page's own stated invariant — attributed plus
+not-attributed equals the whole consumed value — held only over the items that survived the filter.
+The page already has the right instinct one row over: `Not attributed` exists precisely so a rollup
+that cannot claim a row does not produce a believable short total (S567). The same courtesy now
+applies to the rows it cannot value: a banner naming the count and the affected dishes, and a line in
+the workbook's notes so the caveat survives the sheet being mailed on.
+
+**A filter that is correct is not automatically a filter that can be applied quietly.** Ask what
+falls out of it, and whether the reader would want to know.
+
 ### A tab filter is not a valuation boundary (S723)
 
 The S722 rule below is a report reading half a bill because its QUERY narrowed the rows. This is the

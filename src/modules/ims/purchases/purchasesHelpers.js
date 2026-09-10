@@ -12,6 +12,13 @@
 // Cash, or the filter returns fewer rows than the screen it is filtering shows.
 export const PURCHASE_PAYMENT_METHODS = ['Cash', 'Credit', 'FonePay']
 
+// The one place that NULL-reads-as-Cash fallback is applied. A value DISPLAYED through a fallback
+// must also be filtered, grouped and counted through it (S650) — and this had drifted back out:
+// Purchases.js kept a private copy for its filter/option list/row badge while Vendor Report's
+// Cash/Credit/FonePay columns tested the raw column, so every bill written before the column
+// existed fell into NONE of the three and the trio could not sum to the Net Spend beside them.
+export const methodOf = p => p?.payment_method || 'Cash'
+
 // Returns the effective conversion factor (>1) for an item, or 1 if no conversion set.
 export function getCf(item) {
   const cf = parseFloat(item?.conversion_factor)
