@@ -289,7 +289,7 @@ const IMS_FEATURE_TIERS = [
       },
       {
         icon: '◫', name: 'Supplier Price Tracker',
-        guide: 'Shows rate history per item per vendor with trend arrows (↑↓→). "Update Rate" syncs the item master to the latest purchase rate. Warns (⚠) if the master rate differs >5% from the last purchase. Archived suppliers stay selectable under "No longer active", because their past purchases are still part of the price history.',
+        guide: 'Shows rate history per item per vendor with trend arrows (↑↓→). "Update Rate" opens a box to set the item master rate by hand — it does not sync automatically. Warns (⚠) if the master rate differs >5% from the last purchase. Archived suppliers stay selectable under "No longer active", because their past purchases are still part of the price history.',
         tips: ['Run this monthly after entering purchases — catch price creep early', '"Update Rate" overwrites the item master rate, which affects all future recipe costs', 'If a rate does not save, the page now says why and keeps what you typed in the box — a value that silently snaps back has not been saved', 'Print and Export follow every filter on screen, including the search box and the trend filter, so an exported sheet is the list you were looking at']
       },
       {

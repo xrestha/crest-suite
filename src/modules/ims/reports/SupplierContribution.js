@@ -89,8 +89,21 @@ export default function SupplierContribution() {
     // closing count, so an open period gives a truthful partial-month answer rather than a
     // structurally impossible one.
     const target = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (target) { setSelectedPeriod(target); await loadReport(target.id) }
-    setLoading(false)
+    if (target) {
+      // `init()` claims the page too (S721) — the fifth instance after S698/S709/S718/S721, and
+      // fixed on Vendor Report in S725 while this sibling was left. Once `handlePeriodChange` has
+      // run even once the ref is permanently non-null, so `isCurrent` stops failing open — and an
+      // ADMIN SWITCHING CLIENT re-runs `init()` on a still-mounted component with the PREVIOUS
+      // client's period id in the ref. Every setter in `loadReport` is then skipped and the new
+      // tenant reads the old one's supplier figures, in the table and in the Excel export.
+      periodReq.begin(target.id)
+      setSelectedPeriod(target)
+      await loadReport(target.id)
+    }
+    // Only the load that still owns the page may un-gate it. Without this a superseded load
+    // clears `loading`, so one period's rows render — and Export re-enables — under another
+    // period's label, subtitle, print title, scopeLine and filename (S601).
+    if (periodReq.isCurrent(target ? target.id : null) || !target) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
@@ -101,7 +114,7 @@ export default function SupplierContribution() {
     setShowAllDetail(false)
     setLoading(true)
     await loadReport(periodId)
-    setLoading(false)
+    if (periodReq.isCurrent(periodId)) setLoading(false)   // see init(): only the owner un-gates
   }
 
   function toggleRow(id) {
@@ -127,9 +140,13 @@ export default function SupplierContribution() {
         .eq('period_id', periodId).order('id')),
       // is_active only: valuing stock off an inactive item is the S436 rule, and per_uom_rate is
       // what every other IMS valuation uses (it is rate ÷ purchase_qty, generated in the DB).
-      scopedFrom('items', 'id, name, uom, per_uom_rate').eq('is_active', true),
-      scopedFrom('vendors', 'id, name, vendor_code'),
-      scopedFrom('recipes', 'id, name'),
+      // Paged, with a unique tiebreaker. `items` is the read that decides which consumed
+      // ingredients can be VALUED at all, so a silent truncation understates Cost of Sales and
+      // then blames Item Master for it in the banner below. `vendors` and `recipes` resolve the
+      // names the rows and the Ingredient Detail sheet are labelled with.
+      fetchAllRows(() => scopedFrom('items', 'id, name, uom, per_uom_rate').eq('is_active', true).order('id')),
+      fetchAllRows(() => scopedFrom('vendors', 'id, name, vendor_code').order('id')),
+      fetchAllRows(() => scopedFrom('recipes', 'id, name').order('id')),
     ])
 
     // Every result below flows through `|| []`, so a failed read would produce a complete report
@@ -225,8 +242,17 @@ export default function SupplierContribution() {
         attributedPct: pct(a.value, total),
         purchased,
         purchasedPct: purchased === null ? null : pct(purchased, purchaseTotal),
+        // The supplier's SHARE of the item's consumed quantity, scaled the same way its value
+        // was. It used to carry the item's WHOLE-period qty on every supplier's row, beside a
+        // fractional per-supplier cost — so a two-supplier item printed its full quantity
+        // twice and the Ingredient Detail sheet's Qty column totalled to a multiple of what
+        // was actually consumed.
         itemRows: Object.entries(a.items)
-          .map(([itemId, value]) => ({ itemId, value, qty: consumedByItem[itemId]?.qty || 0 }))
+          .map(([itemId, value]) => {
+            const whole = consumedByItem[itemId]
+            const share = whole && whole.value > 0 ? value / whole.value : 0
+            return { itemId, value, qty: (whole?.qty || 0) * share }
+          })
           .sort((x, y) => y.value - x.value),
         recipeRows: Object.entries(a.recipes)
           .map(([recipeId, value]) => ({ recipeId, value }))
@@ -249,8 +275,17 @@ export default function SupplierContribution() {
   }
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : ''
-  const realSuppliers = rows.filter(r => r.id !== UNATTRIBUTED && r.attributed > 0)
-  const topShare = realSuppliers.length > 0 ? realSuppliers[0].attributedPct : 0
+  // A NAMED supplier: not the Not-attributed bucket, and not "No vendor recorded" — bills entered
+  // without a vendor are a data-entry gap, not a supplier you depend on, and the card names its
+  // subject underneath the figure.
+  const realSuppliers = rows.filter(r => r.id !== UNATTRIBUTED && r.id !== NO_VENDOR && r.attributed > 0)
+  // Concentration is measured against the cost that COULD be traced to a supplier, not against
+  // everything consumed. `attributedPct` divides by `total`, which includes the Not-attributed
+  // bucket — so the more of a period's cost the page cannot trace, the SAFER this headline reads,
+  // which is the wrong direction for a risk figure. On a month half-fed from earlier stock, a
+  // supplier carrying every traced rupee showed ~50%, under a card that turns amber at 50.
+  const namedTotal = realSuppliers.reduce((s, r) => s + r.attributed, 0)
+  const topShare = namedTotal > 0 ? (realSuppliers[0].attributed / namedTotal) * 100 : 0
   const purchaseGrandTotal = rows.reduce((s, r) => s + (r.purchased || 0), 0)
   const purchasePctTotal = pct(purchaseGrandTotal, purchaseShareBase)
   const scopeLine = `Period : ${periodLabel} (${selectedPeriod?.status === 'open' ? 'open' : 'closed'})`
@@ -337,7 +372,7 @@ export default function SupplierContribution() {
       </div>
       <div className="stat-card">
         <div className="stat-label">
-          <Tip width={280} text="Share of attributed cost coming from your single largest supplier. The higher this is, the more one delivery failure can take off your menu.">
+          <Tip width={300} text="Share of the cost traced to a NAMED supplier that comes from your single largest one. The higher this is, the more one delivery failure can take off your menu. It is measured against named suppliers only — not against everything you consumed — so a month largely fed from earlier stock cannot make your concentration look safer than it is.">
             Top Supplier Share
           </Tip>
         </div>
@@ -429,7 +464,14 @@ export default function SupplierContribution() {
           </thead>
           <tbody>
             {rows.map(r => {
-              const delta = r.purchasedPct === null ? null : r.attributedPct - r.purchasedPct
+              // Both sides measured over the TRACEABLE pool. `attributedPct` divides by every
+              // consumed rupee including the Not-attributed bucket, while `purchasedPct`
+              // divides by positive net spend — two different denominators, so every supplier
+              // read systematically low by its own share of whatever could not be traced
+              // (s x u x 100 points). Comparing share-of-traced against share-of-spend is the
+              // like-for-like the column's own tooltip describes.
+              const delta = r.purchasedPct === null ? null
+                : pct(r.attributed, totals.attributed) - r.purchasedPct
               const isOpen = expanded === r.id
               const special = r.id === UNATTRIBUTED || r.id === NO_VENDOR
               const canExpand = r.itemRows.length > 0
@@ -520,7 +562,13 @@ export default function SupplierContribution() {
                 </Tip>
               </td>
               <td style={{ textAlign: 'right' }}>{npr(totals.consumed)}</td>
-              <td style={{ textAlign: 'right' }}>100.0%</td>
+              {/* Computed, never asserted (S594 — the defect that rule was written about, still
+                  standing one column to the LEFT of where it was fixed). It is 100.0% whenever
+                  `total > 0`, because every consumed value is split into shares summing to 1
+                  including the Not-attributed bucket — but an empty period makes it 0/0, and a
+                  cell that prints 100.0% over no rows is the one reading that is certainly
+                  wrong. */}
+              <td style={{ textAlign: 'right' }}>{totals.consumed > 0 ? `${pct(rows.reduce((s2, r) => s2 + r.attributed, 0), totals.consumed).toFixed(1)}%` : '—'}</td>
               <td style={{ textAlign: 'right' }}>{npr(purchaseGrandTotal)}</td>
               <td style={{ textAlign: 'right' }}>
                 {/* Computed, never asserted: a vendor whose returns exceeded its purchases makes

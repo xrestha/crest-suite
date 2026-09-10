@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -15,6 +15,58 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { getCf } from './purchasesHelpers'
 import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
+
+// A FREE line is not a price. `lineState()` has accepted rate 0 as free goods since S698 (buy 10
+// get 1 free: stock up, spend unchanged), and this page read every one of them as a price
+// observation — so a gift crate rendered "↓ Down −100%" in green, printed Last Rate 0.0000, and
+// switched OFF the >5% master-rate ⚠ on the very item whose rate had just diverged most. The
+// next real purchase then read as a rise from zero. The rows stay in the expanded history (a
+// free receipt is a real event worth seeing); they are simply not price points.
+const priced = history => (history || []).filter(e => e.perUomRate > 0)
+
+// Relative, not absolute. The band was `Math.abs(last - prev) < 0.01` on a PER-BASE-UNIT rate,
+// so its effective threshold was 0.01/prev — a continuum, not a constant. At NPR 250/BTL that is
+// 0.004% and harmless; at NPR 0.05/GM for rice by the sack it is 20%, so the page silently
+// called a fifth of a price rise "Stable" on exactly the staples a kitchen buys most of, and
+// "↑ Rising Only" hid them. Two thresholds, whichever is more forgiving (S644): a percentage for
+// the figure that matters, and a tiny absolute floor so float noise on a sub-paisa rate is not
+// reported as movement.
+const STABLE_PCT = 0.5      // %; below this a move is noise, not a price change
+const STABLE_ABS = 0.0001   // NPR per base unit; guards float noise only
+
+function trendPair(history) {
+  const p = priced(history)
+  if (p.length < 2) return null
+  return { last: p[p.length - 1].perUomRate, prev: p[p.length - 2].perUomRate }
+}
+
+function getTrend(history) {
+  const pair = trendPair(history)
+  if (!pair) return 'nodata'
+  const { last, prev } = pair
+  const delta = Math.abs(last - prev)
+  if (delta < STABLE_ABS) return 'stable'
+  if (prev > 0 && (delta / prev) * 100 < STABLE_PCT) return 'stable'
+  return last > prev ? 'up' : 'down'
+}
+
+// What the latest price move COST, in rupees: the per-unit change times the quantity actually
+// bought at the new rate. The page ranked and summarised rising prices by COUNT and by percent
+// only, so an owner could not tell a NPR 22 rise from a NPR 3,840 one — on the page whose whole
+// job is deciding which supplier to call. Deliberately the LAST purchase rather than a projected
+// month: it is a figure the reader can check against a bill they are holding.
+function getMoveCost(history) {
+  const p = priced(history)
+  if (p.length < 2) return null
+  const last = p[p.length - 1], prev = p[p.length - 2]
+  return (last.perUomRate - prev.perUomRate) * (parseFloat(last.qty) || 0)
+}
+
+function getPctChange(history) {
+  const pair = trendPair(history)
+  if (!pair || pair.prev === 0) return null
+  return ((pair.last - pair.prev) / pair.prev) * 100
+}
 
 export default function SupplierPriceTracker() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -40,9 +92,17 @@ export default function SupplierPriceTracker() {
   const [affectedRecipes, setAffectedRecipes] = useState(null)
   const [saveError, setSaveError]           = useState(null)
 
+  // Which client the in-flight load belongs to. An admin switching client in the top bar starts
+  // a second `init()` over the first, and whichever lands LAST wins every setter — so the slower,
+  // older client's vendors, items and entire purchase history could paint over the new one's with
+  // nothing on screen to say so. Same shape as `useLatestRequest` on the period-driven reports;
+  // this page derives rather than reloads, so the axis it races on is the client, not the period.
+  const loadedClientRef = useRef(null)
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [effectiveClientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    const myClient = effectiveClientId
+    loadedClientRef.current = myClient
     setLoading(true)
     setLoadError(null)
     const results = await Promise.all([
@@ -52,8 +112,17 @@ export default function SupplierPriceTracker() {
       // because `vendorMap` could not resolve them (S708 on a third page: archiving forces
       // `is_active = false`, so using the feature was what triggered the defect). The picker still
       // separates the two — see the `No longer active` optgroup below.
-      scopedFrom('vendors', 'id, name, is_active').order('name'),
-      scopedFrom('items', 'id, name, item_code, uom, rate, per_uom_rate, purchase_qty, purchase_unit, conversion_factor, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
+      // `vendors` and `items` are PAGED, and `items` is the one that matters: `itemMap` is what
+      // decides which purchase rows survive (`if (!item) return`), so a truncated read here does
+      // not shorten a column — it deletes the entire price history of every item past the cap,
+      // from the table, both Excel sheets and the vendor dropdown's item count. The
+      // `purchase_entries` read below was carefully paged under a comment about exactly this cap
+      // while the read that GATES it was bare: the producer/consumer shape from S706/S708, with
+      // the halves the other way round. `.order('id')` is the unique tiebreaker paging needs —
+      // `name` is not unique.
+      fetchAllRows(() => scopedFrom('vendors', 'id, name, is_active').order('name').order('id')),
+      fetchAllRows(() => scopedFrom('items', 'id, name, item_code, uom, rate, per_uom_rate, purchase_qty, purchase_unit, conversion_factor, categories(name)')
+        .eq('is_active', true).eq('is_sub_recipe', false).order('name').order('id')),
       scopedFrom('monthly_periods').order('bs_year').order('bs_month'),
       // Paged: every purchase line this client has ever recorded, across all periods — price
       // history is the point of this page, so it is unbounded by construction and grows past the
@@ -65,6 +134,7 @@ export default function SupplierPriceTracker() {
     ])
     // A failed read must not render an empty price history — a missing trend reads as "prices
     // never moved" (S612 silent-zero rule).
+    if (loadedClientRef.current !== myClient) return   // a newer client switch owns the page
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: v }, { data: i }, { data: p }, { data: pu }] = results
@@ -169,22 +239,6 @@ export default function SupplierPriceTracker() {
     return byItem
   }
 
-  function getTrend(history) {
-    if (!history || history.length < 2) return 'nodata'
-    const last = history[history.length - 1].perUomRate
-    const prev = history[history.length - 2].perUomRate
-    if (Math.abs(last - prev) < 0.01) return 'stable'
-    return last > prev ? 'up' : 'down'
-  }
-
-  function getPctChange(history) {
-    if (!history || history.length < 2) return null
-    const last = history[history.length - 1].perUomRate
-    const prev = history[history.length - 2].perUomRate
-    if (prev === 0) return null
-    return ((last - prev) / prev) * 100
-  }
-
   function trendBadge(trend) {
     if (trend === 'up')     return <span className="badge badge-red">↑ Up</span>
     if (trend === 'down')   return <span className="badge badge-green">↓ Down</span>
@@ -194,10 +248,14 @@ export default function SupplierPriceTracker() {
 
   // ── Price update ────────────────────────────────────────────────────────────
 
-  async function savePrice(item) {
-    const newPerUomRate = parseFloat(editingPrice[item.id])
+  // Keyed by the ROW key, not the item id. In "All Vendors" mode rows are keyed
+  // `vendor__item`, so one item bought from two vendors has two rows — and an editor keyed by
+  // item id opened BOTH of them on one Edit click, with `autoFocus` landing the caret in the
+  // second. The write still targets `item.id`; only the editor state is per row.
+  async function savePrice(item, rowKey) {
+    const newPerUomRate = parseFloat(editingPrice[rowKey])
     if (isNaN(newPerUomRate) || newPerUomRate <= 0) {
-      setEditingPrice(p => { const n = { ...p }; delete n[item.id]; return n })
+      setEditingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
       return
     }
     setSaveError(null)
@@ -217,12 +275,12 @@ export default function SupplierPriceTracker() {
       .eq('item_id', item.id)
     const affected = (recipeIngs || []).filter(ri => ri.recipes).map(ri => ri.recipes.name).filter((v, i, a) => a.indexOf(v) === i)
 
-    setSavingPrice(p => ({ ...p, [item.id]: true }))
+    setSavingPrice(p => ({ ...p, [rowKey]: true }))
     // Items are stored in their smallest unit — purchase_qty is always 1, so `rate` IS the per-UOM
     // price and needs no scaling. Multiplying by purchase_qty here was correct only while that
     // column could hold a pack size; keeping it would silently re-introduce a pack price.
     const { error } = await scopedUpdate('items', { rate: newPerUomRate }).eq('id', item.id)
-    setSavingPrice(p => { const n = { ...p }; delete n[item.id]; return n })
+    setSavingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
     if (error) {
       // A dropped write error is silent data loss. This branch was `if (!error) { … }` with no
       // else: the row snapped back to the old rate and nothing said why, which reads as the edit
@@ -236,12 +294,12 @@ export default function SupplierPriceTracker() {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, rate: newPerUomRate, per_uom_rate: newPerUomRate } : i))
     if (affected.length > 0) setAffectedRecipes({ itemName: item.name, recipes: affected, newRate: newPerUomRate, uom: item.uom })
     else if (ingErr) setAffectedRecipes({ itemName: item.name, recipes: null, newRate: newPerUomRate, uom: item.uom })
-    setEditingPrice(p => { const n = { ...p }; delete n[item.id]; return n })
+    setEditingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
   }
 
-  function handlePriceKey(e, item) {
-    if (e.key === 'Enter') savePrice(item)
-    if (e.key === 'Escape') setEditingPrice(p => { const n = { ...p }; delete n[item.id]; return n })
+  function handlePriceKey(e, item, rowKey) {
+    if (e.key === 'Enter') savePrice(item, rowKey)
+    if (e.key === 'Escape') setEditingPrice(p => { const n = { ...p }; delete n[rowKey]; return n })
   }
 
   // ── Excel export ───────────────────────────────────────────────────────────
@@ -259,7 +317,7 @@ export default function SupplierPriceTracker() {
     const summaryRows = Object.entries(byItem).map(([key, history]) => {
       const item = itemMap[history[0]?.item_id] || itemMap[key]
       const vendor = vendorMap[history[0]?.vendor_id]
-      const lastEntry = history[history.length - 1]
+      const lastEntry = priced(history).slice(-1)[0]   // last PRICED purchase, never a free line
       const trend = getTrend(history)
       const pct = getPctChange(history)
       return {
@@ -294,9 +352,13 @@ export default function SupplierPriceTracker() {
           'UOM': item?.uom || '',
           'Period': entry.period_label,
           'Day': entry.bs_day ?? '',
+          // The pack this rate is quoted in, or the column cannot be combined with anything:
+          // 'Rate (per pack)' sat beside a BASE-unit Qty with the pack size printed nowhere in
+          // the workbook, so Rate x Qty on the same row was wrong by the conversion factor.
+          'Pack': item?.purchase_unit ? `${getCf(item)} ${item.uom} / ${item.purchase_unit}` : `1 ${item?.uom || ''}`,
           'Rate (per pack)': Number(entry.rate.toFixed(4)),
           'Rate (per UOM)': Number(entry.perUomRate.toFixed(4)),
-          'Qty': entry.qty
+          'Qty (base units)': entry.qty
         })
       })
     })
@@ -340,7 +402,7 @@ export default function SupplierPriceTracker() {
     return out
   }, [allPurchases, selectedPeriodId, periodMap, itemMap])
 
-  const { filteredKeys, risingCount } = useMemo(() => {
+  const { filteredKeys, risingCount, risingCost } = useMemo(() => {
     const q = search.toLowerCase()
     const filteredKeys = Object.keys(vendorPurchases).filter(key => {
       const history = vendorPurchases[key]
@@ -358,8 +420,12 @@ export default function SupplierPriceTracker() {
       const ib = itemMap[vendorPurchases[b][0]?.item_id]
       return (ia?.name || '').localeCompare(ib?.name || '')
     })
-    const risingCount = filteredKeys.filter(k => getTrend(vendorPurchases[k]) === 'up').length
-    return { filteredKeys, risingCount }
+    const risingKeys = filteredKeys.filter(k => getTrend(vendorPurchases[k]) === 'up')
+    const risingCount = risingKeys.length
+    // The rupee cost of those rises on the latest deliveries, so the headline says how much
+    // rather than only how many.
+    const risingCost = risingKeys.reduce((sum, k) => sum + (getMoveCost(vendorPurchases[k]) || 0), 0)
+    return { filteredKeys, risingCount, risingCost }
   }, [vendorPurchases, search, filterTrend, itemMap])
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
@@ -488,7 +554,16 @@ export default function SupplierPriceTracker() {
 
         <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>
           {filteredKeys.length} item{filteredKeys.length !== 1 ? 's' : ''}
-          {risingCount > 0 && <span style={{ color: 'var(--theme-red-text)', marginLeft: 8 }}>· {risingCount} ↑ rising</span>}
+          {risingCount > 0 && (
+            <span style={{ color: 'var(--theme-red-text)', marginLeft: 8 }}>
+              · {risingCount} ↑ rising
+              {risingCost > 0 && (
+                <Tip width={280} text="What those price rises cost on the most recent delivery of each item: the per-unit increase times the quantity actually bought at the new rate. A figure you can check against the bill.">
+                  <span style={{ marginLeft: 6 }}>(NPR {Math.round(risingCost).toLocaleString('en-IN')} on the latest buys)</span>
+                </Tip>
+              )}
+            </span>
+          )}
         </span>
       </div>
 
@@ -525,7 +600,7 @@ export default function SupplierPriceTracker() {
                 <th>Item</th>
                 <th>Category</th>
                 <th>UOM</th>
-                <th style={{ textAlign: 'right' }}><Tip text="Current rate per UOM in the Item Master — what recipe costing uses. Gold ⚠ means it differs from last purchase by >5%." width={260}>Master Rate</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Current rate per UOM in the Item Master — what recipe costing uses. The ⚠ mark means it differs from the last purchase by more than 5%." width={260}>Master Rate</Tip></th>
                 <th style={{ textAlign: 'right' }} className="no-print"><Tip text="Manually set a new master rate. Updates the Item Master and affects all recipe costs immediately." width={240}>Update Rate</Tip></th>
                 <th style={{ textAlign: 'right' }}><Tip text={selectedPeriod ? `Rate per UOM from the most recent purchase entry in ${periodLabel}.` : 'Rate per UOM from the most recent purchase entry across all periods.'}>Last Rate</Tip></th>
                 <th>Last Period</th>
@@ -540,15 +615,15 @@ export default function SupplierPriceTracker() {
                 const item = itemMap[history[0]?.item_id] || itemMap[key]
                 const vendor = vendorMap[history[0]?.vendor_id]
                 if (!item) return null
-                const lastEntry = history[history.length - 1]
+                const lastEntry = priced(history).slice(-1)[0]   // last PRICED purchase (free lines are not prices)
                 const trend = getTrend(history)
                 const pct = getPctChange(history)
                 const masterRate = parseFloat(item.per_uom_rate) || 0
                 const lastRate = lastEntry?.perUomRate
                 const rateMismatch = lastRate && Math.abs(masterRate - lastRate) / lastRate > 0.05
                 const isExpanded = !!expandedItems[key]
-                const isEditing = item.id in editingPrice
-                const isSaving = savingPrice[item.id]
+                const isEditing = key in editingPrice
+                const isSaving = savingPrice[key]
 
                 return (
                   <Fragment key={key}>
@@ -587,9 +662,9 @@ export default function SupplierPriceTracker() {
                           <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
                             <input aria-label={`New price for ${item.name}`}
                               type="number" min="0" step="0.0001"
-                              value={editingPrice[item.id]}
-                              onChange={e => setEditingPrice(p => ({ ...p, [item.id]: e.target.value }))}
-                              onKeyDown={e => handlePriceKey(e, item)}
+                              value={editingPrice[key]}
+                              onChange={e => setEditingPrice(p => ({ ...p, [key]: e.target.value }))}
+                              onKeyDown={e => handlePriceKey(e, item, key)}
                               autoFocus
                               style={{
                                 width: 90, textAlign: 'right',
@@ -599,18 +674,18 @@ export default function SupplierPriceTracker() {
                               }}
                             />
                             <button className="btn btn-primary" style={{ fontSize: 11, padding: '7px 11px' }}
-                              aria-label="Save price" onClick={() => savePrice(item)} disabled={isSaving}>
+                              aria-label="Save price" onClick={() => savePrice(item, key)} disabled={isSaving}>
                               {isSaving ? '…' : '✓'}
                             </button>
                             <button className="btn btn-ghost" style={{ fontSize: 11, padding: '7px 11px' }}
                               aria-label="Cancel edit"
-                              onClick={() => setEditingPrice(p => { const n = { ...p }; delete n[item.id]; return n })}>
+                              onClick={() => setEditingPrice(p => { const n = { ...p }; delete n[key]; return n })}>
                               ✕
                             </button>
                           </div>
                         ) : (
                           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
-                            onClick={() => setEditingPrice(p => ({ ...p, [item.id]: String(masterRate || '') }))}>
+                            onClick={() => setEditingPrice(p => ({ ...p, [key]: String(masterRate || '') }))}>
                             Edit
                           </button>
                         )}
@@ -628,9 +703,14 @@ export default function SupplierPriceTracker() {
 
                     {/* Expanded history rows */}
                     {isExpanded && history.map((entry, idx) => {
-                      const isFirst = idx === 0
-                      const prevRate = isFirst ? null : history[idx - 1].perUomRate
-                      const entryPct = prevRate ? ((entry.perUomRate - prevRate) / prevRate) * 100 : null
+                      // The previous PRICED row, not the previous row. `prevRate ? …` is a
+                      // truthiness test, so a free line (rate 0) sitting above made the next row
+                      // render as though it were the item's first ever purchase — and any row
+                      // after a free line measured its change from zero.
+                      const prevRate = history.slice(0, idx).reverse().find(e => e.perUomRate > 0)?.perUomRate ?? null
+                      const entryPct = prevRate && entry.perUomRate > 0
+                        ? ((entry.perUomRate - prevRate) / prevRate) * 100
+                        : null
                       return (
                         <tr key={`hist-${key}-${idx}`} style={{ background: 'var(--theme-bg)' }}>
                           <td></td>
@@ -638,7 +718,13 @@ export default function SupplierPriceTracker() {
                           <td colSpan={3} style={{ paddingLeft: 32, fontSize: 12, color: 'var(--theme-text3)' }}>
                             {entry.bs_day != null ? `${bsDayOrdinal(entry.bs_day)} ${entry.period_label}` : entry.period_label}
                           </td>
-                          <td colSpan={2}></td>
+                          {/* Master Rate, then Update Rate. This was `colSpan={2}` followed by the
+                              no-print cell — 13 cells against a 12-column header, so every figure
+                              in an expanded history row sat one column to the RIGHT of its own
+                              heading: the rate under "Last Period", the qty under "Trend", the
+                              change under "Purchases". Keeping `no-print` on the Update Rate cell
+                              also matches the header, so the print layout stays aligned too. */}
+                          <td></td>
                           <td className="no-print"></td>
                           <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--theme-text2)' }}>
                             {entry.perUomRate.toFixed(4)}

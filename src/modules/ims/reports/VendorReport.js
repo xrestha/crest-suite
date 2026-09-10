@@ -238,7 +238,12 @@ export default function VendorReport() {
     const discount    = gross - netPurch
     const returned    = vReturns.reduce((s, r) => s + ix.retValueOf(r), 0)
     const net         = netPurch - returned
-    const count       = vPurchases.length
+    // BILLS, not lines. It counted `purchase_entries` rows under a header reading
+    // "Transactions", while the drilldown one click away counts bills off the same index and
+    // says so — a 12-bill vendor with 8 lines a bill read as 96. `billId` comes from the same
+    // grouping key the drilldown uses, so the two cannot disagree about what a bill is.
+    const count       = new Set(vPurchases.map(p => ix.billKey(p))).size
+    const lineCount   = vPurchases.length
     const returnCount = vReturns.length
     const days        = [...new Set(vPurchases.map(p => p.bs_day))].length
     // `methodOf`, not the raw column: NULL is Cash everywhere else in the product (S650), and a
@@ -251,7 +256,7 @@ export default function VendorReport() {
     const cash    = byMethod('Cash')
     const credit  = byMethod('Credit')
     const fonepay = byMethod('FonePay')
-    return { vendor, gross, discount, returned, net, count, returnCount, days, cash, credit, fonepay }
+    return { vendor, gross, discount, returned, net, count, lineCount, returnCount, days, cash, credit, fonepay }
   }).filter(r => r.gross > 0 || r.returned > 0), [vendors, ix])
 
   // A bill with no vendor is still a bill, and it used to appear as a count and a gross with
@@ -269,7 +274,8 @@ export default function VendorReport() {
     unassigned.filter(p => methodOf(p) === m).reduce((s, p) => s + ix.lineNetOf(p), 0)
     - unassignedReturns.filter(r => methodOf(r) === m).reduce((s, r) => s + ix.retValueOf(r), 0)
   const unassignedRow = {
-    count: unassigned.length, gross: unassignedGross, discount: unassignedDiscount,
+    count: new Set(unassigned.map(p => ix.billKey(p))).size, lineCount: unassigned.length,
+    gross: unassignedGross, discount: unassignedDiscount,
     returned: unassignedReturned, net: unassignedNet,
     cash: unassignedByMethod('Cash'), credit: unassignedByMethod('Credit'),
     fonepay: unassignedByMethod('FonePay'),
@@ -282,8 +288,15 @@ export default function VendorReport() {
   const grandNet      = grandNetPurch - grandReturn
 
   const allDays = useMemo(() => [...ix.netByDay.keys()].sort((a, b) => a - b), [ix])
+  // Purchases OR returns. The Daily Breakdown matrix draws a column per vendor in this list while
+  // its "Day Net Total" column and its TOTAL row are computed over EVERY row in the period — so a
+  // vendor whose only activity was a credit note had no column of its own while its credit sat
+  // inside every day total, and the matrix could not be added up. Same class as the Vendor Summary
+  // footer S725 fixed; the same page, the other tab. `unassignedTotal` is the other half of that
+  // population and gets its own column below.
   const activeVendors = useMemo(
-    () => vendors.filter(v => (ix.purByVendor.get(v.id) || []).length > 0),
+    () => vendors.filter(v =>
+      (ix.purByVendor.get(v.id) || []).length > 0 || (ix.retByVendor.get(v.id) || []).length > 0),
     [vendors, ix])
 
   // Discount Received — one row per bill that has a discount
@@ -456,6 +469,18 @@ export default function VendorReport() {
     return ix.netByVendor.get(vendorId) || 0
   }
 
+  // The matrix's own population. "Day Net Total" was `dayNet(day)` — every row in the period —
+  // printed beside a column set that excluded unassigned bills and, under a vendor search, most
+  // vendors. So the cells could not be added across to the total beside them. These two follow
+  // exactly what is rendered; the period's own figures are stated separately underneath.
+  const showUnassignedCol = !vendorSearch && ix.netByVendorDay.has(null)
+  const dayShown = day =>
+    filteredActiveVendors.reduce((s, v) => s + vendorDayNet(v.id, day), 0)
+    + (showUnassignedCol ? vendorDayNet(null, day) : 0)
+  const shownNet =
+    filteredActiveVendors.reduce((s, v) => s + vendorNet(v.id), 0)
+    + (showUnassignedCol ? vendorNet(null) : 0)
+
   function openVendorDrilldown(vendor, day = null) {
     setDrilldownVendor(vendor)
     setDrilldownDay(day)
@@ -477,7 +502,8 @@ export default function VendorReport() {
     const share = v => grandNet !== 0 ? Number(((v / grandNet) * 100).toFixed(1)) : 0
     const summaryRow = (name, r, days) => ({
       'Vendor': name,
-      'Transactions': r.count,
+      'Bills': r.count,
+      'Line Items': r.lineCount,
       'Days Active': days,
       'Gross Purchases (NPR)': n(r.gross),
       'Discount Received (NPR)': n(-r.discount),
@@ -499,7 +525,7 @@ export default function VendorReport() {
     // A sheet a reader is asked to reconcile needs the total printed on it (S723). Without one,
     // the only way to check the export against the screen is to sum eleven columns by hand.
     summaryData.push(summaryRow('TOTAL', {
-      count: purchases.length, gross: grandGross, discount: grandDiscount,
+      count: ix.billMap.size, lineCount: purchases.length, gross: grandGross, discount: grandDiscount,
       returned: grandReturn, net: grandNet,
       cash: vendorSummary.reduce((s, r) => s + r.cash, 0) + (unassignedTotal > 0 ? unassignedRow.cash : 0),
       credit: vendorSummary.reduce((s, r) => s + r.credit, 0) + (unassignedTotal > 0 ? unassignedRow.credit : 0),
@@ -516,14 +542,18 @@ export default function VendorReport() {
     const nameCount = {}
     activeVendors.forEach(v => { nameCount[v.name] = (nameCount[v.name] || 0) + 1 })
     const colOf = v => (nameCount[v.name] > 1 && v.vendor_code) ? `${v.name} (${v.vendor_code})` : v.name
+    const hasUnassignedCol = ix.netByVendorDay.has(null)
     const dailyData = allDays.map(day => {
       const row = { 'Day': day }
       activeVendors.forEach(v => { const val = vendorDayNet(v.id, day); row[colOf(v)] = val !== 0 ? n(val) : '' })
+      // Unassigned is part of the day total, so it needs a column or the sheet cannot be added up.
+      if (hasUnassignedCol) { const u = vendorDayNet(null, day); row['Unassigned'] = u !== 0 ? n(u) : '' }
       row['Day Net Total (NPR)'] = n(dayNet(day))
       return row
     })
     const dailyTotal = { 'Day': 'TOTAL' }
     activeVendors.forEach(v => { const val = vendorNet(v.id); dailyTotal[colOf(v)] = val !== 0 ? n(val) : '' })
+    if (hasUnassignedCol) dailyTotal['Unassigned'] = n(vendorNet(null))
     dailyTotal['Day Net Total (NPR)'] = n(grandNet)
     dailyData.push(dailyTotal)
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
@@ -586,12 +616,30 @@ export default function VendorReport() {
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
           </select>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={!!loadError}>Export Excel</button>
+          {/* Disabled while LOADING too, not only on an error. It was live during the
+              three reads, and the workbook is built from the stale `vendorSummary`/`ix`
+              while `scopeLine` and the filename already read the NEW `selectedPeriod` —
+              one month’s figures leaving the building inside another month’s workbook,
+              which is the S601 rule verbatim. */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError}>Export Excel</button>
         </div>
       </div>
 
       {/* A failed read renders as a failure — never as a confident NPR-0 vendor ledger (S612). */}
+      {/* `loading` as well as `loadError` (S616). The KPI strip and the split chart sat
+          inside a gate that only tested the error, so on first paint they printed a gold
+          "Gross Purchases NPR 0 / Net Spend NPR 0" above a card reading "Loading…", and on
+          every period change they held the PREVIOUS month’s money under the new month’s
+          chip until the reads landed. A number the page has not computed is not a number. */}
       {loadError ? <ReportLoadError error={loadError} /> : <>
+
+      {/* The KPI strip and the split chart below it render only once there are real figures
+          (S616). They used to sit inside a gate testing `loadError` alone, so first paint printed
+          a gold "Gross Purchases NPR 0 / Net Spend NPR 0" above a card reading "Loading…", and
+          every period change held the PREVIOUS month's money under the NEW month's period chip
+          until the reads landed. The tabs and the table card stay mounted — that card has its own
+          Loading state — so nothing jumps. */}
+      {!loading && <>
 
       <div className="stat-grid">
         <div className="stat-card">
@@ -656,6 +704,7 @@ export default function VendorReport() {
           </div>
         </div>
       )}
+      </>}
 
       {/* Vendor search — combobox */}
       <div style={{ marginBottom: 16, position: 'relative', width: 300 }}>
@@ -680,12 +729,14 @@ export default function VendorReport() {
         {showVendorDrop && (
           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', marginTop: 4, zIndex: 100, maxHeight: 220, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}>
             {vendorSearch && (
-              <div
+              <button
+                type="button"
                 onMouseDown={() => { setVendorSearch(''); setShowVendorDrop(false) }}
-                style={{ padding: '8px 12px', fontSize: 12, color: 'var(--theme-text3)', cursor: 'pointer', borderBottom: '1px solid var(--theme-border-lt)' }}
+                onClick={() => { setVendorSearch(''); setShowVendorDrop(false) }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', font: 'inherit', padding: '8px 12px', fontSize: 12, color: 'var(--theme-text3)', cursor: 'pointer', borderBottom: '1px solid var(--theme-border-lt)' }}
               >
                 Show all vendors
-              </div>
+              </button>
             )}
             {vendorSummary
               .filter(r => !vendorSearch || r.vendor.name.toLowerCase().includes(vendorSearch.toLowerCase()) || (r.vendor.vendor_code || '').toLowerCase().includes(vendorSearch.toLowerCase()))
@@ -732,7 +783,7 @@ export default function VendorReport() {
               <thead>
                 <tr>
                   <th>Vendor</th>
-                  <th style={{ textAlign: 'right' }}>Transactions</th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Number of BILLS from this vendor in the period — the same count the drill-down shows when you click the vendor name. Not the number of line items." width={250}>Bills</Tip></th>
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
                   <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}><Tip text="Trade/promo discount received from this vendor — deducted from net spend." width={230}>Discount</Tip></th>
                   <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Value of goods returned to this vendor this period, credited at the price actually paid — if the original bill carried a trade discount, the return is credited net of its share. Return a whole discounted bill and net spend comes back to zero, not to minus the discount." width={280}>Returns</Tip></th>
@@ -750,19 +801,27 @@ export default function VendorReport() {
                   return (
                     <tr key={r.vendor.id}>
                       <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
-                        <span
+                        {/* A real control, not a span with an onClick. The drilldown is this
+                            page's main interaction and was mouse-only at five separate sites —
+                            no tab stop, no Enter, nothing for a screen reader. `.btn-linklike`
+                            is the house class for a cell that ACTS on the row's identity. */}
+                        <button
+                          type="button"
+                          className="btn-linklike"
                           onClick={() => openVendorDrilldown(r.vendor)}
                           title="View purchase bills"
-                          style={{ cursor: 'pointer' }}
-                          onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                          onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                          aria-label={`View ${r.vendor.name}'s purchase bills`}
                         >
                           {r.vendor.vendor_code && (
-                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--theme-accent-ink)', marginRight: 8 }}>{r.vendor.vendor_code}</span>
+                            /* `.cell-sub` rather than a raw accent: `@media print` sets a black
+                               colour on td/th and has no descendant reset, so a coloured span
+                               inside a cell keeps its screen colour and prints pale on white.
+                               That class exists precisely for this and carries a print override. */
+                            <span className="cell-sub" style={{ fontFamily: 'monospace', marginRight: 8 }}>{r.vendor.vendor_code}</span>
                           )}
                           {r.vendor.name}
-                        </span>
-                        {r.returnCount > 0 && <span style={{ fontSize: 11, color: 'var(--theme-red-text)', marginLeft: 6 }}>({r.returnCount} return{r.returnCount > 1 ? 's' : ''})</span>}
+                        </button>
+                        {r.returnCount > 0 && <span className="cell-sub" style={{ marginLeft: 6 }}>({r.returnCount} return{r.returnCount > 1 ? 's' : ''})</span>}
                       </td>
                       <td style={{ textAlign: 'right' }}>{r.count}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>NPR {r.gross.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
@@ -821,7 +880,7 @@ export default function VendorReport() {
                 {vendorSearch && (
                   <tr>
                     <td colSpan={11} style={{ fontSize: 12, color: 'var(--theme-text3)', paddingTop: 6 }}>
-                      Filtered by “{vendorSearch}”. The period's own totals are NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })} gross / NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })} net across {purchases.length} entries.
+                      Filtered by “{vendorSearch}”. The period's own totals are NPR {grandGross.toLocaleString('en-IN', { maximumFractionDigits: 0 })} gross / NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })} net across {ix.billMap.size} bills.
                     </td>
                   </tr>
                 )}
@@ -857,7 +916,20 @@ export default function VendorReport() {
                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                           title="View bill(s) for this day"
                         >
-                          <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(day, selectedPeriod?.bs_month)}</td>
+                          {/* The row keeps its mouse onClick; the DAY carries the real control,
+                              so the drilldown is reachable by keyboard without putting a button
+                              role on a <tr> (which would take its cells out of the table's own
+                              structure — the S595/S653 rule). */}
+                          <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            <button
+                              type="button"
+                              className="btn-linklike"
+                              onClick={e => { e.stopPropagation(); openVendorDrilldown(singleVendor, day) }}
+                              aria-label={`View ${singleVendor.name} bills for ${formatBsDay(day, selectedPeriod?.bs_month)}`}
+                            >
+                              {formatBsDay(day, selectedPeriod?.bs_month)}
+                            </button>
+                          </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                             NPR {val.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                           </td>
@@ -883,28 +955,39 @@ export default function VendorReport() {
                   <tr>
                     <th>Day</th>
                     {filteredActiveVendors.map(v => <th key={v.id} style={{ textAlign: 'right' }}>{v.name}</th>)}
+                    {showUnassignedCol && <th style={{ textAlign: 'right', fontStyle: 'italic', color: 'var(--theme-text3)' }}>Unassigned</th>}
                     <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>Day Net Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {allDays.map(day => {
-                    const dn = dayNet(day)
+                    const dn = dayShown(day)
                     return (
                       <tr key={day}>
                         <td style={{ fontWeight: 700, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{formatBsDay(day, selectedPeriod?.bs_month)}</td>
                         {filteredActiveVendors.map(v => {
                           const val = vendorDayNet(v.id, day)
                           return (
-                            <td
-                              key={v.id}
-                              onClick={val !== 0 ? () => openVendorDrilldown(v, day) : undefined}
-                              title={val !== 0 ? 'View bill(s) for this day' : undefined}
-                              style={{ textAlign: 'right', color: val !== 0 ? 'var(--theme-text1)' : 'var(--theme-border)', cursor: val !== 0 ? 'pointer' : 'default' }}
-                            >
-                              {val !== 0 ? val.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
+                            <td key={v.id} style={{ textAlign: 'right', color: val !== 0 ? 'var(--theme-text1)' : 'var(--theme-border)' }}>
+                              {val !== 0 ? (
+                                <button
+                                  type="button"
+                                  className="btn-linklike"
+                                  onClick={() => openVendorDrilldown(v, day)}
+                                  title="View bill(s) for this day"
+                                  aria-label={`View ${v.name} bills for ${formatBsDay(day, selectedPeriod?.bs_month)}`}
+                                >
+                                  {val.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                </button>
+                              ) : '—'}
                             </td>
                           )
                         })}
+                        {showUnassignedCol && (
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
+                            {vendorDayNet(null, day) !== 0 ? vendorDayNet(null, day).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
+                          </td>
+                        )}
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
                           NPR {dn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </td>
@@ -918,10 +1001,22 @@ export default function VendorReport() {
                         NPR {vendorNet(v.id).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                       </td>
                     ))}
+                    {showUnassignedCol && (
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text3)', paddingTop: 12 }}>
+                        NPR {vendorNet(null).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </td>
+                    )}
                     <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
-                      NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      NPR {shownNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </td>
                   </tr>
+                  {vendorSearch && (
+                    <tr>
+                      <td colSpan={filteredActiveVendors.length + 2} style={{ fontSize: 12, color: 'var(--theme-text3)', paddingTop: 6 }}>
+                        Filtered by “{vendorSearch}”. The period's own net across every vendor is NPR {grandNet.toLocaleString('en-IN', { maximumFractionDigits: 0 })}.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1025,12 +1120,9 @@ export default function VendorReport() {
             {drilldownDay != null && (
               <>
                 {' · '}
-                <span
-                  onClick={() => setDrilldownDay(null)}
-                  style={{ color: 'var(--theme-accent-ink)', cursor: 'pointer', textDecoration: 'underline' }}
-                >
+                <button type="button" className="btn-linklike" onClick={() => setDrilldownDay(null)}>
                   Show all days
-                </span>
+                </button>
               </>
             )}
           </p>
@@ -1123,7 +1215,17 @@ export default function VendorReport() {
                                     <tbody>
                                       {b.entries.map(e => (
                                         <tr key={e.id}>
-                                          <td style={{ padding: '4px 16px 4px 0', color: 'var(--theme-text1)' }}>{e.items?.name}</td>
+                                          {/* `items(name, categories(name))` was fetched on every
+                                              purchase line and the category thrown away — the word
+                                              appeared nowhere in the file outside the SELECT. It is
+                                              what answers "what am I actually buying from this
+                                              vendor", and it costs a second line here. */}
+                                          <td style={{ padding: '4px 16px 4px 0', color: 'var(--theme-text1)' }}>
+                                            {e.items?.name}
+                                            {e.items?.categories?.name && (
+                                              <span className="cell-sub" style={{ display: 'block' }}>{e.items.categories.name}</span>
+                                            )}
+                                          </td>
                                           <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.qty).toLocaleString('en-IN')}</td>
                                           <td style={{ padding: '4px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(e.rate).toLocaleString('en-IN')}</td>
                                           <td style={{ padding: '4px 0 4px 16px', textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>NPR {(e.qty * e.rate).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
