@@ -5,7 +5,7 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, runChunkedByIds } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
@@ -91,6 +91,13 @@ export default function Stock() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const [pendingSync, setPendingSync] = useState(0)
   const [syncing, setSyncing] = useState(false)
+  // Counts the queued entries the last sync attempt could NOT write, with the reason. Until S731
+  // flushQueue() swallowed every failure: a count queued against a month that was closed while
+  // the device was offline (or refused by RLS after a sign-out on a shared tablet) was retried on
+  // every page load forever, never landed, and said nothing — and the "N pending" badge it
+  // inflates only renders inside the offline banner, so once back online the stuck entries were
+  // invisible from every screen.
+  const [syncFailed, setSyncFailed] = useState(null)
   const [pendingItems, setPendingItems] = useState(new Set())
   const flushRef = useRef(null)
 
@@ -109,7 +116,18 @@ export default function Stock() {
   }, [])
 
   useEffect(() => {
-    if (!authLoading && effectiveClientId) init()
+    if (!authLoading && effectiveClientId) {
+      // init() is async and nothing awaits it, so a throw inside it used to be an unhandled
+      // rejection: setLoading(false) never ran and the page sat on "Loading…" forever with no
+      // error anywhere. Every IndexedDB call it makes can reject — Firefox private browsing
+      // refuses indexedDB.open outright, and an evicted or blocked store does the same — and
+      // since flushQueue() is the FIRST thing init() does, that took the ONLINE path down too:
+      // an unusable local cache bricked a page that did not need it.
+      init().catch(err => {
+        setLoadError(err?.supabase || err || new Error('Stock Count could not be loaded.'))
+        setLoading(false)
+      })
+    }
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The day the Daily Wastage tab opens on. Today's day-of-month is right for the current period
@@ -126,11 +144,20 @@ export default function Stock() {
     setLoadError(null)
 
     if (!navigator.onLine) {
-      const [cachedItems, cachedCats, cachedPeriods] = await Promise.all([
-        getCachedItems(effectiveClientId),
-        getCachedCategories(effectiveClientId),
-        getCachedPeriods(effectiveClientId),
-      ])
+      // Offline AND no readable local store is a real dead end, unlike the online path — say so
+      // rather than rendering an empty item list, which reads as "this client has no items".
+      let cachedItems, cachedCats, cachedPeriods
+      try {
+        ;[cachedItems, cachedCats, cachedPeriods] = await Promise.all([
+          getCachedItems(effectiveClientId),
+          getCachedCategories(effectiveClientId),
+          getCachedPeriods(effectiveClientId),
+        ])
+      } catch (err) {
+        setLoadError(err instanceof Error ? err : new Error(String(err)))
+        setLoading(false)
+        return
+      }
       if (cachedItems)   setItems(cachedItems)
       if (cachedCats)    setCategories(cachedCats)
       if (cachedPeriods) {
@@ -139,9 +166,9 @@ export default function Stock() {
         if (open) {
           setSelectedPeriod(open)
           clampWDay(open)
-          const cached = await getCachedStockData(open.id)
+          const cached = await getCachedStockData(open.id).catch(() => null)
           if (cached) {
-            const pending = await getQueue()
+            const pending = await getQueue().catch(() => [])
             const sd = { ...(cached.stockData || {}) }
             pending.forEach(op => {
               if (op.periodId === open.id) {
@@ -153,7 +180,12 @@ export default function Stock() {
             setPurchases(cached.purchases    || {})
             setReturns(cached.returns        || {})
             setRequisitioned(cached.requisitioned || {})
-            setPendingSync(pending.filter(op => op.periodId === open.id).length)
+            // The badge counts everything still waiting for THIS client, across every month —
+            // the same set flushQueue() will attempt. It used to count only the open period's
+            // ops while the sync banner counted all of them, so the two numbers describing one
+            // queue disagreed. `pendingItems` stays period-scoped: it highlights rows in the
+            // table on screen, which is a different question.
+            setPendingSync(pending.filter(op => !op.clientId || op.clientId === effectiveClientId).length)
             setPendingItems(new Set(pending.filter(op => op.periodId === open.id).map(op => op.itemId)))
           }
         }
@@ -179,11 +211,13 @@ export default function Stock() {
     setPeriods(p || [])
     setItems(i || [])
     setCategories(c || [])
+    // Warming the offline cache is an accelerator, never the data path — the server read above
+    // has already succeeded. A rejection here (no store, quota) must not fail a load that worked.
     await Promise.all([
       cachePeriods(effectiveClientId, p || []),
       cacheItems(effectiveClientId, i || []),
       cacheCategories(effectiveClientId, c || []),
-    ])
+    ]).catch(() => {})
     const open = (p || []).find(x => x.status === 'open')
     if (open) {
       periodReq.begin(open.id)   // the auto-selected period claims the page like a chosen one
@@ -297,7 +331,7 @@ export default function Stock() {
     clampWDay(p)
     setPageNotice(null)
     if (!navigator.onLine) {
-      const cached = await getCachedStockData(periodId)
+      const cached = await getCachedStockData(periodId).catch(() => null)
       if (!periodReq.isCurrent(periodId)) return
       if (cached) {
         setStockData(cached.stockData    || {})
@@ -391,7 +425,9 @@ export default function Stock() {
     const prior = persistLocks.current[key] || Promise.resolve()
     const run = prior.then(async () => {
       if (!navigator.onLine) {
-        await enqueue({ periodId: selectedPeriod.id, itemId, fieldKey, qty })
+        // `clientId` is what lets flushQueue() tell this outlet's counts from those of whoever
+        // used the device before — see the note there.
+        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId, fieldKey, qty })
         setPendingSync(prev => prev + 1)
         setPendingItems(prev => new Set([...prev, itemId]))
         return true
@@ -403,21 +439,58 @@ export default function Stock() {
     return run
   }
 
+  // Replays what was counted offline. Two things it must not do, both learned the hard way:
+  //
+  // It must not replay another tenant's ops. The queue is one IndexedDB store shared by every
+  // account that has used this device, and a queued op used to carry only a period id — so after
+  // a sign-out on a shared counting tablet, or an outlet switch, the next session's init() sent
+  // the previous one's counts under its own JWT, where RLS refuses them. `switchOutlet()` in
+  // AuthContext already refuses to switch while the queue is non-empty for exactly this reason;
+  // sign-out has no such guard, so the op now carries the client it was counted against and
+  // anything belonging elsewhere is left where it is. (An op with no clientId predates S731 —
+  // flushed as before rather than stranded, since it is far more likely to be this device's own
+  // interrupted count than someone else's.)
+  //
+  // And it must not swallow the refusal. A count queued against a month that was closed while the
+  // device was offline can never land; retrying it silently on every page load is not resilience,
+  // it is a figure the counter believes is saved and is not.
   async function flushQueue() {
-    const queue = await getQueue()
-    if (queue.length === 0) return
+    let queue
+    try {
+      queue = await getQueue()
+    } catch (_) {
+      // No usable offline store on this device (private browsing, evicted storage). Nothing was
+      // queued here, so there is nothing to replay — and this must never take the page down with
+      // it: init() awaits this before it reads the server at all.
+      return
+    }
+    const mine = (queue || []).filter(op => !op.clientId || op.clientId === effectiveClientId)
+    if (mine.length === 0) { setPendingSync(0); setSyncFailed(null); return }
     setSyncing(true)
-    let remaining = queue.length
-    for (const item of queue) {
+    setSyncFailed(null)
+    let remaining = mine.length
+    let failures = 0
+    let lastErr = null
+    for (const item of mine) {
       try {
         await persistValueDirect(item.periodId, item.itemId, item.fieldKey, item.qty)
         await dequeue(item.id)
         remaining--
         setPendingSync(remaining)
         setPendingItems(prev => { const next = new Set(prev); next.delete(item.itemId); return next })
-      } catch (_) {}
+      } catch (err) {
+        failures++
+        lastErr = err
+      }
     }
     setSyncing(false)
+    if (failures > 0) {
+      const { text, detail } = asActionError(lastErr?.supabase || lastErr)
+      setSyncFailed({
+        text: `${failures} count${failures === 1 ? '' : 's'} entered offline could not be saved and ${failures === 1 ? 'is' : 'are'} still waiting on this device. Re-enter ${failures === 1 ? 'it' : 'them'} on the right month and save again — a month that has since been closed has to be re-opened first. ${text}`,
+        detail,
+      })
+    }
   }
 
   flushRef.current = flushQueue
@@ -497,11 +570,17 @@ export default function Stock() {
       const zeros = entries.filter(e => isNoRow(fieldKey, e.qty)).map(e => e.itemId)
       const positives = entries.filter(e => !isNoRow(fieldKey, e.qty))
       if (fieldKey === 'opening') {
-        if (zeros.length) fail((await supabase.from('opening_stock').delete().eq('period_id', periodId).in('item_id', zeros)).error)
+        // Chunked: `zeros`/`allIds` here are "every visible item", which on a real client is the
+        // whole item book. PostgREST spells an .in() list out in the REQUEST URL, so 400 uuids is
+        // ~15 kB of URL and a 414 from the proxy long before the row cap matters (S629). The
+        // upserts/inserts are POST bodies and need no such treatment. Each delete runs BEFORE the
+        // write that replaces those rows, so a chunk failing part-way throws here and the insert
+        // never runs — nothing is destroyed without its replacement.
+        if (zeros.length) fail((await runChunkedByIds(zeros, ids => supabase.from('opening_stock').delete().eq('period_id', periodId).in('item_id', ids))).error)
         if (positives.length) fail((await supabase.from('opening_stock').upsert(
           positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty })), { onConflict: 'period_id,item_id' })).error)
       } else if (fieldKey === 'closing') {
-        if (zeros.length) fail((await supabase.from('closing_stock').delete().eq('period_id', periodId).in('item_id', zeros)).error)
+        if (zeros.length) fail((await runChunkedByIds(zeros, ids => supabase.from('closing_stock').delete().eq('period_id', periodId).in('item_id', ids))).error)
         if (positives.length) {
           const countedAt = new Date().toISOString()
           fail((await supabase.from('closing_stock').upsert(
@@ -509,11 +588,11 @@ export default function Stock() {
         }
       } else if (fieldKey === 'wastage') {
         // Same shape as persistValueDirect: only the undated catch-all rows are this tab's to replace.
-        fail((await supabase.from('wastages').delete().eq('period_id', periodId).in('item_id', allIds).is('bs_day', null)).error)
+        fail((await runChunkedByIds(allIds, ids => supabase.from('wastages').delete().eq('period_id', periodId).in('item_id', ids).is('bs_day', null))).error)
         if (positives.length) fail((await supabase.from('wastages').insert(
           positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, bs_day: null })))).error, true)
       } else if (fieldKey === 'staff_meal') {
-        fail((await supabase.from('staff_meals').delete().eq('period_id', periodId).in('item_id', allIds).eq('type', 'staff')).error)
+        fail((await runChunkedByIds(allIds, ids => supabase.from('staff_meals').delete().eq('period_id', periodId).in('item_id', ids).eq('type', 'staff'))).error)
         if (positives.length) fail((await supabase.from('staff_meals').insert(
           positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, type: 'staff' })))).error, true)
       }
@@ -659,7 +738,7 @@ export default function Stock() {
     // the copied figures and flash "✓ Saved" whether or not the write had landed.
     const upsertRes = rows.length ? await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' }) : { error: null }
     const delRes = !upsertRes.error && zeros.length
-      ? await supabase.from('opening_stock').delete().eq('period_id', selectedPeriod.id).in('item_id', zeros)
+      ? await runChunkedByIds(zeros, ids => supabase.from('opening_stock').delete().eq('period_id', selectedPeriod.id).in('item_id', ids))
       : { error: null }
     setSaveAllLoading(false)
     const err = upsertRes.error || delRes.error
@@ -881,6 +960,10 @@ export default function Stock() {
           ⟳ Syncing {pendingSync} {pendingSync === 1 ? 'entry' : 'entries'}…
         </div>
       )}
+      {/* A sync that could not finish. This renders while ONLINE — which is the whole point: the
+          "N pending" badge above lives inside the offline banner, so before S731 an entry that
+          the server permanently refuses was retried on every load and never mentioned again. */}
+      {syncFailed && !syncing && <ActionError error={syncFailed} />}
 
       {/* Nothing below the error card while a read has failed: every tab either shows figures the
           page does not have or saves on-screen state back to the server. */}

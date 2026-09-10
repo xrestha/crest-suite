@@ -113,3 +113,41 @@ the one place two people have to agree on *which* day before either of them comm
 `formatBsDay(cd.bs_day, swapDay.bsMonth)` ("3rd Bhadra") where the month is not already on screen
 and `bsDayOrdinal(...)` where it is — both from `src/utils/bsCalendar.js`. Same helpers the roster
 and HR Dashboard use, so the two sides of a swap request can never describe the day differently.
+
+## The service worker and the two manifests (S731)
+
+`public/service-worker.js` is shared by both installable apps and by every public route on the
+origin — the guest QR menu included — so a change here reaches a diner's phone as readily as an
+Owner's. Four rules came out of re-analysing it, each of which had already been violated:
+
+- **`manifest.json` needs an explicit `id`, and it is not the same field as `start_url`.** With no
+  `id`, the spec makes the app identity default to `start_url`, so changing `start_url` orphans
+  every install that already exists and silently creates a second app. The main manifest still
+  opened on `/stock` — a leftover from when this product was Crest Inventory — which an HR-only or
+  POS-only client's `ModuleGate` bounces straight to `/dashboard`, and which a diner offered
+  "Install Crest Suite" from the guest menu landed on as a login page. The migration is to pin
+  `"id": "/stock"` (the value the identity already implicitly had) and move `start_url` to
+  `/dashboard`; **never change `id` afterwards.** `staff.webmanifest` has always carried its own.
+- **A notification `tag` groups REPEATS, not everything one feature sends.** The worker's fallback
+  was the constant `'crest-hr'` and `hr-push` sent no tag at all, so all four kinds it sends
+  collapsed into one another and a swap request silently replaced an unread roster publish. The
+  function now sends `crest-hr-roster` (shared on purpose — republishing a month should collapse)
+  and `crest-hr-swap-<request id>` (per request, so two swaps both stand), and the worker's
+  fallback derives from the title so an un-redeployed function still behaves.
+- **The navigation branch caches the app shell, so it must check what it is caching.** There was no
+  status test, so a 5xx or a maintenance page served during a deploy became the cached offline
+  shell and stayed it until the next `CACHE_NAME` bump. A navigation request also carries
+  `redirect: 'manual'`, so a redirect resolves to an opaqueredirect whose status is 0 and
+  `cache.put()` REJECTS on it — the same trap the cross-origin note in that file already
+  describes, one branch further down, with no `.catch()`. Test `res.ok && res.type === 'basic'`.
+- **Store the navigation response under `'/'`, not under its own URL.** Vercel answers every
+  client-side route with the same index.html and the offline fallback only ever reads
+  `caches.match('/')`, so a per-URL entry is written and never read — dead growth, unbounded in
+  the query string, while the shell itself only refreshed on a visit to `/`.
+
+**What the worker does NOT give you is offline capability.** It caches same-origin assets on
+demand, `activate` purges every non-current cache, and `CACHE_NAME` is bumped on every deploy — so
+a route whose chunk has not been fetched since the last deploy is a blank page offline. Supabase is
+cross-origin and deliberately never intercepted, so no data is cached here at all. Anything that
+must survive a lost connection needs its own IndexedDB store (`src/utils/offlineQueue.js`), which
+is what Stock Count and POS have and nothing else does.

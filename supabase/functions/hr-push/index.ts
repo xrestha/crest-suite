@@ -100,6 +100,12 @@ Deno.serve(async (req) => {
           title: 'Roster Published',
           body: 'Your work schedule has been published — open Self-Service to view it.',
           url: '/hr/self-service',
+          // `tag` decides what REPLACES what on the lock screen. Nothing here sent one until
+          // S731, so every kind below fell to the service worker's single default and a swap
+          // request silently replaced an unread roster notification. Roster publishes keep one
+          // shared tag on purpose — republishing the same month twice should collapse — while the
+          // swap notifications below are keyed per request so two different swaps both stand.
+          tag: 'crest-hr-roster',
         })
       }
       return json({ success: true, notified: (profiles || []).length })
@@ -124,6 +130,7 @@ Deno.serve(async (req) => {
           title: 'Shift Swap Request',
           body: `${requester?.full_name || 'A coworker'} wants to swap shifts with you.`,
           url: '/hr/self-service',
+          tag: `crest-hr-swap-${swap.id}`,
         })
       }
       return json({ success: true })
@@ -149,6 +156,10 @@ Deno.serve(async (req) => {
           title: 'Shift Swap Update',
           body: `${target?.full_name || 'Your coworker'} ${accepted ? 'accepted' : 'declined'} your swap request${accepted ? ' — awaiting manager approval.' : '.'}`,
           url: '/hr/self-service',
+          // Same swap, later stage: replacing the earlier line for THIS request is right — the
+          // manager's decision below supersedes the coworker's response. A second, unrelated swap
+          // carries a different id and therefore stacks.
+          tag: `crest-hr-swap-${swap.id}`,
         })
       }
       return json({ success: true })
@@ -173,6 +184,7 @@ Deno.serve(async (req) => {
           title: 'Shift Swap Update',
           body: `Your shift swap request was ${approved ? 'approved' : 'rejected'} by your manager.`,
           url: '/hr/self-service',
+          tag: `crest-hr-swap-${swap.id}`,
         })
       }
       return json({ success: true })

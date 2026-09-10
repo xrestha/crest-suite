@@ -345,6 +345,14 @@ export function AuthProvider({ children }) {
     setAdminViewClientName('')
     localStorage.removeItem('crest_admin_client_id')
     localStorage.removeItem('crest_admin_client_name')
+    // Same clear switchOutlet() does, for the same reason and one it does not have. sessionStorage
+    // survives a sign-out in the SAME TAB, and sessionDataCache's keys are
+    // `page_section_clientId` — no user id — so signing out and back in as a different account of
+    // the same client served the previous account its cached page data. That is not a cosmetic
+    // staleness: the staff-isolation policies are RESTRICTIVE SELECT filters, so the rows an IMS
+    // `staff` rank must not see are exactly the ones an Owner's cache would hand them. The file's
+    // own header claimed this could not happen (S731).
+    try { sessionStorage.clear() } catch { /* private mode */ }
     setReady(false)
     await supabase.auth.signOut()
   }

@@ -2,6 +2,7 @@
 paths:
   - "src/shared/fetchAllRows.js"
   - "src/shared/sessionDataCache.js"
+  - "src/utils/offlineQueue.js"
   - "src/shared/hooks/useLatestRequest.js"
   - "src/modules/ims/**"
   - "src/modules/hr/**"
@@ -518,3 +519,38 @@ Migrated from the root `CLAUDE.md` (S663). The rules — guard user-gating await
 - **A supabase-js call can hang forever — and `.abortSignal()` does not save you.** Every call goes through `fetchWithAuth` (`@supabase/supabase-js/src/lib/fetch.ts`), which does `await getAccessToken()` on **line 43** and only reaches `fetch(...)` on **line 70**. `getAccessToken()` calls `auth.getSession()`, which can itself stall (a token refresh that never settles, or one of the known GoTrue init/lock deadlocks — the reason `supabaseClient.js` already installs a no-op `lock`). When it stalls, `fetch` is never invoked, so the AbortController passed via `.abortSignal()` is attached to nothing and firing it does *nothing*: the promise never resolves **and** never rejects, so a `try/finally` that resets a `saving` flag never runs and the button stays disabled forever. Guard any user-gating await with `withTimeout()` (`src/utils/withTimeout.js`) — a `Promise.race` against a wall clock is the only thing immune to where the hang is. Keep `.abortSignal()` alongside it (that's still what cancels a genuinely in-flight request); it's a complement, not a substitute. S449→S454 burned four rounds on this exact bug in `Sales.js` because each fix only covered the layer above the real one.
 
 - **Why `getSession()` stalls in the first place, and the client-level fix (S455).** auth-js sets **no timeout on its own network calls**. An expired access token makes the next `getSession()` call `_callRefreshToken()` → `fetch('/auth/v1/token')`; if that stalls, the auth client wedges *permanently*, not just for that call — `_acquireLock` drains via `while (this.pendingInLock.length) { await Promise.all(waitOn) }` (`GoTrueClient.ts` ~2803), so one never-settling promise means the loop never exits, `lockAcquired` is never reset, and every later `_acquireLock` chains `await last` onto the dead promise. Because supabase-js awaits `getAccessToken()` before *every* DB request, one stalled refresh silently freezes every query/insert/update app-wide with no error anywhere until the tab is closed. `src/supabaseClient.js` now passes `global.fetch` (handed straight to the auth client by supabase-js, `SupabaseClient.ts:340-344`) through `makeAuthTimeoutFetch()` (`src/utils/authFetchTimeout.js`), which bounds **only** `/auth/v1/` requests at 15s so the promise settles, the drain loop completes and the client self-heals. PostgREST and Storage traffic is deliberately left unbounded there so a slow report or a large upload is never cut off — bound those per-call with `withTimeout()` instead.
+
+## A cache outlives the session that filled it (S731)
+
+Three stores here survive a sign-out, and each had assumed it did not.
+
+**`sessionDataCache` keys on `page_section_clientId` — no user id — and `sessionStorage` lives as
+long as the TAB, not the session.** So signing out and back in as a *different account of the same
+client* in the same tab read the previous account's cached page data straight back. That is not
+cosmetic staleness: the staff-isolation policies are RESTRICTIVE SELECT filters, so the rows an IMS
+`staff` rank must not see are exactly the ones an Owner's cache would hand them. `switchOutlet()`
+already cleared `sessionStorage` for the outlet version of this; **`signOut()` now does too, and
+that call is load-bearing** — the file's own header used to claim the problem was impossible.
+
+**A queued offline write must carry the client it was made for.** `sync_queue` in
+`src/utils/offlineQueue.js` is one IndexedDB store shared by every account that has ever used the
+device, and a Stock Count op used to carry only a period id. After a sign-out on a shared counting
+tablet, the next session's `init()` replayed the previous one's counts under its own JWT, where RLS
+refuses them. `switchOutlet()` in `AuthContext` refuses to switch outlet while either queue is
+non-empty for precisely this reason; sign-out has no such guard, so the op now carries `clientId`
+and `flushQueue()` leaves anything belonging elsewhere alone.
+
+**A replay that swallows its failures is not resilience.** `flushQueue()` had a bare `catch (_) {}`,
+so a count queued against a month that was closed while the device was offline was retried on every
+page load, for ever, and said nothing — and the "N pending" badge it inflates renders only inside
+the offline banner, so once back online the stuck entries were invisible from every screen. The
+same rule as everywhere else in this codebase applies to a background replay: fail loudly, retry,
+or genuinely swallow, decided per site. Here the counter can act on it, so it is surfaced.
+
+**And the local store is an accelerator, never the data path.** `init()` on Stock Count is async
+and nothing awaits it, so a rejection inside it was an unhandled rejection: `setLoading(false)`
+never ran and the page sat on "Loading…" with no error anywhere. Every IndexedDB call can reject —
+Firefox private browsing refuses `indexedDB.open` outright — and because `flushQueue()` is the
+FIRST thing `init()` does, an unusable local cache took the **online** path down with it. Give any
+such boot a top-level `.catch()` that sets the page's real error state, and wrap the cache reads so
+a missing store degrades to "no cache" rather than to a dead page.

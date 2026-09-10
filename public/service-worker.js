@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crest-v266';
+const CACHE_NAME = 'crest-v267';
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -39,12 +39,30 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return;
 
   if (event.request.mode === 'navigate') {
-    // Navigation requests: network first, fall back to cached root shell
+    // Navigation requests: network first, fall back to the cached root shell.
+    //
+    // Every navigation on this origin is answered by the SAME index.html (Vercel rewrites all
+    // client-side routes to it), so the response is stored under '/' — the one key the offline
+    // fallback below actually reads. Storing it under `event.request` instead, which is what this
+    // did before, wrote a separate entry per visited URL that nothing ever read back: dead cache
+    // growth, unbounded in the query string, while the shell itself only ever refreshed on a
+    // visit to '/'.
+    //
+    // The `ok`/`basic` test is the other half. There was no status check here at all, so a 5xx or
+    // a maintenance page served during a deploy was cached as the offline shell and stayed the
+    // offline shell until the next CACHE_NAME bump. `res.type` matters for the same reason it
+    // does in the cross-origin note above: a navigation request carries `redirect: 'manual'`, so
+    // a redirect resolves to an opaqueredirect response whose status is 0 — `cache.put()` REJECTS
+    // on one, and with no catch that surfaced as an unhandled rejection in the worker.
     event.respondWith(
       fetch(event.request)
         .then(res => {
-          const toCache = res.clone(); // clone synchronously before any async op
-          caches.open(CACHE_NAME).then(c => c.put(event.request, toCache));
+          if (res.ok && res.type === 'basic') {
+            const toCache = res.clone(); // clone synchronously before any async op
+            caches.open(CACHE_NAME)
+              .then(c => c.put('/', toCache))
+              .catch(() => {});
+          }
           return res;
         })
         .catch(() => caches.match('/'))
@@ -59,7 +77,7 @@ self.addEventListener('fetch', event => {
       return fetch(event.request).then(res => {
         if (res.ok) {
           const toCache = res.clone(); // clone synchronously before any async op
-          caches.open(CACHE_NAME).then(c => c.put(event.request, toCache));
+          caches.open(CACHE_NAME).then(c => c.put(event.request, toCache)).catch(() => {});
         }
         return res;
       });
@@ -87,7 +105,16 @@ self.addEventListener('push', event => {
       badge: '/staff192.png',
       // A shared tag REPLACES an unread notification instead of stacking a second one: publishing
       // a roster twice in a minute should not leave two identical entries on the lock screen.
-      tag: data.tag || 'crest-hr',
+      //
+      // It has to be shared by REPEATS, though, not by everything HR sends. The default was the
+      // constant 'crest-hr' and hr-push has never sent a tag of its own, so all four kinds it
+      // sends — Roster Published, Shift Swap Request, Shift Swap Update, and a manager's
+      // decision — collapsed into one another: a swap request arriving on top of an unread roster
+      // notification silently replaced it and the employee never saw the first. Falling back to
+      // the title keeps the de-duplication where it was meant to be and separates the rest.
+      // hr-push now sends explicit tags; this fallback is what makes an un-redeployed function
+      // behave correctly too.
+      tag: data.tag || `crest-hr-${data.title || 'general'}`,
       data: { url: data.url || '/hr/self-service' },
     })
   );
