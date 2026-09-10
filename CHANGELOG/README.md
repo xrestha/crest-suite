@@ -12,7 +12,7 @@ down this table.
 
 | Range | Entries | Dates | Size |
 | --- | ---: | --- | ---: |
-| [S725–S725](S725-S774.md) | 1 | 2026-09-10 → 2026-09-10 | 8 KB |
+| [S725–S725](S725-S774.md) | 1 | 2026-09-10 → 2026-09-10 | 9 KB |
 | [S700–S724](S700-S724.md) | 25 | 2026-09-08 → 2026-09-10 | 179 KB |
 | [S675–S699](S675-S699.md) | 25 | 2026-09-04 → 2026-09-08 | 187 KB |
 | [S650–S674](S650-S674.md) | 24 | 2026-08-30 → 2026-09-04 | 150 KB |
@@ -61,7 +61,15 @@ fix something no reader has ever been misled by.
 2. State explicitly whether app code changed, and whether the service worker was bumped. A reader
    six months from now cannot otherwise tell a docs-only session from a shipping one.
 3. Run `npm run changelog:index`. It rewrites this table and each range file's header from the
-   files themselves, so no count here is ever typed by hand.
+   files themselves, so no count here is ever typed by hand. **This file is generated** — edit
+   `scripts/gen-changelog-index.mjs`, not `CHANGELOG/README.md`, or the next run discards it.
+4. Run `npm run mirror:docs`. It copies every git-tracked `.md` — this log, `CLAUDE.md`,
+   all of `.claude/rules/`, `PRODUCT.md`, `DESIGN.md`, `docs/` — to
+   `E:\CREST SUITE MANAGEMENT\` at the same relative path, so the documentation exists
+   off-machine as well as in git. It never deletes and it skips silently when the drive is not
+   mounted, so it is safe to run every time. Do not copy files across by hand: the mirror was
+   `README.md` + `CHANGELOG/` only until 2026-09-10, precisely because hand-copying is what a
+   scope quietly narrows to.
 
 **Start a new range file when the current one passes about 150,000 characters.** The ceiling is
 200,000 — the point at which a file stops being readable by the things that need to read it —
