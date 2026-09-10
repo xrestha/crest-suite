@@ -2,7 +2,7 @@ import { isStationTeam, posPathReachable } from '../shared/posTeamAccess'
 import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
-import { getAccessState } from '../utils/subscription'
+import { getAccessState, suiteLive } from '../utils/subscription'
 import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
 
 const AuthContext = createContext({})
@@ -630,7 +630,10 @@ export function AuthProvider({ children }) {
       // clients.hr_plan/pos_plan columns still exist but are vestigial; anything that needs to
       // know whether a client has HR or POS reads hrEnabled/posEnabled.
       // Crest Suite Pro — an independent axis from `plan` above. NULL = not subscribed.
-      suitePlan: isAdmin ? 'pro' : (profile?.clients?.suite_plan || null),
+      // Resolves to null once suite_ends_at (or the IMS window, for pre-column rows) is past its
+      // grace — the same date the ★ SUITE pill and the MRR figure already read (S736). No date at
+      // all still fails open. Admin always 'pro'.
+      suitePlan: isAdmin ? 'pro' : (suiteLive(profile?.clients) ? 'pro' : null),
       adminViewClientId, adminViewClientName, switchAdminClient, refreshViewModules,
     }}>
       {children}

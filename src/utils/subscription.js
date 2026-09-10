@@ -80,6 +80,35 @@ export function getAccessState(client) {
   return { ...open, locked: true, reason: 'expired', daysLeft }
 }
 
+// Is the Crest Suite Pro add-on LIVE for this client — subscribed AND paid through? Read by
+// AuthContext, so SuiteGate and the nav's PRO chip both honour the date. Until S736 nothing did:
+// `suite_ends_at` drove the ★ SUITE pill and the MRR figure, so a lapsed Suite read "Not billing"
+// on Admin → Clients while every Suite page stayed open, and the drawer's own tooltip claimed the
+// date gated them. Same resolution as clientMrr.js (suite_ends_at, else the IMS window for rows
+// written before that column existed), same GRACE_DAYS as the app-wide lock, and it fails OPEN
+// on a client with no date at all, like every other date check here.
+export function suiteLive(client) {
+  if (!client || client.suite_plan !== 'pro') return false
+  const end = client.suite_ends_at || client.ims_ends_at || client.subscription_ends_at
+  if (!end) return true
+  const daysLeft = Math.ceil((new Date(end).getTime() - Date.now()) / 86400000)
+  return daysLeft >= -GRACE_DAYS
+}
+
+// "+N days" on a subscription ADDS to the time the client already has. The base is the later of
+// today and the current end date, so a client paid through the 15th who renews on the 10th ends
+// on the 15th + N, not the 10th + N. ClientDrawer's Billing tab computed every quick-extend
+// button from today (S736), which SHORTENED a subscription whenever it was pressed before the
+// current end date — "+1 Year" on a client with three months left threw those three months away.
+// The trial panel's +7 Days had always done this correctly; this is that logic, shared.
+export function extendedFrom(currentEndsAt, days, now = new Date()) {
+  const current = currentEndsAt ? new Date(currentEndsAt) : null
+  const base = current && !Number.isNaN(current.getTime()) && current > now ? current : now
+  const d = new Date(base.getTime())
+  d.setDate(d.getDate() + days)
+  return d
+}
+
 // Client-level badge — uses the latest active end date across all modules, falls back to trial
 export function getSubStatus(client) {
   const now = Date.now()

@@ -5,10 +5,11 @@ import { useAuth } from '../../context/AuthContext'
 import { useSettings } from '../../context/SettingsContext'
 import { formatAd } from '../../utils/bsCalendar'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
-import { getDateStatus } from '../../utils/subscription'
+import { getDateStatus, extendedFrom } from '../../utils/subscription'
 import { validateEmvQr } from '../../utils/emvQr'
 import Tip from '../../components/Tip'
 import Modal from '../../components/Modal'
+import ActionError, { asActionError } from '../../components/ActionError'
 import { MIN_PASSWORD_LENGTH } from '../../utils/weakPasswords'
 import { adminOp } from '../../shared/adminOp'
 // Colours only — the PRICES this panel quotes come from useSettings().pricing (S701), so the
@@ -81,6 +82,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [savingUser, setSavingUser]     = useState(false)
   const [userError, setUserError]       = useState('')
   const [userSuccess, setUserSuccess]   = useState('')
+  const [usersLoadErr, setUsersLoadErr] = useState(null)
 
   // Staff PINs tab state. revealedPins is intentionally NOT seeded from any query — a PIN only
   // ever enters this component as the response to an explicit, audited reveal.
@@ -99,6 +101,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [loadingSettings, setLoadingSettings] = useState(false)
   const [savingSettings, setSavingSettings]   = useState(false)
   const [settingsMsg, setSettingsMsg]         = useState('')
+  const [settingsLoadErr, setSettingsLoadErr] = useState(null) // a failed read is not a form
   // Settings, Thresholds and QR are three views of one `clientSettings` object, so fetching on
   // every switch between them re-ran two network calls to rebuild state the drawer already held.
   const settingsLoadedRef = useRef(false)
@@ -230,13 +233,20 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // admin-only table. The PIN itself never comes from either query — only whether one is stored.
   async function loadPinAccounts() {
     setLoadingPins(true); setPinErr(''); setRevealedPins({})
-    const [{ data: profs }, { data: vaultRows }] = await Promise.all([
+    const [{ data: profs, error: profErr }, { data: vaultRows, error: vaultErr }] = await Promise.all([
       supabase.from('profiles')
         .select('id, full_name, pos_email, hr_self_service')
         .eq('client_id', client.id)
         .or('pos_email.not.is.null,hr_self_service.eq.true'),
       supabase.from('staff_pin_vault').select('user_id, updated_at').eq('client_id', client.id),
     ])
+    // A failed profiles read rendered "This client has no POS or Self-Service PIN accounts"; a
+    // failed vault read rendered every account as "Not stored", which the copy beside it tells
+    // the operator to fix by RESETTING the PIN (S736).
+    if (profErr || vaultErr) {
+      setPinErr('Could not read this client\'s PIN accounts, so nothing below can be trusted — retry. ' + errorLine(profErr || vaultErr))
+      setPinAccounts([]); setLoadingPins(false); return
+    }
     const storedAt = new Map((vaultRows || []).map(v => [v.user_id, v.updated_at]))
     setPinAccounts((profs || []).map(p => ({
       id:        p.id,
@@ -273,11 +283,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   // ── Users ──
   async function loadUsers() {
-    setLoadingUsers(true)
-    const { data: profs } = await supabase
+    setLoadingUsers(true); setUsersLoadErr(null)
+    const { data: profs, error: profErr } = await supabase
       .from('profiles')
       .select('id, full_name, role, client_id')
       .eq('client_id', client.id)
+    // "No users yet for this client" on a failed read is a claim the operator acts on — by
+    // creating a second Owner login (S736). Render the failure instead.
+    if (profErr) { setUsersLoadErr(asActionError(profErr, 'operator')); setLoadingUsers(false); return }
     // One batched call for all this client's emails — replaces N per-user edge
     // calls (which raced/rate-limited and showed blank emails).
     const { data: emailRows } = await supabase.rpc('client_user_emails', { p_client_id: client.id })
@@ -347,12 +360,27 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         setUserError('That email is a platform-admin account — use a different email for a client login.')
         setSavingUser(false); return
       }
-      if (!window.confirm(`${email} already has a client login. Move it to "${client.name}"? It loses access to its previous client. (Its existing password is kept.)`)) {
+      if (!window.confirm(`${email} already has a client login. Move it to "${client.name}"? It loses access to its previous client and arrives as an Owner login — any staff role, POS/Self-Service access or employee link it had there is removed. (Its existing password is kept.)`)) {
         setSavingUser(false); return
       }
       // upsert (not update): some older auth users have no profiles row, so a
       // plain update would silently match 0 rows. .select() confirms it persisted.
-      const row = { id: existingId, client_id: client.id, role: 'client' }
+      //
+      // Everything that still points at the OLD client is cleared in the same write (S736).
+      // active_client_id is the sharp one: my_client_id() and AuthContext both resolve it BEFORE
+      // client_id, and no trigger clears it on a client_id change (only on group changes and
+      // revokes) — so a grouped Owner who had switched outlets and was then moved here kept
+      // reading and writing the old outlet under the new client's login. hr_employee_id points at
+      // an hr_employees row of the old client. The staff markers make this login STAFF at the new
+      // client, not its Owner (Owner is the absence of markers), so a login created here to run a
+      // property would arrive with a rank nobody chose.
+      const row = {
+        id: existingId, client_id: client.id, role: 'client',
+        active_client_id: null, hr_employee_id: null,
+        pos_role: null, pos_email: null, pos_job_title: null,
+        ims_role: null, ims_job_title: null,
+        hr_role: null, hr_job_title: null, hr_self_service: false,
+      }
       if (full_name) row.full_name = full_name
       const { data: saved, error: upErr } = await supabase.from('profiles').upsert(row, { onConflict: 'id' }).select('id')
       if (upErr) { setUserError('Could not reassign: ' + upErr.message); setSavingUser(false); return }
@@ -423,28 +451,44 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   // ── Settings ──
+  // A failed read here must not become a form. Settings, Thresholds and QR all render whatever is
+  // in `clientSettings`, and their four Save buttons all write ALL of it back — so a dropped read
+  // rendered as SETTINGS_DEFAULTS meant one press of "Save Thresholds" overwrote the client's real
+  // name, VAT number, invoice prefix and payment QR with blanks, and the same press upserted the
+  // webhook secret (read separately, also dropped) as null (S736). A missing settings row is a
+  // real state (a client never seeded) and still renders the defaults; a failed read renders an
+  // error with a retry, and every Save on those tabs refuses until a read has succeeded.
   async function fetchClientSettings() {
-    setLoadingSettings(true)
-    // Separate read: the webhook secret lives in client_secrets, which is admin-only at the RLS
-    // level, so it can't ride along on the settings row any more.
-    const { data: secretRow } = await supabase
-      .from('client_secrets').select('pos_webhook_secret').eq('client_id', client.id).maybeSingle()
-    setWebhookSecret(secretRow?.pos_webhook_secret || '')
-    const data = await loadClientSettings(client.id)
-    if (data) {
-      setClientSettings(prev => {
-        const merged = { ...prev, ...data }
-        if (!merged.invoice_prefix && merged.app_name) merged.invoice_prefix = deriveInvoicePrefix(merged.app_name)
-        return merged
-      })
+    setLoadingSettings(true); setSettingsLoadErr(null)
+    try {
+      // Separate read: the webhook secret lives in client_secrets, which is admin-only at the RLS
+      // level, so it can't ride along on the settings row any more.
+      const { data: secretRow, error: secretErr } = await supabase
+        .from('client_secrets').select('pos_webhook_secret').eq('client_id', client.id).maybeSingle()
+      if (secretErr) throw secretErr
+      const data = await loadClientSettings(client.id)
+      setWebhookSecret(secretRow?.pos_webhook_secret || '')
+      if (data) {
+        setClientSettings(prev => {
+          const merged = { ...prev, ...data }
+          if (!merged.invoice_prefix && merged.app_name) merged.invoice_prefix = deriveInvoicePrefix(merged.app_name)
+          return merged
+        })
+      }
+      settingsLoadedRef.current = true
+    } catch (e) {
+      setSettingsLoadErr(asActionError(e, 'operator'))
     }
-    settingsLoadedRef.current = true
     setLoadingSettings(false)
   }
 
   // `what` names what the admin actually pressed — the three tabs share one save handler, so a
   // "Save Thresholds" or "Save QR" click used to report back "Settings saved."
   async function handleSaveSettings(what = 'Settings') {
+    if (!settingsLoadedRef.current) {
+      setSettingsMsg('error:Nothing was saved — this client\'s settings could not be read, so saving now would overwrite them with blanks. Retry the load first.')
+      return
+    }
     setSavingSettings(true); setSettingsMsg('')
     try {
       await saveClientSettings(client.id, clientSettings)
@@ -465,29 +509,26 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // ── Module toggles (instant save). These used to no-op while a Suite Bundle was active,
   // because the bundle required all three modules together. Crest Suite Pro is an add-on now, so
   // a Suite client can run any module combination and every toggle stays live. ──
-  async function handleToggleIms() {
-    const next = !imsEnabled
-    setImsEnabled(next)
-    await supabase.from('clients').update({ ims_enabled: next }).eq('id', client.id)
+  // One implementation. The three used to `await` the update and read nothing back, so a write
+  // that did not land left the switch flipped on screen while the row — and the client list
+  // behind the drawer, after onClientUpdated re-read it — still showed the old state (S736). The
+  // switch is set optimistically and put BACK on failure, so what is on screen is what is saved.
+  async function toggleModule(column, label, current, setter) {
+    const next = !current
+    setter(next)
+    setSubMsg('')
+    const { error } = await supabase.from('clients').update({ [column]: next }).eq('id', client.id)
+    if (error) {
+      setter(current)
+      setSubMsg(`error:${label} is still ${current ? 'on' : 'off'} — the change did not save. ${errorLine(error)}`)
+      return
+    }
     onClientUpdated()
     if (client.id === adminViewClientId) refreshViewModules()
   }
-
-  async function handleToggleHr() {
-    const next = !hrEnabled
-    setHrEnabled(next)
-    await supabase.from('clients').update({ hr_enabled: next }).eq('id', client.id)
-    onClientUpdated()
-    if (client.id === adminViewClientId) refreshViewModules()
-  }
-
-  async function handleTogglePos() {
-    const next = !posEnabled
-    setPosEnabled(next)
-    await supabase.from('clients').update({ pos_enabled: next }).eq('id', client.id)
-    onClientUpdated()
-    if (client.id === adminViewClientId) refreshViewModules()
-  }
+  const handleToggleIms = () => toggleModule('ims_enabled', 'Crest IMS', imsEnabled, setImsEnabled)
+  const handleToggleHr  = () => toggleModule('hr_enabled',  'Crest HR',  hrEnabled,  setHrEnabled)
+  const handleTogglePos = () => toggleModule('pos_enabled', 'Crest POS', posEnabled, setPosEnabled)
 
   // Crest Suite Pro is an add-on, so turning it on implies exactly one thing: IMS must be
   // enabled (SuiteGate's requireModules floor). It says nothing about HR, POS, or which IMS tier
@@ -530,10 +571,10 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   // ── Billing ──
-  function extendModule(setter, days) {
-    const d = new Date()
-    d.setDate(d.getDate() + days)
-    setter(formatAd(d))
+  // From the later of today and the CURRENT end date — see extendedFrom. Computing from today
+  // shortened any subscription extended before it ran out (S736).
+  function extendModule(current, setter, days) {
+    setter(formatAd(extendedFrom(current, days)))
   }
 
   async function handleSaveSub() {
@@ -655,10 +696,16 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // Only rebuild logins when the target has none. After an Archive the accounts were never
       // deleted, so re-provisioning would create a second set of PIN logins for the same people;
       // after a full Delete there are none, which is exactly when this is wanted.
-      const { count: existingLogins } = await supabase
+      // A guard that drops its read error passes vacuously (S654): on a failed count this used to
+      // fall into the rebuild branch, where every existing login came back from the Edge Function
+      // as "must be recreated by hand" — an instruction to delete and recreate accounts that
+      // already work. The data is restored either way; only the login step is skipped.
+      const { count: existingLogins, error: loginCountErr } = await supabase
         .from('profiles').select('id', { count: 'exact', head: true })
         .eq('client_id', client.id).not('pos_email', 'is', null)
-      if ((existingLogins || 0) > 0) {
+      if (loginCountErr) {
+        note = ' Staff logins were NOT rebuilt because the existing logins could not be counted — if this client has none, run the restore again to rebuild them. ' + errorLine(loginCountErr)
+      } else if ((existingLogins || 0) > 0) {
         note = ' Existing staff logins were left untouched.'
       } else {
         setRestoreMsg('info:Rebuilding staff logins…')
@@ -913,6 +960,15 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     document.getElementById(fid(`tab-${next.key}`))?.focus()
   }
 
+  // What the three settings tabs render instead of a form when the read failed — see
+  // fetchClientSettings. One element, three tabs.
+  const settingsErrorEl = settingsLoadErr && (
+    <div>
+      <ActionError error={{ ...settingsLoadErr, text: `This client's settings could not be read, so the form is not shown — saving it would have written blanks over their real values. ${settingsLoadErr.text}` }} />
+      <button className="btn btn-ghost" style={{ fontSize: 12, marginTop: 12 }} onClick={fetchClientSettings}>Retry</button>
+    </div>
+  )
+
   // The client name + plan badge, handed to Modal as its title so the shared header row
   // (title left, × right) stays the one implementation.
   const modalTitle = (
@@ -1084,10 +1140,16 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
                   Existing Users {loadingUsers ? '— Loading…' : `(${users.length})`}
                 </p>
-                {!loadingUsers && users.length === 0 && (
+                {usersLoadErr && (
+                  <div>
+                    <ActionError error={usersLoadErr} />
+                    <button className="btn btn-ghost" style={{ fontSize: 12, marginTop: 10 }} onClick={loadUsers}>Retry</button>
+                  </div>
+                )}
+                {!loadingUsers && !usersLoadErr && users.length === 0 && (
                   <p style={{ fontSize: 13, color: 'var(--theme-text3)' }}>No users yet for this client.</p>
                 )}
-                {!loadingUsers && users.map(u => (
+                {!loadingUsers && !usersLoadErr && users.map(u => (
                   <div key={u.id} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     padding: '10px 0', borderBottom: '1px solid var(--theme-border)'
@@ -1347,14 +1409,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         )}
                       </div>
                       <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
-                        <Tip text="Date when this client's Crest Suite Pro add-on expires — independent of each module's own expiry above. Gates Owner Dashboard, Monthly Owner Report, Multi-Outlet, Demand Forecast and Fixed Assets." width={300}>Suite subscription end date</Tip>
+                        <Tip text="Date when this client's Crest Suite Pro add-on expires — independent of each module's own expiry above. Seven days after it passes, Owner Dashboard, Monthly Owner Report, Multi-Outlet, Demand Forecast and Fixed Assets close (the same grace the app-wide lock gives). Left blank, Suite stays open for as long as it is switched on — and stops counting toward MRR." width={300}>Suite subscription end date</Tip>
                       </p>
                       <div style={{ marginBottom: 8 }}>
                         <BsCalendarPicker value={suiteEndsAt} onChange={setSuiteEndsAt} clearable />
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {[{ label: '+7 Days', days: 7 }, { label: '+1 Month', days: 30 }, { label: '+3 Months', days: 90 }, { label: '+1 Year', days: 365 }].map(({ label, days }) => (
-                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(setSuiteEndsAt, days)}>{label}</button>
+                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(suiteEndsAt, setSuiteEndsAt, days)}>{label}</button>
                         ))}
                         {suiteEndsAt && (
                           <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)', marginLeft: 'auto' }} onClick={() => setSuiteEndsAt('')}>Clear</button>
@@ -1470,7 +1532,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {[{ label: '+7 Days', days: 7 }, { label: '+1 Month', days: 30 }, { label: '+3 Months', days: 90 }, { label: '+1 Year', days: 365 }].map(({ label, days }) => (
-                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(mod.setEndsAt, days)}>{label}</button>
+                          <button key={label} className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => extendModule(mod.endsAt, mod.setEndsAt, days)}>{label}</button>
                         ))}
                         {mod.endsAt && (
                           <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)', marginLeft: 'auto' }} onClick={() => mod.setEndsAt('')}>Clear</button>
@@ -1496,7 +1558,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           {/* ── SETTINGS TAB ── */}
           {activeTab === 'settings' && (
             <div>
-              {loadingSettings ? (
+              {settingsLoadErr ? settingsErrorEl : loadingSettings ? (
                 <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
               ) : (
                 <>
@@ -1629,7 +1691,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           {/* ── THRESHOLDS TAB ── */}
           {activeTab === 'thresholds' && (
             <div>
-              {loadingSettings ? (
+              {settingsLoadErr ? settingsErrorEl : loadingSettings ? (
                 <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
               ) : (
                 <>
@@ -1684,7 +1746,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           {/* ── QR TAB ── */}
           {activeTab === 'qr' && (
             <div>
-              {loadingSettings ? (
+              {settingsLoadErr ? settingsErrorEl : loadingSettings ? (
                 <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
               ) : (
                 <>

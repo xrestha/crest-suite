@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { scopedInsert } from '../shared/scopedDb'
 import { getBsToday } from '../utils/bsCalendar'
-import { getSubStatus, GRACE_DAYS } from '../utils/subscription'
+import { getSubStatus, getAccessState } from '../utils/subscription'
 import { fetchAllRows } from '../shared/fetchAllRows'
+import { useConfirm } from '../shared/hooks/useConfirm'
 import { useAutoPurgeBackup, refreshBackupPermission } from '../modules/admin/dataExport/useAutoPurgeBackup'
 import Tip from '../components/Tip'
 import { useSettings } from '../context/SettingsContext'
@@ -65,6 +66,12 @@ export default function AdminClients() {
   // Approve / seed failures on the Trial Accounts panel. Converted at the call site (errorText),
   // never at render — see .claude/rules/error-messages.md.
   const [trialActionError, setTrialActionError] = useState(null)
+  // Activate/Deactivate on a client card, and the auto-deactivation sweep. These used to drop
+  // their error entirely (S736): a Deactivate that did not land re-rendered the card as Active
+  // with nothing said, which is at least visible — an extendTrial that did not land left the
+  // customer locked out while this screen implied they had been let back in.
+  const [actionError, setActionError] = useState(null)
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [activeDrawer, setActiveDrawer] = useState(null)
   const [featureModalClient, setFeatureModalClient] = useState(null)
   const [lastSeenMap, setLastSeenMap] = useState({})
@@ -113,33 +120,33 @@ export default function AdminClients() {
     // not let the deactivation sweep below run against an empty list (S682).
     if (listErr) { setListError(listErr); setLoading(false); return }
     setListError(null)
-    // Auto-deactivation waits out the same GRACE_DAYS the lock screen honours. Without this the
-    // grace period would be defeated by the admin simply opening this page: is_active=false is an
-    // immediate lock in getAccessState, so sweeping at the raw expiry date would cut a client off
-    // days early, at a moment that has nothing to do with them. Admin's own Deactivate button is
-    // unaffected — a deliberate act still locks at once.
-    const cutoff = new Date(Date.now() - GRACE_DAYS * 86400000).toISOString()
-    const expired = (data || []).filter(c => {
-      if (!c.is_active) return false
-      // Check module-specific dates (+ Suite Bundle's own independent expiry); fall back to
-      // legacy subscription_ends_at
-      const moduleDates = [c.ims_ends_at, c.hr_ends_at, c.pos_ends_at, c.suite_ends_at].filter(Boolean)
-      if (moduleDates.length > 0) {
-        // Active if ANY module still has time remaining
-        return moduleDates.every(d => d < cutoff)
-      }
-      if (c.subscription_ends_at) return c.subscription_ends_at < cutoff
-      // No trial clause on purpose: getAccessState — the single source of truth behind the
-      // app-wide lock — never reads a trial date here (expired trials lock via their own
-      // is_trial/trial_expires_at branch without needing is_active), so sweeping on one meant
-      // merely opening this page could hard-lock a client the runtime model let through (S574).
-      return false
-    })
+    // Auto-deactivation asks getAccessState — the ONE definition of "this client's paid time has
+    // run out" behind the app-wide lock — rather than carrying its own copy of that decision.
+    // The sweep used to re-derive it (module dates first, legacy subscription_ends_at only as a
+    // fallback, a hand-computed GRACE_DAYS cutoff), and the copy disagreed with the lock screen
+    // at the edges: a legacy subscription_ends_at outliving the module dates was ignored here and
+    // honoured there, and the cutoff was a calendar day stricter than the grace the lock shows
+    // (S736). `reason === 'expired'` is exactly the state the sweep wants — past every end date
+    // AND past the grace period — and it already excludes trials, which lock through their own
+    // is_trial/trial_expires_at branch without needing is_active (S574's no-trial-clause rule).
+    // Admin's own Deactivate button is unaffected — a deliberate act still locks at once.
+    const expired = (data || []).filter(c => c.is_active && getAccessState(c).reason === 'expired')
     if (expired.length > 0) {
-      await Promise.all(expired.map(c =>
-        supabase.from('clients').update({ is_active: false }).eq('id', c.id)
+      const results = await Promise.all(expired.map(c =>
+        supabase.from('clients').update({ is_active: false }).eq('id', c.id).then(r => ({ ...r, client: c }))
       ))
-      const { data: refreshed } = await supabase.from('clients').select('*').order('name')
+      const failed = results.filter(r => r.error)
+      if (failed.length) {
+        // Fails open by design — the client keeps working and shows Active. But the sweep will
+        // retry silently on every visit, so say which ones it could not lock rather than letting
+        // "Active" on a card read as a decision someone made.
+        setActionError({
+          text: `${failed.length} lapsed client${failed.length !== 1 ? 's' : ''} could not be deactivated automatically and still shows as Active: ${failed.map(r => r.client.name).join(', ')}. The card's Deactivate button does the same thing by hand.`,
+          detail: asActionError(failed[0].error, 'operator').detail,
+        })
+      }
+      const { data: refreshed, error: refreshErr } = await supabase.from('clients').select('*').order('name')
+      if (refreshErr) { setListError(refreshErr); setLoading(false); return }
       setClients(refreshed || [])
     } else {
       setClients(data || [])
@@ -164,6 +171,15 @@ export default function AdminClients() {
       location: newForm.location.trim(),
       contact_person: newForm.contact_person.trim(),
       contact_phone: newForm.contact_phone.trim(),
+      // The SAME trial register_trial hands out — Growth with IMS, HR and POS all on (S697). This
+      // form wrote none of these, so a hand-onboarded trial was Starter IMS-only while the panel
+      // above promised "Growth + all modules" for both kinds (S736). Convert to Paid leaves the
+      // modules as they are and the admin prices what the client keeps, same as a self-service
+      // trial today.
+      plan: 'growth',
+      ims_enabled: true,
+      hr_enabled: true,
+      pos_enabled: true,
       is_trial: true,
       // Hand-onboarded by the admin creating it — approved by definition (S697). Without this
       // stamp getAccessState() would hold the new client on the "we will call you" screen.
@@ -229,39 +245,87 @@ export default function AdminClients() {
     loadClients()
   }
 
+  // The three trial-row writes below used to `await` the builder and read nothing back (S736).
+  // supabase-js resolves with { error } rather than throwing, so each proceeded as though it had
+  // landed: an extension that failed left the customer LOCKED OUT while the operator, having
+  // pressed +7 Days and watched the list reload, believed they had been let back in.
   async function extendTrial(client) {
+    setTrialActionError(null)
     const current = client.trial_expires_at ? new Date(client.trial_expires_at) : new Date()
     const base    = current > new Date() ? current : new Date()
     const newExp  = new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000)
     const newPurge= new Date(newExp.getTime() + 15 * 24 * 60 * 60 * 1000)
-    await supabase.from('clients').update({
+    const { error } = await supabase.from('clients').update({
       trial_expires_at: newExp.toISOString(),
       trial_purge_at:   newPurge.toISOString(),
     }).eq('id', client.id)
+    if (error) {
+      const info = asActionError(error, 'operator')
+      setTrialActionError({ ...info, text: `${client.name}'s trial was NOT extended — it still ends on the date shown, and if that has passed they are still locked out. ${info.text}` })
+      return
+    }
     loadClients()
   }
 
   async function convertTrialToPaid(client) {
+    setTrialActionError(null)
     // Clear trial flags; admin sets plan/sub dates in the drawer
-    await supabase.from('clients').update({
+    const { error } = await supabase.from('clients').update({
       is_trial:            false,
       subscribe_requested: false,
       subscribe_requested_at: null,
     }).eq('id', client.id)
+    if (error) {
+      // Do NOT open the drawer as if it had: the client is still a trial, still in this panel,
+      // and still a candidate for the retention purge once its purge date passes.
+      const info = asActionError(error, 'operator')
+      setTrialActionError({ ...info, text: `${client.name} is still a trial — the conversion did not save, so nothing about their access or billing has changed. ${info.text}` })
+      return
+    }
     loadClients()
     setActiveDrawer({ ...client, is_trial: false, subscribe_requested: false })
   }
 
   async function dismissSubscribeRequest(client) {
-    await supabase.from('clients').update({ subscribe_requested: false, subscribe_requested_at: null }).eq('id', client.id)
+    setTrialActionError(null)
+    const { error } = await supabase.from('clients').update({ subscribe_requested: false, subscribe_requested_at: null }).eq('id', client.id)
+    if (error) { setTrialActionError(asActionError(error, 'operator')); return }
     loadClients()
   }
 
-  async function toggleActive(client, e) {
-    e.stopPropagation()
-    await supabase.from('clients').update({ is_active: !client.is_active }).eq('id', client.id)
+  async function setActive(client, next) {
+    setActionError(null)
+    const { error } = await supabase.from('clients').update({ is_active: next }).eq('id', client.id)
+    if (error) {
+      const info = asActionError(error, 'operator')
+      setActionError({ ...info, text: `${client.name} is still ${client.is_active ? 'Active' : 'Inactive'} — the change did not save. ${info.text}` })
+      return
+    }
     loadClients()
-    if (activeDrawer?.id === client.id) setActiveDrawer(prev => ({ ...prev, is_active: !prev.is_active }))
+    if (activeDrawer?.id === client.id) setActiveDrawer(prev => ({ ...prev, is_active: next }))
+  }
+
+  function toggleActive(client, e) {
+    e.stopPropagation()
+    if (!client.is_active) { setActive(client, true); return }
+    // Deactivate is an IMMEDIATE product-wide lock (S544: is_active=false is the first thing
+    // getAccessState checks), and this button sits beside Features and Manage on every row. It
+    // used to fire on the click with nothing between the pointer and a live restaurant losing its
+    // till mid-service — while Archive, which does the same lock plus a data wipe, requires the
+    // client's name typed out (S736). Consequence copy, not "are you sure?".
+    askConfirm({
+      title: `Deactivate ${client.name}?`,
+      body: (
+        <p style={{ margin: 0 }}>
+          Every login at this property — Owner, staff, POS tills and the employee app — is locked out
+          the moment this saves, with no grace period. Their data is untouched, and Activate reverses it
+          just as instantly. To close out a client who has left, Manage → Danger → Archive takes a
+          backup first.
+        </p>
+      ),
+      confirmLabel: 'Deactivate now', danger: true, busyLabel: 'Deactivating…',
+      run: () => setActive(client, false),
+    })
   }
 
 
@@ -385,7 +449,7 @@ export default function AdminClients() {
                     ? `${awaitingCount} waiting for your approval — call, check they run a real outlet, then Approve`
                     : trialClients.filter(c => c.subscribe_requested).length > 0
                     ? `${trialClients.filter(c => c.subscribe_requested).length} requesting to subscribe`
-                    : 'Free trials — self-service signups get 7 days from approval, admin-created clients 30 · Growth + all modules'}
+                    : 'Free trials — self-service signups get 7 days from approval, admin-created clients 30 · both run Growth with IMS, HR and POS on'}
                 </div>
               </div>
             </div>
@@ -504,6 +568,11 @@ export default function AdminClients() {
           </div>
         )
       })()}
+
+      {/* Card-level action failures (Activate/Deactivate) and the sweep's own. Above the cards so
+          it is next to the button that was pressed, and never inside the trial panel, which has
+          its own slot. */}
+      {actionError && <ActionError error={actionError} className="action-error--top" />}
 
       {/* Client cards */}
       {loading ? (
@@ -736,6 +805,8 @@ export default function AdminClients() {
           onClose={() => setFeatureModalClient(null)}
         />
       )}
+
+      {confirmEl}
     </div>
   )
 }

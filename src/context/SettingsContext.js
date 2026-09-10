@@ -233,12 +233,17 @@ export function SettingsProvider({ children }) {
     if (cid === clientId) await loadFeatureFlags(cid)
   }
 
+  // Throws on a failed read, the same contract as saveClientSettings. It used to return `data`
+  // alone, so a dropped read and a client with no settings row yet were the same `null` — and
+  // ClientDrawer, its only caller, rendered that null as SETTINGS_DEFAULTS and let Save write the
+  // blanks back over the client's real branding, VAT number, invoice prefix and payment QR (S736).
   async function loadClientSettings(cid) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('settings')
       .select('*')
       .eq('client_id', cid)
       .maybeSingle()
+    if (error) throw new Error(errorLine(error))
     return data
   }
 
