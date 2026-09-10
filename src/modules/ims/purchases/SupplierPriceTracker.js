@@ -204,8 +204,17 @@ export default function SupplierPriceTracker() {
     // The affected-recipe list is advisory, but a FAILED read must not read as "no recipes use
     // this item" — that is the sentence the banner prints, and it is the one thing telling the
     // owner that changing this rate re-costs their menu.
+    // The FK hint is REQUIRED, not decorative: `recipe_ingredients` has two foreign keys to
+    // `recipes` (`recipe_id` and `sub_recipe_id`, baseline schema :2885/:2893), so a bare
+    // `recipes(name)` embed is ambiguous and PostgREST refuses it with PGRST201. This query has
+    // therefore never returned a row — and its error was dropped until S725, so the
+    // affected-recipes banner had never once fired in the product's life. S725 started reporting
+    // the failure honestly, which made "could not read the recipe list" the permanent state.
+    // `Recipes.js` has always spelled the hint (two sites); this was the copy that did not.
     const { data: recipeIngs, error: ingErr } = await supabase
-      .from('recipe_ingredients').select('recipe_id, recipes(name)').eq('item_id', item.id)
+      .from('recipe_ingredients')
+      .select('recipe_id, recipes!recipe_ingredients_recipe_id_fkey(name)')
+      .eq('item_id', item.id)
     const affected = (recipeIngs || []).filter(ri => ri.recipes).map(ri => ri.recipes.name).filter((v, i, a) => a.indexOf(v) === i)
 
     setSavingPrice(p => ({ ...p, [item.id]: true }))
