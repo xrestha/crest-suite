@@ -316,8 +316,9 @@ reasoning that once the handler claims, init's stale load is rejected by its own
 is true of the DATA and not of the LABEL: `init` also calls `setSelectedPeriod`, which no guard
 covers, so a period change during a first load left the dropdown snapping back to the open month
 over another month's table — figures and label disagreeing, the exact thing the guard exists to
-prevent. S698 fixed it in `Purchases.js`, S709 in `PurchaseOrders.js`, S718 in `StockAgeing.js`
-and S721 in `StockMovements.js` — all four against the hook's own documented contract ("anything
+prevent. S698 fixed it in `Purchases.js`, S709 in `PurchaseOrders.js`, S718 in `StockAgeing.js`,
+S721 in `StockMovements.js` and S722 in `PaymentReport.js` — all five against the hook's own
+documented contract ("anything
 that auto-selects a period must call `begin()` too"), while this file was arguing they did not have
 to. **S721 is the instance that shows the stakes are not always a flicker**: once
 `handlePeriodChange` has run even once the ref is permanently non-null, so `isCurrent` stops
@@ -445,6 +446,16 @@ and they were the last swept, exactly as S706 and S708 found for producer-vs-con
 that Period Comparison's `sales_entries` read carried a comment naming the cap "across up to 24
 periods" while the three reads directly beneath it were bare: **a paging comment on one line of a
 `Promise.all` is not a claim about the others.**
+
+**S722 found the same shape one array element apart, on the two statutory reports.** VAT Report and
+Non-VAT Report each read `purchase_entries` through `fetchAllRows` and `vendor_returns` bare, inside
+the same `Promise.all` — the second entry in a two-entry array, on pages whose figures are filed
+with the IRD. `PaymentReport` beside them paged both, so the correct version was one file away the
+whole time. Returns rarely cross 1000 in a month, which is exactly why it survived: **a read is not
+exempt because its table is usually small, it is exempt because someone decided it was and wrote
+down the rows-per-what.** Neither had a comment either way. Same pass: the `.order('id')` tiebreaker
+has to be added with the wrapper, since a `vendor_returns` read ordered only by `bs_day` repeats a
+row on one page and skips it on the next the moment it does page.
 
 **Deliberately not wrapped**, so the next sweep does not
 churn them: single-day reads, `head: true` count queries, id-bounded backfill lookups, and

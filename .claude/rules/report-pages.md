@@ -202,6 +202,22 @@ reconciliation note then compared the PREVIOUS period's derived value against th
 ledger and printed the difference in NPR under the new month's label. A second async source needs
 its own flag, and the stale value must be cleared BEFORE the load rather than overwritten after it.
 
+**And `!loading && !loadError` is not the whole guard, because a page can finish loading nothing
+(S722).** `PaymentReport` auto-selected `periods.find(x => x.status === 'open')` and, on a client
+whose periods are all closed, selected nothing and called no loader at all — so `loading` went
+false, `loadError` stayed null, both gates opened, and the page drew its full stat grid at **NPR 0
+for every method** with the summary table's total row confidently reading **100%**, over a period
+`PeriodScope` was rendering as `—`. `NoPeriodState` did not fire either, since periods *existed*.
+Between closing one month and opening the next, a client got a complete report of a month that was
+never chosen — the same failure `ReorderReport` had in S696 ("Stock is healthy"), which is the tell
+that this is a shape rather than an incident.
+
+Two things to check on any page that auto-selects: **fall back to `periods[0]` rather than to
+nothing** — an open period is a preference, not a precondition — and ask what the KPI strip renders
+when `selectedPeriod` is null, because `loading` and `loadError` both describe a load that *ran*
+and neither says one happened. The honest third state is the S717 `DeadStock` rule in another
+guise: when a report cannot judge, it says so instead of reporting zero.
+
 ## A gating wrapper cannot protect an eagerly-evaluated children expression (S601)
 
 Migrated from the root `CLAUDE.md` (S663).

@@ -10,6 +10,56 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
+### A bill is mixed, so a query cannot be the split (S722)
+
+**`vat_inclusive` is PER LINE and `discount_amount` is PER BILL.** `PurchaseBillForm` puts a VAT
+checkbox on every row and a toggle-all above them — the toggle-all exists *because* mixed bills are
+ordinary. Put the two facts together and a bill's single discount has to be **apportioned across
+both halves** before either the VAT Report or the Non-VAT Report can claim any of it.
+
+So **a report that wants one half must still READ the whole bill.** Non-VAT Report's query carried
+`.eq('vat_inclusive', false)`, which looks like the obvious way to scope the page and is the defect:
+it could not see the VAT lines, so it charged the **entire** bill discount against the non-VAT half
+while VAT Report was independently charging its proportional share. On a 10,000 bill (6,000 VAT /
+4,000 non-VAT) with a 1,000 discount the two pages claimed **1,600**, and "non-VAT purchases this
+period" read 4,000 on one page and 3,000 on the other. Both figures are filed with the IRD.
+
+`src/modules/ims/reports/purchaseTaxSplit.js` is the one place that split happens.
+`splitPurchaseVat(entries, returns)` runs `allocateBillDiscounts()` over every line and returns both
+halves; VAT Report and Non-VAT Report each read fields off the **same call over the same rows**, so
+they cannot fail to sum back to the bill. Its `buildVendorSummary()` has **no `discountScope`
+option** — per-line allocation makes "prorate across the bill" and "prorate across its VAT lines"
+the same arithmetic (`discount × line / billGross`), and the only thing that ever differed was which
+lines the caller passed. VAT Report passes the VAT lines; Annexure-13 passes all of them.
+
+**A return is credited at its bill's DISCOUNTED rate.** `vendor_returns.rate` stores the linked
+line's list rate, and it was being subtracted from a base that had already lost the discount — so
+returning a whole discounted bill drove the taxable base **negative by the discount** and filed a
+negative input VAT claim. `returnBase()` scales every return by its own line's net factor; a full
+return now nets to exactly zero. The lookup is by `purchase_entry_id` and **falls back to the list
+rate rather than dropping the row** — a return nobody can price is still a return.
+
+### Four pages value a bill, and they must all say `calcBillTotals` (S722)
+
+"What does this bill cost" has exactly one answer: `(gross − discount) + 13% VAT on the taxable
+portion net of its share of that discount`. The Purchases register, `VendorReport`'s discount table,
+`OutstandingPayables` and the printed voucher all reach it through `calcBillTotals()`.
+
+**Payment Summary did not.** It summed `qty × rate` per line — **ex-VAT and pre-discount**, which is
+neither the cost basis nor the money owed, so it tied to nothing: not the register, not Outstanding
+Payables, not the P&L. Its own module guide had carried the defect as a written gotcha for months
+without it being fixed. It now goes through `billPayables()` in `purchaseTaxSplit.js`, which is
+`calcBillTotals()` per bill, so the Credit column and Outstanding Payables finally quote one number.
+
+Two properties of that page worth keeping: `payment_method` is a **bill-level** choice written onto
+every line, so a bill belongs to exactly one method and is counted **once** however many lines it
+has; and NULL reads as Cash (`PURCHASE_PAYMENT_METHODS`' documented rule) — a filter that misses
+NULL loses real bills.
+
+**Defaulting to the open period is not a default.** Payment Summary picked
+`periods.find(status === 'open')` and, finding none, selected nothing, loaded nothing, and still
+rendered the whole stat grid at NPR 0 with a total row reading 100%. Fall back to `periods[0]`.
+
 ### A bill with payments recorded against it is frozen, and a return has its own day (S698)
 
 Six things settled by the S698 re-analysis of the purchases module, each a decision Aashish made
