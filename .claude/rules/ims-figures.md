@@ -388,13 +388,30 @@ one tab of the page and gone from the other three. `salesReads.test.js` reads th
 on either half of the defect — a `.neq` on the column, or a `select()` that omits it — because
 neither has a runtime symptom.
 
-**Still open, deliberately:** ~11 files carry the server-side form (
-`MenuRepricing`, `RecipeMargin`, `Recipes`, `AnnualSummary`, `BestSellers`, `MonthlySummary`,
-`PeriodComparison`, `ConsolidatedPnl`, `OwnerDashboard`'s revenue read,
-`useSalesPivotData`, and the two `ownerReport` compute files). Every one is display-only and cannot
-delete a row, and each needs its own answer to what its figure is supposed to mean before it is
-changed — `OwnerDashboard`'s stock read was fixed in S696 precisely because the answer there was
+**Still open, deliberately.** Derive the list rather than trusting a count written here — it has
+gone stale the moment code changed twice now. The grep is
+`grep -rn "\.neq(\s*['\"]source['\"]" src/`, skipping comment lines and `salesReads.test.js`:
+
+```text
+useSalesPivotData  Recipes  AnnualSummary  MonthlySummary  PeriodComparison
+ConsolidatedPnl    OwnerDashboard's revenue read    computeMonthlyReport
+computeMenuEngineeringSection
+```
+
+Each needs its own answer to what its figure is supposed to mean before it is changed —
+`OwnerDashboard`'s stock read was fixed in S696 precisely because the answer there was
 "comps consume ingredients", which is not the answer a revenue read gives.
+
+**`computeMenuEngineeringSection` is on that list and its LIVE twin is not, which is a defect
+waiting rather than a decision.** S715 took `MenuEngineering.js` off for a stated reason — its qty
+map sets the period's median, so a dropped row re-quadrants dishes — and every word of that
+reasoning applies at least as hard to the frozen owner-report copy, where a wrong quadrant is
+**immutable**. The two are supposed to be kept in lockstep; `menuEngineering.js` exists precisely
+to keep them there, and this is the one axis it does not cover, because the read lives in each
+file rather than in the shared module. Found during the S724 markdown sweep, recorded rather than
+fixed because it was outside that session's scope. **`useSalesPivotData` is the other one worth
+looking at first**: it chains `.neq('source','pos_comp').neq('source','pos')`, so it drops the
+NULL rows twice over.
 
 **`MenuEngineering` came off that list in S715, and why is the useful part.** "Display-only" was
 doing too much work: its qty map sets the period's **median**, which is the popularity cutoff, so
@@ -449,9 +466,13 @@ opens.
 
 ## Menu Engineering: the quadrant is a verdict, so an unknown input must not produce one (S715)
 
-`src/shared/menuEngineering.js` is now the only definition of `FC_CUTOFF`, `median()`, `classify()`,
-`menuFcPct()` and `unratedReason()`. `MenuEngineering.js` and the frozen
-`computeMenuEngineeringSection.js` both import it. Before this they each held their own copy, with a
+`src/shared/menuEngineering.js` is the only definition of `FC_CUTOFF`, `median()` and
+`classify()`. `MenuEngineering.js` and the frozen `computeMenuEngineeringSection.js` both
+import it. **`menuFcPct()` and `unratedReason()` moved to `imsFormulas.js` in S724** — three
+more reports needed them, and importing a rule from a module named for one report reads as
+borrowing that report's helper rather than following a rule; they now sit beside the `fcBand()`
+that would otherwise band the zero and the `recipeCostOf()` where the `null` starts.
+`menuEngineering.js` re-exports both, so its own callers are unchanged. Before this they each held their own copy, with a
 comment on both saying they were mirrored "verbatim" and must never diverge — the shape this repo
 keeps re-learning, and the worst possible file to learn it in, because the owner report's section is
 **immutable**: a quadrant frozen wrong stays wrong, and nothing in the artifact says which of the two
