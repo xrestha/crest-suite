@@ -554,3 +554,29 @@ Firefox private browsing refuses `indexedDB.open` outright — and because `flus
 FIRST thing `init()` does, an unusable local cache took the **online** path down with it. Give any
 such boot a top-level `.catch()` that sets the page's real error state, and wrap the cache reads so
 a missing store degrades to "no cache" rather than to a dead page.
+
+## `navigator.onLine` is a claim about a network interface, not about the server (S731)
+
+It is true on a restaurant wifi with no upstream, and it stays true when the signal dies between
+pressing Save and the request landing. So a page that branches on it — Stock Count is the only one
+that does — takes the DIRECT path, fails, and reports a lost count while the offline queue that
+exists for exactly this situation is never consulted.
+
+The fix is to treat the failure, not the flag: catch the write, ask `isNetworkError(err)` from
+`src/shared/errorText.js` (exported as a predicate so the queue decision and the sentence shown to
+the user come from one regex), and queue on a dropped connection only. **An RLS refusal, a
+closed-period trigger or a constraint violation is a decision the server made** — queueing one
+retries a refusal for ever, which is the defect in the section above wearing the other hat.
+
+Two things make this safe to do, and both are worth checking before copying the pattern:
+
+- **The write must be idempotent.** Opening and closing are upserts; wastage and staff meal are
+  delete-then-insert over the same key. Re-running one converges on the same rows whether or not
+  the original landed — which matters because a dead fetch never proves the write did not land, it
+  only proves we did not hear back.
+- **A queued write is not a saved write, and the success flash must not say it is.** The helpers
+  return `'queued'` as a third answer beside `true`/`false`; flashing "✓ Saved" over a notice
+  saying the connection dropped is the same contradiction the page already fixed one state along.
+  And because the browser still believes it is online, the amber offline banner never renders — so
+  the pending count needs its own banner with a **Sync Now** button, or the held entries are
+  invisible from every screen and nothing sends them until the next page load.

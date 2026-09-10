@@ -145,9 +145,29 @@ Owner's. Four rules came out of re-analysing it, each of which had already been 
   `caches.match('/')`, so a per-URL entry is written and never read — dead growth, unbounded in
   the query string, while the shell itself only refreshed on a visit to `/`.
 
-**What the worker does NOT give you is offline capability.** It caches same-origin assets on
-demand, `activate` purges every non-current cache, and `CACHE_NAME` is bumped on every deploy — so
-a route whose chunk has not been fetched since the last deploy is a blank page offline. Supabase is
-cross-origin and deliberately never intercepted, so no data is cached here at all. Anything that
-must survive a lost connection needs its own IndexedDB store (`src/utils/offlineQueue.js`), which
-is what Stock Count and POS have and nothing else does.
+**The install precaches the app SHELL, and that is the boundary of offline support.** `/` plus
+the one js/css pair named in CRA's `/asset-manifest.json` `entrypoints`, fetched at install and
+cached individually so one 404 cannot throw away the other. Before S731 the install cached `/`
+alone, so offline the document loaded, asked for a `main.<hash>.js` that had never been fetched
+under the current `CACHE_NAME`, and rendered a blank white page — and since `CACHE_NAME` is bumped
+on every deploy and `activate` purges every other cache, that was the state after every deploy
+until the user next opened the app online. **Deliberately NOT all 283 files in the manifest**: the
+route chunks are 3.5 MB and this worker is installed by every diner who scans a table QR code. What
+precaching buys is the difference between a white screen and an app that boots and can explain
+itself. Supabase is cross-origin and never intercepted, so no DATA is cached here at all — anything
+that must survive a lost connection needs its own IndexedDB store (`src/utils/offlineQueue.js`),
+which is what Stock Count and POS have and nothing else does.
+
+**A dynamic import that fails is a DEPLOY, not a bug — `src/shared/chunkReload.js` is where that is
+decided.** Every page in `App.js` is `React.lazy` and `xlsx` is `await import('xlsx')` in 43 click
+handlers, so the app fetches its own code by hashed filename from an index.html served before the
+deploy; Vercel replaces those files and `activate` deletes the cached copies on the same event. The
+two halves land in different places and only one of them is reachable from React: a lazy ROUTE
+rejects during render and `AppErrorBoundary` catches it, while an `import()` inside an `onClick` is
+thrown from an event handler, which that boundary **structurally cannot catch** — the Export button
+simply did nothing. `initChunkReloadGuard()` in `src/index.js` listens for `unhandledrejection` and
+`error` to cover the second. Three rules: **reload at most once per minute**, or an error that is
+not a stale deploy becomes a reload loop that hides the real bug; **never reload while offline**,
+where the reload is answered from the cached shell and fails identically, spending the one attempt;
+and **never treat an ordinary error as a chunk failure** — `chunkReload.test.js` asserts the
+predicate refuses `TypeError: Failed to fetch` and a plain null-property read.

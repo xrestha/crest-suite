@@ -1,9 +1,44 @@
-const CACHE_NAME = 'crest-v267';
+const CACHE_NAME = 'crest-v268';
+
+// The app shell: the document, plus the ONE js/css pair every route boots through. CRA emits
+// their hashed names into /asset-manifest.json at build time, which is the only way this
+// hand-written worker can know them.
+//
+// Precaching them is what makes "offline" mean anything here. Before S731 the install cached '/'
+// alone — so offline, the document loaded, asked for a main.<hash>.js that had never been fetched
+// under the CURRENT CACHE_NAME, and rendered a blank white page. And because CACHE_NAME is bumped
+// on EVERY deploy and `activate` purges every other cache, that was the state after every single
+// deploy until the user next opened the app online. The worker was advertising an offline mode it
+// did not have.
+//
+// Deliberately just the entrypoints, not all 283 files in the manifest: the route chunks are 3.5 MB
+// and this same worker is installed by every diner who scans a table QR code. What this buys is the
+// difference between a white screen and an app that boots and can explain itself — a route whose
+// own chunk was never fetched still cannot render, and AppErrorBoundary says so in those words.
+async function precacheShell() {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    await cache.add('/');
+  } catch (_) {
+    // Installing while offline. The fetch handler falls back to whatever the previous version
+    // left behind; failing the whole install here would leave the app with no worker at all.
+  }
+  try {
+    const res = await fetch('/asset-manifest.json', { cache: 'no-cache' });
+    if (!res.ok) return;
+    const manifest = await res.json();
+    const entrypoints = (manifest.entrypoints || []).map(f => (f.startsWith('/') ? f : `/${f}`));
+    // One at a time and individually caught: addAll() rejects as a unit, so a single 404 would
+    // throw away the entrypoint that did fetch.
+    await Promise.all(entrypoints.map(url => cache.add(url).catch(() => {})));
+  } catch (_) {
+    // No manifest (offline, or a build that did not emit one). The on-demand branch below still
+    // caches these files the first time they are fetched, exactly as before.
+  }
+}
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.add('/'))
-  );
+  event.waitUntil(precacheShell());
   self.skipWaiting();
 });
 

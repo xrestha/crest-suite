@@ -20,11 +20,24 @@
 //     returned alongside as `detail`, for a title attribute or a fine-print line, never the
 //     headline.
 
+// Offline / DNS / CORS. Named and exported because two callers need the PREDICATE, not the
+// sentence: a caller that can retry later (Stock Count queues the write instead of losing it)
+// has to tell a dropped connection from a refusal, and a second copy of this regex is how the
+// two answers start disagreeing.
+const NETWORK_ERROR_RE = /failed to fetch|networkerror|load failed|network request failed/i
+
+/** True when the failure was the connection, not the server's answer. */
+export function isNetworkError(err) {
+  if (!err) return false
+  const e = typeof err === 'string' ? { message: err } : err
+  return NETWORK_ERROR_RE.test(e.message || '')
+}
+
 const rules = [
   // Offline / DNS / CORS — supabase-js surfaces these as a bare TypeError from fetch, stringified
   // into `error.message` by PostgrestBuilder rather than thrown.
   {
-    test: e => /failed to fetch|networkerror|load failed|network request failed/i.test(e.message || ''),
+    test: e => NETWORK_ERROR_RE.test(e.message || ''),
     staff: "You're offline, or the connection dropped. Check your signal and try again.",
     operator: "Couldn't reach the server — you're offline, or the connection dropped. Check your internet and try again.",
   },

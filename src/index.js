@@ -4,6 +4,7 @@ import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import { initInstallPrompt } from './utils/installPrompt';
+import { initChunkReloadGuard } from './shared/chunkReload';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
@@ -36,6 +37,13 @@ if ('serviceWorker' in navigator) {
     }
   }
 }
+
+// A dynamic import that 404s after a deploy is the app losing the ability to load its own code.
+// AppErrorBoundary covers the lazy ROUTES; this covers everything React cannot see — chiefly the
+// 43 `await import('xlsx')` calls that sit inside onClick handlers with no try/catch, where the
+// rejection is unhandled and the Export button simply does nothing. Registered before render so
+// it is listening for a failure during the first route's own import.
+initChunkReloadGuard();
 
 // Chrome fires beforeinstallprompt once and early — before the lazily-loaded Crest Staff portal
 // exists to hear it — so it is captured at boot and replayed from the portal's account sheet.

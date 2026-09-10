@@ -127,6 +127,11 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   that throws its own prose.** Related: `throw new Error(error.message)` on a Supabase error
   discards `error.code`, so the code-keyed rules (23514, 23502, 22P02) can never match — rethrow
   the error object.
+- **`isNetworkError(err)` is exported from that same file, and it is the PREDICATE, not the
+  sentence (S731).** A caller that can retry later has to tell a dropped connection from a
+  refusal — Stock Count queues the write in the first case and must never queue in the second, or
+  it retries a refusal for ever. It shares the one regex the network rule above tests on, because
+  a second copy is how "was this the connection?" starts getting two answers on one page.
 - Distinct from the report rule above: that one is about a figure a page *did not compute*; this
   one is about the sentence shown once something has already failed. Rules only get added here for
   shapes genuinely recognisable from the error — everything else takes an honest fallback.

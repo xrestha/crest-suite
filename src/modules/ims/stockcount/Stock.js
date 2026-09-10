@@ -15,6 +15,7 @@ import SearchableSelect from '../../../components/SearchableSelect'
 import ConfirmModal from '../../../components/ConfirmModal'
 import QtyInput from '../../../components/QtyInput'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import { isNetworkError } from '../../../shared/errorText'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import './Stock.css'
@@ -419,6 +420,33 @@ export default function Stock() {
   // Resolves true when the write landed (or was queued), false when it did not — the failure is
   // already recorded on the page by then. Callers use the boolean to decide whether to show the
   // "✓ Saved" state; they must never show it unconditionally (S695).
+  // `navigator.onLine` only reports whether the device has a network INTERFACE. On a restaurant
+  // wifi with no upstream, or when the signal dies between pressing Save and the request landing,
+  // it stays true — so the write took the direct path, failed, and was reported as a lost count
+  // while the offline queue, the entire point of which is this situation, was never consulted.
+  //
+  // The replay is safe to attempt because every write here is idempotent: opening/closing are
+  // upserts, and wastage/staff_meal are delete-then-insert over the same key, so re-running one
+  // converges on the same rows whether or not the original landed. That matters, because a dead
+  // fetch never proves the write did not land — it only proves we did not hear back.
+  //
+  // Only a NETWORK failure qualifies. An RLS refusal, a closed-period trigger or a constraint
+  // violation is a decision the server made, and queueing it would retry a refusal for ever.
+  async function queueOnNetworkFailure(err, fieldKey, entries) {
+    if (!isNetworkError(err?.supabase || err)) return false
+    try {
+      for (const e of entries) {
+        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId: e.itemId, fieldKey, qty: e.qty })
+      }
+    } catch (_) {
+      return false   // no local store either; fall through to the ordinary failure message
+    }
+    setPendingSync(prev => prev + entries.length)
+    setPendingItems(prev => { const next = new Set(prev); entries.forEach(e => next.add(e.itemId)); return next })
+    setPageNotice(`The connection dropped before ${entries.length === 1 ? 'that figure' : 'those figures'} could be saved, so ${entries.length === 1 ? 'it has' : 'they have'} been held on this device instead. Press Sync Now once you are back on a working connection.`)
+    return true
+  }
+
   const persistLocks = useRef({})
   async function persistValue(itemId, fieldKey, qty) {
     const key = `${itemId}:${fieldKey}`
@@ -434,7 +462,13 @@ export default function Stock() {
       }
       await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
       return true
-    }).catch(err => { noteSaveFailure(itemId, fieldKey, err); return false }) // recorded, and never wedges the chain for this key
+    }).catch(async err => {
+      // A dropped connection is held, not lost — see queueOnNetworkFailure. Anything else is a
+      // decision the server made and is recorded on the page as one.
+      if (await queueOnNetworkFailure(err, fieldKey, [{ itemId, qty }])) return 'queued'
+      noteSaveFailure(itemId, fieldKey, err)
+      return false
+    }) // recorded, and never wedges the chain for this key
     persistLocks.current[key] = run
     return run
   }
@@ -597,7 +631,12 @@ export default function Stock() {
           positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, type: 'staff' })))).error, true)
       }
       return true
-    }).catch(err => { noteSaveFailure(null, fieldKey, err, entries.length); return false }) // recorded; never wedges the chains
+    }).catch(async err => {
+      // Worth most here: this is the click at the end of a 300-item count.
+      if (await queueOnNetworkFailure(err, fieldKey, entries)) return 'queued'
+      noteSaveFailure(null, fieldKey, err, entries.length)
+      return false
+    }) // recorded; never wedges the chains
     entries.forEach(e => { persistLocks.current[`${e.itemId}:${fieldKey}`] = run })
     return run
   }
@@ -619,8 +658,11 @@ export default function Stock() {
     const ok = await persistValuesBulk(fieldKey, entries)
     setSaveAllLoading(false)
     // "✓ Saved" only when it did save. The bulk writer's catch records the failure and resolves,
-    // so this used to flash success directly above an ActionError saying the opposite.
-    if (ok) flashSaved()
+    // so this used to flash success directly above an ActionError saying the opposite. `'queued'`
+    // is the third answer (S731): the connection dropped and the figures are held on this device,
+    // which the page notice explains — flashing "✓ Saved" over that sentence is the same
+    // contradiction one state along.
+    if (ok && ok !== 'queued') flashSaved()
   }
 
   // ── Daily wastage (dated, reason-tagged) ───────────────────────────────────
@@ -677,13 +719,14 @@ export default function Stock() {
     const ok = await persistValuesBulk(fieldKey, visibleItems.map(item => ({ itemId: item.id, qty: null })))
     if (ok) {
       // The screen follows the server, not the click — a refused clear leaves the figures the
-      // server still holds on screen, beside the ActionError that says so.
+      // server still holds on screen, beside the ActionError that says so. A QUEUED clear does
+      // clear the screen: the queue is now the record of what those cells hold.
       setStockData(prev => {
         const next = { ...prev }
         visibleItems.forEach(item => { next[item.id] = { ...next[item.id], [fieldKey]: '' } })
         return next
       })
-      flashSaved()
+      if (ok !== 'queued') flashSaved()
     }
     setSaveAllLoading(false)
   }
@@ -960,9 +1003,20 @@ export default function Stock() {
           ⟳ Syncing {pendingSync} {pendingSync === 1 ? 'entry' : 'entries'}…
         </div>
       )}
-      {/* A sync that could not finish. This renders while ONLINE — which is the whole point: the
-          "N pending" badge above lives inside the offline banner, so before S731 an entry that
-          the server permanently refuses was retried on every load and never mentioned again. */}
+      {/* Entries held on this device while the browser believes it is online. Two ways to get
+          here: `navigator.onLine` reports only a network interface, so a wifi with no upstream
+          never fires the offline event; and a connection can die between pressing Save and the
+          request landing. Either way the amber banner above never renders, and before S731 the
+          "N pending" badge lived inside it — so held counts were invisible from every screen and
+          nothing would send them until the next page load. Sync Now is the action. */}
+      {isOnline && !syncing && !syncFailed && pendingSync > 0 && (
+        <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-amber-text)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span>⏳ <strong>{pendingSync} {pendingSync === 1 ? 'entry' : 'entries'}</strong> counted on this device {pendingSync === 1 ? 'has' : 'have'} not reached the server yet.</span>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => flushQueue()}>Sync Now</button>
+        </div>
+      )}
+      {/* A sync that could not finish. This renders while ONLINE — which is the whole point: an
+          entry the server permanently refuses was retried on every load and never mentioned. */}
       {syncFailed && !syncing && <ActionError error={syncFailed} />}
 
       {/* Nothing below the error card while a read has failed: every tab either shows figures the

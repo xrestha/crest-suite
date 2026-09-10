@@ -2,6 +2,7 @@ import { Component } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import SupportContactLine from './SupportContactLine'
 import { APP_VERSION } from '../shared/appVersion'
+import { isChunkLoadError, recoverFromChunkError, chunkErrorMessage } from '../shared/chunkReload'
 
 // Catches a render throw in a lazy route — or, mounted at app scope, in the providers themselves
 // — and renders a fallback instead of letting React unmount the whole tree to a blank page (S673).
@@ -92,6 +93,12 @@ export default class AppErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // eslint-disable-next-line no-console
     console.error('AppErrorBoundary caught:', error, info)
+    // A lazy route whose chunk no longer exists is a DEPLOY, not a crash — every page component
+    // in App.js is `React.lazy`, Vercel replaces the deployment's files, and the service worker's
+    // activate deletes the cache that held the old ones. Reload once and the new index.html names
+    // hashes that resolve. The side effect belongs here rather than in getDerivedStateFromError,
+    // which must stay pure; if it starts a reload the fallback below is never seen.
+    recoverFromChunkError(error)
   }
 
   componentDidUpdate(prevProps) {
@@ -121,6 +128,11 @@ export default class AppErrorBoundary extends Component {
     const route = this.props.route || (typeof window !== 'undefined' ? window.location.pathname : '')
     const details = buildDetails(error, route)
     const stack = stackHeadOf(error)
+    // A stale-deploy chunk failure that got past componentDidCatch's reload — already reloaded
+    // once inside the window, or offline, where a reload is answered from the cached shell and
+    // fails identically. Both are worth naming: "something went wrong on this screen" sends the
+    // reader to support for a state that is not broken and, offline, is not even wrong.
+    const chunkFailure = isChunkLoadError(error)
 
     return (
       <div style={{
@@ -146,11 +158,13 @@ export default class AppErrorBoundary extends Component {
           <h1 style={{
             margin: '0 0 8px', fontSize: 20, fontWeight: 700,
             color: 'var(--theme-text1, #f3f2f2)', fontFamily: 'Georgia, serif',
-          }}>Something went wrong on this screen</h1>
+          }}>{chunkFailure ? 'This screen needs to be reloaded' : 'Something went wrong on this screen'}</h1>
 
           <p style={{ margin: '0 0 20px', fontSize: 13, lineHeight: 1.65, color: 'var(--theme-text2, #bab6b6)' }}>
-            Nothing you had already saved is affected. Reloading usually fixes it — if it keeps
-            happening, copy the details below and send them to support.
+            {chunkFailure ? chunkErrorMessage() : (
+              <>Nothing you had already saved is affected. Reloading usually fixes it — if it keeps
+              happening, copy the details below and send them to support.</>
+            )}
           </p>
 
           <div className="no-print" style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
