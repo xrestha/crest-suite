@@ -274,7 +274,7 @@ export default function ShrinkageReport() {
       {!loadError && <>
       <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
-        Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red-text)' }}>unexplained</em>. Possible causes: theft, over-portioning, unlogged spillage, or data entry errors.
+        Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red-text)' }}>unexplained</em>. Possible causes: unlogged theft, over-portioning, unlogged spillage, or data entry errors. Anything you log on the Daily Wastage tab — theft included — is explained, and so leaves this figure.
         Only items linked to recipes (with sales data) are analysed.
       </div>
 

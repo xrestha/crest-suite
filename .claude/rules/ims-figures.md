@@ -12,6 +12,15 @@ paths:
   # above matched real files, so nothing ever said the set was missing the module the rule is
   # most about. MenuPricing then shipped the zero-numerator banding bug documented below.
   - "src/modules/ims/recipes/**"
+  # Added S726, and the S713 note above describes it exactly: this file has a whole S719 section
+  # titled "The variance family", names `TheoreticalVariance`/`ShrinkageReport`/`WastageReport` by
+  # hand, and did not load for any of them. Four directories hold IMS pages and only three were
+  # listed. check-rules-globs stayed green throughout — every glob above matches real files, and it
+  # can only report a glob matching NOTHING, never a set that is missing a directory.
+  - "src/modules/ims/variance/**"
+  # The reason list itself (S726). Whoever opens this file is exactly the person about to add a
+  # reason, and the two that must never be added are documented at the bottom of this rule.
+  - "src/shared/constants/wastageReasons.js"
   - "src/pages/Settings.js"
   - "src/modules/ownerReport/computeMenuEngineeringSection.js"
 ---
@@ -1010,3 +1019,45 @@ either; it now rounds up to NPR 5 VAT-inclusive like Menu Repricing's.
 - **No `useLatestRequest` on Combo Builder's pair load** — anchor and window are both one-click
   controls, so overlapping loads were easy and the last response won regardless of the anchor
   selected.
+
+---
+
+## The wastage reason vocabulary is a shared constant, and two reasons must never join it (S726)
+
+`src/shared/constants/wastageReasons.js` is the ONE definition of the Daily Wastage reason list —
+19 reasons in six `<optgroup>` headings, plus `DEFAULT_WASTAGE_REASON`. It is a standalone module
+rather than an export from `Stock.js` so `imsGuideData.js` can import it without dragging a
+route-level lazy page into the settings bundle (S440).
+
+**Nothing validates this column, anywhere.** `wastages.reason` is `text` — nullable, no CHECK, no
+enum — and `restoreClientData.js` does not normalise it either. `WastageReport` builds `byReason`
+from whatever strings come back, so the constant is not an enforcement point; it is the only thing
+standing between the By-Reason breakdown and a pile of near-duplicate spellings. Consequences:
+
+- **Adding an option is free** — no migration, and every row written under the old list still
+  displays and still groups.
+- **Renaming or removing one is not.** Every row already written under the old string keeps it, and
+  the report then shows both spellings side by side forever, with nothing to flag it.
+
+**Two reasons must never be added, because both would deduct the same stock twice.** Staff meal /
+Complimentary has its own table, its own tab and its own term in `computeUsed()`; a supplier return
+is already netted inside Net Purchases. A generic "stock adjustment" is excluded for a different
+reason: it turns wastage into a fudge factor for forcing a physical count to tie, which is the
+exact signal Variance and Shrinkage exist to catch. The rationale lives in the constant's header so
+it is read before anyone adds one back.
+
+**`'Monthly (untagged)'` is reserved.** `WastageReport.js` keys undated catch-all rows
+(`bs_day IS NULL`) under that synthetic label *before* it reads `r.reason`, so offering it as a real
+option would merge two different facts into one row of a breakdown that still adds up.
+`wastageReasons.test.js` asserts that, plus no duplicate spelling and `'Other'` still present — two
+call sites in `Stock.js` fall back to it. All three fail silently in production otherwise.
+
+**A guide that re-types a list is a guide that drifts.** `imsGuideData.js` spelled out all seven
+reasons in prose; it now interpolates the count and the group names off the constant, and `Help.js`
+describes the shape of the list rather than naming members. Nothing in the build can notice a guide
+sentence that disagrees with the product, so the sentence should not be able to.
+
+**Logging a loss moves it out of Shrinkage.** Adding `Theft / pilferage` means any theft a client
+records is *explained* and therefore leaves the unexplained gap `ShrinkageReport` measures. That
+report's own copy now says "unlogged theft" and names the consequence — the same rule as any other
+figure here: the sentence has to move when the arithmetic does.

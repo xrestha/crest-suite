@@ -2,6 +2,16 @@
 // edit this file directly and redeploy to update the guide (see CLAUDE.md decision log, S417).
 // Grouped to mirror the IMS nav's own IMS_GROUPS in Layout.js so the guide reads in the same
 // order a user encounters the module.
+//
+// The one thing here that is NOT hand-written is the wastage reason list: it is derived from the
+// shared constant below (S726). It used to spell out all seven reasons in prose — accurate at the
+// time, and one edit to the dropdown away from quietly not being. Nothing in the build can notice a
+// guide sentence that has drifted from the product, so the sentence should not be able to drift.
+
+import { WASTAGE_REASONS, WASTAGE_REASON_GROUPS } from '../../shared/constants/wastageReasons'
+
+const WASTAGE_REASON_SUMMARY =
+  `${WASTAGE_REASONS.length} reasons grouped as ${WASTAGE_REASON_GROUPS.map(g => g.group).join(', ')}`
 
 export const IMS_GUIDE_GROUPS = [
   {
@@ -313,7 +323,7 @@ export const IMS_GUIDE_GROUPS = [
         workflow: [
           'Opening Stock: per-item qty at start of month — manual only for a client\'s very first-ever period; every period after that is auto-carried-forward from the prior period\'s closing count when that period is closed. A "↩ Pull from last month" button on this tab re-runs that same carry-forward on demand, for when the automatic one had nothing to copy (see gotchas).',
           'Closing Stock: the physical count taken at month-end, entered per item.',
-          'Wastage tab: a single quick monthly total per item, no reason/day. Daily Wastage tab: dated, reason-tagged log (Spoilage/Expiry/Over-prep/Breakage/Spillage/Customer return/Other) — both roll into the same period total.',
+          `Wastage tab: a single quick monthly total per item, no reason/day. Daily Wastage tab: dated, reason-tagged log — ${WASTAGE_REASON_SUMMARY} — both roll into the same period total. The reasons are cut by what they imply you should DO: a fridge failure, a burnt pan and a mis-keyed order all end as binned food, but the fix is a repair, a training session and a POS habit. Only the Daily tab carries a reason, so anything logged on the monthly catch-all shows in the Wastage Report as "Monthly (untagged)".`,
           'Staff Meals tab (feature-gated): staff/complimentary consumption, tracked separately from wastage.',
           'Summary tab: full per-category and per-item picture in both qty and NPR value. Print Sheet: a blank physical-count sheet grouped by category, showing a System Ref Qty hint (not the answer) and starring (★) high-value/fast-moving items to count first.',
           'Every field auto-saves on blur; "Save All" forces a save of every visible row; "Clear All" blanks them (deletes the rows). On the Closing tab a typed 0 is a real count and is stored as a row of physical_qty 0 (S695) — blank and 0 are different facts there; on every other tab 0 and blank both mean "no row".',

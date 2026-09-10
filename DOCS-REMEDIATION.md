@@ -348,6 +348,23 @@ recorded here rather than as a T-item. The cheap manual version: when a rule is 
 its subject (`fcBand`, `scopedDb`, `withTimeout`) across `src/` and compare the hit list against
 the `paths:` block. A subject with call sites outside its own globs is the tell.
 
+**A second instance, and a cheaper tell (S726, 2026-09-10).** Same file, same shape, one directory
+further on: `ims-figures.md` still did not glob `src/modules/ims/variance/**`, and neither did
+`report-pages.md`. Four IMS pages live there — `Variance`, `TheoreticalVariance`, `ShrinkageReport`,
+`WastageReport` — and **both rules name those files in their own prose**: `ims-figures.md` has a
+section headed "The variance family" and another headed "`WastageReport` was the one page that did
+not page `wastages`". A rule was describing, at length, files it had never once loaded for. Found
+incidentally while editing `ShrinkageReport.js` for an unrelated change, which is the uncomfortable
+part — nothing was looking.
+
+That gives a tell the S713 note does not, and this one *is* mechanical: **compare the file basenames
+a rule's body mentions against the files its own globs resolve to.** A rule that names
+`WastageReport` fourteen times and cannot load for `WastageReport.js` is a contradiction visible
+without knowing anything about what the rule says. It is narrower than "should this rule cover that
+directory" — it only catches rules whose prose already names the file — but it needs no judgement,
+so it could be a T-item where the S713 version could not. Not built; recorded here as the next
+cheap win on this axis.
+
 ---
 
 ## T4 — Automate the lying-stub check

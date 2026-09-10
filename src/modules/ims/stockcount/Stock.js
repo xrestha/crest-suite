@@ -23,8 +23,7 @@ import { BS_MONTHS, getBsToday, formatBsDay, daysInBsMonth } from '../../../util
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-
-const WASTAGE_REASONS = ['Spoilage', 'Expiry', 'Over-prep', 'Breakage', 'Spillage', 'Customer return', 'Other']
+import { WASTAGE_REASON_GROUPS, DEFAULT_WASTAGE_REASON } from '../../../shared/constants/wastageReasons'
 
 function dispPurch(baseQty, item) {
   const cf = parseFloat(item.conversion_factor) || 1
@@ -67,7 +66,7 @@ export default function Stock() {
   const [dailyWastage, setDailyWastage] = useState({})   // { item_id: total dated wastage qty }
   const [dailyRows, setDailyRows] = useState([])         // raw dated wastage rows (with item join) for the Daily tab
   const [wDay, setWDay] = useState(getBsToday().day)     // selected BS day for daily wastage entry
-  const [wEntry, setWEntry] = useState({ item_id: '', qty: '', reason: 'Other' })
+  const [wEntry, setWEntry] = useState({ item_id: '', qty: '', reason: DEFAULT_WASTAGE_REASON })
   const [wBusy, setWBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState({})
@@ -553,7 +552,7 @@ export default function Stock() {
     setWBusy(true); setSaveError(null)
     const { error } = await supabase.from('wastages').insert({
       period_id: selectedPeriod.id, item_id: wEntry.item_id, qty,
-      bs_day: wDay, reason: wEntry.reason || 'Other',
+      bs_day: wDay, reason: wEntry.reason || DEFAULT_WASTAGE_REASON,
     })
     if (error) {
       // Keep the form as typed so the entry can be retried without re-picking the item.
@@ -1233,10 +1232,14 @@ export default function Stock() {
                 </div>
                 <div style={{ flex: '1 1 150px' }}>
                   <label style={{ display: 'block', fontSize: 11, color: 'var(--theme-text2)', marginBottom: 5 }} htmlFor="stock-f3">
-                    <Tip text="Why the stock was lost. Used to group wastage by cause in the Wastage Report." width={240}>Reason</Tip>
+                    <Tip text="Why the stock was lost. Grouped only to make the list quicker to scan — the Wastage Report totals by the individual reason, not by the heading. Pick the one that says what you'd DO about it." width={260}>Reason</Tip>
                   </label>
                   <select id="stock-f3" style={{ ...winp, width: '100%' }} value={wEntry.reason} onChange={e => setWEntry(w => ({ ...w, reason: e.target.value }))}>
-                    {WASTAGE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    {WASTAGE_REASON_GROUPS.map(g => (
+                      <optgroup key={g.group} label={g.group}>
+                        {g.reasons.map(r => <option key={r} value={r}>{r}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
                 <button className="btn btn-primary" onClick={addDailyWastage} disabled={wBusy || !wEntry.item_id || !(parseFloat(wEntry.qty) > 0)} style={{ fontSize: 13 }}>
@@ -1266,7 +1269,7 @@ export default function Stock() {
                     ) : dayEntries.map(r => (
                       <tr key={r.id}>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{r.items?.name || '—'}</td>
-                        <td><span className="badge badge-yellow">{r.reason || 'Other'}</span></td>
+                        <td><span className="badge badge-yellow">{r.reason || DEFAULT_WASTAGE_REASON}</span></td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{Number(r.qty).toLocaleString('en-IN')} {r.items?.uom || ''}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>{valOf(r) > 0 ? fmtNpr(valOf(r)) : '—'}</td>
                         <td style={{ textAlign: 'right' }}>

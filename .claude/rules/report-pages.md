@@ -13,6 +13,11 @@ paths:
   # MenuRepricing/RecipeMargin/MenuEngineering are reports in recipes/. This file never loaded for them.
   - "src/modules/ims/stockcount/**"
   - "src/modules/ims/recipes/**"
+  # Added S726 — the same omission as the two above, one directory further on. Variance,
+  # TheoreticalVariance, ShrinkageReport and WastageReport are all report pages: they carry
+  # `firstError`, `ReportLoadError`, `useLatestRequest` and an Excel letterhead, which is this
+  # file's entire subject, and it loaded for none of them.
+  - "src/modules/ims/variance/**"
   - "src/modules/pos/reports/**"
   - "src/modules/hr/reports/**"
   - "src/pages/dashboard/**"
