@@ -314,11 +314,21 @@ export default function ComboBuilder() {
                         {p.recipe.category && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>{p.recipe.category}</span>}
                       </td>
                       <td style={{ textAlign: 'right' }}>{p.coCount}</td>
+                      {/* Frequency needs `anchor_bills`, which arrives with migration
+                          20260910120000. Until that is applied the RPC returns two columns and
+                          this is 0 — so the cell says it cannot show the share rather than
+                          drawing an empty track for every row, which reads as "never happens". */}
                       <td style={{ minWidth: 120 }}>
-                        <div style={{ background: 'var(--theme-input-bg)', borderRadius: 'var(--radius-xs)', height: 8, overflow: 'hidden' }}>
-                          <div style={{ width: `${pct}%`, height: '100%', background: 'var(--theme-accent)' }} />
-                        </div>
-                        {anchorBills > 0 && <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{pct.toFixed(0)}%</span>}
+                        {anchorBills > 0 ? (
+                          <>
+                            <div style={{ background: 'var(--theme-input-bg)', borderRadius: 'var(--radius-xs)', height: 8, overflow: 'hidden' }}>
+                              <div style={{ width: `${pct}%`, height: '100%', background: 'var(--theme-accent)' }} />
+                            </div>
+                            <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{pct.toFixed(0)}%</span>
+                          </>
+                        ) : (
+                          <span style={{ color: 'var(--theme-text3)' }} title="Needs the anchor item's own bill count, which this database has not returned">—</span>
+                        )}
                       </td>
                       <td style={{ textAlign: 'right' }}>{fmtNpr(combined)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{fmtNpr(comboMenuPrice)}</td>
