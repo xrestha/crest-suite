@@ -3,13 +3,17 @@ import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
-import { useTheme, PRESETS } from '../context/ThemeContext'
+import { useTheme, PRESETS, SYSTEM_KEY } from '../context/ThemeContext'
 import Tip from '../components/Tip'
 import { MODULE_INK, DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
-import { assignMissingProductCodes } from '../shared/productCode'
+import { assignMissingProductCodes, SUB_RECIPE_CATEGORY } from '../shared/productCode'
 import { useConfirm } from '../shared/hooks/useConfirm'
 import { Navigate } from 'react-router-dom'
 import SupportContactLine from '../components/SupportContactLine'
+import ActionError, { asActionError } from '../components/ActionError'
+import FieldError, { fieldAria } from '../components/FieldError'
+import { fcThresholds, varianceFlagPct } from '../shared/imsFormulas'
+import { fetchAllRows } from '../shared/fetchAllRows'
 import { DEFAULT_SUPPORT_CONTACT, EMERGENCY_CHANNELS, SUPPORT_HOURS, resolveSupportContact, supportPhone } from '../shared/supportContact'
 
 // Lazy so the three module guides' prose (several thousand lines of admin-only strings) lives in
@@ -22,11 +26,69 @@ const tabSlug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
 const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Support', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
+// The columns the page-level Save Changes button owns — and the ONLY columns it may write (S730).
+// `settings` is one row per client that nine other pages write their own columns onto
+// (`pos_note_presets`, `pos_discount_reasons`, `pos_reservation_settings`, `tada_*`,
+// `ims_custom_roles`, `hr_custom_roles`, `pos_custom_roles`, `combo_discount_pct`, …). save() used
+// to send the whole `form`, which was the whole row as it stood when this page LOADED — so an
+// owner who left Settings open while a manager added a discount reason on the till, then pressed
+// Save on Thresholds, put the row back the way it was. Nothing on either screen said so: the
+// manager's save had reported success, and so did the owner's. Every other tab on this page has
+// its own writer for the same reason (Support → the platform row, Plan Pricing → the platform
+// row, Recipe Categories → one column); this list is what makes the page-level button one too.
+export const PAGE_FIELDS = [
+  'app_name', 'app_tagline', 'logo_url',
+  'property_address', 'property_phone', 'property_email', 'vat_number', 'invoice_prefix', 'is_vat_registered',
+  'fc_warning_pct', 'fc_critical_pct', 'expiry_warning_days', 'variance_flag_pct',
+  'block_negative_stock', 'warn_below_cost_pricing',
+  'item_code_prefix', 'vendor_code_prefix', 'sub_recipe_code_prefix',
+]
+// Tabs whose fields ride on that button. Recipe Categories, Theme and Product Codes have nothing
+// for it to save — Categories has its own Save, Theme is per-device, Product Codes is one action —
+// so a Save Changes button there wrote a row for no reason and, on Categories, wrote the STALE
+// category list from the loaded row over whatever had just been typed into the list beside it.
+const PAGE_SAVE_TABS = new Set(['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes'])
+// numeric columns: '' in the box is NULL in the row (readers fall back to the default), never ''
+// — Postgres refuses '' for numeric and integer, and the error it raised named the type.
+const NUMERIC_FIELDS = { fc_warning_pct: 'float', fc_critical_pct: 'float', expiry_warning_days: 'int', variance_flag_pct: 'float' }
+
+const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+
+function toNumberOrNull(v, kind) {
+  if (v === '' || v == null) return null
+  const n = kind === 'int' ? parseInt(v, 10) : parseFloat(v)
+  return Number.isFinite(n) ? n : NaN
+}
+
+// The threshold rules, in one place, against the DEFAULTS the readers actually use. Every reader
+// is `parseFloat(x) || default` (imsFormulas.js), so a stored 0 is silently the default — the box
+// would say 0 and every report would band at 35 — which is why 0 is refused rather than saved.
+export function validateThresholds(form) {
+  const errs = {}
+  const val = {}
+  for (const [k, kind] of Object.entries(NUMERIC_FIELDS)) {
+    const n = toNumberOrNull(form[k], kind)
+    val[k] = n
+    if (n === null) continue
+    if (Number.isNaN(n) || n <= 0) errs[k] = 'Enter a number above 0 — or leave it blank to use the default shown.'
+    else if (kind === 'int' && !Number.isInteger(n)) errs[k] = 'Whole days only.'
+  }
+  const defaults = fcThresholds({})
+  const warn = val.fc_warning_pct ?? defaults.warn
+  const crit = val.fc_critical_pct ?? defaults.critical
+  if (!errs.fc_warning_pct && !errs.fc_critical_pct && crit <= warn) {
+    errs.fc_critical_pct = `Critical must be above the warning level (${warn}%), or no figure can ever land in the amber band.`
+  }
+  return errs
+}
+
 // Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
 function deriveInvoicePrefix(name) {
   if (!name) return ''
   return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 5)
 }
+
+const pad3 = n => String(n).padStart(3, '0')
 
 export default function Settings() {
   const { settings, saveSettings, loadSettings, recipeCategories, platformSupport, savePlatformSupport,
@@ -49,6 +111,11 @@ export default function Settings() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const [fieldErr, setFieldErr] = useState({})
+  // How many recipes hold each category, keyed by category name — so removing one says what it
+  // orphans. null until read; a failed read leaves the counts unknown and the page says so.
+  const [catUsage, setCatUsage] = useState(null)
+  const [catUsageErr, setCatUsageErr] = useState(null)
   const [regenerating, setRegenerating] = useState(false)
   const [regenerateMsg, setRegenerateMsg] = useState('')
   const [regeneratingVnd, setRegeneratingVnd] = useState(false)
@@ -111,34 +178,114 @@ export default function Settings() {
     setPriceForm(next)
   }, [planPrices])
 
+  // Which client the page's state belongs to (S721's shape). An admin switching client in the top
+  // bar does not remount this page, so without this the previous client's regenerate results and
+  // category message stayed on screen under the new client's header.
+  const loadedClientRef = useRef(clientId)
   useEffect(() => {
+    if (loadedClientRef.current !== clientId) {
+      loadedClientRef.current = clientId
+      setRegenerateMsg(''); setRegenerateMsgVnd(''); setRegenerateMsgSrc(''); setGenerateMsgPrd('')
+      setCatMsg(''); setError(''); setFieldErr({}); setCatUsage(null); setCatUsageErr(null)
+    }
     loadSettings(isAdmin && !clientId ? null : clientId)
   }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Seeds `form` from the stored row — and KEEPS what has been typed since the previous seed.
+  // `settings` is re-read after every save on this page, including Save Categories and the three
+  // Regenerate buttons, and a plain reseed on each of those wiped every unsaved edit on every
+  // other tab: type a warning level, save the categories, and the warning level was gone with
+  // nothing to say so. A field is preserved when it differs from the row it was LAST seeded
+  // from; a different client's row replaces everything (an edit is never carried across tenants).
+  const seedRef = useRef(null)
   useEffect(() => {
-    const next = { ...settings }
-    if (!next.invoice_prefix && next.app_name) next.invoice_prefix = deriveInvoicePrefix(next.app_name)
-    setForm(next)
+    const prev = seedRef.current
+    seedRef.current = settings
+    setForm(f => {
+      const next = { ...settings }
+      if (!next.invoice_prefix && next.app_name) next.invoice_prefix = deriveInvoicePrefix(next.app_name)
+      if (prev && (prev.client_id ?? null) === (settings.client_id ?? null)) {
+        for (const k of PAGE_FIELDS) {
+          if (k in f && !sameValue(f[k], prev[k])) next[k] = f[k]
+        }
+      }
+      return next
+    })
   }, [settings])
   useEffect(() => { setCats([...recipeCategories]) }, [recipeCategories]) // eslint-disable-line
 
-  function update(key, val) { setForm(f => ({ ...f, [key]: val })) }
+  // Category usage, for the Recipe Categories tab. One row per recipe, so paged — a client's
+  // menu is master data, but a truncated read here would report a category as unused and let it
+  // be removed without a word (the S528 rule: truncation returns no error).
+  useEffect(() => {
+    if (!clientId || isAdmin || !hasFeature('recipe_costing')) return
+    let cancelled = false
+    fetchAllRows(() => scopedFrom('recipes', 'id, category').order('id')).then(({ data, error: err }) => {
+      if (cancelled) return
+      if (err) { setCatUsageErr(asActionError(err)); return }
+      const counts = {}
+      for (const r of data || []) {
+        if (r.category === SUB_RECIPE_CATEGORY) continue
+        const key = r.category || ''
+        counts[key] = (counts[key] || 0) + 1
+      }
+      setCatUsage(counts)
+    })
+    return () => { cancelled = true }
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function addCat() {
-    const name = newCat.trim()
+  function update(key, val) {
+    setForm(f => ({ ...f, [key]: val }))
+    if (fieldErr[key]) setFieldErr(e => ({ ...e, [key]: '' }))
+  }
+
+  // A category the recipes still use that is not in the list — removed here, or never added.
+  const orphanCats = catUsage
+    ? Object.keys(catUsage).filter(c => c && !cats.some(x => x.toLowerCase() === c.toLowerCase()))
+    : []
+
+  function addCat(nameArg) {
+    const name = (nameArg ?? newCat).trim()
     if (!name) return
-    if (cats.some(c => c.toLowerCase() === name.toLowerCase())) return
-    if (name.toLowerCase() === 'sub-recipe') return
+    // Silently doing nothing on a duplicate is the shape S729 took out of ImsStaff — say why.
+    if (cats.some(c => c.toLowerCase() === name.toLowerCase())) { setCatMsg(`error:"${name}" is already in the list.`); return }
+    if (name.toLowerCase() === SUB_RECIPE_CATEGORY.toLowerCase()) { setCatMsg('error:Sub-Recipe is managed by the app and is always available in the recipe form — it cannot be added here.'); return }
     setCats(prev => [...prev, name])
     setNewCat('')
+    setCatMsg('')
+  }
+
+  function removeCat(i) {
+    const cat = cats[i]
+    const n = catUsage?.[cat] || 0
+    const doRemove = () => setCats(prev => prev.filter((_, idx) => idx !== i))
+    if (n === 0) { doRemove(); return }
+    askConfirm({
+      title: `Remove "${cat}"?`,
+      confirmLabel: 'Remove', danger: true,
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            <strong>{n} recipe{n === 1 ? '' : 's'}</strong> {n === 1 ? 'is' : 'are'} filed under "{cat}". They keep that
+            label and stay on their own tab in Recipe Costing, but the category leaves the dropdown, so no new
+            dish can be filed under it and an existing one can only move out of it.
+          </p>
+          <p style={{ margin: 0 }}>Nothing is written until you press Save Categories.</p>
+        </>
+      ),
+      run: async () => doRemove(),
+    })
   }
 
   async function saveCategories() {
+    if (catSaving) return
     const cleaned = cats.map(c => c.trim()).filter(Boolean)
     if (cleaned.length === 0) { setCatMsg('error:Add at least one category.'); return }
     setCatSaving(true); setCatMsg('')
     try {
-      await saveSettings({ ...settings, recipe_categories: cleaned })
+      // One column, never `{ ...settings, … }`: the context's copy of the row is fresher than the
+      // page's form, but it is still a snapshot, and the same last-writer-wins applies.
+      await saveSettings({ recipe_categories: cleaned })
       setCatMsg('ok:Categories saved.')
       setTimeout(() => setCatMsg(''), 2500)
     } catch (e) {
@@ -147,11 +294,33 @@ export default function Settings() {
     setCatSaving(false)
   }
 
+  // The fields this page owns that differ from the stored row, typed for the column.
+  function pagePatch() {
+    const patch = {}
+    for (const k of PAGE_FIELDS) {
+      if (!(k in form)) continue
+      let v = form[k]
+      if (k in NUMERIC_FIELDS) v = toNumberOrNull(v, NUMERIC_FIELDS[k])
+      else if (typeof v === 'string' && k !== 'logo_url') v = v.trim()
+      if (!sameValue(v, settings[k])) patch[k] = v
+    }
+    return patch
+  }
+
   async function save() {
-    setSaving(true)
+    if (saving) return  // the button stays enabled while busy (DESIGN.md), so this is the guard
     setError('')
+    const errs = validateThresholds(form)
+    setFieldErr(errs)
+    if (Object.keys(errs).length) {
+      setActiveTab('Thresholds')
+      setError('Nothing was saved — a threshold needs correcting first (marked below).')
+      return
+    }
+    const patch = pagePatch()
+    setSaving(true)
     try {
-      await saveSettings(form)
+      if (Object.keys(patch).length) await saveSettings(patch)
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e) {
@@ -195,18 +364,41 @@ export default function Settings() {
     const { error: uploadErr } = await supabase.storage.from('Logos').upload(path, file, { upsert: true, contentType: file.type })
     if (uploadErr) { setLogoMsg('error:' + uploadErr.message); setLogoUploading(false); return }
     const { data: { publicUrl } } = supabase.storage.from('Logos').getPublicUrl(path)
-    const updated = { ...form, logo_url: publicUrl }
-    setForm(updated)
-    await saveSettings(updated)
-    setLogoMsg('ok:Logo saved.')
-    setTimeout(() => setLogoMsg(''), 3000)
+    setForm(f => ({ ...f, logo_url: publicUrl }))
+    try {
+      await saveSettings({ logo_url: publicUrl })
+      setLogoMsg('ok:Logo saved.')
+      setTimeout(() => setLogoMsg(''), 3000)
+    } catch (e) {
+      setLogoMsg('error:The file uploaded, but the row still points at the old logo. ' + e.message)
+    }
     setLogoUploading(false)
   }
 
   async function handleLogoRemove() {
-    const updated = { ...form, logo_url: null }
-    setForm(updated)
-    await saveSettings(updated)
+    setForm(f => ({ ...f, logo_url: null }))
+    setLogoMsg('')
+    try {
+      await saveSettings({ logo_url: null })
+    } catch (e) {
+      setLogoMsg('error:' + e.message)
+    }
+  }
+
+  // One write per row, stopping at the first failure and saying how far it got. Every row's
+  // result used to be dropped (`await scopedUpdate(...)` with nothing read back), so a refused
+  // write — and on sub-recipes a unique-index collision, see below — reported "✓ Renumbered".
+  async function writeCodes(rows, write) {
+    let done = 0
+    for (const row of rows) {
+      const { error: err } = await write(row)
+      if (err) {
+        const a = asActionError(err)
+        throw new Error(`Stopped at "${row.name}" after ${done} of ${rows.length}: ${a.text}${a.detail ? ` (${a.detail})` : ''}`)
+      }
+      done++
+    }
+    return done
   }
 
   async function regenerateAllCodes() {
@@ -233,22 +425,22 @@ export default function Settings() {
     setRegenerating(true)
     setRegenerateMsg('')
     try {
-      // Save prefix first if changed
-      if (form.item_code_prefix !== settings.item_code_prefix) {
-        await saveSettings({ ...form, item_code_prefix: prefix })
-      }
+      // The prefix alone — never `{ ...form, … }`, which committed every other tab's unsaved
+      // edits as a side effect of pressing Renumber, and wrote the whole stale row (PAGE_FIELDS).
+      if (prefix !== (settings.item_code_prefix || '')) await saveSettings({ item_code_prefix: prefix })
 
+      // Real items only. A sub-recipe's mirror row in `items` carries the sub-recipe's OWN code
+      // (SRC-nnn, written by Recipes.js) and is hidden from Item Master — so renumbering it here
+      // stamped an ITM code over the SRC one that the ingredient rows print, and left the hidden
+      // gaps this button exists to close.
       const { data: items, error: fetchErr } = await scopedFrom('items', 'id, name')
-        .order('name')
+        .eq('is_sub_recipe', false)
+        .order('name').order('id')
+      if (fetchErr) throw new Error(asActionError(fetchErr).text)
 
-      if (fetchErr) throw fetchErr
-
-      for (let i = 0; i < (items || []).length; i++) {
-        const code = `${prefix}-${String(i + 1).padStart(3, '0')}`
-        await scopedUpdate('items', { item_code: code }).eq('id', items[i].id)
-      }
-
-      setRegenerateMsg(`✓ Renumbered ${items?.length || 0} items as ${prefix}-001 through ${prefix}-${String(items?.length || 0).padStart(3, '0')}`)
+      const rows = (items || []).map((it, i) => ({ ...it, code: `${prefix}-${pad3(i + 1)}` }))
+      const done = await writeCodes(rows, r => scopedUpdate('items', { item_code: r.code }).eq('id', r.id))
+      setRegenerateMsg(`✓ Renumbered ${done} item${done === 1 ? '' : 's'} as ${prefix}-001 through ${prefix}-${pad3(done)}. Sub-recipes keep their own codes.`)
     } catch (e) {
       setRegenerateMsg(`Error: ${e.message}`)
     }
@@ -279,21 +471,18 @@ export default function Settings() {
     setRegeneratingVnd(true)
     setRegenerateMsgVnd('')
     try {
-      if (form.vendor_code_prefix !== settings.vendor_code_prefix) {
-        await saveSettings({ ...form, vendor_code_prefix: prefix })
-      }
+      if (prefix !== (settings.vendor_code_prefix || '')) await saveSettings({ vendor_code_prefix: prefix })
 
+      // Archived vendors are included on purpose: `vendor_code` has no unique index, so leaving an
+      // archived vendor on VND-003 while an active one is renumbered onto VND-003 would give two
+      // suppliers one code the moment the archived one is restored.
       const { data: vendors, error: fetchErr } = await scopedFrom('vendors', 'id, name')
-        .order('name')
+        .order('name').order('id')
+      if (fetchErr) throw new Error(asActionError(fetchErr).text)
 
-      if (fetchErr) throw fetchErr
-
-      for (let i = 0; i < (vendors || []).length; i++) {
-        const code = `${prefix}-${String(i + 1).padStart(3, '0')}`
-        await scopedUpdate('vendors', { vendor_code: code }).eq('id', vendors[i].id)
-      }
-
-      setRegenerateMsgVnd(`✓ Renumbered ${vendors?.length || 0} vendors as ${prefix}-001 through ${prefix}-${String(vendors?.length || 0).padStart(3, '0')}`)
+      const rows = (vendors || []).map((v, i) => ({ ...v, code: `${prefix}-${pad3(i + 1)}` }))
+      const done = await writeCodes(rows, r => scopedUpdate('vendors', { vendor_code: r.code }).eq('id', r.id))
+      setRegenerateMsgVnd(`✓ Renumbered ${done} vendor${done === 1 ? '' : 's'} as ${prefix}-001 through ${prefix}-${pad3(done)} (archived vendors included, so no two suppliers share a code).`)
     } catch (e) {
       setRegenerateMsgVnd(`Error: ${e.message}`)
     }
@@ -324,24 +513,39 @@ export default function Settings() {
     setRegeneratingSrc(true)
     setRegenerateMsgSrc('')
     try {
-      if (form.sub_recipe_code_prefix !== settings.sub_recipe_code_prefix) {
-        await saveSettings({ ...form, sub_recipe_code_prefix: prefix })
-      }
+      if (prefix !== (settings.sub_recipe_code_prefix || '')) await saveSettings({ sub_recipe_code_prefix: prefix })
 
-      const { data: subRecipes, error: fetchErr } = await scopedFrom('recipes', 'id, name')
-        .eq('category', 'Sub-Recipe')
-        .order('name')
+      const { data: subRecipes, error: fetchErr } = await scopedFrom('recipes', 'id, name, recipe_code, linked_item_id')
+        .eq('category', SUB_RECIPE_CATEGORY)
+        .order('name').order('id')
+      if (fetchErr) throw new Error(asActionError(fetchErr).text)
 
-      if (fetchErr) throw fetchErr
+      const targets = (subRecipes || []).map((r, i) => ({ ...r, code: `${prefix}-${pad3(i + 1)}` }))
+      const changing = targets.filter(r => (r.recipe_code || '') !== r.code)
 
-      for (let i = 0; i < (subRecipes || []).length; i++) {
-        const code = `${prefix}-${String(i + 1).padStart(3, '0')}`
-        await scopedUpdate('recipes', { recipe_code: code }).eq('id', subRecipes[i].id)
-      }
-
-      setRegenerateMsgSrc(`✓ Renumbered ${subRecipes?.length || 0} sub-recipes as ${prefix}-001 through ${prefix}-${String(subRecipes?.length || 0).padStart(3, '0')}`)
+      // TWO passes, because `recipes.recipe_code` is unique per client (recipes_client_recipe_code_key)
+      // and a one-pass renumber collides with itself: giving the first row SRC-001 while a row
+      // further down still holds SRC-001 is refused by the index. With the per-row error dropped,
+      // that refusal was silent and the page reported "✓ Renumbered" over a half-renumbered list.
+      // Pass 1 clears every code that is about to move (the index is partial, NULLs are free);
+      // pass 2 writes the new ones. A failure in pass 2 leaves the remaining rows with no code,
+      // which the message says, and running this again completes it.
+      await writeCodes(changing, r => scopedUpdate('recipes', { recipe_code: null }).eq('id', r.id))
+      const done = await writeCodes(changing, async r => {
+        const { error: err } = await scopedUpdate('recipes', { recipe_code: r.code }).eq('id', r.id)
+        if (err) return { error: err }
+        // The mirror row in `items` prints this code in every ingredient row that uses the
+        // sub-recipe (Recipes.js writes it at insert and nothing else ever updates it), so it
+        // moves with the recipe or the two disagree until someone re-saves the sub-recipe.
+        if (r.linked_item_id) return scopedUpdate('items', { item_code: r.code }).eq('id', r.linked_item_id)
+        return { error: null }
+      })
+      const total = targets.length
+      setRegenerateMsgSrc(total === 0
+        ? 'No sub-recipes to renumber.'
+        : `✓ ${total} sub-recipe${total === 1 ? '' : 's'} now run ${prefix}-001 through ${prefix}-${pad3(total)} (${done} changed, ${total - done} already correct). Their stock-count items carry the same codes.`)
     } catch (e) {
-      setRegenerateMsgSrc(`Error: ${e.message}`)
+      setRegenerateMsgSrc(`Error: ${e.message} Any sub-recipe left without a code gets one when this is run again.`)
     }
     setRegeneratingSrc(false)
   }
@@ -358,7 +562,7 @@ export default function Settings() {
     setGenerateMsgPrd('')
     try {
       const { data: recipes, error: fetchErr } = await scopedFrom('recipes', 'id, name, category, recipe_code')
-      if (fetchErr) throw fetchErr
+      if (fetchErr) throw new Error(asActionError(fetchErr).text)
 
       const pending = assignMissingProductCodes(recipes || [])
       if (pending.length === 0) {
@@ -366,19 +570,31 @@ export default function Settings() {
         setGeneratingPrd(false)
         return
       }
-      if (!window.confirm(
-        `Assign a Product Code to ${pending.length} recipe${pending.length === 1 ? '' : 's'} that ` +
-        `currently have none?\n\nCodes come from each recipe's category (Beverage → BEV-001, ` +
-        `BEV-002, …). Recipes that already have a code are left untouched.`
-      )) { setGeneratingPrd(false); return }
-
-      let done = 0
-      for (const row of pending) {
-        const { error } = await scopedUpdate('recipes', { recipe_code: row.recipe_code }).eq('id', row.id)
-        if (error) throw error
-        done++
-      }
-      setGenerateMsgPrd(`✓ Assigned ${done} Product Code${done === 1 ? '' : 's'}. Existing codes were left as they were.`)
+      const n = pending.length
+      // The page's one confirm dialog, not window.confirm: this is a bulk write, and the three
+      // Renumber buttons beside it already go through it.
+      askConfirm({
+        title: `Give ${n} recipe${n === 1 ? '' : 's'} a Product Code?`,
+        confirmLabel: 'Assign Codes', busyLabel: 'Assigning…',
+        body: (
+          <>
+            <p style={{ margin: '0 0 8px' }}>
+              {n} menu recipe{n === 1 ? ' has' : 's have'} no code. Each gets the next number in its category's
+              series — Beverage → <strong>BEV-001</strong>, <strong>BEV-002</strong> and so on.
+            </p>
+            <p style={{ margin: 0 }}>Recipes that already have a code are not touched.</p>
+          </>
+        ),
+        run: async () => {
+          try {
+            const done = await writeCodes(pending.map(r => ({ ...r, name: r.recipe_code })),
+              r => scopedUpdate('recipes', { recipe_code: r.recipe_code }).eq('id', r.id))
+            setGenerateMsgPrd(`✓ Assigned ${done} Product Code${done === 1 ? '' : 's'}. Existing codes were left as they were.`)
+          } catch (e) {
+            setGenerateMsgPrd(`Error: ${e.message} The codes already assigned stay; run this again for the rest.`)
+          }
+        },
+      })
     } catch (e) {
       setGenerateMsgPrd(`Error: ${e.message}`)
     }
@@ -398,13 +614,13 @@ export default function Settings() {
               : 'Operational thresholds, code formats, recipe categories and your theme'}
           </p>
         </div>
-        {/* Support and Plan Pricing are the tabs whose cards each commit their own row, so the
-            page-level button does not render there: measured, the nearest Save to the consultant
-            fields was the OTHER card's, 243px away, while the button that saved them sat 1,345px
-            up (S684). Plan Pricing joined them in S701 — this button writes the VIEWED client's
-            settings row, which is the one place platform prices must never go. */}
-        {activeTab !== 'Support' && activeTab !== 'Plan Pricing' && (
-          <button className="btn btn-primary" onClick={save} disabled={saving}>
+        {/* Only on the tabs whose fields it saves (PAGE_SAVE_TABS). Support and Plan Pricing commit
+            their own rows: measured, the nearest Save to the consultant fields was the OTHER
+            card's, 243px away, while the button that saved them sat 1,345px up (S684); Plan
+            Pricing writes the platform row, which this button must never (S701). S730 took it off
+            Recipe Categories, Product Codes and Theme too — see PAGE_SAVE_TABS. */}
+        {PAGE_SAVE_TABS.has(activeTab) && (
+          <button className="btn btn-primary" onClick={save} aria-busy={saving ? 'true' : undefined}>
             {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
           </button>
         )}
@@ -455,7 +671,7 @@ export default function Settings() {
       </div>
 
       <div id="settings-tabpanel" role="tabpanel" aria-labelledby={`settings-tab-${tabSlug(activeTab)}`}>
-      {error && <p style={{ color: 'var(--theme-red-text)', fontSize: 13, marginBottom: 16 }}>{error}</p>}
+      <ActionError error={error} className="action-error--top" />
 
       {/* BRANDING */}
       {activeTab === 'Branding' && (
@@ -553,11 +769,10 @@ export default function Settings() {
             ))}
             <div className="form-field">
               <label htmlFor="set-is-vat-registered"><Tip text="On = POS bills print as a Tax Invoice with a VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD." width={280}>VAT Registered</Tip></label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
+              <label className="form-check">
                 <input id="set-is-vat-registered" type="checkbox" checked={form.is_vat_registered ?? true}
-                  onChange={e => update('is_vat_registered', e.target.checked)}
-                  style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
-                <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(form.is_vat_registered ?? true) ? 'Yes — issues Tax Invoices' : 'No — PAN Bill only'}</span>
+                  onChange={e => update('is_vat_registered', e.target.checked)} />
+                <span>{(form.is_vat_registered ?? true) ? 'Yes — issues Tax Invoices' : 'No — PAN Bill only'}</span>
               </label>
             </div>
           </div>
@@ -568,38 +783,42 @@ export default function Settings() {
       {activeTab === 'Thresholds' && (
         <div className="card">
           <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Operational Thresholds</h3>
-          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>These control when the system flags warnings across reports and the dashboard.</p>
+          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>These decide when a figure is coloured amber or red across every report and dashboard. Leave a box blank to use the default shown in it.</p>
           <div className="form-grid form-grid-2">
             {[
-              { key: 'fc_warning_pct', label: 'Food Cost % — Warning threshold', placeholder: '35', suffix: '%', hint: 'Dashboard turns amber above this', tip: 'FC% above this value turns the dashboard FC% card amber. Nepal F&B benchmark: warn at 35–38%.' },
-              { key: 'fc_critical_pct', label: 'Food Cost % — Critical threshold', placeholder: '45', suffix: '%', hint: 'Dashboard turns red above this', tip: 'FC% above this value turns the dashboard FC% card red. Set this higher than the warning threshold.' },
-              { key: 'expiry_warning_days', label: 'Expiry Warning — Days ahead', placeholder: '7', suffix: 'days', hint: 'FIFO report flags items expiring within this window', tip: 'Items expiring within this many days are highlighted in the FIFO / Expiry report. E.g. 7 = flag anything expiring within a week.' },
-              { key: 'variance_flag_pct', label: 'Variance Flag threshold', placeholder: '10', suffix: '%', hint: 'Variance report flags items above this %', tip: 'Items with a usage variance above this % are highlighted in the Variance Report. E.g. 10 = flag when actual usage is >10% above theoretical.' },
+              { key: 'fc_warning_pct', label: 'Food Cost % — Warning level', placeholder: String(fcThresholds({}).warn), suffix: '%', hint: 'Every food-cost figure turns amber △ above this', tip: 'A food cost % above this turns amber — on the Dashboard card, Monthly Summary, Recipe Costing, Menu Pricing, Menu Repricing, Recipe Margin, Annual Summary and Period Comparison alike. Nepal F&B benchmark: warn at 35–38%.' },
+              { key: 'fc_critical_pct', label: 'Food Cost % — Critical level', placeholder: String(fcThresholds({}).critical), suffix: '%', hint: 'Turns red ▲ above this — must be above the warning level', tip: 'A food cost % above this turns red, everywhere the warning level applies. It has to sit above the warning level, or nothing can ever be amber.' },
+              { key: 'expiry_warning_days', label: 'Expiry Warning — Days ahead', placeholder: '7', suffix: 'days', hint: 'FIFO / Expiry report flags batches expiring inside this window', tip: 'Batches expiring within this many days are highlighted in the FIFO / Expiry report. E.g. 7 = flag anything expiring within a week.' },
+              { key: 'variance_flag_pct', label: 'Variance Flag level', placeholder: String(varianceFlagPct({})), suffix: '%', hint: 'Both variance reports flag an item past this %', tip: 'An item whose actual usage differs from theoretical by more than this % is flagged, coloured and marked ▲/▼ on the Variance Report and Theoretical Variance. E.g. 10 = flag when actual usage is more than 10% above or below what sales × recipes say.' },
             ].map(f => (
               <div key={f.key} className="form-field">
                 <label htmlFor={`set-${f.key}`}><Tip text={f.tip} width={280}>{f.label}</Tip></label>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input id={`set-${f.key}`} type="number" value={form[f.key] || ''} onChange={e => update(f.key, e.target.value)} placeholder={f.placeholder} style={{ width: 100 }} />
+                  {/* `?? ''`, not `|| ''`: a stored 0 is refused on save, but until then the box must show it */}
+                  <input id={`set-${f.key}`} type="number" min="0" step={f.key === 'expiry_warning_days' ? '1' : 'any'}
+                    value={form[f.key] ?? ''} onChange={e => update(f.key, e.target.value)}
+                    placeholder={f.placeholder} style={{ width: 100 }} {...fieldAria(`set-${f.key}`, fieldErr[f.key])} />
                   <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{f.suffix}</span>
                 </div>
+                <FieldError id={`set-${f.key}`} message={fieldErr[f.key]} />
                 <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{f.hint}</span>
               </div>
             ))}
             {[
               { key: 'block_negative_stock', label: 'Block negative stock on save', def: false,
-                tip: 'When on, Stock Count refuses to save if any item\'s computed usage goes negative (more used than was ever bought or on hand) — the item(s) must be fixed first. Admin can still override with a confirmation. Off by default.',
-                onText: 'Yes — blocks Save All until fixed', offText: 'No — save anyway, just highlighted red (current behavior)' },
+                tip: 'When on, Stock Count refuses Save All while any item\'s usage comes out negative (more used than was ever bought or on hand) — those items must be fixed first. Crest admin can still override with a confirmation. Off by default.',
+                onText: 'Yes — blocks Save All until fixed', offText: 'No — saves anyway, the item is only highlighted red' },
               { key: 'warn_below_cost_pricing', label: 'Warn when menu price is below cost', def: true,
-                tip: 'When on, Recipes shows a warning if a menu item\'s selling price is set below its computed ingredient cost. Doesn\'t block saving — just a heads-up in case it wasn\'t intentional.',
+                tip: 'When on, Recipe Costing shows a warning if a menu item\'s selling price is set below its computed ingredient cost. Doesn\'t block saving — just a heads-up in case it wasn\'t intentional.',
                 onText: 'Yes — shows a warning', offText: 'No — no warning' },
             ].map(f => (
               <div key={f.key} className="form-field">
-                <label htmlFor={`set-${f.key}`}><Tip text={f.tip} width={280}>{f.label}</Tip></label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', height: 34 }}>
-                  <input id={`set-${f.key}`} type="checkbox" checked={form[f.key] ?? f.def}
-                    onChange={e => update(f.key, e.target.checked)}
-                    style={{ width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0, background: 'none', border: 'none', accentColor: 'var(--theme-accent)', cursor: 'pointer' }} />
-                  <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{(form[f.key] ?? f.def) ? f.onText : f.offText}</span>
+                <span className="field-label" id={`set-${f.key}-label`}><Tip text={f.tip} width={280}>{f.label}</Tip></span>
+                {/* .form-check, not an inline 16px box — the inline workaround S684 said not to re-add */}
+                <label className="form-check">
+                  <input id={`set-${f.key}`} type="checkbox" aria-describedby={`set-${f.key}-label`} checked={form[f.key] ?? f.def}
+                    onChange={e => update(f.key, e.target.checked)} />
+                  <span>{(form[f.key] ?? f.def) ? f.onText : f.offText}</span>
                 </label>
               </div>
             ))}
@@ -633,8 +852,9 @@ export default function Settings() {
           <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
-              If items have been deleted, codes may have gaps. Use this to renumber every item sequentially
-              from {(form.item_code_prefix || 'ITM').toUpperCase()}-001, alphabetically by name. Save the prefix above first if you've changed it.
+              If items have been deleted, codes may have gaps. This renumbers every item sequentially
+              from {(form.item_code_prefix || 'ITM').toUpperCase()}-001, alphabetically by name, and saves the prefix above
+              with it. Sub-recipes are left alone — they carry their own {(form.sub_recipe_code_prefix || 'SRC').toUpperCase()} series.
             </p>
             <button className="btn btn-ghost" onClick={regenerateAllCodes} disabled={regenerating}>
               {regenerating ? 'Renumbering…' : '↻ Regenerate All Item Codes'}
@@ -674,8 +894,8 @@ export default function Settings() {
           <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
-              If vendors have been deleted, codes may have gaps. Use this to renumber every vendor sequentially
-              from {(form.vendor_code_prefix || 'VND').toUpperCase()}-001, alphabetically by name. Save the prefix above first if you've changed it.
+              If vendors have been deleted, codes may have gaps. This renumbers every vendor sequentially
+              from {(form.vendor_code_prefix || 'VND').toUpperCase()}-001, alphabetically by name, and saves the prefix above with it.
             </p>
             <button className="btn btn-ghost" onClick={regenerateAllVendorCodes} disabled={regeneratingVnd}>
               {regeneratingVnd ? 'Renumbering…' : '↻ Regenerate All Vendor Codes'}
@@ -715,7 +935,7 @@ export default function Settings() {
           <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
             <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
-              Renumbers every sub-recipe sequentially from {(form.sub_recipe_code_prefix || 'SRC').toUpperCase()}-001, alphabetically by name. Use this to assign codes to existing sub-recipes or close gaps after deletions.
+              Renumbers every sub-recipe sequentially from {(form.sub_recipe_code_prefix || 'SRC').toUpperCase()}-001, alphabetically by name, and saves the prefix above with it. Use this to assign codes to existing sub-recipes or close gaps after deletions. Each sub-recipe's stock-count item takes the same code.
             </p>
             <button className="btn btn-ghost" onClick={regenerateAllSubRecipeCodes} disabled={regeneratingSrc}>
               {regeneratingSrc ? 'Renumbering…' : '↻ Regenerate All Sub-Recipe Codes'}
@@ -746,7 +966,7 @@ export default function Settings() {
               created before codes existed. <strong>Codes already in place are never changed</strong>,
               so anything you carried across from your old menu stays exactly as it is. Sub-recipes are
               skipped; they have their own {(form.sub_recipe_code_prefix || 'SRC').toUpperCase()} series
-              on the tab before this one.
+              {TABS.includes('Sub-Recipe Codes') ? ' on the tab before this one' : ', set with Recipe Costing on the Growth plan'}.
             </p>
             <button className="btn btn-ghost" onClick={generateMissingProductCodes} disabled={generatingPrd}>
               {generatingPrd ? 'Assigning…' : '＋ Generate Missing Product Codes'}
@@ -765,45 +985,73 @@ export default function Settings() {
         <div className="card">
           <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Recipe Categories</h3>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
-            These appear in the recipe form dropdown and as filter tabs. <strong>Sub-Recipe / Prep Item</strong> is system-managed and cannot be removed.
+            These appear in the recipe form dropdown and as filter tabs in Recipe Costing. <strong>Sub-Recipe / Prep Item</strong> is managed by the app and is always there.
+            A category's first three letters also make its Product Codes (Beverage → BEV-001).
           </p>
 
+          <ActionError error={catUsageErr && { text: 'Could not check which categories your recipes use, so a category in use can be removed here without warning.', detail: catUsageErr.detail }} />
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
-            {cats.map((cat, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', background: 'var(--theme-bg)' }}>
-                <span style={{ flex: 1, fontSize: 13, color: 'var(--theme-text1)' }}>{cat}</span>
-                {/* A named control, not a bare glyph dimmed to 0.7 on red text (S682): title is
-                    the last-resort naming mechanism and announces nothing on touch. */}
-                <button
-                  type="button"
-                  className="btn btn-danger btn-icon"
-                  onClick={() => setCats(prev => prev.filter((_, idx) => idx !== i))}
-                  aria-label={`Remove the "${cat}" category`}
-                  title={`Remove the "${cat}" category`}
-                >×</button>
-              </div>
-            ))}
+            {cats.map((cat, i) => {
+              const n = catUsage?.[cat]
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', background: 'var(--theme-bg)' }}>
+                  <span style={{ flex: 1, fontSize: 13, color: 'var(--theme-text1)' }}>{cat}</span>
+                  {catUsage && (
+                    <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                      {n ? `${n} recipe${n === 1 ? '' : 's'}` : 'unused'}
+                    </span>
+                  )}
+                  {/* A named control, not a bare glyph dimmed to 0.7 on red text (S682): title is
+                      the last-resort naming mechanism and announces nothing on touch. */}
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-icon"
+                    onClick={() => removeCat(i)}
+                    aria-label={`Remove the "${cat}" category`}
+                    title={`Remove the "${cat}" category`}
+                  >×</button>
+                </div>
+              )
+            })}
             {cats.length === 0 && (
               <p style={{ fontSize: 13, color: 'var(--theme-text3)', fontStyle: 'italic' }}>No categories — add at least one below.</p>
             )}
           </div>
 
+          {orphanCats.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
+                Still on recipes but not in this list — they keep their own tab in Recipe Costing, and nothing new can be filed under them:
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {orphanCats.map(c => (
+                  <button key={c} type="button" className="btn btn-ghost btn-sm" onClick={() => addCat(c)}>
+                    + Add back "{c}" ({catUsage[c]} recipe{catUsage[c] === 1 ? '' : 's'})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input aria-label="New category name"
+            {/* .form-input: outside a .form-field a bare <input> has nothing to reach for and
+                renders as the browser's native white box (S593). */}
+            <input aria-label="New category name" className="form-input"
               value={newCat}
-              onChange={e => setNewCat(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addCat()}
+              onChange={e => { setNewCat(e.target.value); if (catMsg.startsWith('error')) setCatMsg('') }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCat() } }}
               placeholder="e.g. Cocktails, Combo Meals, Specials"
               style={{ flex: 1 }}
             />
-            <button className="btn btn-ghost" onClick={addCat} disabled={!newCat.trim()}>+ Add</button>
+            <button className="btn btn-ghost" onClick={() => addCat()} disabled={!newCat.trim()}>+ Add</button>
           </div>
 
           <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 20px' }}>
-            Removing a category won't change recipes already tagged with it — they'll still appear under "All Recipes".
+            Nothing changes until you press Save Categories. Removing a category never retags a recipe.
           </p>
 
-          <button className="btn btn-primary" onClick={saveCategories} disabled={catSaving || cats.length === 0}>
+          <button className="btn btn-primary" onClick={saveCategories} aria-busy={catSaving ? 'true' : undefined} disabled={cats.length === 0}>
             {catSaving ? 'Saving…' : 'Save Categories'}
           </button>
           {catMsg && (
@@ -1099,57 +1347,69 @@ export default function Settings() {
           {/* Presets */}
           <div className="card">
             <h3 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Preset Themes</h3>
-            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>Pick a preset — it sets all colors at once. You can fine-tune individual colors below.</p>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {Object.entries(PRESETS).map(([key, preset]) => (
-                <button
-                  key={key}
-                  onClick={() => switchPreset(key)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '14px 20px', borderRadius: 0, cursor: 'pointer',
-                    border: themeKey === key ? `2px solid ${colors.accent}` : '2px solid var(--theme-border)',
-                    background: themeKey === key ? 'color-mix(in srgb, var(--theme-accent) 8%, transparent)' : 'var(--theme-card)',
-                    minWidth: 180
-                  }}
-                >
-                  {/* Mini color swatch */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
-                    <div style={{ display: 'flex', gap: 3 }}>
-                      <div style={{ width: 14, height: 14, borderRadius: 0, background: preset.bg, border: '1px solid rgba(255,255,255,0.1)' }} />
-                      <div style={{ width: 14, height: 14, borderRadius: 0, background: preset.card, border: '1px solid rgba(255,255,255,0.1)' }} />
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>Pick a preset — it sets all colors at once — or let the app follow your device's light/dark setting. You can fine-tune individual colors below.</p>
+            {/* The Follow-device option is the provider's SYSTEM_KEY (the default on the Crest Staff
+                app). Until S730 nothing in this app could select it, and a device that already had
+                it saved rendered this row with NO card marked — the key matched no preset and was
+                not 'custom' either. Tokens, not rgba(255,255,255,…) hairlines: those are invisible
+                on the light preset (design-system.md). */}
+            <div role="group" aria-label="Preset themes" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {[
+                ...Object.entries(PRESETS).map(([key, preset]) => ({ key, preset, name: preset.name, description: preset.description || '' })),
+                { key: SYSTEM_KEY, preset: null, name: 'Follow device', description: 'Light or dark, whichever your phone or computer is set to' },
+              ].map(({ key, preset, name, description }) => {
+                const active = themeKey === key
+                const sw = preset || colors
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => switchPreset(key)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '14px 20px', borderRadius: 0, cursor: 'pointer', fontFamily: 'inherit',
+                      border: active ? '2px solid var(--theme-accent)' : '2px solid var(--theme-border)',
+                      background: active ? 'color-mix(in srgb, var(--theme-accent) 8%, transparent)' : 'var(--theme-card)',
+                      minWidth: 180
+                    }}
+                  >
+                    {/* Mini color swatch */}
+                    <div aria-hidden="true" style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
+                      <div style={{ display: 'flex', gap: 3 }}>
+                        <div style={{ width: 14, height: 14, borderRadius: 0, background: sw.bg, border: '1px solid var(--theme-border)' }} />
+                        <div style={{ width: 14, height: 14, borderRadius: 0, background: sw.card, border: '1px solid var(--theme-border)' }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: 3 }}>
+                        <div style={{ width: 14, height: 14, borderRadius: 0, background: sw.accent }} />
+                        <div style={{ width: 14, height: 14, borderRadius: 0, background: sw.sidebar, border: '1px solid var(--theme-border)' }} />
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 3 }}>
-                      <div style={{ width: 14, height: 14, borderRadius: 0, background: preset.accent }} />
-                      <div style={{ width: 14, height: 14, borderRadius: 0, background: preset.sidebar, border: '1px solid rgba(255,255,255,0.1)' }} />
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: active ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>{name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{description}</div>
                     </div>
-                  </div>
-                  <div style={{ textAlign: 'left' }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: themeKey === key ? colors.accent : 'var(--theme-text1)' }}>{preset.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
-                      {preset.description || ''}
-                    </div>
-                  </div>
-                  {themeKey === key && (
-                    <span style={{ marginLeft: 'auto', fontSize: 14, color: colors.accent }}>✓</span>
-                  )}
-                </button>
-              ))}
+                    {active && (
+                      <span style={{ marginLeft: 'auto', fontSize: 14, color: 'var(--theme-accent-ink)' }}>✓</span>
+                    )}
+                  </button>
+                )
+              })}
               {themeKey === 'custom' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderRadius: 0, border: '2px solid var(--theme-accent)', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', minWidth: 180 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <div aria-hidden="true" style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                     <div style={{ display: 'flex', gap: 3 }}>
-                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.bg, border: '1px solid rgba(255,255,255,0.1)' }} />
-                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.card, border: '1px solid rgba(255,255,255,0.1)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.bg, border: '1px solid var(--theme-border)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.card, border: '1px solid var(--theme-border)' }} />
                     </div>
                     <div style={{ display: 'flex', gap: 3 }}>
                       <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.accent }} />
-                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.sidebar, border: '1px solid rgba(255,255,255,0.1)' }} />
+                      <div style={{ width: 14, height: 14, borderRadius: 0, background: colors.sidebar, border: '1px solid var(--theme-border)' }} />
                     </div>
                   </div>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-accent-ink)' }}>Custom ✓</div>
-                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Your custom palette</div>
+                    <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Your own palette</div>
                   </div>
                 </div>
               )}
@@ -1178,8 +1438,11 @@ export default function Settings() {
                   style={{ position: 'relative', flexShrink: 0, cursor: 'pointer' }}
                   title={`Pick ${label}`}
                 >
+                  {/* The label's only content is a swatch, so the hidden input needs its own name —
+                      title on the label reaches nobody using a screen reader. */}
                   <input
                     type="color"
+                    aria-label={`${label} colour`}
                     value={colors[key] || '#000000'}
                     onChange={e => updateColor(key, e.target.value)}
                     style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
@@ -1187,9 +1450,9 @@ export default function Settings() {
                   <div style={{
                     width: 36, height: 36, borderRadius: 0,
                     background: colors[key],
-                    border: '2px solid rgba(255,255,255,0.15)',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                    transition: 'transform 0.1s',
+                    border: '2px solid var(--theme-border)',
+                    boxShadow: 'var(--theme-card-shadow)',
+                    transition: 'transform var(--motion-fast) var(--ease-standard)',
                   }} />
                 </label>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1246,7 +1509,7 @@ export default function Settings() {
           </div>
 
           <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0 }}>
-            Theme is saved in your browser (localStorage). It applies only to your device — other users on this account see their own theme.
+            The theme is remembered on this device only, in this browser — nothing here is saved to your account, and everyone else who logs in picks their own.
           </p>
         </div>
       )}

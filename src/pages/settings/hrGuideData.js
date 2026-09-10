@@ -595,7 +595,7 @@ export const HR_GUIDE_GROUPS = [
           'A blocked employee (bulk Deactivate on Employees) gets the same generic "Invalid credentials" as a wrong PIN — the portal never confirms to a leaver that their account exists.',
           'The Roster tab shows PUBLISHED days only — but an unpublished day now SAYS "Not published yet" instead of looking like a day with no shift. Those two are identical in the data and mean opposite things to someone deciding whether to come in.',
           'Notifications only offer a button where pressing one can actually do something — on an iPhone opened from a chat app it explains the Home Screen step instead, because a tab on iOS has no push at all.',
-          'Light or dark follows the phone\'s own setting. Employees cannot reach Settings → Appearance, so a fixed theme was the only one they could ever have.',
+          'Light or dark follows the phone\'s own setting — the "Follow device" option the main app\'s Settings → Theme tab also offers since S730. Employees cannot reach that tab, so following the device is the only theme they can have.',
           'Every screen surfaces a failed load as an error rather than an empty list — "no payslips" always means no payslips, never a swallowed network failure.',
         ],
         connections: 'Payslips come from finalized Payroll Runs; leave requests land in Leave Management\'s queue; TADA claims in TADA\'s queue; roster from published Roster days; swap requests into the Roster\'s Shift Swaps tab. Login enablement and blocking live on Employees.',

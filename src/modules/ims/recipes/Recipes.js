@@ -1517,7 +1517,13 @@ Check the recipe list before saving again — if it timed out after the recipe w
               <div className="form-field">
                 <label htmlFor="recipe-f2">Category</label>
                 <select id="recipe-f2" value={recipeForm.category} onChange={e => setRecipeForm(f => ({ ...f, category: e.target.value }))}>
+                  {/* A recipe whose category was removed in Settings keeps it (S730): without its own
+                      option the select DISPLAYS the first category while the form still holds the
+                      old one, so the screen and the save disagree. It is offered as itself, marked. */}
                   {[...recipeCategories, 'Sub-Recipe'].map(c => <option key={c} value={c}>{c === 'Sub-Recipe' ? '⚙ Sub-Recipe / Prep Item' : c}</option>)}
+                  {recipeForm.category && recipeForm.category !== 'Sub-Recipe' && !recipeCategories.includes(recipeForm.category) && (
+                    <option value={recipeForm.category}>{recipeForm.category} (no longer in Settings)</option>
+                  )}
                 </select>
               </div>
               {isSubRecipeForm ? (
