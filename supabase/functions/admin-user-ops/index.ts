@@ -727,6 +727,50 @@ Deno.serve(async (req) => {
       return null
     }
 
+    // A module MANAGER may act on the staff and supervisors of that module -- never on a peer
+    // manager, and never on their own row. Both were open until S729. delete_ims_staff refused
+    // a manager target ("Managers can only be deleted by admin"), but update_ims_role had no
+    // rank check on the TARGET at all, so a manager could clear a peer manager's role -- locking
+    // them out of every IMS page -- and then delete the now-staff account: the delete guard was
+    // two requests long. reset_ims_password had the same gap, which is worse: a manager could
+    // set a peer manager's password and sign in as them. And nothing stopped a manager setting
+    // their OWN row to "No Access", after which only the Owner or an admin can restore them.
+    //
+    // The Owner is exempt alongside admin. The Owner created these managers, and the old
+    // "admin only" delete rule had never actually kept a manager from an Owner who could clear
+    // the role first -- so the rule it replaces is the one people believed was in force.
+    // requireStaffTarget() runs first, so `target` is already a same-client staff account of the
+    // module (or the caller is admin, who returns before any of this).
+    function requireManageableTarget(target: Record<string, unknown>, module: string, opts: { allowSelf?: boolean } = {}) {
+      if (isCallerAdmin || isCallerOwner) return null
+      const label = MODULE_LABEL[module]
+      if (!opts.allowSelf && target.id === user.id) {
+        return json({ error: `Your own ${label} login cannot be changed from here — ask the account owner or an administrator` }, 403)
+      }
+      if (target[`${module}_role`] === 'manager') {
+        return json({ error: `Another ${label} manager's login can only be changed by the account owner or an administrator` }, 403)
+      }
+      return null
+    }
+
+    // Converting a login with no staff markers into module staff demotes it out of Owner status
+    // (the negative isOwner test). That is the point of "Existing User" mode when a client has
+    // several plain logins -- but converting the ONLY one leaves the client with no Owner at all:
+    // nobody who can use Existing User mode, reach the Suite features, or manage a manager.
+    // Counts the plain logins on the target's client; the caller is already admin or Owner here.
+    async function isLastOwnerLogin(target: Record<string, unknown>) {
+      const { count, error } = await admin
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', target.client_id as string).eq('role', 'client')
+        .is('pos_role', null).is('ims_role', null).is('hr_role', null)
+        .or('hr_self_service.is.null,hr_self_service.eq.false')
+      // A guard that drops its read passes vacuously -- treat "could not count" as "last".
+      if (error) return true
+      return (count ?? 0) <= 1
+    }
+    const LAST_OWNER_MSG = 'This is the only Owner login for this client — giving it a staff role would leave nobody with Owner access. Create the staff member as a new login instead.'
+
     // ── Create a POS staff member — name + PIN, auto-generated email ──────────
     // Optional employee_id links the new POS account to an existing hr_employees record
     // (client has both HR + POS) — full_name is then taken from that employee, not retyped.
@@ -1324,6 +1368,15 @@ Deno.serve(async (req) => {
       if (ims_role && !targetProfile.ims_role && !(isCallerAdmin || isCallerOwner)) {
         return json({ error: 'Only the account owner or an administrator can give an existing login IMS access' }, 403)
       }
+      if (ims_role && !targetProfile.ims_role && await isLastOwnerLogin(targetProfile)) {
+        return json({ error: LAST_OWNER_MSG }, 400)
+      }
+      // Already IMS staff: a manager may move staff and supervisors, not a peer manager or
+      // themselves (see requireManageableTarget).
+      if (targetProfile.ims_role) {
+        const imsManageDenied = requireManageableTarget(targetProfile, 'ims')
+        if (imsManageDenied) return imsManageDenied
+      }
       // An account already marked POS PIN staff, HR self-service, or HR staff is RLS-blocked from
       // every pure-IMS / IMS+POS table regardless of ims_role (no_pos_pin_staff /
       // no_self_service_accounts / no_hr_role_staff don't check ims_role at all) — granting
@@ -1349,9 +1402,8 @@ Deno.serve(async (req) => {
       const imsTarget = await loadTarget(userId)
       const imsDenied = requireStaffTarget(imsTarget, 'ims')
       if (imsDenied) return imsDenied
-      if (!isCallerAdmin && imsTarget?.ims_role === 'manager') {
-        return json({ error: 'Managers can only be deleted by admin' }, 403)
-      }
+      const imsManageDenied = requireManageableTarget(imsTarget!, 'ims')
+      if (imsManageDenied) return imsManageDenied
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
       if (delErr) return json({ error: delErr.message }, 400)
@@ -1371,6 +1423,9 @@ Deno.serve(async (req) => {
       const imsPwTarget = await loadTarget(userId)
       const imsPwDenied = requireStaffTarget(imsPwTarget, 'ims')
       if (imsPwDenied) return imsPwDenied
+      // Resetting your own password is fine; resetting a peer manager's is a takeover.
+      const imsPwManageDenied = requireManageableTarget(imsPwTarget!, 'ims', { allowSelf: true })
+      if (imsPwManageDenied) return imsPwManageDenied
 
       const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password })
       if (updateErr) return json({ error: updateErr.message }, 400)
@@ -1468,6 +1523,13 @@ Deno.serve(async (req) => {
       if (hr_role && !targetProfile.hr_role && !(isCallerAdmin || isCallerOwner)) {
         return json({ error: 'Only the account owner or an administrator can give an existing login HR access' }, 403)
       }
+      if (hr_role && !targetProfile.hr_role && await isLastOwnerLogin(targetProfile)) {
+        return json({ error: LAST_OWNER_MSG }, 400)
+      }
+      if (targetProfile.hr_role) {
+        const hrManageDenied = requireManageableTarget(targetProfile, 'hr')
+        if (hrManageDenied) return hrManageDenied
+      }
       // Same reasoning as update_ims_role's guard — an account already marked POS PIN staff, IMS
       // staff, or HR self-service is RLS-blocked from every hr_ table regardless of hr_role.
       if (hr_role && (targetProfile?.pos_role || targetProfile?.ims_role || targetProfile?.hr_self_service)) {
@@ -1489,9 +1551,8 @@ Deno.serve(async (req) => {
       const hrTarget = await loadTarget(userId)
       const hrDenied = requireStaffTarget(hrTarget, 'hr')
       if (hrDenied) return hrDenied
-      if (!isCallerAdmin && hrTarget?.hr_role === 'manager') {
-        return json({ error: 'Managers can only be deleted by admin' }, 403)
-      }
+      const hrManageDenied = requireManageableTarget(hrTarget!, 'hr')
+      if (hrManageDenied) return hrManageDenied
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
       if (delErr) return json({ error: delErr.message }, 400)
@@ -1508,6 +1569,8 @@ Deno.serve(async (req) => {
       const hrPwTarget = await loadTarget(userId)
       const hrPwDenied = requireStaffTarget(hrPwTarget, 'hr')
       if (hrPwDenied) return hrPwDenied
+      const hrPwManageDenied = requireManageableTarget(hrPwTarget!, 'hr', { allowSelf: true })
+      if (hrPwManageDenied) return hrPwManageDenied
 
       const { error: updateErr } = await admin.auth.admin.updateUserById(userId, { password })
       if (updateErr) return json({ error: updateErr.message }, 400)

@@ -58,3 +58,37 @@ Each axis gates two things that must both be kept in sync when adding a page: th
 `pos_team` (`foh|kitchen|bar`, default `foh`, added S431) is a separate, **orthogonal** axis on `profiles` — which physical station a POS account works, independent of `pos_role`'s rank (a kitchen-team account can be Staff or Manager rank; the team axis only changes what's in its nav, not what its rank permits). Gated by an explicit allowlist (`Layout.js`'s `KITCHEN_TEAM_ALLOWED_PATHS`) rather than per-item tags — fail-closed, so a newly-added POS page is hidden from kitchen/bar by default until someone deliberately adds it to the list. `KitchenDisplay.jsx` additionally uses it to lock the KOT/BOT ticket-station toggle (not the same "station" concept — `pos_kot_log.station` is the ticket's printer routing, unrelated to the staff `pos_team` column) to the account's own queue.
 
 `pos_discount_limit` (nullable numeric %, `NULL` = unlimited) and `pos_allow_void` (boolean, default `false`, added S517) are two more per-staff overrides on `profiles`, same family as `pos_team` — a manager sets them per staff member on `/pos/staff` (POS Staff), and both are enforced in `PosOrders.jsx` against `profile.pos_discount_limit`/`pos_allow_void` from `useAuth()` (never against rank alone — a Supervisor isn't automatically capped/voidable, only whoever has the flag set). **`admin-user-ops`'s `update_pos_role` action must build every field it writes conditionally** (`if (x !== undefined) updatePayload.x = x`), never unconditionally as `x || null` — `updateTeam`/`updateDiscountLimit`/`updateAllowVoid` each call this one action with only their own single field in the request body, so any field written unconditionally gets silently reset to its default on every other field's update. This bit `pos_role` itself: it was unconditional from the start (only `pos_team` got the conditional treatment when added at S431), so setting a staff member's Discount Limit or Allow Void was silently wiping their role to "No Access" — found live smoke-testing S517 against a real staff account, fixed by making `pos_role`/`pos_job_title` conditional too. Any future field added to this same staff-permission family must follow the conditional pattern from the start, not retrofit it after the same bug repeats.
+
+## The staff pages: what a module manager may and may not do (S729)
+
+Found re-analysing `ImsStaff.jsx`; the rules hold for `HrStaff.jsx` and `PosStaff.jsx` too.
+
+- **A list RPC that returns login emails is rank-gated to whoever can ACT on the list.**
+  `get_ims_staff_list` / `get_hr_role_staff_list` require admin, the Owner, or a manager of that
+  module (`20260910120000`). They had gated on same-client alone — the shape S531 closed on the
+  eligible-users pair and left on the sibling that returns every staff email. `get_pos_staff_list`
+  returns no email (PIN accounts have a synthetic one) and stays same-client. **The page's own
+  `hasImsAccess('manager')` redirect is not a guard on the RPC**: `useEffect` fires before the
+  `Navigate` renders, and a direct call needs no page.
+- **A manager never acts on a peer manager, and never on their own row.** `requireManageableTarget()`
+  in `admin-user-ops` runs after `requireStaffTarget()` on every role change, delete and password
+  reset (own password excepted). Before it, "Managers can only be deleted by admin" was two
+  requests long — clear the role, then delete — and a manager could reset a peer's password and
+  sign in as them. **The Owner is exempt alongside admin.** A new staff-management action takes
+  both helpers, in that order.
+- **Converting a marker-less login into staff must refuse the LAST one.** Owner is the absence of
+  markers, so "Existing User" mode on a client's only plain login leaves no Owner at all.
+  `isLastOwnerLogin()` guards `update_ims_role` and `update_hr_role`; a failed count counts as last.
+- **The custom-role scheme seeds from the defaults and refuses to strand a login.** `effectiveRoles`
+  is "custom if any, else defaults", so the first custom role used to REPLACE Staff / Supervisor /
+  Manager while every login still held one — the row's `<select>` rendered blank beside a badge
+  reading Supervisor. Now: the first custom role is added beside the defaults; a role that logins
+  hold cannot be removed; Reset refuses while a custom title is held; a title outside the scheme
+  renders as its own option with an amber orphan mark, never as the first role sharing its level.
+  **Still open on HrStaff and PosStaff.**
+- **Help copy that tells the Owner to give their own login a role is teaching the demotion trap.**
+  The IMS Staff tip said exactly that for 300 sessions. The Owner's login already has every page;
+  the person taking over gets a Manager login of their own.
+- **Audit rows from `admin-user-ops` carry no actor.** `log_audit()` reads `auth.uid()`, which is
+  null under the service role, so a role grant or password reset is recorded but not by whom — on
+  all three staff pages. Known, unfixed.

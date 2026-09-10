@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -6,18 +6,21 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../../shared/staffLevelBadge'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
 
 // Mirrors src/modules/pos/staff/PosStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for real email+password login instead of a
 // shared-device PIN (S417 IMS staff roles). See CLAUDE.md's POS role system note for the pattern
-// this was built from.
+// this was built from. HrStaff.jsx was mirrored FROM this file and then swept (S628) while this
+// one was not; S729 brought the two back level.
 const PERMISSION_LEVELS = [
   { value: 'staff',      label: 'Staff',      desc: 'Purchases, Stock Count, Sales Entry, Requisitions, Gate Passes' },
   { value: 'supervisor', label: 'Supervisor',  desc: 'Staff + Periods, Item Master, Vendors, Purchase Orders, Recipe Costing, all Stock/Summary reports' },
-  { value: 'manager',    label: 'Manager',     desc: 'Supervisor + Menu Pricing, Overheads, Finance Reports, Settings, staff role assignment' },
+  { value: 'manager',    label: 'Manager',     desc: 'Supervisor + Menu Pricing, Menu Engineering, Overheads, Finance and Menu & Vendor reports, Settings, staff role assignment' },
 ]
 const DEFAULT_ROLES = [
   { label: 'Staff',      level: 'staff' },
@@ -28,18 +31,36 @@ const EMPTY_ADD   = { full_name: '', email: '', password: '', job_title: '', emp
 const EMPTY_ROLE  = { label: '', level: 'staff' }
 
 function emailValid(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) }
-function passwordValid(pw) { return pw.length >= 8 }
+// The product's one password policy (S534): the floor from weakPasswords.js, then the offline
+// blocklist. This page mints real /login credentials, so it takes the same check Signup and
+// Reset Password do — until S729 it accepted "password" and "12345678" on a hardcoded length.
+function passwordProblem(pw, context) {
+  if (pw.length < MIN_PASSWORD_LENGTH) return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+  return weakPasswordReason(pw, context)
+}
+const cap = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
+const names = list => list.map(p => p.full_name || p.email).join(', ')
+
+// Every admin-user-ops failure arrives the same three ways; one reader for all of them.
+async function invokeDetail(data, error, fallback) {
+  let detail = data?.error || error?.message || fallback
+  try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
+  return detail
+}
 
 export default function ImsStaff() {
-  const { clientId, hasImsAccess, hrEnabled } = useAuth()
+  const { clientId, hasImsAccess, hrEnabled, session, profile, adminViewClientName } = useAuth()
   const { scopedFrom } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
   const [staff,         setStaff]         = useState([])
   const [employees,     setEmployees]     = useState([]) // hr_employees, only fetched when hrEnabled
   const [eligibleUsers, setEligibleUsers] = useState([]) // existing client accounts with no pos_role/hr_self_service/ims_role yet
   const [loading,     setLoading]     = useState(true)
+  const [loadError,   setLoadError]   = useState(null)   // the staff list or the role scheme could not be read
+  const [partialWarn, setPartialWarn] = useState('')     // an Add-modal option list could not be read
   const [saving,      setSaving]      = useState({})
-  const [msg,         setMsg]         = useState('')
+  const [msg,         setMsg]         = useState('')     // string or { text, detail } — ActionError takes both
+  const [notice,      setNotice]      = useState('')     // a completed action, so a closed dialog is not the only evidence
   const [search,      setSearch]      = useState('')
 
   // Custom roles
@@ -62,55 +83,125 @@ export default function ImsStaff() {
   const [resetting,   setResetting]   = useState(false)
   const [pwMsg,       setPwMsg]       = useState('')
 
-  const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
-  const linkedEmployeeIds = new Set(staff.map(p => p.hr_employee_id).filter(Boolean))
-  const unlinkedEmployees = employees.filter(e => !linkedEmployeeIds.has(e.id))
+  const selfId = session?.user?.id || null
+  const businessName = profile?.clients?.name || adminViewClientName || ''
 
-  useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line
+  const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
+  const linkedEmployeeIds = useMemo(
+    () => new Set(staff.map(p => p.hr_employee_id).filter(Boolean)), [staff])
+  const unlinkedEmployees = useMemo(
+    () => employees.filter(e => !linkedEmployeeIds.has(e.id)), [employees, linkedEmployeeIds])
+  // One filter pass per keystroke, not two that can disagree about what "no matches" means.
+  const visibleStaff = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return staff
+    return staff.filter(p =>
+      (p.full_name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q))
+  }, [staff, search])
+
+  // Which client the rows on screen belong to. A ref rather than state: it is read synchronously
+  // after every await to reject a response for the client we just left (S721) — an admin
+  // switching client re-runs init() on this still-mounted component, and without the claim the
+  // slower load paints the previous client's staff, names and login emails under the new one's
+  // header, then runs the role auto-fix against that stale list.
+  const loadedClientRef = useRef(clientId)
+
+  useEffect(() => {
+    if (!clientId) return
+    loadedClientRef.current = clientId
+    setStaff([]); setEmployees([]); setEligibleUsers([]); setCustomRoles([])
+    setLoadError(null); setPartialWarn(''); setMsg(''); setNotice('')
+    init(clientId)
+  }, [clientId]) // eslint-disable-line
 
   // The three dialogs below are on the shared Modal since S682 (Escape, focus trap, focus return,
   // role="dialog"); the document-level Escape listener that stood in for it is gone with them.
 
-  async function init() {
+  async function init(forClient) {
     setLoading(true)
-    const [{ data: staffData }, { data: settingsData }, { data: empData }, { data: eligibleData }] = await Promise.all([
-      supabase.rpc('get_ims_staff_list', { p_client_id: clientId }),
-      supabase.from('settings').select('ims_custom_roles').eq('client_id', clientId).single(),
+    const [staffRes, settingsRes, empRes, eligibleRes] = await Promise.all([
+      supabase.rpc('get_ims_staff_list', { p_client_id: forClient }),
+      // maybeSingle: a client with no settings row yet is not a failed read. .single() reported
+      // both as one error this function then dropped — the S613 trap saveRoles() below already
+      // avoids — and a dropped error here fed the role auto-fix a DEFAULT scheme.
+      supabase.from('settings').select('ims_custom_roles').eq('client_id', forClient).maybeSingle(),
       hrEnabled
         ? scopedFrom('hr_employees', 'id, full_name, employee_code, status').in('status', ['active', 'probation']).order('full_name')
-        : Promise.resolve({ data: [] }),
-      supabase.rpc('get_ims_eligible_users', { p_client_id: clientId }),
+        : Promise.resolve({ data: [], error: null }),
+      supabase.rpc('get_ims_eligible_users', { p_client_id: forClient }),
     ])
-    const roles = settingsData?.ims_custom_roles?.length ? settingsData.ims_custom_roles : DEFAULT_ROLES
-    if (settingsData?.ims_custom_roles?.length) setCustomRoles(settingsData.ims_custom_roles)
-    const staffList = staffData || []
+    if (loadedClientRef.current !== forClient) return
+
+    // A failed read is not an empty team. Rendering it as "No staff yet — add your first account"
+    // invites the manager to re-create logins that exist (S594), and the role scheme is what
+    // every dropdown on the page is built from, so a failed settings read is the same stop.
+    const readErr = staffRes.error || settingsRes.error
+    if (readErr) {
+      const e = asActionError(readErr)
+      setLoadError({ text: 'The staff list could not be loaded, so nothing below is shown. ' + e.text, detail: e.detail })
+      setLoading(false)
+      return
+    }
+    const saved = settingsRes.data?.ims_custom_roles
+    const roles = saved?.length ? saved : DEFAULT_ROLES
+    if (saved?.length) setCustomRoles(saved)
+    const staffList = staffRes.data || []
     setStaff(staffList)
-    setEmployees(empData || [])
-    setEligibleUsers(eligibleData || [])
+    setEmployees(empRes.error ? [] : (empRes.data || []))
+    setEligibleUsers(eligibleRes.error ? [] : (eligibleRes.data || []))
+    const missing = [empRes.error && 'the HR employee list', eligibleRes.error && 'the existing-login list'].filter(Boolean)
+    setPartialWarn(missing.length
+      ? `Some + Add Staff options could not be loaded (${missing.join(' and ')}) — those modes are hidden until the page is reloaded.`
+      : '')
     setLoading(false)
 
-    // Silently fix any ims_role values that don't match the job title's configured level
+    // Bring any ims_role that no longer matches its role's configured level back into line — in
+    // parallel (each is an independent single-row UPDATE by id; sequencing bought no atomicity and
+    // made a page that had already painted wait on N Edge Function round trips), and reporting
+    // every row that failed rather than dropping each error in turn. A refused row is now also a
+    // real outcome: a peer manager's row is refused for an IMS manager caller (S729), and that
+    // manager should see whose level is still out of line rather than a badge that quietly stays.
     const mismatched = staffList.filter(p => {
       if (!p.ims_job_title) return false
       const expected = roles.find(r => r.label === p.ims_job_title)?.level
       return expected && expected !== p.ims_role
     })
-    for (const p of mismatched) {
+    if (mismatched.length === 0) return
+    const outcomes = await Promise.all(mismatched.map(async p => {
       const level = roles.find(r => r.label === p.ims_job_title)?.level
-      const { error } = await supabase.functions.invoke('admin-user-ops', {
+      const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_ims_role', userId: p.id, ims_role: level, ims_job_title: p.ims_job_title },
       })
-      if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, ims_role: level } : s))
+      return { p, level, failed: !!(error || data?.error) }
+    }))
+    if (loadedClientRef.current !== forClient) return
+    const applied = outcomes.filter(o => !o.failed)
+    if (applied.length > 0) {
+      const levelById = Object.fromEntries(applied.map(o => [o.p.id, o.level]))
+      setStaff(prev => prev.map(s => s.id in levelById ? { ...s, ims_role: levelById[s.id] } : s))
+    }
+    const failed = outcomes.filter(o => o.failed)
+    if (failed.length > 0) {
+      setMsg(`${failed.length} login(s) still carry an access level that does not match their role and could not be corrected: ` +
+        names(failed.map(o => o.p)) + '. Their access is unchanged — set the role again, or ask the account owner.')
     }
   }
 
   async function load() {
-    const [{ data }, { data: eligibleData }] = await Promise.all([
-      supabase.rpc('get_ims_staff_list', { p_client_id: clientId }),
-      supabase.rpc('get_ims_eligible_users', { p_client_id: clientId }),
+    const forClient = clientId
+    const [staffRes, eligibleRes] = await Promise.all([
+      supabase.rpc('get_ims_staff_list', { p_client_id: forClient }),
+      supabase.rpc('get_ims_eligible_users', { p_client_id: forClient }),
     ])
-    setStaff(data || [])
-    setEligibleUsers(eligibleData || [])
+    if (loadedClientRef.current !== forClient) return
+    // A failed re-read after a successful delete must not empty the table — an empty table after
+    // pressing Delete reads as "you just deleted everyone". Keep the last good list and say so.
+    if (staffRes.error) {
+      setMsg('The change was saved, but the staff list could not be refreshed — reload the page to see it. ' + errorLine(staffRes.error))
+    } else {
+      setStaff(staffRes.data || [])
+    }
+    if (!eligibleRes.error) setEligibleUsers(eligibleRes.data || [])
   }
 
   async function saveRoles(roles) {
@@ -141,26 +232,64 @@ export default function ImsStaff() {
     const updated = customRoles.map((r, idx) => idx === i ? { ...r, level } : r)
     const ok = await saveRoles(updated)
     if (!ok) return
-    // Sync existing staff whose job title matches the changed role
+    // Sync existing staff whose job title matches the changed role — in parallel, and reporting
+    // EVERY row that failed rather than silently dropping each error in turn. Sequencing these
+    // never made them atomic: a failure mid-loop already left some staff moved and some not, with
+    // nothing on screen to say which, so the manager saw the new level and believed it applied.
     const affected = staff.filter(p => p.ims_job_title === changedLabel && p.ims_role !== level)
-    for (const p of affected) {
-      const { error } = await supabase.functions.invoke('admin-user-ops', {
+    const outcomes = await Promise.all(affected.map(async p => {
+      const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_ims_role', userId: p.id, ims_role: level, ims_job_title: changedLabel },
       })
-      if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, ims_role: level } : s))
+      return { p, failed: !!(error || data?.error), detail: data?.error || error?.message }
+    }))
+    const moved = new Set(outcomes.filter(o => !o.failed).map(o => o.p.id))
+    if (moved.size > 0) {
+      setStaff(prev => prev.map(s => moved.has(s.id) ? { ...s, ims_role: level } : s))
+    }
+    const failed = outcomes.filter(o => o.failed)
+    if (failed.length > 0) {
+      setRolesError(`Saved the role, but ${failed.length} login(s) could not be moved to the new level and keep their previous access: ` +
+        names(failed.map(o => o.p)) + '. ' + (failed[0].detail || 'Change their level individually, or try again.'))
     }
   }
 
-  function addCustomRole() {
+  function staffHolding(label) { return staff.filter(p => p.ims_job_title === label) }
+
+  async function addCustomRole() {
     const label = newRole.label.trim()
     if (!label) return
-    if (customRoles.some(r => r.label.toLowerCase() === label.toLowerCase())) return
-    saveRoles([...customRoles, { label, level: newRole.level }])
-    setNewRole(EMPTY_ROLE)
+    // The first custom role starts FROM the defaults rather than replacing them. The scheme is
+    // "custom roles if any, else the defaults", so a scheme of one new role dropped Staff /
+    // Supervisor / Manager from every dropdown while every existing login still carried one of
+    // those titles — each row's select then had no option matching its value and rendered BLANK
+    // beside an Access Level badge that still said Supervisor.
+    const base = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
+    if (base.some(r => r.label.toLowerCase() === label.toLowerCase())) {
+      setRolesError(`There is already a role called “${label}”.`); return
+    }
+    const ok = await saveRoles([...base, { label, level: newRole.level }])
+    if (ok) setNewRole(EMPTY_ROLE)   // keep what was typed if the save failed
   }
 
-  function deleteCustomRole(i) { saveRoles(customRoles.filter((_, idx) => idx !== i)) }
-  function resetToDefaults()   { saveRoles([]) }
+  function deleteCustomRole(i) {
+    const label = customRoles[i].label
+    const holders = staffHolding(label)
+    if (holders.length > 0) {
+      setRolesError(`${holders.length} login(s) still hold the “${label}” role — ${names(holders)}. Move them to another role first; removing it now would leave them on a role that no longer exists.`)
+      return
+    }
+    saveRoles(customRoles.filter((_, idx) => idx !== i))
+  }
+
+  function resetToDefaults() {
+    const orphans = staff.filter(p => p.ims_job_title && !DEFAULT_ROLES.some(d => d.label === p.ims_job_title))
+    if (orphans.length > 0) {
+      setRolesError(`${orphans.length} login(s) hold a custom role — ${names(orphans)}. Move them to Staff, Supervisor or Manager first, then reset.`)
+      return
+    }
+    saveRoles([])
+  }
 
   // ── Add staff ──────────────────────────────────────────────────────────────
   function openAdd() {
@@ -192,10 +321,11 @@ export default function ImsStaff() {
         },
       })
       if (error || data?.error) {
-        let detail = data?.error || error?.message || 'The role was not assigned — this account still has the access it had before.'
-        try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-        setAddMsg(detail); setAdding(false); return
+        setAddMsg(await invokeDetail(data, error, 'The role was not assigned — this account still has the access it had before.'))
+        setAdding(false); return
       }
+      const who = eligibleUsers.find(u => u.id === addForm.existing_user_id)
+      setNotice(`${who?.full_name || who?.email || 'The login'} now has IMS access as ${addForm.job_title}.`)
       setAddModal(false); setAdding(false); load()
       return
     }
@@ -204,7 +334,8 @@ export default function ImsStaff() {
       if (!addForm.employee_id) { setAddMsg('Pick which employee this login is for.'); return }
     } else if (!addForm.full_name.trim()) { setAddMsg('Enter the staff member’s full name.'); return }
     if (!emailValid(addForm.email))       { setAddMsg('Enter a valid email address — this is what they will sign in with.'); return }
-    if (!passwordValid(addForm.password)) { setAddMsg('Password must be at least 8 characters.'); return }
+    const pwProblem = passwordProblem(addForm.password, { email: addForm.email, businessName })
+    if (pwProblem) { setAddMsg(pwProblem); return }
     setAdding(true); setAddMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
@@ -218,10 +349,10 @@ export default function ImsStaff() {
       },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'The account was not created. Check your internet and try again — if the email is already in use, add them through “Existing user” instead.'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setAddMsg(detail); setAdding(false); return
+      setAddMsg(await invokeDetail(data, error, 'The account was not created. Check your internet and try again — if the email is already in use, add them through “Existing user” instead.'))
+      setAdding(false); return
     }
+    setNotice(`Login created — they sign in at /login with ${addForm.email.trim()} and the password you set. Share it with them directly.`)
     setAddModal(false); setAdding(false); load()
   }
 
@@ -239,15 +370,14 @@ export default function ImsStaff() {
         </p>
       ),
       run: async () => {
-        setMsg('')
+        setMsg(''); setNotice('')
         const { data, error } = await supabase.functions.invoke('admin-user-ops', {
           body: { action: 'delete_ims_staff', userId: p.id },
         })
         if (error || data?.error) {
-          let detail = data?.error || error?.message || ''
-          try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-          setMsg(`${p.full_name}'s login was not deleted — it still works. ${detail}`); return
+          setMsg(`${p.full_name}'s login was not deleted — it still works. ${await invokeDetail(data, error, '')}`); return
         }
+        setNotice(`${p.full_name}'s IMS login was deleted.`)
         load()
       },
     })
@@ -257,23 +387,27 @@ export default function ImsStaff() {
   function openReset(p) { setPwTarget(p); setNewPassword(''); setPwMsg('') }
 
   async function resetPassword() {
-    if (!passwordValid(newPassword)) { setPwMsg('Password must be at least 8 characters.'); return }
+    const pwProblem = passwordProblem(newPassword, { email: pwTarget.email, businessName })
+    if (pwProblem) { setPwMsg(pwProblem); return }
     setResetting(true); setPwMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: 'reset_ims_password', userId: pwTarget.id, password: newPassword },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'The password was not changed — the old one still works.'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setPwMsg(detail); setResetting(false); return
+      setPwMsg(await invokeDetail(data, error, 'The password was not changed — the old one still works.'))
+      setResetting(false); return
     }
+    setNotice(`Password for ${pwTarget.full_name} changed — the old one no longer works. Share the new one with them directly.`)
     setPwTarget(null); setResetting(false)
   }
 
   // ── Role update ────────────────────────────────────────────────────────────
   async function updateRole(profileId, jobTitle) {
     const role = jobTitle ? effectiveRoles.find(r => r.label === jobTitle) : null
-    setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
+    // A title the scheme no longer defines must not reach the server as "no role": that write
+    // would REVOKE the login's access, not re-label it.
+    if (jobTitle && !role) { setMsg(`“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
+    setSaving(s => ({ ...s, [profileId]: true })); setMsg(''); setNotice('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
         action:        'update_ims_role',
@@ -283,9 +417,7 @@ export default function ImsStaff() {
       },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'The role was not changed — this account still has the access it had before.'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg(detail)
+      setMsg(await invokeDetail(data, error, 'The role was not changed — this account still has the access it had before.'))
     } else {
       setStaff(prev => prev.map(p => p.id === profileId
         ? { ...p, ims_role: role?.level || null, ims_job_title: jobTitle || null }
@@ -297,11 +429,6 @@ export default function ImsStaff() {
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
-  const inputStyle = {
-    width: '100%', boxSizing: 'border-box', padding: '8px 10px',
-    background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-    borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)', fontSize: 13, outline: 'none',
-  }
   const labelStyle = { fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4, display: 'block' }
 
   return (
@@ -320,10 +447,10 @@ export default function ImsStaff() {
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}
           />
-          <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)}>
+          <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)} disabled={loading || !!loadError}>
             Manage Roles
           </button>
-          <button className="btn btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={openAdd}>
+          <button className="btn btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={openAdd} disabled={loading || !!loadError}>
             + Add Staff
           </button>
         </div>
@@ -339,11 +466,15 @@ export default function ImsStaff() {
         ))}
       </div>
 
-      {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red-text)', marginBottom: 16 }}>{msg}</p>}
+      {msg && <ActionError error={msg} className="action-error--top" />}
+      {notice && <p role="status" style={{ fontSize: 13, color: 'var(--theme-green-text)', marginBottom: 16 }}>{notice}</p>}
+      {partialWarn && <p role="status" style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginBottom: 16 }}>{partialWarn}</p>}
       {confirmEl}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
+      ) : loadError ? (
+        <ActionError error={loadError} />
       ) : staff.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
           No staff yet. Click <strong>+ Add Staff</strong> to create your first IMS account.
@@ -362,21 +493,22 @@ export default function ImsStaff() {
               </tr>
             </thead>
             <tbody>
-              {staff.filter(p => {
-                const q = search.trim().toLowerCase()
-                return !q || (p.full_name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q)
-              }).length === 0 && (
+              {visibleStaff.length === 0 && (
                 <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No staff match "{search}".</td></tr>
               )}
-              {staff.filter(p => {
-                const q = search.trim().toLowerCase()
-                return !q || (p.full_name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q)
-              }).map(p => {
-                const displayTitle = p.ims_job_title || effectiveRoles.find(r => r.level === p.ims_role)?.label || ''
+              {visibleStaff.map(p => {
+                // The row's title, exactly as stored. A title the scheme no longer defines (a role
+                // removed, or defaults reset, before S729 refused both while logins held it) is
+                // rendered as its own option so the select shows the truth — never a blank box
+                // beside a badge that still says Supervisor, and never the first role that happens
+                // to share the level, which would name a role this login was never given.
+                const currentTitle = p.ims_job_title || (p.ims_role ? `${cap(p.ims_role)} (no role name)` : '')
+                const orphan = !!currentTitle && !effectiveRoles.some(r => r.label === currentTitle)
+                const isSelf = p.id === selfId
                 return (
                   <tr key={p.id}>
                     <td>
-                      <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.full_name || '—'}</div>
+                      <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.full_name || '—'}{isSelf && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> (you)</span>}</div>
                       {p.hr_employee_id && (
                         <Tip text="This IMS login is linked to an HR employee record — name stays in sync with HR.">
                           <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 HR{p.employee_code ? ` · ${p.employee_code}` : ''}</span>
@@ -386,26 +518,31 @@ export default function ImsStaff() {
                     <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{p.email || '—'}</td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <select aria-label="IMS role"
+                        <select aria-label={`IMS role for ${p.full_name || p.email}`}
                           className="form-select"
                           style={{ minWidth: 160 }}
-                          value={displayTitle || ''}
-                          disabled={saving[p.id]}
+                          value={currentTitle}
+                          disabled={saving[p.id] || isSelf}
+                          title={isSelf ? 'Your own role can only be changed by the account owner or an administrator' : undefined}
                           onChange={e => updateRole(p.id, e.target.value)}
                         >
                           <option value="">— No Access —</option>
+                          {orphan && <option value={currentTitle}>{currentTitle} — not in the role list</option>}
                           {effectiveRoles.map(r => (
                             <option key={r.label} value={r.label}>{r.label}</option>
                           ))}
                         </select>
                         {saving[p.id] && <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Saving…</span>}
+                        {orphan && !saving[p.id] && (
+                          <Tip text="This login's role was removed from the team's role list, so its access level is no longer tied to anything. Pick a current role to put it back under one.">
+                            <span className="badge badge-amber">△ orphan</span>
+                          </Tip>
+                        )}
                       </div>
                     </td>
                     <td>
                       {p.ims_role
-                        ? <span className={`badge ${LEVEL_BADGE[p.ims_role] || STAFF_LEVEL_BADGE_NONE}`}>
-                            {p.ims_role.charAt(0).toUpperCase() + p.ims_role.slice(1)}
-                          </span>
+                        ? <span className={`badge ${LEVEL_BADGE[p.ims_role] || STAFF_LEVEL_BADGE_NONE}`}>{cap(p.ims_role)}</span>
                         : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>
                       }
                     </td>
@@ -415,17 +552,23 @@ export default function ImsStaff() {
                         : '—'}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}>
                           Reset Password
                         </button>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
-                          onClick={() => deleteStaff(p)}
-                        >
-                          Delete
-                        </button>
+                        {isSelf ? (
+                          <Tip text="You cannot delete or re-rank your own login from here — the account owner or an administrator can.">
+                            <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>your login</span>
+                          </Tip>
+                        ) : (
+                          <button
+                            className="btn btn-ghost"
+                            style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
+                            onClick={() => deleteStaff(p)}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -440,10 +583,11 @@ export default function ImsStaff() {
       {rolesModal && (
         <Modal onClose={() => setRolesModal(false)} title="Manage IMS Roles" maxWidth={480} panelStyle={{ maxHeight: '80vh', overflowY: 'auto' }}>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--theme-text3)' }}>
-              Define custom role names for your team. Each maps to a permission level.
+              Define custom role names for your team. Each maps to a permission level. Your first custom role is added
+              alongside Staff / Supervisor / Manager, so nobody's current role disappears.
             </p>
 
-            {rolesError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '-8px 0 12px' }}>{rolesError}</p>}
+            {rolesError && <ActionError error={rolesError} className="action-error--top" />}
 
             {customRoles.length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--theme-text3)', fontStyle: 'italic', marginBottom: 16 }}>
@@ -451,30 +595,37 @@ export default function ImsStaff() {
               </p>
             ) : (
               <div style={{ marginBottom: 16 }}>
-                {customRoles.map((r, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
-                    <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>{r.label}</span>
-                    <select aria-label="Permission level for this role"
-                      className="form-select"
-                      style={{ width: 120, fontSize: 12 }}
-                      value={r.level}
-                      onChange={e => updateCustomRoleLevel(i, e.target.value)}
-                      disabled={rolesSaving}
-                    >
-                      {PERMISSION_LEVELS.map(l => (
-                        <option key={l.value} value={l.value}>{l.label}</option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn btn-ghost"
-                      style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
-                      onClick={() => deleteCustomRole(i)}
-                      disabled={rolesSaving}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
+                {customRoles.map((r, i) => {
+                  const held = staffHolding(r.label).length
+                  return (
+                    <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
+                      <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: 'var(--theme-text1)' }}>
+                        {r.label}
+                        {held > 0 && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 6 }}>{held} login{held === 1 ? '' : 's'}</span>}
+                      </span>
+                      <select aria-label={`Permission level for ${r.label}`}
+                        className="form-select"
+                        style={{ width: 120, fontSize: 12 }}
+                        value={r.level}
+                        onChange={e => updateCustomRoleLevel(i, e.target.value)}
+                        disabled={rolesSaving}
+                      >
+                        {PERMISSION_LEVELS.map(l => (
+                          <option key={l.value} value={l.value}>{l.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: 12, padding: '3px 8px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
+                        onClick={() => deleteCustomRole(i)}
+                        disabled={rolesSaving}
+                        title={held > 0 ? `${held} login(s) hold this role — move them first` : undefined}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             )}
 
@@ -483,7 +634,7 @@ export default function ImsStaff() {
               <div style={{ flex: 1 }}>
                 <label style={labelStyle} htmlFor="imssta-f1">Role Name</label>
                 <input id="imssta-f1"
-                  style={inputStyle}
+                  className="form-input"
                   placeholder="e.g. Store Keeper, Purchasing Clerk…"
                   value={newRole.label}
                   onChange={e => setNewRole(r => ({ ...r, label: e.target.value }))}
@@ -536,14 +687,14 @@ export default function ImsStaff() {
         <Modal onClose={() => { if (!adding) setAddModal(false) }} title="Add Staff Member" maxWidth={380}>
 
             {(hrEnabled || eligibleUsers.length > 0) && (
-              <div className="tab-bar" style={{ marginBottom: 16 }}>
+              <div className="tab-bar" role="group" aria-label="How to add this staff member" style={{ marginBottom: 16 }}>
                 {hrEnabled && (
-                  <button className={`tab-btn${addMode === 'hr' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('hr')}>HR Employee</button>
+                  <button aria-pressed={addMode === 'hr'} className={`tab-btn${addMode === 'hr' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('hr')}>HR Employee</button>
                 )}
                 {eligibleUsers.length > 0 && (
-                  <button className={`tab-btn${addMode === 'existing' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('existing')}>Existing User</button>
+                  <button aria-pressed={addMode === 'existing'} className={`tab-btn${addMode === 'existing' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('existing')}>Existing User</button>
                 )}
-                <button className={`tab-btn${addMode === 'manual' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('manual')}>IMS-only Staff</button>
+                <button aria-pressed={addMode === 'manual'} className={`tab-btn${addMode === 'manual' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('manual')}>IMS-only Staff</button>
               </div>
             )}
 
@@ -570,7 +721,7 @@ export default function ImsStaff() {
             {addMode === 'existing' && (
               <div style={{ marginBottom: 14 }}>
                 <label style={labelStyle} htmlFor="ims-staff-existing-user">
-                  <Tip text="Assigns an IMS role to a login that already exists for this client (e.g. one created from Admin → Clients → Manage → Users) instead of creating a new one. Only accounts with no POS/HR/IMS role already set are shown.">Existing User</Tip>
+                  <Tip text="Assigns an IMS role to a login that already exists for this client (e.g. one created from Admin → Clients → Manage → Users) instead of creating a new one. Only accounts with no POS/HR/IMS role already set are shown, and only the account owner or an administrator sees this tab. A client's only Owner login cannot be converted — that would leave nobody with Owner access.">Existing User</Tip>
                 </label>
                 {eligibleUsers.length === 0 ? (
                   <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>
@@ -591,7 +742,7 @@ export default function ImsStaff() {
               <div style={{ marginBottom: 14 }}>
                 <label style={labelStyle} htmlFor="imssta-f3">Full Name</label>
                 <input id="imssta-f3"
-                  style={inputStyle}
+                  className="form-input"
                   placeholder="e.g. Ram Bahadur"
                   value={addForm.full_name}
                   onChange={e => setAddForm(f => ({ ...f, full_name: e.target.value }))}
@@ -607,7 +758,7 @@ export default function ImsStaff() {
                     <Tip text="Staff log in with this email and password — same login mechanism as your own account.">Email</Tip>
                   </label>
                   <input id="imssta-f4"
-                    style={inputStyle}
+                    className="form-input"
                     type="email"
                     autoComplete="new-password"
                     placeholder="staff@example.com"
@@ -617,12 +768,12 @@ export default function ImsStaff() {
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
-                  <label style={labelStyle} htmlFor="imssta-f5">Initial Password (8+ characters)</label>
+                  <label style={labelStyle} htmlFor="imssta-f5">Initial Password ({MIN_PASSWORD_LENGTH}+ characters)</label>
                   <input id="imssta-f5"
-                    style={inputStyle}
+                    className="form-input"
                     type="password"
                     autoComplete="new-password"
-                    placeholder="Set an initial password"
+                    placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`}
                     value={addForm.password}
                     onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))}
                   />
@@ -642,15 +793,15 @@ export default function ImsStaff() {
               >
                 {effectiveRoles.map(r => (
                   <option key={r.label} value={r.label}>
-                    {r.label} ({r.level.charAt(0).toUpperCase() + r.level.slice(1)})
+                    {r.label} ({cap(r.level)})
                   </option>
                 ))}
               </select>
             </div>
 
-            {addMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 12 }}>{addMsg}</p>}
+            {addMsg && <ActionError error={addMsg} />}
 
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: addMsg ? 12 : 0 }}>
               <button className="btn btn-ghost" onClick={() => setAddModal(false)} disabled={adding}>Cancel</button>
               <button className="btn btn-primary" onClick={addStaff} disabled={adding}>
                 {adding ? 'Creating…' : 'Add Staff'}
@@ -666,19 +817,20 @@ export default function ImsStaff() {
               New password for <strong style={{ color: 'var(--theme-text1)' }}>{pwTarget.full_name}</strong>
             </p>
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle} htmlFor="imssta-f7">New Password (8+ characters)</label>
+              <label style={labelStyle} htmlFor="imssta-f7">New Password ({MIN_PASSWORD_LENGTH}+ characters)</label>
               <input id="imssta-f7"
-                style={inputStyle}
+                className="form-input"
                 type="password"
                 autoComplete="new-password"
-                placeholder="Set a new password"
+                placeholder={`Min. ${MIN_PASSWORD_LENGTH} characters`}
                 value={newPassword}
                 autoFocus
                 onChange={e => setNewPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !resetting && resetPassword()}
               />
             </div>
-            {pwMsg && <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginBottom: 12 }}>{pwMsg}</p>}
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            {pwMsg && <ActionError error={pwMsg} />}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: pwMsg ? 12 : 0 }}>
               <button className="btn btn-ghost" onClick={() => setPwTarget(null)} disabled={resetting}>Cancel</button>
               <button className="btn btn-primary" onClick={resetPassword} disabled={resetting}>
                 {resetting ? 'Saving…' : 'Save Password'}
