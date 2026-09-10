@@ -40,6 +40,15 @@ const FILES = [
   ['StockAgeing.js', path.join(__dirname, '..', 'reports', 'StockAgeing.js')],
   ['StockReport.js', path.join(__dirname, '..', 'stockcount', 'StockReport.js')],
   ['ReorderReport.js', path.join(__dirname, '..', 'stockcount', 'ReorderReport.js')],
+  // The three menu-analysis reports joined in S724, when they were re-analysed. Their figure is a
+  // RANK or the multiplier on one: Best Sellers orders the menu and captions the bottom of that
+  // order as candidates for removal, Recipe Margin's Total Contribution is its headline, its
+  // default sort AND its Top Contributor card, and Menu Repricing multiplies qty by a price gap to
+  // produce Monthly Opportunity. A short qty map on any of them does not shorten one column — it
+  // re-orders the report, or moves the one number the page is read for.
+  ['BestSellers.js', path.join(__dirname, '..', 'reports', 'BestSellers.js')],
+  ['RecipeMargin.js', path.join(__dirname, '..', 'recipes', 'RecipeMargin.js')],
+  ['MenuRepricing.js', path.join(__dirname, '..', 'recipes', 'MenuRepricing.js')],
   // The variance family joined in S719, when the same sweep reached them. All three already
   // complied; they are listed so they cannot quietly stop.
   ['Variance.js', path.join(__dirname, '..', 'variance', 'Variance.js')],

@@ -20,13 +20,14 @@ import { computeRecipeCosts } from '../../utils/recipeCost'
 import {
   FC_CUTOFF, classify, median, menuFcPct, unratedReason, emptyQuadrantCounts,
 } from '../../shared/menuEngineering'
+import { recipeCostOf } from '../../shared/imsFormulas'
 
 export async function computeMenuEngineeringSection(clientId, period) {
   const results = await Promise.all([
     // Both NULL-safe (S714). Both columns are nullable and a server-side .neq drops NULL rows,
     // so an uncategorised dish was absent from the matrix — and this section is FROZEN into the
     // monthly snapshot, so it was absent permanently, with no way to tell from the artifact.
-    scopedFrom('recipes', clientId, 'id, name, category, selling_price')
+    scopedFrom('recipes', clientId, 'id, name, category, selling_price, cost_price')
       .not('is_active', 'is', false).or('category.is.null,category.neq.Sub-Recipe'),
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')),
   ])
@@ -47,7 +48,10 @@ export async function computeMenuEngineeringSection(clientId, period) {
 
   const enriched = (recipes || []).map(r => {
     const sellingPrice = parseFloat(r.selling_price) || 0
-    const ingredientCost = costMap[r.id] || 0
+    // `recipeCostOf` — the manual cost_price counts as a cost here exactly as it does on the
+    // live page, or the same dish freezes as Unrated in the snapshot while Menu Engineering
+    // rates it (S724). These two must never diverge; see MenuEngineering.js.
+    const ingredientCost = recipeCostOf(costMap, r) || 0
     // null, not 0, when the dish has no price or no costed ingredients — a 0 here passed the
     // ≤35% test and froze an uncosted dish into the snapshot as a Star (S715).
     const fcPct = menuFcPct(ingredientCost, sellingPrice)

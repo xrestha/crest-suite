@@ -7,7 +7,7 @@ import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import PeriodScope from '../../../components/PeriodScope'
 import { useSettings } from '../../../context/SettingsContext'
-import { fcBand } from '../../../shared/imsFormulas'
+import { fcBand, recipeCostOf } from '../../../shared/imsFormulas'
 import ChartCard from '../../../components/ChartCard'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import {
@@ -160,7 +160,7 @@ export default function MenuEngineering() {
     // BCG-style revenue/margin quadrant below is about what actually sold at menu price, not what
     // was given away.
     const [{ data: recipes, error: recErr }, { data: sales, error: salesErr }] = await Promise.all([
-      scopedFrom('recipes', 'id, name, category, selling_price')
+      scopedFrom('recipes', 'id, name, category, selling_price, cost_price')
         // Both filters are NULL-safe (S714). `.neq` on a NULLABLE column also drops every NULL
         // row, server-side and silently — and BOTH of these columns are nullable, so an
         // uncategorised dish, or one whose is_active was never set, dropped out of the matrix
@@ -234,7 +234,13 @@ export default function MenuEngineering() {
 
     // Enrich recipes
     const enriched = recipes.map(r => {
-      const ingredientCost = ingMap[r.id] || 0
+      // `recipeCostOf`, not `ingMap[r.id] || 0` — a dish costed by hand through Menu Pricing's
+      // + Add Item has no ingredients and was rated Unrated here while Menu Pricing showed its
+      // cost and its FC%. The same dish must not be costed on one screen and uncosted on another
+      // (S724). Applied to `computeMenuEngineeringSection.js` in the same change: that section is
+      // FROZEN at period close, so the two diverging would put a quadrant into a snapshot nothing
+      // recomputes, with nothing in the artifact to say which definition produced it.
+      const ingredientCost = recipeCostOf(ingMap, r) || 0
       const sellingPrice   = parseFloat(r.selling_price) || 0
       // null, never 0, when either half is missing — see shared/menuEngineering.js.
       const fcPct          = menuFcPct(ingredientCost, sellingPrice)

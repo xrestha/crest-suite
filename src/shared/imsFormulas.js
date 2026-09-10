@@ -80,6 +80,60 @@ export function fcBand(pct, settings) {
 }
 
 /**
+ * A recipe's food cost per portion, or `null` when the product does not know it.
+ *
+ * WHY THIS IS A FUNCTION (S724)
+ *
+ * The decision "computed cost, else the manually entered `cost_price`, else we do not know" was
+ * written out by hand on four pages and each got a different amount of it right. Menu Pricing had
+ * the fallback and collapsed the absence to `0`. Menu Repricing was given the fallback in S713 and
+ * kept the `0`. Best Sellers, Recipe Margin and the Dashboard's Menu Health tile had **no
+ * fallback at all**, so a dish costed by hand through Menu Pricing's + Add Item read as costed on
+ * the page that created it and uncosted on the three that rank it.
+ *
+ * The `0` is the dangerous half. A cost of zero is not a cheap dish, it is an unanswered question,
+ * and every figure downstream is a ratio that will happily accept it: `0 / price` is a real `0`
+ * that `fcBand()` paints green with a ✓, and `(revenue − 0) / revenue` is a real `100` that sorts
+ * to the top of a margin ranking. Carrying the absence as `null` from here is what stops that, and
+ * it only works if nothing in between defaults it back — the first `|| 0` at a call site destroys
+ * the distinction and no care afterwards recovers it.
+ */
+export function recipeCostOf(costMap, recipe) {
+  const computed = parseFloat(costMap?.[recipe?.id])
+  if (computed > 0) return computed
+  const manual = parseFloat(recipe?.cost_price)
+  if (manual > 0) return manual
+  return null
+}
+
+/**
+ * A dish's food cost %, or `null` when the page does not know it.
+ *
+ * Both inputs must be genuinely present: a price of 0 makes the ratio undefined, and a cost of 0
+ * makes it a *number* that means "not costed" rather than "free to make". Returning `null` for
+ * either is what stops the 0 becoming a verdict downstream.
+ *
+ * Lived in `menuEngineering.js` from S715 until S724, when Recipe Margin, Menu Repricing and Best
+ * Sellers turned out to need exactly this and importing it from a file named for one report read
+ * as a coincidence rather than a rule. It belongs next to `fcBand`, which is the thing that would
+ * otherwise band the zero. `menuEngineering.js` re-exports it, so its own callers are unchanged.
+ */
+export function menuFcPct(ingredientCost, sellingPrice) {
+  if (!(sellingPrice > 0) || !(ingredientCost > 0)) return null
+  return (ingredientCost / sellingPrice) * 100
+}
+
+/** Why a dish's food cost % could not be computed, as a sentence, or `null` when it can be. */
+export function unratedReason(ingredientCost, sellingPrice) {
+  const noPrice = !(sellingPrice > 0)
+  const noCost = !(ingredientCost > 0)
+  if (noPrice && noCost) return 'No selling price and no costed ingredients'
+  if (noPrice) return 'No selling price set'
+  if (noCost) return 'No costed ingredients — add a recipe or a manual cost'
+  return null
+}
+
+/**
  * The rendered form of a banded food-cost figure: the number, its shape marker, and the band name
  * as a `title`. One place, so a new call site cannot reintroduce the colour-only version.
  *

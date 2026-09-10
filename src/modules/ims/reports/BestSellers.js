@@ -13,6 +13,7 @@ import PeriodScope from '../../../components/PeriodScope'
 import ChartCard from '../../../components/ChartCard'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
+import { recipeCostOf, unratedReason } from '../../../shared/imsFormulas'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
@@ -29,6 +30,25 @@ const GOLD  = 'var(--theme-accent-ink)'
 const GREEN = 'var(--theme-green-text)'
 const RED   = 'var(--theme-red-text)'
 const MUTED = 'var(--theme-text2)'
+
+/**
+ * The margin cell, written once because both tables render it and only one of them used to be
+ * kept in step. A null margin is an em-dash carrying the reason, never a number: the previous form
+ * (`r.margin >= 60 ? GREEN : …`) turned an uncosted dish's manufactured 100% into the greenest
+ * figure on the page.
+ */
+function MarginCell({ row }) {
+  if (row.margin == null) {
+    return (
+      <td style={{ textAlign: 'right', color: MUTED }} title={row.costReason || 'Margin needs a food cost and positive revenue'}>—</td>
+    )
+  }
+  return (
+    <td style={{ textAlign: 'right', fontWeight: 600, color: row.margin >= 60 ? GREEN : row.margin >= 40 ? GOLD : RED }}>
+      {row.margin.toFixed(1)}%
+    </td>
+  )
+}
 
 export default function BestSellers() {
   const { clientId, profile, hasImsAccess } = useAuth()
@@ -67,10 +87,20 @@ export default function BestSellers() {
       // "Best seller" ranks by real demand — comps (source='pos_comp') never sold at menu
       // price and would misleadingly inflate a heavily-comped item's qty/revenue rank.
       // Paged: a busy month's sales_entries can cross PostgREST's silent 1000-row cap (S528).
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
+      //
+      // `source` is SELECTED and comps filtered in JS, never `.neq('source', …)` (S724). The
+      // column is nullable — DEFAULT 'manual', no NOT NULL — and `NULL <> 'pos_comp'` is NULL
+      // rather than true, so the server-side form drops every legacy row silently. This page's
+      // figure is a RANK, which is why it stopped being one of the ~12 left on the old form:
+      // a short qty for one dish does not shorten a column, it moves that dish DOWN the order,
+      // and the guide's own advice for the bottom of that order is "candidates for menu
+      // removal". A dish deleted off the menu because rows nobody was shown went missing.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId).order('id')),
       // NULL-safe (S714): .neq on a nullable column drops NULL rows too, so an uncategorised
       // dish was missing from the ranking with nothing to say a row had been filtered out.
-      scopedFrom('recipes', 'id, name, category, selling_price').or('category.is.null,category.neq.Sub-Recipe'),
+      // `cost_price` is the manual cost Menu Pricing's + Add Item writes — without it a dish
+      // costed by hand read as costed there and uncosted here, i.e. 100% margin (S724).
+      scopedFrom('recipes', 'id, name, category, selling_price, cost_price').or('category.is.null,category.neq.Sub-Recipe'),
     ])
     // A failed read must not rank a confident NPR 0 (S612 silent-zero rule).
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
@@ -102,6 +132,7 @@ export default function BestSellers() {
     // whenever a menu price changed later.
     const qtyMap = {}, revenueMap = {}
     for (const e of entries || []) {
+      if (e.source === 'pos_comp') continue   // see the read above — filtered here, not server-side
       const qty = parseFloat(e.qty_sold || 0)
       const price = e.unit_price != null ? parseFloat(e.unit_price) : (currentPriceMap[e.recipe_id] || 0)
       qtyMap[e.recipe_id] = (qtyMap[e.recipe_id] || 0) + qty
@@ -113,12 +144,21 @@ export default function BestSellers() {
       .map(r => {
         const qty      = qtyMap[r.id] || 0
         const revenue  = revenueMap[r.id] || 0
-        const price    = qty > 0 ? revenue / qty : currentPriceMap[r.id]
-        const cost     = costMap[r.id] || 0
-        const cogs     = qty * cost
-        const profit   = revenue - cogs
-        const margin   = revenue > 0 ? (profit / revenue) * 100 : 0
-        return { name: r.name, category: r.category, qty, price, revenue, cogs, profit, margin }
+        // null, never 0, when nothing has costed this dish (S724). `cost = costMap[r.id] || 0`
+        // made COGS 0, profit the whole of revenue and margin a flat **100%** — coloured green,
+        // sorted to the top of "By Margin %", and added to Gross Profit as if it were real. A
+        // dish nobody has costed is not the most profitable thing on the menu; it is a dish
+        // nobody has costed, and `Recipes.js`'s own + New Recipe creates one on every click.
+        const cost     = recipeCostOf(costMap, r)
+        const cogs     = cost == null ? null : qty * cost
+        const profit   = cost == null ? null : revenue - cogs
+        // Revenue must be positive for the ratio to mean anything: a fully-discounted dish, or one
+        // a Credit Note has reversed past zero, produces a percentage whose sign is noise.
+        const margin   = (cost != null && revenue > 0) ? (profit / revenue) * 100 : null
+        return {
+          name: r.name, category: r.category, qty, revenue, cogs, profit, margin,
+          costReason: cost == null ? unratedReason(0, currentPriceMap[r.id]) : null,
+        }
       })
 
     setRows(built)
@@ -128,9 +168,21 @@ export default function BestSellers() {
   const categories = [...new Set(rows.map(r => r.category).filter(Boolean))].sort()
   const filteredRows = categoryFilter === 'all' ? rows : rows.filter(r => r.category === categoryFilter)
 
-  const sorted = [...filteredRows].sort((a, b) => b[sortBy] - a[sortBy])
-  const top10  = sorted.slice(0, 10)
-  const bot10  = [...sorted].reverse().slice(0, 10)
+  // Only rows that HAVE the active metric can be ranked by it. On Revenue and Volume that is every
+  // row; on Margin % it excludes the uncosted ones, which is the whole point — they used to arrive
+  // here as a confident 100% and take the top of the chart and the table.
+  const ranked = [...filteredRows]
+    .filter(r => r[sortBy] != null)
+    .sort((a, b) => b[sortBy] - a[sortBy])
+  const unrankable = filteredRows.length - ranked.length
+
+  const top10 = ranked.slice(0, 10)
+  // The bottom list starts AFTER the top one. It used to be `[...sorted].reverse().slice(0, 10)`,
+  // the bottom of the whole list — so with 12 dishes sold, eight of them appeared in both panels,
+  // each one simultaneously a "Top 10 Performer" and a "Bottom 10 Performer" (S724). The module
+  // guide has recorded the overlap as a gotcha since the page was written; the page never said it.
+  const botStart = Math.max(10, ranked.length - 10)
+  const bot10 = ranked.slice(botStart).reverse()
 
   const chartData = top10.map(r => ({
     name: r.name.length > 14 ? r.name.slice(0, 13) + '…' : r.name,
@@ -148,8 +200,29 @@ export default function BestSellers() {
   const totalQtyAll = filteredRows.reduce((s, r) => s + r.qty, 0)
   const top10Revenue = top10.reduce((s, r) => s + r.revenue, 0)
   const top10Qty = top10.reduce((s, r) => s + r.qty, 0)
-  const top10AvgMargin = top10.length > 0 ? top10.reduce((s, r) => s + r.margin, 0) / top10.length : 0
-  const overallAvgMargin = filteredRows.length > 0 ? filteredRows.reduce((s, r) => s + r.margin, 0) / filteredRows.length : 0
+  // Both of these are SIMPLE averages of each dish's own margin, and both are now taken over the
+  // same population — `overallAvgMargin` used to average `filteredRows` while the sentence beside
+  // it counted `rows`, so under a category filter the number was the category's and the count was
+  // the whole menu's. They are also deliberately NOT the same figure as the Summary strip's
+  // "Overall Margin", which is revenue-weighted; the two disagree by design and each says so.
+  // Computed over the costed rows explicitly rather than over `ranked`: `ranked` only excludes
+  // null margins while the Margin sort is active, so under Revenue or Volume these would sum a
+  // null into NaN — unrendered today, and one `&&` away from being rendered tomorrow.
+  const avgMarginOf = (list) => {
+    const withMargin = list.filter(r => r.margin != null)
+    return withMargin.length > 0 ? withMargin.reduce((s, r) => s + r.margin, 0) / withMargin.length : 0
+  }
+  const top10AvgMargin = avgMarginOf(top10)
+  const overallAvgMargin = avgMarginOf(ranked)
+
+  // COGS, Gross Profit and Overall Margin can only be summed over dishes that HAVE a cost. An
+  // uncosted dish contributes its revenue and no COGS, which does not read as missing data — it
+  // reads as an unusually profitable month.
+  const costedRows = filteredRows.filter(r => r.cogs != null)
+  const uncostedCount = filteredRows.length - costedRows.length
+  const costedRevenue = costedRows.reduce((s, r) => s + r.revenue, 0)
+  const costedCogs = costedRows.reduce((s, r) => s + r.cogs, 0)
+  const costedProfit = costedRows.reduce((s, r) => s + r.profit, 0)
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
@@ -223,7 +296,7 @@ export default function BestSellers() {
                   <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{Math.round(top10Qty).toLocaleString('en-IN')} units</strong> · <span style={{ color: GOLD, fontWeight: 600 }}>{((top10Qty / totalQtyAll) * 100).toFixed(0)}%</span> of total volume sold</>
                 )}
                 {sortBy === 'margin' && (
-                  <>Top 10 average margin <strong style={{ color: 'var(--theme-text1)' }}>{top10AvgMargin.toFixed(1)}%</strong> vs <span style={{ color: MUTED }}>{overallAvgMargin.toFixed(1)}%</span> across all {rows.length} items</>
+                  <>Top 10 average margin <strong style={{ color: 'var(--theme-text1)' }}>{top10AvgMargin.toFixed(1)}%</strong> vs <span style={{ color: MUTED }}>{overallAvgMargin.toFixed(1)}%</span> across all {ranked.length} costed items · simple average of each dish's margin</>
                 )}
               </div>
             }
@@ -257,8 +330,8 @@ export default function BestSellers() {
                       <th>#</th>
                       <th>Item</th>
                       <th style={{ textAlign: 'right' }}>Qty</th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Total revenue = qty sold × selling price (ex-VAT).">Revenue</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Gross margin % = (Revenue − COGS) ÷ Revenue. Target: 60%+ for F&B." width={220}>Margin</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Revenue, ex-VAT: each sale valued at the price actually charged on it, less discounts. A sale recorded before Crest started capturing that price falls back to the dish's current selling price." width={280}>Revenue</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Gross margin % = (Revenue − COGS) ÷ Revenue. Target: 60%+ for F&B. Shows — for a dish with no costed ingredients and no manual cost, because there is no COGS to subtract." width={260}>Margin</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -271,9 +344,7 @@ export default function BestSellers() {
                         </td>
                         <td style={{ textAlign: 'right', color: MUTED }}>{Math.round(r.qty).toLocaleString('en-IN')}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.revenue)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: r.margin >= 60 ? GREEN : r.margin >= 40 ? GOLD : RED }}>
-                          {r.margin.toFixed(1)}%
-                        </td>
+                        <MarginCell row={r} />
                       </tr>
                     ))}
                   </tbody>
@@ -291,46 +362,74 @@ export default function BestSellers() {
                       <th>#</th>
                       <th>Item</th>
                       <th style={{ textAlign: 'right' }}>Qty</th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Total revenue = qty sold × selling price (ex-VAT).">Revenue</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Gross margin % = (Revenue − COGS) ÷ Revenue. Target: 60%+ for F&B." width={220}>Margin</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Revenue, ex-VAT: each sale valued at the price actually charged on it, less discounts. A sale recorded before Crest started capturing that price falls back to the dish's current selling price." width={280}>Revenue</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Gross margin % = (Revenue − COGS) ÷ Revenue. Target: 60%+ for F&B. Shows — for a dish with no costed ingredients and no manual cost, because there is no COGS to subtract." width={260}>Margin</Tip></th>
                     </tr>
                   </thead>
                   <tbody>
                     {bot10.map((r, i) => (
                       <tr key={r.name}>
-                        <td style={{ color: MUTED, width: 28 }}>{i + 1}</td>
+                        {/* The dish's real position in the ranking, not its position in this
+                            panel — a "1" here used to sit under a heading that means last. */}
+                        <td style={{ color: MUTED, width: 28 }}>{ranked.length - i}</td>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                           {r.name}
                           <div style={{ fontSize: 11, color: MUTED, fontWeight: 400 }}>{r.category}</div>
                         </td>
                         <td style={{ textAlign: 'right', color: MUTED }}>{Math.round(r.qty).toLocaleString('en-IN')}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.revenue)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: r.margin >= 60 ? GREEN : r.margin >= 40 ? GOLD : RED }}>
-                          {r.margin.toFixed(1)}%
-                        </td>
+                        <MarginCell row={r} />
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {bot10.length === 0 && (
+                  <p style={{ fontSize: 12, color: MUTED, margin: '10px 2px 0' }}>
+                    Every item sold this period is already in the Top 10 — there is no separate bottom to show.
+                  </p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Summary strip */}
+          {unrankable > 0 && sortBy === 'margin' && (
+            <p style={{ fontSize: 12, color: MUTED, marginTop: 12 }}>
+              {unrankable} {unrankable === 1 ? 'dish is' : 'dishes are'} not ranked here — margin needs a food cost, and
+              {unrankable === 1 ? ' it has' : ' they have'} neither costed ingredients nor a manual cost. Add one in Recipe Costing or Menu Pricing.
+            </p>
+          )}
+
+          {/* Summary strip. Revenue and Items Sold span every dish; the three cost-derived figures
+              span only the costed ones and say so, rather than counting an uncosted dish's revenue
+              against no COGS and reporting the difference as profit. */}
           <div className="card" style={{ marginTop: 20, display: 'flex', gap: 32, flexWrap: 'wrap' }}>
             {[
-              { label: 'Total Revenue',   val: fmt(filteredRows.reduce((s, r) => s + r.revenue, 0)),  color: GREEN },
-              { label: 'Total COGS',      val: fmt(filteredRows.reduce((s, r) => s + r.cogs,    0)),  color: RED },
-              { label: 'Gross Profit',    val: fmt(filteredRows.reduce((s, r) => s + r.profit,  0)),  color: GOLD },
-              { label: 'Overall Margin',  val: (() => { const rev = filteredRows.reduce((s, r) => s + r.revenue, 0); const prof = filteredRows.reduce((s, r) => s + r.profit, 0); return rev > 0 ? `${((prof/rev)*100).toFixed(1)}%` : '—' })(), color: GOLD },
-              { label: 'Items Sold',      val: filteredRows.length,                                   color: MUTED },
+              { label: 'Total Revenue',  tip: 'Every dish sold this period, valued at the price actually charged, less discounts.',
+                val: fmt(totalRevenueAll), color: GREEN },
+              { label: 'Total COGS',     tip: 'Ingredient cost of the dishes that have one. Dishes with no cost are left out of this and of the two figures beside it.',
+                val: fmt(costedCogs), color: RED },
+              { label: 'Gross Profit',   tip: 'Revenue − COGS across the costed dishes only.',
+                val: fmt(costedProfit), color: GOLD },
+              { label: 'Overall Margin', tip: 'Gross Profit ÷ Revenue across the costed dishes — weighted by revenue, so a high-volume dish moves it more than a rarely-ordered one. The chart footer shows the unweighted average instead, and the two will not match.',
+                val: costedRevenue > 0 ? `${((costedProfit / costedRevenue) * 100).toFixed(1)}%` : '—', color: GOLD },
+              { label: 'Items Sold',     tip: 'Distinct menu items with at least one sale this period.',
+                val: filteredRows.length, color: MUTED },
             ].map(s => (
               <div key={s.label}>
-                <div style={{ fontSize: 11, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{s.label}</div>
+                <div style={{ fontSize: 11, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                  <Tip text={s.tip} width={280}>{s.label}</Tip>
+                </div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.val}</div>
               </div>
             ))}
           </div>
+          {uncostedCount > 0 && (
+            <p style={{ fontSize: 12, color: MUTED, marginTop: 10 }}>
+              COGS, Gross Profit and Overall Margin cover {costedRows.length} of {filteredRows.length} items
+              — {uncostedCount} {uncostedCount === 1 ? 'has' : 'have'} no food cost recorded, so {uncostedCount === 1 ? 'its' : 'their'} revenue
+              is counted above while {uncostedCount === 1 ? 'its' : 'their'} cost is not known.
+            </p>
+          )}
         </>
       )}
     </div>

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { useSettings } from '../../context/SettingsContext'
-import { fcThresholds } from '../../shared/imsFormulas'
+import { fcThresholds, recipeCostOf } from '../../shared/imsFormulas'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
@@ -25,7 +25,7 @@ import CloseConfirmBody from '../periods/CloseConfirmBody'
 import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
 import { nepalBs } from '../../shared/nepalTime'
 import { getSubStatus } from '../../utils/subscription'
-import { explodeRecipeIngredients } from '../../utils/recipeCost'
+import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 import SalesPivot from '../../modules/dashboard/SalesPivot'
@@ -360,7 +360,7 @@ export default function ClientDashboard() {
       // NULL-safe (S714): .neq drops NULL-category rows, which undercounted the menu.
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).or('category.is.null,category.neq.Sub-Recipe'),
       scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'),
-      scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct'),
+      scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct, cost_price, vat_rate'),
       scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false),
       scopedFrom('par_levels', 'item_id, par_qty'),
       // Unfiltered by is_active — an item deactivated mid-period still has real purchase/wastage
@@ -510,13 +510,23 @@ export default function ClientDashboard() {
       ;(recipes || []).forEach(r => {
         const price = parseFloat(r.selling_price) || 0
         if (r.category === 'Sub-Recipe' || r.is_active === false || price <= 0) return
+        // The tile reads "3 of 47" — underpriced of costed-and-priced — and a dish with no food
+        // cost used to land in the DENOMINATOR while being mathematically unable to reach the
+        // numerator: cost 0 makes FC% 0, and 0 is never above target. So the tile read *healthier*
+        // the more uncosted dishes a client had (S724). It also had no `cost_price` fallback,
+        // unlike the Menu Repricing report it says it mirrors, so a hand-costed dish disagreed
+        // between the tile and the page it links to. `recipeCostOf` is the one shared decision.
+        const cost = recipeCostOf(recipeCostMap, r)
+        if (cost == null) return
         costedPricedCount++
-        const cost = recipeCostMap[r.id] || 0
         const targetPct = parseFloat(r.target_fc_pct) || 30
         const currentFcPct = (cost / price) * 100
         if (currentFcPct > targetPct) {
           underpricedCount++
-          const suggestedExVat = targetPct > 0 ? cost / (targetPct / 100) : 0
+          // Measured against the rounded, VAT-inclusive price Menu Repricing actually suggests,
+          // taken back to ex-VAT — so the tile's opportunity and the report's agree to the rupee.
+          const vat = (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : parseFloat(r.vat_rate)
+          const suggestedExVat = getSuggestedPrice(cost, vat, targetPct / 100) / (1 + vat)
           menuOpportunityTotal += Math.max(0, suggestedExVat - price) * (soldMap[r.id] || 0)
         }
       })

@@ -58,27 +58,16 @@ export function median(arr) {
 }
 
 /**
- * A dish's food cost %, or `null` when the page does not know it.
+ * `menuFcPct` and `unratedReason` moved to `imsFormulas.js` in S724 and are re-exported here so
+ * this file's callers are unchanged.
  *
- * Both inputs must be genuinely present: a price of 0 makes the ratio undefined, and a cost of 0
- * makes it a *number* that means "not costed" rather than "free to make". Returning `null` for
- * either is what stops the 0 becoming a verdict downstream — the first `? :` that defaults a
- * missing input to 0 destroys the distinction and no care at the call site gets it back.
+ * They left because three more reports needed them. Recipe Margin, Menu Repricing and Best Sellers
+ * all had their own zero-cost hole — the same one point 1 below describes — and importing the fix
+ * from a module named for Menu Engineering would have read as borrowing one report's helper rather
+ * than following a rule. They now sit beside `fcBand()`, which is the function that would
+ * otherwise paint the zero green, and beside `recipeCostOf()`, which is where the `null` starts.
  */
-export function menuFcPct(ingredientCost, sellingPrice) {
-  if (!(sellingPrice > 0) || !(ingredientCost > 0)) return null
-  return (ingredientCost / sellingPrice) * 100
-}
-
-/** Why a dish could not be rated, as a sentence, or `null` when it can be. */
-export function unratedReason(ingredientCost, sellingPrice) {
-  const noPrice = !(sellingPrice > 0)
-  const noCost = !(ingredientCost > 0)
-  if (noPrice && noCost) return 'No selling price and no costed ingredients'
-  if (noPrice) return 'No selling price set'
-  if (noCost) return 'No costed ingredients — add a recipe or a manual cost'
-  return null
-}
+export { menuFcPct, unratedReason } from './imsFormulas'
 
 /**
  * The quadrant, or `null` when the dish cannot be rated.
