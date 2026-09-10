@@ -116,6 +116,44 @@ describe('buildVendorSummary', () => {
     expect(v.gross).toBeCloseTo(10000, 6)
     expect(v.discount).toBeCloseTo(1000, 6)   // the WHOLE bill discount, since every line is in
   })
+
+  // S723. `count` was a LINE count under a column headed "Bills" on both callers — the VAT Report
+  // workbook's `# Bills` and the Annexure 13 disclosure — so a vendor's six seven-line bills read
+  // as 42 against a figure an accountant ties back to the purchase register.
+  it('counts BILLS, not lines', () => {
+    const allocated = allocateBillDiscounts(MIXED_BILL)
+    const [v] = buildVendorSummary(allocated, [], netFactors(allocated))
+    expect(v.count).toBe(1)
+  })
+
+  it('counts a second bill from the same vendor separately', () => {
+    const second = { ...VAT_LINE, id: 'l3', purchase_group_id: 'G2', discount_amount: 0 }
+    const allocated = allocateBillDiscounts([...MIXED_BILL, second])
+    const [v] = buildVendorSummary(allocated, [], netFactors(allocated))
+    expect(v.count).toBe(2)
+  })
+
+  // The one-lakh threshold is tested on the ex-VAT net AND on what the vendor invoiced, because a
+  // vendor just under it ex-VAT is over it once VAT is added (decision, Aashish 2026-09-10).
+  it('reports VAT and the invoiced total alongside the ex-VAT net', () => {
+    const allocated = allocateBillDiscounts(MIXED_BILL)
+    const [v] = buildVendorSummary(allocated, [], netFactors(allocated))
+    expect(v.net).toBeCloseTo(9000, 6)                 // 10,000 gross less the 1,000 discount
+    expect(v.vatAmt).toBeCloseTo(5400 * VAT_RATE, 6)   // only the VAT line's post-discount value
+    expect(v.invoiced).toBeCloseTo(9000 + 5400 * VAT_RATE, 6)
+    // …and the invoiced total is exactly what the bill itself was invoiced at.
+    expect(v.invoiced).toBeCloseTo(calcBillTotals(MIXED_BILL, 1000).grandTotal, 6)
+  })
+
+  it('takes the VAT back off a returned VAT line, and never off a non-VAT one', () => {
+    const allocated = allocateBillDiscounts(MIXED_BILL)
+    const factors = netFactors(allocated)
+    const [full] = buildVendorSummary(allocated, [ret(VAT_LINE), ret(NONVAT_LINE)], factors)
+    // Everything came back, so nothing was invoiced on balance.
+    expect(full.net).toBeCloseTo(0, 6)
+    expect(full.vatAmt).toBeCloseTo(0, 6)
+    expect(full.invoiced).toBeCloseTo(0, 6)
+  })
 })
 
 describe('billPayables — what a payment method actually cost', () => {

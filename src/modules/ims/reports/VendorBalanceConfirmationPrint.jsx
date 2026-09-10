@@ -19,7 +19,7 @@ const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFr
 // a bare locale minus sign reads inconsistently next to the styled amounts around it.
 const fmtSigned = n => `${n < -0.005 ? '− ' : ''}${fmt(Math.abs(n))}`
 
-const EVENT_LABEL = { opening: 'Opening Balance', bill: 'Purchase', payment: 'Payment', return: 'Return' }
+const EVENT_LABEL = { opening: 'Opening Balance', bill: 'Purchase', payment: 'Payment', return: 'Return', settlement: 'Paid on purchase' }
 
 export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabel, fyStart, fyEnd, openingBalance, schedule, totals, closingBalance }) {
   const isAdvance = closingBalance < -0.01
@@ -40,6 +40,11 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
     ...e,
     signedAmount: e.type === 'opening' ? null : e.type === 'bill' ? e.amount : -e.amount,
   }))
+  // With the cash settlements emitted as their own rows (S723) this total is exactly
+  // (Closing − Opening): a Cash/FonePay bill's purchase, its settlement and its returns cancel,
+  // leaving only what actually moved the balance. Before that it summed cash purchases that never
+  // touched the balance, so it was a figure that reconciled to nothing on a letter whose entire
+  // purpose is being reconciled.
   const amountTotal = rows.reduce((s, e) => s + (e.signedAmount || 0), 0)
 
   return (
@@ -117,7 +122,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
             <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
               <td style={{ padding: '5px 6px 5px 0' }}>{fmtBs(e.date)}</td>
               <td style={{ padding: '5px 6px' }}>
-                {EVENT_LABEL[e.type]}{e.type === 'bill' && e.method !== 'Credit' ? ` (${e.method})` : ''}
+                {EVENT_LABEL[e.type]}{(e.type === 'bill' || e.type === 'settlement') && e.method !== 'Credit' ? ` (${e.method})` : ''}
               </td>
               <td style={{ padding: '5px 6px' }}>
                 {/* Invoice number bolded on its own line — a free-text payment note (e.g. "Fonepay
@@ -127,7 +132,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
                 {e.note && <div style={{ fontSize: 9.5, marginTop: e.ref ? 2 : 0 }}>{e.note}</div>}
                 {!e.ref && !e.note && '—'}
               </td>
-              <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : e.type === 'payment' ? (e.paymentMode || '—') : '—'}</td>
+              <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : (e.type === 'payment' || e.type === 'settlement') ? (e.paymentMode || '—') : '—'}</td>
               <td style={{ padding: '5px 6px', textAlign: 'right' }}>
                 {e.signedAmount === null ? '—' : fmtSigned(e.signedAmount)}
               </td>
@@ -141,7 +146,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
               vs Balance) with the other column left blank — instead of the two labels landing at
               different right edges, which read as staggered/misaligned. */}
           <tr>
-            <td colSpan={4} style={{ padding: '10px 6px 0', textAlign: 'right', fontWeight: 700, borderTop: '1px solid #000' }}>Total</td>
+            <td colSpan={4} style={{ padding: '10px 6px 0', textAlign: 'right', fontWeight: 700, borderTop: '1px solid #000' }}>Net movement (Closing − Opening)</td>
             <td style={{ padding: '10px 6px 0', textAlign: 'right', fontWeight: 700, borderTop: '1px solid #000' }}>
               {fmtSigned(amountTotal)}
             </td>

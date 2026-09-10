@@ -43,10 +43,13 @@ export function allocateBillDiscounts(purchases) {
     bill.lines.push({ row: p, line })
   }
   const out = []
-  for (const bill of bills.values()) {
+  for (const [gid, bill] of bills.entries()) {
     for (const { row, line } of bill.lines) {
       const share = bill.gross > 0 ? line / bill.gross : 0
-      out.push({ ...row, lineGross: line, lineNet: line - bill.discount * share })
+      // `billId` is the grouping key itself, carried out so a caller can count BILLS without
+      // re-deriving it. Every vendor rollup built on these rows used to count rows and label the
+      // column "Bills" (S723) — a 6-bill vendor with 7 lines a bill read as 42.
+      out.push({ ...row, billId: gid, lineGross: line, lineNet: line - bill.discount * share })
     }
   }
   return out

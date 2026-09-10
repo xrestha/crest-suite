@@ -127,20 +127,37 @@ export function splitPurchaseVat(entries, returns) {
 export function buildVendorSummary(allocatedEntries, returnRows, factors) {
   const map = {}
   const ensure = (id, name, pan) =>
-    (map[id] = map[id] || { name, pan, count: 0, gross: 0, discount: 0, returned: 0 })
+    (map[id] = map[id] || { name, pan, bills: new Set(), count: 0, gross: 0, discount: 0, returned: 0, vatAmt: 0 })
   ;(allocatedEntries || []).forEach(e => {
     const v = ensure(e.vendor_id || '__unknown__', e.vendors?.name || 'Unknown Vendor', e.vendors?.pan_vat_no || '')
-    v.count += 1
+    // `count` is BILLS, not lines. It was lines, under a column header reading "Bills" on both
+    // this rollup's readers — the VAT Report workbook and the Annexure 13 disclosure — so a
+    // seven-line bill counted seven times against a figure an accountant ties to the purchase
+    // register (S723). `billId` comes from allocateBillDiscounts, which has already grouped by
+    // exactly the key VendorReport.js groups by, so the two cannot disagree about what a bill is.
+    v.bills.add(e.billId != null ? e.billId : e.id)
     v.gross += e.lineGross
     v.discount += e.lineGross - e.lineNet
+    // VAT on the post-discount value of the VAT-inclusive lines only — the same base
+    // splitPurchaseVat() levies it on, so a vendor's VAT here sums to the period's own VAT figure.
+    if (e.vat_inclusive) v.vatAmt += e.lineNet * VAT_RATE
   })
   ;(returnRows || []).forEach(r => {
     const v = ensure(r.vendor_id || '__unknown__', r.vendors?.name || 'Unknown Vendor', r.vendors?.pan_vat_no || '')
-    v.returned += r.base !== undefined ? r.base : returnBase(r, factors || new Map())
+    const base = r.base !== undefined ? r.base : returnBase(r, factors || new Map())
+    v.returned += base
+    if (isVatReturn(r)) v.vatAmt -= base * VAT_RATE
   })
-  return Object.values(map).sort(
-    (a, b) => (b.gross - b.discount - b.returned) - (a.gross - a.discount - a.returned)
-  )
+  return Object.values(map)
+    .map(({ bills, ...v }) => {
+      const net = v.gross - v.discount - v.returned
+      // What the vendor actually invoiced across the year: the net taxable value plus the VAT
+      // that rode on it. This is the figure that matches the vendor's own ledger and the money
+      // that left the bank; `net` is the ex-VAT cost basis. Both are disclosed, because which one
+      // the one-lakh threshold is measured on is a filing decision, not an arithmetic one.
+      return { ...v, count: bills.size, net, invoiced: net + v.vatAmt }
+    })
+    .sort((a, b) => b.net - a.net)
 }
 
 /**

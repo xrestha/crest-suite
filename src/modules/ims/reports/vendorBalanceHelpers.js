@@ -57,7 +57,10 @@ function groupRawBills(entries) {
       byBill[key] = {
         billKey: key,
         vendorId: e.vendor_id,
-        paymentMethod: e.payment_method,
+        // NULL reads as Cash everywhere else in the product, so resolve it here rather than at
+        // each of the four places downstream that compare or print it — the schedule's Particulars
+        // column was rendering a legacy bill as "Purchase (null)".
+        paymentMethod: e.payment_method || 'Cash',
         invoiceRef: e.invoice_ref,
         billDate: billDateOf(e),
         lines: [],
@@ -128,6 +131,13 @@ function walkBillReturns(bill, billReturns) {
 // made (a live "today" snapshot), not a historical as-of-fyStart cutoff. This is a single carried-
 // forward lump sum (no separate display), so returns before the cutoff are netted directly here —
 // unlike the FY schedule itself, there's no "Balance b/f" breakdown to preserve.
+//
+// A bill can end up NEGATIVE, and that is carried forward rather than clamped away (S723). Goods
+// returned against an already-settled bill leave the vendor owing US money — ReturnsTab has no
+// guard against that and there is no reason it should, since it is exactly what a credit note is.
+// The old `Math.max(0, ...)` per bill dropped that credit from the opening balance while the FY
+// schedule below applies returns with no clamp at all, so the two halves of one letter disagreed
+// about the same event depending only on which side of Shrawan 1 it fell.
 export function computeOpeningBalance(creditEntries, payments, returns, fyStart) {
   const preFyEntries = creditEntries.filter(e => billDateOf(e) < fyStart)
   if (preFyEntries.length === 0) return 0
@@ -140,7 +150,7 @@ export function computeOpeningBalance(creditEntries, payments, returns, fyStart)
     billReturns.forEach(r => { returnedBeforeFy[r.purchase_entry_id] = (returnedBeforeFy[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
     const grandTotal = billGrandTotal(bill.lines, returnedBeforeFy)
     const paidBeforeFy = bill.lines.reduce((s, l) => s + sumPayments(pmtMap[l.id] || [], fyStart), 0)
-    return total + Math.max(0, grandTotal - paidBeforeFy)
+    return total + grandTotal - paidBeforeFy
   }, 0)
 }
 
@@ -212,6 +222,26 @@ export function buildFySchedule({ creditEntries, cashEntries, payments, returns,
     })
   })
 
+  // A Cash/FonePay bill is a purchase AND its own instant settlement. Both halves are events, so
+  // the Amount column's own total comes out at exactly (closing − opening): the settlement is
+  // recorded net of that bill's returns, and each of those returns has its own line too, so the
+  // three cancel to zero for a bill that never touched the balance. Neither half moves the running
+  // balance — that is what "instant settlement" means, and the Balance column says so by not
+  // moving.
+  rawInFyBills.filter(b => b.paymentMethod !== 'Credit').forEach(bill => {
+    const billEntryIds = new Set(bill.lines.map(l => l.id))
+    const netByEntry = {}
+    returns.filter(r => billEntryIds.has(r.purchase_entry_id)).forEach(r => {
+      netByEntry[r.purchase_entry_id] = (netByEntry[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
+    })
+    const settled = billGrandTotal(bill.lines, netByEntry) // what actually left the register
+    if (Math.abs(settled) < 0.005) return
+    events.push({
+      type: 'settlement', date: bill.billDate, ref: bill.invoiceRef, method: bill.paymentMethod,
+      paymentMode: bill.paymentMethod, amount: settled, billKey: bill.billKey,
+    })
+  })
+
   events.sort((a, b) => a.date - b.date)
 
   let balance = openingBalance
@@ -228,15 +258,14 @@ export function buildFySchedule({ creditEntries, cashEntries, payments, returns,
   // silently net-of-return already, so subtracting the return again double-counted it on screen.
   const totalPurchasesFy = rawInFyBills.reduce((s, b) => s + billGrandTotal(b.lines, null), 0)
   const totalReturnsFy = schedule.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0)
-  const totalPaymentsFy = schedule.filter(e => e.type === 'payment').reduce((s, e) => s + e.amount, 0)
-    + rawInFyBills.filter(b => b.paymentMethod !== 'Credit').reduce((s, b) => {
-      const billEntryIds = new Set(b.lines.map(l => l.id))
-      const netByEntry = {}
-      returns.filter(r => billEntryIds.has(r.purchase_entry_id)).forEach(r => {
-        netByEntry[r.purchase_entry_id] = (netByEntry[r.purchase_entry_id] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0)
-      })
-      return s + billGrandTotal(b.lines, netByEntry) // net settlement — what actually left the register after its own return(s)
-    }, 0)
+  // Every payment total is now read off the SCHEDULE, including the cash settlements — which is
+  // the point of emitting them as events (S723). Previously the cash half was computed here, in a
+  // second expression the letter's reader could not see, so "Payments (FY)" in the headline
+  // counted money that appeared nowhere in the Supporting Schedule below it: a vendor asked to
+  // verify the letter line by line could not reconcile the box to the table.
+  const totalPaymentsFy = schedule
+    .filter(e => e.type === 'payment' || e.type === 'settlement')
+    .reduce((s, e) => s + e.amount, 0)
 
   if (process.env.NODE_ENV !== 'production') {
     // Independent reconciliation check: opening + this-FY Credit bill (gross) totals − this-FY

@@ -1039,13 +1039,16 @@ export const IMS_GUIDE_GROUPS = [
         formulas: [
           'Bill Total = what the vendor actually invoiced, via the SAME calcBillTotals() helper that backs the live total in PurchaseBillForm and the printed purchase voucher: line values net of any goods returned against them, minus the bill-level discount (deduped per purchase_group_id), plus 13% VAT on the VAT-inclusive portion net of its share of that discount.',
           'That grand total is then spread back across the lines of the bill in proportion to their net value, because payments allocate per purchase_entry_id.',
-          'Remaining (per line) = max(0, value − Σ payments against it). A bill only moves to Paid History once EVERY one of its line items individually reaches full payment.',
+          'Remaining (per line) = value − Σ payments against it. It can go NEGATIVE: goods returned against a bill that was already settled leave the vendor owing you that money back, which the page shows as a purple "Credit" rather than clamping it to zero. A bill only moves to Paid History once EVERY one of its line items individually reaches full payment.',
+          'A bill is always valued over ALL of its lines, even though each tab queries only the settled or the unsettled half — the page refetches the rest of the bill by purchase_group_id first. It has to: calcBillTotals is not linear in the bill-level discount, so valuing half a bill re-applies the whole discount to that half.',
         ],
         gotchas: [
           'Until 2026-07-27 Bill Total was a bare qty x rate — no VAT, no bill discount, no returns. A VAT-inclusive credit bill therefore read about 13% LOW, and "Pay in full" settled it at roughly 88.5% of what was actually owed, while discounts and returns pushed the figure the other way. Any bill settled before that date is worth re-checking against its printed voucher.',
           'Only payment_method=\'Credit\' purchases appear here at all — Cash/FonePay purchases are assumed settled at time of purchase and never show up.',
           'Requires a one-time DB migration (a paid_at column on purchase_entries) — if missing, the page shows a setup banner with the exact SQL to run.',
           'There is no way from this UI to pay a single line item independently of its bill — payment always allocates automatically across the whole bill.',
+          'Until 2026-09-10 a PARTIAL payment split a multi-line bill across both tabs — settled lines into Paid History, the rest into Outstanding — and each tab valued the bill from only the lines it had loaded, re-applying the whole bill discount to its half. A 2-line VAT-inclusive bill of 2,034 carrying a 200 discount, part-paid 1,017, then showed 904 remaining (113 short of what was owed), an empty Paid column and no payment history, while the same bill also sat in Paid History as a settled 904. Any bill part-paid before that date is worth re-checking against its printed voucher.',
+          'A bill with payments recorded against it can be neither edited nor deleted — remove the payments here first (S698).',
         ],
         connections: 'Vendor Report\'s bill-drill-down independently reimplements the same aging/status logic (duplicated, not shared code) — the two should agree in practice but aren\'t literally the same function.',
       },
@@ -1063,11 +1066,12 @@ export const IMS_GUIDE_GROUPS = [
           { label: 'Flag badge', desc: 'Amber "Annexure 13" if PAN is on file and the vendor is over threshold; red "⚠ Missing PAN" if over threshold with no PAN — a hard compliance flag that needs fixing before filing.' },
         ],
         formulas: [
-          'Reuses VAT Report\'s buildVendorSummary(), but with discountScope=\'all\' (proration across the WHOLE bill, not just the VAT-taxable slice) and includes every purchase — VAT and non-VAT alike — since Annexure 13 discloses total cumulative spend, not just VAT-taxable spend.',
-          'Threshold = NPR 100,000, checked against Net (after discount and returns), not Gross — a vendor with high gross spend but large discounts can net below threshold and won\'t be flagged.',
+          'Shares buildVendorSummary() with VAT Report. There is no discountScope option any more (removed S722): per-line allocation makes "prorate across the bill" and "prorate across its VAT lines" the same arithmetic, so the only difference between the two callers is WHICH lines each passes — VAT Report passes the VAT lines, this report passes every line, since Annexure 13 discloses total cumulative spend and not just the taxable slice.',
+          'Threshold = NPR 100,000, tested against Net ex-VAT (gross after discount and returns) OR Total Invoiced (that net plus its VAT), whichever crosses first. A vendor at 95,000 taxable plus 12,350 VAT invoiced 107,350 and was flagged by neither column until both were computed — decision, Aashish 2026-09-10: flag on either, the conservative filing position.',
+          'Bills counts BILLS, not line items. It counted lines until 2026-09-10, so a vendor with six seven-line bills read as 42 — on the figure an accountant ties back to the purchase register.',
         ],
         gotchas: [
-          'Because this shares code with VAT Report but with different discount-scoping, the same vendor\'s totals can differ slightly between the two reports — expected, not a bug.',
+          'This report and VAT Report differ by exactly the non-VAT purchases, and by nothing else — the discount arithmetic between them is identical.',
         ],
         connections: 'Code-sibling of VAT Report (same buildVendorSummary() helper, different parameters).',
       },
@@ -1250,8 +1254,9 @@ export const IMS_GUIDE_GROUPS = [
           'Print via the standard browser print flow — formatted as a formal letter with a signature line for the vendor to countersign and return.',
         ],
         fields: [
-          { label: 'Opening Balance', desc: 'The balance as of the fiscal year\'s first day — nets only payments/returns dated BEFORE the cutoff, unlike Outstanding Payables\' live "as of today" figure which nets against everything ever recorded. A single carried-forward lump sum, same convention as a bank statement\'s "Balance Brought Forward" — no line-item breakdown before the cutoff.',
+          { label: 'Opening Balance', desc: 'The balance as of the fiscal year\'s first day — nets only payments/returns dated BEFORE the cutoff, unlike Outstanding Payables\' live "as of today" figure which nets against everything ever recorded. A single carried-forward lump sum, same convention as a bank statement\'s "Balance Brought Forward" — no line-item breakdown before the cutoff. It can be NEGATIVE, when goods were returned against a bill already settled before the year began: that is a credit the vendor owes back, and it is carried forward rather than clamped to zero (fixed 2026-09-10 — until then the same credit note appeared in the letter if it fell after Shrawan 1 and vanished if it fell before it, since the FY schedule applies returns with no clamp at all).',
           },
+          { label: 'Paid on purchase (schedule line)', desc: 'A Cash/FonePay bill is a purchase AND its own instant settlement, so it prints as two lines — the purchase at gross, then the settlement net of any returns against it. Neither moves the running balance, which is what "instant settlement" means. Before 2026-09-10 only the purchase printed while the headline "Payments (FY)" box counted the settlement, so a vendor asked to verify the letter line by line could not tie the box to the schedule below it. The Amount column now totals to exactly (Closing − Opening).' },
           { label: 'Return lines (within the FY)', desc: 'Always shown as their own separate line at their VAT-adjusted effective value, never silently netted into the bill\'s total — a bill\'s displayed Purchase amount is always its gross value. This matters because VAT recalculates on the shrinking post-return base each time a bill has more than one return, so a return\'s displayed value is rarely a flat qty×rate.' },
         ],
         formulas: [

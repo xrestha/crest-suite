@@ -1,22 +1,36 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import RowDisclosure from '../../../components/RowDisclosure'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { supabase } from '../../../supabaseClient'
-import { BS_MONTHS, bsToAd, adToBs } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, adToBs, formatAd } from '../../../utils/bsCalendar'
+import { nepalCivilDate } from '../../../shared/nepalTime'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Modal from '../../../components/Modal'
 import { Navigate } from 'react-router-dom'
 
-const TODAY = new Date().toISOString().split('T')[0]
+// Today in NEPAL, evaluated when it is asked for. This was a module-level
+// `new Date().toISOString().split('T')[0]`, which is wrong twice over (S723): `.toISOString()` is
+// UTC, so between midnight and 05:45 NPT it returns YESTERDAY — the hours a restaurant actually
+// closes its books — and a module constant never changes for the life of the tab, which on an
+// installed PWA left open across a service is longer than a day. It is the default `paid_at` on
+// every payment recorded here, so a settlement could be dated a day early, and a payment slipping
+// across Shrawan 1 lands in the wrong fiscal year on the Vendor Balance Confirmation letter.
+// Same helper PosReservations already uses.
+const todayIso = () => formatAd(nepalCivilDate(new Date()))
 const EPS = 0.001
+
+// One column list for both purchase_entries reads — the seed read and the sibling-completion read
+// below must return identically shaped rows, or a line pulled in from the other tab is missing
+// whatever the seed selected and reads as a blank item on an expanded bill.
+const BILL_COLUMNS = 'id, created_at, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(id, name)'
 
 // paid_at is stored as a plain AD `date` column (Postgres has no BS type), but every date shown
 // to the user elsewhere in the app is BS — this page's own Payment History/Settled On columns were
@@ -55,7 +69,7 @@ export default function OutstandingPayables() {
   const [filterPeriod, setFilterPeriod] = useState('all')
   const [activeTab, setActiveTab]       = useState('outstanding')
   const [expandedBill, setExpandedBill] = useState(null)
-  const [payForm, setPayForm]           = useState({ amount: '', paid_at: TODAY, note: '', payment_mode: 'Cash' })
+  const [payForm, setPayForm]           = useState({ amount: '', paid_at: todayIso(), note: '', payment_mode: 'Cash' })
   const [savingPayment, setSavingPayment] = useState(false)
   const [payError, setPayError]           = useState(null)
   // The second write of each two-write sequence (stamping/clearing purchase_entries.paid_at after
@@ -69,7 +83,7 @@ export default function OutstandingPayables() {
 
   // Bulk "pay several bills at once" — for a monthly credit run across many invoices.
   const [selectedBills, setSelectedBills] = useState(new Set())
-  const [bulkForm, setBulkForm]           = useState({ paid_at: TODAY, note: '', payment_mode: 'Cash' })
+  const [bulkForm, setBulkForm]           = useState({ paid_at: todayIso(), note: '', payment_mode: 'Cash' })
   const [bulkSaving, setBulkSaving]       = useState(false)
   const [bulkError, setBulkError]         = useState('')
 
@@ -116,6 +130,7 @@ export default function OutstandingPayables() {
     setFilterPeriod('all')
     setExpandedBill(null)
     setSelectedBills(new Set())
+    setBulkForm(f => ({ ...f, paid_at: todayIso() }))
 
     // A factory, not a single builder: fetchAllRows needs a fresh query per page (a supabase-js
     // builder is a one-shot thenable). This read is unbounded by period — it spans every credit
@@ -125,7 +140,7 @@ export default function OutstandingPayables() {
     const buildQuery = () => {
       let q = supabase
         .from('purchase_entries')
-        .select('id, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, monthly_periods!inner(client_id, bs_year, bs_month), items(name, uom, categories(name)), vendors(id, name)')
+        .select(BILL_COLUMNS)
         .eq('monthly_periods.client_id', effectiveClientId)
         .eq('payment_method', 'Credit')
 
@@ -139,7 +154,7 @@ export default function OutstandingPayables() {
       return q.order('id')
     }
 
-    const { data, error } = await fetchAllRows(buildQuery)
+    const { data: seed, error } = await fetchAllRows(buildQuery)
     if (!tabReq.isCurrent(tab)) return
 
     if (error) {
@@ -151,9 +166,42 @@ export default function OutstandingPayables() {
       return
     }
 
-    const vendorIds = [...new Set((data || []).map(e => e.vendors?.id).filter(Boolean))]
+    // ── Complete every bill the tab filter cut in half (S723) ──────────────────────────────────
+    //
+    // `paid_at` is stamped PER LINE, and allocatePayment settles a bill's lines oldest-first — so
+    // a partial payment on a multi-line bill stamps some lines and not others, and the tab filter
+    // above then returns half a bill to each tab. That is not merely a display split: the bill's
+    // grand total is recomputed below from whichever lines arrived, and `calcBillTotals` is not
+    // linear in the BILL-LEVEL discount, so each half re-applies the whole discount to itself.
+    // Measured: a 2-line VAT-inclusive bill of 2,034 carrying a 200 discount, part-paid 1,017,
+    // showed Bill Total 904 / Remaining 904 on Outstanding — 113 short of what is actually owed —
+    // with the Paid column empty and the payment missing from that bill's history, while the same
+    // bill sat in Paid History at 904 as a settled one.
+    //
+    // So the tab filter now only SELECTS which bills to show; the figures are always computed over
+    // the whole bill. This second read is bounded by the tab's own bill count rather than by the
+    // client's history, which is why it is a group-id refetch rather than dropping the filter.
+    const groupIds = [...new Set((seed || []).map(e => e.purchase_group_id).filter(Boolean))]
+    const { data: siblings, error: sibErr } = await fetchAllRowsChunked(groupIds, gids => supabase
+      .from('purchase_entries')
+      .select(BILL_COLUMNS)
+      .eq('monthly_periods.client_id', effectiveClientId)
+      .eq('payment_method', 'Credit')
+      .in('purchase_group_id', gids)
+      .order('id'))
+    if (!tabReq.isCurrent(tab)) return
+    if (sibErr) { setLoadError(sibErr); setEntries([]); setPaymentsMap({}); setLoading(false); return }
+
+    // Rows written before purchase_group_id existed carry NULL and cannot be refetched by group;
+    // they are their own bill under billKeyOf's fallback, so the seed row IS the whole bill.
+    const byId = new Map()
+    ;(siblings || []).forEach(e => byId.set(e.id, e))
+    ;(seed || []).forEach(e => { if (!byId.has(e.id)) byId.set(e.id, e) })
+    const data = [...byId.values()]
+
+    const vendorIds = [...new Set(data.map(e => e.vendors?.id).filter(Boolean))]
     const today = new Date()
-    const ids = (data || []).map(e => e.id)
+    const ids = data.map(e => e.id)
 
     // The three follow-up reads all derive their filter from the bills read above (a genuine
     // dependency) but are mutually independent — awaiting them one by one cost three serial round
@@ -162,12 +210,18 @@ export default function OutstandingPayables() {
       vendorIds.length > 0
         ? supabase.from('vendors').select('id, payment_terms').in('id', vendorIds)
         : Promise.resolve({ data: null, error: null }),
-      ids.length > 0
-        ? scopedFrom('payable_payments').in('purchase_entry_id', ids).order('paid_at', { ascending: true })
-        : Promise.resolve({ data: [], error: null }),
-      ids.length > 0
-        ? scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate').in('purchase_entry_id', ids)
-        : Promise.resolve({ data: [], error: null }),
+      // Paged and chunked (S723). The bills read above is carefully paged, with a comment saying
+      // this page is the likeliest in the app to cross PostgREST's silent 1000-row cap — and the
+      // two reads that hang off it were bare. payable_payments holds one row per LINE per
+      // settlement, so it grows faster than the bills do; a truncated payments read renders paid
+      // bills as unpaid and inflates Total Remaining, and a truncated returns read overstates what
+      // is owed on every returned bill. Neither returns an error, so no guard here would fire. The
+      // id list also rides in the URL, and on the Paid History tab it is every settled credit line
+      // this client has ever recorded (S629).
+      fetchAllRowsChunked(ids, chunk => scopedFrom('payable_payments')
+        .in('purchase_entry_id', chunk).order('paid_at', { ascending: true }).order('id')),
+      fetchAllRowsChunked(ids, chunk => scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate')
+        .in('purchase_entry_id', chunk).order('id')),
     ])
     if (!tabReq.isCurrent(tab)) return
 
@@ -224,6 +278,10 @@ export default function OutstandingPayables() {
     // existing payment/settle logic needs no changes at all.
     const byBill = {}
     enriched.forEach(e => { (byBill[e.billKey] = byBill[e.billKey] || []).push(e) })
+    // Oldest line first, which is the order allocatePayment documents and relies on. It used to
+    // fall out of the seed query's own `.order('created_at')`; the sibling read is ordered by id
+    // (the paging tiebreaker), so the bill's line order is now stated here instead of inherited.
+    Object.values(byBill).forEach(lines => lines.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || '') || a.id.localeCompare(b.id)))
     Object.values(byBill).forEach(lines => {
       // discount_amount is stored on every row of a bill but represents ONE bill-level discount,
       // so it's deduped per purchase_group_id before summing (same as VendorReport does).
@@ -251,10 +309,26 @@ export default function OutstandingPayables() {
       const netSum = lines.reduce((s, l) => s + l.netLine, 0)
       lines.forEach(l => {
         l.value = netSum > 0 ? Math.round(l.netLine * (grandTotal / netSum) * 100) / 100 : 0
-        l.remaining = Math.max(0, Math.round((l.value - l.paidTotal) * 100) / 100)
+        // No Math.max(0, …) any more (S723). A return recorded against an already-settled bill
+        // makes it over-paid — the vendor now owes US — and ReturnsTab has no guard against that,
+        // nor should it: that is exactly what a credit note is. Clamping it to zero made the
+        // money disappear from the only screen that tracks what is owed either way. A negative
+        // remaining is surfaced as a Credit below; it can never be paid, since allocatePayment
+        // skips any line at or under EPS and the bulk selector filters on `remaining > EPS`.
+        l.remaining = Math.round((l.value - l.paidTotal) * 100) / 100
       })
     })
-    setEntries(enriched)
+
+    // Which TAB a bill belongs to is a property of the whole bill, not of a line: it is
+    // outstanding while any line of it is still unsettled. Keyed on `paid_at` rather than on
+    // `remaining > EPS` on purpose — a bill settled before payable_payments existed carries the
+    // stamp and no payment rows, so a remaining-based test would drag every one of those back into
+    // Outstanding as a full balance owed.
+    const visible = Object.values(byBill)
+      .filter(lines => (tab === 'outstanding') === lines.some(l => !l.paid_at))
+      .flat()
+
+    setEntries(visible)
     setLoading(false)
   }
 
@@ -262,7 +336,7 @@ export default function OutstandingPayables() {
 
   function toggleBill(key) {
     setExpandedBill(prev => prev === key ? null : key)
-    setPayForm({ amount: '', paid_at: TODAY, note: '', payment_mode: 'Cash' })
+    setPayForm({ amount: '', paid_at: todayIso(), note: '', payment_mode: 'Cash' })
     setPayError('')
   }
 
@@ -320,7 +394,7 @@ export default function OutstandingPayables() {
     setSavingPayment(true)
     setPayError('')
     setSettleWarn(null)
-    const date = payForm.paid_at || TODAY
+    const date = payForm.paid_at || todayIso()
     const note = payForm.note || null
 
     const { rows, settleIds } = allocatePayment(bill.entries, amount, date, note, payForm.payment_mode)
@@ -522,7 +596,7 @@ export default function OutstandingPayables() {
     setBulkSaving(true)
     setBulkError('')
     setSettleWarn(null)
-    const date = bulkForm.paid_at || TODAY
+    const date = bulkForm.paid_at || todayIso()
     const note = bulkForm.note || null
 
     const rows = []
@@ -548,7 +622,7 @@ export default function OutstandingPayables() {
       }
     }
     setBulkSaving(false)
-    setBulkForm({ paid_at: TODAY, note: '', payment_mode: 'Cash' })
+    setBulkForm({ paid_at: todayIso(), note: '', payment_mode: 'Cash' })
     load(activeTab)
   }
 
@@ -560,7 +634,7 @@ export default function OutstandingPayables() {
   // Memoized: this rebuilds and re-sorts the whole bill ledger (every credit line, unbounded by
   // period), and it used to re-run on every keystroke of the payment-amount and note boxes —
   // exactly while someone is entering money.
-  const { vendors, vendorByName, bills, periodOptions, filteredBills, byVendor, totalRemaining, overdueBills, urgentValue } = useMemo(() => {
+  const { vendors, vendorByName, bills, periodOptions, filteredBills, byVendor, totalRemaining, overdueBills, urgentValue, creditValue, lastSettled } = useMemo(() => {
     const vendors = [...new Map(entries.map(e => [e.vendors?.name, e.vendors])).values()].filter(Boolean)
     const vendorByName = Object.fromEntries(vendors.map(v => [v.name, v]))
 
@@ -580,7 +654,13 @@ export default function OutstandingPayables() {
       const daysOld   = Math.max(0, ...b.entries.map(e => e.daysOld))
       const payments  = b.entries.flatMap(e => (paymentsMap[e.id] || [])).sort((x, y) => (x.paid_at > y.paid_at ? 1 : -1))
       const settledOn = b.entries.map(e => e.paid_at).filter(Boolean).sort().slice(-1)[0] || null
-      return { ...b, total, paid, remaining, daysOld, aging: aging(daysOld), isPartial: paid > EPS && remaining > EPS, payments, settledOn }
+      return {
+        ...b, total, paid, remaining, daysOld, aging: aging(daysOld), payments, settledOn,
+        isPartial: paid > EPS && remaining > EPS,
+        // Over-settled: a return landed after the bill was paid, so this is money the vendor owes
+        // back — a credit note against the next bill, not a payable (S723).
+        isCredit: remaining < -EPS,
+      }
     })
 
     // Period (BS month) options — lets a monthly credit run be narrowed to "this month's bills"
@@ -601,10 +681,17 @@ export default function OutstandingPayables() {
     filteredBills.forEach(b => { (byVendor[b.vendorName] = byVendor[b.vendorName] || []).push(b) })
 
     const totalRemaining = filteredBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
-    const overdueBills   = filteredBills.filter(b => b.daysOld > 60).length
-    const urgentValue    = filteredBills.filter(b => b.daysOld > 90).reduce((s, b) => s + b.remaining, 0)
+    const overdueBills   = filteredBills.filter(b => b.daysOld > 60 && b.remaining > EPS).length
+    const urgentValue    = filteredBills.filter(b => b.daysOld > 90).reduce((s, b) => s + Math.max(0, b.remaining), 0)
+    // Vendor credits, shown as a positive amount owed back to us.
+    const creditValue    = -filteredBills.filter(b => b.isCredit).reduce((s, b) => s + b.remaining, 0)
+    // Explicit max rather than "the first bill in fetch order" — that only held while `entries`
+    // arrived in paid_at-descending order, which stopped being true once a bill's lines are
+    // merged from two reads (S723).
+    const lastSettled    = filteredBills.reduce((best, b) =>
+      (b.settledOn && (!best || b.settledOn > best.settledOn) ? b : best), null)
 
-    return { vendors, vendorByName, bills, periodOptions, filteredBills, byVendor, totalRemaining, overdueBills, urgentValue }
+    return { vendors, vendorByName, bills, periodOptions, filteredBills, byVendor, totalRemaining, overdueBills, urgentValue, creditValue, lastSettled }
   }, [entries, paymentsMap, filterVendor, filterAging, filterPeriod, activeTab])
 
   const selectedBillObjs = bills.filter(b => selectedBills.has(b.key) && b.remaining > EPS)
@@ -647,7 +734,7 @@ export default function OutstandingPayables() {
       <div className="stat-grid">
         {activeTab === 'outstanding' ? (<>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: net of goods returned and any bill discount, plus 13% VAT on VAT-inclusive lines." width={280}>Total Remaining</Tip></div>
+            <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: net of goods returned and any bill discount, plus 13% VAT on VAT-inclusive lines. A bill over-settled by a late return counts against this as a credit." width={280}>Total Remaining</Tip></div>
             <div className="stat-value" style={{ fontSize: 18, color: totalRemaining > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''} · {Object.keys(byVendor).length} vendor{Object.keys(byVendor).length !== 1 ? 's' : ''}</div>
           </div>
@@ -674,9 +761,18 @@ export default function OutstandingPayables() {
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="Most recently settled bill date." width={200}>Last Settlement</Tip></div>
-            <div className="stat-value" style={{ fontSize: 14 }}>{filteredBills.length > 0 ? (fmtBsDate(filteredBills[0].settledOn) || '—') : '—'}</div>
-            <div className="stat-sub">{filteredBills.length > 0 ? filteredBills[0].vendorName : ''}</div>
+            <div className="stat-value" style={{ fontSize: 14 }}>{(lastSettled && fmtBsDate(lastSettled.settledOn)) || '—'}</div>
+            <div className="stat-sub">{lastSettled?.vendorName || ''}</div>
           </div>
+          {/* Only rendered when there is one — a card reading "NPR 0 owed back" every month would
+              train the reader to stop looking at the one month it is not zero. */}
+          {creditValue > EPS && (
+            <div className="stat-card">
+              <div className="stat-label"><Tip text="Goods returned against bills that were already settled, so the vendor owes this back — take it off the next bill or ask for a credit note. It is not a payable." width={280}>Vendor Credits</Tip></div>
+              <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-purple-text)' }}>{fmt(creditValue)}</div>
+              <div className="stat-sub">Owed back to you</div>
+            </div>
+          )}
         </>)}
       </div>
       )}
@@ -766,7 +862,11 @@ export default function OutstandingPayables() {
             b.reduce((s, x) => s + x.remaining, 0) - a.reduce((s, x) => s + x.remaining, 0))
           .map(([vName, vBills]) => {
             const vendorTotal = vBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
-            const sorted = activeTab === 'outstanding' ? [...vBills].sort((a, b) => b.daysOld - a.daysOld) : vBills
+            // Paid History reads newest-settled first; it used to inherit the fetch order, which
+            // no longer survives merging a bill's lines from two reads (S723).
+            const sorted = activeTab === 'outstanding'
+              ? [...vBills].sort((a, b) => b.daysOld - a.daysOld)
+              : [...vBills].sort((a, b) => (b.settledOn || '').localeCompare(a.settledOn || ''))
             const cols = activeTab === 'outstanding' ? 10 : 6
             const vKeys = sorted.map(b => b.key)
             const vBillTotal = sorted.reduce((s, b) => s + b.total, 0)
@@ -849,17 +949,24 @@ export default function OutstandingPayables() {
                               <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)' }}>{fmt(b.total)}</td>
                               {activeTab === 'outstanding' ? (<>
                                 <td style={{ textAlign: 'right', color: b.paid > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{b.paid > 0 ? fmt(b.paid) : '—'}</td>
-                                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)' }}>{fmt(b.remaining)}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 700, color: b.isCredit ? 'var(--theme-purple-text)' : 'var(--theme-red-text)' }}>
+                                  {b.isCredit ? `${fmt(-b.remaining)} cr` : fmt(b.remaining)}
+                                </td>
                                 <td style={{ textAlign: 'right', fontWeight: 700, color: b.aging.color }}>{b.daysOld}</td>
                                 <td>
-                                  {b.isPartial
+                                  {b.isCredit
+                                    ? <span className="badge badge-purple" style={{ whiteSpace: 'nowrap' }}>Credit</span>
+                                    : b.isPartial
                                     ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-purple-text)', background: 'color-mix(in srgb, var(--theme-purple) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-purple) 40%, transparent)', borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>Partial</span>
                                     : <span style={{ fontSize: 11, fontWeight: 700, color: b.aging.color, background: `color-mix(in srgb, ${b.aging.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.aging.color} 40%, transparent)`, borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.aging.label}</span>
                                   }
                                 </td>
                                 <td style={{ color: 'var(--theme-accent-ink)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Close' : '＋ Pay Bill'}</td>
                               </>) : (<>
-                                <td style={{ color: 'var(--theme-green-text)', fontWeight: 600, fontSize: 13 }}>{fmtBsDate(b.settledOn) || '—'}</td>
+                                <td style={{ color: 'var(--theme-green-text)', fontWeight: 600, fontSize: 13 }}>
+                                  {fmtBsDate(b.settledOn) || '—'}
+                                  {b.isCredit && <span className="badge badge-purple" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(-b.remaining)} credit</span>}
+                                </td>
                                 <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : '▼ Details'}</td>
                               </>)}
                             </tr>
@@ -958,7 +1065,19 @@ export default function OutstandingPayables() {
                                     })()}
 
                                     {/* Record one payment for the whole bill — outstanding only */}
-                                    {activeTab === 'outstanding' && (
+                                    {/* A bill with nothing left to pay has no form: `Pay in full`
+                                        would prefill a negative and Save would be a button that
+                                        does nothing silently, since allocatePayment skips every
+                                        line at or under EPS. Say which of the two states it is. */}
+                                    {activeTab === 'outstanding' && b.remaining <= EPS && (
+                                      <div style={{ fontSize: 12, color: b.isCredit ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>
+                                        {b.isCredit
+                                          ? `Over-settled by ${fmt(-b.remaining)} — goods were returned after this bill was paid, so the vendor owes that back. Take it off the next bill or ask for a credit note; there is nothing to pay here.`
+                                          : 'Nothing left to pay on this bill.'}
+                                      </div>
+                                    )}
+
+                                    {activeTab === 'outstanding' && b.remaining > EPS && (
                                       <div>
                                         <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
                                           {b.payments.length === 0 ? 'Pay this bill' : 'Add payment'}

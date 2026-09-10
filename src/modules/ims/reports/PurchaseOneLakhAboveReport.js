@@ -51,9 +51,9 @@ export default function PurchaseOneLakhAboveReport() {
       .filter(p => getBsFiscalYear(p.bs_year, p.bs_month) === selectedFy)
       .map(p => p.id)
 
+    setLoadError(null)
     if (periodIds.length === 0) { setVendors([]); setLoading(false); return }
 
-    setLoadError(null)
     const results = await Promise.all([
       // Paged: this spans a whole BS fiscal year (12 periods), so it is one of the largest
       // purchase reads in the app — and it decides which vendors cross the IRD Annexure 13
@@ -84,13 +84,19 @@ export default function PurchaseOneLakhAboveReport() {
 
   useEffect(() => { load() }, [load])
 
+  // A vendor crosses the threshold on EITHER basis (decision, Aashish 2026-09-10). The ex-VAT net
+  // is the cost basis this app records; the invoiced total is what the vendor billed and what left
+  // the bank, and it is the figure the vendor's own ledger shows. A vendor at 95,000 taxable plus
+  // 12,350 VAT invoiced 107,350 and was disclosed by neither column until both were computed.
   const rows = vendors.map(v => {
     const taxBase = v.gross - (v.discount || 0)
-    const net = taxBase - v.returned
-    return { ...v, taxBase, net }
-  }).sort((a, b) => b.net - a.net)
+    return { ...v, taxBase, over: v.net > THRESHOLD || v.invoiced > THRESHOLD }
+  }).sort((a, b) => b.invoiced - a.invoiced)
 
-  const totals = rows.reduce((s, v) => ({ gross: s.gross + v.gross, discount: s.discount + (v.discount || 0), taxBase: s.taxBase + v.taxBase, returned: s.returned + v.returned, net: s.net + v.net }), { gross: 0, discount: 0, taxBase: 0, returned: 0, net: 0 })
+  const totals = rows.reduce((s, v) => ({
+    gross: s.gross + v.gross, discount: s.discount + (v.discount || 0), taxBase: s.taxBase + v.taxBase,
+    returned: s.returned + v.returned, net: s.net + v.net, vatAmt: s.vatAmt + v.vatAmt, invoiced: s.invoiced + v.invoiced,
+  }), { gross: 0, discount: 0, taxBase: 0, returned: 0, net: 0, vatAmt: 0, invoiced: 0 })
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
@@ -102,8 +108,10 @@ export default function PurchaseOneLakhAboveReport() {
       'Discount (NPR)': Math.round((v.discount || 0) * 100) / 100,
       'Taxable (NPR)': Math.round(v.taxBase * 100) / 100,
       'Returned (NPR)': Math.round(v.returned * 100) / 100,
-      'Net (NPR)': Math.round(v.net * 100) / 100,
-      'Annexure 13 (>1L)': v.net > THRESHOLD ? (v.pan ? 'Yes' : 'Yes — MISSING PAN') : '',
+      'Net ex-VAT (NPR)': Math.round(v.net * 100) / 100,
+      'VAT (NPR)': Math.round(v.vatAmt * 100) / 100,
+      'Total Invoiced (NPR)': Math.round(v.invoiced * 100) / 100,
+      'Annexure 13 (>1L)': v.over ? (v.pan ? 'Yes' : 'Yes — MISSING PAN') : '',
     })))
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Purchase One Lakh Above')
@@ -119,7 +127,8 @@ export default function PurchaseOneLakhAboveReport() {
           Purchase One Lakh Above Report <Tip text="Nepal VAT return Annexure 13 (अनुसूची १३): any single vendor whose cumulative purchases exceed NPR 1,00,000 in a fiscal year must be disclosed by name+PAN. This aggregates purchases by vendor across the selected fiscal year and flags who crosses that threshold." width={320}>ⓘ</Tip>
         </h1>
         <p className="page-subtitle">
-          Vendor-wise purchases for the fiscal year — flags vendors above NPR 1,00,000 for Annexure 13 disclosure.
+          Vendor-wise purchases for the fiscal year — flags vendors above NPR 1,00,000 for Annexure 13 disclosure,
+          on the ex-VAT net or the invoiced total, whichever crosses first.
         </p>
       </div>
 
@@ -141,7 +150,9 @@ export default function PurchaseOneLakhAboveReport() {
         <div className="card">
           <div className="empty-state">
             <div className="empty-state-icon">₨</div>
-            <p className="empty-state-text">No VAT purchases in FY {selectedFy}.</p>
+            {/* Every purchase counts here, VAT and non-VAT alike — the copy said "No VAT
+                purchases", which is the exact narrowing S363 had to take out of the arithmetic. */}
+            <p className="empty-state-text">No purchases recorded in FY {selectedFy}.</p>
           </div>
         </div>
       ) : (
@@ -163,16 +174,22 @@ export default function PurchaseOneLakhAboveReport() {
                   <Tip text="Value of vendor returns for this fiscal year, netted out of the total." width={240}>Returned</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Taxable amount minus returns — the figure checked against the NPR 1,00,000 Annexure 13 threshold." width={280}>Net</Tip>
+                  <Tip text="Taxable amount minus returns — the ex-VAT cost basis this app records against the purchase." width={280}>Net ex-VAT</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="13% VAT on the VAT-inclusive lines' post-discount value, less the VAT on any of those lines returned. Non-VAT purchases carry none." width={280}>VAT</Tip>
+                </th>
+                <th style={{ textAlign: 'right' }}>
+                  <Tip text="Net ex-VAT plus VAT — what the vendor actually invoiced across the year, and the figure their own ledger will show. Either this or Net ex-VAT crossing NPR 1,00,000 flags the vendor." width={300}>Total Invoiced</Tip>
                 </th>
                 <th>
-                  <Tip text="Rows above NPR 1,00,000 must be disclosed in Annexure 13 of the VAT return. A missing PAN on a flagged row means the vendor's name alone was recorded." width={280}>Flag</Tip>
+                  <Tip text="Flagged when EITHER Net ex-VAT or Total Invoiced exceeds NPR 1,00,000 — the conservative filing position, since a vendor just under the threshold ex-VAT is over it once VAT is added. A missing PAN on a flagged row means the vendor's name alone was recorded." width={300}>Flag</Tip>
                 </th>
               </tr>
             </thead>
             <tbody>
               {rows.map(v => {
-                const over = v.net > THRESHOLD
+                const over = v.over
                 return (
                   <tr key={v.name + v.pan}>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{v.name}</td>
@@ -182,7 +199,9 @@ export default function PurchaseOneLakhAboveReport() {
                     <td style={{ textAlign: 'right' }}>{fmtNpr(v.discount || 0)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(v.taxBase)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(v.returned)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(v.net)}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNpr(v.net)}</td>
+                    <td style={{ textAlign: 'right' }}>{v.vatAmt > 0.005 ? fmtNpr(v.vatAmt) : '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(v.invoiced)}</td>
                     <td>
                       {over && !v.pan && <span className="badge badge-red">⚠ Missing PAN</span>}
                       {over && v.pan && <span className="badge badge-amber">Annexure 13</span>}
@@ -199,6 +218,8 @@ export default function PurchaseOneLakhAboveReport() {
                 <td style={{ textAlign: 'right' }}>{fmtNpr(totals.taxBase)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(totals.returned)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(totals.net)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(totals.vatAmt)}</td>
+                <td style={{ textAlign: 'right' }}>{fmtNpr(totals.invoiced)}</td>
                 <td></td>
               </tr>
             </tfoot>

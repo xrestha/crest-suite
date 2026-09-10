@@ -3,7 +3,7 @@ import { useSearchParams, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import { getBsFiscalYear, getBsFiscalYearStart, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
@@ -97,10 +97,21 @@ export default function VendorBalanceConfirmation() {
       .eq('vendor_id', selectedVendorId)
       .eq('payment_method', 'Credit')
       .order('id'))
-    if (creditErr) { setLoadError(creditErr.message); setResult(null); setComputing(false); return }
+    // Every error path below re-checks isCurrent for the same reason the success path does (S723):
+    // these run after an await, so an older vendor's failed read would otherwise wipe the letter
+    // the reader is now looking at and replace it with an error about a vendor they left.
+    if (creditErr) {
+      if (scopeReq.isCurrent(key)) { setLoadError(creditErr); setResult(null); setComputing(false) }
+      return
+    }
     const creditEntries = creditData || []
 
     // Cash/FonePay bills never carry a balance, so only the selected FY's periods matter for them.
+    // `payment_method` is NULLABLE — bills written before the column existed have no value, and
+    // every screen renders NULL as Cash (PURCHASE_PAYMENT_METHODS' documented rule). A server-side
+    // .neq therefore dropped every one of them, because `NULL <> 'Credit'` is NULL, not true: those
+    // bills appeared in NEITHER read, so a vendor's legacy cash purchases were simply absent from
+    // the FY's Purchases total on the letter (S723). Filter positively for what is not Credit.
     let cashEntries = []
     if (fyPeriodIds.length > 0) {
       const { data: cashData, error: cashErr } = await fetchAllRows(() => supabase
@@ -108,10 +119,13 @@ export default function VendorBalanceConfirmation() {
         .select('id, bs_day, qty, rate, invoice_ref, vat_inclusive, discount_amount, purchase_group_id, vendor_id, payment_method, monthly_periods!inner(client_id, bs_year, bs_month, id)')
         .eq('monthly_periods.client_id', effectiveClientId)
         .eq('vendor_id', selectedVendorId)
-        .neq('payment_method', 'Credit')
+        .or('payment_method.is.null,payment_method.neq.Credit')
         .in('monthly_periods.id', fyPeriodIds)
         .order('id'))
-      if (cashErr) { setLoadError(cashErr.message); setResult(null); setComputing(false); return }
+      if (cashErr) {
+        if (scopeReq.isCurrent(key)) { setLoadError(cashErr); setResult(null); setComputing(false) }
+        return
+      }
       cashEntries = cashData || []
     }
 
@@ -121,20 +135,26 @@ export default function VendorBalanceConfirmation() {
     // or a return against an in-FY cash bill would silently fail to net out of that bill's total.
     const allEntryIds = [...creditIds, ...cashEntries.map(e => e.id)]
 
-    let payments = []
-    let returns = []
+    // Paged AND chunked, for both halves of the same reason the credit-bill read above is paged
+    // (S723). `creditIds` is every credit LINE this vendor has ever been billed on — deliberately
+    // unbounded, that being the point of an opening-balance carry-forward — and payable_payments
+    // holds one row per line per settlement, so it outgrows the bills it hangs off. A bare .in()
+    // there is both a URL long past what a proxy accepts and a silent 1000-row truncation
+    // underneath it; the truncation is the dangerous half, because missing payments do not read as
+    // an error, they read as a LARGER balance payable on a letter sent to the vendor for signature.
     const [pmtsRes, retsRes] = await Promise.all([
-      creditIds.length > 0
-        ? scopedFrom('payable_payments').in('purchase_entry_id', creditIds).order('paid_at')
-        : Promise.resolve({ data: [] }),
-      allEntryIds.length > 0
-        ? scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate, bs_day, monthly_periods(bs_year, bs_month)').in('purchase_entry_id', allEntryIds)
-        : Promise.resolve({ data: [] }),
+      fetchAllRowsChunked(creditIds, ids => scopedFrom('payable_payments')
+        .in('purchase_entry_id', ids).order('paid_at').order('id')),
+      fetchAllRowsChunked(allEntryIds, ids => scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate, bs_day, monthly_periods(bs_year, bs_month)')
+        .in('purchase_entry_id', ids).order('id')),
     ])
     const pmtRetFailed = firstError([pmtsRes, retsRes])
-    if (pmtRetFailed) { setLoadError(pmtRetFailed); setResult(null); setComputing(false); return }
-    payments = pmtsRes.data || []
-    returns = retsRes.data || []
+    if (pmtRetFailed) {
+      if (scopeReq.isCurrent(key)) { setLoadError(pmtRetFailed); setResult(null); setComputing(false) }
+      return
+    }
+    const payments = pmtsRes.data || []
+    const returns = retsRes.data || []
 
     const computed = computeVendorBalance({ creditEntries, cashEntries, payments, returns, fyStart, fyEnd })
     if (!scopeReq.isCurrent(key)) return   // superseded by a newer vendor/FY selection
