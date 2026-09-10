@@ -14,29 +14,39 @@ migration, no service-worker version bump. T6–T8 do change app code and shippi
 Before doing anything below, note what the repo already has. This plan was first written without
 sight of these files and has been corrected against them.
 
-**Sizes measured 2026-09-02 (S668).** They move every session — read them as scale, not as figures
-to check against. Every one of them had rotted by the time it was next read, three of them badly:
-`POS_TODO.md` was still listed at its pre-T5 size, the checklist at a step count it outgrew, and
-`POS_DECISIONS.md` was not listed at all.
+**Sizes re-measured 2026-09-10 (S723); first measured 2026-09-02 (S668), and every figure had
+rotted by the time it was next read.** They move every session — read them as scale, not as figures
+to check against. The S668 note recorded three that had rotted badly: `POS_TODO.md` still listed at
+its pre-T5 size, the checklist at a step count it outgrew, and `POS_DECISIONS.md` not listed at all.
+Eight days later the rules corpus had grown ~70% and `DESIGN.md` ~39%, which is the useful reading:
+**the resident cost is roughly flat by design (T11's ceiling holds `CLAUDE.md`) and the scoped
+corpus is where the growth goes.** That is the intended direction, and it is also what makes T13's
+per-file audit worth repeating rather than treating as done.
 
-- **`CLAUDE.md`** (51,241 chars, hard ceiling 53,000 — see T11) — stack, access control and the
+- **`CLAUDE.md`** (52,841 chars, hard ceiling 53,000 — see T11) — stack, access control and the
   three gate types, tier thesis, multi-outlet, subscription access, the four S531 privilege
   invariants, multi-tenant isolation and `scopedDb`, staff role axes, BS calendar rules,
-  page-splitting, Supabase/DB traps.
-- **`.claude/rules/*.md`** (25 files, ~414k chars) — everything scoped by `paths:`, loaded only when
+  page-splitting, Supabase/DB traps. **Running at 159 chars of headroom**, so the next section
+  added here has to pay for itself out of an existing one.
+- **`.claude/rules/*.md`** (27 files, ~709k chars) — everything scoped by `paths:`, loaded only when
   a matching file is open.
 - **`.claude/skills/new-feature-checklist/SKILL.md`** — the nine-step ship checklist.
-- **`DESIGN.md`** (62,434 chars) — full design system: token set for both presets, the scoped guest
+- **`DESIGN.md`** (86,722 chars) — full design system: token set for both presets, the scoped guest
   menu palette, print ramp, typography, layout, components, do/don't. Nothing auto-loads it
   (confirmed under T11), and `.impeccable/design.json` is its generated sidecar.
-- **`PRODUCT.md`** (4,895 chars) — platform, users (owner/manager primary, accountant secondary),
+- **`PRODUCT.md`** (6,377 chars) — platform, users (owner/manager primary, accountant secondary),
   purpose, competitive positioning, brand personality, anti-references, design principles, data
   ownership, accessibility.
-- **`POS_TODO.md`** (2,619 chars) — open POS work only: status key, five open items. See T5, which
+- **`README.md`** (7,507 chars) — the map T1 produced: quick start, env vars, repo layout, and a
+  pointer table. Deliberately not a summary of anything it points at.
+- **`POS_TODO.md`** (7,522 chars) — open POS work only: status key and the open items. See T5, which
   cut it from 48,595 by moving everything settled into `POS_DECISIONS.md`.
-- **`POS_DECISIONS.md`** (48,638 chars) — the other half of that split: everything POS has shipped
+- **`POS_DECISIONS.md`** (54,315 chars) — the other half of that split: everything POS has shipped
   or deliberately decided against, rationale intact. It is the record of what has already been
   considered, and the reason a closed question does not get re-asked.
+- **`docs/CROSS-REPO.md`** (34,746 chars) — the hss-suite ledger, created after this plan was
+  written: what is genuinely shared with the sister repo, what only looks it, and which side owes
+  which fix.
 
 **The architecture documentation problem is already solved.** Do **not** create an `ARCHITECTURE.md`.
 A fourth copy of the gate model and the isolation rules would drift from the three that exist, and

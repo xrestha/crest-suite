@@ -29,7 +29,7 @@ Last updated: 2026-08-30 (S654)
 
 ## B. Reports — compliance-adjacent
 
-- [x] ~~Purchase-side One Lakh Above / Annexure 13 (vendor-wise)~~ — shipped S235, 2026-07-04. `src/pages/PurchaseOneLakhAboveReport.js`, `/purchase-one-lakh-report`. Reuses `buildVendorSummary` (now exported from `VatReport.js`) across a full BS fiscal year's `periodIds`, same missing-PAN/Annexure-13 badge convention as the POS-side report. Gated on the existing `vat_report` feature flag — no new flag/migration.
+- [x] ~~Purchase-side One Lakh Above / Annexure 13 (vendor-wise)~~ — shipped S235, 2026-07-04. Now `src/modules/ims/reports/PurchaseOneLakhAboveReport.js`, `/purchase-one-lakh-report`. Reuses `buildVendorSummary` across a full BS fiscal year's `periodIds`, same missing-PAN/Annexure-13 badge convention as the POS-side report. Gated on the existing `vat_report` feature flag — no new flag/migration. **That helper moved to `src/modules/ims/reports/purchaseTaxSplit.js` in S722** (it had been exported from `VatReport.js`), and S723 gave it two properties this report depends on: `count` is BILLS rather than lines, and the row carries `vatAmt`/`invoiced` so the one-lakh threshold is tested on the ex-VAT net **and** on what the vendor actually invoiced, flagging on either.
 
 ## B2. Till controls — enforced server-side (added S577, completed S579)
 
@@ -193,7 +193,7 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 - [x] ~~Bill Register / Voucher Wise Sales Report~~ — shipped S237, 2026-07-04. 7th tab in `SalesReport.jsx`, `/pos/sales-report`. One row per bill (Voucher#, Invoice#, Customer, Payment Mode, Order Mode, amounts, Remarks, Entered By), with a "Credit Noted" badge for bills later corrected instead of excluding them (unlike Daily). No migration needed — reused existing `pos_orders` columns.
 - [x] ~~Item Wise Sales Report + KOT Log (Register + Reconciliation)~~ — shipped S236, 2026-07-04. New `pos_kot_log` table (append-only send-event log with delta-aware item/qty snapshots) backing `/pos/kot-log`; Item Wise added as `SalesReport.jsx`'s 6th tab.
 - [x] ~~Sales Report — Daily / Hourly / Category Wise / Customer Wise / 1L+ (Annexure 13), one tabbed page~~ — shipped S235, 2026-07-04. `src/modules/pos/reports/SalesReport.jsx`, `/pos/sales-report`. Originally built as 4 separate pages same session, then consolidated into one shared-fetch tabbed page after Aashish pointed out it should mirror the competitor's single "Sales Report" menu structure. Daily/Hourly/Category/Customer share one BS date-range fetch (`useMemo`'d per-tab aggregation); 1L+ Report keeps its own Fiscal Year selector since Annexure 13 is a whole-year compliance check, not an arbitrary range.
-- [x] ~~Purchase-side One Lakh Above / Annexure 13~~ — shipped S235, 2026-07-04. `src/pages/PurchaseOneLakhAboveReport.js`, `/purchase-one-lakh-report`. Reuses `buildVendorSummary` (now exported from `VatReport.js`).
+- [x] ~~Purchase-side One Lakh Above / Annexure 13~~ — shipped S235, 2026-07-04. Now `src/modules/ims/reports/PurchaseOneLakhAboveReport.js`, `/purchase-one-lakh-report`. Reuses `buildVendorSummary`, which lives in `purchaseTaxSplit.js` since S722 — see the fuller entry above.
 - [x] ~~Credit Note workflow (VAT Rules 2053, Rule 20)~~ — shipped S234, 2026-07-03
 - [x] ~~IMS stock deduction trigger~~ — shipped, verified 2026-07-03
 - [x] ~~Discount controls (₨/% toggle, mandatory reason)~~ — shipped S219
