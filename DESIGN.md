@@ -333,6 +333,19 @@ reserve. The red is rationed hard: it marks the thing you are meant to press and
   (accent-400) sat at ΔE 7.4 from `--theme-red` under deuteranopia, under the floor of 8; `#ffc4b8`
   (accent-300) clears at 10.4 worst-pair. Both replacements are documented ramp steps, not invented
   colours. **Do not "restore" either to the handoff value without re-running those pairs.**
+
+  **A CUSTOM accent derives its ink; it does not inherit the preset's.** Settings → Theme offers ten
+  swatches and the accent is one of them, so a reader can set an accent the product has never
+  measured. Until S739 `updateColor` kept whichever `accentInk` was resolved at the time — so the
+  buttons changed and every accent-coloured piece of TEXT, plus `focus-outline`, stayed on the
+  previous accent permanently, with no control anywhere able to correct it: the One Accent Rule
+  broken by the one control that edits the accent. `legibleInk(accent, card)` in `ThemeContext.js`
+  now mixes toward black (or toward white on a dark card) until the pair clears 4.5:1, and
+  `accentHover`/`focusRing` are re-derived beside it because **neither has a fallback in
+  `applyTheme`** — leaving either unset makes every rule that reads it resolve to nothing. A
+  derivation clears the contrast half only; the colour-blindness separation above is hand-tuned and
+  cannot be derived, so the tab says in as many words that a custom palette is not checked for it.
+  Presets are unaffected: `switchPreset` resolves from `PRESETS` and never takes this path.
 - **Accent Text** (`accent-text`, `#201e1d` Night / `#ffffff` Light): the foreground that sits **on**
   an accent fill. Not interchangeable with `accent-ink` — this one pairs with a filled surface, that
   one is type on a normal ground. Night's is ink rather than white and measures 5.26:1 on the fill.

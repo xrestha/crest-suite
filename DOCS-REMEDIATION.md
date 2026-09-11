@@ -368,6 +368,25 @@ directory" — it only catches rules whose prose already names the file — but 
 so it could be a T-item where the S713 version could not. Not built; recorded here as the next
 cheap win on this axis.
 
+**A third instance, and it cost a repeat of the defect (S739, 2026-09-11).** Same file a third time.
+`ims-figures.md` carried the whole `settings`-row rule written in S730 — a section naming
+`Settings.js` four times and `PAGE_FIELDS` by name — and its `paths:` has never matched
+`src/pages/Settings.js`. So the rule most about that page did not load when anyone opened it, and
+S739 re-found two of its own shapes on the admin half of the same page plus a third, unfixed, in the
+admin client drawer. Moved to `.claude/rules/settings-row.md`, scoped to the seven files that
+actually write the row, with a pointer stub left behind.
+
+This is the first instance where the gap is known to have **caused** a recurrence rather than merely
+permitted one, and it is squarely inside what the S726 tell catches: the rule's prose named the file
+it could not load for. Three instances in one file in 26 sessions, all three found by accident while
+editing something else. **The check is now justified on its own numbers** — the script would be
+`check-rules-globs.mjs` with one extra pass: for each rule, collect the `` `Foo.js` ``-style
+basenames its body mentions, resolve its globs, and report a basename that exists in `src/` but is
+not in the resolved set. Expect false positives where a rule legitimately *refers* to a file it does
+not govern (`settings-row.md` names `posOrderPrintHtml.js` for exactly that reason), so it wants a
+per-rule ignore list in frontmatter rather than an exit code on every hit — which is the only
+judgement call in it, and it is a one-line one.
+
 ---
 
 ## T4 — Automate the lying-stub check
