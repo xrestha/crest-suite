@@ -241,6 +241,24 @@ alone: reopening a settlement un-blocks a departed employee's Crest Staff login 
 status stamp, which is a different order of consequence from re-running a month. Decide it on its own
 merits rather than sweeping it for consistency.
 
+**Leave's `Reopen` (S740) follows the same rank, and adds the rule that makes an undo safe.** A
+`rejected`/`cancelled` leave request had no action on its row at all — the CHECK constraint always
+allowed `pending` back, only the UI did not — so a mis-click on the Cancel sitting beside Approve
+ended the request permanently, losing its dates, the employee's reason, `created_at` and the audit
+trail. Reopen returns it to **Pending, never straight to `approved`**: `approveRequest()` is the one
+writer of the `hr_attendance` rows and the cancel deleted them, so a restore that skipped the queue
+would show an approved leave over an attendance sheet with those days blank — and payroll reads the
+sheet, so an unpaid leave stops deducting and a daily-wage paid leave goes unpaid. Generalise that
+to any undo here: **restore to the state before the write, not to the state after it, unless the undo
+itself performs the write.** It also re-reads the row's status first, the mirror of the decide path's
+guard above — a concurrent reopen-and-approve would otherwise be silently un-approved with its days
+still marked — and refuses on a FAILED read rather than falling through.
+
+Overtime's `Undo` is the older sibling of both and is **not** aligned with them: it sits at the
+page's own `supervisor` rank, with no confirmation and no freshness re-read. Left alone rather than
+swept, on the same "decide it on its own merits" footing as `FinalSettlement` — an OT entry's undo
+touches no attendance row — but know it is a deliberate difference, not an oversight.
+
 ## The Holiday Calendar is what pays the 2× rate, and it was empty (S635)
 
 `hr_holiday_calendar` is read by `Overtime.jsx` to decide the **holiday 2× rate** — and only on

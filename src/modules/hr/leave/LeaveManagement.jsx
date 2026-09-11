@@ -77,6 +77,8 @@ export default function LeaveManagement() {
   const empMap  = Object.fromEntries(employees.map(e => [e.id, e]))
   const typeMap = Object.fromEntries(types.map(t => [t.id, t]))
   const activeTypes = types.filter(t => t.active)
+  // Reopening a decided request is manager-and-above; the page itself opens at supervisor.
+  const canReopen = hasHrAccess('manager')
   const years = Array.from({ length: 6 }, (_, i) => today.year - 3 + i)
 
   useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -272,6 +274,57 @@ export default function LeaveManagement() {
     await load(); setMsg(`ok:${verb}ed`); setBusy(false)
   }
 
+  // Reopen a rejected or cancelled request — MANAGER rank, not supervisor.
+  //
+  // Cancel is one unguarded click on the same row as Approve, and until this existed a mis-click
+  // was terminal: 'rejected'/'cancelled' were the two statuses with no action at all, so the only
+  // way back was re-typing the request and losing its dates, reason, created_at and audit trail.
+  //
+  // It reopens to PENDING, never straight to 'approved'. approveRequest() is the one place that
+  // writes the hr_attendance rows, and a restore that jumped it would show Approved over an
+  // attendance sheet with those days blank — payroll would then treat a paid leave as unworked.
+  // Two clicks, one consistent state.
+  //
+  // Rank: a supervisor may decide a request; undoing a decision that has already moved a balance
+  // and cleared attendance days is the rank above. Admin and Owner resolve to 'manager' on the HR
+  // axis, so both pass.
+  function reopenRequest(req) {
+    const emp = empMap[req.employee_id]
+    askConfirm({
+      title: 'Reopen this leave request?',
+      confirmLabel: 'Reopen Request', busyLabel: 'Reopening…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {emp?.full_name || 'The employee'}'s {fmt(req.days)} day{req.days === 1 ? '' : 's'} from {bsLabel(req.start_date)} to {bsLabel(req.end_date)} go back to <strong>Pending</strong>.
+          Nothing is marked on the attendance sheet and no balance moves until you approve it again.
+        </p>
+      ),
+      run: async () => { await reopenRequestNow(req) },
+    })
+  }
+
+  async function reopenRequestNow(req) {
+    setBusy(true); setMsg('')
+    // The same stale-row re-read decideRequestNow does, for the opposite reason: if another
+    // session has already reopened AND approved this request, writing 'pending' over it would
+    // silently un-approve a leave whose attendance days stay marked and paid.
+    const { data: fresh, error: freshErr } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
+    if (freshErr) { setMsg('error:Could not check this request\'s current status, so nothing was changed — try again. ' + errorText(freshErr, 'operator')); setBusy(false); return }
+    if (!fresh) { await load(); setMsg('error:That request no longer exists — the list has been refreshed.'); setBusy(false); return }
+    if (fresh.status !== 'rejected' && fresh.status !== 'cancelled') {
+      await load()
+      setMsg(`error:Someone else changed this request first — it now shows ${LEAVE_STATUSES[fresh.status]?.label || fresh.status}, so it was not reopened.`)
+      setBusy(false); return
+    }
+    const { error } = await scopedUpdate('hr_leave_requests', { status: 'pending', decided_at: null }).eq('id', req.id)
+    if (error) {
+      await load()
+      setMsg(`error:The request still shows ${LEAVE_STATUSES[fresh.status]?.label || fresh.status} — reopen it again. ` + errorText(error, 'operator'))
+      setBusy(false); return
+    }
+    await load(); setMsg('ok:Reopened — approve it to mark the attendance days'); setBusy(false)
+  }
+
   // ── Balances ──────────────────────────────────────────────────────────────
   // The arithmetic lives in leaveBalance.js so Final Settlement can pre-fill the days it encashes
   // from the same figure this tab shows, instead of asking an operator to work it out (S600).
@@ -459,7 +512,13 @@ export default function LeaveManagement() {
                           {(req.status === 'pending' || req.status === 'approved') && (
                             <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => decideRequest(req, 'cancelled')} disabled={busy}>Cancel</button>
                           )}
-                          {(req.status === 'rejected' || req.status === 'cancelled') && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>}
+                          {(req.status === 'rejected' || req.status === 'cancelled') && (
+                            canReopen ? (
+                              <Tip text="For a reject or cancel made by mistake. Puts the request back to Pending with its original dates and reason — approve it again to re-mark the attendance days." width={270}>
+                                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => reopenRequest(req)} disabled={busy}>Reopen</button>
+                              </Tip>
+                            ) : <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>
+                          )}
                         </td>
                       </tr>
                     )
@@ -469,7 +528,7 @@ export default function LeaveManagement() {
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request clears those attendance days back to blank — not to Present, since the system has no way to know whether the employee actually worked; re-mark them in Attendance if they did. Every day in the range is included — mark the employee's own off days separately in Attendance if the range spans one.
+            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request clears those attendance days back to blank — not to Present, since the system has no way to know whether the employee actually worked; re-mark them in Attendance if they did. Every day in the range is included — mark the employee's own off days separately in Attendance if the range spans one. A request rejected or cancelled by mistake can be put back to Pending with <strong>Reopen</strong> (HR managers and the owner) — it keeps the original dates and reason, and marks nothing until it is approved again.
           </div>
         </div>
       ) : tab === 'balances' ? (
