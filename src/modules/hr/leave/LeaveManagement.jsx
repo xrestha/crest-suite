@@ -35,6 +35,16 @@ const inp = {
   padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit',
 }
 
+// The product's amber banner, byte-for-byte what PayrollRun's stale-draft card uses: the whole
+// border tinted and an 8% fill, never a thick rule down one side. The first draft of the gap
+// banner below invented the side-tab version and was the only instance of it in the codebase —
+// a shape nothing else here wears reads as a different product, not as emphasis.
+const amberBanner = {
+  marginBottom: 14, padding: '12px 16px',
+  borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+  background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+}
+
 // "12 Baisakh 2082" from an ISO/AD date string.
 function bsLabel(iso) {
   if (!iso) return '—'
@@ -428,12 +438,12 @@ export default function LeaveManagement() {
           this page, so a request can read Approved here while its unpaid days are quietly being
           paid. Two states, two sentences: one is nobody's to act on, the other has a button. */}
       {gaps?.error ? (
-        <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--theme-amber)', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+        <div role="alert" className="card" style={{ ...amberBanner, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
           Could not check whether approved leave has reached the attendance sheets — this page cannot
           confirm that it has. Reload to try again.
         </div>
       ) : (gaps?.unmarked?.length || gaps?.waiting?.length) ? (
-        <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--theme-amber)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div role="alert" className="card" style={{ ...amberBanner, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, flex: '1 1 320px' }}>
             {gaps.unmarked.length > 0 && (
               <div>
