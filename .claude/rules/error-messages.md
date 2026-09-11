@@ -46,6 +46,17 @@ is not -- the detail must survive either way. Its audience defaults to `'operato
   so `vendor_has_references` and `item_has_references` can both say the record is untouched. **The
   claim is earned by WHERE the refusal happens, not by how confident the message is**: the same
   words are a lie in a `catch` around a write whose response was lost.
+- **Zero rows matched is the third thing that earns it — and you have to ask for it (S738).** A
+  conditional write (`.update(...).eq('id', x).eq('status', 'open')`) that matches nothing returns
+  `{ data: null, error: null }`: indistinguishable from success at every call site that only tests
+  `error`. So the guard in the `.eq()` is not a guard — it is a filter whose refusal is silent, and
+  Periods' rename reported a save over a period that had closed under the editor. Add `.select('id')`
+  and branch on `!data?.length`. Unlike a dead fetch, this one **is** proof: PostgREST returns what
+  it actually wrote, so the message may say the write did not land and name the real reason (the
+  row is no longer in the state the guard required) rather than inviting a blind retry. The same
+  shape sits behind every "reported success whatever happened" finding in S724/S730/S736 — the tell
+  is an `await supabase…update/delete` whose result is destructured for `error` alone while the
+  filter chain carries a condition that can stop being true.
 - **Never destroy the technical detail.** `detail` (`code · message`) is returned alongside for a
   fine-print line, never the headline — whoever diagnoses it still needs it.
 - **`ActionError` is where that sentence goes (S658).** `src/components/ActionError.jsx` +

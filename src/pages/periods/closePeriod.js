@@ -37,6 +37,30 @@ export function periodLabel(period) {
   return `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
 }
 
+// ── Chronological neighbours ──────────────────────────────────────────────────
+//
+// "The next period" is the next one that EXISTS in the client's own list, never bs_month + 1
+// (S738). The two are different exactly when a month was skipped — and the product skips months
+// by design: "End Period" closes a month and opens nothing, and "+ Create Period" mints TODAY's
+// month whenever the client comes back, so a client paused for two months has a gap. Periods'
+// "Resync Opening Stock" resolved next-by-arithmetic and told that admin "No Ashwin period exists
+// yet — nothing to sync into", pointing at a month that would never exist, while Stock Count's
+// "Pull last month's closing" already walked the list. Two carry-forwards, two definitions of
+// "next"; this is the one.
+export function periodOrdinal(p) {
+  return p.bs_year * 12 + p.bs_month
+}
+
+export function nextExistingPeriod(periods, period) {
+  const after = periods.filter(p => periodOrdinal(p) > periodOrdinal(period))
+  return after.sort((a, b) => periodOrdinal(a) - periodOrdinal(b))[0] || null
+}
+
+export function previousExistingPeriod(periods, period) {
+  const before = periods.filter(p => periodOrdinal(p) < periodOrdinal(period))
+  return before.sort((a, b) => periodOrdinal(b) - periodOrdinal(a))[0] || null
+}
+
 // ── Preflights ────────────────────────────────────────────────────────────────
 
 // Closing a period is the product's highest-stakes action: it locks the month AND mints the
@@ -106,9 +130,14 @@ export function payrollNote(pre, monthLabel) {
 
 // ── The commit ────────────────────────────────────────────────────────────────
 
-/** Copies the closed month's counted closing stock into the new month's opening stock. */
+/**
+ * Copies the closed month's counted closing stock into the new month's opening stock.
+ * @returns {{error: any, carried: number}} `carried` is the row count actually written — 0 when
+ *   the source month has no counted closing stock, which a caller must say rather than claim a
+ *   carry-forward happened.
+ */
 export async function carryForwardOpeningStock(closedPeriodId, newPeriodId) {
-  if (!closedPeriodId || !newPeriodId) return { error: null }
+  if (!closedPeriodId || !newPeriodId) return { error: null, carried: 0 }
   // Paged, never bare. This is one row per ITEM, so a 1000-SKU client hit PostgREST's
   // db-max-rows cap and carried forward only the first 1000 — with no error and nothing in the
   // data to say so. The bite is that closingCountPreflight() above counts with `head: true`,
@@ -119,13 +148,37 @@ export async function carryForwardOpeningStock(closedPeriodId, newPeriodId) {
   const { data: closingRows, error: readErr } = await fetchAllRows(() =>
     supabase.from('closing_stock')
       .select('item_id, physical_qty').eq('period_id', closedPeriodId).order('item_id'))
-  if (readErr) return { error: readErr }
+  if (readErr) return { error: readErr, carried: 0 }
   const rows = (closingRows || [])
     .filter(r => r.physical_qty != null)
     .map(r => ({ period_id: newPeriodId, item_id: r.item_id, qty: r.physical_qty }))
-  if (rows.length === 0) return { error: null }
+  if (rows.length === 0) return { error: null, carried: 0 }
   const { error: writeErr } = await supabase.from('opening_stock').upsert(rows, { onConflict: 'period_id,item_id' })
-  return { error: writeErr || null }
+  return { error: writeErr || null, carried: writeErr ? 0 : rows.length }
+}
+
+/**
+ * Mint a period and carry the previous EXISTING period's closing count into it — the same
+ * carry-forward "Close & Start Next" does, because a period created by hand is the same event
+ * from the stock ledger's point of view (S738). Until now both "+ Create Period" buttons opened
+ * the month with no opening stock and said nothing: COGS = opening + purchases − closing, so a
+ * month opened at zero understates COGS and flatters food-cost % — a wrong figure, not an error.
+ *
+ * `periods` is the client's own list (the caller already has it on screen). Never throws.
+ *
+ * @returns {Promise<{created: object|null, error: any, carriedFrom: object|null, carried: number,
+ *   carryError: any}>} `carriedFrom` is the period the count came from (null when the new period
+ *   is the earliest on record); `carried` is 0 when that period was never closing-counted.
+ */
+export async function createPeriodWithCarryForward({ clientId, periods, bs_year, bs_month }) {
+  const { data: created, error } = await scopedInsert(
+    'monthly_periods', clientId, { bs_year, bs_month, status: 'open' }, { single: true }
+  )
+  if (error) return { created: null, error, carriedFrom: null, carried: 0, carryError: null }
+  const prev = previousExistingPeriod(periods || [], { bs_year, bs_month })
+  if (!prev) return { created, error: null, carriedFrom: null, carried: 0, carryError: null }
+  const { error: carryError, carried } = await carryForwardOpeningStock(prev.id, created.id)
+  return { created, error: null, carriedFrom: prev, carried, carryError: carryError || null }
 }
 
 /**
@@ -209,7 +262,7 @@ export function closeFailureText({ stage, period, isAdmin = false }) {
       return `${m} may not have closed. Reload to check its status before trying again.`
     case 'open_next':
       return `${m} was closed, but ${nextLabel} could not be opened. ` + (isAdmin
-        ? 'Use "+ Create Period" for this client, then "Resync Opening Stock" to carry the closing count forward.'
+        ? `Use "+ Create Period" for this client — it carries ${m}'s closing count into the new month automatically.`
         : 'Until the new month is opened you will not be able to record purchases, sales or stock. Please contact your Crest consultant.')
     case 'carry_forward':
       return `${m} was closed and ${nextLabel} opened, but the closing count could not be carried into it as opening stock — ` +

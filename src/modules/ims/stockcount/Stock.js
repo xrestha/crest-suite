@@ -21,6 +21,7 @@ import { firstError } from '../../../shared/queryError'
 import './Stock.css'
 import { cacheItems, getCachedItems, cacheCategories, getCachedCategories, cachePeriods, getCachedPeriods, cacheStockData, getCachedStockData, enqueue, getQueue, dequeue } from '../../../utils/offlineQueue'
 import { BS_MONTHS, getBsToday, formatBsDay, daysInBsMonth } from '../../../utils/bsCalendar'
+import { previousExistingPeriod } from '../../../pages/periods/closePeriod'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -800,9 +801,9 @@ export default function Stock() {
     if (!selectedPeriod || isLocked) return
     setPageNotice(null); setSaveError(null)
     if (!navigator.onLine) { setPageNotice('You’re offline. Last month’s closing counts are on the server, so this needs a connection. The counts you have entered on this page are saved on this device and will sync when you’re back online.'); return }
-    const prevPeriod = periods
-      .filter(p => p.bs_year < selectedPeriod.bs_year || (p.bs_year === selectedPeriod.bs_year && p.bs_month < selectedPeriod.bs_month))
-      .sort((a, b) => (b.bs_year - a.bs_year) || (b.bs_month - a.bs_month))[0]
+    // The chronologically previous period that EXISTS — the one definition of "last month" the
+    // period close, "+ Create Period" and Periods' Resync all share since S738 (closePeriod.js).
+    const prevPeriod = previousExistingPeriod(periods, selectedPeriod)
     if (!prevPeriod) { setPageNotice('This is the earliest period on record, so there is no previous month to carry a closing count forward from. Enter the opening stock directly.'); return }
     const prevLabel = `${BS_MONTHS[prevPeriod.bs_month - 1]} ${prevPeriod.bs_year}`
     setSaveAllLoading(true)

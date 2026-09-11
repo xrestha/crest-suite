@@ -108,6 +108,41 @@ limit.** `fetchAllRows` with `.order('item_id')` as the tiebreaker; `closePeriod
 with a 1000-row first page, and that test was verified to fail against the unfixed code before
 being kept.
 
+## "The next period" is the next one that EXISTS, never `bs_month + 1` (S738)
+
+The product skips months by design: **End Period** closes a month and opens nothing, and
+**+ Create Period** mints *today's* month whenever the client comes back — so a client paused for
+two months has a gap in its list. Periods' "Resync Opening Stock" resolved its target by
+arithmetic and told exactly that admin *"No Ashwin period exists yet — nothing to sync into"*,
+naming a month that would never exist, while Stock Count's "Pull last month's closing" walked the
+list. Two carry-forwards, two definitions of "next".
+
+`nextExistingPeriod()` / `previousExistingPeriod()` in `closePeriod.js` are the one definition,
+and all three carry-forwards use them. **A period created by hand carries forward too**
+(`createPeriodWithCarryForward()`): both "+ Create Period" buttons used to open the month with no
+opening stock and say nothing — COGS = opening + purchases − closing, so a month opened at zero
+*understates* COGS and flatters food-cost %, a wrong figure rather than an error. The notice
+after a create says which month the count came from, or that there was nothing to carry, and
+`carryForwardOpeningStock()` returns `carried` so a caller can tell an empty source from a
+successful copy.
+
+Three more rules from the same pass:
+
+- **A period rename is a data move, and the audit trail has to see it.** Thirteen tables hang off
+  `monthly_periods` by `period_id`; relabelling Bhadra → Ashwin moves the month's every row into a
+  different reporting month. `log_audit()` skipped every `monthly_periods` update that was not a
+  status change until migration `20260911120000`, so the highest-consequence write on the page was
+  the one with no trace. Both edit paths confirm through the shared modal; the
+  `.eq('status','open')` guard is followed by `.select('id')`, because zero rows back is
+  `error: null` and used to report a save over a value that had not changed.
+- **A button's label is the verb it performs.** The all-clients "+ Create Period" silently reopened
+  a closed period when today's month already existed. It is now "Reopen <month>" in that state,
+  behind a confirm, and only the create branch creates.
+- **The POS backfill button follows the `!isAdmin && closed` lock.** It writes `sales_entries` and
+  `stock_movements`, and was the one control on Periods that let an Owner or an IMS supervisor
+  write into a closed month. Admin keeps it on every row; posting into a closed month says the
+  frozen report is stale and names Regenerate Snapshot, as the Purchases banner does.
+
 ## Reopen is not the admin path, and cannot become one
 
 `monthly_periods_one_open_per_client` is a partial unique index, so at most one period per client is

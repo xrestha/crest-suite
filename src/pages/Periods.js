@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
-import { scopedInsert as scopedInsertRaw, scopedUpdate as scopedUpdateRaw } from '../shared/scopedDb'
+import { scopedUpdate as scopedUpdateRaw } from '../shared/scopedDb'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS, BS_YEAR_MAX, getBsToday, formatBsDay } from '../utils/bsCalendar'
 import { nepalBs, nepalDateAd } from '../shared/nepalTime'
@@ -9,7 +9,10 @@ import { fetchAllRows } from '../shared/fetchAllRows'
 import { useNavigate, Navigate } from 'react-router-dom'
 import Tip from '../components/Tip'
 import ConfirmModal from '../components/ConfirmModal'
-import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText, carryForwardOpeningStock } from './periods/closePeriod'
+import {
+  closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText,
+  carryForwardOpeningStock, createPeriodWithCarryForward, nextExistingPeriod, periodLabel,
+} from './periods/closePeriod'
 import CloseConfirmBody from './periods/CloseConfirmBody'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
@@ -45,6 +48,7 @@ export default function Periods() {
   const navigate = useNavigate()
   const [periods, setPeriods] = useState([])
   const [backfillBusy, setBackfillBusy] = useState(null) // period id currently posting POS bills
+  const [resyncBusy, setResyncBusy] = useState(null) // period id whose closing count is being re-synced forward
   const [closeBusy, setCloseBusy] = useState(false) // preflighting or committing a close
   // One shared ConfirmModal for the page's consequential actions (S575 rule — period close is that
   // rule's #1 named case, and this page ran it on window.confirm until S612). Shape:
@@ -97,6 +101,19 @@ export default function Periods() {
   const bsToday = getBsToday()
 
   useEffect(() => {
+    // Everything that is ABOUT a client is dropped when the client changes. This is one
+    // component instance across both views — clicking a property in the all-clients table
+    // switches clientId without a remount — so a red ActionError about client X's failed close
+    // was rendering above client Y's table, reading as the verdict on Y (the same failure the
+    // setNotice(null)-before-every-action rule below exists for; this is the path it missed).
+    // A pending ConfirmModal's `run` is bound to the old client, and an open edit row holds the
+    // old client's period id, so both go too.
+    setNotice(null)
+    setJustClosedReport(null)
+    setPendingConfirm(null)
+    setEditingId(null); setEditError('')
+    setEditingAllClientId(null); setEditAllError('')
+    setShowForm(false); setError('')
     if (isAdmin && !clientId) loadAllClientPeriods()
     else if (clientId) loadPeriods()
     else setLoading(false)
@@ -104,20 +121,28 @@ export default function Periods() {
 
   async function loadAllClientPeriods() {
     setAllLoading(true)
-    const results = await Promise.all([
-      supabase.from('clients').select('id, name, is_active, hr_enabled').order('name'),
-      // Every period of every client: rows are clients × months, so 30 clients over three years
-      // is already past PostgREST's 1000-row cap — and the sort drops the OLDEST rows first,
-      // which means the client this read silently erases is the dormant one whose open period is
-      // months behind. That is precisely the client `needsAttention` and the amber count below
-      // exist to surface: it would render as "NO PERIOD" with a + Create Period button, and every
-      // Total in the table would be short. `.order('id')` is the unique tiebreaker paging needs.
-      fetchAllRows(() => supabase.from('monthly_periods')
-        .select('id, client_id, bs_year, bs_month, status')
-        .order('bs_year', { ascending: false })
-        .order('bs_month', { ascending: false })
-        .order('id')),
-    ])
+    let results
+    try {
+      // Bounded: this is the read the whole view waits on, and a stalled auth layer leaves a
+      // supabase-js call unsettled forever — "Loading…" with no error and no way out (CLAUDE.md:
+      // guard any user-gating await with withTimeout).
+      results = await withTimeout(Promise.all([
+        supabase.from('clients').select('id, name, is_active, ims_enabled, hr_enabled').order('name'),
+        // Every period of every client: rows are clients × months, so 30 clients over three years
+        // is already past PostgREST's 1000-row cap — and the sort drops the OLDEST rows first,
+        // which means the client this read silently erases is the dormant one whose open period is
+        // months behind. That is precisely the client `needsAttention` and the amber count below
+        // exist to surface: it would render as "NO PERIOD" with a + Create Period button, and every
+        // Total in the table would be short. `.order('id')` is the unique tiebreaker paging needs.
+        fetchAllRows(() => supabase.from('monthly_periods')
+          .select('id, client_id, bs_year, bs_month, status')
+          .order('bs_year', { ascending: false })
+          .order('bs_month', { ascending: false })
+          .order('id')),
+      ]), 20000, 'Loading periods')
+    } catch (err) {
+      results = [{ error: err }]
+    }
     const failed = results.find(r => r && r.error)
     if (failed) {
       // A failed read is not "no clients" — keep the last-good list and say so.
@@ -152,32 +177,40 @@ export default function Periods() {
   }
 
   // HR pages are deliberately NOT locked by the close — payroll is finalized after the stock
-  // month closes — so the sentence names exactly what locks, for whoever is reading it.
-  const locksSentence = (period, hrOn, audience) =>
-    `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}'s IMS entry pages lock for ` +
-    (audience === 'admin' ? "the client's own logins" : 'your team') +
-    (hrOn ? ' (HR pages stay open — Payroll Run locks itself once finalized)' : '')
+  // month closes — so the sentence names exactly what locks, for whoever is reading it. A client
+  // without IMS has no entry pages to lock, so for them the month simply closes; promising that
+  // "IMS entry pages lock" to an HR-only or POS-only owner names a thing they cannot see.
+  const locksSentence = (period, mods, audience) => {
+    const who = audience === 'admin' ? "the client's own logins" : 'your team'
+    const hr = mods.hr ? ' (HR pages stay open — Payroll Run locks itself once finalized)' : ''
+    return mods.ims
+      ? `${periodLabel(period)}'s IMS entry pages lock for ${who}${hr}`
+      : `${periodLabel(period)} closes for ${who}${hr}`
+  }
 
   function surfaceCloseFailures(result, period) {
     const first = result.failures[0]
     if (first) fail(closeFailureText({ stage: first.stage, period, isAdmin }), first.error)
   }
 
-  const adminHrOn = cid => !!allClients.find(c => c.id === cid)?.hr_enabled
+  const adminMods = cid => {
+    const c = allClients.find(x => x.id === cid)
+    return { ims: c?.ims_enabled !== false, hr: !!c?.hr_enabled }
+  }
 
   async function adminCloseAndAdvance(period, cid) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
-    const hrOn = adminHrOn(cid)
+    const mods = adminMods(cid)
     setNotice(null)
     setActionClientId(cid)
-    const notes = await closeNotes(period, cid, hrOn)
+    const notes = await closeNotes(period, cid, mods.hr)
     setActionClientId(null)
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'Close & Start Next',
       danger: notes.some(n => n?.danger),
-      body: <CloseConfirmBody main={`${locksSentence(period, hrOn, 'admin')} and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`} notes={notes} />,
+      body: <CloseConfirmBody main={`${locksSentence(period, mods, 'admin')} and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`} notes={notes} />,
       run: () => performAdminCloseAndAdvance(period, cid),
     })
   }
@@ -191,10 +224,10 @@ export default function Periods() {
   }
 
   async function adminEndPeriod(period, cid) {
-    const hrOn = adminHrOn(cid)
+    const mods = adminMods(cid)
     setNotice(null)
     setActionClientId(cid)
-    const notes = await closeNotes(period, cid, hrOn)
+    const notes = await closeNotes(period, cid, mods.hr)
     setActionClientId(null)
     setPendingConfirm({
       title: `End ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
@@ -213,55 +246,130 @@ export default function Periods() {
     setActionClientId(null)
   }
 
+  // The all-clients row for a client with no open period offers ONE of two actions, and the
+  // button says which (S738). Until now a single "+ Create Period" did both: it minted today's
+  // month — or, if today's month was already on record as closed, silently flipped it back to
+  // open, reopening a month whose frozen Monthly Report was already minted, under a label that
+  // said "create", with no confirm and no success message. Only the ERROR copy knew the
+  // difference. Now: a closed row for today's month gets a "Reopen" button behind the same
+  // confirm the per-client Reopen implies; otherwise "+ Create Period" mints the month AND
+  // carries the previous period's closing count into it (createPeriodWithCarryForward), which
+  // the old create never did — see finding #1 in the S738 notes.
+  const closedTodayPeriod = cid => (allClientPeriods[cid] || []).find(
+    p => p.bs_year === bsToday.year && p.bs_month === bsToday.month
+  )
+
+  function adminReopenToday(existing, cid) {
+    const label = periodLabel(existing)
+    setNotice(null)
+    setPendingConfirm({
+      title: `Reopen ${label}`,
+      confirmLabel: 'Reopen',
+      danger: true,
+      body: `${label} is already on record for this client and was closed. Reopening hands entry for it back to the client's own logins. Its frozen Monthly Report stays as it was minted at close — use Regenerate Snapshot on the report if the figures change.`,
+      run: async () => {
+        setActionClientId(cid)
+        // Destructured, not a bare await — supabase-js RESOLVES with { data, error } rather than
+        // throwing, so a bare await here was a click, a "Working…", a reload and an unchanged row.
+        const { error } = await scopedUpdateRaw('monthly_periods', cid, { status: 'open' }).eq('id', existing.id)
+        if (error) fail(`${label} was not reopened for this client — it is still closed, so they still cannot record anything.`, error)
+        else ok(`${label} reopened for this client.`)
+        await loadAllClientPeriods()
+        setActionClientId(null)
+      },
+    })
+  }
+
   async function adminCreatePeriod(cid) {
     setNotice(null)
     setActionClientId(cid)
-    const existing = (allClientPeriods[cid] || []).find(
-      p => p.bs_year === bsToday.year && p.bs_month === bsToday.month
-    )
     const label = `${BS_MONTHS[bsToday.month - 1]} ${bsToday.year}`
-    // BOTH branches surface their error. The reactivate branch used to be a bare `await` with
-    // nothing destructured — supabase-js RESOLVES with { data, error } rather than throwing, so a
-    // refusal there was a click, a "Working…", a reload, and a row that had not changed, with
-    // nothing said (CLAUDE.md: a bare await discards the only evidence the call failed).
-    const { error } = existing
-      ? await scopedUpdateRaw('monthly_periods', cid, { status: 'open' }).eq('id', existing.id)
-      : await scopedInsertRaw('monthly_periods', cid, {
-          bs_year: bsToday.year, bs_month: bsToday.month, status: 'open'
-        })
-    if (error) {
-      fail(existing
-        ? `${label} was not reopened for this client — it is still closed, so they still cannot record anything.`
-        : `${label} was not created for this client — they still have no open period, so no purchases, sales or stock can be recorded.`,
-        error)
+    const r = await createPeriodWithCarryForward({
+      clientId: cid, periods: allClientPeriods[cid] || [], bs_year: bsToday.year, bs_month: bsToday.month,
+    })
+    if (r.error) {
+      fail(`${label} was not created for this client — they still have no open period, so no purchases, sales or stock can be recorded.`, r.error)
+    } else {
+      surfaceCreateOutcome(label, r)
     }
     await loadAllClientPeriods()
     setActionClientId(null)
   }
 
-  async function saveAllEdit(periodId, cid) {
+  // One sentence for what a hand-created period opened with. Three honest outcomes: carried
+  // from a named month, nothing to carry (earliest period, or the previous month was never
+  // counted), or the carry failed — the last names the repair, because the period exists now
+  // and the count still has to reach it.
+  function surfaceCreateOutcome(label, r) {
+    if (!r.carriedFrom) {
+      ok(`${label} created. It is the earliest period on record, so it opens with no opening stock — enter it on Stock Count.`)
+    } else if (r.carryError) {
+      fail(`${label} was created, but ${periodLabel(r.carriedFrom)}'s closing count could not be carried into it — ${label} currently opens with no opening figures. Use "Resync Opening Stock" on the ${periodLabel(r.carriedFrom)} row before anyone enters purchases or sales.`, r.carryError)
+    } else if (r.carried === 0) {
+      ok(`${label} created. ${periodLabel(r.carriedFrom)} was never closing-counted, so there was nothing to carry forward — enter the opening stock on Stock Count.`)
+    } else {
+      ok(`${label} created. Opening stock carried forward from ${periodLabel(r.carriedFrom)}'s closing count (${r.carried} item${r.carried === 1 ? '' : 's'}).`)
+    }
+  }
+
+  // Relabelling a period is the one write on this page that moves data without looking like it
+  // (S738). Thirteen tables hang off monthly_periods by period_id, so renaming Bhadra to Ashwin
+  // takes that month's every purchase, sale, stock count, overhead, requisition and attendance
+  // row with it — and until S738 the audit trigger skipped it (log_audit only logged status
+  // changes), so it was also the one write here that left no trace. Both edit paths now confirm
+  // through the shared modal with the consequence stated, and a rename to the same label is a
+  // cancel, not a write.
+  const renameConfirm = (period, year, month, run) => ({
+    title: `Rename ${periodLabel(period)}`,
+    confirmLabel: 'Rename Period',
+    danger: true,
+    body: `${periodLabel(period)} becomes ${BS_MONTHS[month - 1]} ${year}. Everything recorded in it — purchases, sales, stock counts, overheads, requisitions, attendance — moves with it and is reported under the new month. Nothing is recomputed. Use this to correct a period that was created under the wrong month, not to move a month's figures.`,
+    run,
+  })
+
+  async function saveAllEdit(period, cid) {
     setEditAllError('')
     const year = parseInt(editAllForm.bs_year)
     const month = parseInt(editAllForm.bs_month)
     if (!year || year < YEAR_MIN || year > YEAR_MAX) { setEditAllError(yearRangeError); return }
-    const duplicate = (allClientPeriods[cid] || []).find(p => p.id !== periodId && p.bs_year === year && p.bs_month === month)
+    if (year === period.bs_year && month === period.bs_month) { setEditingAllClientId(null); return }
+    const duplicate = (allClientPeriods[cid] || []).find(p => p.id !== period.id && p.bs_year === year && p.bs_month === month)
     if (duplicate) { setEditAllError('A period for this month already exists.'); return }
+    setPendingConfirm(renameConfirm(period, year, month, () => performSaveAllEdit(period.id, cid, year, month)))
+  }
+
+  async function performSaveAllEdit(periodId, cid, year, month) {
     setSavingAll(true)
-    const { error } = await scopedUpdateRaw('monthly_periods', cid, { bs_year: year, bs_month: month }).eq('id', periodId).eq('status', 'open')
+    // `.select('id')`: the `.eq('status','open')` guard matches ZERO rows with `error: null` when
+    // the period closed under the editor, and the old code then reported a save over a value
+    // that had not changed. Zero rows back is definitive — PostgREST returns what it updated —
+    // so this one CAN say the write did not land (the S619 rule is about dead fetches).
+    const { data, error } = await scopedUpdateRaw('monthly_periods', cid, { bs_year: year, bs_month: month })
+      .eq('id', periodId).eq('status', 'open').select('id')
     // `errorLine`, not `error.message` — the sentence leads and the raw `code · message` rides
     // along in parentheses (S619). These three edit paths were the ones S682's alert sweep did
     // not reach. `.message` is also optional-chained: a fetch that never reached Postgres has no
     // message, and `.includes` on undefined throws inside the very handler meant to report it.
     if (error) { setEditAllError(/unique/i.test(error.message || '') ? 'A period for this month already exists.' : errorLine(error, 'operator')) }
+    else if (!data?.length) { setEditAllError('This period is no longer open, so it was not renamed. Reload to see its current status.') }
     else { setEditingAllClientId(null); await loadAllClientPeriods() }
     setSavingAll(false)
   }
 
   async function loadPeriods() {
     setLoading(true)
-    const { data, error } = await scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false })
-      .order('bs_month', { ascending: false })
+    let data, error
+    try {
+      // Bounded, as the all-clients read is: an unsettled auth call otherwise leaves "Loading…"
+      // on screen forever with nothing to say why.
+      ;({ data, error } = await withTimeout(
+        scopedFrom('monthly_periods')
+          .order('bs_year', { ascending: false })
+          .order('bs_month', { ascending: false }),
+        20000, 'Loading periods'))
+    } catch (err) {
+      error = err
+    }
     // A failed read used to render the "No periods yet" empty state — on the page every empty
     // IMS page links to, so an auth stall told a new owner they had no periods (S682).
     if (error) { setLoadError(error); setLoading(false); return }
@@ -278,12 +386,12 @@ export default function Periods() {
     // did not, so a cleared field posted NaN and came back as a Postgres type error.
     if (!year || year < YEAR_MIN || year > YEAR_MAX) { setError(yearRangeError); return }
     setError('')
+    setNotice(null)
     setCreating(true)
-    const { error } = await scopedInsert('monthly_periods', {
-      bs_year: year,
-      bs_month: month,
-      status: 'open'
-    })
+    // Carries the previous existing period's closing count forward, exactly as Close & Start
+    // Next does — a period minted by hand used to open with no opening stock and say nothing.
+    const r = await createPeriodWithCarryForward({ clientId, periods, bs_year: year, bs_month: month })
+    const { error } = r
     if (error) {
       // Two distinct unique constraints can fire here — the message must distinguish them, or
       // trying to open a new period while a DIFFERENT month is already open would confusingly
@@ -295,6 +403,7 @@ export default function Periods() {
       )
     } else {
       setShowForm(false)
+      surfaceCreateOutcome(`${BS_MONTHS[month - 1]} ${year}`, r)
       loadPeriods()
     }
     setCreating(false)
@@ -303,20 +412,20 @@ export default function Periods() {
   async function closeAndAdvance(period) {
     const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
     const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
-    const hrOn = !!clientModules?.hr
+    const mods = { ims: !!clientModules?.ims, hr: !!clientModules?.hr }
     // The two preflights are each bounded at 10s by withTimeout, so on a bad connection this
     // await is ten seconds long — and it runs BEFORE the dialog appears. The admin paths show
     // "Working…" through it (setActionClientId); this one, the Owner's month-end button, showed
     // nothing at all, so pressing it looked like nothing happening.
     setNotice(null)
     setCloseBusy(true)
-    const notes = await closeNotes(period, clientId || profile?.client_id, hrOn)
+    const notes = await closeNotes(period, clientId || profile?.client_id, mods.hr)
     setCloseBusy(false)
     setPendingConfirm({
       title: `Close ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`,
       confirmLabel: 'Close & Start Next',
       danger: notes.some(n => n?.danger),
-      body: <CloseConfirmBody main={`${locksSentence(period, hrOn, 'client')} and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`} notes={notes} />,
+      body: <CloseConfirmBody main={`${locksSentence(period, mods, 'client')} and ${BS_MONTHS[nextMonth - 1]} ${nextYear} opens. Closing stock carries forward as the new month's opening stock, and the frozen Monthly Report for ${BS_MONTHS[period.bs_month - 1]} is generated from the figures as they stand now.`} notes={notes} />,
       run: () => performCloseAndAdvance(period),
     })
   }
@@ -401,9 +510,17 @@ export default function Periods() {
         backfillPosOrdersToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }),
         120000, 'Posting POS bills')
       if (error) { fail(`The POS bills for ${label} were not posted — re-running picks up wherever it stopped.`, error); return }
+      // The frozen snapshot does not follow the write (closed-periods.md): revenue just landed
+      // in a month whose Monthly Report was minted at close, and the Purchases banner names the
+      // repair for exactly this — so does this notice, rather than reporting a clean success
+      // over a report that is now stale.
+      const frozenNote = posted > 0 && period.status === 'closed'
+        ? ` ${label} is closed, so its frozen Monthly Report does not include these bills until an admin uses Regenerate Snapshot on it.`
+        : ''
       ok(
         `Posted ${posted} bill${posted === 1 ? '' : 's'} into ${label}.` +
-        (skipped > 0 ? ` ${skipped} skipped (nothing to post, or the write failed — check the browser console).` : '')
+        (skipped > 0 ? ` ${skipped} skipped (nothing to post, or the write failed — check the browser console).` : '') +
+        frozenNote
       )
     } catch (err) {
       console.error('POS backfill failed:', err)
@@ -413,33 +530,40 @@ export default function Periods() {
     }
   }
 
-  async function resyncOpeningStock(period) {
+  function resyncOpeningStock(period) {
     setNotice(null)
-    const nextMonth = period.bs_month === 12 ? 1 : period.bs_month + 1
-    const nextYear  = period.bs_month === 12 ? period.bs_year + 1 : period.bs_year
-    const { data: nextPeriod, error: nextErr } = await scopedFrom('monthly_periods', 'id')
-      .eq('bs_year', nextYear).eq('bs_month', nextMonth).maybeSingle()
-    // A failed read is not "no period exists" — that sentence is a confident claim about the data,
-    // and it was being made on a dropped connection (S682).
-    if (nextErr) {
-      fail(`Could not check whether a ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists, so nothing was synced. Try again.`, nextErr)
-      return
-    }
+    // The next period that EXISTS, from the list already on screen — not bs_month + 1 queried
+    // from the server (S738). The arithmetic version told an admin whose client had skipped a
+    // month "No Ashwin period exists yet — nothing to sync into", pointing at a month that would
+    // never exist, on precisely the client (End Period, then + Create Period two months later)
+    // this button is the repair for. See nextExistingPeriod in closePeriod.js.
+    const nextPeriod = nextExistingPeriod(periods, period)
+    const fromLabel = periodLabel(period)
     if (!nextPeriod) {
-      fail(`No ${BS_MONTHS[nextMonth - 1]} ${nextYear} period exists yet for this client — nothing to sync into.`)
+      fail(`No later period exists yet for this client — nothing to sync ${fromLabel}'s closing count into. Create the next period first; it carries this closing count forward automatically.`)
       return
     }
-    const fromLabel = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
-    const toLabel = `${BS_MONTHS[nextMonth - 1]} ${nextYear}`
+    const toLabel = periodLabel(nextPeriod)
     setPendingConfirm({
       title: 'Resync Opening Stock',
       confirmLabel: 'Overwrite & Resync',
       danger: true,
       body: `${fromLabel}'s closing stock copies into ${toLabel}'s opening stock. ${toLabel}'s existing opening stock is overwritten for every item that has a closing count in ${fromLabel}.`,
       run: async () => {
-        const { error } = await carryForwardOpeningStock(period.id, nextPeriod.id)
-        if (error) fail(`${toLabel}'s opening stock was not re-synced — it still holds whatever it had before. Try again.`, error)
-        else ok(`Opening stock re-synced into ${toLabel} from ${fromLabel}'s closing count.`)
+        // Busy on the row and bounded on the clock, as every other long action here is: this
+        // pages through closing_stock and upserts one row per item, and the button stayed
+        // clickable through it — a second click started a second resync.
+        setResyncBusy(period.id)
+        try {
+          const { error, carried } = await withTimeout(carryForwardOpeningStock(period.id, nextPeriod.id), 60000, 'Resyncing opening stock')
+          if (error) fail(`${toLabel}'s opening stock was not re-synced — it still holds whatever it had before. Try again.`, error)
+          else if (carried === 0) ok(`${fromLabel} has no counted closing stock, so ${toLabel}'s opening stock was left as it was.`)
+          else ok(`Opening stock re-synced into ${toLabel} from ${fromLabel}'s closing count (${carried} item${carried === 1 ? '' : 's'}).`)
+        } catch (err) {
+          fail(`${toLabel}'s opening stock may not have been fully re-synced — the request did not finish. Reload Stock Count for ${toLabel} to check, then run this again; it is safe to repeat.`, err)
+        } finally {
+          setResyncBusy(null)
+        }
       },
     })
   }
@@ -455,7 +579,7 @@ export default function Periods() {
     setEditError('')
   }
 
-  async function saveEdit(id) {
+  function saveEdit(period) {
     setEditError('')
     const year = parseInt(editForm.bs_year)
     const month = parseInt(editForm.bs_month)
@@ -464,23 +588,32 @@ export default function Periods() {
       setEditError(yearRangeError)
       return
     }
+    if (year === period.bs_year && month === period.bs_month) { cancelEdit(); return }
 
     // Check for duplicate (exclude current row)
     const duplicate = periods.find(
-      p => p.id !== id && p.bs_year === year && p.bs_month === month
+      p => p.id !== period.id && p.bs_year === year && p.bs_month === month
     )
     if (duplicate) {
       setEditError('A period for this month already exists.')
       return
     }
 
+    setPendingConfirm(renameConfirm(period, year, month, () => performSaveEdit(period.id, year, month)))
+  }
+
+  async function performSaveEdit(id, year, month) {
     setSaving(true)
-    const { error } = await scopedUpdate('monthly_periods', { bs_year: year, bs_month: month })
+    // See performSaveAllEdit for why `.select('id')` and the zero-row branch are here.
+    const { data, error } = await scopedUpdate('monthly_periods', { bs_year: year, bs_month: month })
       .eq('id', id)
       .eq('status', 'open') // safety guard — DB-level protection
+      .select('id')
 
     if (error) {
       setEditError(/unique/i.test(error.message || '') ? 'A period for this month already exists.' : errorLine(error, 'operator'))
+    } else if (!data?.length) {
+      setEditError('This period is no longer open, so it was not renamed. Reload to see its current status.')
     } else {
       setEditingId(null)
       loadPeriods()
@@ -634,7 +767,7 @@ export default function Periods() {
                             <td>
                               {openPeriod
                                 ? expired
-                                  ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-xs)', color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)' }}>EXPIRED</span>
+                                  ? <span className="badge badge-amber">EXPIRED</span>
                                   : <span className="badge badge-green">OPEN</span>
                                 : <span className="badge badge-gray">NO PERIOD</span>
                               }
@@ -652,7 +785,7 @@ export default function Periods() {
                                   Cancel
                                 </button>
                                 <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }}
-                                  onClick={() => saveAllEdit(openPeriod.id, c.id)} disabled={savingAll}>
+                                  onClick={() => saveAllEdit(openPeriod, c.id)} disabled={savingAll}>
                                   {savingAll ? 'Saving…' : 'Save'}
                                 </button>
                               </>
@@ -686,13 +819,26 @@ export default function Periods() {
                                     </button>
                                     <Tip text="Closes this period without opening the next one. The client will be blocked from recording data until a new period is created." width={240}>ⓘ</Tip>
                                   </>
+                                ) : closedTodayPeriod(c.id) ? (
+                                  // Today's month is already on record, closed: the honest verb is
+                                  // Reopen, and it gets the confirm that verb implies.
+                                  <Tip text={`${periodLabel(closedTodayPeriod(c.id))} already exists for this client and is closed. Reopen hands entry back to the client's own logins — it does not create a new period.`} width={280}>
+                                    <button
+                                      onClick={() => adminReopenToday(closedTodayPeriod(c.id), c.id)}
+                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-green) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 30%, transparent)', color: 'var(--theme-green-text)' }}
+                                    >
+                                      Reopen {BS_MONTHS[bsToday.month - 1]}
+                                    </button>
+                                  </Tip>
                                 ) : (
-                                  <button
-                                    onClick={() => adminCreatePeriod(c.id)}
-                                    style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-green) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 30%, transparent)', color: 'var(--theme-green-text)' }}
-                                  >
-                                    + Create Period
-                                  </button>
+                                  <Tip text={`Creates ${BS_MONTHS[bsToday.month - 1]} ${bsToday.year} for this client and carries the previous period's closing count into it as opening stock, the same way Close & Start Next does.`} width={280}>
+                                    <button
+                                      onClick={() => adminCreatePeriod(c.id)}
+                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-green) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 30%, transparent)', color: 'var(--theme-green-text)' }}
+                                    >
+                                      + Create Period
+                                    </button>
+                                  </Tip>
                                 )}
                               </>
                             )}
@@ -913,7 +1059,7 @@ export default function Periods() {
                               <button
                                 className="btn btn-primary"
                                 style={{ fontSize: 12, padding: '5px 12px' }}
-                                onClick={() => saveEdit(p.id)}
+                                onClick={() => saveEdit(p)}
                                 disabled={saving}
                               >
                                 {saving ? 'Saving…' : 'Save'}
@@ -954,9 +1100,14 @@ export default function Periods() {
                               )}
                               {/* Backfills POS bills whose revenue and stock never reached IMS
                                   because no period was open for their date (S573). Available on
-                                  any period, open or closed — the whole point is that the period
-                                  didn't exist when the bills were rung. */}
-                              {posEnabled && (
+                                  any period for admin, open or closed — the whole point is that
+                                  the period didn't exist when the bills were rung. For everyone
+                                  else it follows the lock every IMS entry page spells
+                                  (`!isAdmin && closed` — closed-periods.md): this writes
+                                  sales_entries and stock_movements, and it was the one control
+                                  on the page that let an Owner or an IMS supervisor write into a
+                                  closed month (S738). */}
+                              {posEnabled && (isAdmin || p.status === 'open') && (
                                 <Tip text="Posts POS bills from this month that closed while no Inventory period existed — their revenue and ingredient usage are missing from Inventory reports until this runs. Safe to run more than once; already-posted bills are skipped." width={300}>
                                   <button
                                     className="btn btn-ghost"
@@ -1005,8 +1156,10 @@ export default function Periods() {
                                       className="btn btn-ghost"
                                       style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' }}
                                       onClick={() => resyncOpeningStock(p)}
+                                      disabled={resyncBusy === p.id}
+                                      aria-busy={resyncBusy === p.id}
                                     >
-                                      Resync Opening Stock →
+                                      {resyncBusy === p.id ? 'Resyncing…' : 'Resync Opening Stock →'}
                                     </button>
                                   </Tip>
                                   <Tip text="Hands data entry for this month back to the CLIENT'S own logins — blocked whenever a later period is already open (only one period can be open per client). Admin does not need it: use Add missing bills for a purchase that was missed, or Resync Opening Stock for a corrected count." width={300}>

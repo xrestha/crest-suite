@@ -11,7 +11,10 @@ jest.mock('../../modules/ownerReport/generateMonthlyReport', () => ({
 import { supabase } from '../../supabaseClient'
 import { scopedFrom, scopedInsert, scopedUpdate } from '../../shared/scopedDb'
 import { generateMonthlyReport, saveGeneratedReport } from '../../modules/ownerReport/generateMonthlyReport'
-import { performPeriodClose, closeFailureText, payrollNote, nextBsMonth } from './closePeriod'
+import {
+  performPeriodClose, closeFailureText, payrollNote, nextBsMonth,
+  nextExistingPeriod, previousExistingPeriod, carryForwardOpeningStock, createPeriodWithCarryForward,
+} from './closePeriod'
 
 const PERIOD = { id: 'p-bhadra', bs_year: 2083, bs_month: 5 }
 
@@ -46,6 +49,87 @@ describe('nextBsMonth', () => {
   test('rolls Chaitra into the next BS year', () => {
     expect(nextBsMonth({ bs_year: 2083, bs_month: 12 })).toEqual({ bs_year: 2084, bs_month: 1 })
     expect(nextBsMonth(PERIOD)).toEqual({ bs_year: 2083, bs_month: 6 })
+  })
+})
+
+describe('chronological neighbours', () => {
+  // S738: "the next period" is the next one that EXISTS, never bs_month + 1. A client that was
+  // ended in Bhadra and re-created in Kartik has no Ashwin; the repair button pointed at Ashwin.
+  const LIST = [
+    { id: 'kartik', bs_year: 2083, bs_month: 7 },
+    { id: 'bhadra', bs_year: 2083, bs_month: 5 },
+    { id: 'chaitra-82', bs_year: 2082, bs_month: 12 },
+    { id: 'ashadh-82', bs_year: 2082, bs_month: 3 },
+  ]
+  test('nextExistingPeriod skips the gap and crosses the year boundary', () => {
+    expect(nextExistingPeriod(LIST, LIST[1]).id).toBe('kartik')
+    expect(nextExistingPeriod(LIST, LIST[2]).id).toBe('bhadra')
+    expect(nextExistingPeriod(LIST, LIST[0])).toBeNull()
+  })
+  test('previousExistingPeriod is the latest earlier one, whatever order the list is in', () => {
+    const shuffled = [LIST[3], LIST[0], LIST[2], LIST[1]]
+    expect(previousExistingPeriod(shuffled, LIST[0]).id).toBe('bhadra')
+    expect(previousExistingPeriod(shuffled, { bs_year: 2083, bs_month: 1 }).id).toBe('chaitra-82')
+    expect(previousExistingPeriod(shuffled, LIST[3])).toBeNull()
+  })
+  test('a period is never its own neighbour', () => {
+    expect(nextExistingPeriod(LIST, { bs_year: 2083, bs_month: 5 })?.id).toBe('kartik')
+    expect(previousExistingPeriod(LIST, { bs_year: 2083, bs_month: 5 })?.id).toBe('chaitra-82')
+  })
+})
+
+describe('carryForwardOpeningStock', () => {
+  test('reports how many rows it wrote, and 0 when the source month was never counted', async () => {
+    const upsert = jest.fn(() => builder({ error: null }))
+    supabase.from.mockReturnValue({
+      select: () => builder({ data: [{ item_id: 'i1', physical_qty: 0 }, { item_id: 'i2', physical_qty: null }, { item_id: 'i3', physical_qty: 7 }], error: null }),
+      upsert,
+    })
+    // A count of 0 IS a count (a row) — it carries; null is "not counted" and does not.
+    expect(await carryForwardOpeningStock('p-old', 'p-new')).toEqual({ error: null, carried: 2 })
+    expect(upsert.mock.calls[0][0]).toHaveLength(2)
+    supabase.from.mockReturnValue({ select: () => builder({ data: [{ item_id: 'i2', physical_qty: null }], error: null }), upsert })
+    expect(await carryForwardOpeningStock('p-old', 'p-new')).toEqual({ error: null, carried: 0 })
+    expect(upsert).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('createPeriodWithCarryForward', () => {
+  // S738: a period minted by hand used to open with no opening stock and say nothing, while the
+  // close's own carry-forward ran for every month opened by Close & Start Next.
+  const LIST = [{ id: 'bhadra', bs_year: 2083, bs_month: 5 }, { id: 'shrawan', bs_year: 2083, bs_month: 4 }]
+
+  test('carries the previous EXISTING period forward into the new one, across a gap', async () => {
+    scopedInsert.mockResolvedValue({ data: { id: 'kartik' }, error: null })
+    const upsert = jest.fn(() => builder({ error: null }))
+    supabase.from.mockReturnValue({ select: () => builder({ data: [{ item_id: 'i1', physical_qty: 3 }], error: null }), upsert })
+    const r = await createPeriodWithCarryForward({ clientId: 'c1', periods: LIST, bs_year: 2083, bs_month: 7 })
+    expect(r).toEqual({ created: { id: 'kartik' }, error: null, carriedFrom: LIST[0], carried: 1, carryError: null })
+    expect(upsert.mock.calls[0][0]).toEqual([{ period_id: 'kartik', item_id: 'i1', qty: 3 }])
+  })
+
+  test('the earliest period on record has nothing to carry from, and says so rather than failing', async () => {
+    scopedInsert.mockResolvedValue({ data: { id: 'first' }, error: null })
+    const r = await createPeriodWithCarryForward({ clientId: 'c1', periods: [], bs_year: 2083, bs_month: 1 })
+    expect(r).toEqual({ created: { id: 'first' }, error: null, carriedFrom: null, carried: 0, carryError: null })
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  test('a failed insert carries nothing and surfaces the error', async () => {
+    scopedInsert.mockResolvedValue({ data: null, error: { code: '23505', message: 'one_open_per_client' } })
+    const r = await createPeriodWithCarryForward({ clientId: 'c1', periods: LIST, bs_year: 2083, bs_month: 7 })
+    expect(r.created).toBeNull()
+    expect(r.error.code).toBe('23505')
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  test('a failed carry-forward is reported against the period that now exists', async () => {
+    scopedInsert.mockResolvedValue({ data: { id: 'kartik' }, error: null })
+    supabase.from.mockReturnValue({ select: () => builder({ data: null, error: { message: 'Failed to fetch' } }), upsert: jest.fn() })
+    const r = await createPeriodWithCarryForward({ clientId: 'c1', periods: LIST, bs_year: 2083, bs_month: 7 })
+    expect(r.created).toEqual({ id: 'kartik' })
+    expect(r.carriedFrom).toEqual(LIST[0])
+    expect(r.carryError).toEqual({ message: 'Failed to fetch' })
   })
 })
 
@@ -146,7 +230,11 @@ describe('closeFailureText', () => {
   })
 
   test('open_next names the consequence and the recovery for each audience', () => {
-    expect(closeFailureText({ stage: 'open_next', period: PERIOD, isAdmin: true })).toMatch(/Create Period.*Resync Opening Stock/)
+    // S738: "+ Create Period" carries forward itself now, so the advice must not send the admin
+    // on to Resync — a second step that the month gap this text is written for used to break.
+    const admin = closeFailureText({ stage: 'open_next', period: PERIOD, isAdmin: true })
+    expect(admin).toMatch(/Create Period.*carries Bhadra 2083's closing count/)
+    expect(admin).not.toMatch(/Resync/)
     expect(closeFailureText({ stage: 'open_next', period: PERIOD, isAdmin: false })).toMatch(/contact your Crest consultant/i)
   })
 
