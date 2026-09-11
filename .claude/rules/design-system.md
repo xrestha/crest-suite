@@ -528,6 +528,28 @@ it got reported. Margin gives byte-identical clearance (a margin on the last chi
 padding on an `overflow: auto` element pushes its scrollbar away from the content it scrolls.**
 
 
+## The banner for a state already exists — grep before inventing one (S741)
+
+Two new amber banners on the Leave page were given a **3px rule down the left edge**, the side-tab
+accent. The design hook flagged it, and the check that settled the argument took one grep:
+`borderLeft: '3px solid` matched **twice in the whole codebase, and both were the new ones.**
+
+`PayrollRun.jsx`'s stale-draft card has been this product's amber banner since S570 — the whole
+border tinted to `var(--theme-amber) 35%`, an 8% fill, `role="alert"`, an amber-text headline over
+`--theme-text2` detail. Nothing about the new state was different enough to need a second form.
+
+Three things generalise past this instance:
+
+- **A visual form that appears exactly once in a product is not emphasis, it is drift** — and it is
+  hardest to see for the person who just wrote it, because the intent behind it is still fresh.
+  The grep is the cheap test and it is nearly free: one search for the property you reached for.
+- **Take the existing shape wholesale, or state what genuinely differs.** These two took it
+  wholesale, into one `amberBanner` constant with a comment naming `PayrollRun` as its origin, so
+  the third caller does not copy a screenshot of it. Same reasoning as the hand-rolled-`.stat-card`
+  rule above: an identical inline object at three sites has three chances to drift.
+- **A banner that announces a consequence needs `role="alert"`**, not just the colour. Both were
+  missing it; the card they were modelled on was not.
+
 ## A derived figure does not get its own mode (S702)
 
 Settings > Plan Pricing had a Monthly tab and an Annual tab. Annual is `annualOf(monthly)` — one
