@@ -795,10 +795,10 @@ export default function Periods() {
                               <>
                                 {openPeriod && (
                                   <button
-                                    title="Edit period"
+                                    title="Change which BS month this period IS. Everything recorded in it moves with it."
                                     onClick={() => { setEditingAllClientId(c.id); setEditAllForm({ bs_year: openPeriod.bs_year, bs_month: openPeriod.bs_month }); setEditAllError('') }}
-                                    style={{ fontSize: 13, padding: '4px 9px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent)', color: 'var(--theme-accent-ink)' }}
-                                  >✏</button>
+                                    style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent)', color: 'var(--theme-accent-ink)' }}
+                                  >Rename</button>
                                 )}
                                 {openPeriod ? (
                                   <>
@@ -1087,16 +1087,26 @@ export default function Periods() {
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
-                              {/* Edit pencil — open periods, admin only */}
+                              {/* Rename — open periods, admin only. A WORD, not a ✏ (S738b): the
+                                  raw U+270F dingbat has no colour-emoji face on Windows, so it
+                                  fell back to a hairline text glyph that read as a dash — the one
+                                  control on the row saying nothing at all, next to three that name
+                                  their verb. Every other inline row-edit in the product (Items,
+                                  Recipes, Purchases, Returns, Assets, Holidays, Overtime, Shift
+                                  Types) is a `btn btn-ghost` reading "Edit"; Vendors uses a real
+                                  lucide <Pencil/>. Neither is a bare codepoint. It says "Rename"
+                                  rather than "Edit" because that is the verb it performs — the
+                                  period keeps all its data and changes which month it IS. */}
                               {canEdit && isAdmin && (
-                                <button
-                                  className="btn btn-ghost"
-                                  title="Edit period"
-                                  style={{ fontSize: 13, padding: '5px 10px', lineHeight: 1, color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' }}
-                                  onClick={() => startEdit(p)}
-                                >
-                                  ✏
-                                </button>
+                                <Tip text="Change which BS month this period IS. Everything recorded in it — purchases, sales, stock counts, overheads, requisitions, attendance — moves with it and is reported under the new month." width={300}>
+                                  <button
+                                    className="btn btn-ghost"
+                                    style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' }}
+                                    onClick={() => startEdit(p)}
+                                  >
+                                    Rename
+                                  </button>
+                                </Tip>
                               )}
                               {/* Backfills POS bills whose revenue and stock never reached IMS
                                   because no period was open for their date (S573). Available on
