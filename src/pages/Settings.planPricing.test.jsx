@@ -91,15 +91,39 @@ beforeEach(() => {
 })
 
 describe('what the tab shows', () => {
-  it('seeds every field from the platform row, falling back per field', () => {
+  it('shows what is STORED, and leaves an unset price blank with the shipped figure behind it', () => {
     renderPlanPricing()
     // Set on the row.
     expect(priceInput(/Crest HR/i)).toHaveValue(2400)
     expect(priceInput(/Crest POS/i)).toHaveValue(2100)
-    // Never set — the shipped tiers, NOT the dead flat starter/growth/pro keys beside them.
-    expect(priceInput(/starter/i)).toHaveValue(DEFAULT_PLAN_PRICES.ims.starter)
-    expect(priceInput(/pro · monthly/i)).toHaveValue(DEFAULT_PLAN_PRICES.ims.pro)
-    expect(priceInput(/Crest Suite Pro/i)).toHaveValue(DEFAULT_PLAN_PRICES.suite)
+    // Never set: blank, with the shipped figure as the placeholder and named in the hint under the
+    // box — NOT seeded into the box, which made every field look like a saved decision and, with
+    // the old `'' → 0`, left no way back to the default: clearing a box published the plan as free.
+    // And not the dead flat starter/growth/pro keys sitting beside `ims` on the row either.
+    expect(priceInput(/starter/i)).toHaveValue(null)
+    expect(priceInput(/starter/i)).toHaveAttribute('placeholder', String(DEFAULT_PLAN_PRICES.ims.starter))
+    expect(priceInput(/Crest Suite Pro/i)).toHaveValue(null)
+    expect(screen.getAllByText(/Blank . the shipped NPR .* is quoted/).length).toBeGreaterThan(0)
+  })
+
+  it('restores the default when a stored price is cleared, rather than publishing 0', async () => {
+    renderPlanPricing()
+    fireEvent.change(priceInput(/Crest HR/i), { target: { value: '' } })
+    expect(priceInput(/Crest HR/i)).toHaveValue(null)
+    await clickSave()
+    // The key is GONE, so every reader falls back per field to the shipped figure. Writing 0 here
+    // would have been a real price, which resolvePricing and clientMrr both keep on purpose.
+    expect(mockSavePlatformPlanPrices.mock.calls[0][0]).not.toHaveProperty('hr')
+  })
+
+  it('asks before publishing an explicit 0, and writes nothing if cancelled', async () => {
+    renderPlanPricing()
+    fireEvent.change(priceInput(/Crest HR/i), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Plan Prices/i }))
+    await screen.findByText(/Publish HR at NPR 0/i)
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/i }))
+    await waitFor(() => expect(screen.queryByText(/Publish HR at NPR 0/i)).toBeNull())
+    expect(mockSavePlatformPlanPrices).not.toHaveBeenCalled()
   })
 
   // Each figure below is unique across the six fields, so a plain text query is unambiguous.
@@ -147,8 +171,12 @@ describe('where it saves', () => {
     await clickSave()
 
     const written = mockSavePlatformPlanPrices.mock.calls[0][0]
-    expect(Object.keys(written).sort()).toEqual(['hr', 'ims', 'pos', 'suite'])
-    expect(written.ims).toEqual(DEFAULT_PLAN_PRICES.ims)
+    // The two prices the row actually holds, under `ims`/`hr`/`pos`/`suite` only — never the flat
+    // `starter`/`growth`/`pro` keys the JSONB column's original DEFAULT left behind. A price the
+    // admin has never set is ABSENT rather than written at its shipped figure, which is what lets a
+    // cleared box mean "use the default": resolvePricing and clientMrr both fall back per field.
+    expect(Object.keys(written).sort()).toEqual(['hr', 'ims', 'pos'])
+    expect(written.ims).toEqual({})
   })
 
   // The page-level Save commits `form` to the viewed client's row, which is the one place a

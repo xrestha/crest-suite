@@ -138,6 +138,64 @@ function applyTheme(t) {
 // `system` is deliberately NOT a member of PRESETS: it has no palette of its own, and PRESETS is
 // a map of real hex values that colour work (and any contrast check over it) iterates. It is a
 // MODE that resolves to one of them.
+// ── Deriving the accent's siblings (Settings → Theme offers 10 swatches; the palette has ~20) ──
+// Kept as plain functions over hex so they are testable and so applyTheme stays a list of
+// assignments. `--theme-accent-hover` and `--theme-focus-ring` have NO fallback in applyTheme, so
+// they must always be present on a custom theme: an unset CSS variable makes every rule that reads
+// it resolve to nothing, which is a broken hover rather than a flat one.
+const hexToRgb = h => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(h || ''))
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+const toHex = rgb => '#' + rgb.map(c => Math.max(0, Math.min(255, Math.round(c))).toString(16).padStart(2, '0')).join('')
+const mixTo = (rgb, target, amt) => rgb.map((c, i) => c + (target[i] - c) * amt)
+// WCAG relative luminance and contrast ratio — the same formulas the palette was tuned against.
+const relLum = ([r, g, b]) => {
+  const f = c => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+}
+const ratio = (a, b) => {
+  const [hi, lo] = relLum(a) > relLum(b) ? [relLum(a), relLum(b)] : [relLum(b), relLum(a)]
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+/** `rgba()` tint of a hex colour — the shape --theme-focus-ring holds in every preset. */
+export function tintOf(hex, alpha) {
+  const rgb = hexToRgb(hex)
+  return rgb ? `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})` : `rgba(0,0,0,${alpha})`
+}
+
+/** Hover shift, in the direction each preset already shifts its own: lighter on a dark accent, darker on a light one. */
+export function hoverOf(hex) {
+  const rgb = hexToRgb(hex)
+  if (!rgb) return hex
+  return toHex(relLum(rgb) < 0.4 ? mixTo(rgb, [255, 255, 255], 0.28) : mixTo(rgb, [0, 0, 0], 0.16))
+}
+
+/**
+ * The accent darkened (or lightened) until it clears 4.5:1 as TEXT on the given surface — what the
+ * presets author by hand as `accentInk` and what --theme-accent-ink / --theme-focus-outline read.
+ * Returns the accent itself when it already clears, and gives up at pure black/white rather than
+ * looping: an accent on a mid-grey card can have no legible version of itself, and a 4.4:1 ink is
+ * still far better than the previous accent's.
+ */
+export function legibleInk(accentHex, surfaceHex) {
+  const accent = hexToRgb(accentHex)
+  const surface = hexToRgb(surfaceHex)
+  if (!accent) return accentHex
+  if (!surface) return accentHex
+  if (ratio(accent, surface) >= 4.5) return accentHex
+  const target = relLum(surface) > 0.45 ? [0, 0, 0] : [255, 255, 255]
+  let best = accent
+  for (let amt = 0.05; amt <= 1.0001; amt += 0.05) {
+    best = mixTo(accent, target, amt)
+    if (ratio(best, surface) >= 4.5) break
+  }
+  return toHex(best)
+}
+
 export const SYSTEM_KEY = 'system'
 const SYSTEM_PAIR = { dark: 'dark', light: 'light' }
 
@@ -262,6 +320,20 @@ export function ThemeProvider({ children }) {
 
   function updateColor(colorKey, value) {
     const updated = { ...colors, [colorKey]: value }
+    // The accent is three tokens, not one. `colors` here is the RESOLVED object, so a plain spread
+    // carried the PREVIOUS accent's `accentInk` into the custom theme as if it had been authored —
+    // and Settings → Theme offers no control for it. The result: the buttons changed colour and
+    // every accent-coloured piece of TEXT did not. Set the accent to green on Light and the active
+    // tab, the links, the ⬢ mark and the focus outline all stayed #7c1405 crimson, permanently.
+    // Re-derive instead: the ink darkened (or lightened) until it is legible as type on the card,
+    // the hover shifted the way each preset shifts its own, and the focus tint re-tinted.
+    if (colorKey === 'accent') {
+      updated.accentInk = legibleInk(value, updated.card)
+      updated.accentHover = hoverOf(value)
+      updated.focusRing = tintOf(value, 0.15)
+    }
+    // The same applies in reverse: re-grounding the card can leave a derived ink unreadable on it.
+    if (colorKey === 'card' && colors.accent) updated.accentInk = legibleInk(updated.accent, value)
     setColors(updated)
     setThemeKey('custom')
     localStorage.setItem('crest_theme', JSON.stringify({ key: 'custom', colors: updated, schema: THEME_SCHEMA }))

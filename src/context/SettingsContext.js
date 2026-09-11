@@ -208,6 +208,10 @@ export function SettingsProvider({ children }) {
   // Same guard as saveSettings, and both writes now report: this is the admin's "save this
   // client's settings" path, and it used to return successfully whatever the database did (S682).
   async function saveClientSettings(cid, updates) {
+    // The same strip saveSettings() does, and for the same reasons: callers hand this whole rows
+    // read with select('*'), so without it an UPDATE carried the primary key, the client_id and
+    // created_at, and `plan_prices` (which has its own writer) rode along in the general one.
+    const { id: _id, client_id: _cid, created_at: _ca, updated_at: _ua, plan_prices: _pp, ...payload } = updates
     const { data: existing, error: exErr } = await supabase
       .from('settings')
       .select('id')
@@ -216,10 +220,10 @@ export function SettingsProvider({ children }) {
     if (exErr) throw new Error(errorLine(exErr))
 
     if (existing?.id) {
-      const { error } = await supabase.from('settings').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', existing.id)
+      const { error } = await supabase.from('settings').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', existing.id)
       if (error) throw new Error(errorLine(error))
     } else {
-      const { error } = await supabase.from('settings').insert({ ...updates, client_id: cid })
+      const { error } = await supabase.from('settings').insert({ ...payload, client_id: cid })
       if (error) throw new Error(errorLine(error))
     }
   }

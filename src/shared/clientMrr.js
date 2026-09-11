@@ -56,7 +56,13 @@ export function clientMrrBreakdown(c, planPrices) {
 
   const lines = []
   if (imsActive) {
-    const amount = monthlyRate(imsPrices[c.plan] || 0, c.billing_cycle)
+    // `??` per TIER, the way resolvePricing() falls back per field, and NOT `|| 0`: a tier the
+    // admin has left blank in Settings → Plan Pricing is absent from the stored table, and `|| 0`
+    // read that as free — so every Starter client's MRR was 0 here while the pricing page the
+    // buyer reads printed the shipped figure. `??` keeps a deliberate 0 (see below) and falls back
+    // only on absent/null.
+    const tierPrice = imsPrices[c.plan] ?? DEFAULT_PLAN_PRICES.ims[c.plan] ?? 0
+    const amount = monthlyRate(tierPrice, c.billing_cycle)
     // A Starter tier priced at 0 is a real configuration, so it is listed rather than dropped —
     // "IMS · Starter, NPR 0" is information; a missing line would read as IMS being off.
     lines.push({ key: 'ims', label: `IMS · ${c.plan || 'starter'}`, amount })

@@ -1033,3 +1033,37 @@ rule, arrived at from the other direction. So the row carries the pointer handle
 cursor, and a separate focusable grip holding only an icon carries `role="button"`, the arrow keys
 and the focus ring. That ring is why the grip is a CLASS: `:focus-visible` has no inline form, so
 an inline-styled grip would have fallen back to the UA outline the rest of the product replaced.
+
+## The accent is three tokens, and the Theme tab only offered one of them (S739)
+
+Settings → Theme exposes 10 swatches over a palette of ~20, which is a reasonable editing surface —
+but `accentInk`, `accentHover` and `focusRing` all hang off the accent and **both presets author
+`accentInk` explicitly**. `updateColor` is handed the RESOLVED colours object, so
+`{ ...colors, accent: next }` wrote the PREVIOUS accent's ink into the custom theme as if it had been
+chosen: the buttons changed colour and every accent-coloured piece of TEXT — active tab, links, the
+⬢ mark, and `--theme-focus-outline`, which resolves from `accentInk` too — stayed the old hue
+permanently, with no control anywhere to correct it. Set the accent to green on Modernist Light and
+the accent text stays `#7c1405` crimson. That is the One Accent Rule broken by the only control the
+product offers for it.
+
+`updateColor` re-derives all three now (`legibleInk`/`hoverOf`/`tintOf`, exported from
+`ThemeContext.js` so they are testable over hex). Three things that matter if they are ever retuned:
+
+- **`accentHover` and `focusRing` have NO fallback in `applyTheme`**, unlike the five `*-text`
+  variants. Leaving either undefined on a custom theme unsets the CSS variable, and every rule
+  reading it then resolves to nothing — a broken hover, not a flat one. A derived token must always
+  be written, never deleted.
+- **The ink is derived by measurement, not by a fixed darkening step.** `legibleInk(accent, card)`
+  mixes toward black (or toward white on a dark card) until the pair clears 4.5:1, and returns the
+  accent unchanged when it already does. Verified over real inputs: green on Light 1.88 → 4.71,
+  yellow 1.26 → 4.59, navy on Night 1.53 → 4.58. It gives up at pure black/white rather than
+  looping, because an accent on a mid-grey card can have no legible version of itself.
+- **A derived ink is not as good as an authored one, and the UI says so.** The presets' inks are
+  hand-tuned for AA on three grounds AND for red-green colour blindness (S608/S683); a derivation
+  only clears the contrast half. `switchPreset` resolves from `PRESETS` and never goes through this
+  path, so a preset keeps its authored values — and the Theme tab now states plainly that a custom
+  palette is not contrast-checked, with Reset beside it.
+
+**The general shape: a control that edits one token of a derived cluster must re-derive the cluster,
+or it leaves the product in a state no other control can reach.** Before adding a swatch, check
+`applyTheme` for which tokens fall back and which do not.

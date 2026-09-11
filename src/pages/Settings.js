@@ -8,7 +8,7 @@ import Tip from '../components/Tip'
 import { MODULE_INK, DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
 import { assignMissingProductCodes, SUB_RECIPE_CATEGORY } from '../shared/productCode'
 import { useConfirm } from '../shared/hooks/useConfirm'
-import { Navigate } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import SupportContactLine from '../components/SupportContactLine'
 import ActionError, { asActionError } from '../components/ActionError'
 import FieldError, { fieldAria } from '../components/FieldError'
@@ -36,13 +36,48 @@ const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Co
 // manager's save had reported success, and so did the owner's. Every other tab on this page has
 // its own writer for the same reason (Support → the platform row, Plan Pricing → the platform
 // row, Recipe Categories → one column); this list is what makes the page-level button one too.
+// The per-client consultant, edited on the Support tab's LOWER card. Its own list because that
+// card has its own Save (S684) and must commit these three columns and nothing else — and because
+// leaving them out of PAGE_FIELDS entirely is what broke it: `save()` walks PAGE_FIELDS, so from
+// S730 until this was found the patch was always empty, the write was skipped by
+// `if (Object.keys(patch).length)`, and the button still reported "✓ Saved". The fields are read
+// on Help → Support, PremiumGate's upsell card and SubscriptionLock's lock screen
+// (resolveSupportContact's `client` half), so the consultant override simply stopped existing.
+export const CONSULTANT_FIELDS = ['contact_phone', 'contact_email', 'contact_website']
+
+// Which columns each TAB owns. The page-level Save writes the union over the tabs the viewer
+// actually has, which is what keeps the threshold validation self-limiting: an admin has no
+// Thresholds tab, so a stored 0 or an inverted warn/critical pair on the client's row is not theirs
+// to fix and cannot refuse their branding save. Reading the scope off the visible tabs also means a
+// new tab cannot quietly inherit another tab's columns.
+export const TAB_FIELDS = {
+  Branding: ['app_name', 'app_tagline', 'logo_url'],
+  Property: ['property_address', 'property_phone', 'property_email', 'vat_number', 'invoice_prefix', 'is_vat_registered'],
+  Thresholds: ['fc_warning_pct', 'fc_critical_pct', 'expiry_warning_days', 'variance_flag_pct',
+               'block_negative_stock', 'warn_below_cost_pricing'],
+  'Item Codes': ['item_code_prefix'],
+  'Vendor Codes': ['vendor_code_prefix'],
+  'Sub-Recipe Codes': ['sub_recipe_code_prefix'],
+  Support: CONSULTANT_FIELDS,
+  // Nothing for the page button to write: one action, a per-device theme, reference prose, and two
+  // cards that commit the PLATFORM row through their own savers.
+  'Product Codes': [], 'Recipe Categories': [], 'Plan Pricing': [], Data: [], Theme: [], Guides: [],
+}
 export const PAGE_FIELDS = [
   'app_name', 'app_tagline', 'logo_url',
   'property_address', 'property_phone', 'property_email', 'vat_number', 'invoice_prefix', 'is_vat_registered',
   'fc_warning_pct', 'fc_critical_pct', 'expiry_warning_days', 'variance_flag_pct',
   'block_negative_stock', 'warn_below_cost_pricing',
   'item_code_prefix', 'vendor_code_prefix', 'sub_recipe_code_prefix',
+  ...CONSULTANT_FIELDS,
 ]
+// Every tab's columns must have a home in PAGE_FIELDS, or the seed below stops preserving an unsaved
+// edit on that tab across a reseed and the field silently reverts under the typist.
+if (process.env.NODE_ENV !== 'production') {
+  for (const [t, fields] of Object.entries(TAB_FIELDS)) {
+    for (const f of fields) if (!PAGE_FIELDS.includes(f)) throw new Error(`Settings: ${t} owns ${f}, which is not in PAGE_FIELDS`)
+  }
+}
 // Tabs whose fields ride on that button. Recipe Categories, Theme and Product Codes have nothing
 // for it to save — Categories has its own Save, Theme is per-device, Product Codes is one action —
 // so a Save Changes button there wrote a row for no reason and, on Categories, wrote the STALE
@@ -94,7 +129,7 @@ export default function Settings() {
   const { settings, saveSettings, loadSettings, recipeCategories, platformSupport, savePlatformSupport,
           planPrices, savePlatformPlanPrices } = useSettings()
   const { ask: askConfirm, confirmEl } = useConfirm()
-  const { clientId, isAdmin, hasFeature, hasImsAccess } = useAuth()
+  const { clientId, isAdmin, adminViewClientName, hasFeature, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
   const ADMIN_TABS = new Set(['Branding', 'Property', 'Support', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
@@ -106,7 +141,17 @@ export default function Settings() {
     if (t === 'Recipe Categories' && !hasFeature('recipe_costing')) return false
     return true
   })
+  // WHOSE row this page is editing, which is not the same question as "is the viewer an admin".
+  // `settings` is one row per client plus one platform row (client_id NULL), and an admin reaches
+  // either depending on whether a client is selected in the top bar. Branding and Property labelled
+  // themselves off `isAdmin` instead, so an admin viewing a client edited that client's white-label
+  // brand — their sidebar, top bar and recipe cost cards (Layout.js: "this is the CUSTOMER's
+  // brand") — under the label "App Name" with "Crest Suite" in the placeholder.
+  const editingClient = !!clientId
+  const rowLabel = editingClient ? (adminViewClientName || 'this client') : 'Crest itself'
   const [activeTab, setActiveTab] = useState(isAdmin ? 'Branding' : 'Thresholds')
+  // The columns the page-level Save may write: the union over the tabs this viewer has.
+  const visibleFields = TABS.flatMap(t => TAB_FIELDS[t] || [])
   const [form, setForm] = useState({ ...settings })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -156,7 +201,12 @@ export default function Settings() {
   // row and not on whichever client is being viewed. Editing it through `form`/`save()` wrote it
   // onto the VIEWED client's settings row, where nothing reads it — the save reported success and
   // the price everyone sees never moved.
-  const [priceForm, setPriceForm] = useState(DEFAULT_PLAN_PRICES)
+  // Seeded from what is STORED, with absent left absent — a blank box is "use the shipped figure",
+  // which is the state a row that has never been edited is actually in. Seeding the defaults INTO
+  // the boxes instead made every field look like a saved decision and, with `'' → 0` on the way
+  // back out, left no way to return a price to its default: clearing a box published NPR 0, and 0
+  // is a real price that survives every reader on purpose (withMonthly, clientMrr).
+  const [priceForm, setPriceForm] = useState({ ims: {} })
   const [priceSaving, setPriceSaving] = useState(false)
   const [priceMsg, setPriceMsg] = useState('')
   const priceSeedRef = useRef(null)
@@ -166,11 +216,14 @@ export default function Settings() {
     // IMS tiers moved under `ims`. Nothing has read those in a long time; spreading the row would
     // carry them into every future save and keep three dead prices sitting next to four live ones.
     const stored = planPrices || {}
+    const storedIms = stored.ims || {}
     const next = {
-      ims:   { ...DEFAULT_PLAN_PRICES.ims, ...(stored.ims || {}) },
-      hr:    stored.hr ?? DEFAULT_PLAN_PRICES.hr,
-      pos:   stored.pos ?? DEFAULT_PLAN_PRICES.pos,
-      suite: stored.suite ?? DEFAULT_PLAN_PRICES.suite,
+      ims: Object.fromEntries(['starter', 'growth', 'pro']
+        .filter(t => typeof storedIms[t] === 'number')
+        .map(t => [t, storedIms[t]])),
+      ...(typeof stored.hr === 'number' ? { hr: stored.hr } : {}),
+      ...(typeof stored.pos === 'number' ? { pos: stored.pos } : {}),
+      ...(typeof stored.suite === 'number' ? { suite: stored.suite } : {}),
     }
     const key = JSON.stringify(next)
     if (key === priceSeedRef.current) return
@@ -295,9 +348,9 @@ export default function Settings() {
   }
 
   // The fields this page owns that differ from the stored row, typed for the column.
-  function pagePatch() {
+  function pagePatch(fields = PAGE_FIELDS) {
     const patch = {}
-    for (const k of PAGE_FIELDS) {
+    for (const k of fields) {
       if (!(k in form)) continue
       let v = form[k]
       if (k in NUMERIC_FIELDS) v = toNumberOrNull(v, NUMERIC_FIELDS[k])
@@ -307,17 +360,70 @@ export default function Settings() {
     return patch
   }
 
-  async function save() {
+  // The two Property fields that rewrite documents ALREADY ISSUED, and are therefore worth a
+  // confirmation rather than a tooltip. `pos_orders` stores only `invoice_no` and `invoice_fy`; the
+  // printed document number is assembled at PRINT time from the settings row that is current when
+  // the bill is reprinted (posOrderPrintHtml.js), so neither of these edits is forward-only:
+  //   * `invoice_prefix` — every past bill's number changes with it, TI2238-CAC-82/83 → …-CASA-….
+  //   * `is_vat_registered` — the TI/PB prefix AND the VAT breakdown are both resolved the same
+  //     way, so switching it off reprints a tax invoice as a PAN bill, number included.
+  // Changing either is legitimate (a client registers for VAT, or the code was typed wrong on day
+  // one); doing it without being told it reaches history is not.
+  function retroWarnings(patch) {
+    const out = []
+    if ('invoice_prefix' in patch && (settings.invoice_prefix || '')) {
+      out.push(`Every bill this client has already issued reprints with the new code — ${settings.invoice_prefix} becomes ${patch.invoice_prefix || '(blank)'} on past invoices as well as new ones, because the number is assembled when a bill is printed, not when it is billed.`)
+    }
+    if ('is_vat_registered' in patch) {
+      out.push(patch.is_vat_registered
+        ? 'Past bills printed as plain PAN bills will reprint as Tax Invoices (PB→TI) with a VAT breakdown added, since the bill type is decided when a bill is printed.'
+        : 'Past Tax Invoices will reprint as plain PAN bills (TI→PB) with the VAT breakdown removed, since the bill type is decided when a bill is printed.')
+    }
+    return out
+  }
+
+  // `fields` scopes the write to the card that asked for it: the header button owns PAGE_FIELDS,
+  // the Support tab's consultant card owns CONSULTANT_FIELDS (S684 — two cards, two Saves, never
+  // one button committing the other's fields).
+  async function save({ fields = PAGE_FIELDS } = {}) {
     if (saving) return  // the button stays enabled while busy (DESIGN.md), so this is the guard
     setError('')
-    const errs = validateThresholds(form)
-    setFieldErr(errs)
-    if (Object.keys(errs).length) {
-      setActiveTab('Thresholds')
-      setError('Nothing was saved — a threshold needs correcting first (marked below).')
+    // Only when a threshold is actually in scope. It used to run on every save, against the values
+    // in the STORED row — so an admin, who has no Thresholds tab at all, was refused a Branding or
+    // consultant save over a client's pre-S730 row holding a 0 or a critical level below its
+    // warning level (both saved happily until S730 began refusing them), and was then sent to
+    // `setActiveTab('Thresholds')`: a tab absent from ADMIN_TABS, so no tab rendered as selected
+    // and the panel appeared with nothing above it.
+    const inScope = fields.some(k => k in NUMERIC_FIELDS)
+    if (inScope) {
+      const errs = validateThresholds(form)
+      setFieldErr(errs)
+      if (Object.keys(errs).length) {
+        if (TABS.includes('Thresholds')) setActiveTab('Thresholds')
+        setError('Nothing was saved — a threshold needs correcting first (marked below).')
+        return
+      }
+    }
+    const patch = pagePatch(fields)
+    const warnings = retroWarnings(patch)
+    if (warnings.length) {
+      askConfirm({
+        title: warnings.length > 1 ? 'Change the bill type and the invoice code?' : ('is_vat_registered' in patch ? 'Change the bill type?' : 'Change the invoice code?'),
+        confirmLabel: 'Save anyway', danger: true, busyLabel: 'Saving…',
+        body: (
+          <>
+            {warnings.map((w, i) => <p key={i} style={{ margin: i ? '0 0 8px' : '0 0 8px' }}>{w}</p>)}
+            <p style={{ margin: 0 }}>Nothing else on this tab is affected.</p>
+          </>
+        ),
+        run: () => commitPatch(patch),
+      })
       return
     }
-    const patch = pagePatch()
+    await commitPatch(patch)
+  }
+
+  async function commitPatch(patch) {
     setSaving(true)
     try {
       if (Object.keys(patch).length) await saveSettings(patch)
@@ -343,8 +449,39 @@ export default function Settings() {
     setPlatformSaving(false)
   }
 
+  // Which prices are about to be published as free. 0 is a legitimate configuration and every
+  // reader keeps it deliberately, so it cannot be validated away — but it is also one keystroke
+  // from a cleared box, so it is named before it is committed.
+  function zeroPrices(pf) {
+    const out = []
+    for (const t of ['starter', 'growth', 'pro']) if (pf.ims?.[t] === 0) out.push(`IMS ${t}`)
+    if (pf.hr === 0) out.push('HR')
+    if (pf.pos === 0) out.push('POS')
+    if (pf.suite === 0) out.push('Crest Suite Pro')
+    return out
+  }
+
   async function savePrices() {
     if (priceSaving) return  // the button stays enabled while busy (DESIGN.md), so this is the guard
+    const zeros = zeroPrices(priceForm)
+    if (zeros.length) {
+      askConfirm({
+        title: zeros.length === 1 ? `Publish ${zeros[0]} at NPR 0?` : `Publish ${zeros.length} plans at NPR 0?`,
+        confirmLabel: 'Publish', danger: true, busyLabel: 'Saving…',
+        body: (
+          <>
+            <p style={{ margin: '0 0 8px' }}><strong>{zeros.join(', ')}</strong> {zeros.length === 1 ? 'is' : 'are'} set to 0, which is a real price: the public pricing page prints NPR 0, and every MRR and ARR figure counts it as nothing.</p>
+            <p style={{ margin: 0 }}>To restore the shipped figure instead, clear the box and leave it blank.</p>
+          </>
+        ),
+        run: () => commitPrices(),
+      })
+      return
+    }
+    await commitPrices()
+  }
+
+  async function commitPrices() {
     setPriceSaving(true); setPriceMsg('')
     try {
       await savePlatformPlanPrices(priceForm)
@@ -356,33 +493,70 @@ export default function Settings() {
     setPriceSaving(false)
   }
 
+  // The stored URL carries a version, because the object path does not. `upsert: true` writes the
+  // replacement to the SAME path, and getPublicUrl() returns the same URL for it — so with Storage's
+  // default one-hour cacheControl a client who had already loaded the old logo went on seeing it,
+  // and the admin's second upload looked like it had done nothing. The `?v=` makes the URL change
+  // when the file does, which also makes a long cache life correct rather than risky.
+  const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/svg+xml': 'svg', 'image/webp': 'webp' }
+
   async function handleLogoUpload(file) {
     if (file.size > 2 * 1024 * 1024) { setLogoMsg('error:File must be under 2MB.'); return }
+    // Keyed off the mime type, not file.name — a file with no dot in its name made `.pop()` return
+    // the whole name and wrote `<client>/logo.mylogo`.
+    const ext = LOGO_EXT[file.type] || (file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : 'png')
     setLogoUploading(true); setLogoMsg('')
-    const ext  = file.name.split('.').pop().toLowerCase()
     const path = `${clientId || 'admin'}/logo.${ext}`
-    const { error: uploadErr } = await supabase.storage.from('Logos').upload(path, file, { upsert: true, contentType: file.type })
+    const { error: uploadErr } = await supabase.storage.from('Logos')
+      .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '31536000' })
     if (uploadErr) { setLogoMsg('error:' + uploadErr.message); setLogoUploading(false); return }
     const { data: { publicUrl } } = supabase.storage.from('Logos').getPublicUrl(path)
-    setForm(f => ({ ...f, logo_url: publicUrl }))
+    const versioned = `${publicUrl}?v=${Date.now()}`
+    const previous = form.logo_url
+    setForm(f => ({ ...f, logo_url: versioned }))
     try {
-      await saveSettings({ logo_url: publicUrl })
+      await saveSettings({ logo_url: versioned })
       setLogoMsg('ok:Logo saved.')
       setTimeout(() => setLogoMsg(''), 3000)
     } catch (e) {
+      setForm(f => ({ ...f, logo_url: previous }))
       setLogoMsg('error:The file uploaded, but the row still points at the old logo. ' + e.message)
     }
     setLogoUploading(false)
   }
 
-  async function handleLogoRemove() {
-    setForm(f => ({ ...f, logo_url: null }))
-    setLogoMsg('')
-    try {
-      await saveSettings({ logo_url: null })
-    } catch (e) {
-      setLogoMsg('error:' + e.message)
-    }
+  function handleLogoRemove() {
+    // Destructive enough to ask: the preview, the client's sidebar and their printed cost cards all
+    // lose the mark, and the file itself goes with it.
+    askConfirm({
+      title: 'Remove the logo?',
+      confirmLabel: 'Remove', danger: true, busyLabel: 'Removing…',
+      body: <p style={{ margin: 0 }}>{editingClient ? <>This client falls back</> : <>Crest falls back</>} to the default ⬢ mark everywhere the logo appears. A new one can be uploaded at any time.</p>,
+      run: async () => {
+        const previous = form.logo_url
+        setForm(f => ({ ...f, logo_url: null }))
+        setLogoMsg('')
+        try {
+          await saveSettings({ logo_url: null })
+        } catch (e) {
+          // Put the preview back: it showed no logo while the row still held one.
+          setForm(f => ({ ...f, logo_url: previous }))
+          setLogoMsg('error:The logo is still in place — the change did not save. ' + e.message)
+          return
+        }
+        // Best effort, and deliberately quiet: the column is cleared, so the logo is gone from
+        // every screen whatever Storage says, and there is no action the admin could take on a
+        // failure here. Without it the file stayed publicly readable at its own URL after Remove.
+        const stored = String(previous || '')
+        const marker = '/Logos/'
+        const i = stored.indexOf(marker)
+        if (i !== -1) {
+          const objectPath = stored.slice(i + marker.length).split('?')[0]
+          const { error: rmErr } = await supabase.storage.from('Logos').remove([decodeURIComponent(objectPath)])
+          if (rmErr) console.error('Logo file not deleted from Storage:', rmErr.message)
+        }
+      },
+    })
   }
 
   // One write per row, stopping at the first failure and saying how far it got. Every row's
@@ -609,8 +783,11 @@ export default function Settings() {
         <div>
           <h1 className="page-title">Settings</h1>
           <p className="page-subtitle">
+            {/* Three of these are NOT per-client, and saying they were is how a price ended up
+                written onto a client's row (S701). Plan Pricing is the platform's one price list,
+                Theme is this browser, Guides is reference prose — the subtitle now says which. */}
             {isAdmin
-              ? 'Branding, property, the support contact, plan pricing, data and theme for the client you are viewing'
+              ? <>Branding, property and the consultant for <strong>{rowLabel}</strong> · plan pricing for the whole platform · theme for this browser</>
               : 'Operational thresholds, code formats, recipe categories and your theme'}
           </p>
         </div>
@@ -618,9 +795,11 @@ export default function Settings() {
             their own rows: measured, the nearest Save to the consultant fields was the OTHER
             card's, 243px away, while the button that saved them sat 1,345px up (S684); Plan
             Pricing writes the platform row, which this button must never (S701). S730 took it off
-            Recipe Categories, Product Codes and Theme too — see PAGE_SAVE_TABS. */}
-        {PAGE_SAVE_TABS.has(activeTab) && (
-          <button className="btn btn-primary" onClick={save} aria-busy={saving ? 'true' : undefined}>
+            Recipe Categories, Product Codes and Theme too — see PAGE_SAVE_TABS. And not on
+            Property with no client selected: nothing on that tab is read off the platform row, so
+            the button could only ever report success over a write that moved nothing. */}
+        {PAGE_SAVE_TABS.has(activeTab) && !(activeTab === 'Property' && !editingClient) && (
+          <button className="btn btn-primary" onClick={() => save({ fields: visibleFields })} aria-busy={saving ? 'true' : undefined}>
             {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
           </button>
         )}
@@ -677,16 +856,29 @@ export default function Settings() {
       {activeTab === 'Branding' && (
         <div className="card">
           <h3 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            {isAdmin ? 'App Branding' : 'Property Branding'}
+            {editingClient ? 'Property Branding' : 'App Branding'}
           </h3>
+          {isAdmin && (
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
+              {editingClient
+                ? <>Editing <strong>{rowLabel}</strong>'s own branding — their sidebar, top bar and printed recipe cost cards. Not Crest's.</>
+                : <>No client is selected, so this is <strong>Crest's own</strong> branding: the name and mark on the login, signup, pricing and legal pages. Pick a client in the top bar to edit theirs.</>}
+            </p>
+          )}
           <div className="form-grid form-grid-2">
             <div className="form-field">
-              <label htmlFor="set-app-name">{isAdmin ? 'App Name' : 'Property Name'}</label>
+              <label htmlFor="set-app-name">
+                <Tip width={280} text={editingClient
+                  ? "The client's own brand name. It replaces Crest's in their sidebar and top bar and heads their printed recipe cost cards. It is NOT what prints on report letterheads — those use the client's name from Admin → Clients."
+                  : "Crest's own product name, on the platform row. It is what a signed-out visitor sees on the login, signup, pricing and legal pages."}>
+                  {editingClient ? 'Property Name' : 'App Name'}
+                </Tip>
+              </label>
               <input
                 id="set-app-name"
                 value={form.app_name || ''}
                 onChange={e => update('app_name', e.target.value)}
-                placeholder={isAdmin ? 'Crest Suite' : 'e.g. Casa Acai Cafe'}
+                placeholder={editingClient ? 'e.g. Casa Acai Cafe' : 'Crest Suite'}
               />
             </div>
             <div className="form-field">
@@ -695,7 +887,7 @@ export default function Settings() {
                 id="set-app-tagline"
                 value={form.app_tagline || ''}
                 onChange={e => update('app_tagline', e.target.value)}
-                placeholder={isAdmin ? 'Hospitality cost control, built for Nepal.' : 'e.g. Fresh bowls, made daily.'}
+                placeholder={editingClient ? 'e.g. Fresh bowls, made daily.' : 'Hospitality cost control, built for Nepal.'}
               />
             </div>
           </div>
@@ -711,7 +903,7 @@ export default function Settings() {
                 }
               </div>
               <div>
-                <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Square PNG / JPG / SVG · max 2 MB</p>
+                <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Square PNG / JPG / SVG / WebP · max 2 MB</p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <label style={{ cursor: logoUploading ? 'not-allowed' : 'pointer' }}>
                     <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }}
@@ -728,7 +920,9 @@ export default function Settings() {
                     </button>
                   )}
                 </div>
-                {logoMsg && <p style={{ fontSize: 11, margin: '6px 0 0', color: logoMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{logoMsg.replace(/^(ok|error):/, '')}</p>}
+                {/* role, like the Support and Plan Pricing messages beside it — a failed logo save
+                    was announced to nobody. */}
+                {logoMsg && <p role={logoMsg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 11, margin: '6px 0 0', color: logoMsg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{logoMsg.replace(/^(ok|error):/, '')}</p>}
               </div>
             </div>
           </div>
@@ -749,18 +943,32 @@ export default function Settings() {
         </div>
       )}
 
-      {/* PROPERTY */}
+      {/* PROPERTY — every column here is read through `.eq('client_id', cid)` (useBizInfo,
+          CreditNotes, posOrderPrintHtml, computeMonthlyReport…), so with NO client selected this
+          tab writes the platform row, where not one of them is ever read again. That was S701's
+          shape a fourth time: a save that reports success and moves nothing. The Support tab's
+          lower card already handled the same case by saying so instead of offering the fields. */}
       {activeTab === 'Property' && (
         <div className="card">
           <h3 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Property Details</h3>
-          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>These appear on printed reports and the Monthly Summary header.</p>
+          {!editingClient ? (
+            <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>
+              These are per-client — every page that reads them asks for one client's row. Choose a client
+              from the top bar's client switcher to edit theirs; there is nothing to set on Crest's own row.
+            </p>
+          ) : (
+            <>
+          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
+            {isAdmin ? <><strong>{rowLabel}</strong>'s details, as printed on their</> : <>These appear on your</>} POS bills and credit
+            notes, gate passes, parking slips, payslips and rosters, and on every report letterhead.
+          </p>
           <div className="form-grid form-grid-2">
             {[
-              { key: 'property_address', label: 'Address', placeholder: 'e.g. Jhamsikhel, Lalitpur', tip: null },
-              { key: 'property_phone', label: 'Phone', placeholder: '01-XXXXXXX', tip: null },
-              { key: 'property_email', label: 'Email', placeholder: 'info@property.com', tip: null },
+              { key: 'property_address', label: 'Address', placeholder: 'e.g. Jhamsikhel, Lalitpur', tip: 'Printed on every POS bill, credit note, gate pass, parking slip and report letterhead. A bill reprinted later carries whatever is here at the time it is reprinted, not the address it was billed under.' },
+              { key: 'property_phone', label: 'Phone', placeholder: '01-XXXXXXX', tip: 'The number printed on bills, credit notes and parking slips for a guest to call. Not the support line — that is Settings → Support.' },
+              { key: 'property_email', label: 'Email', placeholder: 'info@property.com', tip: 'Printed on report letterheads and payroll documents. Not the support line, and not the login email of any account.' },
               { key: 'vat_number', label: 'VAT Registration Number', placeholder: 'e.g. 123456789', tip: 'Your business VAT registration number as issued by IRD Nepal. Printed on report headers and used for VAT invoice compliance.' },
-              { key: 'invoice_prefix', label: 'Invoice Prefix', placeholder: 'e.g. CAC', tip: 'Short client code used in POS invoice numbers, e.g. TI2238-CAC-82/83. Auto-suggested from the property name; edit if you want something different.', upper: true },
+              { key: 'invoice_prefix', label: 'Invoice Prefix', placeholder: 'e.g. CAC', tip: 'Short client code in POS invoice numbers, e.g. TI2238-CAC-82/83. Changing it RE-NUMBERS every bill already issued: the number is assembled when a bill is printed, so a reprint of an old invoice carries the new code. Auto-suggested from the property name; a save asks before committing a change.', upper: true },
             ].map(f => (
               <div key={f.key} className="form-field">
                 <label htmlFor={`set-${f.key}`}>{f.tip ? <Tip text={f.tip} width={280}>{f.label}</Tip> : f.label}</label>
@@ -768,7 +976,7 @@ export default function Settings() {
               </div>
             ))}
             <div className="form-field">
-              <label htmlFor="set-is-vat-registered"><Tip text="On = POS bills print as a Tax Invoice with a VAT breakdown (invoice numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). Matches whether this client is actually VAT-registered with IRD." width={280}>VAT Registered</Tip></label>
+              <label htmlFor="set-is-vat-registered"><Tip text="On = POS bills print as a Tax Invoice with a VAT breakdown (numbers prefixed TI-). Off = plain Bill, no VAT line, PAN number only (prefixed PB-). The bill type is decided when a bill is PRINTED, so switching this also changes how every past bill reprints — a save asks before committing it. Match whether this client is actually VAT-registered with IRD." width={280}>VAT Registered</Tip></label>
               <label className="form-check">
                 <input id="set-is-vat-registered" type="checkbox" checked={form.is_vat_registered ?? true}
                   onChange={e => update('is_vat_registered', e.target.checked)} />
@@ -776,6 +984,8 @@ export default function Settings() {
               </label>
             </div>
           </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1079,8 +1289,10 @@ export default function Settings() {
               <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Crest Support — shown to every client</h3>
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
                 The line a client reaches when the app itself cannot help: the crash page, the login footer, the
-                offline banners in Stock Count and POS, Help → Support, and the "not on your plan" cards. Blank slots
-                simply do not render. Nothing here is per-client — for that, use the section below.
+                offline banners in Stock Count and POS, Help → Support, and the "not on your plan" cards. A blank
+                slot does not render — except Mobile and Email, which fall back to the built-in line and the
+                address on the Terms page (each field below says which). Nothing here is per-client — for
+                that, use the section below.
               </p>
               <div className="form-grid form-grid-2">
                 <div className="form-field">
@@ -1134,7 +1346,18 @@ export default function Settings() {
                       <option key={c.key} value={c.key} disabled={!preview[c.key]}>{c.label}{preview[c.key] ? '' : ' — no number'}</option>
                     ))}
                   </select>
-                  <span style={hint}>{platformForm.emergency_enabled ? (emergencyOptions.length ? 'Live for every client once saved — they are told this line is answered any time' : 'Add a number above first') : 'No promise is made while this is off'}</span>
+                  {/* `preview.emergency`, not `emergencyOptions.length`: the promise is published only
+                      if the SELECTED channel has a number. With the phone line off, a WhatsApp number
+                      filled in and the channel still on Mobile, resolveSupportContact() returns
+                      `emergency: null` while some channel does have a number — so the hint claimed a
+                      line was live that the preview directly below it was already not showing. */}
+                  <span style={hint}>{!platformForm.emergency_enabled
+                    ? 'No promise is made while this is off'
+                    : preview.emergency
+                      ? `Live for every client once saved — they are told ${preview.emergency.label} ${preview.emergency.value} is answered any time`
+                      : emergencyOptions.length
+                        ? `${EMERGENCY_CHANNELS.find(c => c.key === platformForm.emergency_channel)?.label || 'That line'} has no number, so nothing is published — pick a line that has one`
+                        : 'Add a number above first'}</span>
                 </div>
                 <div className="form-field">
                   <span className="field-label" id="sup-phone-label"><Tip text="Off = no Call button anywhere: the crash page, the lock screen, the login footer, the offline banners and Help → Support show email — and WhatsApp or Viber only if you gave those their own numbers. The built-in number is not used either. Switch this off the day the mobile above should stop being published.">Phone line</Tip></span>
@@ -1191,7 +1414,7 @@ export default function Settings() {
                     <span style={hint}>Shown as a mailto link</span>
                   </div>
                   <div className="form-field">
-                    <label htmlFor="set-contact-website">Website</label>
+                    <label htmlFor="set-contact-website">Consultant website</label>
                     <input id="set-contact-website" autoComplete="off" value={form.contact_website || ''} onChange={e => update('contact_website', e.target.value)} placeholder="e.g. consultant.com.np" />
                     <span style={hint}>Shown on Help → Support only</span>
                   </div>
@@ -1203,10 +1426,12 @@ export default function Settings() {
                 </p>
               )}
               {clientId && (
-                // This card's own Save — the same save() the header button runs on every other tab,
-                // placed beside the fields it commits so the two cards never share a button (S684).
+                // This card's own Save, scoped to its own three columns — placed beside the fields
+                // it commits so the two cards never share a button (S684). It went through the
+                // shared save() unscoped until the columns were found to be missing from
+                // PAGE_FIELDS altogether, which made the whole card a no-op that reported success.
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20, flexWrap: 'wrap' }}>
-                  <button className="btn btn-primary" onClick={() => { if (!saving) save() }} aria-busy={saving || undefined}>
+                  <button className="btn btn-primary" onClick={() => save({ fields: CONSULTANT_FIELDS })} aria-busy={saving || undefined}>
                     {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Consultant'}
                   </button>
                 </div>
@@ -1222,17 +1447,25 @@ export default function Settings() {
         // priceForm, not `form`: `form` is whichever client's settings row this session read, and
         // writing prices there put them somewhere nothing reads — the save said "✓ Saved" and the
         // price the world sees never moved.
-        const imsPrices = priceForm.ims || DEFAULT_PLAN_PRICES.ims
+        const imsPrices = priceForm.ims || {}
         const setPrices = next => { setPriceForm(next); setPriceMsg('') }
+        // A cleared box REMOVES the key rather than writing 0 — blank means "use the shipped
+        // figure", which resolvePricing() and clientMrr.js both fall back to per field. `'' → 0`
+        // published a free plan off one keystroke and made the default unreachable.
+        const toPrice = value => value === '' ? undefined : Math.max(0, parseInt(value, 10) || 0)
         function updateIms(tier, value) {
-          setPrices({
-            ...priceForm,
-            ims: { ...imsPrices, [tier]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) },
-          })
+          const ims = { ...imsPrices }
+          const n = toPrice(value)
+          if (n === undefined) delete ims[tier]; else ims[tier] = n
+          setPrices({ ...priceForm, ims })
         }
         function updateFlat(key, value) {
-          setPrices({ ...priceForm, [key]: value === '' ? 0 : Math.max(0, parseInt(value) || 0) })
+          const next = { ...priceForm }
+          const n = toPrice(value)
+          if (n === undefined) delete next[key]; else next[key] = n
+          setPrices(next)
         }
+        const priceDirty = JSON.stringify({ ims: imsPrices, ...Object.fromEntries(['hr', 'pos', 'suite'].filter(k => typeof priceForm[k] === 'number').map(k => [k, priceForm[k]])) }) !== priceSeedRef.current
         // Monthly and annual are on screen together (S702). They used to be two tabs, which made
         // the annual column a place you had to go and look — for a figure that is not a second
         // price but a printout of this one: annualOf() (×0.75, in pricingPlans.js) is the single
@@ -1267,6 +1500,13 @@ export default function Settings() {
                 <span style={{ display: 'block', marginTop: 2 }}>
                   ARR · NPR {(annual * 12).toLocaleString('en-IN')} / Year
                 </span>
+                {/* Which of the three states this box is in, said plainly: a stored figure, the
+                    shipped one standing in, or a deliberate zero. */}
+                {value == null
+                  ? <span style={{ display: 'block', marginTop: 3 }}>Blank — the shipped NPR {fallback.toLocaleString('en-IN')} is quoted</span>
+                  : value === 0
+                    ? <span style={{ display: 'block', marginTop: 3, color: 'var(--theme-amber-text)' }}>0 publishes this as free — clear the box to use NPR {fallback.toLocaleString('en-IN')} instead</span>
+                    : null}
               </span>
             </div>
           )
@@ -1299,6 +1539,11 @@ export default function Settings() {
                       {priceMsg.replace(/^(ok|error):/, '')}
                     </span>
                   )}
+                  {/* Amber = open, waiting on a person (the One Signal Meaning Rule) — the shape the
+                      Support tab already has, for a table that is read by people who are not here. */}
+                  {!priceMsg && (priceDirty
+                    ? <span className="badge-amber">Unsaved — everyone still sees the saved prices</span>
+                    : <span className="badge-gray">As saved</span>)}
                   <button className="btn btn-primary" onClick={savePrices} aria-busy={priceSaving || undefined}>
                     {priceSaving ? 'Saving…' : 'Save Plan Prices'}
                   </button>
@@ -1419,7 +1664,15 @@ export default function Settings() {
           {/* Color pickers */}
           <div className="card">
             <h3 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Customize Colors</h3>
-            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>Click any swatch to pick a color. Changes apply instantly. Start from a preset, then adjust individual colors here.</p>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 10px' }}>Click any swatch to pick a color. Changes apply instantly. Start from a preset, then adjust individual colors here.</p>
+            {/* Said out loud because it was not, and the gap was visible: the accent used as TEXT is
+                a separate token from the accent used as a FILL, and it has no swatch here. */}
+            <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 24px' }}>
+              Changing the accent also re-derives the three tokens that hang off it — the accent used as text
+              and for focus outlines (darkened until it is readable on your card colour), the hover shade and
+              the focus tint. The presets' own palettes are hand-checked for contrast and for red-green colour
+              blindness; a custom one is not, so use ↺ Reset below if anything becomes hard to read.
+            </p>
 
             {[
               { key: 'bg',          label: 'Page Background',     desc: 'Main app background' },
@@ -1514,37 +1767,52 @@ export default function Settings() {
         </div>
       )}
 
-      {/* DATA */}
+      {/* DATA — admin-only (CLIENT_HIDDEN), which is what made the original copy wrong rather than
+          merely thin: it addressed the client ("contact your Crest consultant" for a data dump),
+          wrapped its one card in an `{isAdmin && …}` that can never be false, and offered a
+          btn-danger whose entire action was an alert() naming another screen. Every tool it talks
+          about is real and one click away, so it links to them. */}
       {activeTab === 'Data' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
-            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Archive Periods</h3>
-            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 16px' }}>
-              Archiving hides closed periods from dropdowns to keep screens clean. Data is never deleted — toggle "Show archived" on any report to access it. Always export before archiving.
+            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Backup &amp; Restore</h3>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
+              A full export of {editingClient ? <strong>{rowLabel}</strong> : 'a client'} — every period, every
+              table — lives in <strong>Admin → Clients → Manage → Backup</strong>. It writes a .xlsx to read and
+              a .json to restore from; take both, and never the workbook alone, because only the .json can be
+              restored. A restore refuses a client that still has data in it.
             </p>
-            <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>Archive controls are available on the Periods page for each closed period.</p>
+            <Link className="btn btn-ghost" style={{ fontSize: 12 }} to="/admin/clients">Open Admin → Clients</Link>
           </div>
 
           <div className="card">
-            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Data Export</h3>
-            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 16px' }}>
-              Export buttons are available on every report page — Monthly Summary, Variance Report, FIFO Report, and Payment Summary all have Export to Excel.
+            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Archiving periods</h3>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
+              Archiving hides a closed period from the period dropdowns to keep screens short. Nothing is
+              deleted — "Show archived" on any report brings it back. Export before archiving, so the figures
+              exist somewhere outside the app.
             </p>
-            <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>For a full data dump of all periods, contact your Crest consultant.</p>
+            <Link className="btn btn-ghost" style={{ fontSize: 12 }} to="/periods">Open Periods</Link>
           </div>
 
-          {isAdmin && (
-            <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
-              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-red-text)' }}>Danger Zone</h3>
-              <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 16px' }}>
-                Destructive actions. These cannot be undone.
-              </p>
-              <button className="btn btn-danger" style={{ fontSize: 13 }}
-                onClick={() => alert('Use Admin → Clients → Manage → ⚠ Danger tab to reset client data.')}>
-                Reset All Data for This Property
-              </button>
-            </div>
-          )}
+          <div className="card">
+            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Per-report export</h3>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
+              Every report page has its own Export to Excel — Monthly Summary, Variance, FIFO, Payment Summary
+              and the rest. Those are single-period extracts for reading; the Backup above is the one that can
+              be restored.
+            </p>
+          </div>
+
+          <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-red-text)' }}>Resetting or deleting a client</h3>
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
+              Destructive actions are deliberately not on this page — they belong on the screen that names
+              which client they are about, where the confirmation can spell out the row counts it is about to
+              destroy. They are in <strong>Admin → Clients → Manage → ⚠ Danger</strong>. Archive in preference
+              to deleting: an archived client keeps its history and stops being billed.
+            </p>
+          </div>
         </div>
       )}
 

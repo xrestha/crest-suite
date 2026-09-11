@@ -15,12 +15,22 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
   const [activeId, setActiveId] = useState(groups[0].sections[0].id)
 
   const q = query.trim().toLowerCase()
+  // Searches the whole section, not just its title. A reference doc is read by searching for the
+  // thing you are stuck on — "SSF", "variance", "staff meals" — and over 90 sections of summaries,
+  // fields, formulas and gotchas a title-only match answered almost all of those with "No pages
+  // match". Built once per (query, module) and flattened from the same 10-key shape the renderer
+  // relies on, so a section with no `fields` is not a crash.
+  const haystack = s => [
+    s.title, s.route, s.plan, s.summary, s.connections,
+    ...(s.workflow || []), ...(s.formulas || []), ...(s.gotchas || []),
+    ...(s.fields || []).flatMap(f => [f.label, f.desc]),
+  ].filter(Boolean).join(' ').toLowerCase()
   const filteredGroups = useMemo(() => {
     if (!q) return groups
     return groups
-      .map(g => ({ ...g, sections: g.sections.filter(s => s.title.toLowerCase().includes(q)) }))
+      .map(g => ({ ...g, sections: g.sections.filter(s => haystack(s).includes(q)) }))
       .filter(g => g.sections.length > 0)
-  }, [q, groups])
+  }, [q, groups]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const active = useMemo(() => {
     for (const g of groups) {
@@ -30,9 +40,12 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
     return groups[0].sections[0]
   }, [activeId, groups])
 
+  const [printErr, setPrintErr] = useState('')
   const printGuide = () => {
+    setPrintErr('')
     const w = window.open('', '_blank')
-    if (!w) return
+    // A blocked popup returns null, and returning quietly made the button look dead.
+    if (!w) { setPrintErr('The print window was blocked by the browser. Allow pop-ups for this site, then press again.'); return }
     w.opener = null
     w.document.write(buildGuidePrintHtml(groups, docTitle, docSubtitle))
     w.document.close()
@@ -41,15 +54,18 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+    // wrap + flex-basis, so the two columns stack instead of crushing the content pane to ~100px
+    // at 390px — the width S684 fixed this page's tab bar for. `position: sticky` is harmless once
+    // wrapped (there is nothing to stick beside).
+    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       {/* Sidebar */}
-      <div style={{ width: 240, flexShrink: 0, position: 'sticky', top: 12 }}>
+      <div style={{ flex: '1 1 240px', maxWidth: 240, position: 'sticky', top: 12 }}>
         <input
           className="form-input"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Search pages…"
-          aria-label="Search guide pages"
+          placeholder="Search the guide…"
+          aria-label="Search the guide — page titles and their contents"
           style={{ width: '100%', boxSizing: 'border-box', marginBottom: 8 }}
         />
         <button
@@ -59,6 +75,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
         >
           🖨 Print full guide
         </button>
+        {printErr && <p role="alert" style={{ fontSize: 11, color: 'var(--theme-red-text)', margin: '0 0 12px' }}>{printErr}</p>}
         <div style={{ maxHeight: 620, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {filteredGroups.map(g => (
             <div key={g.key}>
@@ -86,7 +103,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
             </div>
           ))}
           {filteredGroups.length === 0 && (
-            <p style={{ fontSize: 12, color: 'var(--theme-text3)', padding: '0 4px' }}>No pages match "{query}".</p>
+            <p style={{ fontSize: 12, color: 'var(--theme-text3)', padding: '0 4px' }}>Nothing in this guide mentions "{query}".</p>
           )}
         </div>
       </div>
@@ -216,7 +233,10 @@ function buildGuidePrintHtml(guideGroups, docTitle, docSubtitle) {
       .group { margin-bottom: 8px; }
       /* break-after: avoid keeps a heading glued to the content right after it, so a group/section
          title can never print alone at the bottom of a page with its content stranded on the next. */
-      h1 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #96700a; border-bottom: 2px solid #96700a; padding-bottom: 4px; margin: 28px 0 12px; break-after: avoid; page-break-after: avoid; }
+      /* The Modernist light accent ink (#7c1405, 9.59:1 on white), not the brass #96700a this
+         carried over from the palette retired at S689 — a printout is a document that leaves the
+         building, and it was the last place the old accent still appeared. */
+      h1 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #7c1405; border-bottom: 2px solid #7c1405; padding-bottom: 4px; margin: 28px 0 12px; break-after: avoid; page-break-after: avoid; }
       /* No page-break-inside: avoid here — a section is allowed to split across a page boundary
          (between blocks) so the layout doesn't waste the rest of a page just because the whole
          section doesn't fit in the remaining space. Only the small atomic pieces below stay intact. */

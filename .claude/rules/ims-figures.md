@@ -1075,41 +1075,20 @@ records is *explained* and therefore leaves the unexplained gap `ShrinkageReport
 report's own copy now says "unlogged theft" and names the consequence — the same rule as any other
 figure here: the sentence has to move when the arithmetic does.
 
-## The `settings` row is written by nine pages, so a save sends a PATCH, never the row (S730)
+## The `settings` row, and the screens that write it
 
-`settings` is one row per client, and it is the junk drawer: `Settings.js` owns the thresholds and
-code prefixes, `PosTableManagement` owns discount reasons / note presets / ticket routing /
-reservation settings / delivery partners, `CoversReport` the opening hours, `TadaSettingsModal` the
-TADA rates, `ImsStaff`/`HrStaff`/`PosStaff` the three custom-role schemes, `ComboBuilder` the combo
-discount, and the admin drawer the branding. Every one of them reads the row, edits its part, and
-writes. **A page that writes the whole row writes every other page's columns as they stood when it
-loaded** — and nothing fails: the write succeeds, the toast says saved, and a manager's change on the
-till from ten minutes ago is gone. `Settings.js`'s page-level Save did exactly this until S730 (S701
-had found the mirror image on the same page, a platform price landing on the client row, and fixed
-that one tab).
+Moved to `.claude/rules/settings-row.md` (S739), which auto-loads when editing `Settings.js`, the
+`src/pages/settings/` tabs, `SettingsContext.js` or the admin client drawer — the files the rule is
+actually about, and none of which this file's `paths:` ever matched. It covers the patch-not-row
+save, the reseed rule, the `|| default` threshold trap, and what the admin tabs added in S739.
 
-Three rules:
-
-- **Send only the columns the screen edits, as a diff against the row it loaded** — `PAGE_FIELDS`
-  and `pagePatch()` in `Settings.js` are the reference; `saveSettings()` in the context accepts a
-  partial and always has. `{ ...settings, one_column: x }` is the same defect wearing a fresher
-  snapshot.
-- **A re-read after a save must not reseed a form wholesale.** `loadSettings()` runs after every
-  save, and a form keyed on `settings` that copies the row over itself wipes whatever was typed on
-  another tab. Keep the values that differ from the *previous* seed; replace everything only when
-  the row belongs to a different client (`settings.client_id` changes).
-- **A threshold with a `|| default` reader cannot store 0.** `fcThresholds`, `varianceFlagPct` and
-  FIFO's `expiry_warning_days || 7` all read 0 as "use the default", so a box showing 0 and a report
-  banding at 35 are the same stored value. Refuse 0 at the form, store a cleared box as NULL (never
-  `''` — Postgres refuses it for `numeric` and `integer`), show the default as the placeholder, and
-  check the pair (critical > warning) — `validateThresholds()` is exported for exactly that.
-
-Two smaller ones from the same pass, both about `recipe_code`: **`recipes.recipe_code` is unique
-per client**, so any bulk renumber must clear the codes that are about to move before writing the
-new ones (a one-pass loop hands row A the code row B still holds and the index refuses it); and **a
-sub-recipe's mirror row in `items` carries the same code in `item_code`**, written once at insert
-by `Recipes.js` and updated by nothing but Settings' renumber — so a renumber of items must skip
-`is_sub_recipe = true`, and a renumber of sub-recipes must write both columns.
+The two `recipe_code` rules from the same pass stay here, because they are about codes rather than
+about the row: **`recipes.recipe_code` is unique per client**, so any bulk renumber must clear the
+codes that are about to move before writing the new ones (a one-pass loop hands row A the code row
+B still holds and the index refuses it); and **a sub-recipe's mirror row in `items` carries the same
+code in `item_code`**, written once at insert by `Recipes.js` and updated by nothing but Settings'
+renumber — so a renumber of items must skip `is_sub_recipe = true`, and a renumber of sub-recipes
+must write both columns.
 
 ## Assigned stock counting: who counts what, and who counted it (S737)
 

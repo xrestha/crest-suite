@@ -484,14 +484,34 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   // `what` names what the admin actually pressed — the three tabs share one save handler, so a
   // "Save Thresholds" or "Save QR" click used to report back "Settings saved."
+  // WHICH columns each button owns. `clientSettings` is the client's settings row as it stood when
+  // this drawer opened (loadClientSettings does `select('*')`), and every one of these buttons used
+  // to send the whole thing back — so saving Branding here put POS discount reasons, note presets,
+  // reservation settings, ticket routing, TADA rates, the three custom-role schemes, the combo
+  // discount and the Stock Count settings back to what they were when the drawer opened. That is
+  // S730's defect exactly, in the other admin editor for the same columns: `settings` is one row
+  // per client that nine other pages write their own columns onto, and both saves report success.
+  const DRAWER_SETTINGS_FIELDS = {
+    Settings: ['app_name', 'app_tagline', 'logo_url', 'vat_number', 'is_vat_registered', 'invoice_prefix',
+               'property_address', 'property_phone', 'property_email',
+               'contact_phone', 'contact_email', 'contact_website'],
+    Thresholds: ['fc_warning_pct', 'fc_critical_pct', 'expiry_warning_days', 'variance_flag_pct'],
+    'Payment QR': ['payment_qr_data'],
+    // The webhook secret lives in client_secrets, written below: this button owns no settings column.
+    'Webhook secret': [],
+  }
+
   async function handleSaveSettings(what = 'Settings') {
     if (!settingsLoadedRef.current) {
       setSettingsMsg('error:Nothing was saved — this client\'s settings could not be read, so saving now would overwrite them with blanks. Retry the load first.')
       return
     }
+    const fields = DRAWER_SETTINGS_FIELDS[what] || []
+    const patch = {}
+    for (const k of fields) if (k in clientSettings) patch[k] = clientSettings[k]
     setSavingSettings(true); setSettingsMsg('')
     try {
-      await saveClientSettings(client.id, clientSettings)
+      if (Object.keys(patch).length) await saveClientSettings(client.id, patch)
       // Webhook secret writes to its own admin-only table. Upserted alongside because this one
       // handler backs both the Settings tab's Save and the QR tab's "Save Webhook Secret" button.
       const { error: secretErr } = await supabase
@@ -909,18 +929,34 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     const { error: uploadErr } = await supabase.storage.from('Logos').upload(path, file, { upsert: true, contentType: file.type })
     if (uploadErr) { setLogoMsg('error:' + uploadErr.message); setLogoUploading(false); return }
     const { data: { publicUrl } } = supabase.storage.from('Logos').getPublicUrl(path)
-    const updated = { ...clientSettings, logo_url: publicUrl }
-    setClientSettings(updated)
-    await saveClientSettings(client.id, updated)
-    setLogoMsg('ok:Logo saved.')
+    // Versioned, because `upsert: true` writes to the same path and getPublicUrl() returns the same
+    // URL for it, so a replacement went on serving the previous image out of cache for an hour.
+    await writeLogoUrl(`${publicUrl}?v=${Date.now()}`, 'Logo saved.')
     setLogoUploading(false)
   }
 
   async function handleLogoRemove() {
-    const updated = { ...clientSettings, logo_url: null }
-    setClientSettings(updated)
-    await saveClientSettings(client.id, updated)
-    setLogoMsg('ok:Logo removed.')
+    await writeLogoUrl(null, 'Logo removed.')
+  }
+
+  // One column, and the result is read. Both handlers used to `await saveClientSettings(...)` with
+  // no catch, and it THROWS on a failed write: an RLS refusal or a dropped connection left
+  // "Uploading..." on the button for good, reported nothing, and on the upload path never reached
+  // setLogoUploading(false). They also sent the whole row (see DRAWER_SETTINGS_FIELDS above).
+  async function writeLogoUrl(url, okMsg) {
+    const previous = clientSettings.logo_url
+    setClientSettings(prev => ({ ...prev, logo_url: url }))
+    setLogoMsg('')
+    try {
+      await saveClientSettings(client.id, { logo_url: url })
+      setLogoMsg('ok:' + okMsg)
+    } catch (e) {
+      // Put the preview back: it showed the new state while the row still held the old one.
+      setClientSettings(prev => ({ ...prev, logo_url: previous }))
+      setLogoMsg('error:' + (url === null
+        ? 'The logo is still in place, the change did not save. '
+        : 'The file uploaded, but the row still points at the old logo. ') + errorLine(e))
+    }
   }
 
   const tabs = [
@@ -1657,7 +1693,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   </div>
 
                   <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 16px', borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
-                    Upgrade Contact
+                    This Client's Consultant
+                  </p>
+                  <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 14px' }}>
+                    Optional. When set, it replaces the Crest support line for this client on the upgrade
+                    prompts, the lock screen and Help &rarr; Support. The same three fields appear on
+                    Settings &rarr; Support: this is the same data, not a second copy.
                   </p>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 24 }}>
                     <div className="form-field">
