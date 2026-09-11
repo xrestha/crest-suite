@@ -7,6 +7,7 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
 import { leaveBalance } from './leaveBalance'
+import { backfillApprovedLeave, findApprovedLeaveGaps } from './backfillApprovedLeave'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorText, errorLine } from '../../../shared/errorText'
@@ -61,6 +62,10 @@ export default function LeaveManagement() {
   // exactly what you want to check when a final settlement is being questioned, so the Balances
   // tab can opt them back in.
   const [showSeparated, setShowSeparated] = useState(false)
+  // Approved leave that has not reached an attendance sheet (S741). Null until the check runs;
+  // its `error` is a real state — a failed check must not read as "nothing is missing".
+  const [gaps,      setGaps]      = useState(null)
+  const [filling,   setFilling]   = useState(false)
   const [loading,   setLoading]   = useState(true)
   const [busy,      setBusy]      = useState(false)
   const [msg,       setMsg]       = useState('')
@@ -124,6 +129,30 @@ export default function LeaveManagement() {
     setTypes(lt); setEmployees(emps || []); setPeriods(pr || []); setRequests(reqs || [])
     setSettlements(setl || [])
     setLoading(false)
+    // After the page is usable, not before it: this is a reconciliation, and a slow extra read
+    // must not hold up the queue someone opened the page to work through.
+    setGaps(await findApprovedLeaveGaps({ clientId, requests: reqs || [], periods: pr || [] }))
+  }
+
+  // Write the days for every month that HAS a period and is still missing them. Only reachable
+  // from the banner below, which only appears when there is something to write.
+  async function fillUnmarked() {
+    if (!gaps?.unmarked?.length) return
+    setFilling(true); setMsg('')
+    let filled = 0, skipped = 0
+    for (const u of gaps.unmarked) {
+      const r = await backfillApprovedLeave({ clientId, period: u.period })
+      if (r.error) {
+        setMsg(`error:${filled ? `${filled} day${filled === 1 ? '' : 's'} were marked, but t` : 'T'}he rest could not be — try again. ` + errorText(r.error, 'operator'))
+        setFilling(false); await load(); return
+      }
+      filled += r.filled; skipped += r.skipped
+    }
+    await load()
+    setMsg(filled
+      ? `ok:${filled} day${filled === 1 ? '' : 's'} marked on the attendance sheet${skipped ? ` (${skipped} already had a mark and were left alone)` : ''}.`
+      : 'ok:Nothing to mark — those days already carry an attendance mark.')
+    setFilling(false)
   }
 
   // ── New request ───────────────────────────────────────────────────────────
@@ -223,8 +252,12 @@ export default function LeaveManagement() {
       return
     }
     await load()
+    // The old sentence here read "Create the period(s), then re-approve to mark those days" — and
+    // neither half was possible (S741). The period cannot be opened early (one open period per
+    // client), and an approved row has no Approve button to press again. The days are written
+    // automatically now, when the month is created, so say that instead of asking for it.
     setMsg(missing.length
-      ? `error:Approved, but no period exists for: ${missing.join(', ')}. Create the period(s), then re-approve to mark those days.`
+      ? `ok:Approved. ${missing.join(', ')} ${missing.length === 1 ? 'has' : 'have'} no period yet, so those days will be marked on the attendance sheet automatically when that month is created — nothing to do now.`
       : 'ok:Approved — attendance marked')
     setBusy(false)
   }
@@ -391,6 +424,42 @@ export default function LeaveManagement() {
         </div>
       </div>
 
+      {/* Approved leave that is not on an attendance sheet (S741). Payroll reads the sheet, not
+          this page, so a request can read Approved here while its unpaid days are quietly being
+          paid. Two states, two sentences: one is nobody's to act on, the other has a button. */}
+      {gaps?.error ? (
+        <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--theme-amber)', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+          Could not check whether approved leave has reached the attendance sheets — this page cannot
+          confirm that it has. Reload to try again.
+        </div>
+      ) : (gaps?.unmarked?.length || gaps?.waiting?.length) ? (
+        <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid var(--theme-amber)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, flex: '1 1 320px' }}>
+            {gaps.unmarked.length > 0 && (
+              <div>
+                <strong style={{ color: 'var(--theme-amber-text)' }}>
+                  {gaps.unmarked.reduce((a, u) => a + u.days, 0)} day{gaps.unmarked.reduce((a, u) => a + u.days, 0) === 1 ? '' : 's'} of approved leave {gaps.unmarked.reduce((a, u) => a + u.days, 0) === 1 ? 'is' : 'are'} not on the attendance sheet
+                </strong>{' '}
+                ({gaps.unmarked.map(u => `${BS_MONTHS[u.period.bs_month - 1]} ${u.period.bs_year}`).join(', ')}).
+                Payroll reads the sheet, so unpaid leave on those days is not being deducted.
+              </div>
+            )}
+            {gaps.waiting.length > 0 && (
+              <div style={{ marginTop: gaps.unmarked.length ? 6 : 0 }}>
+                {gaps.waiting.reduce((a, w) => a + w.days, 0)} day{gaps.waiting.reduce((a, w) => a + w.days, 0) === 1 ? '' : 's'} approved for {gaps.waiting.map(w => `${BS_MONTHS[w.bsMonth - 1]} ${w.bsYear}`).join(', ')} {gaps.waiting.length === 1 ? 'is' : 'are'} waiting for that month to exist — nothing to do, {gaps.waiting.length === 1 ? 'it is' : 'they are'} marked automatically when the period is created.
+              </div>
+            )}
+          </div>
+          {gaps.unmarked.length > 0 && (
+            <Tip text="Writes the approved leave days onto those months' attendance sheets. A day that already carries a mark is left exactly as it is." width={260}>
+              <button className="btn btn-primary btn-sm" onClick={fillUnmarked} disabled={filling || busy}>
+                {filling ? 'Marking…' : 'Mark approved leave'}
+              </button>
+            </Tip>
+          )}
+        </div>
+      ) : null}
+
       <div className="tab-bar" style={{ marginBottom: 18 }}>
         {[{ id: 'requests', label: 'Requests' }, { id: 'balances', label: 'Balances' }, { id: 'types', label: 'Leave Types' }].map(t => (
           <button key={t.id} className={`tab-btn${tab === t.id ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
@@ -528,7 +597,7 @@ export default function LeaveManagement() {
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request clears those attendance days back to blank — not to Present, since the system has no way to know whether the employee actually worked; re-mark them in Attendance if they did. Every day in the range is included — mark the employee's own off days separately in Attendance if the range spans one. A request rejected or cancelled by mistake can be put back to Pending with <strong>Reopen</strong> (HR managers and the owner) — it keeps the original dates and reason, and marks nothing until it is approved again.
+            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request clears those attendance days back to blank — not to Present, since the system has no way to know whether the employee actually worked; re-mark them in Attendance if they did. Every day in the range is included — mark the employee's own off days separately in Attendance if the range spans one. Leave approved for a month that has not been created yet cannot be marked on an attendance sheet that does not exist — those days are written automatically the moment that month is opened, and the banner at the top of this page counts anything still waiting. A request rejected or cancelled by mistake can be put back to Pending with <strong>Reopen</strong> (HR managers and the owner) — it keeps the original dates and reason, and marks nothing until it is approved again.
           </div>
         </div>
       ) : tab === 'balances' ? (

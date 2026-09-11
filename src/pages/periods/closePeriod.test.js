@@ -7,16 +7,24 @@ jest.mock('../../shared/scopedDb', () => ({
 jest.mock('../../modules/ownerReport/generateMonthlyReport', () => ({
   generateMonthlyReport: jest.fn(), saveGeneratedReport: jest.fn(),
 }))
+// The leave back-fill (S741) is a second write hung off period CREATION, with its own suite. It is
+// mocked here so these tests stay about the close itself — and so a failure inside it is visible as
+// the `leave_backfill` stage rather than as a mystery in the happy path.
+jest.mock('../../modules/hr/leave/backfillApprovedLeave', () => ({
+  backfillApprovedLeave: jest.fn(),
+}))
 
 import { supabase } from '../../supabaseClient'
 import { scopedFrom, scopedInsert, scopedUpdate } from '../../shared/scopedDb'
 import { generateMonthlyReport, saveGeneratedReport } from '../../modules/ownerReport/generateMonthlyReport'
+import { backfillApprovedLeave } from '../../modules/hr/leave/backfillApprovedLeave'
 import {
   performPeriodClose, closeFailureText, payrollNote, nextBsMonth,
   nextExistingPeriod, previousExistingPeriod, carryForwardOpeningStock, createPeriodWithCarryForward,
 } from './closePeriod'
 
 const PERIOD = { id: 'p-bhadra', bs_year: 2083, bs_month: 5 }
+const NO_LEAVE = { filled: 0, skipped: 0, employees: 0, error: null }
 
 // A chainable, thenable stand-in for a PostgrestBuilder that resolves to `result`.
 function builder(result) {
@@ -35,6 +43,7 @@ beforeEach(() => {
   // Happy path by default: close ok, insert ok, no closing rows to carry, report generates.
   scopedUpdate.mockReturnValue(builder({ error: null }))
   scopedInsert.mockResolvedValue({ data: { id: 'p-ashwin' }, error: null })
+  backfillApprovedLeave.mockResolvedValue(NO_LEAVE)
   scopedFrom.mockReturnValue(builder({ data: null, error: null }))
   supabase.from.mockReturnValue({
     select: () => builder({ data: [], error: null }),
@@ -104,14 +113,14 @@ describe('createPeriodWithCarryForward', () => {
     const upsert = jest.fn(() => builder({ error: null }))
     supabase.from.mockReturnValue({ select: () => builder({ data: [{ item_id: 'i1', physical_qty: 3 }], error: null }), upsert })
     const r = await createPeriodWithCarryForward({ clientId: 'c1', periods: LIST, bs_year: 2083, bs_month: 7 })
-    expect(r).toEqual({ created: { id: 'kartik' }, error: null, carriedFrom: LIST[0], carried: 1, carryError: null })
+    expect(r).toEqual({ created: { id: 'kartik' }, error: null, carriedFrom: LIST[0], carried: 1, carryError: null, leaveFill: NO_LEAVE })
     expect(upsert.mock.calls[0][0]).toEqual([{ period_id: 'kartik', item_id: 'i1', qty: 3 }])
   })
 
   test('the earliest period on record has nothing to carry from, and says so rather than failing', async () => {
     scopedInsert.mockResolvedValue({ data: { id: 'first' }, error: null })
     const r = await createPeriodWithCarryForward({ clientId: 'c1', periods: [], bs_year: 2083, bs_month: 1 })
-    expect(r).toEqual({ created: { id: 'first' }, error: null, carriedFrom: null, carried: 0, carryError: null })
+    expect(r).toEqual({ created: { id: 'first' }, error: null, carriedFrom: null, carried: 0, carryError: null, leaveFill: NO_LEAVE })
     expect(supabase.from).not.toHaveBeenCalled()
   })
 
@@ -140,7 +149,7 @@ describe('performPeriodClose', () => {
       upsert: jest.fn(() => builder({ error: null })),
     })
     const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, actorId: 'u1' })
-    expect(r).toEqual({ closed: true, nextPeriodId: 'p-ashwin', reportSaved: true, failures: [] })
+    expect(r).toEqual({ closed: true, nextPeriodId: 'p-ashwin', reportSaved: true, failures: [], leaveFill: NO_LEAVE })
     expect(scopedInsert).toHaveBeenCalledWith('monthly_periods', 'c1', { bs_year: 2083, bs_month: 6, status: 'open' }, { single: true })
     // The report is generated for the CLOSED period — status must not still read 'open'.
     expect(generateMonthlyReport).toHaveBeenCalledWith({ clientId: 'c1', period: { ...PERIOD, status: 'closed' } })
@@ -215,7 +224,7 @@ describe('performPeriodClose', () => {
 
   test('openNext:false (admin End Period) opens nothing and carries nothing', async () => {
     const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, openNext: false })
-    expect(r).toEqual({ closed: true, nextPeriodId: null, reportSaved: true, failures: [] })
+    expect(r).toEqual({ closed: true, nextPeriodId: null, reportSaved: true, failures: [], leaveFill: null })
     expect(scopedInsert).not.toHaveBeenCalled()
     expect(supabase.from).not.toHaveBeenCalled()
   })

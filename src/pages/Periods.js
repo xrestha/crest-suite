@@ -11,8 +11,9 @@ import Tip from '../components/Tip'
 import ConfirmModal from '../components/ConfirmModal'
 import {
   closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText,
-  carryForwardOpeningStock, createPeriodWithCarryForward, nextExistingPeriod, periodLabel,
+  carryForwardOpeningStock, createPeriodWithCarryForward, nextExistingPeriod, periodLabel, nextBsMonth,
 } from './periods/closePeriod'
+import { backfillLeaveText } from '../modules/hr/leave/backfillApprovedLeave'
 import CloseConfirmBody from './periods/CloseConfirmBody'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
 import { withTimeout } from '../utils/withTimeout'
@@ -190,7 +191,15 @@ export default function Periods() {
 
   function surfaceCloseFailures(result, period) {
     const first = result.failures[0]
-    if (first) fail(closeFailureText({ stage: first.stage, period, isAdmin }), first.error)
+    if (first) { fail(closeFailureText({ stage: first.stage, period, isAdmin }), first.error); return }
+    // A close that went cleanly says nothing, by design — except when opening the next month
+    // wrote attendance days that had been waiting for it to exist (S741). Those are real rows on
+    // a sheet payroll reads, so the one moment they are written is the one moment to say so.
+    const next = nextBsMonth(period)
+    const leave = result.leaveFill
+      ? backfillLeaveText(result.leaveFill, `${BS_MONTHS[next.bs_month - 1]} ${next.bs_year}`)
+      : ''
+    if (leave) ok(leave)
   }
 
   const adminMods = cid => {
@@ -301,14 +310,24 @@ export default function Periods() {
   // counted), or the carry failed — the last names the repair, because the period exists now
   // and the count still has to reach it.
   function surfaceCreateOutcome(label, r) {
+    // A month can only be created once, so anything that had to wait for it to exist gets its
+    // one and only chance to be reported here — see the leave back-fill below.
+    const leave = r.leaveFill ? backfillLeaveText(r.leaveFill, label) : ''
+    if (r.leaveFill?.error) {
+      // The period IS created; the leave days are the half that did not land, and payroll is
+      // what suffers for it. Report as a failure so it carries the technical detail with it.
+      fail(`${label} created${r.carried ? `, opening stock carried forward from ${periodLabel(r.carriedFrom)}` : ''}. But ${leave}`, r.leaveFill.error)
+      return
+    }
+    const tail = leave ? ` ${leave}` : ''
     if (!r.carriedFrom) {
-      ok(`${label} created. It is the earliest period on record, so it opens with no opening stock — enter it on Stock Count.`)
+      ok(`${label} created. It is the earliest period on record, so it opens with no opening stock — enter it on Stock Count.${tail}`)
     } else if (r.carryError) {
-      fail(`${label} was created, but ${periodLabel(r.carriedFrom)}'s closing count could not be carried into it — ${label} currently opens with no opening figures. Use "Resync Opening Stock" on the ${periodLabel(r.carriedFrom)} row before anyone enters purchases or sales.`, r.carryError)
+      fail(`${label} was created, but ${periodLabel(r.carriedFrom)}'s closing count could not be carried into it — ${label} currently opens with no opening figures. Use "Resync Opening Stock" on the ${periodLabel(r.carriedFrom)} row before anyone enters purchases or sales.${tail}`, r.carryError)
     } else if (r.carried === 0) {
-      ok(`${label} created. ${periodLabel(r.carriedFrom)} was never closing-counted, so there was nothing to carry forward — enter the opening stock on Stock Count.`)
+      ok(`${label} created. ${periodLabel(r.carriedFrom)} was never closing-counted, so there was nothing to carry forward — enter the opening stock on Stock Count.${tail}`)
     } else {
-      ok(`${label} created. Opening stock carried forward from ${periodLabel(r.carriedFrom)}'s closing count (${r.carried} item${r.carried === 1 ? '' : 's'}).`)
+      ok(`${label} created. Opening stock carried forward from ${periodLabel(r.carriedFrom)}'s closing count (${r.carried} item${r.carried === 1 ? '' : 's'}).${tail}`)
     }
   }
 

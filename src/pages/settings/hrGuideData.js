@@ -232,6 +232,7 @@ export const HR_GUIDE_GROUPS = [
           'Approving writes the matching attendance rows for every day in the range, using the leave type\'s paid/unpaid nature.',
           'Balances show quota, used and remaining per employee per type for the BS year.',
           'A rejected or cancelled request is not a dead end: Reopen (manager rank and above) returns it to Pending with its original dates, reason and history, ready to be approved again.',
+          'Leave approved for a month that has no period yet cannot be written to an attendance sheet that does not exist. It is approved anyway, and those days are marked automatically the moment that month is created — a banner on the page counts anything still outstanding.',
         ],
         fields: [
           { label: 'Half day', desc: 'Counts 0.5 and is only offered on a single-day request — a multi-day range is forced back to full days. First/second half is record-keeping only; pay only distinguishes full vs half.' },
@@ -246,6 +247,7 @@ export const HR_GUIDE_GROUPS = [
           'Deciding a request re-reads its current status from the database first, so two supervisors working the same queue can\'t double-process one request.',
           'Reopen goes to Pending, never straight back to Approved — approval is the only thing that writes attendance rows, so a request restored as Approved would sit over an attendance sheet with those days blank and payroll would treat a paid leave as unworked. Approve it again after reopening.',
           'Reopen is manager-only by design: a supervisor can decide a request, but undoing a decision that has already cleared attendance days and moved a balance is a rank up. Owner and admin both resolve to manager here.',
+          'An approval is only half the write: the other half is the hr_attendance rows, which is what payroll actually reads. A client may have ONE open period at a time, so leave approved months ahead has nowhere to write — until S741 those days were simply never marked, and an approved unpaid leave was silently PAID when its month came round. Creating the period now back-fills them (backfillApprovedLeave), and a day that already carries a mark is never overwritten.',
         ],
         connections: 'Approval writes hr_attendance (which payroll reads). Balances and request submission also surface in the employee\'s Self-Service Leave tab. The Roster warns when a shift is assigned over approved leave.',
       },

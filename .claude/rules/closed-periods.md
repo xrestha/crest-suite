@@ -108,6 +108,28 @@ limit.** `fetchAllRows` with `.order('item_id')` as the tiebreaker; `closePeriod
 with a 1000-row first page, and that test was verified to fail against the unfixed code before
 being kept.
 
+## Minting a period is an HR event too — approved leave is waiting for it (S741)
+
+Both creation paths (`createPeriodWithCarryForward`, and `performPeriodClose`'s open-next) call
+`backfillApprovedLeave()` from `src/modules/hr/leave/`. This looks like an IMS routine acquiring an
+HR concern; it is the opposite. `hr_attendance` rows hang off `monthly_periods`, and a client may
+have ONE open period at a time — so leave approved for a month two or three ahead has **nowhere to
+write**, and payroll reads the attendance sheet, not the Leave page. Until S741 nothing back-filled
+it, so an approved unpaid leave was silently PAID when its month came round; the approval banner
+told the operator to "create the period, then re-approve", and neither half was possible.
+
+Creating the month is the one moment the write becomes possible, which is why the call belongs
+here. Three properties to preserve:
+
+- **Non-blocking, like the report.** The month must open whether or not the back-fill lands. A
+  failure is a `leave_backfill` stage in `failures` with its own `closeFailureText()` sentence, and
+  the result rides back as `leaveFill` so a clean run can SAY what it wrote — those are real rows
+  on a sheet someone is about to run payroll from.
+- **It never overwrites an existing mark**, so the 23505-retry branch (the next period already
+  exists) is safe to run it through.
+- **A new creation path must call it.** There are two today. A third that mints a `monthly_periods`
+  row without this silently reopens the whole defect, and nothing will fail.
+
 ## "The next period" is the next one that EXISTS, never `bs_month + 1` (S738)
 
 The product skips months by design: **End Period** closes a month and opens nothing, and

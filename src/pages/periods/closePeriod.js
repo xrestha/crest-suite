@@ -3,6 +3,7 @@ import { scopedFrom, scopedInsert, scopedUpdate } from '../../shared/scopedDb'
 import { withTimeout } from '../../utils/withTimeout'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { generateMonthlyReport, saveGeneratedReport } from '../../modules/ownerReport/generateMonthlyReport'
+import { backfillApprovedLeave } from '../../modules/hr/leave/backfillApprovedLeave'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 
 /**
@@ -174,11 +175,13 @@ export async function createPeriodWithCarryForward({ clientId, periods, bs_year,
   const { data: created, error } = await scopedInsert(
     'monthly_periods', clientId, { bs_year, bs_month, status: 'open' }, { single: true }
   )
-  if (error) return { created: null, error, carriedFrom: null, carried: 0, carryError: null }
+  if (error) return { created: null, error, carriedFrom: null, carried: 0, carryError: null, leaveFill: null }
+  // Leave approved months ago for this month can only be written now that the month exists (S741).
+  const leaveFill = await backfillApprovedLeave({ clientId, period: created })
   const prev = previousExistingPeriod(periods || [], { bs_year, bs_month })
-  if (!prev) return { created, error: null, carriedFrom: null, carried: 0, carryError: null }
+  if (!prev) return { created, error: null, carriedFrom: null, carried: 0, carryError: null, leaveFill }
   const { error: carryError, carried } = await carryForwardOpeningStock(prev.id, created.id)
-  return { created, error: null, carriedFrom: prev, carried, carryError: carryError || null }
+  return { created, error: null, carriedFrom: prev, carried, carryError: carryError || null, leaveFill }
 }
 
 /**
@@ -195,7 +198,8 @@ export async function createPeriodWithCarryForward({ clientId, periods, bs_year,
  * by how much the reader has to do about them.
  *
  * @returns {Promise<{closed: boolean, nextPeriodId: string|null, reportSaved: boolean,
- *   failures: Array<{stage: 'close'|'open_next'|'carry_forward'|'report', error: any}>}>}
+ *   failures: Array<{stage: 'close'|'open_next'|'carry_forward'|'leave_backfill'|'report', error: any}>,
+ *   leaveFill: {filled: number, skipped: number, employees: number, error: any}|null}>}
  */
 export async function performPeriodClose({ clientId, period, openNext = true, actorId = null }) {
   const failures = []
@@ -206,6 +210,7 @@ export async function performPeriodClose({ clientId, period, openNext = true, ac
   }
 
   let nextPeriodId = null
+  let leaveFill = null
   if (openNext) {
     const next = nextBsMonth(period)
     const { data: newPeriod, error: newErr } = await scopedInsert(
@@ -229,6 +234,13 @@ export async function performPeriodClose({ clientId, period, openNext = true, ac
     if (nextPeriodId) {
       const { error: cfErr } = await carryForwardOpeningStock(period.id, nextPeriodId)
       if (cfErr) failures.push({ stage: 'carry_forward', error: cfErr })
+      // The new month is the first moment leave already approved for it can be marked (S741).
+      // Non-blocking like the report below: the month is closed and the next one is open either
+      // way, and a failed back-fill is reported rather than reversing any of that.
+      leaveFill = await backfillApprovedLeave({
+        clientId, period: { id: nextPeriodId, bs_year: next.bs_year, bs_month: next.bs_month },
+      })
+      if (leaveFill.error) failures.push({ stage: 'leave_backfill', error: leaveFill.error })
     }
   }
 
@@ -243,7 +255,7 @@ export async function performPeriodClose({ clientId, period, openNext = true, ac
     failures.push({ stage: 'report', error: e })
   }
 
-  return { closed: true, nextPeriodId, reportSaved, failures }
+  return { closed: true, nextPeriodId, reportSaved, failures, leaveFill }
 }
 
 /**
@@ -268,6 +280,11 @@ export function closeFailureText({ stage, period, isAdmin = false }) {
       return `${m} was closed and ${nextLabel} opened, but the closing count could not be carried into it as opening stock — ` +
         `${nextLabel}'s Stock Count currently opens with no opening figures. ` +
         `Use "Resync Opening Stock" on the ${m} row in Periods to carry it forward before anyone enters purchases or sales.`
+    case 'leave_backfill':
+      // Not about the month that closed — about leave already approved for the one just opened,
+      // which payroll will not deduct until those days are marked. Name that, not the read.
+      return `${m} closed and ${nextLabel} opened, but leave already approved for ${nextLabel} could not be marked on its attendance sheet — ` +
+        `payroll will not deduct those days as they stand. Open HR → Leave and use "Mark approved leave", or re-open ${nextLabel}'s Attendance after checking the connection.`
     case 'report':
       return `${m} closed, but its frozen Monthly Report could not be generated now. It will be generated the first time the report is opened.`
     default:

@@ -259,6 +259,45 @@ page's own `supervisor` rank, with no confirmation and no freshness re-read. Lef
 swept, on the same "decide it on its own merits" footing as `FinalSettlement` — an OT entry's undo
 touches no attendance row — but know it is a deliberate difference, not an oversight.
 
+## An approval is two writes, and the second one has a precondition the first does not (S741)
+
+Approving leave stamps the request AND writes an `hr_attendance` row per day. **The second write is
+the one that matters**: `payrollCompute` builds `unpaidDays` only from rows that exist, so a day
+with no row is a paid day, and the Attendance Sheet reads `hr_attendance` and never looks at
+`hr_leave_requests`.
+
+Those rows hang off a `monthly_periods` row, and `monthly_periods_one_open_per_client` allows a
+client ONE open period at a time. So leave approved for a month two or three ahead — which is most
+leave, since staff book around Dashain and family trips — had nowhere to write. It was approved
+anyway (right: recording the decision beats refusing it) under a banner reading *"Create the
+period(s), then re-approve to mark those days"*, and **neither half was possible**: the index
+refuses the early period, and an approved row has no Approve button. Nothing back-filled. The
+request read Approved, the sheet was blank, and an approved UNPAID leave was paid in full when its
+month finally came round.
+
+`backfillApprovedLeave({ clientId, period })` runs at the one moment the write becomes possible —
+`createPeriodWithCarryForward` and `performPeriodClose`'s open-next, the two places a period is
+minted. Five things are load-bearing:
+
+- **It fills only days with no attendance row.** At creation that is every day; the same helper
+  backs the Leave page's catch-up button, where the month may already carry marks, and a months-old
+  approval silently overwriting a hand-marked `present` is worse than the bug being fixed.
+- **It reports, never throws.** Period creation must not fail on an HR read, so the result rides
+  back as `leaveFill` and a failure is its own `leave_backfill` stage in `performPeriodClose`'s
+  `failures` — the CLAUDE.md "two writes in one function can diverge" rule: the second write's
+  silence proves nothing, so it gets its own answer.
+- **One day is sent once.** Two approved requests covering the same day would send the same
+  conflict key twice in one upsert, which Postgres refuses outright ("cannot affect row a second
+  time") — losing the whole month's back-fill over one double-booking.
+- **`findApprovedLeaveGaps()` makes an existing gap visible**, split into `waiting` (no period yet
+  — nobody's to act on, say so) and `unmarked` (period exists, days missing — actionable). Months
+  before the client's earliest period are ignored as imported history. Its failed read returns the
+  error rather than an empty list, because "nothing is missing" is the most reassuring answer the
+  function has.
+- **Say what the reader can do, or say there is nothing to do.** The approval banner now states
+  that the days will be marked when the month is created. A warning that asks for an impossible
+  action is worse than no warning: it trains people to ignore the banner.
+
 ## The Holiday Calendar is what pays the 2× rate, and it was empty (S635)
 
 `hr_holiday_calendar` is read by `Overtime.jsx` to decide the **holiday 2× rate** — and only on
