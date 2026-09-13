@@ -511,3 +511,38 @@ revenue into required hours. Five rules, each of which produces a plausible numb
 `covers_per_staff_target` stays a POLICY the owner sets; the learned covers-per-shift figure is
 shown beside it and never written into it. Collapsing the two would destroy the ability to say "we
 are understaffing against our own standard".
+
+## A shift's length is not its normal day (S742)
+
+`hr_shift_types.regular_hours` ("Normal hrs") splits a shift into normal time and overtime. A shift
+used to carry one number, so a rostered 12-hour day could never carry its overtime: Generate from
+Roster wrote `ot_hours: 0` and a punched 8am–8pm measured 12 − 12 = 0. `shiftRegularHours` /
+`shiftOvertimeHours` in `laborForecast.js` are the one definition. Four rules:
+
+- **NULL means the whole shift is normal time**, which is the pre-column behaviour, so nothing moves
+  until a manager fills it in. Never default it.
+- **Normal hours are CLOCK time, lunch included** (client decision). On a shift with them, Attendance
+  compares the Start-to-End span, so Break does not reduce OT. On a shift WITHOUT them the old
+  net-worked formula stays, on purpose: a shift typed with a net length would otherwise gain an hour
+  of OT on every day a break is entered. The "short" nudge follows the same basis.
+- **OT sits INSIDE `hours_worked`**, everywhere it is written. So the hourly branch of
+  `computePayslip` pays ordinary wage on `hours_worked − OT` (superseded OT included). Paying all of
+  it and then 1.5× on top paid 2.5× until S742. `computeActualLabor` and
+  `computePlannedLaborCost` price the OT part at basic × 1.5 on the same reading.
+- **Attendance reads `hr_shift_types` with `*`, not a column list.** Naming a new column there fails
+  the whole read on a database the migration has not reached, and an empty shift map makes every
+  rostered day's full span overtime.
+
+`zeroHourStatus()` (attendanceFromRoster.js) reads a zero-hour roster marker by name: unpaid first
+("UNPAID LEAVE" contains "paid leave"), then paid, and a leave name that says neither is UNPAID; then
+holiday, then off. `isOffDay` is deliberately unchanged, because Self-Service and the Labor Forecast
+only need on/off duty.
+
+## Clearing a month is scoped to the people on screen (S743)
+
+Attendance's Clear Month refuses when the period's payroll run is finalized, and when that read
+fails. It deletes `.in('employee_id', listed)`, never the whole period: the sheet lists
+active/probation staff only, and a mid-month leaver's days are what Final Settlement reads. **A
+blank attendance day is PAID for monthly staff** (`unpaidDays` comes only from rows that exist), so
+the consequence of any clear is that marked absences and unpaid leave stop deducting. Never write
+"a blank day is unpaid" in copy.
