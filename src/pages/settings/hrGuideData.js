@@ -169,7 +169,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'The shift board: assign shift types to employees per day in week or month view, drag to fill ranges, copy a whole week onto the next one, publish days to employees\' Self-Service, approve shift swaps, and see a planned-labor-cost forecast with the demand overlay from the Holiday Calendar and Demand Forecast.',
         workflow: [
-          'Define shift types once (name, start/end, colour) in the shift settings panel; assign them to cells by click or drag-select (touch devices get an explicit tap-first/tap-last "Select range" mode).',
+          'Define shift types once (name, start/end, colour, and Normal hours for a long shift — a 12-hour Full Day with 9 normal hours carries 3 hours of overtime) in the shift settings panel; assign them to cells by click or drag-select (touch devices get an explicit tap-first/tap-last "Select range" mode).',
           'Publish when a stretch is ready — publishing is per DAY, and only scheduled staff on those days are notified (web push where enabled).',
           '"Suggest" ranks unscheduled employees by fewest hours already scheduled this period, within whatever the Department filter shows.',
           '"⧉ Copy to Next Week" (weekly view) stamps the whole visible week onto the following week, same weekday to same weekday, then lands on it so the exceptions get edited on a real board.',
@@ -180,7 +180,7 @@ export const HR_GUIDE_GROUPS = [
           { label: 'Publish state (per day)', desc: 'Self-Service only ever returns PUBLISHED days — employees can never see a draft, and un-published edits stay invisible to them.' },
         ],
         formulas: [
-          'Planned labor cost per day = Σ over scheduled employees of (hourly rate derived from their pay basis) × shift hours — the same hourly-rate rule payroll itself uses, so plan and payroll can\'t disagree on what an hour costs.',
+          'Planned labor cost per day = Σ over scheduled employees of (hourly rate derived from their pay basis) × shift hours — the same hourly-rate rule payroll itself uses, so plan and payroll can\'t disagree on what an hour costs. A shift\'s hours beyond its Normal hours are priced at basic hourly × 1.5, as payroll pays them.',
         ],
         gotchas: [
           'Assigning a shift on a day with APPROVED leave prompts a confirm (override allowed — someone has to cover Dashain); clearing a cell never prompts.',
@@ -214,7 +214,8 @@ export const HR_GUIDE_GROUPS = [
         ],
         gotchas: [
           'Untouched cells stay EMPTY, never auto-Present — Save writes only cells someone actually touched, so nobody gets paid for a day nobody marked. "— Not marked —" plus the row-delete button is the honest blank state.',
-          'Generate from Roster fills GAPS only and never overwrites a manual entry: a shift with hours becomes Present, a zero-hour shift named like an off day becomes Off, any other zero-hour shift becomes Holiday, and a day with no roster row is left blank for manual entry.',
+          'Generate from Roster fills GAPS only and never overwrites a manual entry: a shift with hours becomes Present, with its hours beyond Normal hours as OT; a zero-hour shift is read by name — "PAID LEAVE" → Paid Leave, any other "LEAVE" → Unpaid Leave, "Holiday" → Holiday, "OFF DAY" → Off, anything else → Holiday; and a day with no roster row is left blank for manual entry.',
+          'On a shift with Normal hours set, punched Start/End overtime is clock time beyond those hours, lunch included, so Break does not reduce it. On a shift without, OT is hours worked (after Break) beyond the shift\'s length, as before.',
           'Working fewer hours than rostered is a visible shortfall nudge, never an automatic pay deduction — Nepal\'s Labour Act defines only full-day absence deductions, and inventing an hourly proration would be making up law.',
           'Attendance is one row per employee per day, so a month\'s sheet crosses the database\'s silent 1,000-row page size at roughly 34 staff — every read here is paged for that reason. A truncated read once paid daily staff zero and monthly staff a full month with no deductions.',
         ],
@@ -348,7 +349,7 @@ export const HR_GUIDE_GROUPS = [
         workflow: [
           'MONTHLY: gross = basic + allowances. Unpaid days = absences + unpaid leave + half of each half-day + days before the join date. Absence deduction = (gross ÷ days in the BS month) × unpaid days — allowances are forfeited too, not just basic. SSF base = min(basic × paid fraction, 100,000). Net = gross + OT − absence − SSF 11% − other deductions − TDS − advance recovery.',
           'DAILY: paid days = present + half days × 0.5 + paid leave (paid leave IS paid for daily staff) + half paid leave × 0.5. Earned = daily basic × paid days. No absence deduction, no allowances. OT at (basic ÷ 8) × 1.5.',
-          'HOURLY: paid hours = hours worked + paid leave × 8 + half paid leave × 4. Earned = hourly basic × paid hours. OT at basic × 1.5.',
+          'HOURLY: paid hours = (hours worked − the OT hours inside them) + paid leave × 8 + half paid leave × 4. Earned = hourly basic × paid hours. OT at basic × 1.5 — so an overtime hour pays 1.5× in total, not the ordinary rate plus 1.5× on top (the pre-S742 figure, 2.5×).',
         ],
         fields: [
           { label: 'SSF (Social Security Fund)', desc: 'Employee 11%, employer 20% (31% total on the challan), on a base capped at NPR 100,000 of basic. Deducted only when enrolment AND the registration number are both present. SSF contributors also get the 1% first tax slab (Social Security Tax) waived entirely.' },

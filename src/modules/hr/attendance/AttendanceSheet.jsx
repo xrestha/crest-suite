@@ -9,7 +9,7 @@ import ConfirmModal from '../../../components/ConfirmModal'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 import { buildAttendanceFromRoster } from './attendanceFromRoster'
-import { calcHours, shiftHours } from '../roster/laborForecast'
+import { calcHours, shiftHours, shiftRegularHours } from '../roster/laborForecast'
 
 const STATUS_MAP = Object.fromEntries(ATTENDANCE_STATUSES.map(s => [s.key, s]))
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -83,7 +83,10 @@ export default function AttendanceSheet() {
 
   useEffect(() => {
     if (!clientId) return
-    scopedFrom('hr_shift_types', 'id, name, hours, start_time, end_time').then(({ data }) => {
+    // `*` rather than a column list: `regular_hours` (S742) must reach the OT auto-calc, and naming
+    // it here would fail this whole read on a database the migration has not reached yet — which
+    // leaves shiftTypesById empty, so every rostered day's whole worked span became overtime.
+    scopedFrom('hr_shift_types').then(({ data }) => {
       setShiftTypesById(Object.fromEntries((data || []).map(s => [s.id, s])))
     })
   }, [clientId, scopedFrom])
@@ -107,22 +110,45 @@ export default function AttendanceSheet() {
   const rosterByKey = useMemo(
     () => Object.fromEntries(rosterRows.map(r => [`${r.employee_id}:${r.bs_day}`, r.shift_type_id])),
     [rosterRows])
+  function shiftFor(empId, day) {
+    const shiftTypeId = rosterByKey[`${empId}:${day}`]
+    return shiftTypeId ? shiftTypesById[shiftTypeId] : null
+  }
   function assignedHoursFor(empId, day) {
     const shiftTypeId = rosterByKey[`${empId}:${day}`]
     return shiftTypeId ? shiftHours(shiftTypesById[shiftTypeId]) : STANDARD_HOURS_PER_DAY
+  }
+  // Two ways to measure a punched day, chosen by the day's shift (S742):
+  //   • the shift has Normal hours → CLOCK time. OT is the Start-to-End span beyond those normal
+  //     hours, lunch included, so 8am–8pm on a 9-normal-hour shift is 3h OT whatever Break says.
+  //   • it does not → exactly as before: hours worked (span minus Break) beyond the shift's length.
+  // The second stays untouched because a shift typed with a NET length (8h for 8am–5pm with an
+  // unpaid hour) would otherwise gain an hour of OT on every day a break is entered.
+  function autoHoursFor(empId, day, startNorm, endNorm, breakMinutes) {
+    const span = calcHours(startNorm, endNorm)
+    if (span == null) return null
+    const worked = Math.max(0, parseFloat((span - (parseFloat(breakMinutes) || 0) / 60).toFixed(2)))
+    const regular = shiftRegularHours(shiftFor(empId, day))
+    const over = regular != null ? span - regular : worked - assignedHoursFor(empId, day)
+    return { hours_worked: worked, ot_hours: Math.max(0, parseFloat(over.toFixed(1))) }
   }
   // A meaningful shortfall against the roster-assigned shift is surfaced as a visual nudge, not
   // an automatic pay deduction — Nepal's Labour Act only defines a full-day absence deduction
   // (Section 47 + Rules), nothing per-hour, so prorating pay here would be inventing a rule the
   // Act doesn't authorize. Left for the admin to notice and decide (e.g. reclassify as Half Day).
+  // Measured on the same basis as the OT above: clock time for a shift with Normal hours, so a
+  // 45-minute break on a full 8am–5pm day no longer reads as "0.75h short".
   const SHORTFALL_FLAG_HOURS = 0.5
   function shortfallFor(rec, empId, day) {
-    if (!rec || rec.status !== 'present' || !rec.start_time || !rec.end_time) return 0
-    if (!isValidTimeStr(rec.start_time) || !isValidTimeStr(rec.end_time)) return 0
-    const worked = parseFloat(rec.hours_worked)
-    if (!Number.isFinite(worked)) return 0
-    const gap = parseFloat((assignedHoursFor(empId, day) - worked).toFixed(1))
-    return gap >= SHORTFALL_FLAG_HOURS ? gap : 0
+    if (!rec || rec.status !== 'present' || !rec.start_time || !rec.end_time) return null
+    if (!isValidTimeStr(rec.start_time) || !isValidTimeStr(rec.end_time)) return null
+    const clockBasis = shiftRegularHours(shiftFor(empId, day)) != null
+    const measured = clockBasis
+      ? calcHours(parseTimeInput(rec.start_time), parseTimeInput(rec.end_time))
+      : parseFloat(rec.hours_worked)
+    if (!Number.isFinite(measured)) return null
+    const gap = parseFloat((assignedHoursFor(empId, day) - measured).toFixed(1))
+    return gap >= SHORTFALL_FLAG_HOURS ? { gap, measured } : null
   }
 
   const loadAttendance = useCallback(async (periodId) => {
@@ -222,14 +248,8 @@ export default function AttendanceSheet() {
     const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id).eq('bs_day', day)
     if (error) setSavedMsg('error:' + errorLine(error))
   }
-  // Unpaid break/lunch minutes, subtracted from the raw Start-to-End span before it becomes Hours
-  // Worked — otherwise a clocked-out lunch break would inflate both Hours and OT. Clamped at 0 so
-  // a break longer than the raw span can't produce a negative.
-  function computeWorked(startNorm, endNorm, breakMinutes) {
-    const raw = calcHours(startNorm, endNorm)
-    if (raw == null) return null
-    return Math.max(0, parseFloat((raw - (parseFloat(breakMinutes) || 0) / 60).toFixed(2)))
-  }
+  // Unpaid break/lunch minutes are subtracted from the raw Start-to-End span to give Hours Worked
+  // (clamped at 0) — see autoHoursFor above for when they also reduce OT and when they do not.
   // Start/End are punched in as plain text (24-hour HH:MM) — auto-computes Hours + OT (worked
   // hours beyond that day's roster-assigned shift) the moment both are valid times. Still just
   // seeds the Hours/OT Hours fields, which stay directly editable afterward if the auto-calc
@@ -245,11 +265,8 @@ export default function AttendanceSheet() {
       const startNorm = parseTimeInput(start)
       const endNorm   = parseTimeInput(end)
       if (startNorm && endNorm) {
-        const worked = computeWorked(startNorm, endNorm, prev.break_minutes)
-        if (worked != null) {
-          next.hours_worked = worked
-          next.ot_hours = Math.max(0, parseFloat((worked - assignedHoursFor(empId, day)).toFixed(1)))
-        }
+        const auto = autoHoursFor(empId, day, startNorm, endNorm, prev.break_minutes)
+        if (auto) Object.assign(next, auto)
       }
       return { ...m, [key]: next }
     })
@@ -264,11 +281,8 @@ export default function AttendanceSheet() {
       const startNorm = parseTimeInput(prev.start_time)
       const endNorm   = parseTimeInput(prev.end_time)
       if (startNorm && endNorm) {
-        const worked = computeWorked(startNorm, endNorm, value)
-        if (worked != null) {
-          next.hours_worked = worked
-          next.ot_hours = Math.max(0, parseFloat((worked - assignedHoursFor(empId, day)).toFixed(1)))
-        }
+        const auto = autoHoursFor(empId, day, startNorm, endNorm, value)
+        if (auto) Object.assign(next, auto)
       }
       return { ...m, [key]: next }
     })
@@ -321,11 +335,8 @@ export default function AttendanceSheet() {
         const startNorm = parseTimeInput(rec.start_time)
         const endNorm = parseTimeInput(rec.end_time)
         if (startNorm && endNorm) {
-          const worked = computeWorked(startNorm, endNorm, defaultBreakMin)
-          if (worked != null) {
-            rec.hours_worked = worked
-            rec.ot_hours = Math.max(0, parseFloat((worked - assignedHoursFor(emp.id, selectedDay)).toFixed(1)))
-          }
+          const auto = autoHoursFor(emp.id, selectedDay, startNorm, endNorm, defaultBreakMin)
+          if (auto) Object.assign(rec, auto)
         }
         next[key] = rec
       })
@@ -343,11 +354,8 @@ export default function AttendanceSheet() {
         const startNorm = parseTimeInput(rec.start_time)
         const endNorm = parseTimeInput(rec.end_time)
         if (startNorm && endNorm) {
-          const worked = computeWorked(startNorm, endNorm, defaultBreakMin)
-          if (worked != null) {
-            rec.hours_worked = worked
-            rec.ot_hours = Math.max(0, parseFloat((worked - assignedHoursFor(empId, d)).toFixed(1)))
-          }
+          const auto = autoHoursFor(empId, d, startNorm, endNorm, defaultBreakMin)
+          if (auto) Object.assign(rec, auto)
         }
         next[key] = rec
       })
@@ -683,7 +691,7 @@ export default function AttendanceSheet() {
 
           <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
             Only the days you actually mark are saved — an untouched day stays blank and is never assumed Present or Off. For daily- and hourly-paid staff a blank day pays nothing, so mark every day of the month (Present/Off/Holiday/Leave) before payroll runs.{' '}
-            <Tip text="Fills blank days across the whole month from Staff Roster shift assignments — marked Present, with hours from the shift. A zero-hour roster entry named like an off day (e.g. 'OFF DAY', 'LEAVE') is marked Off; any other zero-hour entry is marked Holiday. Days with no roster entry at all are left blank for manual entry. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
+            <Tip text="Fills blank days across the whole month from Staff Roster shift assignments — marked Present, with hours from the shift, and any hours beyond the shift's Normal hours filled in as OT. A zero-hour roster entry is read by its name: 'PAID LEAVE' becomes Paid Leave, any other 'LEAVE' becomes Unpaid Leave, a 'Holiday' becomes Holiday, and 'OFF DAY' becomes Off. Days with no roster entry at all are left blank for manual entry. Never overwrites a day that already has an entry, so a formal approved Leave Request or manual correction still takes precedence if entered afterward." width={320}>
               ⚡ Generate from Roster
             </Tip>{' '}pre-fills this month from Staff Roster shift assignments; it never overwrites a day you've already marked.
           </div>
@@ -696,19 +704,19 @@ export default function AttendanceSheet() {
                     <th>Employee</th>
                     <th style={{ width: 150 }}>Status</th>
                     <th style={{ width: 100 }}>
-                      <Tip text="Clock-in time — type 24-hour HH:MM (e.g. 09:00). Once both Start and End are valid, Hours and OT Hours are calculated automatically — worked hours beyond that day's roster-assigned shift (or 8h if not on the roster that day) become OT." width={300}>Start</Tip>
+                      <Tip text="Clock-in time — type 24-hour HH:MM (e.g. 09:00). Once both Start and End are valid, Hours and OT Hours are calculated automatically. If that day's roster shift has Normal hours set, OT is the clock time from Start to End beyond those normal hours (lunch included). Otherwise OT is the hours worked beyond the shift's length (or 8h if not on the roster that day)." width={300}>Start</Tip>
                     </th>
                     <th style={{ width: 100 }}>
                       <Tip text="Clock-out time — type 24-hour HH:MM (e.g. 18:30). Overnight shifts (end time earlier than start time) are handled automatically." width={260}>End</Tip>
                     </th>
                     <th style={{ width: 70, textAlign: 'right' }}>
-                      <Tip text="Unpaid lunch/break minutes to subtract from the raw Start-to-End span before it becomes Hours Worked — otherwise a clocked-out break would inflate Hours and OT. Leave blank if the shift has no unpaid break." width={260}>Break</Tip>
+                      <Tip text="Unpaid lunch/break minutes to subtract from the raw Start-to-End span before it becomes Hours Worked. On a shift with Normal hours set, the break does not reduce OT — those normal hours already include lunch. Leave blank if the shift has no unpaid break." width={260}>Break</Tip>
                     </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
                       <Tip text="Hours worked that day — auto-filled from Start/End minus Break, or enter directly. Only used for hourly-paid staff." width={250}>Hours</Tip>
                     </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
-                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly. If the same day also has an approved entry in the Overtime module, that approved entry is what gets paid and the hours here are ignored for that day — so the same overtime can never be paid twice. Holiday overtime at 2× is only available through the Overtime module." width={280}>OT Hours</Tip>
+                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster shift (its Normal hours when set), or enter directly. If the same day also has an approved entry in the Overtime module, that approved entry is what gets paid and the hours here are ignored for that day — so the same overtime can never be paid twice. Holiday overtime at 2× is only available through the Overtime module." width={280}>OT Hours</Tip>
                     </th>
                     <th>Note</th>
                     <th style={{ width: 32 }} />
@@ -771,11 +779,14 @@ export default function AttendanceSheet() {
                           <input type="number" min="0" step="0.5" id={`att-ot-${emp.id}`} aria-label={`${emp.full_name} — overtime hours`}
                             style={{ ...inp, width: 80, textAlign: 'right' }}
                             value={rec?.ot_hours ?? ''} onChange={e => setCell(emp.id, selectedDay, 'ot_hours', e.target.value)} placeholder="0" />
-                          {shortfallFor(rec, emp.id, selectedDay) > 0 && (
-                            <Tip text={`Clocked ${rec.hours_worked}h against a ${assignedHoursFor(emp.id, selectedDay)}h roster shift — ${shortfallFor(rec, emp.id, selectedDay)}h short. Not auto-deducted; reclassify as Half Day if warranted.`} width={230}>
-                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>⚠ {shortfallFor(rec, emp.id, selectedDay)}h short</div>
-                            </Tip>
-                          )}
+                          {(() => {
+                            const short = shortfallFor(rec, emp.id, selectedDay)
+                            return short && (
+                              <Tip text={`Clocked ${short.measured}h against a ${assignedHoursFor(emp.id, selectedDay)}h roster shift — ${short.gap}h short. Not auto-deducted; reclassify as Half Day if warranted.`} width={230}>
+                                <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>⚠ {short.gap}h short</div>
+                              </Tip>
+                            )
+                          })()}
                         </td>
                         <td>
                           <input id={`att-note-${emp.id}`} aria-label={`${emp.full_name} — note`}
@@ -865,19 +876,19 @@ export default function AttendanceSheet() {
                     <th style={{ width: 110 }}>Date</th>
                     <th style={{ width: 150 }}>Status</th>
                     <th style={{ width: 100 }}>
-                      <Tip text="Clock-in time — type 24-hour HH:MM (e.g. 09:00). Once both Start and End are valid, Hours and OT Hours are calculated automatically — worked hours beyond that day's roster-assigned shift (or 8h if not on the roster that day) become OT." width={300}>Start</Tip>
+                      <Tip text="Clock-in time — type 24-hour HH:MM (e.g. 09:00). Once both Start and End are valid, Hours and OT Hours are calculated automatically. If that day's roster shift has Normal hours set, OT is the clock time from Start to End beyond those normal hours (lunch included). Otherwise OT is the hours worked beyond the shift's length (or 8h if not on the roster that day)." width={300}>Start</Tip>
                     </th>
                     <th style={{ width: 100 }}>
                       <Tip text="Clock-out time — type 24-hour HH:MM (e.g. 18:30). Overnight shifts (end time earlier than start time) are handled automatically." width={260}>End</Tip>
                     </th>
                     <th style={{ width: 70, textAlign: 'right' }}>
-                      <Tip text="Unpaid lunch/break minutes to subtract from the raw Start-to-End span before it becomes Hours Worked — otherwise a clocked-out break would inflate Hours and OT. Leave blank if the shift has no unpaid break." width={260}>Break</Tip>
+                      <Tip text="Unpaid lunch/break minutes to subtract from the raw Start-to-End span before it becomes Hours Worked. On a shift with Normal hours set, the break does not reduce OT — those normal hours already include lunch. Leave blank if the shift has no unpaid break." width={260}>Break</Tip>
                     </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
                       <Tip text="Hours worked that day — auto-filled from Start/End minus Break, or enter directly. Only used for hourly-paid staff." width={250}>Hours</Tip>
                     </th>
                     <th style={{ width: 90, textAlign: 'right' }}>
-                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster-assigned shift, or enter directly." width={280}>OT Hours</Tip>
+                      <Tip text="Overtime hours, paid at 1.5× the normal hourly rate during payroll — auto-filled from Start/End against that day's roster shift (its Normal hours when set), or enter directly." width={280}>OT Hours</Tip>
                     </th>
                     <th>Note</th>
                     <th style={{ width: 32 }} />
@@ -939,11 +950,14 @@ export default function AttendanceSheet() {
                             <input type="number" min="0" step="0.5" id={`att-emp-ot-${d}`} aria-label={`Day ${d} — overtime hours`}
                               style={{ ...inp, width: 80, textAlign: 'right' }}
                               value={rec?.ot_hours ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'ot_hours', e.target.value)} placeholder="0" />
-                            {shortfallFor(rec, selectedEmployeeId, d) > 0 && (
-                              <Tip text={`Clocked ${rec.hours_worked}h against a ${assignedHoursFor(selectedEmployeeId, d)}h roster shift — ${shortfallFor(rec, selectedEmployeeId, d)}h short. Not auto-deducted; reclassify as Half Day if warranted.`} width={230}>
-                                <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>⚠ {shortfallFor(rec, selectedEmployeeId, d)}h short</div>
-                              </Tip>
-                            )}
+                            {(() => {
+                              const short = shortfallFor(rec, selectedEmployeeId, d)
+                              return short && (
+                                <Tip text={`Clocked ${short.measured}h against a ${assignedHoursFor(selectedEmployeeId, d)}h roster shift — ${short.gap}h short. Not auto-deducted; reclassify as Half Day if warranted.`} width={230}>
+                                  <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>⚠ {short.gap}h short</div>
+                                </Tip>
+                              )
+                            })()}
                           </td>
                           <td>
                             <input id={`att-emp-note-${d}`} aria-label={`Day ${d} — note`}

@@ -243,9 +243,32 @@ describe('computePayslip — hourly basis', () => {
       { status: 'paid_leave' },
     ]
     const slip = computePayslip(employee, [], attendanceRows, period)
-    expect(slip.gross).toBe(25200)   // 150 * (160 + 8)
+    expect(slip.gross).toBe(24450)   // 150 * ((160 - 5 OT) + 8)
     expect(slip.ot_amount).toBe(1125) // 5 * 150 * 1.5
-    expect(slip.net_pay).toBe(26325)
+    expect(slip.net_pay).toBe(25575)
+  })
+
+  // S742: OT hours sit inside hours_worked, so paying the ordinary wage on all of them and then
+  // 1.5× on top paid each overtime hour 2.5×.
+  test('an overtime hour pays 1.5× the rate in total, not 2.5×', () => {
+    const employee = { pay_basis: 'hourly', basic_salary: 100, ssf_enrolled: false }
+    const slip = computePayslip(employee, [], [{ status: 'present', bs_day: 1, hours_worked: 12, ot_hours: 3 }], period)
+    expect(slip.breakdown.regularHours).toBe(9)
+    expect(slip.gross).toBe(900)       // 9 normal hours × 100
+    expect(slip.ot_amount).toBe(450)   // 3 × 100 × 1.5
+    expect(slip.net_pay).toBe(1350)    // 12 hours cost 13.5 hours' pay, not 16.5
+  })
+
+  test('attendance OT replaced by an approved Overtime entry is still taken out of the ordinary hours', () => {
+    const employee = { pay_basis: 'hourly', basic_salary: 100, ssf_enrolled: false }
+    const slip = computePayslip(
+      employee, [],
+      [{ status: 'present', bs_day: 1, hours_worked: 12, ot_hours: 3 }],
+      period, 0,
+      [{ bs_day: 1, ot_hours: 3, ot_type: 'holiday' }],
+    )
+    expect(slip.gross).toBe(900)       // 9 normal hours
+    expect(slip.ot_amount).toBe(600)   // the approved entry: 3 × 100 × 2
   })
 })
 

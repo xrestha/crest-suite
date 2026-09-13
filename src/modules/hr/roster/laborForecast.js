@@ -23,6 +23,27 @@ export function shiftHours(shift) {
   return shift.hours ?? calcHours(shift.start_time, shift.end_time) ?? 0
 }
 
+// The hours of a shift paid at the normal rate before overtime starts (`hr_shift_types.regular_hours`,
+// S742), or null when the manager left it blank — in which case the whole shift is normal time,
+// which is exactly how every shift behaved before the column existed. A shift type had only ONE
+// number, its length, so a rostered 12-hour "Full Day" could never carry the 3 overtime hours it
+// was scheduled with: Generate from Roster wrote 0 OT and a punched 8am–8pm measured 12 − 12 = 0.
+// Normal hours are CLOCK time, lunch included — the decision the client made (2026-09-13) — so
+// Attendance compares a punched Start-to-End span against it, not the break-reduced hours worked.
+export function shiftRegularHours(shift) {
+  if (!shift || shift.regular_hours == null || shift.regular_hours === '') return null
+  const n = parseFloat(shift.regular_hours)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+// The overtime a shift carries as rostered: its length beyond its normal hours. 0 when no normal
+// hours are set, so a blank column changes nothing anywhere.
+export function shiftOvertimeHours(shift) {
+  const regular = shiftRegularHours(shift)
+  if (regular == null) return 0
+  return Math.max(0, parseFloat((shiftHours(shift) - regular).toFixed(1)))
+}
+
 // A roster row is a person ON DUTY only if its shift is a working one. The Help page tells
 // managers to mark a rest day by assigning the zero-hour "Day Off" shift (so the day still shows
 // on the board, in Attendance and in Self-Service), which means a roster row is NOT evidence that
@@ -120,13 +141,18 @@ export function loadedHourlyRateOf(emp, monthDays, components = []) {
 // monthly-basis employees; pass daysInBsMonth for the BS month the column falls in (a roster week
 // can straddle two BS months). `componentsByEmp` is { [employee_id]: hr_salary_components rows };
 // an employee with none is priced at basic + SSF.
+// A shift's rostered overtime (shiftOvertimeHours) is priced the way computeActualLabor prices a
+// clocked OT hour — basic hourly × OT_MULTIPLIER — so a planned 12-hour Full Day with 9 normal
+// hours costs what payroll will actually pay for it, not twelve ordinary hours.
 export function computePlannedLaborCost(col, employees, roster, shiftMap, monthDays, componentsByEmp = {}) {
   return employees.reduce((sum, emp) => {
     const e = roster[rKey(col.bsYear, col.bsMonth, col.bsDay, emp.id)]
     const s = e ? shiftMap[e.shift_type_id] : null
     const hrs = shiftHours(s)
     if (hrs === 0) return sum
-    return sum + hrs * loadedHourlyRateOf(emp, monthDays, componentsByEmp[emp.id] || []).rate
+    const ot = Math.min(hrs, shiftOvertimeHours(s))
+    const rate = loadedHourlyRateOf(emp, monthDays, componentsByEmp[emp.id] || [])
+    return sum + (hrs - ot) * rate.rate + ot * rate.basicRate * OT_MULTIPLIER
   }, 0)
 }
 

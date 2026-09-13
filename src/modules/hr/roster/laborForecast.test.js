@@ -5,6 +5,7 @@ import {
   loadedHourlyRateOf, computePlannedLaborCost, isOnDutyShift, hasUnknownHours,
   computeScheduledCount, computeUnpricedCount, summarizeLaborForecastRows, rKey,
   computeDayRevenue, computeActualLabor, computeActualStaff,
+  shiftRegularHours, shiftOvertimeHours,
 } from './laborForecast'
 import { hourlyRateOf } from '../payroll/payrollCompute'
 import { SSF_CAP, SSF_EMPLOYER_PCT, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
@@ -131,6 +132,34 @@ describe('computePlannedLaborCost', () => {
     const old = emps.filter(e => roster[rKey(col.bsYear, col.bsMonth, col.bsDay, e.id)])
       .reduce((s, e) => s + 8 * hourlyRateOf(e.pay_basis, e.basic_salary, MONTH_DAYS), 0)
     expect(computePlannedLaborCost(col, emps, roster, shifts, MONTH_DAYS)).toBeCloseTo(old, 8)
+  })
+})
+
+// S742 — a shift's Normal hours split its length into normal time and overtime.
+describe('shiftRegularHours / shiftOvertimeHours', () => {
+  test('blank Normal hours: the whole shift is normal time, no overtime', () => {
+    expect(shiftRegularHours({ hours: 12, regular_hours: null })).toBeNull()
+    expect(shiftRegularHours({ hours: 12, regular_hours: '' })).toBeNull()
+    expect(shiftOvertimeHours({ hours: 12 })).toBe(0)
+  })
+
+  test('a 12-hour shift with 9 Normal hours carries 3 hours of overtime', () => {
+    const fullDay = { hours: null, start_time: '08:00', end_time: '20:00', regular_hours: 9 }
+    expect(shiftRegularHours(fullDay)).toBe(9)
+    expect(shiftOvertimeHours(fullDay)).toBe(3)
+  })
+
+  test('Normal hours longer than the shift is never negative overtime', () => {
+    expect(shiftOvertimeHours({ hours: 8, regular_hours: 9 })).toBe(0)
+  })
+})
+
+describe('computePlannedLaborCost — rostered overtime', () => {
+  test('hours beyond Normal hours are priced at basic hourly × 1.5, the rest at the loaded rate', () => {
+    const emp = { id: 'x', pay_basis: 'daily', basic_salary: 800 }       // 100/h, no SSF
+    const shiftMap = { fd: { name: 'Full Day', hours: 12, regular_hours: 9 } }
+    const roster = { [rKey(col.bsYear, col.bsMonth, col.bsDay, 'x')]: { shift_type_id: 'fd' } }
+    expect(computePlannedLaborCost(col, [emp], roster, shiftMap, MONTH_DAYS)).toBeCloseTo(9 * 100 + 3 * 100 * 1.5, 8)
   })
 })
 

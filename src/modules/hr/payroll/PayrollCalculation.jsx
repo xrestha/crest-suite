@@ -86,6 +86,7 @@ function CalcDetail({ row, monthDays, advances }) {
         {b.basis === 'hourly' && (
           <Section title="Gross (Hourly)">
             <Line label="Hours Worked" value={(t.sumHours || 0).toFixed(2)} />
+            <Line label="OT Hours (paid in Overtime below)" op="−" value={((t.sumHours || 0) - (b.regularHours ?? t.sumHours ?? 0)).toFixed(2)} />
             <Line label="Paid Leave × 8h" op="+" value={((t.paid_leave || 0) * 8).toFixed(2)} />
             <Line label="Half-day Paid Leave × 4h" op="+" value={((t.half_paid_leave || 0) * 4).toFixed(2)} />
             <Line label="Paid Hours" op="=" value={`${b.paidHours.toFixed(2)} hrs`} strong />

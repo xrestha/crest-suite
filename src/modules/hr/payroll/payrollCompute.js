@@ -165,7 +165,13 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     }
   } else if (basis === 'hourly') {
     // Paid-leave days credit a standard working day of hours for hourly staff.
-    const paidHours = t.sumHours + t.paid_leave * STANDARD_HOURS_PER_DAY + t.half_paid_leave * STANDARD_HOURS_PER_DAY * 0.5
+    // OT hours sit INSIDE hours_worked (Attendance derives OT as the part of the worked day beyond
+    // the shift), so the ordinary wage is paid on the hours that are NOT overtime. Before S742 it
+    // was paid on all of them and OT then added 1.5× on top, so every overtime hour of an hourly
+    // employee paid 2.5× the rate. Superseded attendance OT is taken out too: it was recorded
+    // inside that day's hours, and the approved Overtime entry replacing it pays it at its own rate.
+    const regularHours = Math.max(0, t.sumHours - t.sumOt - t.sumOtSuperseded)
+    const paidHours = regularHours + t.paid_leave * STANDARD_HOURS_PER_DAY + t.half_paid_leave * STANDARD_HOURS_PER_DAY * 0.5
     const earned   = r(basic * paidHours)
     const otAmount = r(t.sumOt * basic * OT_MULTIPLIER)
     const ssfEmp   = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYEE_PCT) : 0
@@ -175,7 +181,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
       allowances: 0, gross: earned, absence_deduction: 0, other_deductions: 0,
       ot_amount: otAmount, ssf_employee: ssfEmp, ssf_employer: ssfEmpr,
       net_pay: earned + otAmount - ssfEmp - tdsVal - advDed,
-      breakdown: { basis, monthDays, tally: t, hourlyRate: basic, paidHours, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount, ssfBase: Math.min(earned, SSF_CAP) },
+      breakdown: { basis, monthDays, tally: t, hourlyRate: basic, regularHours, paidHours, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount, ssfBase: Math.min(earned, SSF_CAP) },
     }
   } else {
     // monthly

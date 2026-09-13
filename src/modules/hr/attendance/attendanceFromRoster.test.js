@@ -1,4 +1,4 @@
-import { buildAttendanceFromRoster } from './attendanceFromRoster'
+import { buildAttendanceFromRoster, zeroHourStatus } from './attendanceFromRoster'
 
 describe('buildAttendanceFromRoster', () => {
   const shiftTypesById = {
@@ -107,5 +107,56 @@ describe('buildAttendanceFromRoster', () => {
       { employee_id: 'e2', period_id: 'p1', bs_day: 6, status: 'present',    hours_worked: 8, ot_hours: 0, note: null },
     ]))
     expect(rows).toHaveLength(3)
+  })
+
+  // S742 — a 12-hour shift with 9 Normal hours carries 3 hours of overtime as rostered.
+  test('a shift with Normal hours set writes its length beyond them as OT', () => {
+    const rows = buildAttendanceFromRoster({
+      rosterRows: [
+        { employee_id: 'e1', shift_type_id: 'fullDay', bs_day: 5 },
+        { employee_id: 'e1', shift_type_id: 'morning9', bs_day: 6 },
+      ],
+      shiftTypesById: {
+        fullDay:  { name: 'Full Day', hours: null, start_time: '08:00', end_time: '20:00', regular_hours: 9 },
+        morning9: { name: 'Morning',  hours: null, start_time: '08:00', end_time: '17:00', regular_hours: 9 },
+      },
+      employeeIds: ['e1'],
+      existingDayKeys: new Set(),
+      days: [5, 6],
+      periodId: 'p1',
+    })
+    expect(rows).toEqual([
+      { employee_id: 'e1', period_id: 'p1', bs_day: 5, status: 'present', hours_worked: 12, ot_hours: 3, note: null },
+      { employee_id: 'e1', period_id: 'p1', bs_day: 6, status: 'present', hours_worked: 9,  ot_hours: 0, note: null },
+    ])
+  })
+
+  test('a blank Normal hours keeps the whole shift as normal time (no OT), as before', () => {
+    const rows = buildAttendanceFromRoster({
+      rosterRows: [{ employee_id: 'e1', shift_type_id: 'long', bs_day: 5 }],
+      shiftTypesById: { long: { name: 'Long', hours: 12, regular_hours: null } },
+      employeeIds: ['e1'],
+      existingDayKeys: new Set(),
+      days: [5],
+      periodId: 'p1',
+    })
+    expect(rows[0].ot_hours).toBe(0)
+  })
+})
+
+describe('zeroHourStatus', () => {
+  test.each([
+    ['PAID LEAVE',        'paid_leave'],
+    ['Paid Sick Leave',   'paid_leave'],
+    ['LEAVE',             'unpaid_leave'],
+    ['UNPAID LEAVE',      'unpaid_leave'],   // contains "paid leave" — unpaid must win
+    ['Leave without pay', 'unpaid_leave'],
+    ['Public Holiday',    'holiday'],
+    ['OFF DAY',           'weekly_off'],
+    ['Day Off',           'weekly_off'],
+    ['',                  'weekly_off'],
+    ['Training',          'holiday'],
+  ])('%s → %s', (name, status) => {
+    expect(zeroHourStatus(name)).toBe(status)
   })
 })

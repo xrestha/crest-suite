@@ -5,7 +5,28 @@
 // says for that employee on that day, same source of truth SelfServiceHome.jsx already uses to
 // grey out an employee's own off days (isOffDay/OFF_SHIFT_KEYWORDS).
 import { isOffDay } from '../payrollConstants'
-import { shiftHours } from '../roster/laborForecast'
+import { shiftHours, shiftOvertimeHours } from '../roster/laborForecast'
+
+// The attendance status a zero-hour roster marker stands for. Before S742 every name containing
+// "leave" became 'weekly_off' — so a rostered "LEAVE" (unpaid) paid a monthly employee in full and
+// a rostered "PAID LEAVE" paid a daily-wage employee nothing. Order matters: "UNPAID LEAVE"
+// contains "paid leave", so unpaid is tested first. A leave name that says neither is UNPAID — the
+// client's decision (2026-09-13) for a plain "LEAVE"; a paid kind has to say so ("Paid Sick Leave").
+// The Leave page stays the authority: an approved request has already written its days, and this
+// only ever fills blanks.
+export function zeroHourStatus(name) {
+  const n = String(name || '').trim().toLowerCase()
+  if (n.includes('leave')) {
+    if (n.includes('unpaid') || n.includes('without pay')) return 'unpaid_leave'
+    if (/(^|[^a-z])paid/.test(n)) return 'paid_leave'
+    return 'unpaid_leave'
+  }
+  if (n.includes('holiday')) return 'holiday'
+  // No name, or an off-named marker ("OFF DAY", "Day Off").
+  if (isOffDay(name)) return 'weekly_off'
+  // A zero-hour custom type named like none of those (unusual) — payroll-neutral, same as before.
+  return 'holiday'
+}
 
 // rosterRows: hr_roster rows for the BS month (employee_id, shift_type_id, bs_day)
 // shiftTypesById: { [shift_type_id]: hr_shift_types row }
@@ -38,27 +59,16 @@ export function buildAttendanceFromRoster({ rosterRows, shiftTypesById, employee
           bs_day:       day,
           status:       'present',
           hours_worked: hours,
-          ot_hours:     0,
-          note:         null,
-        })
-      } else if (isOffDay(shiftType?.name)) {
-        rows.push({
-          employee_id:  empId,
-          period_id:    periodId,
-          bs_day:       day,
-          status:       'weekly_off',
-          hours_worked: 0,
-          ot_hours:     0,
+          // The shift's length beyond its Normal hours (S742) — 0 when none are set, as before.
+          ot_hours:     shiftOvertimeHours(shiftType),
           note:         null,
         })
       } else {
-        // A zero-hour shift type that isn't named like an off day (unusual, but possible for a
-        // custom type) — payroll-neutral either way, same as Off.
         rows.push({
           employee_id:  empId,
           period_id:    periodId,
           bs_day:       day,
-          status:       'holiday',
+          status:       zeroHourStatus(shiftType?.name),
           hours_worked: 0,
           ot_hours:     0,
           note:         null,
