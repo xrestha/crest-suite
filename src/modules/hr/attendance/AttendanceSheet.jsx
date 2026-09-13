@@ -520,6 +520,44 @@ export default function AttendanceSheet() {
     setSaving(false)
   }
 
+  // Every listed employee's records for the whole month — Month Summary's clear. Two things the
+  // per-day and per-employee clears never had to consider, because a month is what payroll reads:
+  //   • A FINALIZED payroll run was built from these rows, so clearing them would leave issued
+  //     payslips with nothing behind them. Refused, and a failed read of the run refuses too — a
+  //     check that could not run has not passed.
+  //   • The delete is scoped to the employees on this sheet (active/probation), not to the period:
+  //     someone who left mid-month is not listed here, and their days are what Final Settlement
+  //     reads — a period-wide delete would destroy them from a screen that never showed them.
+  async function requestClearMonth() {
+    if (!period) return
+    const ids = new Set(employees.map(e => e.id))
+    const count = Object.values(records).filter(r => ids.has(r.employee_id)).length
+    if (count === 0) {
+      setSavedMsg(`ok:Nothing to clear — ${periodLabel} has no records.`)
+      return
+    }
+    const { data: run, error } = await scopedFrom('hr_payroll_runs', 'status').eq('period_id', period.id).maybeSingle()
+    if (error) {
+      setSavedMsg('error:Could not check whether payroll is already finalized for this month, so nothing was cleared. ' + errorLine(error))
+      return
+    }
+    if (run?.status === 'finalized') {
+      setSavedMsg(`error:Payroll for ${periodLabel} is finalized and its payslips were built from this attendance, so it can't be cleared. Reopen the payroll run first if the month really needs re-entering.`)
+      return
+    }
+    setConfirmClear({ kind: 'month', count, draftRun: run?.status === 'draft' })
+  }
+  async function clearMonth() {
+    if (!period) return
+    setConfirmClear(null)
+    setSaving(true); setSavedMsg('')
+    const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).in('employee_id', employees.map(e => e.id))
+    if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
+    await loadAttendance(period.id)
+    setSavedMsg(`ok:Cleared ${periodLabel} for all ${employees.length} listed staff`)
+    setSaving(false)
+  }
+
   async function generateFromRosterForEmployee(empId) {
     if (!period || !empId) return
     setGenerating(true); setSavedMsg('')
@@ -1011,6 +1049,20 @@ export default function AttendanceSheet() {
                 {s.label}
               </span>
             ))}
+            <div style={{ flex: 1 }} />
+            {savedMsg && (
+              <span role={savedMsg.startsWith('ok') ? 'status' : 'alert'}
+                style={{ fontSize: 12, color: savedMsg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                {savedMsg.split(':').slice(1).join(':')}
+              </span>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
+              <Tip text="Deletes every listed employee's saved records for this whole month — the sheet reverts to blank. Refused once payroll for the month is finalized. Can't be undone.">
+                <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={requestClearMonth} disabled={saving}>
+                  🗑 Clear Month
+                </button>
+              </Tip>
+            </div>
           </div>
 
           <div className="card" style={{ padding: 0 }}>
@@ -1086,24 +1138,35 @@ export default function AttendanceSheet() {
         <ConfirmModal
           title={confirmClear.kind === 'day'
             ? `Clear every record for Day ${selectedDay}?`
-            : `Clear ${confirmClear.name}'s whole month?`}
+            : confirmClear.kind === 'month'
+              ? `Clear all of ${periodLabel}?`
+              : `Clear ${confirmClear.name}'s whole month?`}
           confirmLabel={confirmClear.kind === 'day'
             ? `Clear Day ${selectedDay} (${confirmClear.count})`
             : `Clear ${confirmClear.count} record${confirmClear.count === 1 ? '' : 's'}`}
           danger
           busy={saving} busyLabel="Clearing…"
-          onConfirm={() => confirmClear.kind === 'day' ? clearDay() : clearEmployeeMonth(confirmClear.empId)}
+          onConfirm={() => confirmClear.kind === 'day' ? clearDay()
+            : confirmClear.kind === 'month' ? clearMonth()
+            : clearEmployeeMonth(confirmClear.empId)}
           onCancel={() => setConfirmClear(null)}
         >
           <p style={{ margin: '0 0 10px' }}>
             {confirmClear.kind === 'day'
               ? <>All <strong>{confirmClear.count}</strong> attendance record{confirmClear.count === 1 ? '' : 's'} for {formatBsDay(selectedDay, period?.bs_month)} will be deleted — the day reverts to blank for every employee.</>
-              : <>All <strong>{confirmClear.count}</strong> of {confirmClear.name}&apos;s attendance record{confirmClear.count === 1 ? '' : 's'} this month will be deleted.</>}
+              : confirmClear.kind === 'month'
+                ? <>All <strong>{confirmClear.count}</strong> attendance record{confirmClear.count === 1 ? '' : 's'} for {periodLabel} will be deleted, for all {employees.length} staff listed on this sheet — including approved leave days, which Leave → Mark approved leave puts back.</>
+                : <>All <strong>{confirmClear.count}</strong> of {confirmClear.name}&apos;s attendance record{confirmClear.count === 1 ? '' : 's'} this month will be deleted.</>}
           </p>
+          {confirmClear.kind === 'month' && confirmClear.draftRun && (
+            <p style={{ margin: '0 0 10px' }}>
+              A draft payroll run exists for this month. Regenerate it after re-entering attendance, or it will not finalize.
+            </p>
+          )}
           <p style={{ margin: 0 }}>
-            A blank day pays <strong>zero</strong> for daily/hourly staff and counts as unpaid for
-            monthly staff — re-enter the days (or Generate from Roster) before running payroll.
-            This can&apos;t be undone.
+            A blank day pays <strong>zero</strong> for daily/hourly staff. Monthly staff are paid in
+            full for a blank day, so any absence or unpaid leave that was marked stops being deducted.
+            Re-enter the days (or Generate from Roster) before running payroll. This can&apos;t be undone.
           </p>
         </ConfirmModal>
       )}

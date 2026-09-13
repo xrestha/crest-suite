@@ -201,7 +201,7 @@ export const HR_GUIDE_GROUPS = [
         workflow: [
           'Mark the day\'s statuses — Present, Half Day, Absent, Paid/Unpaid Leave (full or half), Off, Holiday. Bulk-fill a day or a month, or "Generate from Roster" to seed the sheet from published shifts.',
           'Enter start/end times and the sheet derives hours; OT is auto-suggested as hours beyond that day\'s rostered shift length (or beyond 8h if unrostered) — both stay editable.',
-          'Clear Day / Clear Employee-Month genuinely delete rows, for redoing a botched stretch.',
+          'Clear Day / Clear Employee-Month / Clear Month (Month Summary tab) genuinely delete rows, for redoing a botched stretch. Clear Month deletes only the listed (active/probation) staff\'s rows — a leaver\'s days stay for Final Settlement — and refuses once the month\'s payroll is finalized, or when that check cannot be read. Approved leave days go too; Leave → Mark approved leave restores them.',
         ],
         fields: [
           { label: 'Statuses', desc: 'present, half_day, absent, paid_leave, unpaid_leave, half_paid_leave, half_unpaid_leave, weekly_off ("Off"), holiday. The half-leave pair exists so a half-day leave request lands as exactly half a day\'s pay effect.' },
