@@ -1375,7 +1375,10 @@ export default function ClientDashboard() {
   // itself leak the Food Cost%/margin/spend data those pages are gated to protect.
   const showIms = clientModules.ims && hasImsAccess('staff')
   const showHr  = clientModules.hr && hasHrAccess('staff')
-  const showPos = clientModules.pos
+  // POS the same way (S750 browser check): an HR-only login's pos_orders read comes back
+  // RLS-empty, and the section rendered it as Revenue NPR 0 / 0 bills / 0 tables beside the
+  // Owner's real NPR 1,680 — a zero nobody computed, not a quiet day.
+  const showPos = clientModules.pos && hasPosAccess('staff')
   const moduleCount = [showIms, showHr, showPos].filter(Boolean).length
   const dashTitle = isAdmin
     ? 'Admin Dashboard'

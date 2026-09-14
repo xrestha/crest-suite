@@ -161,6 +161,9 @@ export default function HolidayCalendar() {
     setBusy(true); setMsg('')
     const { error } = await scopedUpdate('hr_holiday_calendar', { removed_at: null }).eq('id', h.id)
     if (error) { setMsg('error:' + h.name + ' was not put back — it is still removed. ' + errorLine(error)); setBusy(false); return }
+    // A Seed report still on screen says this one was "not added back, because you removed it" —
+    // stale the moment it is put back, and it sat right beside the "is back" confirmation.
+    setSeedReport(r => r && r.keptRemoved.includes(h.name) ? { ...r, keptRemoved: r.keptRemoved.filter(n => n !== h.name) } : r)
     await load(); setMsg('ok:' + h.name + ' is back in the calendar'); setBusy(false)
   }
 
