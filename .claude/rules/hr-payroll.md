@@ -349,7 +349,7 @@ BS) and the correction is named in the result rather than applied silently. That
 since the page shipped, in both directions at once: 2× offered on an ordinary day, weekday rate on
 the real holiday.
 
-**Region-split holidays are seeded twice, named, and the operator deletes one.** Holi is a real day
+**Region-split holidays are seeded twice, named, and the operator removes one** (a `removed_at` stamp since S748, so the next Seed does not bring it back — see the S748 section below). Holi is a real day
 off in both halves of the country and falls a day apart in each. Guessing the outlet's district from
 nothing is worse than asking.
 
