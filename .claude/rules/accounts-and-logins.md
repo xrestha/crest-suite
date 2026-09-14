@@ -46,6 +46,17 @@ What an owner sees after signing in is then four independent things: the module 
 
 **S563 shipped the real fix: `hr_employees.access_blocked`, a boolean fully independent of `status` (migration `20260815100000`).** Employees now has a checkbox column (header select-all + per row) and a bulk action bar — Deactivate blocks Self-Service login, Activate restores it — that writes `access_blocked` alone via `scopedUpdate`, never `status`. `hr-selfservice-login` embeds `hr_employees(access_blocked)` via `profiles.hr_employee_id` and refuses with the same generic "Invalid credentials" every other rejection path returns. Because `status` is never touched, blocking/unblocking login can never again remove someone from a payroll picker. **The migration must be applied before this works** (it was written when this machine could not reach the database; since S747 the linked CLI can — see `supabase-sql.md` → Schema migrations); until it's applied, the Edge Function's embedded select on a nonexistent column will fail every Self-Service login, not just blocked ones. Verify the column exists before relying on this.
 
+**Self-Service logins, S748.** Enable and Remove (`create_hr_self_service_login` /
+`delete_hr_self_service_login`) are `isHrPrivileged` — admin, Owner or HR manager; they had been
+admin-or-Owner while the Employees page (an HR-manager page) showed both buttons to managers. Create
+refuses an employee who already has a login (409, plus the `profiles_hr_employee_self_service_unique`
+index), so a new PIN is Remove then Enable. `hr-selfservice-login` refuses a login whose
+`hr_employees` embed is NULL: `hr_employee_id` is `ON DELETE SET NULL`, and an orphaned login used to
+sign in because `undefined?.access_blocked` is falsy. An employee with a login cannot be deleted
+(`hr_employees_guard_delete`). **Still open:** every staff action in `admin-user-ops` resolves a
+non-admin caller's client as `profile.client_id`, not the switched outlet, so a grouped Owner acting
+on a sibling outlet's staff is refused.
+
 **Deactivate had no inverse (fixed S562).** `EmployeeForm.jsx`'s footer only ever rendered a Deactivate button (`employee.status === 'active'`) — once flipped to Inactive, the Edit form offered no way back to Active short of Delete-and-re-add, which loses the employee's history. Added a mirrored `handleActivate()` and a green Activate button rendered when `employee.status === 'inactive'`. Note this `status` Deactivate/Activate pair is orthogonal to S563's `access_blocked` Deactivate/Activate pair above — same words, two different columns, two different pages (Edit form vs. Employees list bulk bar).
 
 ## Session, profile reads and the HR/POS employee link

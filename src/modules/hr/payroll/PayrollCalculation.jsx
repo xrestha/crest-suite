@@ -161,7 +161,7 @@ function CalcDetail({ row, monthDays, advances }) {
           <Line label="YTD Gross (prior finalized months)" value={`NPR ${fmt(tdsBreakdown.ytdGross)}`} />
           <Line label="This Month's Actual Gross" op="+" value={`NPR ${fmt(slip.gross + slip.ot_amount - slip.absence_deduction)} × ${tdsBreakdown.monthsAtCurrent} remaining month(s)`} />
           <Line label="Projected Annual Gross" op="=" value={`NPR ${fmt(tdsBreakdown.annualGross)}`} strong />
-          <Line label="SSF Deduction" op="−" value={`NPR ${fmt(tdsBreakdown.ssfDeduction)}`} />
+          <Line label="Retirement Deduction (SSF + CIT)" op="−" value={`NPR ${fmt(tdsBreakdown.retirementDeduction)}`} hint="SSF plus CIT / provident fund, together capped at NPR 5,00,000 or a third of annual income" />
           <Line label="Insurance Deduction" op="−" value={`NPR ${fmt(tdsBreakdown.insuranceDeduction)}`} />
           <Line label="Annual Taxable" op="=" value={`NPR ${fmt(tdsBreakdown.annualTaxable)}`} strong />
           <Line label="Annual Tax (FY slabs)" value={`NPR ${fmt(tdsBreakdown.annualTax)}`} />
@@ -333,6 +333,9 @@ export default function PayrollCalculation() {
         monthlySsf:   slip.ssf_employee,
         ytdGross:     ytd.gross,
         ytdSsf:       ytd.ssf,
+        // CIT / provident fund shares SSF's deduction cap (S748). Identical in PayrollRun.jsx.
+        monthlyRetirement: slip.retirement_contribution,
+        ytdRetirement:     ytd.retirement || 0,
         ytdWithheld:  ytd.withheld,
         ytdMonths:    ytd.count,
         // Mirrors PayrollRun's gate exactly — these two must agree or every SSF-enrolled employee

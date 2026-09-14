@@ -105,7 +105,11 @@ Deno.serve(async (req) => {
     if (profileErr || !profile?.hr_self_service_email) {
       return json({ error: 'Invalid credentials' }, 401)
     }
-    if (profile.hr_employees?.access_blocked) {
+    // `!profile.hr_employees` refuses a login whose employee record is gone. profiles.hr_employee_id
+    // is ON DELETE SET NULL, so an employee deleted before S748's delete guard left the login with
+    // no employee — and `undefined?.access_blocked` is falsy, so that PIN kept signing in to an app
+    // with nobody behind it. A login is only as valid as the employee it belongs to.
+    if (!profile.hr_employees || profile.hr_employees.access_blocked) {
       return json({ error: 'Invalid credentials' }, 401)
     }
 

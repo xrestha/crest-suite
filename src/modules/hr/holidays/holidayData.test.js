@@ -1,4 +1,4 @@
-import { FIXED_HOLIDAYS, MOVABLE_HOLIDAYS, resolveYear, movableForFy } from './holidayData'
+import { FIXED_HOLIDAYS, MOVABLE_HOLIDAYS, resolveYear, movableForFy, planSeed } from './holidayData'
 import { daysInBsMonth, BS_MONTHS } from '../../../utils/bsCalendar'
 
 // These tables are transcribed from the Nepal Gazette by hand, and Overtime.jsx pays the 2×
@@ -114,5 +114,42 @@ describe('legacy names', () => {
   it('keeps the pre-S635 name for the one fixed holiday that was renamed', () => {
     const pj = FIXED_HOLIDAYS.find(h => h.name.startsWith('Prithvi'))
     expect(pj.legacy).toContain("Prithvi Narayan Shah's Birthday")
+  })
+})
+
+// S748 — a holiday the owner removed stays removed.
+describe('planSeed', () => {
+  const FY = 2083 // FY 2083/84: 2083 is transcribed, 2084 is not
+
+  it('seeds an empty year in full', () => {
+    const { toInsert, corrections, keptRemoved, missing } = planSeed(FY, [])
+    expect(toInsert.length).toBeGreaterThan(FIXED_HOLIDAYS.length)
+    expect(corrections).toEqual([])
+    expect(keptRemoved).toEqual([])
+    expect(missing).toEqual([2084])
+  })
+
+  it('never re-adds a removed holiday, and says so', () => {
+    const removed = { id: 'h1', name: 'Fagu Purnima / Holi (Terai)', bs_year: 2083, bs_month: 12, bs_day: 8, holiday_type: 'public', removed_at: '2026-09-14T10:00:00Z' }
+    const { toInsert, keptRemoved } = planSeed(FY, [removed])
+    expect(toInsert.some(r => r.name === removed.name)).toBe(false)
+    expect(keptRemoved).toEqual([removed.name])
+    // The other Holi row is still offered.
+    expect(toInsert.some(r => r.name === 'Fagu Purnima / Holi (Hill districts)')).toBe(true)
+  })
+
+  it('does not "correct" the date of a fixed holiday the owner removed', () => {
+    const wrongAndRemoved = { id: 'm1', name: "Martyrs' Day (Sahid Diwas)", bs_year: 2083, bs_month: 10, bs_day: 5, holiday_type: 'public', removed_at: '2026-09-14T10:00:00Z' }
+    const { corrections, keptRemoved, toInsert } = planSeed(FY, [wrongAndRemoved])
+    expect(corrections).toEqual([])
+    expect(keptRemoved).toContain(wrongAndRemoved.name)
+    expect(toInsert.some(r => r.name === wrongAndRemoved.name)).toBe(false)
+  })
+
+  it('still corrects a live fixed holiday on the wrong date', () => {
+    const wrong = { id: 'm2', name: "Martyrs' Day (Sahid Diwas)", bs_year: 2083, bs_month: 10, bs_day: 5, holiday_type: 'public', removed_at: null }
+    const { corrections } = planSeed(FY, [wrong])
+    expect(corrections).toHaveLength(1)
+    expect(corrections[0]).toMatchObject({ id: 'm2', movedDate: true, fromDay: 5, toDay: 16 })
   })
 })

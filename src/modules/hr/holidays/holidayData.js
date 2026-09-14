@@ -113,6 +113,59 @@ export function resolveYear(fyYear, bs_month) {
   return bs_month >= 4 ? fyYear : fyYear + 1
 }
 
+// What Seed would do to one fiscal year, given every row the calendar holds for it — REMOVED rows
+// included (removed_at set). Pure, so the rules below are tested rather than re-read.
+//
+// Additive and name-keyed: a holiday already present under its name (or a legacy name) is never
+// inserted again, and its date and type are the owner's. The one exception is a FIXED holiday on
+// the wrong date, which is corrected and named (Martyrs' Day, Magh 5 → 16).
+//
+// A REMOVED row counts as present (S748, decided with Aashish): the owner took it out on purpose —
+// the Terai Holi at a hill outlet, typically — and until this rule pressing Seed again put it back.
+// It is reported as `keptRemoved` so the result says why it was not added, and it is never
+// "corrected" either: fixing the date of a holiday the owner removed would be a write about
+// nothing anyone can see.
+export function planSeed(fyYear, fyRows) {
+  const byName = new Map((fyRows || []).map(h => [h.name, h]))
+  const toInsert = []
+  const corrections = []
+  const keptRemoved = []
+
+  FIXED_HOLIDAYS.forEach(h => {
+    const bs_year = resolveYear(fyYear, h.bs_month)
+    const existing = byName.get(h.name) || (h.legacy || []).map(n => byName.get(n)).find(Boolean)
+    if (!existing) {
+      toInsert.push({ bs_year, bs_month: h.bs_month, bs_day: h.bs_day, name: h.name, holiday_type: 'public' })
+      return
+    }
+    if (existing.removed_at) { keptRemoved.push(existing.name); return }
+    const movedDate = existing.bs_month !== h.bs_month || existing.bs_day !== h.bs_day
+    const renamed   = existing.name !== h.name
+    if (!movedDate && !renamed) return
+    corrections.push({
+      id: existing.id,
+      name: h.name,
+      renamed: renamed ? existing.name : null,
+      fromMonth: existing.bs_month, fromDay: existing.bs_day,
+      toMonth: h.bs_month, toDay: h.bs_day,
+      movedDate,
+      patch: { bs_year, bs_month: h.bs_month, bs_day: h.bs_day, name: h.name },
+    })
+  })
+
+  const { rows: movable, missing } = movableForFy(fyYear)
+  movable.forEach(h => {
+    const existing = byName.get(h.name)
+    if (existing) { if (existing.removed_at) keptRemoved.push(existing.name); return }
+    toInsert.push({
+      bs_year: h.bs_year, bs_month: h.m, bs_day: h.d, name: h.name,
+      holiday_type: h.optional ? 'optional' : 'public',
+    })
+  })
+
+  return { toInsert, corrections, missing, keptRemoved }
+}
+
 // Every movable holiday falling inside one fiscal year, drawn from the two BS years it spans, plus
 // any BS year whose gazette has not been transcribed yet. A partially-covered FY is REPORTED, never
 // silently seeded short: an owner who reads "34 added" and then finds no Dashain has no way to tell

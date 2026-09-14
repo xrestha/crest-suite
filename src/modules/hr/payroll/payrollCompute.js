@@ -15,6 +15,16 @@ export function calcAmount(comp, basic) {
   return Math.round(v)
 }
 
+// This month's contribution to a retirement fund other than SSF — the deduction components marked
+// `retirement_fund` (CIT, provident fund). Taken off take-home pay like any deduction AND off
+// taxable income inside the shared SSF/EPF/CIT cap (tds.js retirementRelief). Monthly pay basis
+// only, because components only ever apply there (see computePayslip).
+export function retirementContributionOf(components, basic) {
+  return (components || [])
+    .filter(c => c.type === 'deduction' && c.retirement_fund)
+    .reduce((s, c) => s + calcAmount(c, basic), 0)
+}
+
 // Tally an employee's attendance rows for the period.
 //
 // `supersededOtDays` is an optional Set of bs_days on which an APPROVED overtime entry exists.
@@ -157,6 +167,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     ot_hours:          t.sumOt,
     tds:               tdsVal,
     advance_deduction: advDed,
+    retirement_contribution: 0,
   }
 
   let result
@@ -227,6 +238,9 @@ export function computePayslip(employee, components, attendanceRows, period, tds
       unpaid_days:       unpaidDays,
       absence_deduction: absenceDed,
       other_deductions:  otherDed,
+      // Part of other_deductions, not in addition to it — stored so fiscal-year-to-date tax relief
+      // sums real figures, the way ytd SSF sums ssf_employee.
+      retirement_contribution: retirementContributionOf(components, basic),
       ot_amount:         otAmount,
       ssf_employee:      ssfEmp,
       ssf_employer:      ssfEmpr,

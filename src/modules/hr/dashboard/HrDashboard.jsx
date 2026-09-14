@@ -7,6 +7,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { useHrApprovalCounts } from './useHrApprovalCounts'
+import { SSF_DEPOSIT_DAY } from '../payrollConstants'
 
 const fmt = nprInt
 const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
@@ -15,14 +16,15 @@ function nextMonthLabel(bs_year, bs_month) {
   if (!bs_year || !bs_month) return '—'
   const nm = bs_month === 12 ? 1   : bs_month + 1
   const ny = bs_month === 12 ? bs_year + 1 : bs_year
-  return `${BS_MONTHS[nm - 1]} 15, ${ny}`
+  return `${BS_MONTHS[nm - 1]} ${SSF_DEPOSIT_DAY}, ${ny}`
 }
 
-// SSF is due by the 15th of the month following the payroll period. Returns how that deadline
+// SSF is due by the 25th of the month following the payroll period (SSF_DEPOSIT_DAY — it was the
+// 15th until the July 2025 amendment, and this card said 15 until S748). Returns how that deadline
 // stands relative to today, so the card can be quiet when there is nothing to do — it used to
 // render red unconditionally, which meant a healthy account with weeks of runway showed the same
 // colour as one that had missed the deposit. Callers must also gate this on the deposit amount
-// being > 0 — a client with no SSF-enrolled staff has nothing to deposit, so a passed 15th is not
+// being > 0 — a client with no SSF-enrolled staff has nothing to deposit, so a passed due day is not
 // a missed deadline, just an inapplicable one.
 function ssfDeadlineState(bs_year, bs_month) {
   if (!bs_year || !bs_month) return {}
@@ -31,8 +33,8 @@ function ssfDeadlineState(bs_year, bs_month) {
   const today = getBsToday()
   const dueOrdinal = ny * 12 + nm
   const nowOrdinal = today.year * 12 + today.month
-  if (nowOrdinal > dueOrdinal || (nowOrdinal === dueOrdinal && today.day > 15)) return { overdue: true }
-  // Same month as the deadline, on or before the 15th: it is now the live task.
+  if (nowOrdinal > dueOrdinal || (nowOrdinal === dueOrdinal && today.day > SSF_DEPOSIT_DAY)) return { overdue: true }
+  // Same month as the deadline, on or before the due day: it is now the live task.
   if (nowOrdinal === dueOrdinal) return { alert: true }
   return {}
 }
@@ -407,7 +409,7 @@ export default function HrDashboard() {
             />
             {(() => {
               const ssfTotal = payInfo.ssfEmployee + payInfo.ssfEmployer
-              // Nothing owed (no SSF-enrolled staff this run) means a passed 15th isn't a missed
+              // Nothing owed (no SSF-enrolled staff this run) means a passed due day isn't a missed
               // deadline — stay neutral instead of painting a NPR 0 deposit red.
               const deadline = ssfTotal > 0 ? ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth) : {}
               return (
@@ -420,7 +422,7 @@ export default function HrDashboard() {
                       ? `Deposit was due ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
                       : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
                   color="var(--theme-accent-ink)"
-                  tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}. Deposit with SSF by the 15th of the following month. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
+                  tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}. Deposit with SSF by the ${SSF_DEPOSIT_DAY}th of the following month — late deposits attract 10% interest. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
                   onClick={() => navigate('/hr/reports')}
                   {...deadline}
                 />

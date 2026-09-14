@@ -974,10 +974,12 @@ Deno.serve(async (req) => {
     }
 
     // ── Enable HR Employee Self-Service — PIN login, mirrors create_pos_staff exactly ────────
-    // Restricted to admin or the client owner (not POS managers — HR access isn't necessarily
-    // delegated to a floor manager the way POS staff management is).
+    // Admin, the client Owner, or an HR MANAGER of that client (S748, decided with Aashish). The
+    // Employees page has always been an HR-manager page and rendered Enable / Remove to them, while
+    // this gate refused them with a bare "Forbidden" — so the one person running HR could not give
+    // an employee their app. POS managers stay out: HR access is not delegated to a floor manager.
     if (action === 'create_hr_self_service_login') {
-      if (!(isCallerAdmin || isCallerOwner)) return json({ error: 'Forbidden' }, 403)
+      if (!isHrPrivileged) return json({ error: 'Forbidden' }, 403)
 
       const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
@@ -990,6 +992,18 @@ Deno.serve(async (req) => {
         .from('hr_employees').select('id, full_name, client_id')
         .eq('id', employee_id).eq('client_id', targetClientId).single()
       if (!employee) return json({ error: 'Employee not found' }, 400)
+
+      // One login per employee. Nothing checked this before S748, so a second Enable created a
+      // second account for the same person rather than a new PIN (profiles_hr_employee_self_service_
+      // unique is the backstop). A failed read refuses: a check that could not run has not passed.
+      const { data: existingLogin, error: existingErr } = await admin
+        .from('profiles').select('id')
+        .eq('hr_employee_id', employee.id).eq('hr_self_service', true)
+        .limit(1)
+      if (existingErr) return json({ error: 'Could not check for an existing Self-Service login — nothing was created. Try again.' }, 500)
+      if (existingLogin && existingLogin.length > 0) {
+        return json({ error: `${employee.full_name} already has a Self-Service login. To give them a new PIN, Remove it first, then Enable again.` }, 409)
+      }
 
       const slug   = employee.full_name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)
       const suffix = Math.random().toString(36).slice(2, 7)
@@ -1035,9 +1049,9 @@ Deno.serve(async (req) => {
     // Note this is NOT the same as hr_employees.access_blocked (S563), which suspends login while
     // keeping the account — this deletes the login outright. The employee RECORD is untouched:
     // profiles.hr_employee_id is ON DELETE SET NULL in that direction, and payroll history hangs
-    // off hr_employees, not off this login. Same admin-or-Owner gate as creating one.
+    // off hr_employees, not off this login. Same gate as creating one: admin, Owner or HR manager.
     if (action === 'delete_hr_self_service_login') {
-      if (!(isCallerAdmin || isCallerOwner)) return json({ error: 'Forbidden' }, 403)
+      if (!isHrPrivileged) return json({ error: 'Forbidden' }, 403)
 
       const { userId } = params
       if (!userId) return json({ error: 'userId is required' }, 400)

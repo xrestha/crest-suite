@@ -263,6 +263,18 @@ So the trigger has no bypass for a client account of any rank, operator included
 fourth instance, decide which of the two shapes it is before writing the migration: a DEFINER
 force-path is a real answer, but so is refusing outright and pointing at the state change.
 
+### The fourth instance, on `hr_employees` (S748) — and the cascade it must not block
+
+`hr_employees_guard_delete` (`20260914150000`) refuses a delete while `employee_pay_history()` (the
+SECURITY DEFINER lookup) reports finalized payslips, a finalized settlement, finalized festival
+allowances, any advance, or a Self-Service login. Like vendors it has **no force path** — Deactivate
+(`status`) is the lossless state change. The variation: **the guard lets a delete through once the
+`clients` row is already gone**, because ClientDrawer deletes the client from an `authenticated` admin
+session and the cascade into `hr_employees` would otherwise be refused on the first employee with a
+payslip. Inside a cascade the parent row is not visible, so `NOT EXISTS (SELECT 1 FROM clients …)` is
+the reliable "this is a client deletion" test. When adding a fifth instance on a table that cascades
+from `clients`, decide that question before writing the trigger.
+
 **A list that must exist in both JS and SQL needs a test that reads both.** `ITEM_REF_TABLES` is now
 mirrored inside two SQL functions, and the server cannot import a `.js` module.
 `itemRefTables.test.js` parses the migration and asserts membership *and* order. Strip `--` comments

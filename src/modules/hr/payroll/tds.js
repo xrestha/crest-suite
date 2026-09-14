@@ -7,8 +7,10 @@
 // and subtract tax already withheld earlier in the year. Self-correcting.
 
 // Deduction cap: SSF/EPF/CIT retirement contribution is deductible up to the
-// lower of NPR 500,000 or one-third of assessable income.
-const RETIREMENT_CAP_ABS = 500000
+// lower of NPR 500,000 or one-third of assessable income. ONE bucket — SSF and CIT share the cap,
+// they do not get one each. Until S748 only SSF ever entered it: a CIT / provident-fund deduction
+// came off take-home pay and was still taxed, while Pay Setup's chip said it reduced taxable income.
+export const RETIREMENT_CAP_ABS = 500000
 
 // Insurance premium deduction caps (Nepal Income Tax Act 2058, Section 12).
 const LIFE_INS_CAP   = 40000
@@ -57,6 +59,14 @@ export function slabsFor(fyStart, isMarried = false) {
   return isMarried ? SLABS_2082_83_MARRIED : SLABS_2082_83_SINGLE
 }
 
+// The retirement-contribution deduction for a year: everything contributed to SSF, EPF and CIT
+// together, capped at the lower of NPR 5,00,000 or a third of annual income. The one definition,
+// shared by monthly TDS and by every lump-sum path (Festival Allowance, Incentives, Final
+// Settlement) that projects an annual taxable figure of its own.
+export function retirementRelief(annualContributions, annualGross) {
+  return Math.max(0, Math.min(annualContributions || 0, Math.min(RETIREMENT_CAP_ABS, (annualGross || 0) / 3)))
+}
+
 // Annual tax for a taxable amount. SSF contributors get the 1% first slab
 // (Social Security Tax) waived entirely.
 export function applySlabs(taxable, slabs, isSsfContributor) {
@@ -78,10 +88,12 @@ export function applySlabs(taxable, slabs, isSsfContributor) {
 // ytd* = sums from PRIOR finalized payslips this fiscal year (months before this one).
 // isMarried: use married tax schedule (only effective for FY 2082/83 and earlier).
 // festivalBonus: one-time bonus included in this month's annual income projection.
+// monthlyRetirement / ytdRetirement: CIT / provident-fund contributions (deduction components
+// marked retirement_fund) — this month's, and the sum from prior finalized payslips this FY.
 export function computeMonthlyTdsBreakdown({
   period, monthlyGross, monthlySsf, ytdGross = 0, ytdSsf = 0, ytdWithheld = 0, ytdMonths,
   isSsf = false, annualLifeInsurance = 0, annualHealthInsurance = 0,
-  isMarried = false, festivalBonus = 0,
+  isMarried = false, festivalBonus = 0, monthlyRetirement = 0, ytdRetirement = 0,
 }) {
   const { fyStart, monthInFy } = fiscalYearOf(period.bs_year, period.bs_month)
   const slabs = slabsFor(fyStart, isMarried)
@@ -89,10 +101,11 @@ export function computeMonthlyTdsBreakdown({
   const monthsAtCurrent = 13 - monthInFy
   const annualGross = ytdGross + monthlyGross * monthsAtCurrent + festivalBonus
   const annualSsf   = ytdSsf   + monthlySsf   * monthsAtCurrent
+  const annualOtherRetirement = ytdRetirement + monthlyRetirement * monthsAtCurrent
 
-  const ssfDeduction       = Math.min(annualSsf, Math.min(RETIREMENT_CAP_ABS, annualGross / 3))
-  const insuranceDeduction = Math.min(annualLifeInsurance, LIFE_INS_CAP) + Math.min(annualHealthInsurance, HEALTH_INS_CAP)
-  const annualTaxable      = Math.max(0, annualGross - ssfDeduction - insuranceDeduction)
+  const retirementDeduction = retirementRelief(annualSsf + annualOtherRetirement, annualGross)
+  const insuranceDeduction  = Math.min(annualLifeInsurance, LIFE_INS_CAP) + Math.min(annualHealthInsurance, HEALTH_INS_CAP)
+  const annualTaxable       = Math.max(0, annualGross - retirementDeduction - insuranceDeduction)
 
   const annualTax = applySlabs(annualTaxable, slabs, isSsf)
   // Spread annualTax evenly across the months this employee is actually paid within the FY —
@@ -109,8 +122,8 @@ export function computeMonthlyTdsBreakdown({
 
   return {
     tds, fyStart, monthInFy, monthsAtCurrent, slabs, isSsf,
-    ytdGross, ytdSsf, ytdWithheld, annualGross, annualSsf,
-    ssfDeduction, insuranceDeduction, annualTaxable, annualTax, cumulativeDue,
+    ytdGross, ytdSsf, ytdWithheld, annualGross, annualSsf, annualOtherRetirement,
+    retirementDeduction, insuranceDeduction, annualTaxable, annualTax, cumulativeDue,
     monthsEmployedSoFar, monthsEmployedTotal,
   }
 }

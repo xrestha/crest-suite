@@ -36,7 +36,8 @@ export async function runForecast(clientId, horizonDays = 7) {
         .gte('closed_at', lookbackStart.toISOString())
         .lt('closed_at', todayStart.toISOString()),
       scopedFrom('monthly_periods', clientId, 'id, bs_year, bs_month'),
-      scopedFrom('hr_holiday_calendar', clientId, 'bs_year, bs_month, bs_day, name, holiday_type, demand_multiplier'),
+      // A removed holiday (removed_at, S748) is remembered for Seed, not observed — no multiplier.
+      scopedFrom('hr_holiday_calendar', clientId, 'bs_year, bs_month, bs_day, name, holiday_type, demand_multiplier').is('removed_at', null),
     ])
     // A failed read is not "no history": every read in this run used to drop its error, so a dead
     // connection trained the forecast on nothing and wrote a confident zero for every day (S683).
@@ -83,9 +84,18 @@ export async function runForecast(clientId, horizonDays = 7) {
       }
     }
 
-    const holidaysByKey = Object.fromEntries(
-      (holidays || []).map(h => [`${h.bs_year}:${h.bs_month}:${h.bs_day}`, { name: h.name, holiday_type: h.holiday_type, demand_multiplier: h.demand_multiplier }])
-    )
+    // One entry per date, and several dates carry two holidays (Krishna Janmashtami and Gaura Parva
+    // on one day, Bhai Tika and Falgunanda Jayanti on another). Object.fromEntries kept whichever row
+    // PostgREST returned LAST, so a multiplier set on one of them could silently vanish. The row that
+    // carries a multiplier wins, then a public holiday over an optional one (S748).
+    const holidaysByKey = {}
+    for (const h of holidays || []) {
+      const key = `${h.bs_year}:${h.bs_month}:${h.bs_day}`
+      const next = { name: h.name, holiday_type: h.holiday_type, demand_multiplier: h.demand_multiplier }
+      const prev = holidaysByKey[key]
+      const rank = x => (x.demand_multiplier != null ? 2 : 0) + (x.holiday_type === 'public' ? 1 : 0)
+      if (!prev || rank(next) > rank(prev)) holidaysByKey[key] = next
+    }
 
     const forecast = forecastByWeekday(history, horizonDays, holidaysByKey, now)
 

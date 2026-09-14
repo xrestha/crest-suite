@@ -7,7 +7,7 @@ import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth } from '../../../utils/bsCalendar'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { FIXED_HOLIDAYS, SIGHTED_HOLIDAYS, resolveYear, movableForFy } from './holidayData'
+import { SIGHTED_HOLIDAYS, resolveYear, planSeed } from './holidayData'
 import { fiscalYearOf } from '../payroll/tds'
 
 function fyLabel(fy) {
@@ -41,6 +41,13 @@ export default function HolidayCalendar() {
   const { ask: askConfirm, confirmEl } = useConfirm()
   const [holidays, setHolidays] = useState([])
   const [loading,  setLoading]  = useState(true)
+  // Seed dedupes against the list on screen, so it may only run over a list that actually loaded —
+  // after a failed read the list is empty or stale and Seed inserted the whole year again (S748).
+  const [loadedOk, setLoadedOk] = useState(false)
+  // A holiday decides the 2× overtime rate and scales the Demand Forecast, so changing one is a
+  // supervisor's call, as recording overtime is. Staff still read the calendar. The database
+  // enforces the same rank (migration 20260914150000).
+  const canEdit = hasHrAccess('supervisor')
   const [fyYear,   setFyYear]   = useState(() => {
     const t = getBsToday()
     return fiscalYearOf(t.year, t.month).fyStart
@@ -60,8 +67,9 @@ export default function HolidayCalendar() {
     setLoading(false)
     // A failed read is not "no holidays" — that is the difference between the 1× and 2× OT rate
     // for every day in the table (S682). Keep the last-good list and say so.
-    if (error) { setMsg('error:Could not load the holiday calendar — the list is from the last successful load. ' + errorLine(error)); return }
+    if (error) { setLoadedOk(false); setMsg('error:Could not load the holiday calendar — the list is from the last successful load, and Seed is off until it loads. ' + errorLine(error)); return }
     setHolidays(data || [])
+    setLoadedOk(true)
   }, [clientId, scopedFrom])
 
   useEffect(() => { load() }, [load])
@@ -69,8 +77,13 @@ export default function HolidayCalendar() {
   const fyYears = fyYearsFrom(holidays)
   if (!fyYears.includes(fyYear)) fyYears.unshift(fyYear)
 
-  const fyHolidays = holidays
+  // Every row for the year, removed ones included — Seed must see those to leave them out.
+  const fyAllRows = holidays
     .filter(h => fiscalYearOf(h.bs_year, h.bs_month).fyStart === fyYear)
+  // The calendar itself. A removed holiday (removed_at) is not a holiday for anything: not this
+  // table, not the counts, not Overtime or the forecast. It is listed under "Removed" below.
+  const fyHolidays = fyAllRows.filter(h => !h.removed_at)
+  const fyRemoved  = fyAllRows.filter(h => h.removed_at)
 
   function openAdd() { setForm({ open: true, editing: null, ...BLANK }); setMsg('') }
   function openEdit(h) {
@@ -80,6 +93,7 @@ export default function HolidayCalendar() {
   function closeForm() { setForm(f => ({ ...f, open: false, editing: null })) }
 
   async function saveForm() {
+    if (busy) return   // Enter in the name box could submit twice and insert the holiday twice
     if (!clientId) { setMsg('error:No client selected'); return }
     if (!form.name.trim()) { setMsg('error:Holiday name is required'); return }
     const bs_month = parseInt(form.bs_month, 10)
@@ -98,30 +112,75 @@ export default function HolidayCalendar() {
       bs_year, bs_month, bs_day, name: form.name.trim(), holiday_type: form.holiday_type,
       demand_multiplier: multiplierStr ? parseFloat(multiplierStr) : null,
     }
+    // Typing in a holiday that was removed puts THAT row back rather than inserting a second one
+    // on the same day under the same name — which the unique index would refuse anyway.
+    const removedTwin = !form.editing && fyRemoved.find(h =>
+      h.bs_year === bs_year && h.bs_month === bs_month && h.bs_day === bs_day && h.name === payload.name)
     const { error } = form.editing
       ? await scopedUpdate('hr_holiday_calendar', payload).eq('id', form.editing.id)
-      : await scopedInsert('hr_holiday_calendar', payload)
+      : removedTwin
+        ? await scopedUpdate('hr_holiday_calendar', { ...payload, removed_at: null }).eq('id', removedTwin.id)
+        : await scopedInsert('hr_holiday_calendar', payload)
     if (error) { setMsg('error:This holiday was not saved. ' + errorLine(error)); setBusy(false); return }
     await load(); closeForm(); setMsg('ok:Saved'); setBusy(false)
   }
 
   // A holiday drives the 2× OT rate for its date and the demand-forecast multiplier, so the ask
   // names both (S682; was window.confirm).
-  function del(h) {
+  //
+  // Remove STAMPS the row rather than deleting it (S748, decided with Aashish): Seed matches by
+  // name, so a deleted seeded holiday came straight back the next time anyone pressed Seed. A
+  // stamped row stays findable, is ignored everywhere a holiday matters, and can be put back.
+  function removeHoliday(h) {
     askConfirm({
-      title: `Delete "${h.name}"?`,
-      confirmLabel: 'Delete Holiday', danger: true, busyLabel: 'Deleting…',
+      title: `Remove "${h.name}"?`,
+      confirmLabel: 'Remove Holiday', danger: true, busyLabel: 'Removing…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            {BS_MONTHS[h.bs_month - 1]} {h.bs_day}, {h.bs_year} stops being a holiday: overtime entered for it from now on is
+            suggested at the weekday rate instead of the holiday rate{h.demand_multiplier != null ? `, and the ×${h.demand_multiplier} demand-forecast multiplier is dropped the next time the forecast runs` : ''}.
+            Overtime already entered keeps the rate it was entered at, and attendance for that day is not changed.
+          </p>
+          <p style={{ margin: 0 }}>
+            It moves to the Removed list below this year's calendar. Seed will not add it back, and you can put it back yourself at any time.
+          </p>
+        </>
+      ),
+      run: async () => {
+        setMsg('')
+        const { error } = await scopedUpdate('hr_holiday_calendar', { removed_at: new Date().toISOString() }).eq('id', h.id)
+        if (error) { setMsg('error:This holiday was not removed — it is still in the calendar. ' + errorLine(error)); return }
+        await load()
+      },
+    })
+  }
+
+  async function putBack(h) {
+    if (busy) return
+    setBusy(true); setMsg('')
+    const { error } = await scopedUpdate('hr_holiday_calendar', { removed_at: null }).eq('id', h.id)
+    if (error) { setMsg('error:' + h.name + ' was not put back — it is still removed. ' + errorLine(error)); setBusy(false); return }
+    await load(); setMsg('ok:' + h.name + ' is back in the calendar'); setBusy(false)
+  }
+
+  // Deleting for good forgets the removal too, so for a gazetted holiday the next Seed adds it
+  // again — which is exactly what someone reaching for this (a typo'd hand-entered day) wants, and
+  // exactly what the confirm has to say for everyone else.
+  function deleteForGood(h) {
+    askConfirm({
+      title: `Delete "${h.name}" for good?`,
+      confirmLabel: 'Delete for good', danger: true, busyLabel: 'Deleting…',
       body: (
         <p style={{ margin: 0 }}>
-          {BS_MONTHS[h.bs_month - 1]} {h.bs_day}, {h.bs_year} becomes an ordinary working day: overtime on it is paid at the
-          normal rate instead of the holiday rate{h.demand_multiplier != null ? `, and the ×${h.demand_multiplier} demand-forecast multiplier is dropped` : ''}.
-          Attendance already generated for that day is not changed. This cannot be undone.
+          This erases the row entirely, including the note that you removed it. If it is a gazetted holiday, the next Seed
+          for {fyLabel(fyYear)} will add it back. To keep it out of the calendar, leave it in the Removed list instead.
         </p>
       ),
       run: async () => {
         setMsg('')
         const { error } = await scopedDelete('hr_holiday_calendar').eq('id', h.id)
-        if (error) { setMsg('error:This holiday was not deleted — it is still in the calendar. ' + errorLine(error)); return }
+        if (error) { setMsg('error:' + h.name + ' was not deleted — it is still in the Removed list. ' + errorLine(error)); return }
         await load()
       },
     })
@@ -138,41 +197,16 @@ export default function HolidayCalendar() {
   // the result so it is never silent.
   async function seedYear() {
     if (!clientId) { setMsg('error:No client selected'); return }
+    if (!loadedOk) { setMsg('error:The calendar has not loaded, so Seed cannot tell what is already there — reload the page first.'); return }
     setBusy(true); setMsg(''); setSeedReport(null)
 
-    const byName = new Map(fyHolidays.map(h => [h.name, h]))
-    const toInsert = []
-    const corrections = []
-
-    FIXED_HOLIDAYS.forEach(h => {
-      const bs_year = resolveYear(fyYear, h.bs_month)
-      const existing = byName.get(h.name) || (h.legacy || []).map(n => byName.get(n)).find(Boolean)
-      if (!existing) {
-        toInsert.push({ bs_year, bs_month: h.bs_month, bs_day: h.bs_day, name: h.name, holiday_type: 'public' })
-        return
-      }
-      const movedDate = existing.bs_month !== h.bs_month || existing.bs_day !== h.bs_day
-      const renamed   = existing.name !== h.name
-      if (!movedDate && !renamed) return
-      corrections.push({
-        id: existing.id,
-        name: h.name,
-        renamed: renamed ? existing.name : null,
-        from: `${BS_MONTHS[existing.bs_month - 1]} ${existing.bs_day}`,
-        to: `${BS_MONTHS[h.bs_month - 1]} ${h.bs_day}`,
-        movedDate,
-        patch: { bs_year, bs_month: h.bs_month, bs_day: h.bs_day, name: h.name },
-      })
-    })
-
-    const { rows: movable, missing } = movableForFy(fyYear)
-    movable.forEach(h => {
-      if (byName.has(h.name)) return
-      toInsert.push({
-        bs_year: h.bs_year, bs_month: h.m, bs_day: h.d, name: h.name,
-        holiday_type: h.optional ? 'optional' : 'public',
-      })
-    })
+    // fyAllRows, not fyHolidays: a removed holiday must count as present or Seed re-adds it.
+    const { toInsert, corrections: planned, missing, keptRemoved } = planSeed(fyYear, fyAllRows)
+    const corrections = planned.map(c => ({
+      ...c,
+      from: `${BS_MONTHS[c.fromMonth - 1]} ${c.fromDay}`,
+      to:   `${BS_MONTHS[c.toMonth - 1]} ${c.toDay}`,
+    }))
 
     if (toInsert.length > 0) {
       const { error } = await scopedInsert('hr_holiday_calendar', toInsert)
@@ -184,7 +218,7 @@ export default function HolidayCalendar() {
     }
 
     await load()
-    setSeedReport({ added: toInsert.length, corrections, missing })
+    setSeedReport({ added: toInsert.length, corrections, missing, keptRemoved })
     setMsg(toInsert.length || corrections.length
       ? `ok:${toInsert.length} added${corrections.length ? `, ${corrections.length} corrected` : ''}`
       : 'ok:Already up to date')
@@ -217,9 +251,10 @@ export default function HolidayCalendar() {
           >
             {fyYears.map(y => <option key={y} value={y}>{fyLabel(y)}</option>)}
           </select>
+          {canEdit && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Tip text={`Fills this fiscal year from the Nepal Gazette — the fixed-date holidays (New Year, Republic Day, Constitution Day, Prithvi Jayanti, Maghe Sankranti, Martyrs' Day, Democracy Day) plus every gazetted movable one we hold for it: Dashain, Tihar, Chhath, Shivaratri, the three Lhosars, Holi and the rest. Safe to press again — it never touches a holiday you have already entered or edited, and it tells you what it could not cover. ${SIGHTED_HOLIDAYS} have no gazetted date and always need adding by hand.`} width={360}>
-              <button className="btn btn-ghost" onClick={seedYear} disabled={busy} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+            <Tip text={`Fills this fiscal year from the Nepal Gazette — the fixed-date holidays (New Year, Republic Day, Constitution Day, Prithvi Jayanti, Maghe Sankranti, Martyrs' Day, Democracy Day) plus every gazetted movable one we hold for it: Dashain, Tihar, Chhath, Shivaratri, the three Lhosars, Holi and the rest. It never changes the date or type of a holiday you entered or edited, and it tells you what it could not cover. A fixed-date holiday found on the wrong date is corrected, and a holiday you removed stays removed. ${SIGHTED_HOLIDAYS} have no gazetted date and always need adding by hand.`} width={360}>
+              <button className="btn btn-ghost" onClick={seedYear} disabled={busy || !loadedOk} style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
                 ＋ Seed {fyLabel(fyYear)}
               </button>
             </Tip>
@@ -227,6 +262,7 @@ export default function HolidayCalendar() {
               + Add Holiday
             </button>
           </div>
+          )}
           {msg && <span role="status" style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
       </div>
@@ -252,13 +288,18 @@ export default function HolidayCalendar() {
               )}
             </div>
           ))}
+          {seedReport.keptRemoved.length > 0 && (
+            <div>
+              Not added back, because you removed {seedReport.keptRemoved.length > 1 ? 'them' : 'it'}: <strong>{seedReport.keptRemoved.join(', ')}</strong>. Put one back from the Removed list if you want it.
+            </div>
+          )}
           {seedReport.missing.length > 0 && (
             <div>
               No movable holidays are held for <strong>BS {seedReport.missing.join(' and ')}</strong> yet — Nepal gazettes them only in Falgun of the preceding year, so {seedReport.missing.length > 1 ? 'those months' : 'that part of this fiscal year'} carries fixed-date holidays only for now. Add any you need by hand.
             </div>
           )}
           <div style={{ color: 'var(--theme-text3)' }}>
-            {SIGHTED_HOLIDAYS} have no gazetted date and are never seeded. Holi is seeded for both Hill (Chaitra 7) and Terai (Chaitra 8) — delete whichever does not apply to your outlet.
+            {SIGHTED_HOLIDAYS} have no gazetted date and are never seeded. Holi is seeded for both Hill (Chaitra 7) and Terai (Chaitra 8) — remove whichever does not apply to your outlet; Seed will not add it back.
           </div>
         </div>
       )}
@@ -267,7 +308,7 @@ export default function HolidayCalendar() {
       <div className="stat-grid">
         <div className="stat-card">
           <div className="stat-label">
-            <Tip text="Gazetted public holidays — staff are entitled to the day off. Working on a public holiday attracts 2× overtime under the Nepal Labour Act." width={280}>
+            <Tip text="Gazetted public holidays — staff are entitled to the day off. Overtime entered for a public holiday in Overtime is suggested at the 2× holiday rate." width={280}>
               Public Holidays
             </Tip>
           </div>
@@ -276,7 +317,7 @@ export default function HolidayCalendar() {
         </div>
         <div className="stat-card">
           <div className="stat-label">
-            <Tip text="Optional / floating holidays — not gazetted. Employees may be asked to work; the day off is at the employer's discretion." width={280}>
+            <Tip text="Holidays gazetted only for part of the country or a community — Teej for women, Gai Jatra in the Kathmandu Valley, Christmas — plus any floating day you add. Overtime on them is suggested at the weekday rate." width={280}>
               Optional Holidays
             </Tip>
           </div>
@@ -298,7 +339,9 @@ export default function HolidayCalendar() {
           <div className="empty-state-icon">📆</div>
           <p className="empty-state-text">
             No holidays for {fyLabel(fyYear)} yet.{' '}
-            Click <strong>Seed {fyLabel(fyYear)}</strong> to fill it from the Nepal Gazette — Dashain, Tihar, Chhath, Shivaratri, the Lhosars and the fixed-date national holidays. {SIGHTED_HOLIDAYS} carry no gazetted date and need adding by hand.
+            {canEdit
+              ? <>Click <strong>Seed {fyLabel(fyYear)}</strong> to fill it from the Nepal Gazette — Dashain, Tihar, Chhath, Shivaratri, the Lhosars and the fixed-date national holidays. {SIGHTED_HOLIDAYS} carry no gazetted date and need adding by hand.</>
+              : <>A supervisor or manager can fill it from the Nepal Gazette.</>}
           </p>
         </div>
       ) : (
@@ -351,10 +394,55 @@ export default function HolidayCalendar() {
                       {h.demand_multiplier != null ? `×${h.demand_multiplier}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(h)}>Edit</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => del(h)}>Delete</button>
-                      </div>
+                      {canEdit && (
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(h)} aria-label={`Edit ${h.name}`}>Edit</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => removeHoliday(h)} aria-label={`Remove ${h.name}`}>Remove</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Removed holidays (S748). Kept so Seed leaves them out, shown so that is never a mystery,
+          and reversible. Not a holiday for anything — no count, no overtime rate, no forecast. */}
+      {!loading && fyRemoved.length > 0 && (
+        <div className="card" style={{ padding: 0, marginTop: 16 }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)' }}>
+            <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-text1)' }}>
+              <Tip text="Holidays taken out of this fiscal year. They are not holidays for overtime or the Demand Forecast, and Seed will not add them back. Put one back to restore it exactly as it was." width={300}>
+                Removed from {fyLabel(fyYear)} ({fyRemoved.length})
+              </Tip>
+            </h2>
+          </div>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Holiday Name</th>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {fyRemoved.map(h => (
+                  <tr key={h.id}>
+                    <td style={{ color: 'var(--theme-text2)' }}>{h.name}</td>
+                    <td style={{ color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{BS_MONTHS[h.bs_month - 1]} {h.bs_day}, {h.bs_year}</td>
+                    <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{h.holiday_type === 'public' ? 'Public' : 'Optional'}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {canEdit && (
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => putBack(h)} disabled={busy} aria-label={`Put back ${h.name}`}>Put back</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => deleteForGood(h)} aria-label={`Delete ${h.name} for good`}>Delete for good</button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -365,8 +453,9 @@ export default function HolidayCalendar() {
       )}
 
       <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
-        <strong style={{ color: 'var(--theme-text2)' }}>Nepal Labour Act — holiday OT:</strong> working on a gazetted public holiday entitles the employee to 2× the regular hourly rate. Optional holidays follow company policy.
-        <br />Movable holidays (Dashain, Tihar, Holi, Buddha Jayanti, Teej, etc.) must be added manually each fiscal year from the Nepal government gazette.
+        <strong style={{ color: 'var(--theme-text2)' }}>Holiday overtime:</strong> overtime entered in Overtime for a public holiday is suggested at 2× the regular hourly rate; optional holidays follow company policy. Each overtime entry keeps the rate it was entered at, so a later change here does not reprice it.
+        <br />Seed fills each fiscal year from the Nepal Gazette, for every BS year we hold a gazette for. {SIGHTED_HOLIDAYS} have no gazetted date and are always added by hand.
+        {!canEdit && <><br />View only — holidays set the overtime rate, so only an HR supervisor or manager can change them.</>}
       </div>
 
       {/* Add / Edit Modal */}

@@ -69,7 +69,9 @@ export default function Overtime() {
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
         scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, status')
           .in('status', ['active', 'probation']).order('full_name'),
-        scopedFrom('hr_holiday_calendar', 'bs_year, bs_month, bs_day, name, holiday_type'),
+        // Removed holidays (removed_at set, S748) are kept only so Seed does not re-add them —
+        // never a holiday for pay purposes.
+        scopedFrom('hr_holiday_calendar', 'bs_year, bs_month, bs_day, name, holiday_type').is('removed_at', null),
       ])
       setPeriods(p || [])
       setEmployees(emps || [])
@@ -491,7 +493,9 @@ export default function Overtime() {
             </div>
             {form.ot_type === 'holiday' && isHoliday(form.bs_year, form.bs_month, form.bs_day) && (
               <div style={{ fontSize: 11, color: 'var(--theme-accent-ink)', marginTop: 6 }}>
-                ✓ {holidays.find(h => h.bs_year === form.bs_year && h.bs_month === form.bs_month && h.bs_day === form.bs_day)?.name}
+                {/* The PUBLIC holiday's name — the one that earns 2× — not whichever row sorted first
+                    on a date that also carries an optional holiday. */}
+                ✓ {holidays.find(h => h.bs_year === form.bs_year && h.bs_month === form.bs_month && h.bs_day === form.bs_day && h.holiday_type === 'public')?.name}
               </div>
             )}
           </div>

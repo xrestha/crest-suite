@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -13,6 +13,7 @@ import Modal from '../../../components/Modal'
 import EmployeeForm from './EmployeeForm'
 import EmployeeJoiningForm from './EmployeeJoiningForm'
 import { EMPLOYEE_STATUS_COLORS as STATUS_COLORS } from '../payrollConstants'
+import { formatAdAsBs } from '../../../utils/bsCalendar'
 
 function pinValid(pin) { return /^\d{4,6}$/.test(pin) }
 
@@ -29,7 +30,8 @@ const RETIRE_SOON_DAYS = 180
 function retireInfo(dateStr) {
   if (!dateStr) return null
   const today = new Date(); today.setHours(0, 0, 0, 0)
-  const d = new Date(dateStr); d.setHours(0, 0, 0, 0)
+  // Local midnight: `new Date('YYYY-MM-DD')` is UTC midnight, the previous day west of UTC.
+  const d = new Date(String(dateStr).slice(0, 10) + 'T00:00:00')
   const days = Math.round((d - today) / 86400000)
   // `color` is only ever used as the badge's TEXT (the tint + border are the fill), so it takes
   // the *-text contrast variants per the S549 rule.
@@ -38,9 +40,9 @@ function retireInfo(dateStr) {
   return { future: true, days }
 }
 
-function fmtDate(dateStr) {
-  return dateStr ? new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
-}
+// Dates are picked in BS and stored as AD, so they are shown in BS — this printed the raw AD value
+// ("12 Aug 2025"), a calendar nobody entered.
+const fmtDate = dateStr => formatAdAsBs(dateStr)
 
 // Three separate failures on this page each need the same page-level red card, so it lives here
 // once rather than being pasted per call site.
@@ -113,14 +115,34 @@ export default function EmployeeList() {
   const [selected, setSelected] = useState(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
 
+  // The client this page is currently showing. An admin switching client re-runs the effect below
+  // on a still-mounted page, and until S748 that left the PREVIOUS client's roster on screen while
+  // the new read was in flight (or forever, if it failed — under a banner saying only "may be out of
+  // date"), kept the old selection for the bulk bar, and let whichever response landed last win.
+  const clientRef = useRef(effectiveClientId)
+  const shownClientRef = useRef(effectiveClientId)
+
   useEffect(() => {
+    clientRef.current = effectiveClientId
+    if (shownClientRef.current !== effectiveClientId) {
+      shownClientRef.current = effectiveClientId
+      const cached = effectiveClientId ? readPageCache('employees', 'employees', effectiveClientId) : null
+      setEmployees(cached ?? [])
+      setLoading(!!effectiveClientId && !cached)
+      setSelected(new Set())
+      setSelfServiceMap({})
+      setLoadErr(''); setSsStatusErr(''); setBulkError(null); setSsRemoveErr('')
+      setSupFilter('all')
+    }
     if (effectiveClientId) { fetchEmployees(); fetchSelfServiceStatus() }
     else setLoading(false)
   }, [effectiveClientId]) // eslint-disable-line
 
   async function fetchEmployees() {
+    const forClient = effectiveClientId
     if (employees.length === 0) setLoading(true) // a cached list keeps showing while this refreshes
     const { data, error } = await scopedFrom('hr_employees').order('full_name')
+    if (clientRef.current !== forClient) return   // the page has moved to another client since
     if (error) {
       // Leave whatever is already on screen. A cached list is stale but true; [] is a lie that
       // reads as "this client has no employees" — and it would also be written to the cache,
@@ -138,7 +160,9 @@ export default function EmployeeList() {
   // profiles doesn't follow the standard client-scoped RLS pattern (self-or-admin only), so this
   // goes through a dedicated RPC rather than a raw/scoped query — see get_hr_self_service_status.
   async function fetchSelfServiceStatus() {
-    const { data, error } = await supabase.rpc('get_hr_self_service_status', { p_client_id: effectiveClientId })
+    const forClient = effectiveClientId
+    const { data, error } = await supabase.rpc('get_hr_self_service_status', { p_client_id: forClient })
+    if (clientRef.current !== forClient) return
     if (error) {
       // Keep the last known map rather than blanking it, and let the row render "unknown" instead
       // of confidently offering Enable — creating a second login for an employee who already has
@@ -222,12 +246,15 @@ export default function EmployeeList() {
   // Bulk-toggles access_blocked only — never touches status, so this can never remove anyone from
   // a Payroll Run/Calculation/Final Settlement picker (all three filter on status alone).
   async function bulkSetAccess(blocked) {
-    if (selected.size === 0) return
+    // Only the ticked rows still ON SCREEN. A selection survives a filter change, so ticking "select
+    // all" on one tab and switching tabs used to aim Deactivate at rows the reader could no longer see.
+    const ids = selectedVisible.map(e => e.id)
+    if (ids.length === 0) return
     setBulkBusy(true); setBulkError(null)
-    const { error } = await scopedUpdate('hr_employees', { access_blocked: blocked }).in('id', Array.from(selected))
+    const { error } = await scopedUpdate('hr_employees', { access_blocked: blocked }).in('id', ids)
     if (error) {
       const a = asActionError(error)
-      setBulkError({ text: `The ${selected.size} selected employee(s) were not ${blocked ? 'deactivated' : 'activated'} — their access is unchanged. ` + a.text, detail: a.detail })
+      setBulkError({ text: `The ${ids.length} selected employee(s) were not ${blocked ? 'deactivated' : 'activated'} — their access is unchanged. ` + a.text, detail: a.detail })
       setBulkBusy(false)
       return
     }
@@ -241,10 +268,17 @@ export default function EmployeeList() {
   function closeDrawer() { setDrawer(false); setEditing(null) }
 
   // One shared login link per client — the admin sends this to every self-service employee.
-  function copySelfServiceLink() {
+  async function copySelfServiceLink() {
     const url = `${window.location.origin}/hr/self-service/login/${effectiveClientId}`
-    navigator.clipboard.writeText(url)
-    setLinkCopied(true)
+    // Awaited: a refused clipboard (no permission, an insecure origin) used to flash "✓ Link Copied"
+    // over a clipboard holding whatever was there before. Fall back to showing the link to copy.
+    try {
+      await navigator.clipboard.writeText(url)
+      setLinkCopied(true)
+    } catch (_) {
+      window.prompt('Copy this Self-Service link:', url)
+      return
+    }
     setTimeout(() => setLinkCopied(false), 2000)
   }
 
@@ -281,6 +315,8 @@ export default function EmployeeList() {
     })
   }, [employees, search, statusFilter, supFilter, retiringOnly])
 
+  const selectedVisible = useMemo(() => filtered.filter(e => selected.has(e.id)), [filtered, selected])
+
   // The four stat-card figures, in ONE pass rather than four scans of the same array. They are
   // headline counts over the whole roster, so they never move while someone types in the search
   // box — the memo is what stops them being recomputed anyway.
@@ -291,7 +327,9 @@ export default function EmployeeList() {
       if (e.status === 'active') active++
       if (e.status === 'probation') probation++
       if (onPayroll) {
-        payrollAmt += parseFloat(e.basic_salary || 0)
+        // Monthly-paid staff only: a daily or hourly employee's basic_salary is their RATE, and
+        // adding NPR 800/day to a monthly total understated nothing and meant nothing.
+        if ((e.pay_basis || 'monthly') === 'monthly') payrollAmt += parseFloat(e.basic_salary || 0)
         // Active/probation employees retiring within the next 180 days.
         if (retireInfo(e.retirement_date)?.soon) retiringSoon++
       }
@@ -352,16 +390,24 @@ export default function EmployeeList() {
         </div>
         <div className="stat-card">
           <div className="stat-label">
-            <Tip text="Sum of basic salary for all active and probation employees. Full payroll (with allowances, SSF, TDS) is computed during payroll run." width={260}>
+            <Tip text="Sum of monthly basic salary for active and probation employees paid monthly. Daily and hourly staff are left out — their figure is a rate, not a month's pay. Allowances, SSF and TDS are worked out in Payroll Run." width={260}>
               Basic Payroll / Month
             </Tip>
           </div>
           <div className="stat-value" style={{ fontSize: 16 }}>
             NPR {Math.round(payrollAmt).toLocaleString('en-IN')}
           </div>
-          <div className="stat-sub">basic salary only</div>
+          <div className="stat-sub">monthly-paid staff, basic only</div>
         </div>
-        <div className="stat-card" style={retiringSoon > 0 ? { cursor: 'pointer' } : undefined} onClick={() => retiringSoon > 0 && setRetiringOnly(v => !v)}>
+        <div
+          className="stat-card"
+          style={retiringSoon > 0 ? { cursor: 'pointer' } : undefined}
+          onClick={() => retiringSoon > 0 && setRetiringOnly(v => !v)}
+          {...(retiringSoon > 0 ? {
+            role: 'button', tabIndex: 0, 'aria-pressed': retiringOnly,
+            onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRetiringOnly(v => !v) } },
+          } : {})}
+        >
           <div className="stat-label">
             <Tip text="Active or probation employees whose retirement date falls within the next 180 days. Click to filter." width={260}>
               Retiring Soon
@@ -415,12 +461,12 @@ export default function EmployeeList() {
         </button>
       </div>
 
-      {selected.size > 0 && (
+      {selectedVisible.length > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
           padding: '8px 12px', borderRadius: 0, background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
         }}>
-          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{selected.size} selected</span>
+          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{selectedVisible.length} selected</span>
           <Tip text="Blocks Self-Service PIN login for the selected employees only. Does not change their Status, so they stay fully visible to Payroll Run, Payroll Calculation and Final Settlement.">
             <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} disabled={bulkBusy} onClick={() => bulkSetAccess(true)}>
               {bulkBusy ? 'Working…' : 'Deactivate (block login)'}
@@ -460,20 +506,20 @@ export default function EmployeeList() {
                     aria-label="Select all employees"
                   />
                 </th>
-                <th><Tip text="Auto-generated employee code used as a short reference on payroll, attendance, and reports.">Code</Tip></th>
+                <th><Tip text="Optional employee code, typed on the Employee form — a short reference on payroll, attendance and reports.">Code</Tip></th>
                 <th>Name</th>
                 <th>Designation</th>
                 <th>Department</th>
-                <th><Tip text="Reporting manager for this employee — used in leave approval workflows.">Supervisor</Tip></th>
-                <th><Tip text="Employment type: Permanent, Probation, Contract, or Part-time. Affects payroll and leave accrual rules." width={280}>Type</Tip></th>
+                <th><Tip text="Who this employee reports to — a record for your reference and HR Reports' staff directory. Leave approvals are not routed by it.">Supervisor</Tip></th>
+                <th><Tip text="Employment type: Permanent, Probation, Contract or Part-time. A record of the arrangement — how someone is paid (monthly, daily, hourly) is set in Pay Setup." width={280}>Type</Tip></th>
                 <th>
-                  <Tip text="Date joined." width={160}>Join Date</Tip>
+                  <Tip text="Date joined, in BS. Payroll pays a monthly employee from this day." width={200}>Join Date</Tip>
                 </th>
                 <th>
-                  <Tip text="Expected retirement date (DOB + 60, SSF pension age). Flags employees retiring within 180 days." width={280}>Retirement</Tip>
+                  <Tip text="Retirement date as entered on the Employee form (its ↻ Age 60 button sets date of birth + 60, the SSF pension age). Flags employees retiring within 180 days." width={280}>Retirement</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Basic salary per month in NPR. Does not include allowances." width={220}>Basic (NPR)</Tip>
+                  <Tip text="Basic salary per month in NPR, or the day / hour rate for daily and hourly staff. Does not include allowances — see Pay Setup." width={240}>Basic (NPR)</Tip>
                 </th>
                 <th style={{ textAlign: 'center' }}>Status</th>
                 <th></th>
@@ -560,7 +606,7 @@ export default function EmployeeList() {
                             </span>
                           )
                         ) : ssStatusErr ? (
-                          <Tip text="Self-Service status couldn't be loaded, so this is unknown — not 'no login'. Reload before enabling: if this employee already has Self-Service, enabling it again will fail." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                          <Tip text="Self-Service status couldn't be loaded, so this is unknown — not 'no login'. Reload the page to check before enabling." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                             <span className="badge badge-gray" style={{ fontSize: 10 }}>Self-Service ?</span>
                           </Tip>
                         ) : (
@@ -603,8 +649,8 @@ export default function EmployeeList() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>
               {ssTarget.full_name} will be able to log in with this PIN via the "Copy Self-Service Link" button
-              above to view their own payslip, submit leave requests, and see their roster. Set an initial PIN —
-              they can be given a new one later by repeating this action.
+              above to view their own payslip, submit leave requests, and see their roster. To give them a new PIN
+              later, Remove their Self-Service access and Enable it again.
             </p>
             <div>
               <label htmlFor="emp-ss-pin" style={{ fontSize: 11, color: 'var(--theme-text3)', marginBottom: 4, display: 'block' }}>PIN (4–6 digits)</label>

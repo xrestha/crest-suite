@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
@@ -6,7 +7,14 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { formatAd } from '../../../utils/bsCalendar'
+import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES } from './employeeFormData'
 
+// The fields THIS form owns. Pay basis, basic salary, bank and SSF are not here on purpose: Pay
+// Setup owns them, and until S748 this form carried them anyway (spread in from the loaded row) and
+// wrote them back on every save — so an Employees save undid a Pay Setup raise, a Final Settlement's
+// status/end date, or a login block made in another tab. `changedEmployeeFields` now sends only what
+// the user actually changed.
 const EMPTY = {
   employee_code: '',
   full_name: '',
@@ -17,7 +25,6 @@ const EMPTY = {
   designation: '',
   department: '',
   employment_type: 'permanent',
-  pay_basis: 'monthly',
   join_date: '',
   end_date: '',
   status: 'active',
@@ -26,12 +33,6 @@ const EMPTY = {
   address: '',
   emergency_contact_name: '',
   emergency_contact_phone: '',
-  bank_name: '',
-  bank_account_no: '',
-  bank_branch: '',
-  ssf_no: '',
-  ssf_enrolled: false,
-  basic_salary: '',
   notes: '',
   // Reporting & lifecycle
   supervisor_id: '',
@@ -85,8 +86,13 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   const { ask: askConfirm, confirmEl } = useConfirm()
   const isEdit = !!employee
   const [tab, setTab]         = useState('personal')
-  const [form, setForm]       = useState(isEdit ? { ...EMPTY, ...employee } : { ...EMPTY })
+  // Only the fields this form owns are copied in — see EMPTY above. `?? ''` keeps a NULL column a
+  // controlled input instead of flipping it to uncontrolled.
+  const [form, setForm]       = useState(() => (isEdit
+    ? Object.fromEntries(Object.keys(EMPTY).map(k => [k, employee[k] ?? EMPTY[k]]))
+    : { ...EMPTY }))
   const [supervisors, setSupervisors] = useState([])
+  const [supervisorErr, setSupervisorErr] = useState('')
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
   // Keyed by field, not one string for the whole form. This form already KNEW which field had
@@ -94,14 +100,25 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   // never carried, so a screen-reader user was told a save failed and never told by what (S603).
   const [fieldErr, setFieldErr] = useState({})
 
-  // Active employees available as reporting supervisors (exclude self to prevent self-reporting).
+  // Employees available as reporting supervisors (excluding self). Active AND probation — a new
+  // shift lead on probation is a real supervisor. The CURRENT supervisor is kept in the list even
+  // after they have left, labelled, because a <select> whose value matches no option renders its
+  // first option: the form showed "— None —" for a supervisor who was still on the record.
   useEffect(() => {
     if (!clientId) return
-    scopedFrom('hr_employees', 'id, full_name, designation')
-      .eq('status', 'active')
+    let live = true
+    const currentSup = employee?.supervisor_id
+    scopedFrom('hr_employees', 'id, full_name, designation, status')
       .order('full_name')
-      .then(({ data }) => setSupervisors((data || []).filter(e => e.id !== employee?.id)))
-  }, [clientId, employee?.id, scopedFrom])
+      .then(({ data, error: readErr }) => {
+        if (!live) return
+        if (readErr) { setSupervisorErr(errorLine(readErr)); return }
+        setSupervisorErr('')
+        setSupervisors((data || []).filter(e =>
+          e.id !== employee?.id && (e.status === 'active' || e.status === 'probation' || e.id === currentSup)))
+      })
+    return () => { live = false }
+  }, [clientId, employee?.id, employee?.supervisor_id, scopedFrom])
 
   // Editing a field clears its own error. Leaving a red border under a box the user has just
   // corrected teaches them the message is stale and worth ignoring, which is how a real one gets
@@ -133,34 +150,15 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     setError('')
     setSaving(true)
 
-    const samePerm = !!form.same_as_permanent
-    const payload = {
-      ...form,
-      full_name:      form.full_name.trim(),
-      basic_salary:   parseFloat(form.basic_salary) || 0,
-      gender:         form.gender         || null,
-      date_of_birth:  form.date_of_birth  || null,
-      end_date:       form.end_date       || null,
-      pan_no:         form.pan_no         || null,
-      citizenship_no: form.citizenship_no || null,
-      // Typed columns must be null (not '') when empty.
-      supervisor_id:   form.supervisor_id   || null,
-      retirement_date: form.retirement_date || null,
-      marital_status:  form.marital_status  || null,
-      children_count:  form.children_count === '' ? null : parseInt(form.children_count, 10),
-      // When "same as permanent" is ticked, mirror the permanent address into current.
-      temp_province:     samePerm ? form.perm_province     : form.temp_province,
-      temp_district:     samePerm ? form.perm_district     : form.temp_district,
-      temp_municipality: samePerm ? form.perm_municipality : form.temp_municipality,
-      temp_ward:         samePerm ? form.perm_ward         : form.temp_ward,
-      temp_tole:         samePerm ? form.perm_tole         : form.temp_tole,
-    }
-
+    const keys = Object.keys(EMPTY)
     if (isEdit) {
-      const { error: err } = await scopedUpdate('hr_employees', payload).eq('id', employee.id)
-      if (err) { setError('The changes were not saved. ' + errorLine(err)); setSaving(false); return }
+      const patch = changedEmployeeFields(employee, form, keys)
+      if (Object.keys(patch).length > 0) {
+        const { error: err } = await scopedUpdate('hr_employees', patch).eq('id', employee.id)
+        if (err) { setError('The changes were not saved. ' + errorLine(err)); setSaving(false); return }
+      }
     } else {
-      const { error: err } = await scopedInsert('hr_employees', payload)
+      const { error: err } = await scopedInsert('hr_employees', newEmployeePayload(form, keys))
       if (err) { setError('The employee was not added. ' + errorLine(err)); setSaving(false); return }
     }
 
@@ -168,17 +166,36 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
     onSave()
   }
 
-  // Both status flips are reversible from the same button, so the native confirm stays; the
-  // write's error no longer does (S682).
-  async function handleDeactivate() {
-    if (!window.confirm(`Mark ${employee.full_name} as inactive?`)) return
-    const { error: err } = await scopedUpdate('hr_employees', { status: 'inactive' }).eq('id', employee.id)
-    if (err) { setError(`${employee.full_name} is still active — the change was not saved. ` + errorLine(err)); return }
-    onSave()
+  // Deactivate takes someone off every payroll picker, and that is the consequence the old
+  // "Mark X as inactive?" box never named: a mid-month leaver deactivated BEFORE their Final
+  // Settlement can no longer be settled at all, because Final Settlement lists active/probation
+  // staff only. It also does not block their Self-Service login — a different control, on the list.
+  function handleDeactivate() {
+    askConfirm({
+      title: `Deactivate ${employee.full_name}?`,
+      confirmLabel: 'Deactivate', danger: true, busyLabel: 'Saving…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            They come off Payroll Run, Payroll Calculation, Final Settlement, the Roster and Attendance. Their record and
+            pay history are kept, and Activate brings them back.
+          </p>
+          <p style={{ margin: '0 0 8px' }}>
+            <strong>If they are leaving, run Final Settlement first</strong> — once inactive they no longer appear there.
+          </p>
+          <p style={{ margin: 0 }}>This does not block their Self-Service login; use Deactivate (block login) on the Employees list for that.</p>
+        </>
+      ),
+      run: async () => {
+        const { error: err } = await scopedUpdate('hr_employees', { status: 'inactive' }).eq('id', employee.id)
+        if (err) { setError(`${employee.full_name} is still ${employee.status} — the change was not saved. ` + errorLine(err)); return }
+        onSave()
+      },
+    })
   }
 
   async function handleActivate() {
-    if (!window.confirm(`Reactivate ${employee.full_name}?`)) return
+    if (!window.confirm(`Reactivate ${employee.full_name}? They return to payroll, the Roster and Attendance.`)) return
     const { error: err } = await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id)
     if (err) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + errorLine(err)); return }
     onSave()
@@ -195,34 +212,43 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
   // native confirms in a row ("Delete?" then "Are you sure?") — a doubled window.confirm is the
   // tell that the box could not carry what deleting actually does (S682). A failed count is a
   // check that did not run, so it refuses rather than treating null as zero.
+  //
+  // S748: an employee with PAY HISTORY — finalized payslips, a finalized Final Settlement, finalized
+  // festival allowances, any advance — or a Self-Service login is refused outright, by the database
+  // (hr_employees_guard_delete) as well as here. Those five cascade from hr_employees, so a delete
+  // used to take the records the TDS certificate and SSF challan are built from; and the login
+  // survived its employee (hr_employee_id is SET NULL) with a PIN that kept working. The page asks
+  // first only so it can say which; the trigger is the guard.
   async function handleDelete() {
     setError('')
 
-    const counts = await Promise.all([
+    const checks = await Promise.all([
+      supabase.rpc('employee_pay_history', { p_ids: [employee.id] }),
       scopedFrom('hr_tada_claims', 'id', { count: 'exact', head: true }).eq('employee_id', employee.id),
       scopedFrom('hr_incentives', 'id', { count: 'exact', head: true }).eq('employee_id', employee.id),
       scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('requester_employee_id', employee.id),
       scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true }).eq('target_employee_id', employee.id),
     ])
-    const countFailed = counts.find(r => r && r.error)
-    if (countFailed) {
-      setError(`Could not check whether ${employee.full_name} still has TADA, incentive or shift-swap records, so nothing was deleted. Try again. ` + errorLine(countFailed.error))
+    const checkFailed = checks.find(r => r && r.error)
+    if (checkFailed) {
+      setError(`Could not check ${employee.full_name}'s pay history and linked records, so nothing was deleted. Try again. ` + errorLine(checkFailed.error))
       return
     }
-    const [{ count: tadaCount }, { count: incentiveCount }, { count: swapReqCount }, { count: swapTgtCount }] = counts
+    const [{ data: history }, { count: tadaCount }, { count: incentiveCount }, { count: swapReqCount }, { count: swapTgtCount }] = checks
+    const swapCount = (swapReqCount || 0) + (swapTgtCount || 0)
     const blockers = [
+      ...(history || []).map(h => PAY_HISTORY_LABELS[h.ref_kind] || h.ref_kind),
       tadaCount      ? `${tadaCount} TADA claim${tadaCount === 1 ? '' : 's'}` : '',
       incentiveCount ? `${incentiveCount} incentive/bonus record${incentiveCount === 1 ? '' : 's'}` : '',
-      (swapReqCount || swapTgtCount) ? `${(swapReqCount || 0) + (swapTgtCount || 0)} shift-swap request${((swapReqCount || 0) + (swapTgtCount || 0)) === 1 ? '' : 's'}` : '',
+      swapCount      ? `${swapCount} shift-swap request${swapCount === 1 ? '' : 's'}` : '',
     ].filter(Boolean)
 
     if (blockers.length > 0) {
-      setError(
-        `${employee.full_name} can't be deleted because they still have ${blockers.join(', ')} on record. ` +
-        'That history is kept deliberately, since it covers money paid and approvals given. ' +
-        'Use Deactivate instead — it removes them from payroll pickers, rosters and attendance while keeping the record. ' +
-        'If you genuinely need the employee gone, delete those entries first in TADA Claims, Incentives and Roster → Swap Requests.'
-      )
+      const loginOnly = blockers.length === 1 && (history || []).some(h => h.ref_kind === 'self_service_login')
+      setError(loginOnly
+        ? `${employee.full_name} still has a Self-Service login. Remove it from the Employees list first — deleting the employee would leave that PIN able to sign in.`
+        : `${employee.full_name} can't be deleted — they have ${blockers.join(', ')} on record. ` +
+          'That history covers money paid and approvals given, so it is kept. Use Deactivate instead: it takes them off payroll, the Roster and Attendance and keeps the record.')
       return
     }
 
@@ -232,21 +258,23 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       body: (
         <>
           <p style={{ margin: '0 0 8px' }}>
-            The employee record and everything that cascades from it — attendance, leave requests, payslips, advances,
-            roster assignments and the Self-Service login — are permanently deleted. Finalized payroll runs keep their
-            totals but lose this person's payslip.
+            {employee.full_name} has no finalized pay, no advances and no Self-Service login, so the record can go. Their
+            attendance, leave requests, roster shifts, overtime entries, salary setup and any draft payslip go with it.
           </p>
-          <p style={{ margin: 0 }}>To keep the history, use Deactivate instead. This cannot be undone.</p>
+          <p style={{ margin: 0 }}>This cannot be undone. To keep the record, use Deactivate instead.</p>
         </>
       ),
       run: async () => {
         const { error: err } = await scopedDelete('hr_employees').eq('id', employee.id)
         if (err) {
-          // Backstop: a table added later with a non-cascading FK would land here rather than showing
-          // raw Postgres text. Add it to the pre-check above when that happens.
-          setError(err.code === '23503'
-            ? `${employee.full_name} still has linked records elsewhere in HR and can't be deleted. Use Deactivate instead, or remove those entries first.`
-            : `${employee.full_name} was not deleted — the record is unchanged. ` + errorLine(err))
+          // Backstops: a pay record or login that appeared after the check above (the trigger), or a
+          // table added later with a non-cascading FK. Add either to the pre-check when it happens.
+          const history = String(err.message || '').includes('employee_has_pay_history')
+          setError(history
+            ? `${employee.full_name} was not deleted — they now have pay history or a Self-Service login on record. Use Deactivate instead.`
+            : err.code === '23503'
+              ? `${employee.full_name} still has linked records elsewhere in HR and can't be deleted. Use Deactivate instead.`
+              : `${employee.full_name} was not deleted — the record is unchanged. ` + errorLine(err))
           return
         }
         onSave()
@@ -280,7 +308,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
           {tab === 'personal' && <>
             <div style={col}>
               <label style={lbl} htmlFor="emp-code">
-                <Tip text="Auto-generated if left blank (e.g. EMP-001). You can set a custom code." width={240}>Employee Code</Tip>
+                <Tip text="Optional short reference shown on payroll, attendance and reports (e.g. EMP-001). Nothing is generated if you leave it blank." width={240}>Employee Code</Tip>
               </label>
               <input id="emp-code" className="form-input" placeholder="EMP-001 (optional)" value={form.employee_code} onChange={e => set('employee_code', e.target.value)} />
             </div>
@@ -309,7 +337,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
             <div style={row}>
               <div style={col}>
                 <label style={lbl} htmlFor="emp-pan">
-                  <Tip text="PAN number from IRD. Required for TDS computation." width={220}>PAN No.</Tip>
+                  <Tip text="PAN number from IRD. Printed on the employee's TDS certificate and in HR Reports." width={220}>PAN No.</Tip>
                 </label>
                 <input id="emp-pan" className="form-input" placeholder="9-digit PAN" value={form.pan_no} onChange={e => set('pan_no', e.target.value)} />
               </div>
@@ -352,7 +380,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
             </div>
             <div style={col}>
               <label style={lbl} htmlFor="emp-employment-type">
-                <Tip text="Permanent — no end date. Probation — first 3–6 months. Contract — defined end date. Part-time — paid per day/hour." width={280}>Employment Type</Tip>
+                <Tip text="Permanent — no end date. Probation — first 3–6 months. Contract — a defined end date. Part-time — reduced hours. How someone is PAID (monthly, daily or hourly) is set separately, in Pay Setup." width={280}>Employment Type</Tip>
               </label>
               <select id="emp-employment-type" className="form-select" style={{ width: '100%' }} value={form.employment_type} onChange={e => set('employment_type', e.target.value)}>
                 <option value="permanent">Permanent</option>
@@ -367,13 +395,26 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                 <BsCalendarPicker id="emp-join-date" value={form.join_date} onChange={v => set('join_date', v)} placeholder="Pick join date" invalid={fieldErr.join_date} />
                 <FieldError id="emp-join-date" message={fieldErr.join_date} />
               </div>
-              {(form.employment_type === 'contract' || form.employment_type === 'part_time') && (
+              {/* Shown for a contract/part-time type AND whenever a date is already set. It used to
+                  hide on any other type while the value stayed saved, and payroll pays a monthly
+                  employee nothing after end_date — so a contract hire switched to Permanent kept a
+                  date nobody could see or clear, and their pay stopped at it (S748). */}
+              {(form.employment_type === 'contract' || form.employment_type === 'part_time' || !!form.end_date) && (
                 <div style={col}>
-                  <label style={lbl} htmlFor="emp-end-date">Contract End Date</label>
+                  <label style={lbl} htmlFor="emp-end-date">
+                    <Tip text="The last day this employee is paid for. Payroll pays nothing for days after it. Final Settlement sets it when someone leaves; clear it if they are still working." width={280}>
+                      {form.employment_type === 'contract' || form.employment_type === 'part_time' ? 'Contract End Date' : 'End Date'}
+                    </Tip>
+                  </label>
                   <BsCalendarPicker id="emp-end-date" value={form.end_date} onChange={v => set('end_date', v)} placeholder="Pick end date" clearable />
                 </div>
               )}
             </div>
+            {endDateHasPassed(form.end_date, form.status, formatAd(new Date())) && (
+              <div role="alert" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)', padding: '8px 12px', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)' }}>
+                ⚠ This end date has passed, but {form.full_name.trim() || 'this employee'} is still on payroll — payroll pays them nothing after it. Clear the date if they are still working.
+              </div>
+            )}
             <div style={col}>
               <label style={lbl} htmlFor="emp-status">Status</label>
               <select id="emp-status" className="form-select" style={{ width: '100%' }} value={form.status} onChange={e => set('status', e.target.value)}>
@@ -383,17 +424,29 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
                 <option value="resigned">Resigned</option>
                 <option value="terminated">Terminated</option>
               </select>
+              {OFF_PAYROLL_STATUSES.has(form.status) && form.status !== (employee?.status ?? 'active') && (
+                <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4, lineHeight: 1.5 }}>
+                  Saving takes {form.full_name.trim() || 'this employee'} off Payroll Run and Final Settlement. If they are leaving, run Final Settlement first — it sets this for you.
+                </span>
+              )}
             </div>
             <div style={col}>
               <label style={lbl} htmlFor="emp-supervisor">
-                <Tip text="The person this employee reports to. Only active employees are listed." width={260}>Reporting Supervisor</Tip>
+                <Tip text="The person this employee reports to. Active and probation employees are listed; a current supervisor who has since left stays selected, marked as such." width={260}>Reporting Supervisor</Tip>
               </label>
               <select id="emp-supervisor" className="form-select" style={{ width: '100%' }} value={form.supervisor_id || ''} onChange={e => set('supervisor_id', e.target.value)}>
                 <option value="">— None —</option>
                 {supervisors.map(s => (
-                  <option key={s.id} value={s.id}>{s.full_name}{s.designation ? ` — ${s.designation}` : ''}</option>
+                  <option key={s.id} value={s.id}>
+                    {s.full_name}{s.designation ? ` — ${s.designation}` : ''}{s.status === 'active' || s.status === 'probation' ? '' : ` (${s.status})`}
+                  </option>
                 ))}
               </select>
+              {supervisorErr && (
+                <span role="alert" style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>
+                  Couldn't load the supervisor list, so the current choice may show as None — leave this unchanged and it is kept. {supervisorErr}
+                </span>
+              )}
             </div>
             <div style={col}>
               <label style={lbl} htmlFor="emp-retirement-date">
@@ -567,7 +620,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
         {/* Footer */}
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 8 }}>
-            {isEdit && employee.status === 'active' && (
+            {isEdit && (employee.status === 'active' || employee.status === 'probation') && (
               <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} onClick={handleDeactivate}>
                 Deactivate
               </button>

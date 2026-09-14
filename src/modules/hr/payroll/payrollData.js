@@ -18,7 +18,9 @@ export async function fetchYtdMap(scopedFrom, period) {
   // `.order('id')` is the unique tiebreaker fetchAllRows requires: paging a non-uniquely-ordered
   // query repeats rows on one page and skips them on the next, trading truncation for a worse bug.
   const { data, error } = await fetchAllRows(() =>
-    scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, ssf_employee, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+    // retirement_contribution (S748) is the CIT / provident-fund part of other_deductions; it needs
+    // migration 20260914150000 applied before this deploys, or every payroll read fails loudly.
+    scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, ssf_employee, retirement_contribution, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
       .eq('hr_payroll_runs.status', 'finalized')
       .order('id'))
   // A failed read must NOT degrade to an empty YTD map. Empty means "no prior finalized months
@@ -35,10 +37,11 @@ export async function fetchYtdMap(scopedFrom, period) {
     if (!mp) return
     const fy = fiscalYearOf(mp.bs_year, mp.bs_month)
     if (fy.fyStart !== cur.fyStart || fy.monthInFy >= cur.monthInFy) return
-    const e = map[r.employee_id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
+    const e = map[r.employee_id] || { gross: 0, ssf: 0, retirement: 0, withheld: 0, count: 0 }
     // OT pay is taxable income too — must stay in sync with monthlyGross below (S365 + OT fix).
     e.gross += (r.gross || 0) + (r.ot_amount || 0)
     e.ssf   += r.ssf_employee || 0
+    e.retirement += parseFloat(r.retirement_contribution) || 0
     e.withheld += r.tds || 0
     e.count += 1 // prior finalized months this FY — feeds tds.js's ytdMonths (mid-year-joiner fix)
     map[r.employee_id] = e
@@ -96,8 +99,11 @@ export async function fetchApprovedTadaMap(scopedFrom, period) {
 //
 // Lives here rather than in either page because this module exists so those two cannot drift; a
 // third copy of the comparison is precisely the failure it was written to prevent.
+// `retirement_contribution` (S748): ticking "reduces taxable income" on an existing CIT deduction
+// moves no amount above, only the TDS — which would otherwise read as a hand override.
 export const FRESHNESS_INPUT_FIELDS = [
   'gross', 'ot_amount', 'absence_deduction', 'ssf_employee', 'other_deductions', 'advance_deduction',
+  'retirement_contribution',
 ]
 
 // Order-independent identity for a payslip's TADA claim set.

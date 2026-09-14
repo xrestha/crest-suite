@@ -208,6 +208,10 @@ export default function PayrollRun() {
         monthlySsf:            slip.ssf_employee,
         ytdGross:              ytd.gross,
         ytdSsf:                ytd.ssf,
+        // CIT / provident fund marked retirement_fund in Pay Setup comes off taxable income inside
+        // the same cap as SSF (S748). Must stay identical to PayrollCalculation.jsx.
+        monthlyRetirement:     slip.retirement_contribution,
+        ytdRetirement:         ytd.retirement || 0,
         ytdWithheld:           ytd.withheld,
         // Actual count of prior finalized months this FY — lets a mid-year joiner's tax spread
         // over the months they'll actually work instead of being front-loaded (see tds.js).

@@ -559,5 +559,47 @@ the consequence of any clear is that marked absences and unpaid leave stop deduc
   test.** Festival Allowance and Incentives waived the 1% slab and projected SSF relief on the flag
   alone, and the Owner Dashboard / Monthly Owner Report added employer SSF to labour the same way.
   Copies still inline in `gratuityCompute.js`, `laborForecast.js`, `HrReports.jsx`, `PayslipBody.jsx`
-  agree today; move them to the helper when touched. `PaySetup.jsx` / `PayForm.jsx` previews still use
-  the flag alone.
+  agree today; move them to the helper when touched. `PaySetup.jsx` / `PayForm.jsx` previews adopted
+  it in S748.
+
+## Employees, Pay Setup and the Holiday Calendar (S748)
+
+- **CIT / provident fund is retirement relief, in ONE cap with SSF** (decided with Aashish). A deduction
+  component marked `retirement_fund` is taken off take-home pay AND off taxable income;
+  `retirementRelief(annualContributions, annualGross)` in `tds.js` is the only cap (lower of NPR 5,00,000
+  or a third of income) and `retirementContributionOf()` in `payrollCompute.js` the only sum. The
+  payslip stores `retirement_contribution` so `fetchYtdMap` relieves real prior months, and it is a
+  `FRESHNESS_INPUT_FIELDS` member — ticking the box on an existing deduction moves no amount, only TDS,
+  which would otherwise read as a hand override. Monthly TDS and Final Settlement use it; **Festival
+  Allowance and Incentives still relieve SSF alone** (open). A marker, never a name match: the owner
+  names these rows, and a guess would move real tax.
+- **A form saves the fields it owns and changed, never the row it loaded.** `EmployeeForm` spread the
+  loaded row (up to 10 minutes old from the page cache) into its payload, so a phone-number edit
+  reverted a Pay Setup raise, a Final Settlement's status and end date, and a login block.
+  `changedEmployeeFields()` (`employeeFormData.js`) is the patch. Any other edit form over a table two
+  screens write needs the same shape.
+- **A field that affects pay is never hidden while it holds a value.** The end-date picker showed only
+  for Contract/Part-time, the value stayed saved, and `daysAfterExit` pays a monthly employee nothing
+  after it. It now shows whenever set, with a warning when past on an active employee. Live check
+  2026-09-14: no employee in that state.
+- **Pay Setup's editor refuses Save until its component read is `ok`.** Save deletes and re-inserts
+  the whole set, so an unfinished or failed read wiped every allowance. The general rule for any
+  replace-the-set save: the set you send must be one you actually read.
+- **An employee with pay history cannot be deleted, by anyone** (`hr_employees_guard_delete`,
+  `employee_pay_history()`): finalized payslips, a finalized settlement, finalized festival
+  allowances, any advance, or a Self-Service login. Deactivate is the lossless path; there is no force
+  path. A whole-client deletion still cascades (the guard lets the delete through once the `clients`
+  row is gone).
+- **Holiday Calendar writes need HR supervisor rank** (page and a RESTRICTIVE policy per write command);
+  `(client_id, bs_year, bs_month, bs_day, name)` is unique; the table is audited. Seed runs only over a
+  list that loaded, because it dedupes against the screen. **An OT entry stores its own `ot_type`**, so
+  editing or deleting a holiday never reprices existing overtime — copy must not say otherwise.
+- **Removing a holiday is a stamp (`removed_at`), never a DELETE** (decided with Aashish). Seed is
+  name-keyed, so a deleted seeded holiday came back on the next Seed. `planSeed()` (`holidayData.js`)
+  counts a removed row as present and never corrects its date. **Every reader outside the page must
+  filter `removed_at IS NULL`** — today Overtime.jsx and demandForecastData.js; a new reader that
+  forgets suggests 2× on a day the owner took out. Delete for good exists and forgets the removal.
+- **SSF is deposited by the 25th of the following month** (`SSF_DEPOSIT_DAY`, the July 2025 amendment
+  to s.4(4); it was 15). Never hard-code the day in copy — read the constant.
+- **Pay Setup previews are a full month before income tax**, and say so. Default tab is On payroll
+  (active + probation), matching every payroll picker.

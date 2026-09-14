@@ -47,14 +47,14 @@ export const HR_GUIDE_GROUPS = [
           'The operational HR console — not a glance page. An approvals KPI row (pending Leave / Overtime / TADA / shift-swap counts), employee statistics, the SSF deposit-deadline card, outstanding advances, the last finalized payroll, and act-on-it queue tables for each pending pile.',
         workflow: [
           'Open it daily: each KPI in the approvals row links to the page where that queue is cleared.',
-          'The SSF card tracks the statutory deposit deadline — the 15th of the month FOLLOWING the payroll month — and shows overdue / due-soon / upcoming state relative to today.',
+          'The SSF card tracks the statutory deposit deadline — the 25th of the month FOLLOWING the payroll month (25 days after the month ends; it was 15 until the July 2025 amendment) — and shows overdue / due-soon / upcoming state relative to today.',
           'Retiring-soon surfaces employees within 180 days of their retirement date.',
         ],
         fields: [
           { label: 'Pending swap count', desc: 'Counts only swaps at pending_admin — a swap still waiting on the target coworker\'s consent (pending_target) is not yet HR\'s to action, so it does not inflate the queue.' },
         ],
         formulas: [
-          'SSF deposit deadline = 15th of the month after the payroll month, from the last finalized run.',
+          'SSF deposit deadline = 25th of the month after the payroll month, from the last finalized run.',
         ],
         gotchas: [
           'Amber means "a queue is waiting", red is reserved for genuinely overdue — a pending approval pile is normal operations, not an error state. This is now the rule across all five HR queues and the employee app, not just this page: amber = open, brass = decided but the money has not moved, green = closed and good, red = refused, grey = withdrawn.',
@@ -76,24 +76,27 @@ export const HR_GUIDE_GROUPS = [
         route: '/hr/employees',
         plan: 'Manager only',
         summary:
-          'The employee master: every person on the books, with search and filters (status, supervisor, retiring-only), an add/edit drawer, a printable Employee Joining Form, and the controls for employee Self-Service logins — enable with a PIN, bulk block/unblock, or remove.',
+          'The employee master: every person on the books, with search and filters (status, supervisor, retiring-only), an add/edit form (Personal, Employment, Address and Family tabs), a printable Employee Joining Form, and the controls for employee Self-Service logins — enable with a PIN, bulk block/unblock, or remove. Salary, pay basis, bank and SSF are not on this form; they live in Pay Setup.',
         workflow: [
-          'Add employees here first — every other HR page keys off this record. Department, supervisor, join date, retirement date and status all matter downstream.',
-          'Enable Self-Service per employee: set a 4-6 digit PIN, then share the ONE login link (or QR) the whole company uses — each employee picks their own name on it. Employees log in from their own phones; there is no device setup.',
-          'The checkbox column + bulk bar Deactivate/Activate toggles Self-Service LOGIN access (access_blocked) for many employees at once.',
-          '"🖨 Print Joining Form" in the page header opens a BLANK joining form to print and have a new hire fill in by hand for the paper personnel file — it is not filled from any employee\'s record.',
+          'Add employees here first — every other HR page keys off this record. Department, supervisor, join date, retirement date and status all matter downstream. The employee code is optional and typed by hand — nothing generates one. Join and retirement dates on the list show in BS.',
+          'Saving the Edit form writes only the fields you changed, so it never overwrites pay, bank or SSF set in Pay Setup, a Final Settlement, or a login block made elsewhere.',
+          'Enable Self-Service per employee: set a 4-6 digit PIN, then share the ONE login link ("Copy Self-Service Link" — there is no QR code on this page) the whole company uses — each employee picks their own name on it. Employees log in from their own phones; there is no device setup. Enable and Remove are open to the Owner, an HR Manager and Crest admin.',
+          'The checkbox column + bulk bar Deactivate (block login) / Activate (allow login) toggles Self-Service LOGIN access (access_blocked) for many employees at once. It acts only on ticked rows still visible under the current filter.',
+          '"🖨 Print Joining Form" in the page header opens a BLANK joining form to print and have a new hire fill in by hand for the paper personnel file — it is not filled from any employee\'s record. Its status choices are Active / Probation, and Designation is not a required field.',
         ],
         fields: [
-          { label: 'Status (active / probation / inactive / resigned / terminated)', desc: 'Payroll eligibility. Payroll Run, Payroll Calculation and Final Settlement include active + probation only; the other three all drop out. The Edit form\'s Deactivate button (shown on an active employee) sets Inactive and its Activate button (shown on an inactive one) sets Active; Resigned and Terminated are picked from the Status list, and Final Settlement sets them itself when it is finalized.' },
+          { label: 'Status (active / probation / inactive / resigned / terminated)', desc: 'Payroll eligibility. Payroll Run, Payroll Calculation and Final Settlement include active + probation only; the other three all drop out. The Edit form\'s Deactivate button (shown on an active OR probation employee) sets Inactive — taking them off Payroll Run, Payroll Calculation, Final Settlement, the Roster and Attendance, without blocking their Self-Service login — and its confirm says to run Final Settlement first for a leaver. Its Activate button (shown on an inactive one) sets Active; Resigned and Terminated are picked from the Status list, and Final Settlement sets them itself when it is finalized.' },
+          { label: 'End Date', desc: 'Shown for Contract / Part-time staff, and on any employee who already has an end date. Payroll pays a monthly employee nothing for days after it; Final Settlement sets it when someone leaves. An amber warning appears if the date has passed while the employee is still active or on probation.' },
           { label: 'Bulk Deactivate / Activate (access_blocked)', desc: 'Blocks or restores Self-Service LOGIN only — status is never touched, so blocking a leaver\'s login can never remove them from their own final payroll. A blocked employee sees the same "Incorrect PIN. Try again." as someone who typed a wrong PIN.' },
-          { label: 'Remove Self-Service', desc: 'Deletes the login account outright (different from blocking, which suspends it). The employee record, payslips and leave history all survive either way. It is also how a forgotten PIN is replaced: there is no reset button, so Remove the login and then press Enable Self-Service again with a new PIN. (A blocked employee shows no Remove button — Activate them first.)' },
-          { label: 'Retirement date / retiring filter', desc: 'The retiring-only filter and the Dashboard card both use a 180-day window.' },
+          { label: 'Remove Self-Service', desc: 'Deletes the login account outright (different from blocking, which suspends it). The employee record, payslips and leave history all survive either way. It is also how a forgotten PIN is replaced: each employee can have only one login and Enable is refused while one exists, so Remove the login and then press Enable Self-Service again with a new PIN. (A blocked employee shows no Remove button — Activate them first.) A login whose employee record no longer exists cannot sign in.' },
+          { label: 'Retirement date / retiring filter', desc: 'The retiring-only filter and the Dashboard card both use a 180-day window. The Retiring Soon stat card filters the list when clicked.' },
         ],
         formulas: [
-          'The payroll-amount stat sums basic salary over active + probation employees only.',
+          'Active stat = active employees only; probation staff are counted on the "N on probation" line beneath it.',
+          'Basic Payroll / Month sums basic salary over active + probation employees paid MONTHLY only — a daily or hourly rate is not a month\'s pay and is left out.',
         ],
         gotchas: [
-          'Deleting an employee loses their history — prefer status Inactive in almost every real case, exactly like Item Master\'s Hide-vs-Delete rule in IMS.',
+          'Delete is refused — by the database, not just the page — for anyone with finalized payslips, a finalized Final Settlement, finalized festival allowances, any advance or loan, a Self-Service login, or TADA claims / incentives / shift-swap requests. Use Deactivate instead, exactly like Item Master\'s Hide-vs-Delete rule in IMS. An employee with none of those (added by mistake, say) can still be deleted.',
           'Self-Service status per employee is read through a dedicated RPC because the profiles table\'s security only lets an account read its own row — a raw query would show every employee as having no login.',
         ],
         connections: 'Feeds every HR page. status → Payroll Run / Calculation / Settlement pickers; access_blocked → Self-Service login only; join date → payroll proration; retirement date → Dashboard; department/supervisor → Roster and filters.',
@@ -106,22 +109,25 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'Per-employee salary structure: pay basis (monthly / daily / hourly), basic salary, Dearness Allowance and other allowance/deduction components, SSF enrolment plus the SSF registration number, and bank details for the transfer sheet. Excel export included. This page decides what every payroll figure means.',
         workflow: [
+          'Pick a tab — "On payroll" (active + probation, the default), "All", or "Not on payroll" (inactive, resigned, terminated). The totals follow the tab.',
           'Click a row to open the pay drawer. Set the basis first — it changes what "basic" means (per month, per day, or per hour).',
-          'Add salary components: each is a flat NPR amount or a percentage of basic; allowances add to gross, deductions subtract from net.',
-          'For SSF staff, tick enrolment AND enter the SSF registration number — this is the only place the number is ever entered, and payroll refuses to deduct SSF without it.',
+          'Add salary components: each is a flat NPR amount or a percentage of basic; allowances add to gross, deductions subtract from net. If the employee\'s existing allowances fail to load, Save is switched off, because saving would erase them.',
+          'For SSF staff, switch on enrolment AND enter the SSF registration number — this is the only place the number is ever entered, and payroll refuses to deduct SSF without it.',
         ],
         fields: [
           { label: 'Pay basis', desc: 'Monthly staff get gross = basic + allowances with absence deductions; daily staff are paid per day worked; hourly staff per hour worked. Daily/hourly rows show only the rate plus an estimate (rate × 26 days, or × 8h × 26) and are excluded from the page totals.' },
-          { label: 'SSF enrolment + SSF No.', desc: 'Both are required before payroll deducts the employee\'s 11% — a flag with no number used to withhold money the SSF challan sheet never claimed. Deducting nothing is the recoverable direction.' },
+          { label: 'SSF enrolment + SSF No.', desc: 'Both are required before payroll deducts the employee\'s 11% (and the employer\'s 20%) — the same rule Pay Setup\'s own figures use. With the switch on and no number, payroll deducts no SSF and charges the 1% social security tax, and Pay Setup shows an amber "⚠ SSF no. missing" chip and warnings. A flag with no number used to withhold money the SSF challan sheet never claimed. Deducting nothing is the recoverable direction.' },
+          { label: 'Retirement fund tick box (deductions)', desc: 'Each deduction row carries "Retirement fund — reduces taxable income"; the CIT / Provident Fund chip arrives ticked. Payroll takes ticked deductions off taxable income together with SSF, inside one shared cap of NPR 5,00,000 a year or a third of annual income, whichever is lower — for monthly TDS and Final Settlement\'s lump-sum tax. Festival Allowance and Incentives do not include it yet.' },
           { label: 'Dearness Allowance', desc: 'A named statutory component: Nepal\'s full-time monthly minimum wage of NPR 19,550 is defined as 12,170 basic + 7,380 dearness, so the form treats it separately from other allowances.' },
         ],
         formulas: [
           'Component amount = flat value, or basic × percent for percent-of-basic components.',
-          'Monthly preview: gross = basic + allowances; SSF base = min(basic, 100,000); employee 11%, employer 20%; net = gross − SSF employee share − other deductions.',
+          'Monthly preview: gross = basic + allowances; SSF base = min(basic, 100,000) when enrolled AND an SSF No. is entered, otherwise 0; employee 11%, employer 20%; net before income tax = gross − SSF employee share − other deductions.',
         ],
         gotchas: [
-          'The form warns — without blocking — when pay falls below the legal floors: monthly basic under 12,170, the per-basis minimum wage (daily 754, hourly 101, part-time hourly 107, monthly 19,550 all-in), or basic under 60% of gross (a Labour Act rule: benefits are computed on basic, so a low basic quietly undercuts leave encashment, gratuity and festival allowance).',
-          'Minimum wages were last revised Shrawan 1, 2082 and are reviewed every two years — next review Shrawan 2084. The constants live in one payroll-constants file when they change.',
+          '"Net before income tax" is a full month before TDS — not what the employee takes home. Payroll works out income tax, absences, overtime, advance recovery and TADA, so the payslip\'s take-home figure differs.',
+          'The form warns — without blocking — when pay falls below the legal floors: monthly basic under 12,170, the per-basis minimum wage (daily 754, hourly 101, part-time hourly 107, monthly 19,550 all-in), or basic under 60% of gross (a Labour Act rule: benefits are computed on basic, so a low basic quietly undercuts leave encashment, gratuity and festival allowance). The minimum-wage panel (labelled FY 2083/84) appears only when a check fails; otherwise it is a single ✓ line.',
+          'Minimum wages were last fixed from Shrawan 1, 2082 under the Labour Act 2074 and are reviewed every two years — next review Shrawan 2084. The constants live in one payroll-constants file when they change.',
         ],
         connections: 'Basic, basis, components, SSF fields and join date drive Payroll Run, Payroll Calculation, Gratuity, Festival Allowance, Final Settlement and the Roster\'s labor-cost forecast. Bank details feed HR Reports\' Bank Transfer tab.',
       },
@@ -129,16 +135,16 @@ export const HR_GUIDE_GROUPS = [
         id: 'holidays',
         title: 'Holiday Calendar',
         route: '/hr/holidays',
-        plan: 'Staff+ (all HR logins)',
+        plan: 'Staff+ to view; Supervisor+ to edit',
         summary:
-          'The per-fiscal-year list of company holidays, typed Public (gazetted — banks closed, statutory) or Optional (floating), each with an optional demand multiplier for forecasting. The only HR page open to staff rank, so anyone can check what is coming.',
+          'The per-fiscal-year list of company holidays, typed Public (gazetted — banks closed, statutory) or Optional (gazetted only for part of the country or a community, such as Teej, Gai Jatra or Christmas, plus any floating day you add), each with an optional demand multiplier for forecasting. The only HR page open to staff rank, so anyone can check what is coming — but adding, editing, deleting and seeding are for HR Supervisors and Managers, the Owner and Crest admin. Staff see it read-only, and the database enforces that.',
         workflow: [
-          'Pick the BS fiscal year, add holidays with month/day, type, and (optionally) a demand multiplier — e.g. 1.5 for a day you expect 50% more covers.',
-          '"Seed FY …" fills the whole year from the Nepal Gazette — seven fixed national days (New Year 1 Baishakh, Republic Day 15 Jestha, Constitution Day 3 Ashwin, Prithvi Jayanti 27 Poush, Maghe Sankranti 1 Magh, Martyrs\' Day 16 Magh, Democracy Day 7 Falgun) plus every gazetted movable holiday held for that BS year: Dashain, Tihar, Chhath, Shivaratri, the three Lhosars, Holi and the rest.',
-          'Pressing Seed again is safe — it only adds holidays that are missing, never overrules a movable holiday you entered or edited, and reports what it could not cover. The one thing it will change: one of the seven FIXED national days found on the wrong date (e.g. Martyrs\' Day at Magh 5 instead of Magh 16) or under an old name is corrected in place, and the result lists each correction.',
+          'Pick the BS fiscal year, add holidays with month/day, type, and (optionally) a demand multiplier — e.g. 1.5 for a day you expect 50% more covers. The same holiday twice (same date and name) is refused.',
+          '"Seed FY …" fills the whole year from the Nepal Gazette — seven fixed national days (New Year 1 Baishakh, Republic Day 15 Jestha, Constitution Day 3 Ashwin, Prithvi Jayanti 27 Poush, Maghe Sankranti 1 Magh, Martyrs\' Day 16 Magh, Democracy Day 7 Falgun) plus every gazetted movable holiday held for that fiscal year\'s two BS years: Dashain, Tihar, Chhath, Shivaratri, the three Lhosars, Holi and the rest. It reports any BS year with no gazette yet. Seed is off if the calendar failed to load.',
+          'Pressing Seed again only adds holidays that are missing, never changes the date or type of a holiday you entered or edited, and reports what it could not cover. Two things it will change: one of the seven FIXED national days found on the wrong date (e.g. Martyrs\' Day at Magh 5 instead of Magh 16) or under an old name is corrected in place, and the result lists each correction; and a holiday you REMOVED is never added back — the result names any it left out for that reason.',
         ],
         fields: [
-          { label: 'Public vs Optional', desc: 'Public (gazetted) entries are what the Overtime module reads to auto-suggest the 2× holiday OT rate. Optional holidays are informational.' },
+          { label: 'Public vs Optional', desc: 'Overtime entered in the Overtime module for a Public (gazetted) date is suggested at the 2× holiday rate. Each overtime entry keeps the rate it was entered at, so editing or deleting a holiday later does not reprice overtime already entered. Optional holidays are gazetted for part of the country or a community and are suggested at the weekday rate.' },
           { label: 'Demand multiplier', desc: 'Feeds the Suite Demand Forecast and the Roster\'s forecast overlay — a way to encode "Dashain week runs hot" once.' },
         ],
         formulas: [
@@ -148,8 +154,9 @@ export const HR_GUIDE_GROUPS = [
           'If this calendar is left empty, Overtime never auto-selects the 2× holiday rate — every new entry starts as Weekday (1.5×). The Holiday (2×) option can still be picked by hand on each entry, but nothing reminds anyone to, so in practice holiday work gets paid at 1.5×.',
           'Days are validated against the real BS month length (28-32 days) — there is no 30-day assumption anywhere in the module.',
           'Movable dates are TRANSCRIBED per BS year from the gazette, never computed — Nepal publishes them only in Falgun of the preceding year, so the last quarter of the current fiscal year (Baishakh–Ashadh) carries fixed-date holidays only until that gazette exists. Seed says so on screen rather than looking complete.',
-          'Eid al-Fitr, Eid al-Adha, Mohammad Jayanti, Guru Nanak Jayanti and Bhoto Jatra have no gazetted date at all and are never seeded — add them by hand each year.',
-          'Holi is seeded twice, for Hill (7 Chaitra) and Terai (8 Chaitra) districts — delete whichever does not apply to the outlet, or it pays 2× OT on a day that is not its holiday.',
+          'Eid al-Fitr, Eid al-Adha, Mohammad Jayanti, Guru Nanak Jayanti and Bhoto Jatra have no gazetted date at all and are never seeded — they are the only holidays that always need adding by hand each year.',
+          'Holi is seeded twice, for Hill (7 Chaitra) and Terai (8 Chaitra) districts — remove whichever does not apply to the outlet, or it suggests 2× OT on a day that is not its holiday. Removed holidays move to a Removed list under the calendar (Put back / Delete for good); Seed never adds a removed one back, but Delete for good forgets it, so a gazetted holiday deleted that way comes back on the next Seed.',
+          'Every holiday added, changed or deleted is recorded in the Audit Log.',
         ],
         connections: 'Public entries → Overtime\'s holiday-rate auto-suggest → payroll OT amounts. Demand multipliers → Demand Forecast and Roster planning.',
       },
@@ -548,7 +555,7 @@ export const HR_GUIDE_GROUPS = [
           'Gratuity (only if ≥ 12 months served) = max(0, basic ÷ 12 × service months − SSF-covered portion) — same netting as the Gratuity page.',
           'Festival pro-ration (only if not yet paid this FY) = basic × months into the FY ÷ 12.',
           'Advances: every advance\'s full outstanding is deducted — including one issued this month, since there is no later payroll to recover it from.',
-          'TDS = marginal lump-sum tax on (gratuity + leave encashment + festival pro-ration), measured on top of the leaver\'s REAL income for the year: gross from this fiscal year\'s finalized payslips plus the final partial month, less SSF relief (the SSF actually deducted on those payslips plus this month\'s, capped at the lower of NPR 500,000 and a third of that income) and the insurance deductions.',
+          'TDS = marginal lump-sum tax on (gratuity + leave encashment + festival pro-ration), measured on top of the leaver\'s REAL income for the year: gross from this fiscal year\'s finalized payslips plus the final partial month, less retirement relief (the SSF and ticked CIT / provident-fund deductions on those payslips plus this month\'s, capped together at the lower of NPR 500,000 and a third of that income) and the insurance deductions.',
         ],
         gotchas: [
           'The TDS base stops at the last working day — it does not project income for months the leaver will not work. So it is only as complete as Payroll Run: a month worked this fiscal year whose run was never finalized is missing from the base and the lump-sum TDS comes out low. Finalize those months first.',
@@ -581,7 +588,7 @@ export const HR_GUIDE_GROUPS = [
           'Rename the three levels to whatever titles the business uses; changing a title\'s level cascades to every account holding it.',
         ],
         fields: [
-          { label: 'Access levels', desc: 'Staff: view-only pages like the Holiday Calendar. Supervisor: attendance, leave, overtime, roster, TADA approvals, the HR Dashboard. Manager: everything — payroll, pay setup, employees, reports, this page.' },
+          { label: 'Access levels', desc: 'Staff: view-only pages like the Holiday Calendar. Supervisor: attendance, leave, overtime, roster, TADA approvals, the HR Dashboard, and adding or editing holidays. Manager: everything — payroll, pay setup, employees, reports, this page.' },
         ],
         formulas: [],
         gotchas: [
@@ -599,7 +606,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'The employee\'s own app: today\'s shift, their published roster, leave and TADA requests, and their payslips — behind a name-picker + 4-6 digit PIN on one shared per-company link. It installs to a phone\'s home screen as "Crest Staff" with its own icon, opening full-screen on the shift they came to check.',
         workflow: [
-          'The manager enables Self-Service for an employee (sets the PIN) and shares the company\'s one login link or QR. The employee opens it, taps their own name, enters the PIN.',
+          'The Owner or an HR Manager enables Self-Service for an employee (sets the PIN) and shares the company\'s one login link from Employees → Copy Self-Service Link. The employee opens it, taps their own name, enters the PIN.',
           'Four destinations on a bottom bar: Home (today\'s shift, the next working shift, swaps waiting on them, latest payslip), Roster (their own Sun-Sat week + swap requests), Requests (Leave and TADA, each opening as a bottom sheet), Pay (own finalized payslips, same layout as the printed one).',
           'Tell employees to add it to their home screen — on Android the account sheet offers a button, on iPhone it is Share → Add to Home Screen. On iPhone that step is also what makes notifications possible at all: iOS never gives push to a browser tab.',
         ],

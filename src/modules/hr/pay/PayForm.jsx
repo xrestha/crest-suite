@@ -6,18 +6,19 @@ import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
 import {
   SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT,
-  MIN_WAGE_MONTHLY, MIN_BASIC_MONTHLY,
+  MIN_WAGE_MONTHLY, MIN_BASIC_MONTHLY, MIN_DEARNESS_MONTHLY, MIN_BASIC_PCT_OF_GROSS,
   PAY_BASES, minRateFor,
 } from '../payrollConstants'
+import { isSsfContributor } from '../payroll/payrollCompute'
 
-const DEARNESS_MIN  = 7380
+const CIT_CHIP = 'CIT / Provident Fund'
 const QUICK_EARNINGS   = ['Housing Allowance', 'Transport', 'Medical Allowance', 'Food Allowance', 'Grade Pay']
-const QUICK_DEDUCTIONS = ['CIT / Provident Fund', 'Advance Recovery', 'Other Deduction']
+const QUICK_DEDUCTIONS = [CIT_CHIP, 'Advance Recovery', 'Other Deduction']
 
 // Plain-language notes for the quick-add deduction chips. CIT in particular is an acronym a
 // restaurant owner has no reason to know, so it gets the full "what it is + a real example".
 const QUICK_DEDUCTION_TIPS = {
-  'CIT / Provident Fund': 'CIT = Citizen Investment Trust — a government-run retirement savings account. Each month a fixed amount is held back from the employee\'s salary and paid into their own CIT (or provident fund) account, which they get back with interest when they retire or leave. Example: your head chef on NPR 30,000 basic saves NPR 3,000 a month — enter 3,000 here and it comes off their pay every month and reduces their taxable income. Only add this for staff who have actually opened a CIT or provident fund account.',
+  [CIT_CHIP]: 'CIT = Citizen Investment Trust — a government-run retirement savings account. Each month a fixed amount is held back from the employee\'s salary and paid into their own CIT (or provident fund) account, which they get back with interest when they retire or leave. Example: your head chef on NPR 30,000 basic saves NPR 3,000 a month — enter 3,000 here and it comes off their pay every month. Payroll also takes it off their taxable income, together with SSF, up to NPR 5,00,000 a year or a third of their income, whichever is lower. Only add this for staff who have actually opened a CIT or provident fund account.',
 }
 
 const TABS = [
@@ -61,23 +62,37 @@ export default function PayForm({ employee, onSave, onClose }) {
   })
   const [dearness, setDearness]     = useState('')   // stored separately from other components
   const [components, setComponents] = useState([])   // earnings + deductions excluding dearness
+  // 'loading' | 'ok' | 'failed'. Save is refused until 'ok', and that is the whole defence against
+  // a real loss: Save deletes every component and re-inserts what the form holds, so a Save made
+  // before this read landed — or after it failed — sent an EMPTY set and wiped the employee's
+  // dearness allowance, allowances and deductions (S748). The read used to be `if (!data) return`.
+  const [compsState, setCompsState] = useState('loading')
+  const [compsError, setCompsError] = useState('')
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
 
   useEffect(() => {
+    let live = true
+    setCompsState('loading'); setCompsError('')
     scopedFrom('hr_salary_components').eq('employee_id', employee.id).order('created_at')
-      .then(({ data }) => {
-        if (!data) return
-        const da = data.find(c => c.name === 'Dearness Allowance' && c.type === 'earning')
+      .then(({ data, error: readErr }) => {
+        if (!live) return
+        if (readErr) { setCompsState('failed'); setCompsError(errorLine(readErr)); return }
+        const rows = data || []
+        const da = rows.find(c => c.name === 'Dearness Allowance' && c.type === 'earning')
         setDearness(da ? String(da.value) : '')
-        setComponents(data.filter(c => !(c.name === 'Dearness Allowance' && c.type === 'earning')))
+        setComponents(rows.filter(c => !(c.name === 'Dearness Allowance' && c.type === 'earning')))
+        setCompsState('ok')
       })
+    return () => { live = false }
   }, [employee.id, scopedFrom])
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
 
   function addComponent(type, name = '') {
-    setComponents(c => [...c, { name, type, calc_type: 'fixed', value: '' }])
+    // The CIT chip arrives already marked as a retirement contribution; a hand-added deduction does
+    // not, because payroll takes a marked one off taxable income and that must be a choice.
+    setComponents(c => [...c, { name, type, calc_type: 'fixed', value: '', retirement_fund: type === 'deduction' && name === CIT_CHIP }])
   }
   function updateComponent(i, field, value) {
     setComponents(c => c.map((comp, idx) => idx === i ? { ...comp, [field]: value } : comp))
@@ -87,6 +102,12 @@ export default function PayForm({ employee, onSave, onClose }) {
   }
 
   async function handleSave() {
+    if (compsState !== 'ok') {
+      setError(compsState === 'loading'
+        ? 'Still loading this employee\'s allowances — wait a moment, then Save.'
+        : 'This employee\'s allowances and deductions could not be loaded, so nothing was saved: saving now would erase them. Close and reopen to try again.')
+      return
+    }
     const invalidComp = components.find(c => !c.name.trim())
     if (invalidComp) { setError('All salary components need a name.'); setTab('salary'); return }
     setError('')
@@ -122,6 +143,7 @@ export default function PayForm({ employee, onSave, onClose }) {
         type:        c.type,
         calc_type:   c.calc_type,
         value:       parseFloat(c.value) || 0,
+        retirement_fund: c.type === 'deduction' && !!c.retirement_fund,
       })),
     ]
     if (rows.length > 0) {
@@ -140,7 +162,12 @@ export default function PayForm({ employee, onSave, onClose }) {
   const deductions    = components.filter(c => c.type === 'deduction')
   const otherEarnings = earnings.reduce((s, c) => s + calcAmount(c, basic), 0)
   const totalDeductions = deductions.reduce((s, c) => s + calcAmount(c, basic), 0)
-  const ssf_base      = form.ssf_enrolled ? Math.min(basic, SSF_CAP) : 0
+  // Payroll's own SSF rule: the switch AND a registration number (isSsfContributor). The preview
+  // used the switch alone, so an enrolled employee with no number showed 11% coming off that
+  // payroll never takes — a Net here NPR 2,750 lower than the payslip at 25,000 basic.
+  const ssfActive     = isSsfContributor(form)
+  const ssfNoMissing  = !!form.ssf_enrolled && !ssfActive
+  const ssf_base      = ssfActive ? Math.min(basic, SSF_CAP) : 0
   const ssf_employee  = Math.round(ssf_base * SSF_EMPLOYEE_PCT)
   const ssf_employer  = Math.round(ssf_base * SSF_EMPLOYER_PCT)
   const gross         = basic + dearnessAmt + otherEarnings
@@ -154,10 +181,10 @@ export default function PayForm({ employee, onSave, onClose }) {
 
   // Validation flags
   const basicBelowMin    = isMonthly && basic > 0 && basic < MIN_BASIC_MONTHLY
-  const dearnessBelowMin = isMonthly && dearnessAmt > 0 && dearnessAmt < DEARNESS_MIN
+  const dearnessBelowMin = isMonthly && dearnessAmt > 0 && dearnessAmt < MIN_DEARNESS_MONTHLY
   const grossBelowMin    = isMonthly && gross > 0 && gross < MIN_WAGE_MONTHLY
   const rateBelowMin     = !isMonthly && basic > 0 && basic < minRate
-  const basicTooLow      = isMonthly && gross > 0 && basic < gross * 0.6
+  const basicTooLow      = isMonthly && gross > 0 && basic < gross * MIN_BASIC_PCT_OF_GROSS
 
   return (
     <Modal onClose={onClose} title={`Pay Setup — ${employee.full_name}`} maxWidth={780}>
@@ -190,6 +217,13 @@ export default function PayForm({ employee, onSave, onClose }) {
               {/* Left column — inputs */}
               <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16, borderRight: basic > 0 ? '1px solid var(--theme-border)' : 'none' }}>
 
+                {compsState === 'failed' && (
+                  <div role="alert" style={{ padding: '10px 14px', fontSize: 12, lineHeight: 1.6, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)' }}>
+                    This employee's allowances and deductions could not be loaded, so Save is off — saving now would erase them. Close and reopen to try again.
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--theme-text3)' }}>{compsError}</div>
+                  </div>
+                )}
+
                 {/* Pay Basis */}
                 <div style={col}>
                   <label style={lbl} htmlFor="pf-pay-basis">
@@ -204,7 +238,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                 <div style={col}>
                   <label style={lbl} htmlFor="pf-basic-salary">
                     <Tip text={isMonthly
-                      ? 'Monthly basic salary in NPR. SSF is computed on basic only (capped at NPR 100,000). Minimum NPR 12,170 per Labour Act 2082.'
+                      ? 'Monthly basic salary in NPR. SSF is computed on basic only (capped at NPR 100,000). Minimum NPR 12,170 — the minimum wage fixed from Shrawan 2082 under the Labour Act 2074.'
                       : `Pay rate per ${payUnit} in NPR. Actual pay is computed from attendance in Payroll.`} width={300}>
                       {isMonthly ? 'Basic Salary (NPR / month)' : `Rate (NPR / ${payUnit})`}
                     </Tip>
@@ -234,7 +268,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                 {isMonthly && (
                   <div style={col}>
                     <label style={lbl} htmlFor="pf-dearness">
-                      <Tip text="Statutory dearness allowance (महँगी भत्ता). Minimum NPR 7,380 / month per Labour Act 2082. Separate from basic salary — SSF is not computed on this." width={300}>
+                      <Tip text="Statutory dearness allowance (महँगी भत्ता). Minimum NPR 7,380 / month — part of the minimum wage fixed from Shrawan 2082. Separate from basic salary — SSF is not computed on this." width={300}>
                         Dearness Allowance (NPR / month)
                       </Tip>
                     </label>
@@ -244,7 +278,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                       onChange={e => setDearness(e.target.value)} />
                     {dearnessBelowMin && (
                       <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
-                        ⚠ Below minimum dearness allowance — Nepal requires at least NPR {DEARNESS_MIN.toLocaleString('en-IN')} / month.
+                        ⚠ Below minimum dearness allowance — Nepal requires at least NPR {MIN_DEARNESS_MONTHLY.toLocaleString('en-IN')} / month.
                       </span>
                     )}
                     {grossBelowMin && !dearnessBelowMin && (
@@ -325,7 +359,7 @@ export default function PayForm({ employee, onSave, onClose }) {
                       })}
                     </div>
                     {/* SSF auto row */}
-                    {basic > 0 && form.ssf_enrolled && (
+                    {basic > 0 && ssfActive && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: 'var(--theme-input-bg)', borderRadius: 0, marginBottom: 6, border: '1px solid var(--theme-border)' }}>
                         <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                           <Tip text="11% of basic salary deducted from the employee each month. Mandatory under SSF Act. Basic is capped at NPR 100,000 for SSF calculation." width={280}>
@@ -333,6 +367,11 @@ export default function PayForm({ employee, onSave, onClose }) {
                           </Tip>
                         </span>
                         <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 500 }}>NPR {ssf_employee.toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+                    {basic > 0 && ssfNoMissing && (
+                      <div style={{ padding: '7px 10px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+                        ⚠ SSF is switched on but there is no SSF No. yet — payroll deducts no SSF (and charges the 1% social security tax) until the number is entered on the Bank / SSF tab.
                       </div>
                     )}
                     {basic > 0 && !form.ssf_enrolled && (
@@ -346,7 +385,8 @@ export default function PayForm({ employee, onSave, onClose }) {
                       const globalIdx = components.indexOf(comp)
                       const computed  = calcAmount(comp, basic)
                       return (
-                        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                        <div key={i} style={{ marginBottom: 8 }}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                           <input style={{ ...inp, flex: 2 }} aria-label={`Deduction ${i + 1} name`} placeholder="Name" value={comp.name} onChange={e => updateComponent(globalIdx, 'name', e.target.value)} />
                           <select style={{ ...inp, flex: 1, padding: '8px 6px' }} aria-label={`Deduction ${i + 1} calculation type`} value={comp.calc_type} onChange={e => updateComponent(globalIdx, 'calc_type', e.target.value)}>
                             <option value="fixed">Fixed NPR</option>
@@ -362,6 +402,16 @@ export default function PayForm({ employee, onSave, onClose }) {
                           )}
                           <button onClick={() => removeComponent(globalIdx)} aria-label={`Remove deduction ${comp.name || i + 1}`} style={{ background: 'none', border: 'none', color: 'var(--theme-text2)', fontSize: 16, cursor: 'pointer', flexShrink: 0, padding: '0 4px' }}>✕</button>
                         </div>
+                        {/* S748: payroll takes a marked deduction off taxable income, inside the cap it
+                            shares with SSF. A checkbox rather than a name match, because the owner
+                            names these rows and a guess would move real tax. */}
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={!!comp.retirement_fund} onChange={e => updateComponent(globalIdx, 'retirement_fund', e.target.checked)} />
+                          <Tip text="Tick for CIT, provident fund or another approved retirement fund. Payroll then takes this deduction off the employee's taxable income, together with SSF, up to NPR 5,00,000 a year or a third of their income, whichever is lower. Leave unticked for anything else, such as an advance recovery." width={300}>
+                            Retirement fund — reduces taxable income
+                          </Tip>
+                        </label>
+                        </div>
                       )
                     })}
                   </div>
@@ -372,17 +422,20 @@ export default function PayForm({ employee, onSave, onClose }) {
               {basic > 0 && isMonthly && (
                 <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <p style={{ margin: '0 0 8px', fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Monthly Summary</p>
+                  <p style={{ margin: '-4px 0 4px', fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
+                    A full month with no absences. Income tax (TDS), overtime, advance recovery and TADA are worked out in Payroll each month, so the payslip's take-home figure will differ.
+                  </p>
                   <div style={{ background: 'var(--theme-input-bg)', borderRadius: 0, border: '1px solid var(--theme-border)', overflow: 'hidden' }}>
                     {[
                       { label: 'Basic Salary',           value: basic,          indent: false, color: 'var(--theme-text1)' },
                       dearnessAmt > 0 && { label: 'Dearness Allowance', value: dearnessAmt, indent: true,  color: 'var(--theme-green-text)' },
                       otherEarnings > 0 && { label: `Other Allowances${earnings.length > 0 ? ` (${earnings.length})` : ''}`, value: otherEarnings, indent: true, color: 'var(--theme-green-text)' },
                       { label: 'Gross Earnings',         value: gross,          indent: false, color: 'var(--theme-text1)', bold: true, separator: true },
-                      form.ssf_enrolled && { label: `SSF Employee (11%${basic > SSF_CAP ? ' · capped' : ''})`, value: -ssf_employee, indent: true, color: 'var(--theme-red-text)' },
+                      ssfActive && { label: `SSF Employee (11%${basic > SSF_CAP ? ' · capped' : ''})`, value: -ssf_employee, indent: true, color: 'var(--theme-red-text)' },
                       ...deductions.map(c => ({ label: c.name || 'Deduction', value: -calcAmount(c, basic), indent: true, color: 'var(--theme-red-text)' })),
-                      { label: 'Net (Cash in Hand)',      value: net,            indent: false, color: 'var(--theme-accent-ink)', bold: true, big: true, separator: true },
+                      { label: 'Net before income tax',    value: net,            indent: false, color: 'var(--theme-accent-ink)', bold: true, big: true, separator: true },
                       { label: 'Cost to Company (CTC)',  value: ctc,            indent: false, color: 'var(--theme-text1)', bold: true, big: true, separator: true, bg: 'color-mix(in srgb, var(--theme-text1) 5%, transparent)' },
-                      form.ssf_enrolled && { label: 'Employer SSF (20%)', value: ssf_employer, indent: true,  color: 'var(--theme-text2)', note: 'paid by company' },
+                      ssfActive && { label: 'Employer SSF (20%)', value: ssf_employer, indent: true,  color: 'var(--theme-text2)', note: 'paid by company' },
                     ].filter(Boolean).map((r, i) => (
                       <div key={i} style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -409,8 +462,8 @@ export default function PayForm({ employee, onSave, onClose }) {
                           {basic >= MIN_BASIC_MONTHLY ? '✓' : '✗'} Basic ≥ NPR {MIN_BASIC_MONTHLY.toLocaleString('en-IN')} &nbsp;
                           <span style={{ color: 'var(--theme-text2)' }}>(yours: {fmt(basic)})</span>
                         </div>
-                        <div style={{ color: dearnessAmt >= 7380 ? 'var(--theme-green-text)' : 'var(--theme-amber-text)' }}>
-                          {dearnessAmt >= 7380 ? '✓' : '⚠'} Dearness ≥ NPR 7,380 &nbsp;
+                        <div style={{ color: dearnessAmt >= MIN_DEARNESS_MONTHLY ? 'var(--theme-green-text)' : 'var(--theme-amber-text)' }}>
+                          {dearnessAmt >= MIN_DEARNESS_MONTHLY ? '✓' : '⚠'} Dearness ≥ NPR {MIN_DEARNESS_MONTHLY.toLocaleString('en-IN')} &nbsp;
                           <span style={{ color: 'var(--theme-text2)' }}>(yours: {fmt(dearnessAmt)})</span>
                         </div>
                         <div style={{ color: gross >= MIN_WAGE_MONTHLY ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
@@ -473,9 +526,14 @@ export default function PayForm({ employee, onSave, onClose }) {
                 {form.ssf_enrolled && (
                   <div style={col}>
                     <label style={lbl} htmlFor="pf-ssf-no">
-                      <Tip text="SSF registration number. Required for SSF challan export in HR Reports. Leave blank until the employee's registration is confirmed." width={280}>SSF No.</Tip>
+                      <Tip text="SSF registration number. Payroll deducts SSF only once this is entered — with the switch on and this blank, no SSF comes off and the 1% social security tax is charged instead. It is also what the SSF challan in HR Reports files under." width={280}>SSF No.</Tip>
                     </label>
                     <input id="pf-ssf-no" style={inp} placeholder="SSF registration number" value={form.ssf_no} onChange={e => set('ssf_no', e.target.value)} />
+                    {ssfNoMissing && (
+                      <span style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
+                        ⚠ Until this is entered, payroll deducts no SSF for this employee and charges the 1% social security tax instead.
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -521,7 +579,7 @@ export default function PayForm({ employee, onSave, onClose }) {
         <div style={{ padding: '16px 24px', borderTop: '1px solid var(--theme-border)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 }}>
           {error && <span role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', marginRight: 'auto' }}>{error}</span>}
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || compsState !== 'ok'}>{saving ? 'Saving…' : compsState === 'loading' ? 'Loading…' : 'Save'}</button>
         </div>
 
       </div>

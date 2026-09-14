@@ -35,6 +35,7 @@ const TABLE_LABELS = {
   hr_festival_allowances: 'Festival',
   hr_leave_types:         'Leave Type',
   hr_leave_requests:      'Leave Request',
+  hr_holiday_calendar:    'Holiday',   // audited since S748 — a holiday's type sets the 2× OT rate
   // POS module
   pos_orders:             'POS Order',
   pos_credit_notes:       'Credit Note',
@@ -229,6 +230,7 @@ const HELP_ITEMS = [
   { area: 'Festival',      icon: '🎉', ops: 'Add · Edit · Delete', note: 'Festival allowance entries' },
   { area: 'Leave Type',    icon: '🏖️', ops: 'Add · Edit · Delete', note: 'Leave entitlement definitions' },
   { area: 'Leave Request', icon: '🗓️', ops: 'Add · Edit · Delete', note: 'Leave applications & approvals' },
+  { area: 'Holiday',       icon: '📆', ops: 'Add · Edit · Delete', note: 'Holiday Calendar entries — a public holiday sets the 2× overtime rate' },
   { area: 'Final Settlement', icon: '📄', ops: 'Add · Edit · Delete', note: 'Final settlement drafts, finalisation and reopening' },
   { area: 'POS Order',     icon: '🧮', ops: 'Status change',       note: 'Void, discount, close type, invoice no. and credit settlement — not every item edit or bill reprint' },
   { area: 'Credit Note',   icon: '↩', ops: 'Add',                 note: 'Credit notes issued against a closed POS invoice' },

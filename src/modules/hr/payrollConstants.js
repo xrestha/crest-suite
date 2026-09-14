@@ -85,12 +85,20 @@ export const SSF_EMPLOYER_PCT = 0.20
 // gratuityCompute.js. Lived as a bare 0.0333 inside GratuityTracker and a second copy inside
 // FinalSettlement until S600; it belongs here with the other rates it moves with.
 export const SSF_GRATUITY_PCT = 0.0333
+// Days after the end of a payroll month by which the employer must deposit SSF. 15 under the
+// Contribution-based Social Security Act 2074 s.4(4) until the Act to Amend Some Nepal Acts, 2082
+// (Nepal Gazette 2082/04/14, 30 July 2025) extended it to 25. Late deposits attract 10% interest.
+// Decided with Aashish 2026-09-14 (S748). BS months run 29-32 days, so the 25th always exists.
+export const SSF_DEPOSIT_DAY = 25
 // Nepal Labour Act: gratuity vests after one year of continuous service.
 export const GRATUITY_VESTING_MONTHS = 12
 
 // Minimum wage (full-time monthly): NPR 19,550 = 12,170 basic + 7,380 dearness allowance.
 export const MIN_WAGE_MONTHLY  = 19550
 export const MIN_BASIC_MONTHLY = 12170
+// The dearness-allowance half of the monthly minimum. Derived, not typed: PayForm carried 7380 as
+// a literal in three places beside these two constants.
+export const MIN_DEARNESS_MONTHLY = MIN_WAGE_MONTHLY - MIN_BASIC_MONTHLY
 
 // Minimum wage (non-monthly).
 export const MIN_DAILY          = 754

@@ -199,7 +199,7 @@ export default function EmployeeJoiningForm({ onClose }) {
         <SectionHead title="2 · Employment Details" />
 
         <FieldRow>
-          <Line label="Designation *" />
+          <Line label="Designation" />
           <Line label="Department" />
         </FieldRow>
 
@@ -218,7 +218,10 @@ export default function EmployeeJoiningForm({ onClose }) {
         </FieldRow>
 
         <FieldRow>
-          <CheckRow label="Status" options={['Active', 'Probation', 'Contract', 'Resigned', 'Terminated']} />
+          {/* The statuses the Employee form actually has. This listed "Contract" (an employment
+              type, above) and had no Inactive. A joining form only ever starts someone, so the
+              leaving statuses are not offered at all. */}
+          <CheckRow label="Status" options={['Active', 'Probation']} />
         </FieldRow>
 
         <FieldRow>

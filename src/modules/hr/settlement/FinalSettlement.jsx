@@ -6,13 +6,13 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs } from '../../../utils/bsCalendar'
-import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
+import { computeBonusTds, fiscalYearOf, retirementRelief } from '../payroll/tds'
 import { printWithTitle } from '../../../utils/printTitle'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { calcGratuity } from '../gratuity/gratuityCompute'
 import { fetchSsfStartMap, ssfMonthsFrom } from '../gratuity/ssfEnrolment'
 import { leaveBalance } from '../leave/leaveBalance'
-import { tallyAttendance, calcAmount } from '../payroll/payrollCompute'
+import { tallyAttendance, calcAmount, retirementContributionOf } from '../payroll/payrollCompute'
 import { fetchYtdMap } from '../payroll/payrollData'
 import { firstError } from '../../../shared/queryError'
 import { errorText, errorLine } from '../../../shared/errorText'
@@ -322,7 +322,10 @@ export default function FinalSettlement() {
     // SSF relief for the year: what was actually contributed, plus this month's, capped by the
     // statutory ⅓-of-income / NPR 500,000 ceiling.
     const thisMonthSsf = g.enrolled ? Math.min(basic, SSF_CAP) * SSF_EMPLOYEE_PCT : 0
-    const ssfDeduction = Math.min(ytdSsf + thisMonthSsf, Math.min(500000, annualBasis / 3))
+    // CIT / provident fund shares the same cap (S748) — the year's real contributions plus this
+    // final month's, exactly as monthly payroll now relieves them.
+    const retirementYear = ytdSsf + thisMonthSsf + (parseFloat(ytd.retirement) || 0) + retirementContributionOf(empComponents, basic)
+    const ssfDeduction = retirementRelief(retirementYear, annualBasis)
     const lifeIns      = Math.min(parseFloat(emp.life_insurance_premium) || 0, 40000)
     const healthIns    = Math.min(parseFloat(emp.health_insurance_premium) || 0, 20000)
     const annualTaxable = Math.max(0, annualBasis - ssfDeduction - lifeIns - healthIns)

@@ -1,5 +1,5 @@
 import {
-  fiscalYearOf, slabsFor, applySlabs, computeMonthlyTds, computeBonusTds,
+  fiscalYearOf, slabsFor, applySlabs, computeMonthlyTds, computeBonusTds, computeMonthlyTdsBreakdown, retirementRelief,
   SLABS_2083_84, SLABS_2082_83_SINGLE, SLABS_2082_83_MARRIED,
 } from './tds'
 
@@ -109,5 +109,43 @@ describe('computeBonusTds', () => {
   test('a zero or negative bonus owes no tax', () => {
     expect(computeBonusTds({ annualTaxable: 1200000, bonusAmount: 0, fyStart: 2083 })).toBe(0)
     expect(computeBonusTds({ annualTaxable: 1200000, bonusAmount: -500, fyStart: 2083 })).toBe(0)
+  })
+})
+
+// S748 — CIT / provident fund comes off taxable income, in ONE bucket with SSF.
+describe('retirement relief (SSF + CIT share a cap)', () => {
+  const period = { bs_year: 2083, bs_month: 4 } // Shrawan 2083 — month 1 of FY 2083/84
+
+  test('a CIT contribution lowers TDS', () => {
+    // 150,000/month → 18,00,000/yr. Without relief: 10,000 + 50,000 + 60,000 = 1,20,000 → 10,000/month.
+    const without = computeMonthlyTds({ period, monthlyGross: 150000, monthlySsf: 0 })
+    // CIT 10,000/month → 1,20,000/yr deducted → taxable 16,80,000 → 10,000 + 50,000 + 36,000 = 96,000.
+    const withCit = computeMonthlyTds({ period, monthlyGross: 150000, monthlySsf: 0, monthlyRetirement: 10000 })
+    expect(without).toBe(10000)
+    expect(withCit).toBe(8000)
+  })
+
+  test('SSF and CIT together are capped at a third of annual income, not each', () => {
+    const b = computeMonthlyTdsBreakdown({
+      period, monthlyGross: 100000, monthlySsf: 11000, monthlyRetirement: 30000, isSsf: true,
+    })
+    // 1,32,000 SSF + 3,60,000 CIT = 4,92,000, capped at 12,00,000 / 3 = 4,00,000.
+    expect(b.retirementDeduction).toBe(400000)
+    expect(b.annualTaxable).toBe(800000)
+  })
+
+  test('the absolute NPR 5,00,000 cap applies to the combined figure', () => {
+    expect(retirementRelief(900000, 3000000)).toBe(500000)
+    expect(retirementRelief(120000, 1800000)).toBe(120000)
+    expect(retirementRelief(0, 1800000)).toBe(0)
+  })
+
+  test('prior months’ CIT counts toward the year', () => {
+    const b = computeMonthlyTdsBreakdown({
+      period: { bs_year: 2083, bs_month: 6 }, // month 3
+      monthlyGross: 150000, monthlySsf: 0, monthlyRetirement: 10000,
+      ytdGross: 300000, ytdRetirement: 20000, ytdMonths: 2,
+    })
+    expect(b.annualOtherRetirement).toBe(20000 + 10000 * 10)
   })
 })
