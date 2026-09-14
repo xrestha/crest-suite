@@ -535,7 +535,8 @@ Roster wrote `ot_hours: 0` and a punched 8am–8pm measured 12 − 12 = 0. `shif
 
 `zeroHourStatus()` (attendanceFromRoster.js) reads a zero-hour roster marker by name: unpaid first
 ("UNPAID LEAVE" contains "paid leave"), then paid, and a leave name that says neither is UNPAID; then
-holiday, then off. `isOffDay` is deliberately unchanged, because Self-Service and the Labor Forecast
+holiday; and everything else — an off name, no name, or a name that says none of these — is Off
+(S749: it was Holiday, which now PAYS daily and hourly staff). `isOffDay` is deliberately unchanged, because Self-Service and the Labor Forecast
 only need on/off duty.
 
 ## Clearing a month is scoped to the people on screen (S743)
@@ -603,3 +604,60 @@ the consequence of any clear is that marked absences and unpaid leave stop deduc
   to s.4(4); it was 15). Never hard-code the day in copy — read the constant.
 - **Pay Setup previews are a full month before income tax**, and say so. Default tab is On payroll
   (active + probation), matching every payroll picker.
+
+## Roster, Attendance, Leave and Overtime (S749)
+
+Eight decisions taken with Aashish, and the rules that hold them. Migration `20260914170000`.
+
+- **Rank is a database fence here too.** RESTRICTIVE supervisor-rank INSERT/UPDATE/DELETE policies on
+  `hr_attendance`, `hr_leave_requests`, `hr_leave_types`, `hr_overtime_entries`, `hr_roster`,
+  `hr_shift_types`, `hr_shift_swap_requests`, `hr_roster_publish_state` (the S748 Holiday Calendar
+  shape). **A new HR table a supervisor page writes gets the same three policies.** Self-Service writes
+  through SECURITY DEFINER RPCs and is unaffected.
+- **A month whose payroll run is FINALIZED is read-only** — Attendance, leave approve/cancel, every
+  overtime action. Pages lock and say "reopen the payroll run"; `hr_attendance_guard_finalized` /
+  `hr_overtime_guard_finalized` refuse any caller that skips the page. A failed run-status read locks
+  (`runStatus === 'unknown'`). **The parent-exists test that lets a client/period cascade through lives
+  in the SECURITY DEFINER lookup, never in the INVOKER trigger** — an HR account's RLS view of
+  `monthly_periods` is empty, so the first draft's `EXISTS` passed vacuously and a supervisor deleted a
+  paid month's row on the live verification.
+- **A non-working day carries no clock.** `NON_WORKING_STATUSES` in `attendance/attendanceRules.js`
+  (absent, paid/unpaid leave, off, holiday — never the half-day ones). `withStatus()` clears the cell,
+  the inputs switch off, `attendanceRowFor()` saves zeros, and leave approval's upsert clears a full
+  day. **`tallyAttendance` adds `ot_hours` from every row whatever its status** — which is the reason.
+- **Bulk marks fill blanks only** (`fillBlankCells`). An overwrite turned approved leave into Present.
+- **Leave: `days` is derived by the database** (`hr_leave_requests_validate`), and two pending/approved
+  requests for one employee may not share a day (operator exempt, for restore). `leaveRules.js`'s
+  `findOverlappingRequest` / `finalizedMonthsFor` / `quotaOverrun` let the page say so first. Over
+  quota WARNS, never blocks. `submit_my_leave_request` keeps `p_days` in its signature and ignores it.
+- **One overtime entry per employee per day** (`hr_overtime_entries_employee_day_key`). An edit of an
+  approved entry stays approved — decided, not an oversight. Overtime reloads the month ON SCREEN after
+  a save to another month, never the saved one.
+- **Shift types: unique name per client, and no delete while the roster uses one**
+  (`hr_shift_types_guard_delete`). The page used to delete duplicate-named types on every load; never
+  reintroduce a destructive tidy-up on a read path. A seed runs only after a successful read, and a
+  23505 on the seed is a second tab, answered by re-reading.
+- **A swap approval is `approve_shift_swap(p_request_id)`**, SECURITY INVOKER, one transaction, every
+  UPDATE's row count asserted (a write RLS filters out is 0 rows, not an error). Same day → trade
+  `shift_type_id`; different days → trade `employee_id`, refused if either already works the other day.
+  The sentinel-`bs_day = -1` dance is gone.
+- Attendance's period switch and Roster's board/publish loads are request-guarded; `hr_overtime_entries`,
+  `hr_shift_types` and `hr_shift_swap_requests` are audited (`hr_roster` deliberately not — volume).
+- **A public holiday inside a leave is not charged** (decided 2026-09-14, migration `20260914180000`).
+  `days` = calendar days − public, not-removed Holiday Calendar days, derived in the trigger through
+  `hr_public_holiday_count()` (SECURITY DEFINER, caller-checked) over `bs_months`; approval and
+  `backfillApprovedLeave` mark those days `holiday`, and a revert leaves them. `leaveDayCount()` /
+  `publicHolidayKeys()` in `leaveConstants.js` are the page's copy. Rostered days off still count.
+  **A `holiday` row PAYS daily and hourly staff** (decided with Aashish, 2026-09-14 — Labour Act s.41
+  gives every worker paid public holidays): `computePayslip` adds `t.holiday` to a daily employee's
+  worked days and `t.holiday × 8` to an hourly employee's paid hours, like paid leave; monthly pay does
+  not move. Before it, a daily-wage employee's paid leave over a holiday paid a day less. So
+  `zeroHourStatus()` returns Off, not Holiday, for a zero-hour shift named like nothing — only a
+  "holiday" name may create a paid day. The Labor Forecast's actual cost still prices a holiday row
+  at 0 hours — deliberately: it costs hours worked on the floor, and paid leave reads 0 there too. A days-only UPDATE does not fire the trigger; a request
+  decided before a holiday was added keeps the count it was decided on.
+- **`request_shift_swap` refuses a past day, an unpublished day, and a shift already in an open swap**
+  (`swap_day_past` / `swap_day_unpublished` / `swap_already_requested`); the Staff app's picker hides
+  past days.
+- Generate from Roster and the Roster board's assign-over-leave ask through `ConfirmModal`, naming
+  what will be written.

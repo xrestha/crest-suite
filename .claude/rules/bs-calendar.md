@@ -92,6 +92,20 @@ tenant, readable from View Source. The script accepts the prefixed name so an ex
 keeps working, but warns. `scripts/backfill-credit-note-reversals.mjs` still reads only the prefixed
 name and carries the same hazard.
 
+## The database has a copy of this table: `bs_months` (S749)
+
+Leave day counts and swap-date checks run in triggers and RPCs, and the holiday and roster tables
+are BS while leave dates are AD, so Postgres needed its own converter. `public.bs_months` holds one
+row per BS month — the AD date of day 1 and the month's length — **generated from this file's
+table** (migration `20260914180000`), with `bs_to_ad(y, m, d)` over it. It covers exactly
+`BS_YEAR_MIN`–`BS_YEAR_MAX`; outside that it returns NULL where the JS falls back to an
+approximation, and every SQL caller treats NULL as refusal.
+
+**Extending `BS_CALENDAR` now needs a migration adding the matching `bs_months` rows.**
+`src/utils/bsMonthsSql.test.js` reads the migrations and fails until every month the JS table holds
+is present with the same start date and length — the same two-copies-one-test shape as
+`itemRefTables.test.js`. Regenerate the rows from `bsToAd`/`daysInBsMonth`; never type them.
+
 ## `formatBsDay` and the one definition of `BS_MONTHS` (S614)
 
 Migrated from the root `CLAUDE.md` (S663).

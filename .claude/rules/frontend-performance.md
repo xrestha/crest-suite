@@ -368,12 +368,12 @@ races on had no guard at all. Two quick clicks start two loads; the later-landin
   `` `${periodId}:${day}` ``. The paragraph below said the composite-key reason was spent
   everywhere it had been given; this was the one place it had never been asked.
 
-**Not swept:** `AttendanceSheet.jsx`, whose `handlePeriodChange` awaits `loadAttendance(id)` with
-nothing claiming the page, and `SupplierPriceTracker.js`, which selects an id and derives rather
-than loads. The first was skipped because its loaders take `(bsYear, bsMonth)` rather than one id
-and "would need a composite key" — S657 built exactly that on `GroupDashboard` (a `bsYear-bsMonth`
-key), so the stated reason no longer holds, and it no longer even fits: `loadAttendance` takes one
-period id. `MonthlyOwnerReport.jsx` stood on this list until S682 wired it and holds a `periodReq`
+**`AttendanceSheet.jsx` was swept in S749**, and it was a write surface: a stale load won `records`
+while `period` was the last pick, so Save Day wrote one month's rows under another month's
+`period_id`. It holds a `periodReq` keyed on the period id now — it had stood on this list for a
+stated reason ("its loaders take `(bsYear, bsMonth)` and would need a composite key") that S657 had
+already spent and that no longer even fit its one-id loader. **Not swept:** `SupplierPriceTracker.js`,
+which selects an id and derives rather than loads. `MonthlyOwnerReport.jsx` stood on this list until S682 wired it and holds a `periodReq`
 now.
 
 ## The 1000-row truncation sweeps: S528, S529, S613, S628

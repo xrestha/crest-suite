@@ -150,6 +150,7 @@ Migrated from the root `CLAUDE.md` (S663).
 - `hr-selfservice-login` (`supabase/functions/hr-selfservice-login/`, added S464) completes HR Self-Service PIN login server-side: takes `{ staff_id, pin }`, resolves the real email with the service role, calls `signInWithPassword` itself, and returns only the resulting session tokens — added specifically so the browser never has to hold or transmit the account's actual email during login. `SelfServiceLogin.jsx` calls it via `supabase.functions.invoke(...)` and then `supabase.auth.setSession({access_token, refresh_token})` on success, since `signInWithPassword` used to do that step implicitly and now the real auth call happens off-browser.
 - `ims-staff-login` (`supabase/functions/ims-staff-login/`, added S737) is the stock-count tablet's equivalent — `{ client_id, device_secret, staff_id, pin }`, the device gate first, then the lockout, then the derived password, returning only session tokens. `verify_jwt = false` for the same reason: it runs before there is a session. Its device secret is `client_secrets.ims_device_secret`, which a tablet obtains only by redeeming a short-lived enrolment token off the QR a manager shows in Stock Count → Settings — never by pressing a button on the device, which a store-room tablet has no manager session to press.
 - **Staff accounts are same-client at the RLS level** — POS PIN staff (`pos_email IS NOT NULL`), IMS staff (`ims_role IS NOT NULL`, whether they sign in with a password or an S737 count PIN), HR staff (`hr_role IS NOT NULL`), and HR self-service accounts (`hr_self_service = true`) all share `role='client'` + `client_id` with the owner, so the standard admin-or-same-client policy alone gives any of them owner-level data access. S316 (`20260708130000_staff_account_business_table_isolation.sql`) fenced off POS/self-service with **RESTRICTIVE** `no_self_service_accounts` / `no_pos_pin_staff` policies per table; S419 added `no_ims_staff` for IMS staff; S430 added `no_hr_role_staff` for HR staff (helpers: `is_hr_self_service()`, `is_pos_pin_staff()`, `is_ims_staff()`, `is_hr_role_staff()`). **When creating a new business table, add it to every matching restrictive-policy list** — a new table doesn't inherit the exclusions, and a bare same-client policy re-opens the hole for whichever staff-account type's JWT touches it.
+- **Rank is a separate fence from account type.** The families above exclude a KIND of account; they say nothing about an HR account's RANK. Nine HR tables (`hr_holiday_calendar` since S748; `hr_attendance`, `hr_leave_requests`, `hr_leave_types`, `hr_overtime_entries`, `hr_roster`, `hr_shift_types`, `hr_shift_swap_requests`, `hr_roster_publish_state` since S749) carry RESTRICTIVE `<table>_write_rank_insert/update/delete` policies requiring admin, Owner or `hr_role` supervisor/manager — reads stay open to every HR rank. A new HR table written from a supervisor page gets the same three; one written from a manager-only page should raise the bar, not copy it.
 
 ## A purchase bill saves through `save_purchase_bill`, and a paid bill cannot be deleted (S698)
 
@@ -274,6 +275,14 @@ session and the cascade into `hr_employees` would otherwise be refused on the fi
 payslip. Inside a cascade the parent row is not visible, so `NOT EXISTS (SELECT 1 FROM clients …)` is
 the reliable "this is a client deletion" test. When adding a fifth instance on a table that cascades
 from `clients`, decide that question before writing the trigger.
+
+**S749 found that passthrough fails vacuously when the caller cannot see the parent.**
+`hr_attendance_guard_finalized` first tested `EXISTS (SELECT 1 FROM monthly_periods …)` inside the INVOKER
+trigger — and an HR-role account's RLS view of `monthly_periods` is empty (the S430 fence), so every
+"does the period still exist?" was false and a supervisor's DELETE in a finalized month went through
+on the live verification. **Put the parent-exists test inside the SECURITY DEFINER lookup** (a JOIN to
+the parent there, which a cascade has already removed) — never in the INVOKER body, whose reads are
+only as wide as the caller's policies.
 
 **A list that must exist in both JS and SQL needs a test that reads both.** `ITEM_REF_TABLES` is now
 mirrored inside two SQL functions, and the server cannot import a `.js` module.
