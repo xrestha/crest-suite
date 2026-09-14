@@ -868,8 +868,17 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
   const retirementPaid = salary.ssf + salary.retirement
   const retirementOff  = retirementRelief(retirementPaid, totals.gross)
 
-  const lifeIns   = Math.min(parseFloat(emp.life_insurance_premium)   || 0, 40000)
-  const healthIns = Math.min(parseFloat(emp.health_insurance_premium) || 0, 20000)
+  // The premiums the year's tax was actually worked out with: the latest payslip or settlement of the
+  // year that stored them (S753). The employee record is only the fallback for a year paid before
+  // payslips kept them — reading it first let this year's edit rewrite last year's certificate.
+  const monthKey = (y, m) => (Number(y) || 0) * 12 + (Number(m) || 0)
+  const storedIns = [
+    ...slips.map(s => ({ ym: monthKey(s.hr_payroll_runs?.monthly_periods?.bs_year, s.hr_payroll_runs?.monthly_periods?.bs_month), life: s.life_insurance_premium, health: s.health_insurance_premium })),
+    ...settlements.map(st => ({ ym: monthKey(st.settle_bs_year, st.settle_bs_month), life: st.life_insurance_premium, health: st.health_insurance_premium })),
+  ].filter(x => x.life != null || x.health != null).sort((a, b) => b.ym - a.ym)[0]
+  const insSource = storedIns || { life: emp.life_insurance_premium, health: emp.health_insurance_premium }
+  const lifeIns   = Math.min(parseFloat(insSource.life)   || 0, 40000)
+  const healthIns = Math.min(parseFloat(insSource.health) || 0, 20000)
   const insTotal  = lifeIns + healthIns
   const taxable   = Math.max(0, totals.gross - retirementOff - insTotal)
 
@@ -1021,8 +1030,8 @@ function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, client
             { label: 'Total Gross Income',               value: totals.gross, neg: false },
             { label: salary.retirement > 0 ? 'Less: SSF + CIT / provident fund' : 'Less: SSF Employee Contribution', value: retirementOff, neg: true,
               sub: retirementOff < retirementPaid - 0.5 ? `paid NPR ${fmtN(retirementPaid)} — relief capped at NPR 5,00,000 or a third of income` : (salary.retirement > 0 ? `SSF NPR ${fmtN(salary.ssf)} + CIT NPR ${fmtN(salary.retirement)}` : undefined) },
-            ...(lifeIns > 0 ? [{ label: `Less: Life Insurance (cap NPR 40,000)`, value: lifeIns, neg: true, sub: `declared NPR ${fmtN(parseFloat(emp.life_insurance_premium)||0)}` }] : []),
-            ...(healthIns > 0 ? [{ label: `Less: Health Insurance (cap NPR 20,000)`, value: healthIns, neg: true, sub: `declared NPR ${fmtN(parseFloat(emp.health_insurance_premium)||0)}` }] : []),
+            ...(lifeIns > 0 ? [{ label: `Less: Life Insurance (cap NPR 40,000)`, value: lifeIns, neg: true, sub: `declared NPR ${fmtN(parseFloat(insSource.life)||0)}${storedIns ? '' : ' (from the employee record — no payslip this year stored it)'}` }] : []),
+            ...(healthIns > 0 ? [{ label: `Less: Health Insurance (cap NPR 20,000)`, value: healthIns, neg: true, sub: `declared NPR ${fmtN(parseFloat(insSource.health)||0)}${storedIns ? '' : ' (from the employee record — no payslip this year stored it)'}` }] : []),
           ].map((r, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '5px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
               <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>

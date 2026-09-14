@@ -1,4 +1,4 @@
-import { groupByEmployee, sliceFor, buildAdvanceMap, firstRecoveryMonth, advanceDueIn, dueAdvances } from './payrollData'
+import { groupByEmployee, sliceFor, buildAdvanceMap, firstRecoveryMonth, advanceDueIn, dueAdvances, payrollCashCost } from './payrollData'
 import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 
 // `buildRows` in PayrollRun.jsx and `rows` in PayrollCalculation.jsx replaced a per-employee
@@ -144,5 +144,20 @@ describe('buildAdvanceMap', () => {
     expect(() => buildAdvanceMap([adv()], [])).toThrow(/period/)
     expect(() => buildAdvanceMap([adv()], [], {})).toThrow(/period/)
     expect(() => buildAdvanceMap([adv()], [], null)).toThrow(/period/)
+  })
+})
+
+describe('payrollCashCost (S753)', () => {
+  it('is pay earned plus employer SSF — not net pay, and travel claims are reported apart', () => {
+    const slips = [
+      { gross: 30000, absence_deduction: 1000, ot_amount: 500, ssf_employer: 6000, ssf_employee: 3300, tds: 250, net_pay: 26000, tada_amount: 1200 },
+      { gross: 20000, absence_deduction: 0, ot_amount: 0, ssf_employer: 0, tada_amount: 0 },
+    ]
+    expect(payrollCashCost(slips)).toEqual({ total: 55500, earned: 49500, employerSsf: 6000, tada: 1200 })
+  })
+
+  it('treats blanks as zero and rounds to paisa', () => {
+    expect(payrollCashCost([{ gross: '100.005', ssf_employer: null }, {}])).toEqual({ total: 100.01, earned: 100.01, employerSsf: 0, tada: 0 })
+    expect(payrollCashCost(null).total).toBe(0)
   })
 })

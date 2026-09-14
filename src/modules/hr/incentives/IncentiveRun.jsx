@@ -142,7 +142,6 @@ export default function IncentiveRun() {
   const [busy,         setBusy]         = useState(false)
   const [msg,          setMsg]          = useState('')
   const [showConfigs,  setShowConfigs]  = useState(false)
-  const [taxAck,       setTaxAck]       = useState('')
 
   // A write's reload reads the year and label on screen NOW (S751 review: a stale pair from the
   // write's own render was a load key `shown` never matched, stuck on Loading).
@@ -295,14 +294,17 @@ export default function IncentiveRun() {
   const years        = Array.from({ length: 6 }, (_, i) => today.year - 3 + i)
 
   // Draft rows whose stored tax no longer matches what it works out to now (S751 review).
-  const staleTax = useMemo(() => (ready ? drafts.flatMap(r => {
+  const taxCheck = useMemo(() => (ready ? drafts.flatMap(r => {
     const emp = empMap.get(r.employee_id)
     if (!emp) return []
     const fresh = taxFor(emp, parseFloat(r.amount) || 0)
-    return Math.abs(fresh - (parseFloat(r.tds) || 0)) >= 1 ? [{ row: r, fresh }] : []
+    return Math.abs(fresh - (parseFloat(r.tds) || 0)) >= 1 ? [{ row: r, fresh, kept: !!r.tds_overridden }] : []
   }) : NONE), [ready, drafts, empMap, compsIdx, ytdMap, others, fyStart]) // eslint-disable-line react-hooks/exhaustive-deps
-  const staleSig = staleTax.map(s => `${s.row.id}:${s.row.tds}`).join('|')
-  const taxKept  = staleTax.length > 0 && taxAck === staleSig
+  // A row whose tax a person typed or kept (tds_overridden, S753) is not stale — it is listed in the
+  // Finalize confirmation instead. Before S753 "keep" was a page-session acknowledgement that a
+  // reload forgot.
+  const staleTax = useMemo(() => taxCheck.filter(t => !t.kept), [taxCheck])
+  const keptTax  = useMemo(() => taxCheck.filter(t => t.kept), [taxCheck])
 
   const finalMonths = [...new Set(rows.filter(r => r.status === 'finalized').map(monthOf))]
   const moveOptions = anyFinalized ? (finalMonths.length === 1 ? finalMonths : NONE) : rowMonths
@@ -314,7 +316,7 @@ export default function IncentiveRun() {
     const amount = seededAmount(emp, selectedConfig, bounds.payDate)
     return {
       employee_id: emp.id, config_id: effConfigId || null, run_label: runLabel, bs_year: bsYear, bs_month: payMonth,
-      amount, tds: taxFor(emp, amount), status: 'draft',
+      amount, tds: taxFor(emp, amount), tds_overridden: false, status: 'draft',
     }
   }
 
@@ -370,7 +372,7 @@ export default function IncentiveRun() {
           if (!emp) return Promise.resolve({ data: [], error: null, skipped: true })
           const keep = !seeds || (cfg.calc_type === 'percent_of_basic' && (emp.pay_basis || 'monthly') !== 'monthly')
           const amount = keep ? (parseFloat(r.amount) || 0) : seededAmount(emp, cfg, bounds.payDate)
-          return scopedUpdate(TABLE, { amount, tds: taxFor(emp, amount) }).eq('id', r.id).eq('status', 'draft').select('id')
+          return scopedUpdate(TABLE, { amount, tds: taxFor(emp, amount), tds_overridden: false }).eq('id', r.id).eq('status', 'draft').select('id')
         }))
         await reloadRun()
         setBusy(false)
@@ -385,12 +387,25 @@ export default function IncentiveRun() {
     const targets = staleTax
     setBusy(true); setMsg('')
     const results = await Promise.all(targets.map(({ row, fresh }) =>
-      scopedUpdate(TABLE, { tds: fresh }).eq('id', row.id).eq('status', 'draft').select('id')))
+      scopedUpdate(TABLE, { tds: fresh, tds_overridden: false }).eq('id', row.id).eq('status', 'draft').select('id')))
     await reloadRun()
     setBusy(false)
     if (rowsFailed(results, targets.length, 'did not get the new income tax')) return
-    setTaxAck('')
     setMsg('ok:Income tax brought up to date')
+  }
+
+  // "Keep the tax as entered" (S753): stored on each row, so it survives a reload and a second tab
+  // sees it. A later Recompute, amount change or pay-month move clears it again.
+  async function keepTaxAsEntered() {
+    if (!ready || busy || staleTax.length === 0) return
+    const targets = staleTax
+    setBusy(true); setMsg('')
+    const results = await Promise.all(targets.map(({ row }) =>
+      scopedUpdate(TABLE, { tds_overridden: true }).eq('id', row.id).eq('status', 'draft').select('id')))
+    await reloadRun()
+    setBusy(false)
+    if (rowsFailed(results, targets.length, 'were not marked as kept')) return
+    setMsg('ok:Income tax kept as entered')
   }
 
   async function inlineWrite(row, patch, what) {
@@ -407,8 +422,8 @@ export default function IncentiveRun() {
     if (amount === null) { reset(); setMsg(`error:The amount for ${nameOf(row.employee_id)} must be 0 or more.`); return }
     if (sameMoney(amount, row.amount)) return
     const tds = taxFor(empMap.get(row.employee_id), amount)
-    patchLocal(row.id, { amount, tds })
-    await inlineWrite(row, { amount, tds }, 'The amount')
+    patchLocal(row.id, { amount, tds, tds_overridden: false })
+    await inlineWrite(row, { amount, tds, tds_overridden: false }, 'The amount')
   }
 
   async function updateTds(row, raw, reset) {
@@ -416,8 +431,12 @@ export default function IncentiveRun() {
     const tds = parseMoney(raw)
     if (tds === null) { reset(); setMsg(`error:The income tax for ${nameOf(row.employee_id)} must be 0 or more.`); return }
     if (sameMoney(tds, row.tds)) return
-    patchLocal(row.id, { tds })
-    await inlineWrite(row, { tds }, 'The income tax')
+    // Stored as typed (S753): a figure that differs from the calculation is flagged, so a later change
+    // to the calculation does not hold up Finalize, and the flag survives a reload.
+    const calculated = taxFor(empMap.get(row.employee_id), parseFloat(row.amount) || 0)
+    const tds_overridden = Math.abs(tds - calculated) >= 1
+    patchLocal(row.id, { tds, tds_overridden })
+    await inlineWrite(row, { tds, tds_overridden }, 'The income tax')
   }
 
   async function updateNote(row, value) {
@@ -437,7 +456,7 @@ export default function IncentiveRun() {
       body: <p style={{ margin: 0 }}>They are paid nothing from the {runLabel} {bsYear} run{reason ? ` (${reason.toLowerCase()})` : ''}. Their row stays, marked Excluded at 0, so they are not offered again as missing staff and do not hold up Finalize. “Include again” undoes it.</p>,
       run: async () => {
         setBusy(true); setMsg('')
-        const { data, error } = await scopedUpdate(TABLE, { amount: 0, tds: 0, note: EXCLUDED_NOTE }).eq('id', row.id).eq('status', 'draft').select('id')
+        const { data, error } = await scopedUpdate(TABLE, { amount: 0, tds: 0, tds_overridden: false, note: EXCLUDED_NOTE }).eq('id', row.id).eq('status', 'draft').select('id')
         await reloadRun()
         setBusy(false)
         if (error || !data?.length) { setMsg(`error:${nameOf(row.employee_id)} was not removed — the register shows what is stored. ` + (error ? errorLine(error) : 'The run may have been finalized in another tab.')); return }
@@ -451,7 +470,7 @@ export default function IncentiveRun() {
     const emp = empMap.get(row.employee_id)
     const amount = emp ? seededAmount(emp, selectedConfig, bounds.payDate) : 0
     setBusy(true); setMsg('')
-    const { data, error } = await scopedUpdate(TABLE, { amount, tds: taxFor(emp, amount), note: null }).eq('id', row.id).eq('status', 'draft').select('id')
+    const { data, error } = await scopedUpdate(TABLE, { amount, tds: taxFor(emp, amount), tds_overridden: false, note: null }).eq('id', row.id).eq('status', 'draft').select('id')
     await reloadRun()
     setBusy(false)
     if (error || !data?.length) { setMsg(`error:${nameOf(row.employee_id)} was not included again — the register shows what is stored. ` + (error ? errorLine(error) : 'The run may have been finalized in another tab.')); return }
@@ -485,7 +504,9 @@ export default function IncentiveRun() {
         const othersNew = otherBonusesForFy(base.bonuses, newFy, runKey, { bs_year: bsYear, bs_month: m })
         const results = await Promise.all(targets.map(r => {
           const emp = empMap.get(r.employee_id)
-          const patch = { bs_month: m, tds: isExcluded(r) || !emp ? (parseFloat(r.tds) || 0) : taxWith(emp, parseFloat(r.amount) || 0, newFy, ytdNew, othersNew) }
+          const patch = isExcluded(r) || !emp
+            ? { bs_month: m }
+            : { bs_month: m, tds: taxWith(emp, parseFloat(r.amount) || 0, newFy, ytdNew, othersNew), tds_overridden: false }
           return scopedUpdate(TABLE, patch).eq('id', r.id).eq('status', 'draft').select('id')
         }))
         await reloadRun()
@@ -513,10 +534,10 @@ export default function IncentiveRun() {
 
   function setStatus(status) {
     const toFinal = status === 'finalized'
-    if (toFinal && (flagged.length || amountNeeded.length || splitMonth || drafts.length === 0 || !(total > 0) || (staleTax.length && !taxKept))) return
+    if (toFinal && (flagged.length || amountNeeded.length || splitMonth || drafts.length === 0 || !(total > 0) || staleTax.length)) return
     const ids = rows.filter(r => r.status === (toFinal ? 'draft' : 'finalized')).map(r => r.id)
     const verb = toFinal ? 'finalized' : 'reopened'
-    const kept = toFinal && taxKept ? staleTax : NONE
+    const kept = toFinal ? keptTax : NONE
     askConfirm({
       title: `${toFinal ? 'Finalize' : 'Reopen'} the ${runLabel} ${bsYear} incentive run?`,
       confirmLabel: `${toFinal ? 'Finalize' : 'Reopen'} Run`, busyLabel: `${toFinal ? 'Finalizing' : 'Reopening'}…`,
@@ -549,8 +570,7 @@ export default function IncentiveRun() {
           setMsg(`error:${ids.length - n} of the ${ids.length} rows on screen were not ${verb} — the run was changed in another tab (a row edited, removed or already ${verb}). The register now shows what is stored; check it and ${toFinal ? 'finalize' : 'reopen'} again.`)
           return
         }
-        setTaxAck('')
-        setMsg(`ok:${toFinal ? 'Finalized' : 'Reopened'}`)
+            setMsg(`ok:${toFinal ? 'Finalized' : 'Reopened'}`)
       },
     })
   }
@@ -592,7 +612,7 @@ export default function IncentiveRun() {
 
   const loadError = baseError || runError || configsError
   const loading   = !loadError && !ready
-  const taxBlocks = staleTax.length > 0 && !taxKept
+  const taxBlocks = staleTax.length > 0
   const allZero   = rows.length > 0 && !(total > 0)
   const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks && !allZero
   const statusChip = g => (g.finalized === g.count ? { label: 'Finalized', cls: 'badge-green' } : g.finalized === 0 ? { label: 'Draft', cls: 'badge-amber' } : { label: 'Part finalized', cls: 'badge-amber' })
@@ -764,14 +784,14 @@ export default function IncentiveRun() {
             <div role="alert" className="card" style={{ ...amberBanner, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, flex: '1 1 320px' }}>
                 <div style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>
-                  {taxKept ? `Income tax kept as entered on ${staleTax.length} row${staleTax.length === 1 ? '' : 's'}` : `Income tax is out of date on ${staleTax.length} row${staleTax.length === 1 ? '' : 's'}`}
+                  {`Income tax is out of date on ${staleTax.length} row${staleTax.length === 1 ? '' : 's'}`}
                 </div>
                 {staleTax.map(s => `${nameOf(s.row.employee_id)} (NPR ${fmt(s.row.tds)} saved, works out to NPR ${fmt(s.fresh)} now)`).join(', ')}.
                 {' '}A payroll month or another bonus finalized since, a raise, or a tax you typed by hand all do this. Finalize waits until you bring the tax up to date or say the typed figures stay.
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn btn-primary btn-sm" onClick={recomputeTaxNow} disabled={busy}>Recompute tax now</button>
-                {!taxKept && <button className="btn btn-ghost btn-sm" onClick={() => setTaxAck(staleSig)} disabled={busy}>Keep the tax as entered</button>}
+                <button className="btn btn-ghost btn-sm" onClick={keepTaxAsEntered} disabled={busy}>Keep the tax as entered</button>
               </div>
             </div>
           )}

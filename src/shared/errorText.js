@@ -84,6 +84,21 @@ const rules = [
     operator: 'Only the Owner, or a manager of that module, can change its role list, so nothing was saved. The list decides every login\'s access level, which is why it is fenced.',
   },
   {
+    test: e => /tada_settings_rank/i.test(e.message || ''),
+    staff: 'Only the owner or an HR manager can change the travel claim settings. Nothing was changed.',
+    operator: 'Only the Owner or an HR manager can change the travel claim settings (per-km rates, purposes, start points), so nothing was saved.',
+  },
+  {
+    test: e => /payroll_rank/i.test(e.message || ''),
+    staff: 'Only the owner or an HR manager can finalize or reopen payroll. Nothing was changed.',
+    operator: 'Finalizing or reopening payroll needs the Owner or an HR manager, so nothing was changed.',
+  },
+  {
+    test: e => /self_service_blocked/i.test(e.message || ''),
+    staff: 'Your access to the Staff app has been turned off. Speak to your manager if you think this is a mistake.',
+    operator: 'This employee\'s Staff app access is turned off, so the request was refused. Turn it back on in Employees if they should still use it.',
+  },
+  {
     test: e => /settlement_rank/i.test(e.message || ''),
     staff: 'Only the owner or an HR manager can do that to a settlement. Nothing was changed.',
     operator: 'Finalizing or reopening a Final Settlement needs the Owner or an HR manager, so nothing was changed.',
@@ -304,6 +319,31 @@ const rules = [
     test: e => /hr_own_request/i.test(e.message || ''),
     staff: 'That request is your own, so someone else has to decide it. Nothing was changed.',
     operator: 'This is your own record, so someone else — another manager or the Owner — has to approve, reject or write it off. Nothing was changed.',
+  },
+  {
+    test: e => /payroll_run_stale|payroll_repayments_mismatch|payroll_repayment_invalid/i.test(e.message || ''),
+    staff: 'The payroll changed while it was being finalized. Nothing was finalized — reload and try again.',
+    operator: 'Nothing was finalized. Something changed between the check and the finalize — the run was regenerated in another tab, or an advance was repaid, written off or edited — so the figures on screen were no longer the ones in the database. Reload the page and finalize again.',
+  },
+  {
+    test: e => /payroll_tada_changed/i.test(e.message || ''),
+    staff: 'A travel claim on this payroll changed. Nothing was finalized.',
+    operator: 'Nothing was finalized: a travel claim this payroll pays is no longer Approved — it was rejected or paid by hand in TADA Claims after the run was generated. Regenerate the run and finalize again.',
+  },
+  {
+    test: e => /payroll_already_finalized|payroll_not_finalized/i.test(e.message || ''),
+    staff: 'This payroll was changed in another tab. Reload the page.',
+    operator: 'Nothing was changed by this click — the run was finalized or reopened in another tab a moment ago. Reload the page to see where it stands.',
+  },
+  {
+    test: e => /payroll_run_empty|payroll_run_not_found/i.test(e.message || ''),
+    staff: 'That payroll run has no payslips any more. Reload the page.',
+    operator: 'Nothing was finalized: the run has no payslips, or no longer exists. Reload the page.',
+  },
+  {
+    test: e => /repayment_ledger_locked/i.test(e.message || ''),
+    staff: 'That repayment was recorded by payroll or a settlement and cannot be changed here. Nothing was changed.',
+    operator: 'That repayment was recorded by a payroll run or a Final Settlement, so it can only be undone by reopening that run or settlement — deleting it by hand would make a recovered advance look owed again. Nothing was changed.',
   },
   {
     test: e => /run_has_settled_employee/i.test(e.message || ''),

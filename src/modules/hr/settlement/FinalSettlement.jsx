@@ -171,6 +171,9 @@ export default function FinalSettlement() {
   const [busy,     setBusy]     = useState(false)
   const [msg,      setMsg]      = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  // The leaver's HR / IMS / POS staff logins Finalize will block (S753). null = still reading, and
+  // { error } when the read failed — the dialog says so rather than implying there are none.
+  const [linkedLogins, setLinkedLogins] = useState(null)
   const [reopenTarget, setReopenTarget] = useState(null)
   const [reopenReason, setReopenReason] = useState('')
 
@@ -383,6 +386,17 @@ export default function FinalSettlement() {
   // Finalize is ONE database transaction (finalize_final_settlement). It re-reads the advances, the
   // travel claims, payroll for the month and any other finalized settlement, refuses if anything
   // moved since this screen calculated, and writes every ledger — or nothing.
+  const confirmEmpId = confirmOpen ? liveRow?.employee_id : null
+  useEffect(() => {
+    if (!confirmEmpId) { setLinkedLogins(null); return }
+    let live = true
+    setLinkedLogins(null)
+    supabase.rpc('settlement_linked_logins', { p_employee_id: confirmEmpId }).then(({ data, error }) => {
+      if (live) setLinkedLogins(error ? { error } : (data || []))
+    })
+    return () => { live = false }
+  }, [confirmEmpId])
+
   async function finalize() {
     if (!liveRow) return
     setConfirmOpen(false)
@@ -403,7 +417,8 @@ export default function FinalSettlement() {
     setBusy(false)
     setMsg('ok:Settlement finalized. ' + (data.employee_name || emp.full_name) + ' is now ' + (STATUS_AFTER[data.separation_reason] || 'resigned')
       + '; advances recovered: NPR ' + fmt(data.advance_recovered)
-      + ((data.tada_claim_ids || []).length > 0 ? '; ' + data.tada_claim_ids.length + ' travel claim(s) marked paid' : '') + '.')
+      + ((data.tada_claim_ids || []).length > 0 ? '; ' + data.tada_claim_ids.length + ' travel claim(s) marked paid' : '')
+      + ((data.blocked_logins || []).length > 0 ? '; staff login blocked: ' + data.blocked_logins.join(', ') : '') + '.')
   }
 
   async function reopen() {
@@ -835,7 +850,16 @@ export default function FinalSettlement() {
             <li>
               {liveRow.employee_name} becomes <strong>{STATUS_AFTER[reason]}</strong> with an end date of {lastAdLabel}, and leaves every payroll, roster and attendance screen.
             </li>
-            <li>New sign-ins to Crest Staff are blocked. If they also have an HR, IMS or POS staff login, remove it on that Staff page — this does not.</li>
+            <li>Their Crest Staff app access is turned off, and a phone already signed in is signed out.</li>
+            <li>
+              {linkedLogins === null
+                ? 'Checking for an HR, IMS or POS staff login…'
+                : linkedLogins.error
+                  ? 'Could not check for an HR, IMS or POS staff login — any linked to this employee are still blocked.'
+                  : linkedLogins.length === 0
+                    ? 'No HR, IMS or POS staff login is linked to this employee. A login created without linking it to their employee record is not found — check the Staff pages.'
+                    : <>Their staff login{linkedLogins.length === 1 ? '' : 's'} {linkedLogins.map(l => `${l.full_name} (${l.modules})`).join(', ')} {linkedLogins.length === 1 ? 'is' : 'are'} <strong>blocked</strong> — not deleted, so their name stays on everything they recorded. Reopen unblocks {linkedLogins.length === 1 ? 'it' : 'them'}.</>}
+            </li>
             {parseFloat(liveRow.leave_days_encashed) > 0 && <li>{liveRow.leave_days_encashed} leave day(s) are recorded as paid out and come off their balance.</li>}
             <li>If anything changed since this screen calculated — an advance, a claim, payroll for the month — nothing is finalized and you are told what.</li>
           </ul>
@@ -848,6 +872,7 @@ export default function FinalSettlement() {
             <li>The advance recoveries it made are removed, so those advances are owed again.</li>
             <li>The travel claims it paid go back to Approved.</li>
             <li>{reopenTarget.employee_name} stays marked as left. If they are not leaving after all, change their status in Employees.</li>
+            {(reopenTarget.blocked_logins || []).length > 0 && <li>The staff login{reopenTarget.blocked_logins.length === 1 ? '' : 's'} it blocked ({reopenTarget.blocked_logins.join(', ')}) can sign in again.</li>}
             {reopenTarget.paid_at && <li>It was recorded as paid (NPR {fmt(reopenTarget.paid_amount ?? reopenTarget.net_payout)}); that record is kept.</li>}
             <li>The settlement becomes a draft. A printed copy no longer matches it until it is finalized again.</li>
           </ul>

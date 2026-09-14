@@ -137,8 +137,6 @@ export default function FestivalAllowance() {
   const [runLoading,  setRunLoading]  = useState(true)
   const [busy,        setBusy]        = useState(false)
   const [msg,         setMsg]         = useState('')
-  // "Keep the tax as entered", acknowledged for exactly this set of rows and figures.
-  const [taxAck,      setTaxAck]      = useState('')
 
   // A write's reload must read the year and name on screen NOW, not the ones captured by the render
   // the write started in — a stale pair was a load key `shown` never matched: stuck on Loading.
@@ -286,14 +284,17 @@ export default function FestivalAllowance() {
 
   // Draft rows whose stored tax no longer matches what the tax works out to now — a payroll month
   // finalized, an earlier bonus finalized, a raise. Finalize must not lock that silently (S751 review).
-  const staleTax = useMemo(() => (ready ? drafts.flatMap(r => {
+  const taxCheck = useMemo(() => (ready ? drafts.flatMap(r => {
     const emp = empMap.get(r.employee_id)
     if (!emp) return []
     const fresh = taxFor(emp, parseFloat(r.amount) || 0)
-    return Math.abs(fresh - (parseFloat(r.tds) || 0)) >= 1 ? [{ row: r, fresh }] : []
+    return Math.abs(fresh - (parseFloat(r.tds) || 0)) >= 1 ? [{ row: r, fresh, kept: !!r.tds_overridden }] : []
   }) : NONE), [ready, drafts, empMap, compsIdx, ytdMap, others, fyStart]) // eslint-disable-line react-hooks/exhaustive-deps
-  const staleSig = staleTax.map(s => `${s.row.id}:${s.row.tds}`).join('|')
-  const taxKept  = staleTax.length > 0 && taxAck === staleSig
+  // A row whose tax a person typed or kept (tds_overridden, S753) is not stale — it is listed in the
+  // Finalize confirmation instead. Before S753 "keep" was a page-session acknowledgement that a
+  // reload forgot.
+  const staleTax = useMemo(() => taxCheck.filter(t => !t.kept), [taxCheck])
+  const keptTax  = useMemo(() => taxCheck.filter(t => t.kept), [taxCheck])
 
   // The month the split rows can be moved to: any month while nothing is finalized, otherwise only
   // the one month every finalized row already carries (a finalized row cannot move).
@@ -312,7 +313,7 @@ export default function FestivalAllowance() {
     const amount = basis === 'monthly' ? Math.round(basic * months / 12) : 0
     return {
       employee_id: emp.id, bs_year: bsYear, bs_month: payMonth, festival_name: festival,
-      pay_basis: basis, basic, months_worked: months, amount, tds: taxFor(emp, amount), status: 'draft',
+      pay_basis: basis, basic, months_worked: months, amount, tds: taxFor(emp, amount), tds_overridden: false, status: 'draft',
     }
   }
 
@@ -367,7 +368,7 @@ export default function FestivalAllowance() {
           const amount = built.pay_basis !== 'monthly' ? (parseFloat(r.amount) || 0) : built.amount
           const patch = {
             pay_basis: built.pay_basis, basic: built.basic, months_worked: built.months_worked,
-            amount, tds: taxFor(emp, amount),
+            amount, tds: taxFor(emp, amount), tds_overridden: false,
           }
           return scopedUpdate(TABLE, patch).eq('id', r.id).eq('status', 'draft').select('id')
         }))
@@ -385,12 +386,25 @@ export default function FestivalAllowance() {
     const targets = staleTax
     setBusy(true); setMsg('')
     const results = await Promise.all(targets.map(({ row, fresh }) =>
-      scopedUpdate(TABLE, { tds: fresh }).eq('id', row.id).eq('status', 'draft').select('id')))
+      scopedUpdate(TABLE, { tds: fresh, tds_overridden: false }).eq('id', row.id).eq('status', 'draft').select('id')))
     await reloadRun()
     setBusy(false)
     if (rowsFailed(results, targets.length, 'did not get the new income tax')) return
-    setTaxAck('')
     setMsg('ok:Income tax brought up to date')
+  }
+
+  // "Keep the tax as entered" (S753): stored on each row, so it survives a reload and a second tab
+  // sees it. A later Recompute, amount change or pay-month move clears it again.
+  async function keepTaxAsEntered() {
+    if (!ready || busy || staleTax.length === 0) return
+    const targets = staleTax
+    setBusy(true); setMsg('')
+    const results = await Promise.all(targets.map(({ row }) =>
+      scopedUpdate(TABLE, { tds_overridden: true }).eq('id', row.id).eq('status', 'draft').select('id')))
+    await reloadRun()
+    setBusy(false)
+    if (rowsFailed(results, targets.length, 'were not marked as kept')) return
+    setMsg('ok:Income tax kept as entered')
   }
 
   // Inline edits are optimistic; a refused write — an error, or an RLS refusal that returns 0 rows
@@ -410,8 +424,8 @@ export default function FestivalAllowance() {
     // Blurring without a change must not recompute — that overwrote a hand-typed tax (S751).
     if (sameMoney(amount, row.amount)) return
     const tds = taxFor(empMap.get(row.employee_id), amount)
-    patchLocal(row.id, { amount, tds })
-    await inlineWrite(row, { amount, tds }, 'The amount')
+    patchLocal(row.id, { amount, tds, tds_overridden: false })
+    await inlineWrite(row, { amount, tds, tds_overridden: false }, 'The amount')
   }
 
   async function updateTds(row, raw, reset) {
@@ -419,8 +433,12 @@ export default function FestivalAllowance() {
     const tds = parseMoney(raw)
     if (tds === null) { reset(); setMsg(`error:The income tax for ${nameOf(row.employee_id)} must be 0 or more.`); return }
     if (sameMoney(tds, row.tds)) return
-    patchLocal(row.id, { tds })
-    await inlineWrite(row, { tds }, 'The income tax')
+    // Stored as typed (S753): a figure that differs from the calculation is flagged, so a later change
+    // to the calculation does not hold up Finalize, and the flag survives a reload.
+    const calculated = taxFor(empMap.get(row.employee_id), parseFloat(row.amount) || 0)
+    const tds_overridden = Math.abs(tds - calculated) >= 1
+    patchLocal(row.id, { tds, tds_overridden })
+    await inlineWrite(row, { tds, tds_overridden }, 'The income tax')
   }
 
   async function updateNote(row, value) {
@@ -440,7 +458,7 @@ export default function FestivalAllowance() {
       body: <p style={{ margin: 0 }}>They are paid nothing from the {festival} {bsYear} allowance{reason ? ` (${reason.toLowerCase()})` : ''}. Their row stays, marked Excluded at 0, so they are not offered again as missing staff and do not hold up Finalize. “Include again” undoes it.</p>,
       run: async () => {
         setBusy(true); setMsg('')
-        const { data, error } = await scopedUpdate(TABLE, { amount: 0, tds: 0, note: EXCLUDED_NOTE }).eq('id', row.id).eq('status', 'draft').select('id')
+        const { data, error } = await scopedUpdate(TABLE, { amount: 0, tds: 0, tds_overridden: false, note: EXCLUDED_NOTE }).eq('id', row.id).eq('status', 'draft').select('id')
         await reloadRun()
         setBusy(false)
         if (error || !data?.length) { setMsg(`error:${nameOf(row.employee_id)} was not removed — the register shows what is stored. ` + (error ? errorLine(error) : 'The run may have been finalized in another tab.')); return }
@@ -454,8 +472,8 @@ export default function FestivalAllowance() {
     const emp = empMap.get(row.employee_id)
     const built = emp ? buildRow(emp) : null
     const patch = built
-      ? { pay_basis: built.pay_basis, basic: built.basic, months_worked: built.months_worked, amount: built.amount, tds: built.tds, note: null }
-      : { amount: 0, tds: 0, note: null }
+      ? { pay_basis: built.pay_basis, basic: built.basic, months_worked: built.months_worked, amount: built.amount, tds: built.tds, tds_overridden: false, note: null }
+      : { amount: 0, tds: 0, tds_overridden: false, note: null }
     setBusy(true); setMsg('')
     const { data, error } = await scopedUpdate(TABLE, patch).eq('id', row.id).eq('status', 'draft').select('id')
     await reloadRun()
@@ -491,7 +509,9 @@ export default function FestivalAllowance() {
         const othersNew = otherBonusesForFy(base.bonuses, newFy, runKey, { bs_year: bsYear, bs_month: m })
         const results = await Promise.all(targets.map(r => {
           const emp = empMap.get(r.employee_id)
-          const patch = { bs_month: m, tds: isExcluded(r) || !emp ? (parseFloat(r.tds) || 0) : taxWith(emp, parseFloat(r.amount) || 0, newFy, ytdNew, othersNew) }
+          const patch = isExcluded(r) || !emp
+            ? { bs_month: m }
+            : { bs_month: m, tds: taxWith(emp, parseFloat(r.amount) || 0, newFy, ytdNew, othersNew), tds_overridden: false }
           return scopedUpdate(TABLE, patch).eq('id', r.id).eq('status', 'draft').select('id')
         }))
         await reloadRun()
@@ -520,10 +540,10 @@ export default function FestivalAllowance() {
 
   function setStatus(status) {
     const toFinal = status === 'finalized'
-    if (toFinal && (flagged.length || amountNeeded.length || splitMonth || drafts.length === 0 || (staleTax.length && !taxKept))) return
+    if (toFinal && (flagged.length || amountNeeded.length || splitMonth || drafts.length === 0 || staleTax.length)) return
     const ids = rows.filter(r => r.status === (toFinal ? 'draft' : 'finalized')).map(r => r.id)
     const verb = toFinal ? 'finalized' : 'reopened'
-    const kept = toFinal && taxKept ? staleTax : NONE
+    const kept = toFinal ? keptTax : NONE
     askConfirm({
       title: `${toFinal ? 'Finalize' : 'Reopen'} the ${festival} ${bsYear} allowance?`,
       confirmLabel: `${toFinal ? 'Finalize' : 'Reopen'} Allowance`, busyLabel: `${toFinal ? 'Finalizing' : 'Reopening'}…`,
@@ -555,8 +575,7 @@ export default function FestivalAllowance() {
           setMsg(`error:${ids.length - n} of the ${ids.length} rows on screen were not ${verb} — the run was changed in another tab (a row edited, removed or already ${verb}). The register now shows what is stored; check it and ${toFinal ? 'finalize' : 'reopen'} again.`)
           return
         }
-        setTaxAck('')
-        setMsg(`ok:${toFinal ? 'Finalized' : 'Reopened'}`)
+            setMsg(`ok:${toFinal ? 'Finalized' : 'Reopened'}`)
       },
     })
   }
@@ -603,7 +622,7 @@ export default function FestivalAllowance() {
 
   const loadError = baseError || runError
   const loading   = !loadError && !ready
-  const taxBlocks = staleTax.length > 0 && !taxKept
+  const taxBlocks = staleTax.length > 0
   const canFinalize = ready && !busy && !typing && drafts.length > 0 && flagged.length === 0 && amountNeeded.length === 0 && !splitMonth && !taxBlocks
   const statusChip = g => (g.finalized === g.count ? { label: 'Finalized', cls: 'badge-green' } : g.finalized === 0 ? { label: 'Draft', cls: 'badge-amber' } : { label: 'Part finalized', cls: 'badge-amber' })
 
@@ -758,14 +777,14 @@ export default function FestivalAllowance() {
             <div role="alert" className="card" style={{ ...amberBanner, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, flex: '1 1 320px' }}>
                 <div style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>
-                  {taxKept ? `Income tax kept as entered on ${staleTax.length} row${staleTax.length === 1 ? '' : 's'}` : `Income tax is out of date on ${staleTax.length} row${staleTax.length === 1 ? '' : 's'}`}
+                  {`Income tax is out of date on ${staleTax.length} row${staleTax.length === 1 ? '' : 's'}`}
                 </div>
                 {staleTax.map(s => `${nameOf(s.row.employee_id)} (NPR ${fmt(s.row.tds)} saved, works out to NPR ${fmt(s.fresh)} now)`).join(', ')}.
                 {' '}A payroll month or another bonus finalized since, a raise, or a tax you typed by hand all do this. Finalize waits until you bring the tax up to date or say the typed figures stay.
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn btn-primary btn-sm" onClick={recomputeTaxNow} disabled={busy}>Recompute tax now</button>
-                {!taxKept && <button className="btn btn-ghost btn-sm" onClick={() => setTaxAck(staleSig)} disabled={busy}>Keep the tax as entered</button>}
+                <button className="btn btn-ghost btn-sm" onClick={keepTaxAsEntered} disabled={busy}>Keep the tax as entered</button>
               </div>
             </div>
           )}

@@ -204,6 +204,9 @@ export function settlementColumns(c, { emp, reason, noticeDays, noticeServed, le
     month_other_deductions: paisa(c.slip.other_deductions),
     month_retirement_contribution: paisa(c.slip.retirement_contribution),
     month_tds: paisa(c.monthTds),
+    // The premiums the final month's tax used (S753) — the TDS certificate reads them, not today's record.
+    life_insurance_premium: parseFloat(emp.life_insurance_premium) || 0,
+    health_insurance_premium: parseFloat(emp.health_insurance_premium) || 0,
     partial_salary: paisa(c.monthIncome),
     tada_amount: c.tadaAmount,
     tada_claim_ids: c.tadaIds,

@@ -185,8 +185,10 @@ Deno.serve(async (req) => {
     const anon = Deno.env.get('SUPABASE_ANON_KEY')!
     const svc  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-    // Service-role client used for all privileged writes
-    const admin = createClient(url, svc, {
+    // Service-role client used for all privileged writes. Re-created once the caller is known (below)
+    // so every PostgREST write carries x-crest-actor — log_audit() reads it to name who acted, since
+    // auth.uid() is NULL under the service role (S753). `let` so the helpers closing over it follow.
+    let admin = createClient(url, svc, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
@@ -521,6 +523,10 @@ Deno.serve(async (req) => {
     })
     const { data: { user }, error: authErr } = await caller.auth.getUser()
     if (authErr || !user) return json({ error: 'Unauthorized' }, 401)
+    admin = createClient(url, svc, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { 'x-crest-actor': user.id } },
+    })
 
     // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
     // identity is already verified above via caller.auth.getUser()

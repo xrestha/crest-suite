@@ -13,7 +13,7 @@ import { BS_MONTHS, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { nepalBs, nepalCivilDate } from '../../../shared/nepalTime'
 import {
   fetchYtdMap, fetchApprovedTadaMap, payslipDrift, periodAdBounds,
-  fetchPayrollEmployees, fetchEmployeesByIds, buildPayrollRows, allocateAdvanceRepayments,
+  fetchPayrollEmployees, fetchEmployeesByIds, buildPayrollRows, allocateAdvanceRepayments, payrollCashCost,
 } from './payrollData'
 import PayslipBody from './PayslipBody'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -544,75 +544,32 @@ export default function PayrollRun() {
     // The advance allocation runs over the FRESH ledgers, through the same dueAdvances() filter the
     // deduction came from. formatAd over Nepal's civil date: the UTC slice is YESTERDAY between 00:00
     // and 05:45 Nepal time, and a viewer abroad would stamp their own calendar's day.
-    const { repayRows, settleIds } = allocateAdvanceRepayments({
+    const { repayRows } = allocateAdvanceRepayments({
       payslips: slips, advances: fresh.advances, repayments: fresh.repayments, period: p, runId,
       repaidDate: formatAd(nepalCivilDate(new Date()) || new Date()),
       note: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year} payroll`,
     })
-    // Exactly the claims these payslips pay — TADA is locked to its claims now (decision 6), so there is
-    // no "cleared to 0, leave the claim Approved" case left to skip.
-    const tadaClaimIds = [...new Set(slips.flatMap(s => (Array.isArray(s.tada_claim_ids) ? s.tada_claim_ids : [])))]
 
-    // Writes to four ledgers, and supabase-js never throws — it resolves `{ error }`. Stop at the first
-    // failure and say which ledger did NOT move (S682). Reopen → Finalize is idempotent (the
-    // delete-then-insert below), so "reopen and finalize again" is always a safe recovery, and the
-    // reload first means the register shows the true state, not the intended one.
-    const failAt = async (what, error) => {
-      await loadAll(p)
-      setMsg('error:' + what + (error ? ' ' + errorText(error, 'operator') : ''))
-      setBusy(false)
-    }
-    // Conditional on still being a draft, and the row count checked: a second tab's Finalize, or an RLS
-    // refusal, is 0 rows and no error — both used to go on to write every ledger a second time.
-    const { data: runRows, error: runErr } = await scopedUpdate('hr_payroll_runs', { status: 'finalized', finalized_at: new Date().toISOString() })
-      .eq('id', runId).eq('status', 'draft').select('id')
-    if (runErr) { await failAt('Payroll was NOT finalized — nothing has changed.', runErr); return }
-    if (!runRows || runRows.length === 0) { await failAt('Payroll was NOT finalized by this click and nothing was changed — the run was no longer a draft (finalized in another tab a moment ago), or this account may not finalize payroll. The page has been reloaded to show its real state.'); return }
-
-    // Re-count AFTER the flip (S751 review). The check above read the payslips before the flip, and a
-    // Regenerate in another tab could delete and rebuild them in the gap. Once the run is finalized the
-    // database locks its payslips, so this count is the final one: if it is not the set that was
-    // checked, the ledgers below would be written from a list the run no longer holds.
-    const { count: slipCount, error: countErr } = await scopedFrom('hr_payslips', 'id', { count: 'exact', head: true }).eq('run_id', runId)
-    if (countErr || slipCount == null) { await failAt('The run is marked finalized, but its payslips could not be re-counted, so nothing else was written — no TADA claims marked Paid, no advance repayments recorded. Reopen it and finalize again.', countErr); return }
-    if (slipCount !== slips.length) {
-      await failAt(`The run was finalized with ${slipCount} payslip${slipCount === 1 ? '' : 's'}, but ${slips.length} were checked — it was regenerated in another tab at the same moment. Nothing else was written: no TADA claims marked Paid, no advance repayments recorded. Reopen it, Regenerate, and finalize again.`)
-      return
-    }
-
-    // TADA BEFORE advances (S751 review). A claim left Approved after its payroll is finalized is payable
-    // a second time — through TADA Claims, or through next month's run, which pays every Approved claim
-    // whose trip is over. An advance recovery left unrecorded is only a ledger that under-reports, and
-    // Reopen → Finalize writes it. So the step whose absence can pay money twice goes first.
-    const tadaNote = tadaClaimIds.length > 0
-      ? ` Its ${tadaClaimIds.length} TADA claim${tadaClaimIds.length === 1 ? ' was' : 's were'} already marked Paid.`
-      : ' It pays no TADA claims.'
-    if (tadaClaimIds.length > 0) {
-      const { data: paidRows, error: tadaErr } = await scopedUpdate('hr_tada_claims', { status: 'paid', paid_at: new Date().toISOString(), paid_method: 'Payroll' })
-        .in('id', tadaClaimIds).eq('status', 'approved').select('id')
-      if (tadaErr) { await failAt(`Payroll is finalized, but ${tadaClaimIds.length} TADA claim(s) paid through it still show as Approved — mark them Paid in TADA Claims so they are not reimbursed twice. Its advance repayments were not recorded yet: Reopen and finalize again once the claims are sorted.`, tadaErr); return }
-      const moved = (paidRows || []).length
-      if (moved < tadaClaimIds.length) {
-        await failAt(`Payroll is finalized, but only ${moved} of the ${tadaClaimIds.length} TADA claims it pays were marked Paid — the other ${tadaClaimIds.length - moved} were no longer Approved when it tried, so they were changed in TADA Claims after the check (rejected, or paid by hand). Open TADA Claims to see where they stand; if any should not be in this payroll, Reopen it, Regenerate and finalize again. Its advance repayments were not recorded yet.`)
-        return
-      }
-    }
-
-    // Idempotent: delete prior auto-repayments for this run, then re-insert
-    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('payroll_run_id', runId)
-    if (delErr) { await failAt('The run is marked finalized, but its advance repayments were not recorded.' + tadaNote + ' Reopen it and finalize again.', delErr); return }
-    if (repayRows.length > 0) {
-      const { error: insErr } = await scopedInsert('hr_advance_repayments', repayRows)
-      if (insErr) { await failAt('The run is marked finalized, but its advance repayments were not recorded.' + tadaNote + ' Reopen it and finalize again.', insErr); return }
-    }
-    if (settleIds.length > 0) {
-      const { error: settleErr } = await scopedUpdate('hr_advances', { status: 'settled' }).in('id', settleIds)
-      if (settleErr) { await failAt(`Repayments were recorded, but ${settleIds.length} fully repaid advance(s) still show as active.${tadaNote} Reopen and finalize again, or settle them in Advances & Loans.`, settleErr); return }
-    }
+    // ONE transaction since S753 (finalize_payroll_run). It was five browser writes — flip the run,
+    // mark TADA paid, delete and re-insert repayments, settle advances — with a payslip RECOUNT after
+    // the flip standing in for "nobody regenerated in between". The function takes the payroll lock,
+    // refuses unless the stored payslips are exactly the ids checked above, re-checks the repayments
+    // add up to each payslip's advance cut, and writes every ledger or none. The advance allocation
+    // stays here: the JS engine owns that arithmetic, and the function validates it.
+    const { data: result, error: finErr } = await supabase.rpc('finalize_payroll_run', {
+      p_run_id: runId,
+      p_payslip_ids: slips.map(s => s.id),
+      p_repayments: repayRows.map(r => ({
+        advance_id: r.advance_id, employee_id: r.employee_id, amount: r.amount,
+        repaid_date: r.repaid_date, notes: r.notes,
+      })),
+    })
+    if (finErr) { await stop('Payroll was NOT finalized — nothing has changed. ' + errorText(finErr, 'operator')); return }
 
     await loadAll(p)
-    const suffix = repayRows.length > 0 ? ` — ${repayRows.length} advance repayment(s) auto-recorded` : ''
-    setMsg('ok:Finalized' + suffix)
+    const n = result?.repayments || 0
+    const t = result?.tada_claims || 0
+    setMsg('ok:Finalized' + (n > 0 ? ` — ${n} advance repayment(s) recorded` : '') + (t > 0 ? ` — ${t} TADA claim(s) marked Paid` : ''))
     setBusy(false)
   }
 
@@ -623,81 +580,21 @@ export default function PayrollRun() {
     setConfirmAction(null)
     setBusy(true); setMsg('')
 
-    // Which advances did THIS run touch? Read them off its own tagged rows before deleting them —
-    // this is the only record of what it settled. Scoped to this run's own advances, a reopen can never
-    // reactivate an advance a Final Settlement closed (S600).
-    //
-    // Both guard reads carry their error (S682): a failed read here used to leave `touchedIds` empty,
-    // delete the run's repayment rows anyway and skip every reactivation. And the run is re-read: a
-    // run another tab already reopened is left alone rather than reset a second time (S751).
-    const failAt = async (what, error) => {
-      await loadAll(p)
-      setMsg('error:' + what + (error ? ' ' + errorText(error, 'operator') : ''))
-      setBusy(false)
-    }
-    // The payslips are re-read too, so the TADA claims reverted below are the ones this run's stored
-    // payslips actually carry — not the page's copy of them (S751 review).
-    const [runRes, ownRes, slipRes] = await Promise.all([
-      scopedFrom('hr_payroll_runs', 'id, status').eq('id', runId).maybeSingle(),
-      scopedFrom('hr_advance_repayments', 'advance_id').eq('payroll_run_id', runId),
-      scopedFrom('hr_payslips', 'id, tada_claim_ids').eq('run_id', runId),
-    ])
-    const readErr = runRes.error || ownRes.error || slipRes.error
-    if (readErr) { setMsg('error:Could not re-read this run, its payslips and its advance repayments, so nothing was changed — try again. ' + errorText(readErr, 'operator')); setBusy(false); return }
-    if (!runRes.data || runRes.data.status !== 'finalized') { await failAt('Nothing was changed by this click — this run is no longer finalized (it was reopened in another tab). The page has been reloaded.'); return }
-    const touchedIds = [...new Set((ownRes.data || []).map(r => r.advance_id))]
-    const notes = []
-
-    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('payroll_run_id', runId)
-    if (delErr) { setMsg('error:Nothing was changed — this run\'s advance repayments could not be removed. Try again. ' + errorText(delErr, 'operator')); setBusy(false); return }
-
-    if (touchedIds.length > 0) {
-      // Fresh reads of the touched advances, not the page's copy — its statuses are whatever they were
-      // when the page loaded. (The repayments trigger now reactivates a settled advance whose balance
-      // returns; this write stays as the belt to that brace.)
-      const [advRes, repRes] = await Promise.all([
-        scopedFrom('hr_advances', 'id, employee_id, amount, status').in('id', touchedIds),
-        scopedFrom('hr_advance_repayments', 'advance_id, amount').in('advance_id', touchedIds),
-      ])
-      const reErrRead = advRes.error || repRes.error
-      if (reErrRead) { await failAt(`This run's repayments were removed, but its ${touchedIds.length} advance(s) could not be re-checked, so none were reactivated. Reactivate them in Advances & Loans, or press Reopen again.`, reErrRead); return }
-      const repaid = {}
-      ;(repRes.data || []).forEach(r => { repaid[r.advance_id] = (repaid[r.advance_id] || 0) + num(r.amount) })
-      // A write-off is a decision, and the repayments trigger leaves it alone — so removing this run's
-      // recovery does not reopen the loan. Named, and never reactivated (the filter below skips it).
-      const writtenOff = (advRes.data || []).filter(a => a.status === 'written_off')
-      if (writtenOff.length > 0) {
-        notes.push(`${writtenOff.map(a => `${nameOf(a.employee_id)}'s advance of NPR ${fmt(a.amount)}`).join(', ')} ${writtenOff.length === 1 ? 'is' : 'are'} written off — ${writtenOff.length === 1 ? 'its write-off does' : 'their write-offs do'} not change, so check ${writtenOff.length === 1 ? 'it' : 'them'} in Advances & Loans.`)
-      }
-      const reactivateIds = (advRes.data || [])
-        .filter(a => a.status === 'settled' && Math.max(0, num(a.amount) - (repaid[a.id] || 0)) > 0.01)
-        .map(a => a.id)
-      if (reactivateIds.length > 0) {
-        const { error: reErr } = await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivateIds)
-        if (reErr) { await failAt(`This run's repayments were removed, but ${reactivateIds.length} advance(s) still show as settled. Reactivate them in Advances & Loans, or press Reopen again.`, reErr); return }
-      }
-    }
-
-    // Revert TADA claims this run auto-marked Paid — but only ones marked paid BY payroll,
-    // never a claim a manager separately paid by hand via TADA Claims.
-    const tadaClaimIds = [...new Set((slipRes.data || []).flatMap(s => (Array.isArray(s.tada_claim_ids) ? s.tada_claim_ids : [])))]
-    if (tadaClaimIds.length > 0) {
-      const { data: revertedRows, error: tadaErr } = await scopedUpdate('hr_tada_claims', { status: 'approved', paid_at: null, paid_method: null })
-        .in('id', tadaClaimIds).eq('paid_method', 'Payroll').select('id')
-      if (tadaErr) { await failAt('Advances were reset, but the TADA claims paid through this run still show as Paid. Press Reopen again, or fix them in TADA Claims.', tadaErr); return }
-      // Carried on rather than stopped: advances are already reset, and leaving the run finalized over
-      // them would be the worse half-state. The shortfall is named in the result instead.
-      const reverted = (revertedRows || []).length
-      if (reverted < tadaClaimIds.length) {
-        notes.push(`Only ${reverted} of the ${tadaClaimIds.length} TADA claims this run paid went back to Approved — the other ${tadaClaimIds.length - reverted} ${tadaClaimIds.length - reverted === 1 ? 'is' : 'are'} no longer marked paid by payroll (changed in TADA Claims, or this account may not reopen them). Check TADA Claims before regenerating, or a claim may be paid twice or not at all.`)
-      }
-    }
-
-    const { data: draftRows, error: draftErr } = await scopedUpdate('hr_payroll_runs', { status: 'draft', finalized_at: null })
-      .eq('id', runId).eq('status', 'finalized').select('id')
-    if (draftErr) { await failAt('Its ledgers were reset, but the run still shows as finalized — press Reopen again.', draftErr); return }
-    if (!draftRows || draftRows.length === 0) { await failAt('Its ledgers were reset, but the run was not returned to draft — it changed in another tab, or this account may not reopen payroll. The page has been reloaded; press Reopen again if it still shows Finalized.'); return }
+    // ONE transaction since S753 (reopen_payroll_run): the repayments this run wrote are deleted (the
+    // status trigger reactivates anything that owes again), the TADA claims IT marked Paid go back to
+    // Approved, and the run returns to draft — all or nothing, under the payroll lock. It used to be
+    // five browser writes, each able to stop half-way with its own recovery message.
+    const { data: result, error: reErr } = await supabase.rpc('reopen_payroll_run', { p_run_id: runId })
     await loadAll(p)
+    if (reErr) { setMsg('error:Nothing was changed — the run was not reopened. ' + errorText(reErr, 'operator')); setBusy(false); return }
+    const notes = []
+    if (result?.written_off) {
+      notes.push(`${result.written_off} ${result.written_off.includes(',') ? 'have advances' : 'has an advance'} that ${result.written_off.includes(',') ? 'are' : 'is'} written off — the write-off does not change, so check Advances & Loans.`)
+    }
+    if ((result?.tada_claims || 0) > (result?.tada_reverted || 0)) {
+      const left = result.tada_claims - result.tada_reverted
+      notes.push(`Only ${result.tada_reverted} of the ${result.tada_claims} TADA claims this run paid went back to Approved — the other ${left} ${left === 1 ? 'is' : 'are'} no longer marked paid by payroll (changed in TADA Claims). Check TADA Claims before regenerating, or a claim may be paid twice or not at all.`)
+    }
     setMsg(notes.length > 0 ? 'error:Reopened — but: ' + notes.join(' ') : 'ok:Reopened'); setBusy(false)
   }
 
@@ -744,6 +641,7 @@ export default function PayrollRun() {
     return a
   }, { gross: 0, ot: 0, absence: 0, ssfEmp: 0, other: 0, advDed: 0, tds: 0, tada: 0, net: 0, ssfEmpr: 0 })
   const totalDeductions = totals.absence + totals.ssfEmp + totals.other + totals.advDed + totals.tds
+  const cost = payrollCashCost(payslips)
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
 
@@ -871,13 +769,18 @@ export default function PayrollRun() {
                 { label: 'Deductions',   value: totalDeductions, color: 'var(--theme-red-text)', tip: 'Everything taken off pay: unpaid days, SSF (11%), other deductions such as CIT, advance recovery, and income tax (TDS).' },
                 { label: 'Net Payable',  value: totals.net, color: 'var(--theme-green-text)', tip: 'Total take-home pay to disburse this period, TADA reimbursements included.' },
                 { label: 'Employer SSF', value: totals.ssfEmpr, color: 'var(--theme-text2)', tip: '20% SSF the company pays on top — not part of net payable.' },
+                {
+                  label: 'Cost to Business', value: cost.total, color: 'var(--theme-text1)',
+                  tip: 'What this month\'s payroll costs the business: pay earned (gross, less unpaid days, plus overtime) plus the employer\'s 20% SSF. It is more than Net Payable because the employee SSF, CIT and income tax withheld are still paid by the business — to the SSF fund and the tax office instead of to staff. Travel claims are reimbursements, not pay, and are shown underneath.',
+                  sub: `NPR ${fmt(cost.earned)} pay + NPR ${fmt(cost.employerSsf)} employer SSF${cost.tada > 0 ? ` · plus NPR ${fmt(cost.tada)} travel claims` : ''}`,
+                },
               ].map(s => (
                 <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                     <Tip text={s.tip} width={260}>{s.label}</Tip>
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>NPR {fmt(s.value)}</div>
-                  <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 3 }}>{payslips.length} payslip{payslips.length === 1 ? '' : 's'}</div>
+                  <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 3 }}>{s.sub || `${payslips.length} payslip${payslips.length === 1 ? '' : 's'}`}</div>
                 </div>
               ))}
             </div>

@@ -292,6 +292,22 @@ export function allocateAdvanceRepayments({ payslips, advances, repayments, peri
   return { repayRows, settleIds }
 }
 
+// What a month's payroll costs the business (S753, from hss-suite's Cost to Company tile): pay
+// actually earned — gross less unpaid days plus overtime — plus the employer's 20% SSF. Net Payable is
+// not that figure: it leaves out the employee SSF, CIT and income tax the business withholds and pays
+// on the staff's behalf, and it includes travel reimbursements, which are not pay. Paisa-rounded.
+export function payrollCashCost(payslips) {
+  const n = v => parseFloat(v) || 0
+  let earned = 0, employerSsf = 0, tada = 0
+  for (const s of payslips || []) {
+    earned += n(s.gross) - n(s.absence_deduction) + n(s.ot_amount)
+    employerSsf += n(s.ssf_employer)
+    tada += n(s.tada_amount)
+  }
+  const r2 = v => Math.round(v * 100) / 100
+  return { total: r2(earned + employerSsf), earned: r2(earned), employerSsf: r2(employerSsf), tada: r2(tada) }
+}
+
 // ── Who a month's payroll covers (S751) ────────────────────────────────────────────────────────
 export const PAYROLL_EMPLOYEE_COLUMNS = 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date, end_date'
 
@@ -396,6 +412,10 @@ export function buildPayrollRows({ runId = null, period, employees, components, 
       run_id: runId, employee_id: emp.id, ...slip,
       advance_deduction: advance,
       tds, tds_overridden: false,
+      // The premiums this month's tax was computed with (S753), so a certificate for a past year is
+      // not recomputed from whatever the employee record says today.
+      life_insurance_premium:   parseFloat(emp.life_insurance_premium) || 0,
+      health_insurance_premium: parseFloat(emp.health_insurance_premium) || 0,
       tada_amount: tadaAmount, tada_claim_ids: tada.ids,
       net_pay: slip.net_pay - tds - advance + tadaAmount,
     }
