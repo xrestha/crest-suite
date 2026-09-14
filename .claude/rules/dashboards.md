@@ -188,6 +188,18 @@ rendered *"Nothing here is a real figure"* directly above *"No outlets in this g
 on failure). The table and both admin panels now wait for a successful read. **A page that branches on
 a module flag or an error owes the reader the sentence for the branch it took.**
 
+## A module section gates on the viewer's rank, not only on the client's module (S750)
+
+`ClientDashboard`'s `showIms` / `showHr` / `showPos` each need BOTH halves: `clientModules.x` (the
+client bought it) and `hasXAccess('staff')` (this login may see it). POS had only the first until
+S750's browser check, so an HR-only login got a Point of Sale section reading Revenue NPR 0, 0 bills,
+0 tables beside the Owner's real figures — the staff-isolation policies return an RLS-empty read, not
+an error, and the section painted it as a quiet day. The same shape one rank deeper: the HR employee
+and payroll tiles are hidden below supervisor (`hasHrAccess('supervisor')`), because `no_hr_staff_rank`
+empties those reads for staff rank. **When a fence is added to a table a dashboard tile reads, gate
+the tile at the same rank in the same change** — the zero is otherwise indistinguishable from a real
+one.
+
 ## The getting-started card is one component with two visibility rules (S697)
 
 `src/pages/dashboard/GettingStartedCard.jsx` is the only place a new owner is told what to do
