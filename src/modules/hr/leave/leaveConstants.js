@@ -46,6 +46,39 @@ export const LEAVE_STATUSES = {
   cancelled: { label: 'Cancelled', color: HR_REQUEST_STATUS.cancelled.tint.color },
 }
 
+/**
+ * `${bsYear}:${bsMonth}:${bsDay}` for every PUBLIC holiday a client has not removed — the set
+ * leaveDayCount() takes. Rows as read from hr_holiday_calendar.
+ */
+export function publicHolidayKeys(holidays) {
+  return new Set((holidays || [])
+    .filter(h => h.holiday_type === 'public' && !h.removed_at)
+    .map(h => `${h.bs_year}:${h.bs_month}:${h.bs_day}`))
+}
+
+/**
+ * What a leave request charges against the balance (decided with Aashish, 2026-09-14): every
+ * calendar day in the range EXCEPT public holidays, 0.5 for a half day. The database derives the
+ * stored figure the same way (hr_leave_requests_validate); this is what the form shows first, and
+ * what approval uses to mark those days Holiday rather than leave. Rostered days off still count.
+ *
+ * @returns {{ days: number, calendarDays: number, holidayDays: Array, chargedDays: Array }}
+ *   `days` is 0 when every day is a holiday — a request the database refuses.
+ */
+export function leaveDayCount(startIso, endIso, dayType, holidayKeys) {
+  const all = workingDaysInRange(startIso, endIso)
+  const isHol = d => !!holidayKeys && holidayKeys.has(`${d.bsYear}:${d.bsMonth}:${d.bsDay}`)
+  const holidayDays = all.filter(isHol)
+  const chargedDays = all.filter(d => !isHol(d))
+  const half = dayType && dayType !== 'full'
+  return {
+    days: chargedDays.length === 0 ? 0 : (half ? 0.5 : chargedDays.length),
+    calendarDays: all.length,
+    holidayDays,
+    chargedDays,
+  }
+}
+
 // Every day in an inclusive AD date range — no day is assumed off automatically (there's no
 // single company-wide off weekday; off days are marked explicitly per employee in Attendance).
 // Returns [{ ad: Date, bsYear, bsMonth, bsDay }]. Used both for the day count and for

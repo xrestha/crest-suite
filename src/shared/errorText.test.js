@@ -80,4 +80,40 @@ describe('errorText', () => {
       expect(errorText(raised('po_has_receipts'), 'operator')).toMatch(/bills/i)
     })
   })
+
+  // S749. Raised by BEFORE triggers and by approve_shift_swap's one transaction.
+  describe('the roster, attendance, leave and overtime refusals', () => {
+    const raised = name => ({ code: 'P0001', message: `${name}: …` })
+
+    it('a finalized month names the way out — reopen the payroll run', () => {
+      expect(errorText(raised('hr_month_finalized'), 'operator')).toMatch(/reopen the payroll run/i)
+      expect(errorText(raised('hr_month_finalized'), 'staff')).toMatch(/ask your manager/i)
+    })
+
+    it('an overlapping leave request says why two requests over one day cannot both stand', () => {
+      expect(errorText(raised('leave_overlap'), 'operator')).toMatch(/balance/i)
+    })
+
+    it('a duplicate overtime day points at editing the entry that exists', () => {
+      const err = { code: '23505', message: 'duplicate key value violates unique constraint "hr_overtime_entries_employee_day_key"' }
+      expect(errorText(err, 'operator')).toMatch(/edit the existing entry/i)
+      expect(errorText(err, 'operator')).toMatch(/twice/i)
+    })
+
+    it('the staff wording for a refused leave or swap says nothing was sent', () => {
+      for (const name of ['leave_all_holidays', 'swap_day_past', 'swap_day_unpublished', 'swap_already_requested']) {
+        expect(errorText(raised(name), 'staff')).toMatch(/nothing was sent/i)
+      }
+    })
+
+    it('a shift type in use offers Active instead of the delete', () => {
+      expect(errorText(raised('shift_type_in_use'), 'operator')).toMatch(/untick active/i)
+    })
+
+    it('every swap refusal says the roster was not changed — the approval is one transaction', () => {
+      for (const name of ['swap_not_pending', 'swap_shift_changed', 'swap_day_taken', 'swap_not_permitted']) {
+        expect(errorText(raised(name), 'operator')).toMatch(/roster was not changed/i)
+      }
+    })
+  })
 })

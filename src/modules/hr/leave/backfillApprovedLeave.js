@@ -54,7 +54,7 @@ export async function backfillApprovedLeave({ clientId, period }) {
 
   // Overlap, not containment: a leave running Ashwin 29 → Kartik 3 belongs partly to this month,
   // and the day filter below keeps only the days that are actually in it.
-  const [reqRes, typeRes, attRes] = await Promise.all([
+  const [reqRes, typeRes, attRes, holRes] = await Promise.all([
     scopedFrom('hr_leave_requests', clientId, 'id, employee_id, leave_type_id, start_date, end_date, day_type')
       .eq('status', 'approved').lte('start_date', monthEnd).gte('end_date', monthStart),
     scopedFrom('hr_leave_types', clientId, 'id, paid'),
@@ -63,10 +63,15 @@ export async function backfillApprovedLeave({ clientId, period }) {
     // read as an error, it reads as free days to fill, which would overwrite real marks.
     fetchAllRows(() => scopedFrom('hr_attendance', clientId, 'employee_id, bs_day')
       .eq('period_id', period.id).order('employee_id').order('bs_day').order('id')),
+    // This month's public holidays: a holiday inside an approved leave is marked Holiday, not
+    // leave — the day the leave does not charge (decided 2026-09-14), the same as approval does.
+    scopedFrom('hr_holiday_calendar', clientId, 'bs_day')
+      .eq('holiday_type', 'public').is('removed_at', null)
+      .eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
   ])
   // A failed read is not "no approved leave" — returning `filled: 0` on an error would report the
   // month as fully synced and hide exactly the days this exists to rescue.
-  const readErr = reqRes.error || typeRes.error || attRes.error
+  const readErr = reqRes.error || typeRes.error || attRes.error || holRes.error
   if (readErr) return { ...empty, error: readErr }
 
   const requests = reqRes.data || []
@@ -74,6 +79,7 @@ export async function backfillApprovedLeave({ clientId, period }) {
   const paidById = Object.fromEntries((typeRes.data || []).map(t => [t.id, t.paid !== false]))
   // Days already carrying a mark — keyed employee:day, so a pre-existing row is never overwritten.
   const taken = new Set((attRes.data || []).map(a => `${a.employee_id}:${a.bs_day}`))
+  const holidayDays = new Set((holRes.data || []).map(h => h.bs_day))
 
   const rows = []
   let skipped = 0
@@ -90,7 +96,7 @@ export async function backfillApprovedLeave({ clientId, period }) {
       // upsert, which Postgres refuses outright ("cannot affect row a second time") and would lose
       // the whole month's back-fill over one double-booking.
       taken.add(key)
-      rows.push({ employee_id: req.employee_id, period_id: period.id, bs_day: d.bsDay, status })
+      rows.push({ employee_id: req.employee_id, period_id: period.id, bs_day: d.bsDay, status: holidayDays.has(d.bsDay) ? 'holiday' : status })
     }
   }
   if (rows.length === 0) return { ...empty, skipped }

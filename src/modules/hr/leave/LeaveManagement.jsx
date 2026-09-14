@@ -5,8 +5,9 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
-import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange } from './leaveConstants'
+import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange, leaveDayCount, publicHolidayKeys } from './leaveConstants'
 import { leaveBalance } from './leaveBalance'
+import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun } from './leaveRules'
 import { backfillApprovedLeave, findApprovedLeaveGaps } from './backfillApprovedLeave'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -68,6 +69,13 @@ export default function LeaveManagement() {
   // Finalized settlements, so an encashed day stops reading as still-available. Loaded here
   // rather than derived, because the Balances tab is the only screen that shows a balance at all.
   const [settlements, setSettlements] = useState([])
+  // Periods whose payroll run is FINALIZED. Approving or cancelling leave in one of those months
+  // would rewrite attendance under issued payslips, so the page refuses it (decided 2026-09-14);
+  // hr_attendance_guard_finalized refuses it too.
+  const [finalizedPeriodIds, setFinalizedPeriodIds] = useState(() => new Set())
+  // Public holidays (Holiday Calendar, public, not removed) as `y:m:d` keys. A public holiday inside
+  // a leave is not charged and is marked Holiday on attendance (decided 2026-09-14).
+  const [holidayKeys, setHolidayKeys] = useState(() => new Set())
   // Someone settled or deactivated vanishes from every HR picker by design — but their balance is
   // exactly what you want to check when a final settlement is being questioned, so the Balances
   // tab can opt them back in.
@@ -132,12 +140,20 @@ export default function LeaveManagement() {
       fetchAllRows(() => scopedFrom('hr_leave_requests').order('start_date', { ascending: false }).order('id')),
       scopedFrom('hr_final_settlements', 'employee_id, leave_type_id, leave_days_encashed, last_working_date, status')
         .eq('status', 'finalized'),
+      // One row per payroll run — a handful per year. Its failure fails the load, because the
+      // finalized-month lock below cannot be checked without it.
+      scopedFrom('hr_payroll_runs', 'period_id, status').eq('status', 'finalized'),
+      // Its failure fails the load too: without it every count and every approval would treat a
+      // public holiday as a leave day.
+      scopedFrom('hr_holiday_calendar', 'bs_year, bs_month, bs_day, holiday_type, removed_at').eq('holiday_type', 'public').is('removed_at', null),
     ])
     const failed = results.find(r => r && r.error)
     if (failed) { loadFailed('leave data', failed.error); return }
-    const [{ data: emps }, { data: pr }, { data: reqs }, { data: setl }] = results
+    const [{ data: emps }, { data: pr }, { data: reqs }, { data: setl }, { data: runs }, { data: hols }] = results
     setTypes(lt); setEmployees(emps || []); setPeriods(pr || []); setRequests(reqs || [])
     setSettlements(setl || [])
+    setFinalizedPeriodIds(new Set((runs || []).map(r => r.period_id)))
+    setHolidayKeys(publicHolidayKeys(hols))
     setLoading(false)
     // After the page is usable, not before it: this is a reconciliation, and a slow extra read
     // must not hold up the queue someone opened the page to work through.
@@ -147,10 +163,13 @@ export default function LeaveManagement() {
   // Write the days for every month that HAS a period and is still missing them. Only reachable
   // from the banner below, which only appears when there is something to write.
   async function fillUnmarked() {
-    if (!gaps?.unmarked?.length) return
+    // A month whose payroll is finalized is not written — its payslips are issued (S749). Those
+    // are named in the banner with the way through instead.
+    const open = (gaps?.unmarked || []).filter(u => !finalizedPeriodIds.has(u.period.id))
+    if (!open.length) return
     setFilling(true); setMsg('')
     let filled = 0, skipped = 0
-    for (const u of gaps.unmarked) {
+    for (const u of open) {
       const r = await backfillApprovedLeave({ clientId, period: u.period })
       if (r.error) {
         setMsg(`error:${filled ? `${filled} day${filled === 1 ? '' : 's'} were marked, but t` : 'T'}he rest could not be — try again. ` + errorText(r.error, 'operator'))
@@ -167,12 +186,21 @@ export default function LeaveManagement() {
 
   // ── New request ───────────────────────────────────────────────────────────
   const previewDays = workingDaysInRange(fStart, fEnd)
-  // Half-day only applies to a single-day request — 0.5 instead of the whole-day count.
-  const previewDaysCount = isSingleDay && fDayType !== 'full' ? 0.5 : previewDays.length
+  // What the request charges: public holidays inside the range are not counted, and a half day is
+  // 0.5. The database derives the stored figure the same way.
+  const preview = leaveDayCount(fStart, fEnd, isSingleDay ? fDayType : 'full', holidayKeys)
+  const previewDaysCount = preview.days
   async function submitRequest() {
     if (!clientId) { setMsg('error:No client selected'); return }
     if (!fEmp || !fType || !fStart || !fEnd) { setMsg('error:Fill employee, type and dates'); return }
     if (previewDays.length === 0) { setMsg('error:No days in that range (end date is before start date)'); return }
+    if (preview.days === 0) { setMsg('error:Every day in that range is a public holiday, so there is no leave to take — nothing was submitted.'); return }
+    // Overlapping requests are refused (decided 2026-09-14) — named here, before the trigger does.
+    const clash = findOverlappingRequest(requests, { employeeId: fEmp, startDate: fStart, endDate: fEnd })
+    if (clash) {
+      setMsg(`error:${empMap[fEmp]?.full_name || 'This employee'} already has a ${clash.status} request for ${bsLabel(clash.start_date)} → ${bsLabel(clash.end_date)}, which shares days with this one. Nothing was submitted — cancel or reject that request first.`)
+      return
+    }
     setBusy(true); setMsg('')
     const { error } = await scopedInsert('hr_leave_requests', {
       employee_id: fEmp, leave_type_id: fType,
@@ -194,13 +222,21 @@ export default function LeaveManagement() {
     const days = workingDaysInRange(req.start_date, req.end_date)
     const rows = []
     const missing = []
+    const fullDay = status === 'paid_leave' || status === 'unpaid_leave'
     days.forEach(d => {
       const p = periodMap[`${d.bsYear}:${d.bsMonth}`]
       if (!p) { missing.push(`${d.bsDay} ${BS_MONTHS[d.bsMonth - 1]} ${d.bsYear}`); return }
-      rows.push({
-        employee_id: req.employee_id, period_id: p.id,
-        bs_day: d.bsDay, status,
-      })
+      // A public holiday inside the leave is not a leave day (decided 2026-09-14): it is marked
+      // Holiday, which is what it is. A half day on a holiday never gets here — it is refused.
+      const dayStatus = holidayKeys.has(`${d.bsYear}:${d.bsMonth}:${d.bsDay}`) ? 'holiday' : status
+      // A full day of leave (or a holiday) was not worked, so the upsert also clears any times,
+      // hours and overtime the day carried — payroll pays OT from every row whatever its status
+      // (S749). A half day keeps them: half of it was worked. Every row in one request has the
+      // same keys either way, which a bulk upsert needs.
+      rows.push(fullDay
+        ? { employee_id: req.employee_id, period_id: p.id, bs_day: d.bsDay, status: dayStatus,
+            hours_worked: 0, ot_hours: 0, start_time: null, end_time: null, break_minutes: null }
+        : { employee_id: req.employee_id, period_id: p.id, bs_day: d.bsDay, status: dayStatus })
     })
     if (rows.length) {
       const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
@@ -228,6 +264,8 @@ export default function LeaveManagement() {
     for (const d of days) {
       const p = periodMap[`${d.bsYear}:${d.bsMonth}`]
       if (!p) continue
+      // A public holiday was marked Holiday, not leave — it stays a holiday when the leave goes.
+      if (holidayKeys.has(`${d.bsYear}:${d.bsMonth}:${d.bsDay}`)) continue
       if (!daysByPeriod.has(p.id)) daysByPeriod.set(p.id, [])
       daysByPeriod.get(p.id).push(d.bsDay)
     }
@@ -237,11 +275,54 @@ export default function LeaveManagement() {
     return results.find(r => r && r.error)?.error || null
   }
 
-  async function approveRequest(req) {
+  // The months a request touches whose payroll is finalized, as words — or '' when none are.
+  function lockedMonthsLabel(req) {
+    return finalizedMonthsFor(req, periods, finalizedPeriodIds)
+      .map(m => `${BS_MONTHS[m.bsMonth - 1]} ${m.bsYear}`).join(', ')
+  }
+
+  function approveRequest(req) {
     if (!clientId) { setMsg('error:No client selected'); return }
     const type = typeMap[req.leave_type_id]
     if (!type) { setMsg('error:Leave type missing'); return }
+    const locked = lockedMonthsLabel(req)
+    if (locked) {
+      setMsg(`error:Payroll for ${locked} is already finalized, so this leave cannot be approved — it would change attendance under payslips that have been issued. Reopen that payroll run first, or reject the request.`)
+      return
+    }
+    // Over the yearly quota: warn and let the manager decide (decided 2026-09-14). It used to
+    // approve silently and only turn the balance red.
+    const overrun = quotaOverrun({ requests, settlements, leaveType: type, request: req })
+    if (overrun) {
+      const emp = empMap[req.employee_id]
+      askConfirm({
+        title: 'Approve leave over the yearly quota?',
+        confirmLabel: 'Approve Anyway', busyLabel: 'Approving…',
+        body: (
+          <p style={{ margin: 0 }}>
+            Approving this puts {emp?.full_name || 'the employee'} at <strong>{fmt(overrun.after)} days</strong> of {type.name} for BS {overrun.bsYear} —{' '}
+            <strong>{fmt(overrun.over)} day{overrun.over === 1 ? '' : 's'} over</strong> the {fmt(overrun.quota)}-day quota.
+            {type.paid ? ' Every day of it is marked as paid leave. To pay only the days within the quota, reject this and file the extra days as Unpaid Leave.' : ''}
+          </p>
+        ),
+        run: async () => { await approveRequestNow(req, type) },
+      })
+      return
+    }
+    approveRequestNow(req, type)
+  }
+
+  async function approveRequestNow(req, type) {
     setBusy(true); setMsg('')
+    // Re-read the request's status first, the decide path's guard mirrored: approving off a stale
+    // 'pending' would mark attendance for a request someone else has since rejected or cancelled.
+    const { data: fresh, error: freshErr } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
+    if (freshErr) { setMsg('error:Could not check this request\'s current status, so nothing was changed — try again. ' + errorText(freshErr, 'operator')); setBusy(false); return }
+    if (fresh?.status !== 'pending') {
+      await load()
+      setMsg(`error:${fresh ? `Someone else changed this request first — it now shows ${LEAVE_STATUSES[fresh.status]?.label || fresh.status}` : 'That request no longer exists'}, so it was not approved. The list has been refreshed.`)
+      setBusy(false); return
+    }
     const isHalf = req.day_type && req.day_type !== 'full'
     const status = type.paid
       ? (isHalf ? 'half_paid_leave' : 'paid_leave')
@@ -276,6 +357,13 @@ export default function LeaveManagement() {
     if (!clientId) { setMsg('error:No client selected'); return }
     const verb = newStatus === 'rejected' ? 'Reject' : 'Cancel'
     const emp = empMap[req.employee_id]
+    // Cancelling an APPROVED request deletes its attendance days; in a finalized month those days
+    // are what the issued payslip was built from (S749). A pending request touches no attendance.
+    const locked = req.status === 'approved' ? lockedMonthsLabel(req) : ''
+    if (locked) {
+      setMsg(`error:Payroll for ${locked} is already finalized, so this approved leave cannot be ${verb.toLowerCase()}ed — its days are on payslips that have been issued. Reopen that payroll run first.`)
+      return
+    }
     // Deciding an APPROVED request reverts its attendance marks — pay for daily staff — so the
     // ask names that (S682; was window.confirm).
     askConfirm({
@@ -283,7 +371,7 @@ export default function LeaveManagement() {
       confirmLabel: `${verb} Request`, danger: true, busyLabel: `${verb === 'Reject' ? 'Rejecting' : 'Cancelling'}…`,
       body: (
         <p style={{ margin: 0 }}>
-          {emp?.full_name || 'The employee'}'s {req.days} day{req.days === 1 ? '' : 's'} from {req.start_date} to {req.end_date}{' '}
+          {emp?.full_name || 'The employee'}'s {fmt(req.days)} day{req.days === 1 ? '' : 's'} from {bsLabel(req.start_date)} to {bsLabel(req.end_date)}{' '}
           {req.status === 'approved'
             ? 'are already approved and marked on the attendance sheet — those days go back to unmarked and the leave balance is restored.'
             : 'are marked ' + verb.toLowerCase() + 'ed and the balance is untouched.'}
@@ -333,6 +421,12 @@ export default function LeaveManagement() {
   // axis, so both pass.
   function reopenRequest(req) {
     const emp = empMap[req.employee_id]
+    // Back to Pending is an open request again, so it may not share days with another one.
+    const clash = findOverlappingRequest(requests, { employeeId: req.employee_id, startDate: req.start_date, endDate: req.end_date, excludeId: req.id })
+    if (clash) {
+      setMsg(`error:${emp?.full_name || 'This employee'} now has a ${clash.status} request for ${bsLabel(clash.start_date)} → ${bsLabel(clash.end_date)}, which shares days with this one, so it cannot be reopened. Cancel or reject that request first.`)
+      return
+    }
     askConfirm({
       title: 'Reopen this leave request?',
       confirmLabel: 'Reopen Request', busyLabel: 'Reopening…',
@@ -442,16 +536,32 @@ export default function LeaveManagement() {
           Could not check whether approved leave has reached the attendance sheets — this page cannot
           confirm that it has. Reload to try again.
         </div>
-      ) : (gaps?.unmarked?.length || gaps?.waiting?.length) ? (
+      ) : (gaps?.unmarked?.length || gaps?.waiting?.length) ? (() => {
+        // A month whose payroll is finalized cannot be written (S749), so its missing days get
+        // their own sentence naming the way through, and the button acts on the rest only.
+        const unmarkedOpen = gaps.unmarked.filter(u => !finalizedPeriodIds.has(u.period.id))
+        const unmarkedPaid = gaps.unmarked.filter(u => finalizedPeriodIds.has(u.period.id))
+        const sum = list => list.reduce((a, u) => a + u.days, 0)
+        const months = list => list.map(u => `${BS_MONTHS[u.period.bs_month - 1]} ${u.period.bs_year}`).join(', ')
+        const n = sum(unmarkedOpen), paid = sum(unmarkedPaid)
+        return (
         <div role="alert" className="card" style={{ ...amberBanner, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, flex: '1 1 320px' }}>
-            {gaps.unmarked.length > 0 && (
+            {unmarkedOpen.length > 0 && (
               <div>
                 <strong style={{ color: 'var(--theme-amber-text)' }}>
-                  {gaps.unmarked.reduce((a, u) => a + u.days, 0)} day{gaps.unmarked.reduce((a, u) => a + u.days, 0) === 1 ? '' : 's'} of approved leave {gaps.unmarked.reduce((a, u) => a + u.days, 0) === 1 ? 'is' : 'are'} not on the attendance sheet
+                  {n} day{n === 1 ? '' : 's'} of approved leave {n === 1 ? 'is' : 'are'} not on the attendance sheet
                 </strong>{' '}
-                ({gaps.unmarked.map(u => `${BS_MONTHS[u.period.bs_month - 1]} ${u.period.bs_year}`).join(', ')}).
+                ({months(unmarkedOpen)}).
                 Payroll reads the sheet, so unpaid leave on those days is not being deducted.
+              </div>
+            )}
+            {unmarkedPaid.length > 0 && (
+              <div style={{ marginTop: unmarkedOpen.length ? 6 : 0 }}>
+                <strong style={{ color: 'var(--theme-amber-text)' }}>
+                  {paid} day{paid === 1 ? '' : 's'} of approved leave {paid === 1 ? 'is' : 'are'} missing from {months(unmarkedPaid)}, whose payroll is already finalized
+                </strong>{' '}
+                — those payslips were issued without them. Reopen that payroll run, then press Mark approved leave, then finalize again.
               </div>
             )}
             {gaps.waiting.length > 0 && (
@@ -460,15 +570,16 @@ export default function LeaveManagement() {
               </div>
             )}
           </div>
-          {gaps.unmarked.length > 0 && (
-            <Tip text="Writes the approved leave days onto those months' attendance sheets. A day that already carries a mark is left exactly as it is." width={260}>
+          {unmarkedOpen.length > 0 && (
+            <Tip text="Writes the approved leave days onto those months' attendance sheets. A day that already carries a mark is left exactly as it is. A month whose payroll is finalized is not touched." width={260}>
               <button className="btn btn-primary btn-sm" onClick={fillUnmarked} disabled={filling || busy}>
                 {filling ? 'Marking…' : 'Mark approved leave'}
               </button>
             </Tip>
           )}
         </div>
-      ) : null}
+        )
+      })() : null}
 
       <div className="tab-bar" style={{ marginBottom: 18 }}>
         {[{ id: 'requests', label: 'Requests' }, { id: 'balances', label: 'Balances' }, { id: 'types', label: 'Leave Types' }].map(t => (
@@ -523,8 +634,10 @@ export default function LeaveManagement() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, flexWrap: 'wrap', gap: 8 }}>
               <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                <Tip text="Every day in the picked range counts against the balance — there's no automatic day-off exclusion. Adjust the dates if the employee has a day off within this range." width={260}>
-                  {fStart && fEnd ? `${fmt(previewDaysCount)} day${previewDaysCount === 1 ? '' : 's'}` : 'Pick a date range'}
+                <Tip text="Every day in the picked range counts against the balance except public holidays from the Holiday Calendar, which are marked Holiday instead. Rostered days off still count — adjust the dates if the employee has one within this range." width={260}>
+                  {fStart && fEnd
+                    ? `${fmt(previewDaysCount)} day${previewDaysCount === 1 ? '' : 's'}${preview.holidayDays.length ? ` · ${preview.holidayDays.length} public holiday${preview.holidayDays.length === 1 ? '' : 's'} not counted` : ''}`
+                    : 'Pick a date range'}
                 </Tip>
               </span>
               <button className="btn btn-primary" onClick={submitRequest} disabled={busy} style={{ fontSize: 13 }}>{busy ? 'Saving…' : 'Submit Request'}</button>
@@ -541,7 +654,7 @@ export default function LeaveManagement() {
                     <th>Dates (BS)</th>
                     <th>Reason</th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Days in the range — every calendar day counts, half-day requests show 0.5." width={240}>Days</Tip>
+                      <Tip text="Days charged — every calendar day in the range except public holidays; half-day requests show 0.5." width={240}>Days</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Remaining balance for this leave type after approved leave this BS year." width={250}>Balance</Tip>
@@ -607,7 +720,7 @@ export default function LeaveManagement() {
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request clears those attendance days back to blank — not to Present, since the system has no way to know whether the employee actually worked; re-mark them in Attendance if they did. Every day in the range is included — mark the employee's own off days separately in Attendance if the range spans one. Leave approved for a month that has not been created yet cannot be marked on an attendance sheet that does not exist — those days are written automatically the moment that month is opened, and the banner at the top of this page counts anything still waiting. A request rejected or cancelled by mistake can be put back to Pending with <strong>Reopen</strong> (HR managers and the owner) — it keeps the original dates and reason, and marks nothing until it is approved again.
+            Approving a request marks those days in Attendance (paid or unpaid leave) for the matching month — so Payroll deducts unpaid leave automatically. Rejecting or cancelling an approved request clears those attendance days back to blank — not to Present, since the system has no way to know whether the employee actually worked; re-mark them in Attendance if they did. Every day in the range counts except public holidays from the Holiday Calendar, which are not charged and are marked Holiday on the sheet — a rostered day off still counts, so adjust the dates if the range spans one. Leave approved for a month that has not been created yet cannot be marked on an attendance sheet that does not exist — those days are written automatically the moment that month is opened, and the banner at the top of this page counts anything still waiting. A request rejected or cancelled by mistake can be put back to Pending with <strong>Reopen</strong> (HR managers and the owner) — it keeps the original dates and reason, and marks nothing until it is approved again. Two open or approved requests for the same employee cannot share a day. Approving past the yearly quota asks first. Once payroll for a month is finalized, leave touching that month can no longer be approved or cancelled — reopen the payroll run first.
           </div>
         </div>
       ) : tab === 'balances' ? (
@@ -701,7 +814,13 @@ export default function LeaveManagement() {
                   {types.map(t => (
                     <tr key={t.id}>
                       <td>
-                        <input aria-label={`Name — ${t.name}`} defaultValue={t.name} onBlur={e => updateType(t.id, { name: e.target.value })}
+                        <input aria-label={`Name — ${t.name}`} defaultValue={t.name}
+                          onBlur={e => {
+                            const name = e.target.value.trim()
+                            if (name === t.name) return
+                            if (!name) { e.target.value = t.name; setMsg('error:A leave type needs a name — it was put back.'); return }
+                            updateType(t.id, { name })
+                          }}
                           style={{ ...inp, width: '100%', color: typeText(t.color), fontWeight: 600 }} />
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -709,7 +828,15 @@ export default function LeaveManagement() {
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <input aria-label={`Annual quota — ${t.name}`} type="number" min="0" step="0.5" defaultValue={t.annual_quota}
-                          onBlur={e => updateType(t.id, { annual_quota: parseFloat(e.target.value) || 0 })}
+                          onBlur={e => {
+                            // Blank means 0 (uncapped), as the tip says. Anything that is not a
+                            // number of days is put back — it used to become 0, i.e. UNCAPPED.
+                            const raw = e.target.value.trim()
+                            const n = raw === '' ? 0 : Number(raw)
+                            if (!Number.isFinite(n) || n < 0) { e.target.value = t.annual_quota; setMsg('error:Annual Quota must be a number of days, 0 or more (0 means uncapped) — it was put back.'); return }
+                            if (n === parseFloat(t.annual_quota)) return
+                            updateType(t.id, { annual_quota: n })
+                          }}
                           style={{ ...inp, width: 90, textAlign: 'right' }} />
                       </td>
                       <td style={{ textAlign: 'center' }}>

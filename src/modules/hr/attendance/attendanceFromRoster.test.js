@@ -48,7 +48,7 @@ describe('buildAttendanceFromRoster', () => {
     ])
   })
 
-  test('a roster row pointing to a zero-hour shift NOT named like an off day is marked holiday', () => {
+  test('a roster row pointing to a zero-hour shift named like nothing is marked Off — only a "holiday" name pays as a holiday (S749)', () => {
     const rows = buildAttendanceFromRoster({
       rosterRows: [{ employee_id: 'e1', shift_type_id: 'custom', bs_day: 5 }],
       shiftTypesById,
@@ -58,7 +58,7 @@ describe('buildAttendanceFromRoster', () => {
       periodId: 'p1',
     })
     expect(rows).toEqual([
-      { employee_id: 'e1', period_id: 'p1', bs_day: 5, status: 'holiday', hours_worked: 0, ot_hours: 0, note: null },
+      { employee_id: 'e1', period_id: 'p1', bs_day: 5, status: 'weekly_off', hours_worked: 0, ot_hours: 0, note: null },
     ])
   })
 
@@ -155,7 +155,7 @@ describe('zeroHourStatus', () => {
     ['OFF DAY',           'weekly_off'],
     ['Day Off',           'weekly_off'],
     ['',                  'weekly_off'],
-    ['Training',          'holiday'],
+    ['Training',          'weekly_off'],
   ])('%s → %s', (name, status) => {
     expect(zeroHourStatus(name)).toBe(status)
   })

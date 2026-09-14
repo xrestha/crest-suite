@@ -36,6 +36,11 @@ const TABLE_LABELS = {
   hr_leave_types:         'Leave Type',
   hr_leave_requests:      'Leave Request',
   hr_holiday_calendar:    'Holiday',   // audited since S748 — a holiday's type sets the 2× OT rate
+  // audited since S749 — an approved entry is pay; a shift type decides Generate from Roster;
+  // a swap approval changes who works a day
+  hr_overtime_entries:    'Overtime',
+  hr_shift_types:         'Shift Type',
+  hr_shift_swap_requests: 'Shift Swap',
   // POS module
   pos_orders:             'POS Order',
   pos_credit_notes:       'Credit Note',

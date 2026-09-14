@@ -172,6 +172,85 @@ const rules = [
     operator: 'Bills have already been received against this purchase order, and deleting it would cut them loose from the order they came from. Nothing was removed. Cancel the order instead — it keeps the record and stops further receiving — or delete those bills in Purchases first.',
   },
 
+  // ── HR: Roster, Attendance, Leave, Overtime (S749) ──────────────────────────────────────────
+  // Every one of these is raised by a BEFORE trigger or inside approve_shift_swap's single
+  // transaction, so the record is exactly as it was — which is what lets each of them say so.
+  {
+    test: e => /hr_month_finalized/i.test(e.message || ''),
+    staff: "Payroll for that month has already been finalized, so it can't be changed. Nothing was changed — ask your manager.",
+    operator: 'Payroll for that month is finalized and its payslips were built from these records, so nothing was changed. Reopen the payroll run for that month first if it really needs correcting, then finalize it again.',
+  },
+  {
+    test: e => /leave_overlap/i.test(e.message || ''),
+    staff: 'You already have a leave request covering some of those days. Nothing was sent — cancel or change that one first.',
+    operator: 'This employee already has a pending or approved leave request covering some of those days, so nothing was saved. Two requests over one day would both count against the balance. Cancel or reject the other request first.',
+  },
+  {
+    test: e => /leave_dates_invalid|leave_half_day_range|leave_range_too_long/i.test(e.message || ''),
+    staff: 'Those dates were not accepted — check the start and end date (a half day is a single date). Nothing was sent.',
+    operator: 'Those dates were not accepted — the end date must not be before the start date, a half-day request covers a single date, and one request covers at most a year. Nothing was saved.',
+  },
+  {
+    test: e => /leave_all_holidays/i.test(e.message || ''),
+    staff: 'Every day you picked is a public holiday, so there is no leave to take. Nothing was sent.',
+    operator: 'Every day in this request is a public holiday in the Holiday Calendar, so it charges no leave and was not saved. Public holidays inside a leave are not counted against the balance.',
+  },
+  {
+    test: e => /swap_day_past/i.test(e.message || ''),
+    staff: 'One of those days has already gone, so it cannot be swapped. Nothing was sent.',
+    operator: 'One of those days has already passed, so the swap was not requested.',
+  },
+  {
+    test: e => /swap_day_unpublished/i.test(e.message || ''),
+    staff: "That day's roster hasn't been published yet, so it cannot be swapped. Nothing was sent.",
+    operator: 'That day of the roster has not been published, so the swap was not requested.',
+  },
+  {
+    test: e => /swap_already_requested/i.test(e.message || ''),
+    staff: 'One of those shifts already has a swap waiting. Wait for it to be decided, or withdraw it first. Nothing was sent.',
+    operator: 'One of those shifts already has a swap request waiting, so a second one was not created.',
+  },
+  {
+    test: e => /leave_type_invalid/i.test(e.message || ''),
+    staff: "That leave type isn't available any more. Reopen the form and pick another. Nothing was sent.",
+    operator: 'That leave type is not one of this client’s active types. Nothing was saved.',
+  },
+  {
+    test: e => /shift_type_in_use/i.test(e.message || ''),
+    staff: 'That shift is still on the roster, so it cannot be deleted.',
+    operator: 'That shift type is still used on the roster, so it was not deleted — deleting it would blank those days, and Generate from Roster would then mark them Off. Untick Active instead: it disappears from the picker and every assigned day keeps its shift.',
+  },
+  {
+    test: e => /hr_shift_types_client_name_key/i.test(e.message || ''),
+    staff: 'A shift with that name already exists.',
+    operator: 'A shift type with that name already exists for this client. Use a different name (for example "Morning – Kitchen"), or edit the existing one.',
+  },
+  {
+    test: e => /hr_overtime_entries_employee_day_key/i.test(e.message || ''),
+    staff: 'Overtime is already recorded for that person on that day.',
+    operator: 'This employee already has an overtime entry for that day, so nothing was saved — each approved entry is paid, so a second one would pay the same day twice. Edit the existing entry and add the hours to it.',
+  },
+  {
+    test: e => /swap_not_pending|swap_not_found/i.test(e.message || ''),
+    staff: 'That swap has already been decided or withdrawn.',
+    operator: 'That swap is no longer waiting for approval — it was withdrawn, or someone else decided it first. The roster was not changed. The list has been refreshed.',
+  },
+  {
+    test: e => /swap_shift_changed|swap_shift_missing/i.test(e.message || ''),
+    staff: 'The roster changed after that swap was asked for.',
+    operator: 'The roster has changed since this swap was requested — one of those days no longer carries the shift the two employees agreed to trade. The roster was not changed. Reject the swap and ask them to request it again from the new roster.',
+  },
+  {
+    test: e => /swap_day_taken/i.test(e.message || ''),
+    staff: 'One of you already works the other day.',
+    operator: 'One of the two employees is already rostered on the day they would be moving onto, so the swap would give them two shifts on one day. The roster was not changed. Adjust the roster first, or reject the swap.',
+  },
+  {
+    test: e => /swap_not_permitted/i.test(e.message || ''),
+    staff: "You're not allowed to do that.",
+    operator: 'This account could not change the roster or the swap request — approving a swap needs HR supervisor rank or above. The roster was not changed.',
+  },
+
   // force_delete_item refused. Both of its refusals happen BEFORE anything is written, which is
   // the one thing worth saying: the previous browser-side loop could not promise that.
   {

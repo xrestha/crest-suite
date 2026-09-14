@@ -274,6 +274,19 @@ describe('computePayslip — daily basis', () => {
     expect(slip.ot_amount).toBe(750)  // 4 * (1000/8) * 1.5
     expect(slip.net_pay).toBe(23750)
   })
+
+  // S749: Labour Act s.41 gives every worker paid public holidays, and a daily-wage employee was
+  // paid nothing for a Holiday day — so a paid leave over a holiday (marked Holiday) paid a day less.
+  test('a Holiday day is paid, like paid leave; an Off day is not', () => {
+    const employee = { pay_basis: 'daily', basic_salary: 1000, ssf_enrolled: false }
+    const slip = computePayslip(employee, [], [
+      ...Array(20).fill({ status: 'present' }),
+      { status: 'holiday' }, { status: 'holiday' },
+      { status: 'weekly_off' },
+    ], period)
+    expect(slip.worked_days).toBe(22)
+    expect(slip.gross).toBe(22000)
+  })
 })
 
 describe('computePayslip — hourly basis', () => {
@@ -289,6 +302,20 @@ describe('computePayslip — hourly basis', () => {
     expect(slip.gross).toBe(24450)   // 150 * ((160 - 5 OT) + 8)
     expect(slip.ot_amount).toBe(1125) // 5 * 150 * 1.5
     expect(slip.net_pay).toBe(25575)
+  })
+
+  test('a Holiday day credits a standard 8-hour day too (S749)', () => {
+    const employee = { pay_basis: 'hourly', basic_salary: 100, ssf_enrolled: false }
+    const slip = computePayslip(employee, [], [
+      { status: 'present', hours_worked: 40 }, { status: 'holiday' }, { status: 'weekly_off' },
+    ], period)
+    expect(slip.breakdown.paidHours).toBe(48)
+    expect(slip.gross).toBe(4800)
+  })
+
+  test('a monthly employee\'s pay does not move for a Holiday day', () => {
+    const employee = { pay_basis: 'monthly', basic_salary: 31000, ssf_enrolled: false }
+    expect(computePayslip(employee, [], [{ status: 'holiday' }], { bs_year: 2082, bs_month: 1 }).net_pay).toBe(31000)
   })
 
   // S742: OT hours sit inside hours_worked, so paying the ordinary wage on all of them and then

@@ -16,14 +16,14 @@ function resolveRegular(val) {
 }
 
 export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes }) {
-  const { scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const [editing, setEditing] = useState(null)
   const [adding,  setAdding]  = useState(false)
   const [form,    setForm]    = useState(EMPTY_FORM)
   const [saving,  setSaving]  = useState(false)
   const [error,   setError]   = useState(null)
-  // Pending delete awaiting its ConfirmModal: { shift, run }. A deleted shift type SET NULLs every
-  // hr_roster row pointing at it (FK is ON DELETE SET NULL), so the confirm has to say that.
+  // Pending delete awaiting its ConfirmModal: { shift, run }. Only reachable for a shift type the
+  // roster does not use (S749) — see deleteShift.
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmBusy,    setConfirmBusy]    = useState(false)
 
@@ -82,7 +82,23 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
     if (data) setShiftTypes(prev => prev.map(x => x.id === data.id ? data : x))
   }
 
-  function deleteShift(s) {
+  // Refused while the roster uses it (decided 2026-09-14). hr_roster.shift_type_id is ON DELETE SET
+  // NULL, so the delete blanked those days, and Generate from Roster then read each blank row as a
+  // zero-hour marker and wrote Off — a daily-wage employee's rostered working days stopped paying.
+  // hr_shift_types_guard_delete refuses it too; this says so before anything is attempted, and a
+  // count that could not be read refuses as well.
+  async function deleteShift(s) {
+    setError(null)
+    const { count, error: countErr } = await scopedFrom('hr_roster', 'id', { count: 'exact', head: true }).eq('shift_type_id', s.id)
+    if (countErr) {
+      const a = asActionError(countErr, 'operator')
+      setError({ text: `Could not check whether "${s.name}" is on the roster, so it was not deleted. Reload to try again. ` + a.text, detail: a.detail })
+      return
+    }
+    if (count > 0) {
+      setError(`"${s.name}" is on the roster for ${count} day${count === 1 ? '' : 's'}, so it cannot be deleted — deleting it would blank those days, and Generate from Roster would then mark them Off. Untick Active instead: it disappears from the shift picker and every assigned day keeps its shift.`)
+      return
+    }
     setPendingConfirm({
       shift: s,
       run: async () => {
@@ -313,6 +329,7 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 10, marginBottom: 0 }}>
+        Each shift type needs its own name. A shift type used on the roster cannot be deleted — untick Active to retire it.
         Leave Hours blank to auto-calculate from start/end times. Overnight shifts (e.g. Night 21:00–07:00) wrap past midnight automatically.
         Normal hrs splits a long shift into normal time and overtime (e.g. 12h with 9 normal = 3h OT); blank means the whole shift is normal time.
         Attendance → Generate from Roster reads a zero-hour shift by its name: "PAID LEAVE" becomes Paid Leave, any other "LEAVE" becomes Unpaid Leave, "Holiday" becomes Holiday, and "OFF DAY" becomes Off.
@@ -328,10 +345,10 @@ export default function ShiftSettingsPanel({ clientId, shiftTypes, setShiftTypes
           onCancel={() => setPendingConfirm(null)}
         >
           <p style={{ margin: '0 0 8px' }}>
-            Every roster cell that uses it goes blank — the days stay on the board with no shift assigned, and the
-            hours it carried drop out of the labour forecast and Attendance → Generate from Roster.
+            Nothing on the roster uses it, so no day changes. It disappears from the shift picker, and a past
+            swap request that named it shows a dash where the shift name was.
           </p>
-          <p style={{ margin: 0 }}>To keep the history, untick Active instead: an inactive shift type is hidden from the picker but existing assignments are preserved.</p>
+          <p style={{ margin: 0 }}>To keep it for later, untick Active instead — an inactive shift type is hidden from the picker and can be switched back on.</p>
         </ConfirmModal>
       )}
     </div>

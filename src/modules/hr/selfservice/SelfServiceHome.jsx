@@ -334,7 +334,9 @@ export default function SelfServiceHome() {
   }
 
   const coworkerNames = [...new Map(coworkerRoster.map(r => [r.employee_id, r.full_name])).entries()]
-  const coworkerDays = coworkerRoster.filter(r => r.employee_id === swapTargetEmpId)
+  // Not a day already gone — request_shift_swap refuses one (S749), so the picker does not offer it.
+  const coworkerDays = coworkerRoster.filter(r => r.employee_id === swapTargetEmpId
+    && (swapDay.bsYear * 10000 + swapDay.bsMonth * 100 + r.bs_day) >= (today.year * 10000 + today.month * 100 + today.day))
 
   async function submitSwapRequest() {
     if (!swapTargetEmpId || !swapTargetDay) { setSwapMsg('Pick a colleague and one of their scheduled days.'); return }
@@ -677,7 +679,7 @@ export default function SelfServiceHome() {
                 </select>
               </div>
             )}
-            {days > 0 && <div style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{days} day{days !== 1 ? 's' : ''} will be deducted.</div>}
+            {days > 0 && <div style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Up to {days} day{days !== 1 ? 's' : ''} will be deducted — any public holiday inside these dates is not counted.</div>}
             <div className="ss-field">
               <label htmlFor="ss-leave-reason">Reason</label>
               <textarea id="ss-leave-reason" style={{ ...inp, height: 76, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />

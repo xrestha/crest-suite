@@ -3,10 +3,10 @@ import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
-import { errorText } from '../../../shared/errorText'
+import { errorText, errorLine } from '../../../shared/errorText'
+import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import Tip from '../../../components/Tip'
 import { HR_REQUEST_STATUS } from '../payrollConstants'
-import { errorLine } from '../../../shared/errorText'
 
 // The Shift Swaps tab: the queue of swaps waiting on a manager's sign-off, and the permanent
 // record of every one already decided.
@@ -17,18 +17,15 @@ import { errorLine } from '../../../shared/errorText'
 // sharing the board's period controls. It is a tab of its own now, and the pending count rides
 // on the tab button so moving it off the board doesn't bury an action queue.
 //
-// Approving trades the employee_id on the two underlying hr_roster rows — each day keeps its own
-// shift, only who's scheduled on it changes (per Help.js's own description of this feature).
-// Found live (2026-07-28): the original two-step version (target's row -> requester's id, then
-// requester's row -> target's id) assumed the two swapped days are always different, which breaks
-// the moment they're the SAME calendar day (e.g. trading Morning<->Afternoon on one date — a
-// normal request, not an edge case): for one instant two rows would share the same
-// (client_id,employee_id,bs_year,bs_month,bs_day) key, which the unique constraint rejects no
-// matter which row is updated first. Routed around it with a 3-step dance through an impossible
-// sentinel bs_day (hr_roster.bs_day has no range CHECK, unlike every other bs_day column in this
-// schema, so -1 can never collide with a real row): park the requester's row on the sentinel day,
-// move the target's row onto the requester's old identity, then bring the requester's row back
-// onto the target's old identity. Each step only ever collides with itself.
+// Approving trades who works each of the two days — each day keeps its own shift (per Help.js's
+// own description of this feature). Since S749 that is ONE call, `approve_shift_swap`, a single
+// transaction. The browser version it replaced ran up to five writes with a hand-rolled rollback
+// (a sentinel bs_day of -1 to get two rows past the unique constraint on a same-day swap), never
+// re-checked the request was still waiting — a swap the requester had withdrawn could be approved —
+// never checked the two days still carried the shifts that were agreed, and dropped the error on
+// the final status write: a same-day swap whose status write failed stayed in the queue, and
+// approving it again swapped the two people straight back. The function refuses each of those by
+// name, and every refusal leaves the roster exactly as it was.
 const HISTORY_STATUSES = ['approved', 'rejected_by_target', 'rejected_by_admin', 'cancelled']
 // Same ladder as every other HR queue and as the employee's own view of this swap — the labels
 // below, not a second hue, are what separate "declined by coworker" from "rejected".
@@ -111,67 +108,47 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
       .then(({ data }) => setAdminNames(Object.fromEntries((data || []).map(p => [p.id, p.full_name]))))
   }, [clientId])
 
+  // The decision notification is fire-and-forget: a failure to notify does not undo the decision.
+  function notifyDecision(swap) {
+    void supabase.functions.invoke('hr-push', { body: { action: 'notify_swap_admin_decision', request_id: swap.id } })
+      .then(({ error }) => { if (error) console.error('swap decision notification failed:', error) },
+        err => console.error('swap decision notification failed:', err))
+  }
+
   async function approve(swap) {
     setBusyId(swap.id); setMsg('')
-    const [{ data: reqRow }, { data: tgtRow }] = await Promise.all([
-      scopedFrom('hr_roster').eq('employee_id', swap.requester_employee_id)
-        .eq('bs_year', swap.bs_year).eq('bs_month', swap.bs_month).eq('bs_day', swap.requester_bs_day).maybeSingle(),
-      scopedFrom('hr_roster').eq('employee_id', swap.target_employee_id)
-        .eq('bs_year', swap.bs_year).eq('bs_month', swap.bs_month).eq('bs_day', swap.target_bs_day).maybeSingle(),
-    ])
-    if (!reqRow || !tgtRow) { setMsg('One of the shifts no longer exists — cannot swap.'); setBusyId(null); return }
-
-    const SENTINEL_DAY = -1
-
-    const { error: e1 } = await scopedUpdate('hr_roster', { bs_day: SENTINEL_DAY }).eq('id', reqRow.id)
-    if (e1) { setMsg('Failed to swap: ' + errorLine(e1)); setBusyId(null); return }
-
-    const { error: e2 } = await scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id }).eq('id', tgtRow.id)
-    if (e2) {
-      const { error: rollbackErr } = await scopedUpdate('hr_roster', { bs_day: swap.requester_bs_day }).eq('id', reqRow.id)
-      setMsg(rollbackErr
-        ? 'Swap failed and rollback also failed — please check the roster manually: ' + errorLine(e2)
-        : 'Swap failed: ' + errorLine(e2) + ' — no changes were applied, you can retry.')
-      setBusyId(null)
-      return
-    }
-
-    const { error: e3 } = await scopedUpdate('hr_roster', { employee_id: swap.target_employee_id, bs_day: swap.requester_bs_day }).eq('id', reqRow.id)
-    if (e3) {
-      // tgtRow already carries the requester's identity at this point, and reqRow is stranded on
-      // the sentinel day — undo both to get back to the pre-swap state.
-      const [{ error: rb1 }, { error: rb2 }] = await Promise.all([
-        scopedUpdate('hr_roster', { employee_id: swap.target_employee_id }).eq('id', tgtRow.id),
-        scopedUpdate('hr_roster', { employee_id: swap.requester_employee_id, bs_day: swap.requester_bs_day }).eq('id', reqRow.id),
-      ])
-      setMsg((rb1 || rb2)
-        ? 'Swap failed and rollback also failed — please check the roster manually: ' + errorLine(e3)
-        : 'Swap failed: ' + errorLine(e3) + ' — no changes were applied, you can retry.')
-      setBusyId(null)
-      return
-    }
-
-    await scopedUpdate('hr_shift_swap_requests', {
-      status: 'approved', admin_decided_by: profile?.id, admin_decided_at: new Date().toISOString(),
-    }).eq('id', swap.id)
-    supabase.functions.invoke('hr-push', { body: { action: 'notify_swap_admin_decision', request_id: swap.id } })
+    const { error } = await supabase.rpc('approve_shift_swap', { p_request_id: swap.id })
     setBusyId(null)
+    if (error) {
+      // Every refusal the function raises leaves the roster untouched, and errorText says so. A
+      // dropped connection promises nothing — reloading shows whether it landed.
+      setMsg(errorLine(error))
+      load()
+      return
+    }
+    notifyDecision(swap)
     load()
   }
 
   async function reject(swap) {
     setBusyId(swap.id); setMsg('')
-    await scopedUpdate('hr_shift_swap_requests', {
+    // Conditional on still waiting, with the matched row asked back: a request withdrawn or decided
+    // in the meantime matches nothing, which is otherwise indistinguishable from success (S738).
+    const { data, error } = await scopedUpdate('hr_shift_swap_requests', {
       status: 'rejected_by_admin', admin_decided_by: profile?.id, admin_decided_at: new Date().toISOString(),
-    }).eq('id', swap.id)
-    supabase.functions.invoke('hr-push', { body: { action: 'notify_swap_admin_decision', request_id: swap.id } })
+    }).eq('id', swap.id).eq('status', 'pending_admin').select('id')
     setBusyId(null)
+    if (error) { setMsg('That swap may not have been rejected — the list has been refreshed. ' + errorLine(error)); load(); return }
+    if (!data?.length) { setMsg('That swap is no longer waiting for approval — it was withdrawn, or someone else decided it first. The list has been refreshed.'); load(); return }
+    notifyDecision(swap)
     load()
   }
 
+  // In BS, read in Nepal (S749) — it was the runtime's AD date, the one date on the Roster page not
+  // in the calendar every other column uses. nepalDateLong is the fallback outside the BS table.
   function decidedOn(r) {
     const dt = r.admin_decided_at || r.target_responded_at || r.created_at
-    return dt ? new Date(dt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+    return dt ? (nepalBsLong(dt) || nepalDateLong(dt)) : '—'
   }
 
   // A coworker's decline and a requester's cancellation never reach a manager, so there is no

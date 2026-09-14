@@ -123,6 +123,9 @@ export default function Roster() {
   const [employees,  setEmployees]  = useState([])
   const [roster,     setRoster]     = useState({})
   const [loading,    setLoading]    = useState(true)
+  // The shift types or staff list could not be read: the board shows the error and nothing else,
+  // never "No active employees found" (S749).
+  const [initFailed, setInitFailed] = useState(false)
   // hr_salary_components earning rows, keyed by employee_id — the allowances half of the loaded
   // hourly rate the Labor Forecast prices scheduled hours at (laborForecast.js's
   // loadedHourlyRateOf). Master data, a handful of rows per employee, read once per client.
@@ -137,12 +140,14 @@ export default function Roster() {
   // through onPendingCount so approving one updates the badge without a second read.
   // 'pending_admin' only: a swap still awaiting the coworker's own accept isn't yet a manager
   // action, same filter the panel and useHrApprovalCounts.js use.
+  // null = the count could not be read. On a queue badge an empty count is the good news, so a
+  // failed read must not produce one (S734) — the tab shows a "?" instead of nothing.
   const [pendingSwaps, setPendingSwaps] = useState(0)
   useEffect(() => {
     if (!clientId) return
     scopedFrom('hr_shift_swap_requests', 'id', { count: 'exact', head: true })
       .eq('status', 'pending_admin')
-      .then(({ count }) => setPendingSwaps(count || 0))
+      .then(({ count, error }) => setPendingSwaps(error ? null : (count || 0)))
   }, [clientId, scopedFrom])
 
   // Letterhead name for the print header. The ADDRESS and the covers target used to be read here
@@ -281,7 +286,7 @@ export default function Roster() {
     async function init() {
       // ssf_enrolled/ssf_no and the earning components feed loadedHourlyRateOf: Planned Labor
       // Cost is what the employer pays for the hour, not the basic-pay share of it (S692).
-      const [{ data: st }, { data: emps }, { data: comps, error: compsErr }] = await Promise.all([
+      const [{ data: st, error: stErr }, { data: emps, error: empsErr }, { data: comps, error: compsErr }] = await Promise.all([
         scopedFrom('hr_shift_types').order('sort_order'),
         scopedFrom('hr_employees', 'id, full_name, employee_code, department, status, pay_basis, basic_salary, ssf_enrolled, ssf_no')
           .in('status', ['active', 'probation'])
@@ -297,30 +302,30 @@ export default function Roster() {
         setComponentsByEmp(byEmp)
         setComponentsError(null)
       }
+      // A failed read is not "no shift types" and not "no staff" (S749). It used to fall straight
+      // into the seed below, inserting the seven defaults a second time — and the page then
+      // DELETED shift types by name on every load to tidy the duplicates up. hr_roster's
+      // shift_type_id is ON DELETE SET NULL, so that tidy-up blanked every roster day painted
+      // with whichever copy it chose, including a manager's own second "Morning". Neither the
+      // seed nor the delete runs on a failed read now, and nothing is deleted on load at all —
+      // hr_shift_types_client_name_key refuses the duplicate instead.
+      if (stErr || empsErr) {
+        const a = asActionError(stErr || empsErr)
+        setBoardError({ text: 'Could not load the shift types or the staff list, so the board cannot be shown. Reload to try again. ' + a.text, detail: a.detail })
+        setInitFailed(true)
+        return
+      }
+      setInitFailed(false)
       let shifts = st || []
 
-      // Deduplicate by name — React Strict Mode double-invokes effects in dev,
-      // which can cause two concurrent seed inserts before either sees rows.
-      // Keep earliest sort_order per name; delete the extras from DB.
-      const byName = {}
-      const toDelete = []
-      for (const s of shifts) {
-        if (byName[s.name]) {
-          toDelete.push(s.id)
-        } else {
-          byName[s.name] = s
-        }
-      }
-      if (toDelete.length > 0) {
-        // Best-effort housekeeping: a failed cleanup leaves the duplicates, which the name-keyed
-        // map above already hides from the board.
-        const { error: dupErr } = await scopedDelete('hr_shift_types').in('id', toDelete)
-        if (dupErr) console.error('duplicate shift-type cleanup failed:', dupErr)
-        shifts = Object.values(byName).sort((a, b) => (a.sort_order ?? 99) - (b.sort_order ?? 99))
-      }
-
       if (shifts.length === 0) {
-        const { data: seeded, error: seedErr } = await scopedInsert('hr_shift_types', DEFAULT_SHIFTS)
+        let { data: seeded, error: seedErr } = await scopedInsert('hr_shift_types', DEFAULT_SHIFTS)
+        // Two tabs (or React Strict Mode's double effect in dev) seeding at once: the second
+        // insert is refused by the name index, and the first one's rows are what to read back.
+        if (seedErr?.code === '23505') {
+          const again = await scopedFrom('hr_shift_types').order('sort_order')
+          seeded = again.data; seedErr = again.error
+        }
         // A dropped WRITE error is silent data loss, not a silent zero (S613): a failed seed left
         // the board with no shift types and nothing painted, with no explanation anywhere.
         if (seedErr) {
@@ -334,7 +339,7 @@ export default function Roster() {
       setEmployees(emps || [])
     }
     init()
-  }, [clientId, scopedFrom, scopedDelete, scopedInsert])
+  }, [clientId, scopedFrom, scopedInsert])
 
   // One BS month of roster rows, PAGED. `hr_roster` is one row per employee per rostered day —
   // the same cardinality as `hr_attendance`, which AttendanceSheet.jsx pages for exactly this
@@ -348,10 +353,19 @@ export default function Roster() {
       .order('id')), [scopedFrom])
 
   // ── Load roster entries for the visible date range ─────────────────────────
+  // Keyed on the visible range (S749): clicking the arrows quickly started a load per click, and the
+  // last response to land won the board under whichever week the label showed. A stale map is not
+  // only a wrong picture — Clear on a cell deletes by the ids in it.
+  const rosterReq = useLatestRequest()
+  const rangeKey = viewMode === 'weekly' ? `w:${formatAd(weekStart)}` : `m:${bsYear}:${bsMonth}`
   const loadRoster = useCallback(async () => {
     if (!clientId) return
+    const key = rosterReq.begin(`${clientId}:${rangeKey}`)
     setLoading(true)
     let all = []
+    // A failed read keeps the last good board and says so — and must not leave "Loading…" up for
+    // good, which is what the early returns here used to do.
+    const failed = err => { if (!rosterReq.isCurrent(key)) return; setBoardError(boardLoadFailed(err)); setLoading(false) }
 
     if (viewMode === 'weekly') {
       // Week can span two BS months — group unique year/month combos
@@ -362,18 +376,19 @@ export default function Roster() {
         if (!months.has(k)) months.set(k, bs)
       })
       const results = await Promise.all([...months.values()].map(bs => monthRosterRows(bs.year, bs.month)))
-      for (const r of results) { if (r && r.error) { setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
+      for (const r of results) { if (r && r.error) { failed(r.error); return } all.push(...(r.data || [])) }
     } else {
       const { data, error } = await monthRosterRows(bsYear, bsMonth)
-      if (error) { setBoardError(boardLoadFailed(error)); return }
+      if (error) { failed(error); return }
       all = data || []
     }
+    if (!rosterReq.isCurrent(key)) return
 
     const map = {}
     all.forEach(r => { map[rKey(r.bs_year, r.bs_month, r.bs_day, r.employee_id)] = r })
     setRoster(map)
     setLoading(false)
-  }, [clientId, viewMode, weekStart, bsYear, bsMonth, monthRosterRows])
+  }, [clientId, viewMode, weekStart, bsYear, bsMonth, monthRosterRows, rosterReq, rangeKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadRoster() }, [loadRoster])
 
@@ -385,8 +400,10 @@ export default function Roster() {
   const [publishedDays, setPublishedDays] = useState(new Set()) // Set of `${year}:${month}:${day}`
   const [publishing,    setPublishing]    = useState(false)
 
+  const publishReq = useLatestRequest()
   const loadPublishedDays = useCallback(async () => {
     if (!clientId) return
+    const key = publishReq.begin(`${clientId}:${rangeKey}`)
     let all = []
     if (viewMode === 'weekly') {
       const months = new Map()
@@ -405,8 +422,9 @@ export default function Roster() {
       if (error) { setBoardError(boardLoadFailed(error)); return }
       all = data || []
     }
+    if (!publishReq.isCurrent(key)) return
     setPublishedDays(new Set(all.map(r => `${r.bs_year}:${r.bs_month}:${r.bs_day}`)))
-  }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom])
+  }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom, publishReq, rangeKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadPublishedDays() }, [loadPublishedDays])
 
   // Publishes every day in `dayGroups` (usually one group, two if a visible week straddles a BS
@@ -421,11 +439,18 @@ export default function Roster() {
         published_at: new Date().toISOString(), published_by: profile?.id,
       }))
       const { error } = await scopedUpsert('hr_roster_publish_state', rows, { onConflict: 'client_id,bs_year,bs_month,bs_day' })
-      if (!error) {
-        supabase.functions.invoke('hr-push', {
-          body: { action: 'notify_roster_published', client_id: clientId, bs_year: g.bsYear, bs_month: g.bsMonth, bs_days: g.bsDays },
-        })
+      // A refused publish used to say nothing at all (S749): the badge stayed Draft and nobody was
+      // told why, while the manager believed staff had been sent the roster.
+      if (error) {
+        const a = asActionError(error)
+        setBoardError({ text: `${BS_MONTHS[g.bsMonth - 1]} ${g.bsYear} may not have been published, and staff were not notified. Press Publish again. ` + a.text, detail: a.detail })
+        break
       }
+      // Fire-and-forget, but not silent: a notification failure does not unpublish anything.
+      void supabase.functions.invoke('hr-push', {
+        body: { action: 'notify_roster_published', client_id: clientId, bs_year: g.bsYear, bs_month: g.bsMonth, bs_days: g.bsDays },
+      }).then(({ error: pushErr }) => { if (pushErr) console.error('roster publish notification failed:', pushErr) },
+        err => console.error('roster publish notification failed:', err))
     }
     await loadPublishedDays()
     setPublishing(false)
@@ -499,19 +524,22 @@ export default function Roster() {
 
   // ── Assign or clear a shift across every cell in the current selection ────
   // A plain click is just a 1-cell selection, so this single path covers both.
-  async function assignShiftBulk(cells, shiftTypeId) {
+  // An assignment over approved leave, waiting on its ConfirmModal: { cells, shiftTypeId, names, days }.
+  const [pendingLeaveAssign, setPendingLeaveAssign] = useState(null)
+
+  async function assignShiftBulk(cells, shiftTypeId, { overLeaveConfirmed = false } = {}) {
     if (!clientId || cells.length === 0) return
 
     // Leave-conflict auto-block (with override): assigning a shift, not clearing one, onto a day
-    // an employee already has approved leave for gets a confirm rather than silently succeeding.
-    if (shiftTypeId !== null) {
+    // an employee already has approved leave for asks first rather than silently succeeding. A
+    // ConfirmModal naming the people and the day count, not window.confirm (S749).
+    if (shiftTypeId !== null && !overLeaveConfirmed) {
       const conflicts = cells.filter(c => isOnApprovedLeave(c.empId, { bsYear: c.year, bsMonth: c.month, bsDay: c.day }))
       if (conflicts.length > 0) {
         const names = [...new Set(conflicts.map(c => employees.find(e => e.id === c.empId)?.full_name).filter(Boolean))]
-        const proceed = window.confirm(
-          `${names.join(', ')} ${names.length === 1 ? 'has' : 'have'} approved leave on the selected day(s) — assign the shift anyway?`
-        )
-        if (!proceed) return
+        setSelection(null); setPickerOpen(false); setRangeAnchor(null)
+        setPendingLeaveAssign({ cells, shiftTypeId, names, days: conflicts.length })
+        return
       }
     }
 
@@ -661,6 +689,9 @@ export default function Roster() {
   function candidatesFor(col) {
     return filteredEmps
       .filter(emp => !roster[rKey(col.bsYear, col.bsMonth, col.bsDay, emp.id)])
+      // Not someone on approved leave that day (S749) — suggesting them only led to the
+      // "has approved leave — assign anyway?" question one click later.
+      .filter(emp => !isOnApprovedLeave(emp.id, col))
       .map(emp => ({ ...emp, hrsThisPeriod: empHrs(emp.id) }))
       .sort((a, b) => a.hrsThisPeriod - b.hrsThisPeriod)
   }
@@ -1192,7 +1223,9 @@ export default function Roster() {
             face is exactly how an approval waits a week. */}
         <button className={`tab-btn${tab === 'swaps'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('swaps')}>
           Shift Swaps
-          {pendingSwaps > 0 && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>{pendingSwaps}</span>}
+          {pendingSwaps === null
+            ? <span className="badge-gray" style={{ fontSize: 10, marginLeft: 6 }} title="The number of swaps waiting could not be read — open the tab to see them">?</span>
+            : pendingSwaps > 0 && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>{pendingSwaps}</span>}
         </button>
       </div>
 
@@ -1357,7 +1390,7 @@ export default function Roster() {
           </div>
 
           {/* Board */}
-          {loading ? (
+          {initFailed ? null : loading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : filteredEmps.length === 0 ? (
             <div className="card">
@@ -1406,7 +1439,9 @@ export default function Roster() {
                                 <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{col.sublabel}</div>
                                 {fr?.recommended != null && (
                                   <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
-                                    <Tip text={`Recommended ${fr.recommended} staff (~${Math.round(fr.forecastCovers)} forecasted covers ÷ ${coversPerStaffTarget}/staff). Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`} width={240}>
+                                    <Tip text={fr.required
+                                      ? `Recommended ${fr.recommended} staff — the forecast revenue needs about ${fr.required.hours}h at this outlet's own sales per labour hour. Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`
+                                      : `Recommended ${fr.recommended} staff (~${Math.round(fr.forecastCovers || 0)} forecasted covers ÷ ${coversPerStaffTarget}/staff). Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`} width={240}>
                                       <span style={{ fontSize: 9, fontWeight: short ? 700 : 500, color: short ? 'var(--theme-amber-text)' : 'var(--theme-text3)', cursor: 'default' }}>
                                         Rec: {fr.recommended}
                                       </span>
@@ -1624,6 +1659,24 @@ export default function Roster() {
               />
             )
           })()}
+
+          {pendingLeaveAssign && (
+            <ConfirmModal
+              title="Assign a shift over approved leave?"
+              confirmLabel="Assign Anyway"
+              onConfirm={() => { const p = pendingLeaveAssign; setPendingLeaveAssign(null); assignShiftBulk(p.cells, p.shiftTypeId, { overLeaveConfirmed: true }) }}
+              onCancel={() => setPendingLeaveAssign(null)}
+            >
+              <p style={{ margin: '0 0 8px' }}>
+                {pendingLeaveAssign.names.join(', ')} {pendingLeaveAssign.names.length === 1 ? 'has' : 'have'} approved leave on{' '}
+                <strong>{pendingLeaveAssign.days}</strong> of the selected day{pendingLeaveAssign.days === 1 ? '' : 's'}.
+              </p>
+              <p style={{ margin: 0 }}>
+                The shift is added to the roster, but the leave stays approved and its attendance days stay marked as leave —
+                if they are coming in after all, cancel that leave on the Leave page too, or payroll will treat the day as leave.
+              </p>
+            </ConfirmModal>
+          )}
 
           {/* Suggest-who-to-schedule popover, opened from the ✨ button on a short-staffed day */}
           {suggestCol && (

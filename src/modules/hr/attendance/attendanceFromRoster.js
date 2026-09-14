@@ -4,7 +4,6 @@
 // There's no more company-wide "weekly off weekday" — off days are whatever the roster actually
 // says for that employee on that day, same source of truth SelfServiceHome.jsx already uses to
 // grey out an employee's own off days (isOffDay/OFF_SHIFT_KEYWORDS).
-import { isOffDay } from '../payrollConstants'
 import { shiftHours, shiftOvertimeHours } from '../roster/laborForecast'
 
 // The attendance status a zero-hour roster marker stands for. Before S742 every name containing
@@ -22,10 +21,11 @@ export function zeroHourStatus(name) {
     return 'unpaid_leave'
   }
   if (n.includes('holiday')) return 'holiday'
-  // No name, or an off-named marker ("OFF DAY", "Day Off").
-  if (isOffDay(name)) return 'weekly_off'
-  // A zero-hour custom type named like none of those (unusual) — payroll-neutral, same as before.
-  return 'holiday'
+  // No name, an off-named marker ("OFF DAY", "Day Off"), or a zero-hour custom type named like none
+  // of these ("Training"). The last used to become Holiday, which was harmless while Holiday paid
+  // nobody extra — since S749 a Holiday day PAYS daily and hourly staff (Labour Act s.41), so only a
+  // shift that says "holiday" may produce one. Off is unpaid for them and neutral for monthly staff.
+  return 'weekly_off'
 }
 
 // rosterRows: hr_roster rows for the BS month (employee_id, shift_type_id, bs_day)

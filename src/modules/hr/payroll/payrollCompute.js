@@ -174,7 +174,10 @@ export function computePayslip(employee, components, attendanceRows, period, tds
 
   if (basis === 'daily') {
     // Paid-leave days are paid for daily-wage staff too — that's what makes the leave "paid".
-    const workedDays = t.present + t.half_day * 0.5 + t.paid_leave + t.half_paid_leave * 0.5
+    // So is a Holiday day (decided with Aashish, 2026-09-14): Labour Act s.41 gives EVERY worker
+    // paid public holidays, and until S749 a daily-wage employee was paid nothing for one — which
+    // also meant a paid leave spanning a holiday (marked Holiday since S749) paid a day less.
+    const workedDays = t.present + t.half_day * 0.5 + t.paid_leave + t.half_paid_leave * 0.5 + t.holiday
     const earned     = r(basic * workedDays)
     const otAmount   = r(t.sumOt * (basic / STANDARD_HOURS_PER_DAY) * OT_MULTIPLIER)
     const ssfEmp     = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYEE_PCT) : 0
@@ -194,7 +197,9 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     // employee paid 2.5× the rate. Superseded attendance OT is taken out too: it was recorded
     // inside that day's hours, and the approved Overtime entry replacing it pays it at its own rate.
     const regularHours = Math.max(0, t.sumHours - t.sumOt - t.sumOtSuperseded)
+    // A Holiday day credits a standard day of hours, like paid leave (Labour Act s.41, 2026-09-14).
     const paidHours = regularHours + t.paid_leave * STANDARD_HOURS_PER_DAY + t.half_paid_leave * STANDARD_HOURS_PER_DAY * 0.5
+      + t.holiday * STANDARD_HOURS_PER_DAY
     const earned   = r(basic * paidHours)
     const otAmount = r(t.sumOt * basic * OT_MULTIPLIER)
     const ssfEmp   = enrolled ? r(Math.min(earned, SSF_CAP) * SSF_EMPLOYEE_PCT) : 0

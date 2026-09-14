@@ -1,12 +1,13 @@
+import { scopedFrom, scopedUpsert } from '../../../shared/scopedDb'
+import { backfillApprovedLeave, backfillLeaveText, findApprovedLeaveGaps } from './backfillApprovedLeave'
+
 // backfillApprovedLeave.js reaches scopedDb directly; both it and supabaseClient are mocked so the
-// suite runs in a plain checkout, the same way closePeriod.test.js does it.
+// suite runs in a plain checkout, the same way closePeriod.test.js does it. babel-jest hoists
+// jest.mock above the imports, so they sit below them here only to satisfy import/first.
 jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn() } }))
 jest.mock('../../../shared/scopedDb', () => ({
   scopedFrom: jest.fn(), scopedUpsert: jest.fn(),
 }))
-
-import { scopedFrom, scopedUpsert } from '../../../shared/scopedDb'
-import { backfillApprovedLeave, backfillLeaveText, findApprovedLeaveGaps } from './backfillApprovedLeave'
 
 // Ashwin is BS month 6 (Baisakh, Jestha, Ashadh, Shrawan, Bhadra, Ashwin), and Ashwin 2083 spans
 // 2026-09-17 → 2026-10-17 with 31 days. Read off bsCalendar's own table rather than assumed — the
@@ -22,7 +23,7 @@ const REQ = {
 // A chainable, thenable PostgrestBuilder stand-in. `range` is here for fetchAllRows' paging.
 function builder(result) {
   const b = {
-    eq: () => b, in: () => b, lte: () => b, gte: () => b, order: () => b,
+    eq: () => b, in: () => b, is: () => b, lte: () => b, gte: () => b, order: () => b,
     range: () => b,
     then: (res, rej) => Promise.resolve(result).then(res, rej),
   }
@@ -54,6 +55,30 @@ describe('backfillApprovedLeave', () => {
       { employee_id: 'e1', period_id: 'p-ashwin', bs_day: 7, status: 'unpaid_leave' },
       { employee_id: 'e1', period_id: 'p-ashwin', bs_day: 8, status: 'unpaid_leave' },
     ])
+  })
+
+  test('a public holiday inside the leave is written as Holiday, not leave (S749)', async () => {
+    mockTables({
+      hr_leave_requests: { data: [REQ], error: null },
+      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
+      hr_attendance: { data: [], error: null },
+      hr_holiday_calendar: { data: [{ bs_day: 8 }], error: null },
+    })
+    await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
+    const [, , rows] = scopedUpsert.mock.calls[0]
+    expect(rows.map(r => [r.bs_day, r.status])).toEqual([[7, 'unpaid_leave'], [8, 'holiday']])
+  })
+
+  test('a failed holiday read is a failed back-fill, not a leave day', async () => {
+    mockTables({
+      hr_leave_requests: { data: [REQ], error: null },
+      hr_leave_types: { data: [{ id: 't-unpaid', paid: false }], error: null },
+      hr_attendance: { data: [], error: null },
+      hr_holiday_calendar: { data: null, error: { message: 'boom' } },
+    })
+    const r = await backfillApprovedLeave({ clientId: 'c1', period: ASHWIN })
+    expect(r.error).toEqual({ message: 'boom' })
+    expect(scopedUpsert).not.toHaveBeenCalled()
   })
 
   test('a paid type writes paid_leave, and a half-day writes the half status', async () => {

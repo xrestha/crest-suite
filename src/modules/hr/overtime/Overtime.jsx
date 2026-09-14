@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -57,6 +57,17 @@ export default function Overtime() {
   const [busy,      setBusy]      = useState(false)
   const [msg,       setMsg]       = useState('')
   const [drawerOpen, setDrawer]   = useState(false)
+  // A failed Holiday Calendar read (S749): every date then auto-suggested Weekday 1.5×, silently,
+  // on the days that pay 2×. Held so the form can say to check the date by hand.
+  const [holidaysError, setHolidaysError] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+  // Payroll status of the month on screen: 'none' | 'draft' | 'finalized' | 'unknown' (a failed
+  // read, which locks like 'finalized' — decided 2026-09-14: a paid month is read-only).
+  const [runStatus, setRunStatus] = useState('none')
+  // Names of employees the page's active list does not hold — someone who logged OT this month and
+  // has since left rendered as a bare dash (the S633 rule: a history outlives the people in it).
+  const [extraEmps, setExtraEmps] = useState({})
+  const attemptedRef = useRef(new Set())
 
   // ── Initial load ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -64,7 +75,7 @@ export default function Overtime() {
     async function init() {
       setLoading(true)
       const today = getBsToday()
-      const [{ data: p }, { data: emps }, { data: hols }] = await Promise.all([
+      const [pRes, eRes, hRes] = await Promise.all([
         scopedFrom('monthly_periods')
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
         scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, status')
@@ -73,10 +84,15 @@ export default function Overtime() {
         // never a holiday for pay purposes.
         scopedFrom('hr_holiday_calendar', 'bs_year, bs_month, bs_day, name, holiday_type').is('removed_at', null),
       ])
-      setPeriods(p || [])
-      setEmployees(emps || [])
-      setHolidays(hols || [])
-      const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
+      // A failed periods or employee read is not "no OT yet" — it stops the page (S749).
+      if (pRes.error || eRes.error) { setLoadError(pRes.error || eRes.error); setLoading(false); return }
+      setLoadError(null)
+      const p = pRes.data || [], emps = eRes.data || []
+      setPeriods(p)
+      setEmployees(emps)
+      setHolidaysError(hRes.error || null)
+      setHolidays(hRes.error ? [] : (hRes.data || []))
+      const open = p.find(x => x.status === 'open') || p[0]
       if (open) {
         setPeriod(open)
         await loadEntries(open.bs_year, open.bs_month)
@@ -91,20 +107,36 @@ export default function Overtime() {
     init()
   }, [clientId]) // eslint-disable-line
 
+  // Whether payroll for a BS month is finalized. A month with no period has no payroll at all.
+  // → 'none' | 'draft' | 'finalized' | 'unknown' (a read failed — treated as locked).
+  async function monthFinalized(bsYear, bsMonth) {
+    const { data: per, error: perErr } = await scopedFrom('monthly_periods', 'id')
+      .eq('bs_year', bsYear).eq('bs_month', bsMonth).maybeSingle()
+    if (perErr) return 'unknown'
+    if (!per) return 'none'
+    const { data: run, error: runErr } = await scopedFrom('hr_payroll_runs', 'status').eq('period_id', per.id).maybeSingle()
+    if (runErr) return 'unknown'
+    return run?.status || 'none'
+  }
+
   const loadEntries = useCallback(async (bsYear, bsMonth) => {
     // Month-driven from a native <select>: arrowing the list fires a load per keypress and the
     // last response to land used to win the figures under the wrong label (S601). Keyed on the
     // month, so a reload of the current month after a save always passes.
     const key = monthReq.begin(`${bsYear}-${bsMonth}`)
-    const { data, error } = await scopedFrom('hr_overtime_entries')
-      .eq('bs_year', bsYear)
-      .eq('bs_month', bsMonth)
-      .order('bs_day').order('created_at')
+    const [{ data, error }, payrollStatus] = await Promise.all([
+      scopedFrom('hr_overtime_entries')
+        .eq('bs_year', bsYear)
+        .eq('bs_month', bsMonth)
+        .order('bs_day').order('created_at'),
+      monthFinalized(bsYear, bsMonth),
+    ])
     if (!monthReq.isCurrent(key)) return
+    setRunStatus(payrollStatus)
     // A failed read is not "no OT this month" (S682): keep the last-good list and say so.
     if (error) { setMsg('error:Could not load this month\'s overtime — the list is from the last successful load. ' + errorLine(error)); return }
     setEntries(data || [])
-  }, [scopedFrom, monthReq])
+  }, [scopedFrom, monthReq]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handlePeriodChange(id) {
     const p = periods.find(x => x.id === id); if (!p) return
@@ -133,10 +165,13 @@ export default function Overtime() {
 
   // ── CRUD ──────────────────────────────────────────────────────────────────────
   function openAdd() {
-    setForm(f => ({ ...f, open: true, editing: null, employee_id: '', ot_hours: '', reason: '', ot_type: 'weekday', bs_day: 1 }))
+    // Day 1 is checked against the calendar like any other day — the form opened on day 1 as
+    // Weekday without asking, so OT on a holiday falling on the 1st kept the 1.5× rate (S748 open).
+    setForm(f => ({ ...f, open: true, editing: null, employee_id: '', ot_hours: '', reason: '', ot_type: isHoliday(f.bs_year, f.bs_month, 1) ? 'holiday' : 'weekday', bs_day: 1 }))
     setMsg(''); setDrawer(true)
   }
   function openEdit(e) {
+    if (refuseIfLocked()) return
     setForm({ open: true, editing: e, employee_id: e.employee_id, bs_year: e.bs_year, bs_month: e.bs_month, bs_day: e.bs_day, ot_hours: e.ot_hours, ot_type: e.ot_type, reason: e.reason || '' })
     setMsg(''); setDrawer(true)
   }
@@ -150,8 +185,38 @@ export default function Overtime() {
     const bs_day = parseInt(form.bs_day, 10)
     const maxDay = daysInBsMonth(form.bs_year, form.bs_month)
     if (bs_day < 1 || bs_day > maxDay) { setMsg(`error:Day must be 1–${maxDay}`); return }
+    const targetLabel = `${BS_MONTHS[form.bs_month - 1]} ${form.bs_year}`
 
     setBusy(true); setMsg('')
+    // Two checks the form can make in words before the database refuses (S749). Both refuse on a
+    // failed read — a check that could not run has not passed.
+    //  • A month whose payroll is finalized is locked (decided 2026-09-14), whichever month is on
+    //    screen — the form can log OT into any month. An edit moving an entry OUT of a paid month
+    //    is refused as well, since it would take pay out of an issued payslip.
+    //  • One entry per person per day (decided 2026-09-14): every approved entry is paid, so a
+    //    second one paid the same day twice.
+    const monthsToCheck = [[form.bs_year, form.bs_month]]
+    if (form.editing && (form.editing.bs_year !== form.bs_year || form.editing.bs_month !== form.bs_month)) {
+      monthsToCheck.push([form.editing.bs_year, form.editing.bs_month])
+    }
+    const [statuses, dupRes] = await Promise.all([
+      Promise.all(monthsToCheck.map(([y, m]) => monthFinalized(y, m))),
+      scopedFrom('hr_overtime_entries', 'id')
+        .eq('employee_id', form.employee_id).eq('bs_year', form.bs_year).eq('bs_month', form.bs_month).eq('bs_day', bs_day),
+    ])
+    if (statuses.includes('unknown') || dupRes.error) {
+      setMsg('error:Could not check this entry against payroll and existing overtime, so it was not saved — try again. ' + (dupRes.error ? errorLine(dupRes.error) : ''))
+      setBusy(false); return
+    }
+    if (statuses.includes('finalized')) {
+      const paid = monthsToCheck.filter((_, i) => statuses[i] === 'finalized').map(([y, m]) => `${BS_MONTHS[m - 1]} ${y}`).join(' and ')
+      setMsg(`error:Payroll for ${paid} is finalized, so its overtime is locked and nothing was saved. Reopen that payroll run first if it really needs correcting.`)
+      setBusy(false); return
+    }
+    if ((dupRes.data || []).some(r => r.id !== form.editing?.id)) {
+      setMsg(`error:${empMap[form.employee_id]?.full_name || 'This employee'} already has overtime on ${formatBsDay(bs_day, form.bs_month)} ${form.bs_year}, so nothing was saved — two entries for one day would both be paid. Edit that entry and add these hours to it.`)
+      setBusy(false); return
+    }
     const payload = {
       client_id: clientId,
       employee_id: form.employee_id,
@@ -164,12 +229,29 @@ export default function Overtime() {
     const { error } = form.editing
       ? await scopedUpdate('hr_overtime_entries', { ...payload, status: form.editing.status }).eq('id', form.editing.id)
       : await scopedInsert('hr_overtime_entries', payload)
-    if (error) { setMsg('error:This overtime entry was not saved. ' + errorLine(error)); setBusy(false); return }
-    await loadEntries(form.bs_year, form.bs_month)
-    closeDrawer(); setMsg('ok:Saved'); setBusy(false)
+    if (error) { setMsg('error:This overtime entry may not have saved. ' + errorLine(error)); setBusy(false); return }
+    // Reload the month ON SCREEN, not the month saved to. Loading the saved month used to put
+    // Kartik's entries under the period picker still reading Ashwin — list, counts and cost all
+    // labelled with the wrong month (S749).
+    if (period) await loadEntries(period.bs_year, period.bs_month)
+    const elsewhere = !period || period.bs_year !== form.bs_year || period.bs_month !== form.bs_month
+    closeDrawer()
+    setMsg(elsewhere ? `ok:Saved to ${targetLabel} — switch the month above to see it.` : 'ok:Saved')
+    setBusy(false)
+  }
+
+  // Everything on the list belongs to the month on screen, so one lock covers every row action.
+  const locked = runStatus === 'finalized' || runStatus === 'unknown'
+  function refuseIfLocked() {
+    if (!locked) return false
+    setMsg(runStatus === 'unknown'
+      ? 'error:Could not check whether payroll for this month is finalized, so nothing was changed. Reload to try again.'
+      : `error:Payroll for ${periodLabel} is finalized, so its overtime is locked. Reopen that payroll run first if it really needs correcting.`)
+    return true
   }
 
   async function setStatus(id, status) {
+    if (refuseIfLocked()) return
     setMsg('')
     const { error } = await scopedUpdate('hr_overtime_entries', { status }).eq('id', id)
     if (error) { setMsg(`error:The entry was not marked ${status} — it still shows its previous status. ` + errorLine(error)); return }
@@ -179,7 +261,8 @@ export default function Overtime() {
   // An approved OT entry is pay: deleting it removes hours from the payroll run. A consequence
   // dialog rather than window.confirm (S682).
   function del(entry) {
-    const emp = employees.find(e => e.id === entry.employee_id)
+    if (refuseIfLocked()) return
+    const emp = empMap[entry.employee_id]
     askConfirm({
       title: 'Delete this overtime entry?',
       confirmLabel: 'Delete Entry', danger: true, busyLabel: 'Deleting…',
@@ -205,7 +288,22 @@ export default function Overtime() {
   // Memoized: the Add/Edit OT form is a set of controlled inputs on this same component, so every
   // keystroke rebuilt the employee index and made four more passes over the month's entries —
   // `approved` was walked twice on its own, once for the count and once for the hours.
-  const empMap = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees])
+  const empMap = useMemo(
+    () => ({ ...extraEmps, ...Object.fromEntries(employees.map(e => [e.id, e])) }),
+    [employees, extraEmps])
+
+  useEffect(() => {
+    const known = new Set(employees.map(e => e.id))
+    const missing = [...new Set(entries.map(e => e.employee_id))]
+      .filter(id => id && !known.has(id) && !attemptedRef.current.has(id))
+    if (missing.length === 0) return
+    missing.forEach(id => attemptedRef.current.add(id))
+    scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, status').in('id', missing)
+      .then(({ data, error }) => {
+        if (error) { console.error('overtime: could not resolve former employees', error); return }
+        if (data?.length) setExtraEmps(p => ({ ...p, ...Object.fromEntries(data.map(e => [e.id, e])) }))
+      })
+  }, [entries, employees, scopedFrom])
 
   const filtered = useMemo(
     () => entries.filter(e => statusTab === 'all' || e.status === statusTab), [entries, statusTab])
@@ -261,6 +359,26 @@ export default function Overtime() {
           </select>
         </div>
       </div>
+
+      {loadError && (
+        <div role="alert" className="card" style={{ padding: 24, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-red-text)', marginBottom: 6 }}>Could not load the overtime page</div>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{errorLine(loadError)}</div>
+        </div>
+      )}
+      {/* A paid month is read-only (S749) — the product's amber banner shape. */}
+      {!loading && period && locked && (
+        <div role="alert" className="card" style={{ marginBottom: 16, padding: '12px 16px', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>
+            {runStatus === 'unknown' ? 'Overtime for this month is locked — payroll status could not be checked' : `Payroll for ${periodLabel} is finalized — its overtime is locked`}
+          </strong>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4, lineHeight: 1.6 }}>
+            {runStatus === 'unknown'
+              ? 'Nothing on this list can be approved, edited or deleted until the page can confirm payroll for this month has not been finalized. Reload to try again.'
+              : 'These entries were paid on issued payslips, so they can no longer be approved, edited or deleted. To correct one, reopen the payroll run for this month first.'}
+          </div>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="stat-grid">
@@ -392,15 +510,15 @@ export default function Overtime() {
                         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                           {e.status === 'pending' && (
                             <>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-green-text)' }} onClick={() => setStatus(e.id, 'approved')}>Approve</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red-text)' }} onClick={() => setStatus(e.id, 'rejected')}>Reject</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-green-text)' }} onClick={() => setStatus(e.id, 'approved')} disabled={locked}>Approve</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red-text)' }} onClick={() => setStatus(e.id, 'rejected')} disabled={locked}>Reject</button>
                             </>
                           )}
                           {e.status !== 'pending' && (
-                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setStatus(e.id, 'pending')}>Undo</button>
+                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setStatus(e.id, 'pending')} disabled={locked}>Undo</button>
                           )}
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEdit(e)}>Edit</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => del(e)}>Del</button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEdit(e)} disabled={locked}>Edit</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => del(e)} disabled={locked}>Del</button>
                         </div>
                       </td>
                     </tr>
@@ -416,7 +534,7 @@ export default function Overtime() {
         <strong style={{ color: 'var(--theme-text2)' }}>Payroll integration:</strong> only <strong>Approved</strong> entries feed into the payroll run.
         Approved weekday OT is paid at <strong>1.5×</strong> the normal hourly rate; public holiday OT at <strong>2×</strong>.
         An approved entry <strong>supersedes</strong> any OT typed on the attendance sheet for that same day, so the same hours are never paid twice — and this is the only route to the holiday 2× rate.
-        Regenerate payroll after approving new entries to include them.
+        Regenerate payroll after approving new entries to include them. One entry per person per day — two stretches of overtime on one day are one entry with the hours added up. Once payroll for a month is finalized, its overtime is locked.
       </div>
 
       {/* Add / Edit drawer */}
@@ -491,6 +609,11 @@ export default function Overtime() {
                 </label>
               ))}
             </div>
+            {holidaysError && (
+              <div role="alert" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 6 }}>
+                ⚠ The Holiday Calendar could not be read, so a public holiday is not detected — check the date yourself and pick Public Holiday (2×) if it is one.
+              </div>
+            )}
             {form.ot_type === 'holiday' && isHoliday(form.bs_year, form.bs_month, form.bs_day) && (
               <div style={{ fontSize: 11, color: 'var(--theme-accent-ink)', marginTop: 6 }}>
                 {/* The PUBLIC holiday's name — the one that earns 2× — not whichever row sorted first
