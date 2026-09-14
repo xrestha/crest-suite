@@ -110,8 +110,8 @@ Report is the counter-example done right: it snapshots `is_vat_registered` at ge
 ## The second editor for the same columns is where the fix did not reach (S739)
 
 `Admin → Clients → Manage → Settings` edits the same Branding / Property / consultant columns as the
-admin tabs on `Settings.js`, plus Thresholds and the payment QR — and it was still sending
-`clientSettings` whole, from a `select('*')` load, on all four of its Save buttons. S730's fix had
+admin tabs on `Settings.js`, plus the payment QR (and, until S744, Thresholds) — and it was still
+sending `clientSettings` whole, from a `select('*')` load, on all four of its Save buttons. S730's fix had
 been applied to one of the two screens. `DRAWER_SETTINGS_FIELDS` now scopes each button, and
 `saveClientSettings()` strips `id`/`client_id`/`created_at`/`plan_prices` the way `saveSettings()`
 always has.
@@ -124,6 +124,15 @@ reported nothing, and never reached `setLogoUploading(false)`.
 tell here was a field the drawer called "Upgrade Contact" and `Settings.js` called "this client's
 consultant": two names for one column set is usually two editors, and the second one is rarely
 carrying the same fixes.
+
+**The drawer no longer edits thresholds at all (S744).** Its Thresholds tab (from the June v2 build)
+was the one admin surface for `fc_warning_pct`/`fc_critical_pct`/`expiry_warning_days`/
+`variance_flag_pct` — 4 of the 6 columns, with no `validateThresholds()`, so it could store a 0
+the readers treat as the default while the box showed 35, or an inverted warning/critical pair. It
+was removed rather than brought up to date: thresholds are the client's operating preference, the
+Owner edits them in Settings → Thresholds, and `Settings.js`'s admin tab set had already excluded
+them as "not theirs to fix". **Do not add an admin editor for them back**; an operator helping a
+client talks the Owner through their own tab.
 
 ## A logo at a stable path keeps serving the old image (S739)
 

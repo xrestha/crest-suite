@@ -38,8 +38,7 @@ const FIELD_GRID = {
 
 const SETTINGS_DEFAULTS = {
   app_name: '', app_tagline: '', property_address: '', property_phone: '',
-  property_email: '', vat_number: '', fc_warning_pct: 35, fc_critical_pct: 45,
-  expiry_warning_days: 7, variance_flag_pct: 10, item_code_prefix: 'ITM',
+  property_email: '', vat_number: '', item_code_prefix: 'ITM',
   contact_phone: '', contact_email: '', contact_website: '',
   is_vat_registered: true, invoice_prefix: '', payment_qr_data: ''
 }
@@ -102,8 +101,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [savingSettings, setSavingSettings]   = useState(false)
   const [settingsMsg, setSettingsMsg]         = useState('')
   const [settingsLoadErr, setSettingsLoadErr] = useState(null) // a failed read is not a form
-  // Settings, Thresholds and QR are three views of one `clientSettings` object, so fetching on
-  // every switch between them re-ran two network calls to rebuild state the drawer already held.
+  // Settings and QR are two views of one `clientSettings` object, so fetching on every switch
+  // between them re-ran two network calls to rebuild state the drawer already held.
   const settingsLoadedRef = useRef(false)
   const [webhookSecret, setWebhookSecret]     = useState('') // client_secrets, not settings — see SETTINGS_DEFAULTS
 
@@ -209,7 +208,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }, [client.id])
 
   useEffect(() => {
-    if ((activeTab === 'settings' || activeTab === 'thresholds' || activeTab === 'qr') && !settingsLoadedRef.current) {
+    if ((activeTab === 'settings' || activeTab === 'qr') && !settingsLoadedRef.current) {
       fetchClientSettings()
     }
     if (activeTab === 'pins') loadPinAccounts()
@@ -451,10 +450,10 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
 
   // ── Settings ──
-  // A failed read here must not become a form. Settings, Thresholds and QR all render whatever is
-  // in `clientSettings`, and their four Save buttons all write ALL of it back — so a dropped read
-  // rendered as SETTINGS_DEFAULTS meant one press of "Save Thresholds" overwrote the client's real
-  // name, VAT number, invoice prefix and payment QR with blanks, and the same press upserted the
+  // A failed read here must not become a form. Settings and QR both render whatever is in
+  // `clientSettings`, and their Save buttons used to write ALL of it back — so a dropped read
+  // rendered as SETTINGS_DEFAULTS meant one press of "Save Thresholds" (a tab removed in S744)
+  // overwrote the client's real name, VAT number, invoice prefix and payment QR with blanks, and the same press upserted the
   // webhook secret (read separately, also dropped) as null (S736). A missing settings row is a
   // real state (a client never seeded) and still renders the defaults; a failed read renders an
   // error with a retry, and every Save on those tabs refuses until a read has succeeded.
@@ -495,7 +494,6 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     Settings: ['app_name', 'app_tagline', 'logo_url', 'vat_number', 'is_vat_registered', 'invoice_prefix',
                'property_address', 'property_phone', 'property_email',
                'contact_phone', 'contact_email', 'contact_website'],
-    Thresholds: ['fc_warning_pct', 'fc_critical_pct', 'expiry_warning_days', 'variance_flag_pct'],
     'Payment QR': ['payment_qr_data'],
     // The webhook secret lives in client_secrets, written below: this button owns no settings column.
     'Webhook secret': [],
@@ -964,7 +962,6 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     { key: 'pins',       label: 'Staff PINs' },
     { key: 'billing',    label: 'Billing' },
     { key: 'settings',   label: 'Settings' },
-    { key: 'thresholds', label: 'Thresholds' },
     { key: 'qr',         label: 'QR' },
     { key: 'data',       label: 'Backup' },
     { key: 'legal',      label: 'Legal' },
@@ -1723,61 +1720,6 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   )}
                   <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => handleSaveSettings('Settings')} disabled={savingSettings}>
                     {savingSettings ? 'Saving…' : 'Save Settings'}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* ── THRESHOLDS TAB ── */}
-          {activeTab === 'thresholds' && (
-            <div>
-              {settingsLoadErr ? settingsErrorEl : loadingSettings ? (
-                <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
-              ) : (
-                <>
-                  <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px' }}>
-                    Food Cost Thresholds
-                  </p>
-                  <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 16px', lineHeight: 1.5 }}>
-                    Controls the warning/critical colouring on the Dashboard Food Cost % KPI card and reports.
-                  </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 24 }}>
-                    <div className="form-field">
-                      <label htmlFor={fid('t-fcwarn')}><Tip text="When a recipe's food cost percentage exceeds this, the FC badge turns yellow in Recipe Costing and reports." width={280}>FC Warning % (yellow)</Tip></label>
-                      <input id={fid('t-fcwarn')} type="number" value={clientSettings.fc_warning_pct || 35} onChange={e => setClientSettings({ ...clientSettings, fc_warning_pct: parseFloat(e.target.value) })} />
-                    </div>
-                    <div className="form-field">
-                      <label htmlFor={fid('t-fccrit')}><Tip text="When a recipe's food cost exceeds this, the badge turns red — the item is unprofitable at its current selling price." width={280}>FC Critical % (red)</Tip></label>
-                      <input id={fid('t-fccrit')} type="number" value={clientSettings.fc_critical_pct || 45} onChange={e => setClientSettings({ ...clientSettings, fc_critical_pct: parseFloat(e.target.value) })} />
-                    </div>
-                  </div>
-
-                  <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px', borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
-                    Alerts
-                  </p>
-                  <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 16px', lineHeight: 1.5 }}>
-                    Controls when items are flagged in the Expiry and Variance reports.
-                  </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 24 }}>
-                    <div className="form-field">
-                      <label htmlFor={fid('t-expiry')}><Tip text="Items expiring within this many days are flagged amber in the Expiry Tracker.">Expiry Warning (days)</Tip></label>
-                      <input id={fid('t-expiry')} type="number" value={clientSettings.expiry_warning_days || 7} onChange={e => setClientSettings({ ...clientSettings, expiry_warning_days: parseInt(e.target.value) })} />
-                    </div>
-                    <div className="form-field">
-                      <label htmlFor={fid('t-variance')}><Tip text="Variance Report highlights items where actual vs. theoretical consumption differs by more than this percentage." width={280}>Variance Flag %</Tip></label>
-                      <input id={fid('t-variance')} type="number" value={clientSettings.variance_flag_pct || 10} onChange={e => setClientSettings({ ...clientSettings, variance_flag_pct: parseFloat(e.target.value) })} />
-                    </div>
-                  </div>
-
-                  {settingsMsg && (
-                    <p role={settingsMsg.startsWith('ok:') ? 'status' : 'alert'}
-                      style={{ fontSize: 12, margin: '0 0 12px', color: settingsMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                      {settingsMsg.replace(/^(ok|error):/, '')}
-                    </p>
-                  )}
-                  <button className="btn btn-primary" style={{ fontSize: 13 }} onClick={() => handleSaveSettings('Thresholds')} disabled={savingSettings}>
-                    {savingSettings ? 'Saving…' : 'Save Thresholds'}
                   </button>
                 </>
               )}
