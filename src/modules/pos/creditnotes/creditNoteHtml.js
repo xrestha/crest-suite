@@ -5,7 +5,7 @@
 // own module (not PosOrders.jsx) so it can be printed/reprinted from both the Recent Bills quick
 // action and the standalone Credit Notes page without either depending on the other's state.
 
-import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { scopedUpdate } from '../../../shared/scopedDb'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
@@ -26,8 +26,8 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   const now       = new Date(creditNote.created_at || Date.now())
   const nowStr    = nepalTime(now)
   const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const bs        = adToBs(now)
-  const bsDateStr = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+  const bs        = adToBsSafe(now)
+  const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
   const totalQty  = items.reduce((s, i) => s + i.qty, 0)
 
   return `<!DOCTYPE html>

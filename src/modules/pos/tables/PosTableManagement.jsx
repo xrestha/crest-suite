@@ -11,7 +11,7 @@ import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { TABLE_STATUS_BADGE as STATUS_BADGE, TABLE_STATUS_LABEL as STATUS_LABEL, tableStripColor } from '../posSignals'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { adToBs, formatBsDay, formatAd } from '../../../utils/bsCalendar'
+import { adToBsSafe, formatBsDay, formatAd } from '../../../utils/bsCalendar'
 import { turnoverByBand, PARTY_BANDS } from '../reports/coversMath'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS, DEFAULT_WHATSAPP_TEMPLATE } from '../reservations/reservationSettings'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -616,7 +616,7 @@ export default function PosTableManagement() {
     setResvMsg('')
   }
   const closedDateLabel = iso => {
-    const bs = adToBs(new Date(iso + 'T00:00:00'))
+    const bs = adToBsSafe(new Date(iso + 'T00:00:00'))
     return bs ? `${formatBsDay(bs.day, bs.month)} ${bs.year} · ${iso}` : iso
   }
 

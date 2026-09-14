@@ -9,7 +9,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RowDisclosure from '../../../components/RowDisclosure'
-import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { formatAd, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CLOSE_TYPE_BADGE, STATION_BADGE } from '../posSignals'
 import { nepalTime } from '../../../shared/nepalTime'
 
@@ -272,9 +272,9 @@ export default function KotLog() {
     const wb = XLSX.utils.book_new()
     if (tab === 'register') {
       const ws = XLSX.utils.json_to_sheet(logRows.map(r => {
-        const bs = adToBs(new Date(r.sent_at))
+        const bs = adToBsSafe(new Date(r.sent_at))
         return {
-          'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
+          'Date (BS)': bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(r.sent_at).slice(0, 10)} (AD)`,
           'Time': nepalTime(r.sent_at),
           'Table': r.table_name || 'Takeaway',
           'Order#': r.order_no,
@@ -289,9 +289,9 @@ export default function KotLog() {
       XLSX.writeFile(wb, `kot-register-${fromIso}-to-${toIso}.xlsx`)
     } else if (tab === 'pulled') {
       const ws = XLSX.utils.json_to_sheet(pulledRows.map(r => {
-        const bs = adToBs(new Date(r.removed_at))
+        const bs = adToBsSafe(new Date(r.removed_at))
         return {
-          'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
+          'Date (BS)': bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(r.removed_at).slice(0, 10)} (AD)`,
           'Time': nepalTime(r.removed_at),
           'Order#': r.pos_orders?.order_no ?? '',
           'Invoice#': r.pos_orders?.invoice_no || '',
@@ -315,8 +315,8 @@ export default function KotLog() {
       const rows = []
       for (const row of billTrailRows) {
         const o = row.order
-        const bs = adToBs(new Date(o.closed_at))
-        const dateBs = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+        const bs = adToBsSafe(new Date(o.closed_at))
+        const dateBs = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(o.closed_at).slice(0, 10)} (AD)`
         const flag = row.reasons.length > 0 ? `Discrepancy: ${row.reasons.join('; ')}` : ''
         const base = { 'Date (BS)': dateBs, 'Order#': o.order_no, 'Invoice#': o.invoice_no || '', 'Table': o.table_name || 'Takeaway', 'Status': statusBadge(o).label }
         if (row.logs.length === 0) {
@@ -395,14 +395,14 @@ export default function KotLog() {
             </thead>
             <tbody>
               {logRows.map(r => {
-                const bs = adToBs(new Date(r.sent_at))
+                const bs = adToBsSafe(new Date(r.sent_at))
                 const actual = actualPrepMin(r)
                 const est = r.estimated_prep_minutes
                 const overEst = est != null && actual != null && actual > est
                 return (
                   <tr key={r.id}>
                     <td>
-                      {bs.day} {BS_MONTHS[bs.month - 1]}
+                      {bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(r.sent_at).slice(0, 10)} (AD)`}
                       <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>
                         {nepalTime(r.sent_at)}
                       </span>
@@ -436,12 +436,12 @@ export default function KotLog() {
             </thead>
             <tbody>
               {pulledRows.map(r => {
-                const bs = adToBs(new Date(r.removed_at))
+                const bs = adToBsSafe(new Date(r.removed_at))
                 const o = r.pos_orders
                 return (
                   <tr key={r.id}>
                     <td>
-                      {bs.day} {BS_MONTHS[bs.month - 1]}
+                      {bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(r.removed_at).slice(0, 10)} (AD)`}
                       <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>
                         {nepalTime(r.removed_at)}
                       </span>

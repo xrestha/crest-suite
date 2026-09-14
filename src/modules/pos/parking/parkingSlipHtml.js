@@ -1,4 +1,4 @@
-import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { scopedUpdate } from '../../../shared/scopedDb'
 import { nepalTime } from '../../../shared/nepalTime'
@@ -10,8 +10,8 @@ export function buildParkingSlipHtml(slip, outletName, propertyAddress, issuedBy
   const now       = new Date(slip.time_in || Date.now())
   const nowStr    = nepalTime(now)
   const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const bs        = adToBs(now)
-  const bsDateStr = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+  const bs        = adToBsSafe(now)
+  const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
 
   return `<!DOCTYPE html>
 <html><head><title>Parking Slip</title>

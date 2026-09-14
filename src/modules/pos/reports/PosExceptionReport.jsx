@@ -9,7 +9,7 @@ import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBsSafe, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { viewPosBill } from '../../../utils/viewPosBill'
 import { CLOSE_TYPE_BADGE } from '../posSignals'
@@ -204,7 +204,7 @@ export default function PosExceptionReport() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(filtered.map(r => {
-      const bs = r.closed_at ? adToBs(new Date(r.closed_at)) : null
+      const bs = r.closed_at ? adToBsSafe(new Date(r.closed_at)) : null
       return {
         'Date (AD)':  r.closed_at ? new Date(r.closed_at).toLocaleDateString() : '',
         'Miti (BS)':  bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : '',
@@ -388,7 +388,7 @@ export default function PosExceptionReport() {
                 </thead>
                 <tbody>
                   {filtered.map(r => {
-                    const bs = r.closed_at ? adToBs(new Date(r.closed_at)) : null
+                    const bs = r.closed_at ? adToBsSafe(new Date(r.closed_at)) : null
                     return (
                       <tr key={r.id} onClick={() => viewPosBill(clientId, r)} style={{ cursor: 'pointer' }}>
                         <td>

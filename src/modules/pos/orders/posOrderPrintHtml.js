@@ -1,5 +1,5 @@
-import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
-import { nepalTime, nepalBs, nepalCivilDate, nepalDateAd } from '../../../shared/nepalTime'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { nepalTime, nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { npr2 } from '../../../shared/nepalMoney'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
@@ -13,11 +13,12 @@ import { escapeHtml as esc } from '../../../utils/escapeHtml'
 export function buildKotBotHtml({ station, items, ticketNo, outletName, tableName, takenBy, covers }) {
   const stamp        = new Date()
   const now          = nepalTime(stamp)
-  // nepalCivilDate pins the day to Nepal before adToBs reads its local getters, so a ticket sent
+  // nepalBs pins the day to Nepal before the converter reads its local getters, so a ticket sent
   // just after midnight Kathmandu cannot print yesterday's date for a station whose tablet is set
-  // to another zone. adToBs rather than nepalBs: this is today, always inside the table.
-  const bs           = adToBs(nepalCivilDate(stamp))
-  const date         = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+  // to another zone. nepalBs is exactly adToBsSafe(nepalCivilDate(stamp)) — a display site, so the
+  // range-guarded converter (docs/CROSS-REPO.md adToBs audit), even though today is always in range.
+  const bs           = nepalBs(stamp)
+  const date         = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
   const stationLabel = station === 'BOT' ? 'BAR ORDER TICKET' : 'KITCHEN ORDER TICKET'
 
   return `<!DOCTYPE html>

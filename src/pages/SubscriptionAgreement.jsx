@@ -24,7 +24,7 @@ import { supabase } from '../supabaseClient'
 import { withTimeout } from '../utils/withTimeout'
 import ActionError, { asActionError } from '../components/ActionError'
 import { printWithTitle } from '../utils/printTitle'
-import { adToBs, BS_MONTHS } from '../utils/bsCalendar'
+import { adToBsSafe, BS_MONTHS } from '../utils/bsCalendar'
 import { clientMrrBreakdown } from '../shared/clientMrr'
 import { COMPANY, DOC_TYPES, PRODUCT_NAME, legalDoc, legalAbsoluteUrl, siteOrigin, legalReadiness } from '../legal'
 import './SubscriptionAgreement.css'
@@ -37,7 +37,7 @@ const npr = (n) => `NPR ${Number(n || 0).toLocaleString('en-IN')}`
 
 function bsLabel(date) {
   if (!date) return ''
-  const bs = adToBs(date)
+  const bs = adToBsSafe(date)
   if (!bs) return ''
   return `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
 }

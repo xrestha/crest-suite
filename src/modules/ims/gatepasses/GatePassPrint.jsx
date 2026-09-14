@@ -1,4 +1,4 @@
-import { BS_MONTHS, adToBs } from '../../../utils/bsCalendar'
+import { BS_MONTHS, adToBsSafe } from '../../../utils/bsCalendar'
 import { nepalTime } from '../../../shared/nepalTime'
 
 const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'Maintenance', other: 'Other' }
@@ -11,8 +11,8 @@ export default function GatePassPrint({ gatePass, bizInfo, issuedByName }) {
   const now = new Date(gatePass.time_in || Date.now())
   const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
   const nowStr    = nepalTime(now)
-  const bs        = adToBs(now)
-  const bsDateStr = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+  const bs        = adToBsSafe(now)
+  const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
 
   return (
     <div style={{ fontFamily: 'Georgia, serif', color: '#000', padding: '20px 24px', maxWidth: 720, margin: '0 auto' }}>
@@ -26,7 +26,7 @@ export default function GatePassPrint({ gatePass, bizInfo, issuedByName }) {
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 9, color: '#777', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Gate Pass</div>
           <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>{adDateStr} · {nowStr}</div>
-          <div style={{ fontSize: 11, color: '#555' }}>{bsDateStr} (BS)</div>
+          {bsDateStr && <div style={{ fontSize: 11, color: '#555' }}>{bsDateStr} (BS)</div>}
         </div>
       </div>
 

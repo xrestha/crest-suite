@@ -6,7 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
-import { getBsFiscalYear, getBsFiscalYearStart, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { getBsFiscalYear, getBsFiscalYearStart, adToBsSafe, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { printWithTitle } from '../../../utils/printTitle'
 import { getFiscalYearAdRange, computeVendorBalance } from './vendorBalanceHelpers'
 import Tip from '../../../components/Tip'
@@ -170,7 +170,7 @@ export default function VendorBalanceConfirmation() {
   const isEmpty = !result || (result.schedule.length <= 1 && Math.abs(result.openingBalance) < 0.01)
 
   const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const fmtBs = date => { const { year, month, day } = adToBs(date); return `${day} ${BS_MONTHS[month - 1]} ${year}` }
+  const fmtBs = date => { const bs = adToBsSafe(date); return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${formatAd(new Date(date))} (AD)` }
 
   // Plain text, WhatsApp's own markdown (*bold*) — no HTML, matches ReorderReport.js's convention.
   // Mirrors the letter's own "Opening + Purchases − Payments − Returns = Balance" sentence rather

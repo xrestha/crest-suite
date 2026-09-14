@@ -138,6 +138,58 @@ describe('BS <-> AD anchors (2000 BS extension)', () => {
   })
 })
 
+// Reality anchors: Baisakh 1 (Nepali New Year) for EVERY BS year 2000-2083 (docs/CROSS-REPO.md,
+// 2026-09-02). The round-trip sweep below proves adToBs/bsToAd are a bijection over the table, not
+// that the table is right — both directions read the same BS_CALENDAR, so a mistyped month length
+// round-trips perfectly. One anchor per year localizes a bad row to that year, and catches a
+// compensating pair (+1 in one month, -1 in another) that spans a year boundary.
+//
+// Sourced 2026-09-14 INDEPENDENTLY of bsCalendar.js — read from each site's published calendar,
+// never computed from this table:
+//   - hamropatro.com, nepalicalendar.rat32.com, ashesh.com.np, nepcal.com, englishtonepali.com:
+//     all five agree on all 84 years.
+//   - nepalicalendar.org agrees on 83/84; it gives 2057 as 2000-04-14, but its own Chaitra 2056
+//     page leaves 2000-04-13 with no BS date, so 2000-04-13 stands (also mypatro.com).
+//   - 2072-2083 are additionally confirmed by timeanddate.com, calendarific.com and
+//     officeholidays.com, which publish Nepali New Year as a holiday date.
+// CAVEAT: for 2000-2071 the calendar sites very likely share one widely circulated table, so those
+// anchors prove agreement with the published calendar, not with a primary gazette source.
+// 2084-2087 are deliberately absent: they are extrapolations (see .claude/rules/bs-calendar.md).
+describe('Baisakh 1 reality anchors, every BS year 2000-2083', () => {
+  const NEW_YEAR = [
+    [2000, '1943-04-14'], [2001, '1944-04-13'], [2002, '1945-04-13'], [2003, '1946-04-13'],
+    [2004, '1947-04-14'], [2005, '1948-04-13'], [2006, '1949-04-13'], [2007, '1950-04-13'],
+    [2008, '1951-04-14'], [2009, '1952-04-13'], [2010, '1953-04-13'], [2011, '1954-04-13'],
+    [2012, '1955-04-14'], [2013, '1956-04-13'], [2014, '1957-04-13'], [2015, '1958-04-13'],
+    [2016, '1959-04-14'], [2017, '1960-04-13'], [2018, '1961-04-13'], [2019, '1962-04-13'],
+    [2020, '1963-04-14'], [2021, '1964-04-13'], [2022, '1965-04-13'], [2023, '1966-04-13'],
+    [2024, '1967-04-14'], [2025, '1968-04-13'], [2026, '1969-04-13'], [2027, '1970-04-14'],
+    [2028, '1971-04-14'], [2029, '1972-04-13'], [2030, '1973-04-13'], [2031, '1974-04-14'],
+    [2032, '1975-04-14'], [2033, '1976-04-13'], [2034, '1977-04-13'], [2035, '1978-04-14'],
+    [2036, '1979-04-14'], [2037, '1980-04-13'], [2038, '1981-04-13'], [2039, '1982-04-14'],
+    [2040, '1983-04-14'], [2041, '1984-04-13'], [2042, '1985-04-13'], [2043, '1986-04-14'],
+    [2044, '1987-04-14'], [2045, '1988-04-13'], [2046, '1989-04-13'], [2047, '1990-04-14'],
+    [2048, '1991-04-14'], [2049, '1992-04-13'], [2050, '1993-04-13'], [2051, '1994-04-14'],
+    [2052, '1995-04-14'], [2053, '1996-04-13'], [2054, '1997-04-13'], [2055, '1998-04-14'],
+    [2056, '1999-04-14'], [2057, '2000-04-13'], [2058, '2001-04-14'], [2059, '2002-04-14'],
+    [2060, '2003-04-14'], [2061, '2004-04-13'], [2062, '2005-04-14'], [2063, '2006-04-14'],
+    [2064, '2007-04-14'], [2065, '2008-04-13'], [2066, '2009-04-14'], [2067, '2010-04-14'],
+    [2068, '2011-04-14'], [2069, '2012-04-13'], [2070, '2013-04-14'], [2071, '2014-04-14'],
+    [2072, '2015-04-14'], [2073, '2016-04-13'], [2074, '2017-04-14'], [2075, '2018-04-14'],
+    [2076, '2019-04-14'], [2077, '2020-04-13'], [2078, '2021-04-14'], [2079, '2022-04-14'],
+    [2080, '2023-04-14'], [2081, '2024-04-13'], [2082, '2025-04-14'], [2083, '2026-04-14'],
+  ]
+
+  test('covers every year from 2000 to 2083 exactly once', () => {
+    expect(NEW_YEAR.map(([y]) => y)).toEqual(Array.from({ length: 84 }, (_, i) => 2000 + i))
+  })
+
+  test.each(NEW_YEAR)('Baisakh 1, %i BS = %s', (year, ad) => {
+    expect(formatAd(bsToAd(year, 1, 1))).toBe(ad)
+    expect(adToBsSafe(d(ad))).toEqual({ year, month: 1, day: 1 })
+  })
+})
+
 // adToBsSafe() (added 2026-08-15 as a follow-up to the table extension) is what actually closes the
 // bug: BS_CALENDAR being complete doesn't help a caller that still calls the unguarded adToBs() and
 // trusts whatever it returns. Ported verbatim from the sister HSS app, which shipped this the same

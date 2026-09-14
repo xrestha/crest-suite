@@ -6,7 +6,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { adToBs, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd, formatBsDay, bsDiffDays, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { adToBs, adToBsSafe, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd, formatBsDay, bsDiffDays, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -77,8 +77,9 @@ function weekDays(start) {
 // component so the copy-week dialog can name the target week in the same words.
 function weekLabelFor(start) {
   const days = weekDays(start)
-  const s    = adToBs(days[0])
-  const e    = adToBs(days[6])
+  const s    = adToBsSafe(days[0])
+  const e    = adToBsSafe(days[6])
+  if (!s || !e) return `${formatAd(days[0])} – ${formatAd(days[6])} (AD)`
   const sm   = BS_MONTHS[s.month - 1]
   const em   = BS_MONTHS[e.month - 1]
   if (s.month === e.month && s.year === e.year) return `${sm} ${s.day}–${e.day}, ${s.year}`

@@ -16,7 +16,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
-import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBs, adToBsSafe, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import {
   CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE,
   EMPTY_TADA_ITEM, recomputeTadaAmount, tadaLineAmount, tadaItemsTotal, acceptTadaAmount, tadaDatesError, findLookAlikeClaim,
@@ -27,7 +27,9 @@ const fmt = nprInt
 const pad2 = n => String(n).padStart(2, '0')
 const fmtD = iso => {
   if (!iso) return '—'
-  const bs = adToBs(new Date(iso + 'T00:00:00'))
+  const bs = adToBsSafe(new Date(iso + 'T00:00:00'))
+  // Out of the BS table's range: show the AD date, marked, never a confident wrong BS date (S753).
+  if (!bs) return `${iso} (AD)`
   return `${bs.year}-${pad2(bs.month)}-${pad2(bs.day)}`
 }
 // A timestamp's BS day AS READ IN NEPAL. `paid_at.slice(0, 10)` took the UTC date, so a payment

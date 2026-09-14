@@ -15,7 +15,7 @@ import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { invalidStyle } from '../../../shared/inlineFieldState'
-import { adToBs, BS_MONTHS, formatAdAsBs } from '../../../utils/bsCalendar'
+import { adToBsSafe, BS_MONTHS, formatAdAsBs } from '../../../utils/bsCalendar'
 import { nepalBsLong } from '../../../shared/nepalTime'
 import { firstRecoveryMonth } from '../payroll/payrollData'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -25,7 +25,9 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 const fmt = nprInt
 const fmtD = iso => {
   if (!iso) return '—'
-  const bs = adToBs(new Date(iso + 'T00:00:00'))
+  const bs = adToBsSafe(new Date(iso + 'T00:00:00'))
+  // Out of the BS table's range: show the AD date, marked, never a confident wrong BS date (S753).
+  if (!bs) return `${iso} (AD)`
   return `${bs.year}-${String(bs.month).padStart(2,'0')}-${String(bs.day).padStart(2,'0')}`
 }
 const round2 = n => Math.round(n * 100) / 100

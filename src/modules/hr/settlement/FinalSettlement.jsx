@@ -587,6 +587,11 @@ export default function FinalSettlement() {
                 BS {lastDate.year}: {fmt(leaveBal.quota)} a year × {leaveBal.monthsWorked} of 12 months worked = {Math.round(leaveBal.earned * 10) / 10} earned
                 {' '}− {leaveBal.used} taken{leaveBal.encashed > 0 ? ` − ${leaveBal.encashed} already paid out` : ''} = <strong>{leaveBal.remaining} days</strong>.
                 {' '}Carry-forward from earlier years is not included — the app does not track it.
+                {(parseFloat(leaveDays) || 0) > leaveBal.remaining + 0.01 && (
+                  <span role="alert" style={{ display: 'block', marginTop: 4, color: 'var(--theme-amber-text)', fontWeight: 600 }}>
+                    △ {parseFloat(leaveDays)} days is more than the {leaveBal.remaining} earned — the extra is paid only if you leave it. Keep it only for carry-forward you are sure of; a draft saved earlier keeps the figure it was saved with.
+                  </span>
+                )}
               </p>
             ) : (
               <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
@@ -761,7 +766,7 @@ export default function FinalSettlement() {
               <>
                 <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
                   Finalizing records this settlement and, in one step: recovers the outstanding advances, marks the travel claims paid,
-                  marks {shownRow.employee_name} as {STATUS_AFTER[reason]} with their last working date, and blocks new sign-ins to Crest Staff.
+                  marks {shownRow.employee_name} as {STATUS_AFTER[reason]} with their last working date, turns off their Crest Staff app access, and blocks any HR, IMS or POS staff login linked to them.
                 </p>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button className="btn btn-ghost" disabled={busy || inputsBlocked || !liveRow} onClick={saveDraft}>{current ? 'Update draft' : 'Save draft'}</button>

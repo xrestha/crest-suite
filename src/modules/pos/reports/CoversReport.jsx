@@ -13,7 +13,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
-import { formatAd, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { formatAd, adToBs, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { nepalHour } from '../../../shared/nepalTime'
 import { turnoverByBand } from './coversMath'
@@ -26,7 +26,7 @@ const fmtNpr = npr
 const GOLD  = '#c9a84c'
 const MUTED = '#6b7280'
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
-const bsSlash = iso => { const bs = adToBs(new Date(iso)); return `${String(bs.day).padStart(2, '0')}/${String(bs.month).padStart(2, '0')}/${bs.year}` }
+const bsSlash = iso => { const bs = adToBsSafe(new Date(iso)); return bs ? `${String(bs.day).padStart(2, '0')}/${String(bs.month).padStart(2, '0')}/${bs.year}` : '—' }
 
 const TABS = [
   { key: 'overview',     label: 'Overview' },

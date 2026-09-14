@@ -12,7 +12,7 @@ import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
-import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { nepalTime } from '../../../shared/nepalTime'
@@ -85,8 +85,8 @@ function DenomGrid({ counts, onChange }) {
 function fmtAdBs(date) {
   const dt = new Date(date)
   const ad = dt.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
-  const bs = adToBs(dt)
-  return `${ad} (${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year})`
+  const bs = adToBsSafe(dt)
+  return bs ? `${ad} (${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year})` : ad
 }
 
 // 80mm thermal-printable Cash Settlement / Shift Opening slip — same template conventions as

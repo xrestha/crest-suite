@@ -8,7 +8,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { supabase } from '../../../supabaseClient'
-import { BS_MONTHS, bsToAd, adToBs, formatAd } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, adToBsSafe, formatAd } from '../../../utils/bsCalendar'
 import { nepalCivilDate } from '../../../shared/nepalTime'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
 import Tip from '../../../components/Tip'
@@ -40,8 +40,9 @@ const BILL_COLUMNS = 'id, created_at, bs_day, qty, rate, invoice_ref, paid_at, v
 // figures didn't look like the BS dates used everywhere else in the app.
 function fmtBsDate(adIso) {
   if (!adIso) return null
-  const { year, month, day } = adToBs(new Date(adIso))
-  return `${day} ${BS_MONTHS[month - 1]} ${year}`
+  const bs = adToBsSafe(new Date(adIso))
+  if (!bs) return `${String(adIso).slice(0, 10)} (AD)`
+  return `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
 }
 // How a Credit bill's settlement was actually paid — distinct from purchase_entries.payment_method
 // (Cash/Credit/FonePay), which describes the ORIGINAL purchase, not its later settlement.

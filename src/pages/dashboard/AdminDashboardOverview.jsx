@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useSettings } from '../../context/SettingsContext'
 import { supabase } from '../../supabaseClient'
 import Tip from '../../components/Tip'
-import { BS_MONTHS, adToBs } from '../../utils/bsCalendar'
+import { BS_MONTHS, adToBsSafe } from '../../utils/bsCalendar'
 import { getSubStatus, getDateStatus } from '../../utils/subscription'
 import { clientMRR } from '../../shared/clientMrr'
 import { fetchAllRows } from '../../shared/fetchAllRows'
@@ -531,8 +531,8 @@ export default function AdminDashboardOverview() {
                     const expiryIso = endDate || c.trial_expires_at
                     let expiryBs = null
                     if (expiryIso) {
-                      const bs = adToBs(new Date(expiryIso))
-                      expiryBs = `${BS_MONTHS[bs.month - 1]} ${bs.year}`
+                      const bs = adToBsSafe(new Date(expiryIso))
+                      expiryBs = bs ? `${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(expiryIso).slice(0, 10)} (AD)`
                     }
 
                     let typeLabel, typeColor

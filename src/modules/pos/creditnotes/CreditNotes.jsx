@@ -7,7 +7,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { adToBs, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBsSafe, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { printCreditNote } from './creditNoteHtml'
 import IssueCreditNoteModal from './IssueCreditNoteModal'
 
@@ -114,11 +114,11 @@ export default function CreditNotes() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const ws = XLSX.utils.json_to_sheet(notes.map(n => {
-      const bs = adToBs(new Date(n.created_at))
+      const bs = adToBsSafe(new Date(n.created_at))
       return {
         'CN No': `CN${n.credit_note_no}-${billingSettings.invoice_prefix}${billingSettings.invoice_prefix ? '-' : ''}${n.invoice_fy}`,
         'Ref Invoice No': n.original_invoice_label,
-        'Date (BS)': `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`,
+        'Date (BS)': bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(n.created_at).slice(0, 10)} (AD)`,
         'Buyer': n.buyer_name || 'CASH SALES',
         'Reason': n.reason,
         'Gross (NPR)': Math.round(n.gross_amount * 100) / 100,
@@ -182,10 +182,10 @@ export default function CreditNotes() {
                 </thead>
                 <tbody>
                   {candidates.map(o => {
-                    const bs = adToBs(new Date(o.closed_at))
+                    const bs = adToBsSafe(new Date(o.closed_at))
                     return (
                       <tr key={o.id}>
-                        <td>{bs.day} {BS_MONTHS[bs.month - 1]}</td>
+                        <td>{bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(o.closed_at).slice(0, 10)} (AD)`}</td>
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{o.invoice_no}</td>
                         <td>{o.table_name || 'Takeaway'}</td>
                         <td>{o.buyer_name || 'CASH SALES'}</td>
@@ -235,7 +235,7 @@ export default function CreditNotes() {
                 </thead>
                 <tbody>
                   {notes.map(n => {
-                    const bs = adToBs(new Date(n.created_at))
+                    const bs = adToBsSafe(new Date(n.created_at))
                     const cnNo = `CN${n.credit_note_no}-${billingSettings.invoice_prefix}${billingSettings.invoice_prefix ? '-' : ''}${n.invoice_fy}`
                     return (
                       <tr key={n.id}>
@@ -251,7 +251,7 @@ export default function CreditNotes() {
                           )}
                         </td>
                         <td>{n.original_invoice_label}</td>
-                        <td>{bs.day} {BS_MONTHS[bs.month - 1]}</td>
+                        <td>{bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(n.created_at).slice(0, 10)} (AD)`}</td>
                         <td>{n.buyer_name || 'CASH SALES'}</td>
                         <td>{n.reason}</td>
                         <td style={{ textAlign: 'right' }}>{fmtNpr(n.gross_amount)}</td>

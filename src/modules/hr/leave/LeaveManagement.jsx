@@ -4,7 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
-import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { adToBs, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange, leaveDayCount, publicHolidayKeys } from './leaveConstants'
 import { leaveBalance } from './leaveBalance'
 import { findOverlappingRequest, finalizedMonthsFor, quotaOverrun } from './leaveRules'
@@ -51,8 +51,8 @@ function bsLabel(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   if (isNaN(d)) return '—'
-  const bs = adToBs(d)
-  return `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+  const bs = adToBsSafe(d)
+  return bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(iso).slice(0, 10)} (AD)`
 }
 
 export default function LeaveManagement() {

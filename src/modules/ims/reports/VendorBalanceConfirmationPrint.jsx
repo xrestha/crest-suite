@@ -1,4 +1,4 @@
-import { BS_MONTHS, adToBs } from '../../../utils/bsCalendar'
+import { BS_MONTHS, adToBsSafe, formatAd } from '../../../utils/bsCalendar'
 import { numberToWordsNpr } from '../../../utils/numberToWords'
 
 // Vendor Balance Confirmation letter + supporting schedule — external audit evidence per NSA 17
@@ -10,8 +10,9 @@ import { numberToWordsNpr } from '../../../utils/numberToWords'
 // rest of the app than as a deliberately old-fashioned printed document. Extended with a letter/
 // salutation section and a running-balance schedule instead of a single itemized bill.
 function fmtBs(date) {
-  const { year, month, day } = adToBs(date)
-  return `${day} ${BS_MONTHS[month - 1]} ${year}`
+  const bs = adToBsSafe(date)
+  if (!bs) return `${formatAd(new Date(date))} (AD)`
+  return `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
 }
 
 const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

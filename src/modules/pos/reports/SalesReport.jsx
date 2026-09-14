@@ -12,7 +12,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
-import { getBsToday, formatAd, adToBs, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
+import { getBsToday, formatAd, adToBs, adToBsSafe, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { nepalTime, nepalTime24, nepalBs, nepalCivilDate, nepalHour } from '../../../shared/nepalTime'
 import { computeOrderAmounts, computeGroupAmounts } from '../../../utils/posBillingMath'
 import { viewPosBill } from '../../../utils/viewPosBill'
@@ -105,7 +105,7 @@ const openedOnLabel = (openedAt, closedAt) => {
   return (o.year === c.year && o.month === c.month && o.day === c.day) ? '' : bsLabel(o)
 }
 
-const bsSlash = iso => { const bs = adToBs(new Date(iso)); return `${String(bs.day).padStart(2, '0')}/${String(bs.month).padStart(2, '0')}/${bs.year}` }
+const bsSlash = iso => { const bs = adToBsSafe(new Date(iso)); return bs ? `${String(bs.day).padStart(2, '0')}/${String(bs.month).padStart(2, '0')}/${bs.year}` : '—' }
 
 const TABS = [
   { key: 'daily',    label: 'Daily' },

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { getBsToday, getBsFiscalYear, adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { getBsToday, getBsFiscalYear, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { printCreditNote } from './creditNoteHtml'
 import Modal from '../../../components/Modal'
@@ -95,8 +95,8 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     if (!reason.trim()) { setMsg('error:Enter a reason for this Credit Note.'); return }
     setSubmitting(true); setMsg('')
 
-    const bs = adToBs(new Date(order.closed_at))
-    const original_invoice_date_bs = `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}`
+    const bs = adToBsSafe(new Date(order.closed_at))
+    const original_invoice_date_bs = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(order.closed_at).slice(0, 10)} (AD)`
     const original_invoice_label = invoiceLabel(order, vatReg, settings.invoice_prefix)
     // The CN's own invoice_fy (which drives its sequential credit_note_no via
     // assign_pos_credit_note_no) is the fiscal year it's actually issued in — matching the
