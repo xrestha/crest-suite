@@ -23,6 +23,8 @@ Constants in `src/modules/hr/payrollConstants.js`: SSF rates (11% employee / 20%
 
 **`hr_payslips.unpaid_days` vs `absent_days` (S570, migration `20260818120000`).** `absent_days` is literal absences and must stay that way — Payroll Run's Excel export renders it under the header "Absent Days". The payslip's absence line covers absences **plus** unpaid leave, half days and pre-join days, so it prints `unpaid_days`; printing the narrow figure understated it (one absence + three unpaid-leave days read "(1.0 days)" against four days of money). Payslips finalized before the migration have no value and correctly print no count rather than a wrong one.
 
+> **S751 supersedes parts of the next five sections** — the TADA filter (S565), the `net_pay`/override comparison (S570/S620), the departed bucket being non-blocking (S600), and the two pages' own `buildRows`. Read the S751 section at the end first.
+
 **Payroll Run refuses to finalize a stale draft (S570).** The draft is a snapshot from Generate time, so approving OT or editing attendance afterwards left it quietly wrong while Finalize locked whatever was on screen — and the only staleness detection lived on `/hr/calculation`, a page nobody had to visit first. `PayrollRun.jsx` now recomputes live via **`buildRows` itself** (never a second copy of the arithmetic) and compares `net_pay` per employee; mismatches and employees added after the run block Finalize outright, with a named amber banner pointing at Regenerate. Finalize's confirm is now a consequence summary — payslip count, total net pay, advance recoveries and TADA claims to be closed — because those are real writes to other ledgers. This is why `fetchYtdMap`/`fetchApprovedTadaMap` are loaded on every page load here, not just inside generate/regenerate.
 
 **`payrollData.js`'s three fetch helpers are shared by Payroll Run and Payroll Calculation on purpose, and a filter that's correct for one can be wrong for the other (S565).** `/hr/payroll-calculation` exists solely to recompute every figure live and compare it against the stored `hr_payslips` snapshot, flagging a per-employee **⚠ Stale** badge when `Math.round(stored.net_pay) !== Math.round(netPay)`. That comparison is only meaningful if the live side sees the same *inputs* the stored side was built from — so **any helper feeding it must be robust to state the Finalize action itself changed.** `fetchApprovedTadaMap()` was not: Finalize marks the claims it paid `status='paid', paid_method='Payroll'` (the double-reimbursement guard from S324), while the helper filtered `.eq('status','approved')`, so on an already-finalized period it returned an empty map, live net pay came out short by exactly the TADA amount, and **every employee paid TADA through payroll showed a false Stale flag** — pointing at a genuinely correct payslip. It now matches `.in('status', ['approved','paid'])` and drops any `paid` row whose `paid_method` isn't `'Payroll'`, so a claim settled by hand in cash/bank is still correctly excluded. `fetchYtdMap` is immune to the same shape by construction (it deliberately reads only *prior* months' finalized runs, never this one), and `buildAdvanceMap` is a pure function over rows the caller already fetched. **Before adding a fourth helper here, ask what Finalize does to the rows it reads** — if the answer is "changes them", the Calculation page will read the post-finalize state and the Stale badge becomes noise the moment payroll locks.
@@ -662,3 +664,70 @@ Eight decisions taken with Aashish, and the rules that hold them. Migration `202
   past days.
 - Generate from Roster and the Roster board's assign-over-leave ask through `ConfirmModal`, naming
   what will be written.
+
+## Payroll, Calculation, Festival, Incentives, Advances and TADA (S751)
+
+Sixteen decisions taken with Aashish (2026-09-14). Migration `20260914210000`; engine tests in
+`payrollS751.test.js`. Several rules ABOVE are superseded here — read this section as the current one.
+
+- **One builder for both payroll pages: `buildPayrollRows()` in `payrollData.js`.** Payroll Run's
+  `buildRows` and Calculation's `rows` were two copies held together by "must stay identical"
+  comments. Order of the money: `computePayslip` → TDS (capped at what is left) → advance cut
+  (capped at what is left after TDS — decision: take-home never below zero, the rest stays owed and
+  later cuts take it; there are no arrears, so a shortfall lengthens the loan) → TADA on top.
+  `computePayslip` itself cuts a fixed deduction (CIT) before take-home goes negative, and
+  `retirement_contribution` follows the cut so tax relief follows the money.
+- **Who a month's payroll covers is `fetchPayrollEmployees()`**, not `status IN (active, probation)`:
+  active/probation OR `end_date` on/after the month start (a leaver is paid to their last day
+  whatever their status), filtered by `employedInPeriod` (no payslip for a month not worked at all —
+  a future hire used to get a zero-gross payslip with a negative net), minus anyone whose FINALIZED
+  Final Settlement's `last_working_date` is inside the month (the settlement paid that month; a
+  draft payslip for them used to be finalized on top). This supersedes S600's "departed" bucket being
+  non-blocking: a stored payslip for someone NOT on the list must not be finalized.
+- **A TADA claim is paid by exactly one payroll: `status = 'approved' AND end_date <= month end`.**
+  The S565 rule above (approved OR paid-by-payroll, overlapping the month) paid a cross-month trip in
+  both months. There is no paid half any more, because the Calculation page shows a finalized month as
+  STORED (next bullet), so nothing compares live TADA against a locked month. The TADA amount on a
+  payslip is not editable — it always equals its claims; change the claim instead.
+- **Calculation shows a finalized month as it was paid**, never recomputed against today's salaries —
+  every raise used to turn every past month red "Stale".
+- **`payslipDrift` calls a TDS difference an override only when `hr_payslips.tds_overridden` is true**
+  (set by the TDS box). This supersedes S620's "a TDS difference is an override": prior months
+  finalized late, an insurance premium or a bonus all move TDS without anyone typing.
+- **Bonus tax lives in `bonusTax.js`** (Festival Allowance and Incentives), and four things are
+  load-bearing: the pay month (`bs_month` on both tables) decides the fiscal year; the months left are
+  projected at basic + earning components (`projectedMonthlyGross`), for the employed months only;
+  every OTHER finalized bonus that fiscal year raises the base (`otherBonusesForFy`, keyed by
+  `runKey`); and YTD gross includes overtime. **`fetchYtdMap` adds finalized bonuses from earlier FY
+  months to `gross` and `withheld` but not `count`**, so monthly TDS and Final Settlement's lump-sum
+  base both know about them. A new bonus-like table must join `fetchFinalizedBonuses` or it is taxed
+  as though it were never paid.
+- **A bonus counts only the bonuses paid BEFORE it** (`otherBonusesForFy(rows, fyStart, runKey, pay)`,
+  by fiscal-year month, then run key within a month). Counting every other finalized bonus made the tax
+  depend on finalize order. And **monthly TDS treats bonus tax as settled at source**
+  (`ytdBonusWithheld`): the year's tax minus bonus tax is what gets spread, or the months after a bonus
+  withhold nothing. Festival/bonus Finalize re-checks each draft's stored tax against a fresh figure.
+- **Festival months of service are completed BS months to the festival date** (`completedServiceMonths`,
+  decision: keep the share for months worked). Several festival runs a year are allowed, with a warning.
+  Daily/hourly rows are typed by hand and Finalize is blocked while any is 0.
+- **Rank is a database fence on every money table** — manager for runs, payslips, components,
+  settlements, advances, repayments, festival, incentives, incentive types; supervisor for TADA
+  claims. **A refused RLS UPDATE returns 0 rows and no error**, so a status write that matters selects
+  `id` and checks the count.
+- **Locked by trigger, not by the page:** payslips of a finalized run (`hr_run_finalized`); a finalized
+  run's delete; festival/incentive rows once finalized, where Reopen (status → draft, nothing else
+  changed) is the only allowed update (`bonus_finalized`) — a Generate from a stale tab used to upsert
+  a paid run back to draft; a period with finalized payroll (`period_has_finalized_payroll`), and a
+  period delete needs admin/Owner (IMS and POS PIN logins could delete one over REST, cascading payroll).
+  The operator (`is_admin()`) passes these guards so an Export/Import restore can write history.
+- **Advances:** a repayment may not exceed what is owed or land on a non-active advance; an AFTER
+  trigger keeps `status` in step with the balance (repaid → settled, a repayment removed → active);
+  Settle is refused while owed; forgiving money is `status = 'written_off'` with a required reason, and
+  the amount/who/when are stamped server-side; an advance with repayments cannot be deleted. Payroll
+  and Final Settlement's own status writes still run and are now redundant-but-harmless.
+- **TADA ladder, by trigger:** pending → approved/rejected (never your own claim — matched on
+  `profiles.hr_employee_id` or the employee record's email; `approved_by` set server-side), approved →
+  paid needs a manager and a method, paid(Payroll) → approved only for a payroll Reopen; a decided
+  claim's employee, dates and total are frozen. Manager-entered claims go through `create_tada_claim`
+  (one transaction); `submit_my_tada_claim` refuses an identical claim twice, NaN and reversed dates.
+  **numeric accepts `'NaN'` and `NaN > 0` is true** — a CHECK needs `<> 'NaN'` spelled out.

@@ -105,6 +105,11 @@ Every figure comes from an RPC the portal already called: `get_my_hr_payslips`,
 **Keep it that way where possible** — the whole rebuild carried no migration and no Edge Function
 deploy, which is why it could not break the admin side.
 
+`submit_my_tada_claim` refuses an identical claim sent twice (`tada_duplicate`), a trip ending before
+it starts (`tada_dates_invalid`) and a non-number amount (`tada_amount_invalid`) since S751 — each has a
+`'staff'` sentence in `errorText.js`, and the form checks the dates first. Live data had five pairs of
+the same claim 0–2 minutes apart; a double tap is the ordinary way to make one.
+
 ## A day is named, not numbered (S614)
 
 The swap flow used to say "Day 3" — in the target-day picker and in both pending-swap lines. An
