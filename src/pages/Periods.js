@@ -16,6 +16,7 @@ import {
 import { backfillLeaveText } from '../modules/hr/leave/backfillApprovedLeave'
 import CloseConfirmBody from './periods/CloseConfirmBody'
 import { backfillPosOrdersToIms, countUnpostedForPeriod } from '../modules/pos/orders/backfillPosToIms'
+import { backfillCreditNotesToIms, countUnpostedCreditNotesForPeriod } from '../modules/pos/creditnotes/creditNotePosting'
 import { withTimeout } from '../utils/withTimeout'
 import { closingCountNote } from './periods/closingCountNote'
 import { errorInfo, errorLine } from '../shared/errorText'
@@ -500,16 +501,27 @@ export default function Periods() {
     setNotice(null)
     setBackfillBusy(period.id)
     try {
-      const waiting = await withTimeout(
-        countUnpostedForPeriod({ supabase, scopedFrom, period }), 20000, 'Checking for unposted bills')
-      if (waiting === 0) {
-        ok(`No unposted POS bills for ${label} — everything the till sold that month is already in Inventory.`)
+      // Credit notes ride on the same button (S747): a note issued while no period was open for its
+      // month is marked waiting, exactly like a bill, and is posted here as a negative revenue row.
+      const [waiting, waitingNotes] = await withTimeout(Promise.all([
+        countUnpostedForPeriod({ supabase, scopedFrom, period }),
+        countUnpostedCreditNotesForPeriod({ supabase, scopedFrom, period }),
+      ]), 20000, 'Checking for unposted bills')
+      if (waiting === 0 && waitingNotes === 0) {
+        ok(`No unposted POS bills or credit notes for ${label} — everything the till sold and corrected that month is already in Inventory.`)
         return
       }
+      const parts = [
+        waiting > 0 && `${waiting} bill${waiting === 1 ? '' : 's'}`,
+        waitingNotes > 0 && `${waitingNotes} credit note${waitingNotes === 1 ? '' : 's'}`,
+      ].filter(Boolean)
       setPendingConfirm({
         title: 'Post POS bills into Inventory',
-        confirmLabel: `Post ${waiting} bill${waiting === 1 ? '' : 's'}`,
-        body: `${waiting} POS bill${waiting === 1 ? '' : 's'} from ${label} post${waiting === 1 ? 's' : ''} into Inventory — their revenue and ingredient usage are added to this period, so Inventory reports and stock levels catch up with what the till already sold.`,
+        confirmLabel: `Post ${parts.join(' and ')}`,
+        body: [
+          waiting > 0 && `${waiting} POS bill${waiting === 1 ? '' : 's'} from ${label} post${waiting === 1 ? 's' : ''} into Inventory — their revenue and ingredient usage are added to this period, so Inventory reports and stock levels catch up with what the till already sold.`,
+          waitingNotes > 0 && `${waitingNotes} credit note${waitingNotes === 1 ? '' : 's'} issued in ${label} ${waitingNotes === 1 ? 'takes its bill' : 'take their bills'}' revenue back out of this period. Stock is not touched — the food was served.`,
+        ].filter(Boolean).join(' '),
         run: () => performPosBackfill(period, label),
       })
     } catch (err) {
@@ -529,16 +541,20 @@ export default function Periods() {
         backfillPosOrdersToIms({ supabase, scopedFrom, scopedInsert, scopedUpdate, period }),
         120000, 'Posting POS bills')
       if (error) { fail(`The POS bills for ${label} were not posted — re-running picks up wherever it stopped.`, error); return }
+      // After the bills, so a credit note is never posted into a month its own bill has not reached.
+      const notes = await withTimeout(
+        backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpdate, period }), 60000, 'Posting credit notes')
+      if (notes.error) { fail(`Posted ${posted} bill${posted === 1 ? '' : 's'} into ${label}, but its credit notes were not posted — re-running picks up wherever it stopped.`, notes.error); return }
       // The frozen snapshot does not follow the write (closed-periods.md): revenue just landed
       // in a month whose Monthly Report was minted at close, and the Purchases banner names the
       // repair for exactly this — so does this notice, rather than reporting a clean success
       // over a report that is now stale.
-      const frozenNote = posted > 0 && period.status === 'closed'
+      const frozenNote = (posted > 0 || notes.posted > 0) && period.status === 'closed'
         ? ` ${label} is closed, so its frozen Monthly Report does not include these bills until an admin uses Regenerate Snapshot on it.`
         : ''
       ok(
-        `Posted ${posted} bill${posted === 1 ? '' : 's'} into ${label}.` +
-        (skipped > 0 ? ` ${skipped} skipped (nothing to post, or the write failed — check the browser console).` : '') +
+        `Posted ${posted} bill${posted === 1 ? '' : 's'}${notes.posted > 0 ? ` and ${notes.posted} credit note${notes.posted === 1 ? '' : 's'}` : ''} into ${label}.` +
+        (skipped + notes.skipped > 0 ? ` ${skipped + notes.skipped} skipped (already posted, nothing to post, or the write failed — check the browser console).` : '') +
         frozenNote
       )
     } catch (err) {
@@ -1137,7 +1153,7 @@ export default function Periods() {
                                   on the page that let an Owner or an IMS supervisor write into a
                                   closed month (S738). */}
                               {posEnabled && (isAdmin || p.status === 'open') && (
-                                <Tip text="Posts POS bills from this month that closed while no Inventory period existed — their revenue and ingredient usage are missing from Inventory reports until this runs. Safe to run more than once; already-posted bills are skipped." width={300}>
+                                <Tip text="Posts POS bills from this month that closed while no Inventory period existed — their revenue and ingredient usage are missing from Inventory reports until this runs — and credit notes issued that month that could not take their bill's revenue back out. Safe to run more than once; anything already posted is skipped." width={300}>
                                   <button
                                     className="btn btn-ghost"
                                     style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-amber-text)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)' }}

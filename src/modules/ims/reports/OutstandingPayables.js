@@ -283,11 +283,13 @@ export default function OutstandingPayables() {
     // (the paging tiebreaker), so the bill's line order is now stated here instead of inherited.
     Object.values(byBill).forEach(lines => lines.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || '') || a.id.localeCompare(b.id)))
     Object.values(byBill).forEach(lines => {
-      // discount_amount is stored on every row of a bill but represents ONE bill-level discount,
-      // so it's deduped per purchase_group_id before summing (same as VendorReport does).
-      const discountByGroup = {}
-      lines.forEach(l => { discountByGroup[l.purchase_group_id || l.id] = parseFloat(l.discount_amount || 0) })
-      const billDiscount = Object.values(discountByGroup).reduce((s, d) => s + d, 0)
+      // discount_amount is stored on every row of a bill but represents ONE bill-level discount.
+      // Every line here already shares one billKey, so the bill's discount is the one value they
+      // repeat — max, as VendorReport and allocateBillDiscounts take it (S747). This deduped by
+      // `purchase_group_id || l.id`, so a pre-grouping bill (no purchase_group_id, grouped by the
+      // vendor|invoice|day fallback) keyed each LINE separately and summed the discount once per
+      // line: a five-line bill's discount came off five times and the payable read too low.
+      const billDiscount = Math.max(0, ...lines.map(l => parseFloat(l.discount_amount || 0) || 0))
       // qty 1 × rate netLine: calcBillTotals only ever multiplies the two, and the returns
       // netting above already collapsed each line to a single net figure.
       const { grandTotal } = calcBillTotals(

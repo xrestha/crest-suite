@@ -8,6 +8,7 @@ import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { printCreditNote } from './creditNoteHtml'
 import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
+import { postCreditNoteToIms } from './creditNotePosting'
 
 // A credit note here always credits the WHOLE bill (decision 2026-08-18 — partial credits are not
 // supported). 'Price correction' and 'Billing error' were removed from these chips because both
@@ -43,6 +44,8 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
   const [buyerPhone, setBuyerPhone] = useState(order.buyer_phone || '')
   const [submitting, setSubmitting] = useState(false)
   const [msg, setMsg] = useState('')
+  // Set when the note issued but its Inventory reversal could not post (S747).
+  const [imsNotice, setImsNotice] = useState(null)
 
   useEffect(() => {
     if (!clientId) return
@@ -137,29 +140,50 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       return
     }
 
-    // Best-effort revenue correction — mirrors writeSalesEntries' own bail/error-swallow pattern in
-    // PosOrders.jsx: post negative sales_entries into TODAY's open period (the period the
-    // correction is discovered in), not the original bill's period. Stock/ingredient depletion is
-    // deliberately NOT reversed — the food was already served; this corrects billing/tax, not stock.
-    try {
-      const { data: periods } = await scopedFrom('monthly_periods')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      const open = (periods || []).find(p => p.status === 'open')
-      if (open && today.year === open.bs_year && today.month === open.bs_month) {
-        const rows = payableItems.filter(i => i.recipe_id).map(i => ({
-          period_id: open.id, recipe_id: i.recipe_id, bs_day: today.day, qty_sold: -i.qty, source: 'pos_credit',
-          unit_price: i.unit_price, vat_rate: i.vat_rate,
-        }))
-        if (rows.length > 0) await supabase.from('sales_entries').insert(rows)
-      }
-    } catch (err) {
-      console.error('credit note sales_entries reversal failed:', err)
-    }
+    // Revenue correction into TODAY's open period (the period the correction is discovered in), not
+    // the original bill's. Stock/ingredient depletion is deliberately NOT reversed — the food was
+    // already served; this corrects billing/tax, not stock. It used to skip silently with no open
+    // period and never read its insert's error (S747); now a note that could not post is stamped
+    // "waiting", said so here, counted on the POS floor and posted from Periods.
+    const ims = await postCreditNoteToIms({ supabase, scopedFrom, scopedUpdate, note: created, order, items, today })
 
     await printCreditNote(clientId, created, payableItems, settings, outletName, hscMap)
 
     setSubmitting(false)
-    onIssued?.(created)
+    if (ims.posted) { onIssued?.(created); return }
+    // The note is issued, numbered and printed whatever happens here, so this is a notice with one
+    // button, not an error with a retry: Periods' backfill is the retry.
+    const month = `${BS_MONTHS[today.month - 1]} ${today.year}`
+    setImsNotice({
+      created,
+      text: ims.reason === 'no_period'
+        ? `There is no Inventory period for ${month} yet, so this credit note has not been taken off Inventory sales. Once ${month} is opened in Periods, a manager presses "Post POS bills to Inventory" on it and the note is posted then.`
+        : ims.reason === 'closed'
+          ? `${month} is closed in Inventory, so this credit note has not been taken off Inventory sales. An admin can post it from Periods with "Post POS bills to Inventory" on ${month}.`
+          : `This credit note could not be taken off Inventory sales just now (the connection or the database refused it). It is marked as waiting — a manager can post it from Periods with "Post POS bills to Inventory" on ${month}.`,
+      detail: ims.error ? errorLine(ims.error) : '',
+    })
+  }
+
+  if (imsNotice) {
+    return (
+      <Modal title="Credit Note issued" onClose={() => onIssued?.(imsNotice.created)} maxWidth={480}>
+        <div role="alert" style={{
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+          padding: '12px 14px', fontSize: 13, color: 'var(--theme-text2)', marginBottom: 14,
+        }}>
+          <strong style={{ display: 'block', color: 'var(--theme-amber-text)', marginBottom: 4 }}>
+            ⚠ Credit Note {imsNotice.created?.credit_note_no ?? ''} is valid and printed — but not yet in Inventory
+          </strong>
+          {imsNotice.text}
+          {imsNotice.detail && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{imsNotice.detail}</div>}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn btn-primary" onClick={() => onIssued?.(imsNotice.created)}>Done</button>
+        </div>
+      </Modal>
+    )
   }
 
   return (
@@ -192,7 +216,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
               ))}
             </div>
             <textarea id="icn-reason" value={reason} onChange={e => setReason(e.target.value)} rows={2}
-              placeholder="e.g. Billing error — wrong item charged"
+              placeholder="e.g. Bill raised against the wrong customer"
               style={{ ...inputStyle, width: '100%', resize: 'vertical', marginBottom: 12 }} />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>

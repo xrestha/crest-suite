@@ -88,6 +88,9 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
                   return (
                     <button
                       key={s.id}
+                      type="button"
+                      className="guide-nav-btn"
+                      aria-current={isActive ? 'true' : undefined}
                       onClick={() => setActiveId(s.id)}
                       style={{
                         textAlign: 'left', background: isActive ? 'var(--theme-accent)' : 'transparent',

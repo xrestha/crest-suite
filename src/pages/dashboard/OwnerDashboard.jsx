@@ -18,12 +18,14 @@ import { lcBand, pcBand, nmBand, bandFigure } from '../../shared/operatingBands'
 import Tip from '../../components/Tip'
 import SuiteGate from '../../components/SuiteGate'
 import ChartCard from '../../components/ChartCard'
-import { calcAmount, hourlyRateOf } from '../../modules/hr/payroll/payrollCompute'
+import { calcAmount, hourlyRateOf, isSsfContributor } from '../../modules/hr/payroll/payrollCompute'
 import {
   SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY,
 } from '../../modules/hr/payrollConstants'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
+import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
+import { FEATURE_TIER } from '../../shared/featureCatalog'
 
 // Cost & Margin trend series. Fixed hex, for the reason DESIGN.md states by name: the semantic
 // token set is five ROLES, not five distinguishable hues. These four lines were
@@ -55,6 +57,8 @@ const TREND_COLORS = {
 export default function OwnerDashboard() {
   const { profile, clientId, clientModules, hasFeature, loading: authLoading, isAdmin, isOwner } = useAuth()
   const canOverheads = hasFeature('overheads')
+  // 'growth' → 'Growth' — the plan Overheads is sold on, for the upsell line under True Net Margin.
+  const overheadsTier = (t => (t ? t[0].toUpperCase() + t.slice(1) : ''))(FEATURE_TIER.overheads)
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const navigate = useNavigate()
@@ -154,7 +158,11 @@ export default function OwnerDashboard() {
   // filter, the Overheads page's "Labor Costs" tab rows would get subtracted a second time.
   async function loadImsFigures(period, myId) {
     const results = await Promise.all([
-      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, payment_method').eq('period_id', period.id).order('id')) : { data: [] },
+      // `discount_amount` + the bill-key columns feed allocateBillDiscounts() below. Without them
+      // this page charged the undiscounted price into Food Cost %, Prime Cost % and True Net
+      // Margin %, while Consolidated P&L and Monthly Summary take the same bills net of the
+      // discount — the same month read two ways on the pages an owner compares.
+      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, payment_method, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').eq('period_id', period.id).order('id')) : { data: [] },
       // Paged (S734): subtracted from net purchases, so a truncation OVERSTATES Food Cost %
       // and understates True Net Margin — the wrong direction on a banded tile.
       period ? fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id).order('id')) : { data: [] },
@@ -184,9 +192,14 @@ export default function OwnerDashboard() {
     setLoadErrors(prev => ({ ...prev, ims: results.some(r => r.error) ? 'Revenue/food cost figures failed to load — may be incomplete or stale.' : '' }))
     const [{ data: purchases }, { data: returns }, { data: salesData }, { data: recipes }, { data: overheadsData }, { data: wastagesData }, { data: items }] = results
 
-    const grossTotal  = (purchases || []).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
+    // Net purchases = purchases NET of each bill's discount − returns, the definition Consolidated
+    // P&L and Monthly Summary use (S601/S720). `discount_amount` is a bill-level figure repeated
+    // on every line; allocateBillDiscounts() dedupes it per bill and spreads it across that bill's
+    // lines. Returns stay at list value, as on those two pages.
+    const allocatedPurchases = allocateBillDiscounts(purchases || [])
+    const netOfDiscount = allocatedPurchases.reduce((s, p) => s + p.lineNet, 0)
     const returnTotal = (returns   || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
-    const purchaseTotal = grossTotal - returnTotal
+    const purchaseTotal = netOfDiscount - returnTotal
 
     // unit_price captured on the row (price actually charged) used per-row when present, else
     // falls back to the recipe's current price — this figure feeds Est. Net Margin, the number
@@ -205,9 +218,9 @@ export default function OwnerDashboard() {
 
     // Cash/Credit split of net purchases (not revenue — Sales Entry has no payment_method field).
     let cashNet = 0, creditNet = 0
-    ;(purchases || []).forEach(p => {
-      const v = parseFloat(p.qty || 0) * parseFloat(p.rate || 0)
-      if (p.payment_method === 'Credit') creditNet += v; else cashNet += v
+    // Split off the same discounted line values, so Cash + Credit still adds up to Net Purchases.
+    allocatedPurchases.forEach(p => {
+      if (p.payment_method === 'Credit') creditNet += p.lineNet; else cashNet += p.lineNet
     })
     ;(returns || []).forEach(r => { cashNet -= parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
 
@@ -332,7 +345,8 @@ export default function OwnerDashboard() {
     const elapsedDays = isCurrentMonth ? Math.min(bsToday.day, monthDays) : monthDays
 
     const results = await Promise.all([
-      scopedFrom('hr_employees', 'id, status, basic_salary, pay_basis, ssf_enrolled, join_date, end_date'),
+      // `ssf_no` is load-bearing: isSsfContributor() needs it as well as the enrolment flag.
+      scopedFrom('hr_employees', 'id, status, basic_salary, pay_basis, ssf_enrolled, ssf_no, join_date, end_date'),
       scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value'),
       scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
         .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
@@ -385,7 +399,10 @@ export default function OwnerDashboard() {
       const perDay = monthDays > 0 ? monthlyEquivGross / monthDays : 0
       accruedGross += perDay * daysWorked
 
-      if (emp.ssf_enrolled) {
+      // Employer SSF only for a real contributor — enrolled AND carrying an SSF number — exactly
+      // as computePayslip decides it. The flag alone added 20% for staff payroll never contributes
+      // for, so this estimate ran above the payroll it says it "refines to" once finalized.
+      if (isSsfContributor(emp)) {
         const ssfBase = Math.min(monthlyEquivGross, SSF_CAP) * (monthDays > 0 ? daysWorked / monthDays : 0)
         accruedSsfEmployer += ssfBase * SSF_EMPLOYER_PCT
       }
@@ -588,7 +605,7 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/variance'))}>
             <div style={kpiLabelStyle}>
-              <Tip text={`Net purchases ÷ revenue × 100. Coloured against your own Settings thresholds — watch above ${fcBand(fcPct, settings).warn}%, too high above ${fcBand(fcPct, settings).critical}% — the same scale Variance and Recipes use. Nepal F&B benchmark: 28–35%.`} width={260}>Food Cost % (MTD)</Tip>
+              <Tip text={`Purchases net of bill discounts and returns ÷ revenue × 100. Coloured against your own Settings thresholds — watch above ${fcBand(fcPct, settings).warn}%, too high above ${fcBand(fcPct, settings).critical}% — the same scale Variance and Recipes use. Nepal F&B benchmark: 28–35%.`} width={260}>Food Cost % (MTD)</Tip>
             </div>
             <div title={settledFigure(fcPct, fcCardBand).title} style={{ ...kpiValueStyle(24), color: settledFigure(fcPct, fcCardBand).color }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : settledFigure(fcPct, fcCardBand).text}
@@ -598,7 +615,7 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/hr/payroll'))}>
             <div style={kpiLabelStyle}>
-              <Tip text="Prorated estimate: gross + overtime + employer SSF, scaled to days elapsed this month. Refines to the exact figure once Payroll Run is finalized. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
+              <Tip text="Prorated estimate: gross + overtime + employer SSF (staff enrolled in SSF with an SSF number, as payroll does), scaled to days elapsed this month. This tile always shows that estimate — the exact figure is the finalized Payroll Run, which the Monthly Owner Report uses once the month is closed. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
             </div>
             {/* Banded through `lcBand`, not an inline ternary. The thresholds were already the
                 Monthly Owner Report's 30/37 — but written out a second time here, and WITHOUT the
@@ -644,7 +661,8 @@ export default function OwnerDashboard() {
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : settledFigure(netMarginPct, nmBand).text}
             </div>
             <div style={kpiSubtextStyle}>
-              {!canOverheads ? 'Requires Overheads (Pro) →'
+              {/* Tier read from the catalog: this said "(Pro)" while Overheads is a Growth feature. */}
+              {!canOverheads ? `Requires Overheads (${overheadsTier}) →`
                 : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered'
                 : partialNote ? `Day ${dayOfPeriod} of ${periodDays} · includes labour estimate`
                 : 'After food, labour & overhead · includes labour estimate'}
@@ -689,7 +707,7 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/payments'))}>
             <div style={kpiLabelStyle}>
-              <Tip text="Net purchases (this period) split by payment method — not a revenue split." width={260}>Purchases · Cash / Credit</Tip>
+              <Tip text="Net purchases (this period, after bill discounts and returns) split by payment method — not a revenue split. Returns are all taken off Cash." width={260}>Purchases · Cash / Credit</Tip>
             </div>
             <div style={{ ...kpiValueStyle(18), color: 'var(--theme-text1)' }}>
               {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : (

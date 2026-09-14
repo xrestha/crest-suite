@@ -267,6 +267,9 @@ export default function PosOrders() {
   const [redeemStr, setRedeemStr] = useState('')
   const [loyaltyLookupMsg, setLoyaltyLookupMsg] = useState('')
   const [unpostedCount,   setUnpostedCount]   = useState(0)
+  // Credit notes issued while no Inventory period was open for their month (S747) — the same
+  // standing condition as unposted bills, recovered by the same Periods button.
+  const [unpostedNotes,   setUnpostedNotes]   = useState(0)
   const flushRef = useRef(null)
   // Re-entry guard for closeOrder — a manual Charge tap and the QR auto-confirm poll both call
   // closeOrder('paid') and could otherwise land inside the same order concurrently. A ref (not
@@ -677,7 +680,7 @@ export default function PosOrders() {
     }
 
     loadOpenShift()
-    const [{ data: tbls }, { data: orders }, { count: unposted }] = await Promise.all([
+    const [{ data: tbls }, { data: orders }, { count: unposted }, { count: notesWaiting, error: notesErr }] = await Promise.all([
       scopedFrom('pos_tables')
         .order('sort_order').order('name'),
       scopedFrom('pos_orders', 'id, table_id, covers, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
@@ -686,8 +689,14 @@ export default function PosOrders() {
       // index idx_pos_orders_unposted, so it stays cheap however large the table gets.
       scopedFrom('pos_orders', 'id', { count: 'exact', head: true })
         .eq('status', 'billed').is('ims_posted_at', null),
+      // Same shape, backed by idx_pos_credit_notes_unposted.
+      scopedFrom('pos_credit_notes', 'id', { count: 'exact', head: true })
+        .is('ims_posted_at', null),
     ])
     setUnpostedCount(unposted || 0)
+    // A failed count keeps the last value (a failed poll must not blank live state, S654) — and a
+    // bundle deployed ahead of the migration reads 42703 here, which must not paint a banner.
+    if (!notesErr) setUnpostedNotes(notesWaiting || 0)
     setTables(tbls || [])
     cachePosTables(clientId, tbls || [])
     const map = {}
@@ -3677,6 +3686,23 @@ The tables were left occupied rather than freed with their orders still open.`)
             These bills closed normally and are valid, but there was no open Inventory period for
             their date — so their revenue and ingredient usage are missing from Inventory reports.
             Open the matching period in <strong>Periods</strong>, then use <strong>Post POS bills to Inventory</strong> there to backfill them.
+          </div>
+        </div>
+      )}
+      {unpostedNotes > 0 && (
+        <div role="alert" style={{
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--theme-amber) 28%, transparent)',
+          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
+          color: 'var(--theme-text2)',
+        }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>
+            ⚠ {unpostedNotes} credit note{unpostedNotes === 1 ? '' : 's'} not yet taken off Inventory sales
+          </strong>
+          <div style={{ marginTop: 4 }}>
+            {unpostedNotes === 1 ? 'It is' : 'They are'} valid and printed, but no Inventory period was open for the
+            month {unpostedNotes === 1 ? 'it was' : 'they were'} issued in — so Inventory still counts that revenue.
+            Open the month in <strong>Periods</strong>, then use <strong>Post POS bills to Inventory</strong> there.
           </div>
         </div>
       )}

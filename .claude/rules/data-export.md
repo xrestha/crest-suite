@@ -38,3 +38,10 @@ Two failure modes this feature produced, both worth remembering because neither 
 
 - **A silent `catch` on a user-initiated action is a bug, even when the swallowed error is usually benign.** `showDirectoryPicker()` throws `AbortError` when the user closes the picker — but Chrome throws the *same* error when the environment refuses the call (`Intercepted by Page.setInterceptFileChooserDialog()` under automation; likewise in some embedded webviews). Treating it purely as a cancel gave a button that did nothing and said nothing. The two cases are indistinguishable, so the handler now reports a message covering both rather than staying quiet.
 - **An overflowing tab bar hides its LAST tab.** `ClientDrawer`'s tab row was a bare `display:flex` with no `flexWrap` and no overflow handling, so adding a seventh tab pushed `⚠ Danger` — the destructive one — clean off the 520px drawer with no scrollbar or ellipsis to hint at it. The drawer is now an 880px centred `Modal` (which also gains Escape-to-close, a Tab focus trap, focus restoration and dialog ARIA that the hand-rolled drawer never had), and the row carries `flexWrap` + `whiteSpace:nowrap` so a future eighth tab wraps visibly instead of vanishing. **Any fixed-width container holding a variable number of controls needs a wrap or scroll strategy, or the newest one disappears.**
+
+**`sales_entries` restores AFTER the POS tables (S747).** It carries FKs to `pos_orders`
+(`pos_order_id`, `20260818170000`) and `pos_credit_notes` (`pos_credit_note_id`, `20260914140200`),
+but sat beside the other IMS transactions in `RESTORE_ORDER` — so the first chunk holding a POS row
+was refused and, the loop breaking a table on its first failure, a POS client's entire sales history
+dropped out of the restore. **Adding an FK to a table in `RESTORE_ORDER` is a change to its
+position**: check the order in the same edit.

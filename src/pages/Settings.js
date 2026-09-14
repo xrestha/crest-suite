@@ -83,6 +83,11 @@ if (process.env.NODE_ENV !== 'production') {
 // so a Save Changes button there wrote a row for no reason and, on Categories, wrote the STALE
 // category list from the loaded row over whatever had just been typed into the list beside it.
 const PAGE_SAVE_TABS = new Set(['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes'])
+// Tabs whose fields are the viewed row itself, so a failed read of that row leaves nothing real to
+// show (S747). SettingsContext used to drop the error and hand over DEFAULT_SETTINGS — "Crest Suite"
+// as a client's brand, a blank VAT number — as editable values. Product Codes reads recipes, and
+// the Support tab gates only its consultant card, so neither is on the list.
+const ROW_TABS = new Set([...PAGE_SAVE_TABS, 'Recipe Categories'])
 // numeric columns: '' in the box is NULL in the row (readers fall back to the default), never ''
 // — Postgres refuses '' for numeric and integer, and the error it raised named the type.
 const NUMERIC_FIELDS = { fc_warning_pct: 'float', fc_critical_pct: 'float', expiry_warning_days: 'int', variance_flag_pct: 'float' }
@@ -117,17 +122,36 @@ export function validateThresholds(form) {
   return errs
 }
 
-// Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
-function deriveInvoicePrefix(name) {
-  if (!name) return ''
-  return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 5)
-}
-
 const pad3 = n => String(n).padStart(3, '0')
 
+// The Storage object path inside the Logos bucket, from a stored public URL (`…/Logos/<path>?v=…`).
+function logoObjectPath(url) {
+  const stored = String(url || '')
+  const marker = '/Logos/'
+  const i = stored.indexOf(marker)
+  return i === -1 ? null : decodeURIComponent(stored.slice(i + marker.length).split('?')[0])
+}
+
+// A plan-price table in ONE key order with absent left absent — the shape the Plan Pricing form is
+// seeded in and compared in. Built field by field rather than spread over the stored row, because
+// the live row still carries the JSONB column's original DEFAULT (flat `starter`/`growth`/`pro` keys
+// from before IMS tiers moved under `ims`); spreading it would carry three dead prices into every save.
+function canonicalPrices(table) {
+  const stored = table || {}
+  const storedIms = stored.ims || {}
+  return {
+    ims: Object.fromEntries(['starter', 'growth', 'pro']
+      .filter(t => typeof storedIms[t] === 'number')
+      .map(t => [t, storedIms[t]])),
+    ...(typeof stored.hr === 'number' ? { hr: stored.hr } : {}),
+    ...(typeof stored.pos === 'number' ? { pos: stored.pos } : {}),
+    ...(typeof stored.suite === 'number' ? { suite: stored.suite } : {}),
+  }
+}
+
 export default function Settings() {
-  const { settings, saveSettings, loadSettings, recipeCategories, platformSupport, savePlatformSupport,
-          planPrices, savePlatformPlanPrices } = useSettings()
+  const { settings, saveSettings, recipeCategories, platformSupport, savePlatformSupport,
+          planPrices, savePlatformPlanPrices, settingsLoadError, platformLoadError, platformLoaded } = useSettings()
   const { ask: askConfirm, confirmEl } = useConfirm()
   const { clientId, isAdmin, adminViewClientName, hasFeature, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
@@ -150,12 +174,16 @@ export default function Settings() {
   const editingClient = !!clientId
   const rowLabel = editingClient ? (adminViewClientName || 'this client') : 'Crest itself'
   const [activeTab, setActiveTab] = useState(isAdmin ? 'Branding' : 'Thresholds')
-  // The columns the page-level Save may write: the union over the tabs this viewer has.
-  const visibleFields = TABS.flatMap(t => TAB_FIELDS[t] || [])
   const [form, setForm] = useState({ ...settings })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  // Which button the saving/saved/error state above belongs to (S747): 'page' (the header's Save
+  // Changes) or 'consultant' (the Support tab's lower card). They shared one state, so a failed
+  // consultant save reported at the top of the tab, a screen above the button that was pressed,
+  // and a consultant save's "✓ Saved" carried onto the header button of the next tab opened.
+  const [saveScope, setSaveScope] = useState('page')
+  const logoInputRef = useRef(null)
   const [fieldErr, setFieldErr] = useState({})
   // How many recipes hold each category, keyed by category name — so removing one says what it
   // orphans. null until read; a failed read leaves the counts unknown and the page says so.
@@ -211,20 +239,8 @@ export default function Settings() {
   const [priceMsg, setPriceMsg] = useState('')
   const priceSeedRef = useRef(null)
   useEffect(() => {
-    // Built field by field rather than spread over the stored row, because the live row still
-    // carries the JSONB column's original DEFAULT — flat `starter`/`growth`/`pro` keys from before
-    // IMS tiers moved under `ims`. Nothing has read those in a long time; spreading the row would
-    // carry them into every future save and keep three dead prices sitting next to four live ones.
-    const stored = planPrices || {}
-    const storedIms = stored.ims || {}
-    const next = {
-      ims: Object.fromEntries(['starter', 'growth', 'pro']
-        .filter(t => typeof storedIms[t] === 'number')
-        .map(t => [t, storedIms[t]])),
-      ...(typeof stored.hr === 'number' ? { hr: stored.hr } : {}),
-      ...(typeof stored.pos === 'number' ? { pos: stored.pos } : {}),
-      ...(typeof stored.suite === 'number' ? { suite: stored.suite } : {}),
-    }
+    // canonicalPrices() explains the field-by-field build.
+    const next = canonicalPrices(planPrices)
     const key = JSON.stringify(next)
     if (key === priceSeedRef.current) return
     priceSeedRef.current = key
@@ -241,8 +257,10 @@ export default function Settings() {
       setRegenerateMsg(''); setRegenerateMsgVnd(''); setRegenerateMsgSrc(''); setGenerateMsgPrd('')
       setCatMsg(''); setError(''); setFieldErr({}); setCatUsage(null); setCatUsageErr(null)
     }
-    loadSettings(isAdmin && !clientId ? null : clientId)
-  }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+    // No loadSettings() here (S747): SettingsProvider already loads on the same [clientId,
+    // isAdmin] change, so every client switch read the row twice with nothing deciding which
+    // response won. The provider now owns the load and discards a superseded one.
+  }, [clientId, isAdmin])
 
   // Seeds `form` from the stored row — and KEEPS what has been typed since the previous seed.
   // `settings` is re-read after every save on this page, including Save Categories and the three
@@ -255,8 +273,13 @@ export default function Settings() {
     const prev = seedRef.current
     seedRef.current = settings
     setForm(f => {
+      // No invented invoice code (S747). This used to fill a blank `invoice_prefix` from the
+      // property name ("Casa Acai Cafe" → CAC), which made `form` differ from the row, so the next
+      // Save on ANY tab committed it — silently, because the renumbering warning only fired when
+      // there had been a previous code. A client billing without a code prints TI2238-82/83, so
+      // every past bill then reprinted as TI2238-CAC-82/83. Decided with Aashish: suggest, never
+      // save — the box stays blank with a placeholder until someone types a code.
       const next = { ...settings }
-      if (!next.invoice_prefix && next.app_name) next.invoice_prefix = deriveInvoicePrefix(next.app_name)
       if (prev && (prev.client_id ?? null) === (settings.client_id ?? null)) {
         for (const k of PAGE_FIELDS) {
           if (k in f && !sameValue(f[k], prev[k])) next[k] = f[k]
@@ -355,6 +378,11 @@ export default function Settings() {
       let v = form[k]
       if (k in NUMERIC_FIELDS) v = toNumberOrNull(v, NUMERIC_FIELDS[k])
       else if (typeof v === 'string' && k !== 'logo_url') v = v.trim()
+      // A never-set VAT flag is read as registered by every reader (`?? true` in PosOrders,
+      // viewPosBill, CreditNotes, computeMonthlyReport), and the box shows it ticked. Ticking it
+      // off and on again is therefore no change — it used to be `true` vs NULL, a patch, and a
+      // false "past PAN bills will reprint as Tax Invoices" warning (S747).
+      if (k === 'is_vat_registered' && (v ?? true) === (settings[k] ?? true)) continue
       if (!sameValue(v, settings[k])) patch[k] = v
     }
     return patch
@@ -371,8 +399,15 @@ export default function Settings() {
   // one); doing it without being told it reaches history is not.
   function retroWarnings(patch) {
     const out = []
-    if ('invoice_prefix' in patch && (settings.invoice_prefix || '')) {
-      out.push(`Every bill this client has already issued reprints with the new code — ${settings.invoice_prefix} becomes ${patch.invoice_prefix || '(blank)'} on past invoices as well as new ones, because the number is assembled when a bill is printed, not when it is billed.`)
+    // A FIRST code is as retroactive as a changed one (S747): a bill issued with no code prints
+    // TI2238-82/83 and reprints as TI2238-CAC-82/83 once one is set. The warning used to require
+    // an old code, which is why the invented one above could go through without it.
+    if ('invoice_prefix' in patch) {
+      const was = settings.invoice_prefix || ''
+      const now = patch.invoice_prefix || ''
+      out.push(was
+        ? `Every bill this client has already issued reprints with the new code — ${was} becomes ${now || '(no code)'} on past invoices as well as new ones, because the number is assembled when a bill is printed, not when it is billed.`
+        : `If this client has already issued bills without a code, every one of them reprints with ${now} added to its number from now on, because the number is assembled when a bill is printed, not when it is billed.`)
     }
     if ('is_vat_registered' in patch) {
       out.push(patch.is_vat_registered
@@ -385,8 +420,10 @@ export default function Settings() {
   // `fields` scopes the write to the card that asked for it: the header button owns PAGE_FIELDS,
   // the Support tab's consultant card owns CONSULTANT_FIELDS (S684 — two cards, two Saves, never
   // one button committing the other's fields).
-  async function save({ fields = PAGE_FIELDS } = {}) {
+  async function save({ fields = PAGE_FIELDS, scope = 'page' } = {}) {
     if (saving) return  // the button stays enabled while busy (DESIGN.md), so this is the guard
+    setSaveScope(scope)
+    setSaved(false)
     setError('')
     // Only when a threshold is actually in scope. It used to run on every save, against the values
     // in the STORED row — so an admin, who has no Thresholds tab at all, was refused a Branding or
@@ -484,7 +521,7 @@ export default function Settings() {
   async function commitPrices() {
     setPriceSaving(true); setPriceMsg('')
     try {
-      await savePlatformPlanPrices(priceForm)
+      await savePlatformPlanPrices(canonicalPrices(priceForm))
       setPriceMsg('ok:Prices saved — the public pricing page, Help > Plan & Pricing and every MRR figure now quote them.')
       setTimeout(() => setPriceMsg(''), 5000)
     } catch (e) {
@@ -518,6 +555,14 @@ export default function Settings() {
       await saveSettings({ logo_url: versioned })
       setLogoMsg('ok:Logo saved.')
       setTimeout(() => setLogoMsg(''), 3000)
+      // A replacement of a different TYPE lands at a different path (logo.png → logo.svg), so the
+      // upsert overwrote nothing and the old file stayed publicly readable at its own URL (S747).
+      // Best effort and quiet, exactly as Remove below: the row already points at the new file.
+      const oldPath = logoObjectPath(previous)
+      if (oldPath && oldPath !== path) {
+        const { error: rmErr } = await supabase.storage.from('Logos').remove([oldPath])
+        if (rmErr) console.error('Previous logo file not deleted from Storage:', rmErr.message)
+      }
     } catch (e) {
       setForm(f => ({ ...f, logo_url: previous }))
       setLogoMsg('error:The file uploaded, but the row still points at the old logo. ' + e.message)
@@ -547,12 +592,9 @@ export default function Settings() {
         // Best effort, and deliberately quiet: the column is cleared, so the logo is gone from
         // every screen whatever Storage says, and there is no action the admin could take on a
         // failure here. Without it the file stayed publicly readable at its own URL after Remove.
-        const stored = String(previous || '')
-        const marker = '/Logos/'
-        const i = stored.indexOf(marker)
-        if (i !== -1) {
-          const objectPath = stored.slice(i + marker.length).split('?')[0]
-          const { error: rmErr } = await supabase.storage.from('Logos').remove([decodeURIComponent(objectPath)])
+        const objectPath = logoObjectPath(previous)
+        if (objectPath) {
+          const { error: rmErr } = await supabase.storage.from('Logos').remove([objectPath])
           if (rmErr) console.error('Logo file not deleted from Storage:', rmErr.message)
         }
       },
@@ -777,6 +819,25 @@ export default function Settings() {
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
 
+  // The tab whose panel renders — none, for a row tab whose row could not be read (see ROW_TABS).
+  const shownTab = settingsLoadError && ROW_TABS.has(activeTab) ? null : activeTab
+  // The platform row (Plan Pricing, the Support tab's upper card) is not editable until it has been
+  // read successfully — `=== false` so a caller that does not report it (the test mocks) is ready.
+  const platformReady = !platformLoadError && platformLoaded !== false
+  // A plain function, not a component, for the same reason priceField is one (see below).
+  const platformNotReady = what => platformLoadError
+    ? (
+      <div>
+        <ActionError error={asActionError(platformLoadError)} />
+        <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '8px 0 0' }}>
+          Crest's saved {what} could not be read, so it cannot be edited right now — the boxes would show the
+          built-in defaults, and saving would publish those to every client in place of what is saved. Reload the
+          page to try again.
+        </p>
+      </div>
+    )
+    : <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>Loading the saved {what}…</p>
+
   return (
     <div>
       <div className="page-header page-header--split">
@@ -798,9 +859,14 @@ export default function Settings() {
             Recipe Categories, Product Codes and Theme too — see PAGE_SAVE_TABS. And not on
             Property with no client selected: nothing on that tab is read off the platform row, so
             the button could only ever report success over a write that moved nothing. */}
-        {PAGE_SAVE_TABS.has(activeTab) && !(activeTab === 'Property' && !editingClient) && (
-          <button className="btn btn-primary" onClick={() => save({ fields: visibleFields })} aria-busy={saving ? 'true' : undefined}>
-            {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
+        {PAGE_SAVE_TABS.has(activeTab) && !(activeTab === 'Property' && !editingClient) && !settingsLoadError && (
+          // THIS tab's columns only (S747, decided with Aashish). It wrote the union over every
+          // visible tab, so Save on Branding also committed a consultant number half-typed on the
+          // Support tab — which has its own Save precisely so that could not happen — and the
+          // renumbering dialog's "Nothing else on this tab is affected" was true of the tab and
+          // not of the write. An unsaved edit on another tab now waits for that tab's Save.
+          <button className="btn btn-primary" onClick={() => save({ fields: TAB_FIELDS[activeTab] || [] })} aria-busy={saving && saveScope === 'page' ? 'true' : undefined}>
+            {saving && saveScope === 'page' ? 'Saving…' : saved && saveScope === 'page' ? '✓ Saved' : 'Save Changes'}
           </button>
         )}
       </div>
@@ -850,10 +916,20 @@ export default function Settings() {
       </div>
 
       <div id="settings-tabpanel" role="tabpanel" aria-labelledby={`settings-tab-${tabSlug(activeTab)}`}>
-      <ActionError error={error} className="action-error--top" />
+      {saveScope === 'page' && <ActionError error={error} className="action-error--top" />}
+      {settingsLoadError && ROW_TABS.has(activeTab) && (
+        <div className="card">
+          <ActionError error={asActionError(settingsLoadError)} />
+          <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '8px 0 0' }}>
+            {isAdmin ? <><strong>{rowLabel}</strong>'s</> : 'Your'} settings could not be read, so nothing on this tab can be
+            edited — what would show here is the app's defaults, not the saved values, and saving over them would
+            replace the real ones. Reload the page to try again.
+          </p>
+        </div>
+      )}
 
       {/* BRANDING */}
-      {activeTab === 'Branding' && (
+      {shownTab === 'Branding' && (
         <div className="card">
           <h3 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             {editingClient ? 'Property Branding' : 'App Branding'}
@@ -862,7 +938,7 @@ export default function Settings() {
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
               {editingClient
                 ? <>Editing <strong>{rowLabel}</strong>'s own branding — their sidebar, top bar and printed recipe cost cards. Not Crest's.</>
-                : <>No client is selected, so this is <strong>Crest's own</strong> branding: the name and mark on the login, signup, pricing and legal pages. Pick a client in the top bar to edit theirs.</>}
+                : <>No client is selected, so this is <strong>Crest's own</strong> branding: the name and mark on the login, signup, password-reset and pricing pages. Pick a client in the top bar to edit theirs.</>}
             </p>
           )}
           <div className="form-grid form-grid-2">
@@ -870,7 +946,7 @@ export default function Settings() {
               <label htmlFor="set-app-name">
                 <Tip width={280} text={editingClient
                   ? "The client's own brand name. It replaces Crest's in their sidebar and top bar and heads their printed recipe cost cards. It is NOT what prints on report letterheads — those use the client's name from Admin → Clients."
-                  : "Crest's own product name, on the platform row. It is what a signed-out visitor sees on the login, signup, pricing and legal pages."}>
+                  : "Crest's own product name, on the platform row. It is what a signed-out visitor sees on the login, signup, password-reset and pricing pages. The legal pages deliberately do not use it — they always name the company that signs the agreement."}>
                   {editingClient ? 'Property Name' : 'App Name'}
                 </Tip>
               </label>
@@ -905,15 +981,24 @@ export default function Settings() {
               <div>
                 <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px' }}>Square PNG / JPG / SVG / WebP · max 2 MB</p>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <label style={{ cursor: logoUploading ? 'not-allowed' : 'pointer' }}>
-                    <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }}
-                      disabled={logoUploading}
-                      onChange={e => { if (e.target.files[0]) handleLogoUpload(e.target.files[0]) }}
-                    />
-                    <span className="btn btn-ghost" style={{ fontSize: 11, opacity: logoUploading ? 0.6 : 1, pointerEvents: 'none' }}>
-                      {logoUploading ? 'Uploading…' : '↑ Upload Logo'}
-                    </span>
-                  </label>
+                  {/* A real button in front of a visually-hidden input (S747) — ClientDrawer's shape. The
+                      input was display:none inside a label wrapping a pointer-events:none span, so
+                      nothing here could be reached by keyboard at all. `value = ''` lets the same
+                      file be picked again after a failed upload. */}
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                    className="visually-hidden"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    disabled={logoUploading}
+                    onChange={e => { if (e.target.files[0]) handleLogoUpload(e.target.files[0]); e.target.value = '' }}
+                  />
+                  <button type="button" className="btn btn-ghost" style={{ fontSize: 11 }} disabled={logoUploading}
+                    onClick={() => logoInputRef.current?.click()}>
+                    {logoUploading ? 'Uploading…' : '↑ Upload Logo'}
+                  </button>
                   {form.logo_url && (
                     <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)' }} onClick={handleLogoRemove}>
                       Remove
@@ -948,7 +1033,7 @@ export default function Settings() {
           tab writes the platform row, where not one of them is ever read again. That was S701's
           shape a fourth time: a save that reports success and moves nothing. The Support tab's
           lower card already handled the same case by saying so instead of offering the fields. */}
-      {activeTab === 'Property' && (
+      {shownTab === 'Property' && (
         <div className="card">
           <h3 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Property Details</h3>
           {!editingClient ? (
@@ -968,7 +1053,7 @@ export default function Settings() {
               { key: 'property_phone', label: 'Phone', placeholder: '01-XXXXXXX', tip: 'The number printed on bills, credit notes and parking slips for a guest to call. Not the support line — that is Settings → Support.' },
               { key: 'property_email', label: 'Email', placeholder: 'info@property.com', tip: 'Printed on report letterheads and payroll documents. Not the support line, and not the login email of any account.' },
               { key: 'vat_number', label: 'VAT Registration Number', placeholder: 'e.g. 123456789', tip: 'Your business VAT registration number as issued by IRD Nepal. Printed on report headers and used for VAT invoice compliance.' },
-              { key: 'invoice_prefix', label: 'Invoice Prefix', placeholder: 'e.g. CAC', tip: 'Short client code in POS invoice numbers, e.g. TI2238-CAC-82/83. Changing it RE-NUMBERS every bill already issued: the number is assembled when a bill is printed, so a reprint of an old invoice carries the new code. Auto-suggested from the property name; a save asks before committing a change.', upper: true },
+              { key: 'invoice_prefix', label: 'Invoice Prefix', placeholder: 'Your Business Code', tip: 'Short client code in POS invoice numbers, e.g. TI2238-CAC-82/83. Left blank, bills print without one (TI2238-82/83). Setting or changing it RE-NUMBERS every bill already issued: the number is assembled when a bill is printed, so a reprint of an old invoice carries the new code. Nothing is filled in for you, and a save asks before committing a change.', upper: true },
             ].map(f => (
               <div key={f.key} className="form-field">
                 <label htmlFor={`set-${f.key}`}>{f.tip ? <Tip text={f.tip} width={280}>{f.label}</Tip> : f.label}</label>
@@ -990,7 +1075,7 @@ export default function Settings() {
       )}
 
       {/* THRESHOLDS */}
-      {activeTab === 'Thresholds' && (
+      {shownTab === 'Thresholds' && (
         <div className="card">
           <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Operational Thresholds</h3>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>These decide when a figure is coloured amber or red across every report and dashboard. Leave a box blank to use the default shown in it.</p>
@@ -1037,7 +1122,7 @@ export default function Settings() {
       )}
 
       {/* ITEM CODES */}
-      {activeTab === 'Item Codes' && (
+      {shownTab === 'Item Codes' && (
         <div className="card">
           <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Item Codes</h3>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
@@ -1079,7 +1164,7 @@ export default function Settings() {
       )}
 
       {/* VENDOR CODES */}
-      {activeTab === 'Vendor Codes' && (
+      {shownTab === 'Vendor Codes' && (
         <div className="card">
           <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Vendor Codes</h3>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
@@ -1120,7 +1205,7 @@ export default function Settings() {
       )}
 
       {/* SUB-RECIPE CODES */}
-      {activeTab === 'Sub-Recipe Codes' && (
+      {shownTab === 'Sub-Recipe Codes' && (
         <div className="card">
           <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sub-Recipe Codes</h3>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
@@ -1191,7 +1276,7 @@ export default function Settings() {
       )}
 
       {/* RECIPE CATEGORIES */}
-      {activeTab === 'Recipe Categories' && (
+      {shownTab === 'Recipe Categories' && (
         <div className="card">
           <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Recipe Categories</h3>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
@@ -1294,6 +1379,10 @@ export default function Settings() {
                 address on the Terms page (each field below says which). Nothing here is per-client — for
                 that, use the section below.
               </p>
+              {/* Not editable until the stored contact is really on screen (S747): this card saves the
+                  WHOLE block, so fields seeded from a failed read — blank, badged "As saved" — would
+                  have published blanks over every slot that was never touched. */}
+              {!platformReady ? platformNotReady('support contact') : (<>
               <div className="form-grid form-grid-2">
                 <div className="form-field">
                   <label htmlFor="sup-mobile"><Tip text="The number on the Call button. It also serves WhatsApp and Viber unless you give those their own numbers below.">Mobile</Tip></label>
@@ -1390,6 +1479,7 @@ export default function Settings() {
                   </span>
                 )}
               </div>
+              </>)}
             </div>
 
             <div className="card">
@@ -1401,7 +1491,12 @@ export default function Settings() {
                 prompts, the lock screen and Help → Support — so the client reaches the person who looks after them.
                 Blank means they see Crest Support.
               </p>
-              {clientId ? (
+              {clientId && settingsLoadError ? (
+                <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>
+                  This client's settings could not be read, so their consultant cannot be edited — the boxes would
+                  show blanks, not what is saved. Reload the page to try again.
+                </p>
+              ) : clientId ? (
                 <div className="form-grid form-grid-2">
                   <div className="form-field">
                     <label htmlFor="set-contact-phone"><Tip text="Replaces the mobile, WhatsApp and Viber above for this client. The Crest landline is not shown beside a consultant.">Consultant phone</Tip></label>
@@ -1425,15 +1520,17 @@ export default function Settings() {
                   applies to everyone until then.
                 </p>
               )}
-              {clientId && (
+              {clientId && !settingsLoadError && (
                 // This card's own Save, scoped to its own three columns — placed beside the fields
                 // it commits so the two cards never share a button (S684). It went through the
                 // shared save() unscoped until the columns were found to be missing from
                 // PAGE_FIELDS altogether, which made the whole card a no-op that reported success.
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20, flexWrap: 'wrap' }}>
-                  <button className="btn btn-primary" onClick={() => save({ fields: CONSULTANT_FIELDS })} aria-busy={saving || undefined}>
-                    {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Consultant'}
+                  <button className="btn btn-primary" onClick={() => save({ fields: CONSULTANT_FIELDS, scope: 'consultant' })} aria-busy={saving && saveScope === 'consultant' ? 'true' : undefined}>
+                    {saving && saveScope === 'consultant' ? 'Saving…' : saved && saveScope === 'consultant' ? '✓ Saved' : 'Save Consultant'}
                   </button>
+                  {/* Its failure is reported HERE, beside the button that was pressed (S747). */}
+                  {saveScope === 'consultant' && <ActionError error={error} />}
                 </div>
               )}
             </div>
@@ -1444,6 +1541,10 @@ export default function Settings() {
       {/* PLAN PRICING — the platform's price list, so it saves to the client_id-NULL settings row
           through savePrices(), never through the page-level save() (S701). */}
       {activeTab === 'Plan Pricing' && (() => {
+        // Same reason as the Support card (S747): Save Plan Prices writes the WHOLE table, so a form
+        // seeded from a failed read — every box blank, badged "As saved" — turned one edited price
+        // into every other price reverting to the shipped figure for every client.
+        if (!platformReady) return <div className="card">{platformNotReady('plan prices')}</div>
         // priceForm, not `form`: `form` is whichever client's settings row this session read, and
         // writing prices there put them somewhere nothing reads — the save said "✓ Saved" and the
         // price the world sees never moved.
@@ -1465,7 +1566,11 @@ export default function Settings() {
           if (n === undefined) delete next[key]; else next[key] = n
           setPrices(next)
         }
-        const priceDirty = JSON.stringify({ ims: imsPrices, ...Object.fromEntries(['hr', 'pos', 'suite'].filter(k => typeof priceForm[k] === 'number').map(k => [k, priceForm[k]])) }) !== priceSeedRef.current
+        // Through the same canonical shape as the seed (S747). This built its own object in the
+        // order the keys happened to be in, and clearing then retyping a tier moves that tier to the
+        // end of `ims` — so identical prices serialised differently and the badge said "Unsaved"
+        // over a form that matched the saved table, including straight after saving it.
+        const priceDirty = JSON.stringify(canonicalPrices(priceForm)) !== priceSeedRef.current
         // Monthly and annual are on screen together (S702). They used to be two tabs, which made
         // the annual column a place you had to go and look — for a figure that is not a second
         // price but a printout of this one: annualOf() (×0.75, in pricingPlans.js) is the single
@@ -1688,6 +1793,7 @@ export default function Settings() {
             ].map(({ key, label, desc }) => (
               <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0', borderBottom: '1px solid var(--theme-border)' }}>
                 <label
+                  className="theme-swatch"
                   style={{ position: 'relative', flexShrink: 0, cursor: 'pointer' }}
                   title={`Pick ${label}`}
                 >
@@ -1700,7 +1806,9 @@ export default function Settings() {
                     onChange={e => updateColor(key, e.target.value)}
                     style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
                   />
-                  <div style={{
+                  {/* .theme-swatch-chip carries the focus ring (S747): the real input is 0×0, so
+                      keyboard focus on it was invisible — :focus-visible has no inline form. */}
+                  <div className="theme-swatch-chip" style={{
                     width: 36, height: 36, borderRadius: 0,
                     background: colors[key],
                     border: '2px solid var(--theme-border)',
@@ -1720,10 +1828,10 @@ export default function Settings() {
 
             <div style={{ marginTop: 20, display: 'flex', gap: 10 }}>
               <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => switchPreset('dark')}>
-                ↺ Reset to Dark
+                ↺ Reset to {PRESETS.dark?.name || 'Dark'}
               </button>
               <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => switchPreset('light')}>
-                ↺ Reset to Light
+                ↺ Reset to {PRESETS.light?.name || 'Light'}
               </button>
             </div>
           </div>
@@ -1738,10 +1846,10 @@ export default function Settings() {
               <div style={{ padding: '10px 20px', borderRadius: 0, background: 'transparent', color: colors.text2, border: `1px solid ${colors.border}`, fontSize: 13 }}>
                 Ghost Button
               </div>
-              <div style={{ padding: '6px 14px', borderRadius: 0, background: `${colors.green}18`, color: colors.greenText, fontSize: 11, fontWeight: 700 }}>
+              <div style={{ padding: '6px 14px', borderRadius: 0, background: `color-mix(in srgb, ${colors.green} 9%, transparent)`, color: colors.greenText, fontSize: 11, fontWeight: 700 }}>
                 Active Badge
               </div>
-              <div style={{ padding: '6px 14px', borderRadius: 0, background: `${colors.red}18`, color: colors.redText, fontSize: 11, fontWeight: 700 }}>
+              <div style={{ padding: '6px 14px', borderRadius: 0, background: `color-mix(in srgb, ${colors.red} 9%, transparent)`, color: colors.redText, fontSize: 11, fontWeight: 700 }}>
                 Error Badge
               </div>
             </div>
@@ -1786,11 +1894,14 @@ export default function Settings() {
           </div>
 
           <div className="card">
-            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Archiving periods</h3>
+            {/* S747: this card described a feature that does not exist — an archive action, period
+                dropdowns that hide archived months, and a "Show archived" toggle on every report. The
+                only thing there is the Periods page's own list folding old closed months away. */}
+            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Old periods</h3>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
-              Archiving hides a closed period from the period dropdowns to keep screens short. Nothing is
-              deleted — "Show archived" on any report brings it back. Export before archiving, so the figures
-              exist somewhere outside the app.
+              There is no archive action for periods. The Periods page folds closed periods older than 12 months
+              out of its own list to keep it short — "Show Archived" there brings them back. Nothing is deleted
+              or hidden anywhere else: every report's period picker still lists every month.
             </p>
             <Link className="btn btn-ghost" style={{ fontSize: 12 }} to="/periods">Open Periods</Link>
           </div>
@@ -1809,8 +1920,17 @@ export default function Settings() {
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
               Destructive actions are deliberately not on this page — they belong on the screen that names
               which client they are about, where the confirmation can spell out the row counts it is about to
-              destroy. They are in <strong>Admin → Clients → Manage → ⚠ Danger</strong>. Archive in preference
-              to deleting: an archived client keeps its history and stops being billed.
+              destroy. They are in <strong>Admin → Clients → Manage → ⚠ Danger</strong>.
+            </p>
+            {/* S747: this said an archived client "keeps its history". Archive DELETES the client's
+                data (handleArchiveClient → deleteClientData); the history survives only in the backup
+                it takes first. An operator planning around the old sentence would have lost it. */}
+            <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '8px 0 0' }}>
+              Prefer <strong>Archive</strong> to Delete, but know what it does: it takes a backup, then <strong>deletes
+              all of the client's data</strong>, keeps every login and staff PIN, and locks the account so it stops
+              being billed. Nothing is left to browse in the app — the history lives only in that backup file, and
+              restoring it brings everything back. <strong>Delete</strong> also removes the logins and the client
+              itself, so its restore cannot bring back password logins.
             </p>
           </div>
         </div>

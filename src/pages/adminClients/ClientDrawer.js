@@ -12,6 +12,7 @@ import Modal from '../../components/Modal'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { MIN_PASSWORD_LENGTH } from '../../utils/weakPasswords'
 import { adminOp } from '../../shared/adminOp'
+import { useConfirm } from '../../shared/hooks/useConfirm'
 // Colours only — the PRICES this panel quotes come from useSettings().pricing (S701), so the
 // figure under each module button is the one Settings > Plan Pricing actually charges. It used
 // to import the constants, which meant the screen where an operator picks a client's modules
@@ -57,10 +58,23 @@ function generateWebhookSecret() {
   return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// Derives a short invoice-number prefix from the property/business name, e.g. "Casa Acai Cafe" -> "CAC"
-function deriveInvoicePrefix(name) {
-  if (!name) return ''
-  return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 5)
+// The two settings resolved at PRINT time, so a change reaches bills already issued (S739/S747).
+// Same sentences as Settings.js's retroWarnings(); `loaded` is the row as this drawer read it.
+function retroBillWarnings(loaded, patch) {
+  const out = []
+  if ('invoice_prefix' in patch && (patch.invoice_prefix || '') !== (loaded?.invoice_prefix || '')) {
+    const was = loaded?.invoice_prefix || ''
+    const now = patch.invoice_prefix || ''
+    out.push(was
+      ? `Every bill this client has already issued reprints with the new code — ${was} becomes ${now || '(no code)'} on past invoices as well as new ones, because the number is assembled when a bill is printed, not when it is billed.`
+      : `If this client has already issued bills without a code, every one of them reprints with ${now} added to its number from now on, because the number is assembled when a bill is printed, not when it is billed.`)
+  }
+  if ('is_vat_registered' in patch && (patch.is_vat_registered ?? true) !== (loaded?.is_vat_registered ?? true)) {
+    out.push((patch.is_vat_registered ?? true)
+      ? 'Past bills printed as plain PAN bills will reprint as Tax Invoices (PB→TI) with a VAT breakdown added, since the bill type is decided when a bill is printed.'
+      : 'Past Tax Invoices will reprint as plain PAN bills (TI→PB) with the VAT breakdown removed, since the bill type is decided when a bill is printed.')
+  }
+  return out
 }
 
 export default function ClientDrawer({ client, onClose, onClientUpdated }) {
@@ -104,6 +118,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // Settings and QR are two views of one `clientSettings` object, so fetching on every switch
   // between them re-ran two network calls to rebuild state the drawer already held.
   const settingsLoadedRef = useRef(false)
+  // The settings row as last read or saved — what a retroactive change is measured against.
+  const loadedSettingsRef = useRef(null)
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [webhookSecret, setWebhookSecret]     = useState('') // client_secrets, not settings — see SETTINGS_DEFAULTS
 
   // QR tab state. Both the parse and the encode are keyed off the payload only — they used to run
@@ -467,13 +484,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       if (secretErr) throw secretErr
       const data = await loadClientSettings(client.id)
       setWebhookSecret(secretRow?.pos_webhook_secret || '')
-      if (data) {
-        setClientSettings(prev => {
-          const merged = { ...prev, ...data }
-          if (!merged.invoice_prefix && merged.app_name) merged.invoice_prefix = deriveInvoicePrefix(merged.app_name)
-          return merged
-        })
-      }
+      // No invented invoice code (S747, decided with Aashish): a blank prefix used to be filled from
+      // the property name here and then saved by the next Save, renumbering every bill the client
+      // had already issued without one. It stays blank until someone types a code.
+      loadedSettingsRef.current = data || {}
+      if (data) setClientSettings(prev => ({ ...prev, ...data }))
       settingsLoadedRef.current = true
     } catch (e) {
       setSettingsLoadErr(asActionError(e, 'operator'))
@@ -507,9 +522,28 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     const fields = DRAWER_SETTINGS_FIELDS[what] || []
     const patch = {}
     for (const k of fields) if (k in clientSettings) patch[k] = clientSettings[k]
+    // This drawer had no warning at all for the two fields that rewrite issued bills (S747) — the
+    // Settings page asked, the other editor for the same columns did not.
+    const warnings = retroBillWarnings(loadedSettingsRef.current, patch)
+    if (warnings.length) {
+      askConfirm({
+        title: warnings.length > 1 ? 'Change the bill type and the invoice code?' : ('invoice_prefix' in patch && (patch.invoice_prefix || '') !== (loadedSettingsRef.current?.invoice_prefix || '') ? 'Change the invoice code?' : 'Change the bill type?'),
+        confirmLabel: 'Save anyway', danger: true, busyLabel: 'Saving…',
+        body: <>{warnings.map((w, i) => <p key={i} style={{ margin: '0 0 8px' }}>{w}</p>)}</>,
+        run: () => commitClientSettings(what, patch),
+      })
+      return
+    }
+    await commitClientSettings(what, patch)
+  }
+
+  async function commitClientSettings(what, patch) {
     setSavingSettings(true); setSettingsMsg('')
     try {
-      if (Object.keys(patch).length) await saveClientSettings(client.id, patch)
+      if (Object.keys(patch).length) {
+        await saveClientSettings(client.id, patch)
+        loadedSettingsRef.current = { ...(loadedSettingsRef.current || {}), ...patch }
+      }
       // Webhook secret writes to its own admin-only table. Upserted alongside because this one
       // handler backs both the Settings tab's Save and the QR tab's "Save Webhook Secret" button.
       const { error: secretErr } = await supabase
@@ -1666,8 +1700,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       </label>
                     </div>
                     <div className="form-field">
-                      <label htmlFor={fid('s-prefix')}><Tip text="Short client code used in POS invoice numbers, e.g. TI2238-CAC-82/83. Auto-suggested from the property name; edit if you want something different.">Invoice Prefix</Tip></label>
-                      <input id={fid('s-prefix')} value={clientSettings.invoice_prefix || ''} onChange={e => setClientSettings({ ...clientSettings, invoice_prefix: e.target.value.toUpperCase() })} placeholder="e.g. CAC" />
+                      <label htmlFor={fid('s-prefix')}><Tip text="Short client code used in POS invoice numbers, e.g. TI2238-CAC-82/83. Left blank, bills print without one. Setting or changing it re-numbers every bill already issued, because the number is assembled when a bill is printed — a save asks first.">Invoice Prefix</Tip></label>
+                      <input id={fid('s-prefix')} value={clientSettings.invoice_prefix || ''} onChange={e => setClientSettings({ ...clientSettings, invoice_prefix: e.target.value.toUpperCase() })} placeholder="Your Business Code" />
                     </div>
                   </div>
 
@@ -2174,6 +2208,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           </Modal>
         )
       })()}
+      {confirmEl}
     </Modal>
   )
 }

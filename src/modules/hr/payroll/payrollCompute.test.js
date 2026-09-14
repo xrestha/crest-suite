@@ -1,5 +1,48 @@
-import { calcAmount, tallyAttendance, hourlyRateOf, computePayslip } from './payrollCompute'
+import { calcAmount, tallyAttendance, hourlyRateOf, computePayslip, isSsfContributor } from './payrollCompute'
 import { bsToAd, formatAd } from '../../../utils/bsCalendar'
+const fs = require('fs')
+const path = require('path')
+
+// One SSF gate for the whole module. It decides the 11%/20% deduction here AND the TDS 1%
+// first-slab waiver (plus projected SSF relief on bonus runs), so every caller must ask the same
+// question — Festival Allowance and Incentive Run had used the flag alone, waiving tax for staff
+// from whom payroll deducts no SSF.
+describe('isSsfContributor', () => {
+  test('requires both the enrolment flag and a non-blank registration number', () => {
+    expect(isSsfContributor({ ssf_enrolled: true, ssf_no: '1234567890' })).toBe(true)
+    expect(isSsfContributor({ ssf_enrolled: true })).toBe(false)
+    expect(isSsfContributor({ ssf_enrolled: true, ssf_no: null })).toBe(false)
+    expect(isSsfContributor({ ssf_enrolled: true, ssf_no: '' })).toBe(false)
+    expect(isSsfContributor({ ssf_enrolled: true, ssf_no: '   ' })).toBe(false)
+    expect(isSsfContributor({ ssf_enrolled: false, ssf_no: '1234567890' })).toBe(false)
+    expect(isSsfContributor({})).toBe(false)
+    expect(isSsfContributor(null)).toBe(false)
+  })
+
+  test('agrees with the deduction computePayslip makes', () => {
+    const period = { bs_year: 2082, bs_month: 1 }
+    for (const emp of [
+      { ssf_enrolled: true, ssf_no: '99' }, { ssf_enrolled: true, ssf_no: ' ' }, { ssf_enrolled: false, ssf_no: '99' },
+    ]) {
+      const slip = computePayslip({ pay_basis: 'monthly', basic_salary: 50000, ...emp }, [], [], period)
+      expect(slip.ssf_employee > 0).toBe(isSsfContributor(emp))
+    }
+  })
+
+  // Reads the source, so a page that goes back to the flag alone fails here rather than on a tax
+  // figure. Each of these computes TDS with an `isSsf` waiver.
+  test.each([
+    ['PayrollRun.jsx', 'payroll'],
+    ['PayrollCalculation.jsx', 'payroll'],
+    ['FestivalAllowance.jsx', 'festival'],
+    ['IncentiveRun.jsx', 'incentives'],
+  ])('%s decides SSF through isSsfContributor, never the flag alone', (file, dir) => {
+    const src = fs.readFileSync(path.join(__dirname, '..', dir, file), 'utf8')
+    expect(src).toMatch(/isSsfContributor\(emp\)/)
+    expect(src).not.toMatch(/isSsf\s*:\s*!!\s*emp\.ssf_enrolled\b/)
+    expect(src).not.toMatch(/\(\s*emp\.ssf_enrolled\s*\?/)
+  })
+})
 
 describe('calcAmount', () => {
   test('percent_of_basic computes a share of basic salary', () => {

@@ -546,3 +546,18 @@ active/probation staff only, and a mid-month leaver's days are what Final Settle
 blank attendance day is PAID for monthly staff** (`unpaidDays` comes only from rows that exist), so
 the consequence of any clear is that marked absences and unpaid leave stop deducting. Never write
 "a blank day is unpaid" in copy.
+
+## Advances recover from the month AFTER issue, and SSF is one predicate (S747)
+
+- **An advance is first deducted in the BS month after the month it was issued** (day irrelevant;
+  Chaitra → Baisakh next year) — decided with Aashish, the rule hss-suite already runs.
+  `firstRecoveryMonth` / `advanceDueIn` / `dueAdvances` in `payrollData.js` are the one filter every
+  per-period reader uses (deduction, Finalize's allocation, Calculation's count), and
+  `buildAdvanceMap(advances, repayments, period)` **throws** without a period rather than deducting
+  everything. Final Settlement deliberately does not use it — a leaver repays everything outstanding.
+- **`isSsfContributor(employee)` in `payrollCompute.js` is the one "enrolled AND has an SSF number"
+  test.** Festival Allowance and Incentives waived the 1% slab and projected SSF relief on the flag
+  alone, and the Owner Dashboard / Monthly Owner Report added employer SSF to labour the same way.
+  Copies still inline in `gratuityCompute.js`, `laborForecast.js`, `HrReports.jsx`, `PayslipBody.jsx`
+  agree today; move them to the helper when touched. `PaySetup.jsx` / `PayForm.jsx` previews still use
+  the flag alone.

@@ -28,12 +28,16 @@ import { nepalBs } from '../../shared/nepalTime'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
+import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
+import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 import SalesPivot from '../../modules/dashboard/SalesPivot'
 import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 import GettingStartedCard from './GettingStartedCard'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
+// 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
+const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
 // Roving-tabindex tab row for in-card view switches — completes the tablist contract the bare
 // role="tablist"/"tab" markup used to promise without delivering (aria-controls, roving tabIndex,
@@ -411,7 +415,11 @@ export default function ClientDashboard() {
     loadFcTrend(period, myId)
 
     const dependentPromise = Promise.all([
-      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, bs_day').eq('period_id', period.id).order('id')) : { data: [] },
+      // `discount_amount` + the bill-key columns (`purchase_group_id`, and the vendor/invoice/day
+      // fallback for bills written before grouping existed) feed allocateBillDiscounts() below —
+      // the same read ConsolidatedPnl and MonthlySummary make, so Net Purchases, Food Cost % and
+      // Est. Net Margin % on this page agree with those two for the same month.
+      period ? fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, bs_day, discount_amount, purchase_group_id, vendor_id, invoice_ref').eq('period_id', period.id).order('id')) : { data: [] },
       // Paged (S734). Returns are usually few — but "usually small" is not a decision, and this
       // one is SUBTRACTED from Net Purchases and from every daily bar on the trend chart, so a
       // truncation overstates spend and Food Cost % rather than understating a list. Same call
@@ -496,10 +504,18 @@ export default function ClientDashboard() {
       || rawBreakdown === null
     setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
 
-    // PATCHED: purchaseTotal = gross − returns
-    const grossTotal  = (purchases || []).reduce((s, p) => s + p.qty * p.rate, 0)
-    const returnTotal = (returns || []).reduce((s, r) => s + r.qty * r.rate, 0)
-    const purchaseTotal = grossTotal - returnTotal
+    // purchaseTotal = purchases NET of bill discounts − returns. `discount_amount` is a BILL-level
+    // figure repeated on every line, so a raw Σ qty × rate charged the undiscounted price into
+    // Net Purchases, Food Cost % and Est. Net Margin % — while Consolidated P&L and Monthly Summary
+    // took the same bills net of the discount, and the same month read two ways on two pages.
+    // allocateBillDiscounts() spreads each bill's one discount across its own lines (S601/S720);
+    // every purchase figure below (per-item spend, the daily bars) reads that `lineNet` too, so
+    // Spend by Category can never add up to more than the Net Purchases tile beside it. Returns
+    // stay at their list value, exactly as those two pages take them.
+    const allocatedPurchases = allocateBillDiscounts(purchases || [])
+    const netPurchaseValue = allocatedPurchases.reduce((s, p) => s + p.lineNet, 0)
+    const returnTotal = (returns || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+    const purchaseTotal = netPurchaseValue - returnTotal
 
     const currentPriceMap = {}
     ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price) || 0 })
@@ -572,9 +588,11 @@ export default function ClientDashboard() {
     // PATCHED: purchMap net of returns
     const purchMap = {}
     const purchValueMap = {}
-    ;(purchases || []).forEach(p => {
+    ;allocatedPurchases.forEach(p => {
       purchMap[p.item_id] = (purchMap[p.item_id] || 0) + parseFloat(p.qty || 0)
-      purchValueMap[p.item_id] = (purchValueMap[p.item_id] || 0) + parseFloat(p.qty || 0) * parseFloat(p.rate || 0)
+      // Net of the bill discount (see purchaseTotal above); qty is untouched — a discount changes
+      // what was paid, not what arrived.
+      purchValueMap[p.item_id] = (purchValueMap[p.item_id] || 0) + p.lineNet
     })
     ;(returns || []).forEach(r => {
       purchMap[r.item_id] = (purchMap[r.item_id] || 0) - parseFloat(r.qty || 0)
@@ -615,13 +633,14 @@ export default function ClientDashboard() {
     )
 
     // ── Daily trend: purchases (actual, net) + daily sales revenue + month-end sales projection ──
-    const dayGrossMap = {}
+    const dayNetPurchMap = {}
     const dayReturnMap = {}
-    ;(purchases || []).forEach(p => { dayGrossMap[p.bs_day] = (dayGrossMap[p.bs_day] || 0) + parseFloat(p.qty || 0) * parseFloat(p.rate || 0) })
+    // Net of bill discounts, so the daily bars sum to the Net Purchases tile.
+    ;allocatedPurchases.forEach(p => { dayNetPurchMap[p.bs_day] = (dayNetPurchMap[p.bs_day] || 0) + p.lineNet })
     ;(returns || []).forEach(r => { dayReturnMap[r.bs_day] = (dayReturnMap[r.bs_day] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
     const dayPurchMap = {}
-    new Set([...Object.keys(dayGrossMap), ...Object.keys(dayReturnMap)]).forEach(d => {
-      dayPurchMap[d] = Math.round((dayGrossMap[d] || 0) - (dayReturnMap[d] || 0))
+    new Set([...Object.keys(dayNetPurchMap), ...Object.keys(dayReturnMap)]).forEach(d => {
+      dayPurchMap[d] = Math.round((dayNetPurchMap[d] || 0) - (dayReturnMap[d] || 0))
     })
 
     // Daily sales revenue — ONLY from day-attributed entries (bs_day > 0). Bulk monthly entries
@@ -982,7 +1001,10 @@ export default function ClientDashboard() {
     const periodIds = [...closed.map(p => p.id), ...(currentPeriod ? [currentPeriod.id] : [])]
 
     const trendResults = await Promise.all([
-      periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
+      // Bill-key columns + `discount_amount` for allocateBillDiscounts(), as in loadStats — this
+      // chart's open-period point must equal the Food Cost % tile, and every closed month must
+      // equal what Consolidated P&L / Monthly Summary charge for it.
+      periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').in('period_id', periodIds).order('id')) : { data: [] },
       periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, qty, rate').in('period_id', periodIds).order('id')) : { data: [] },
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
       // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
@@ -1015,7 +1037,14 @@ export default function ClientDashboard() {
     // sales arrays once per period below (O(periods × rows) → O(rows)) — bounded by the .limit(11)
     // above so it never ran away, but scales with purchase/sales volume across those 11 months.
     const grossMap = {}, retMap = {}, revMap = {}
-    ;(allPurch || []).forEach(e => { grossMap[e.period_id] = (grossMap[e.period_id] || 0) + parseFloat(e.qty) * parseFloat(e.rate) })
+    // `grossMap` holds purchases NET of bill discounts. Allocated one period at a time: the
+    // fallback bill key (vendor | invoice | bs_day) carries no period, so allocating the whole
+    // 12-month batch at once could fold two legacy bills from different months into one.
+    const purchByPeriod = {}
+    ;(allPurch || []).forEach(e => { (purchByPeriod[e.period_id] = purchByPeriod[e.period_id] || []).push(e) })
+    Object.entries(purchByPeriod).forEach(([pid, rows]) => {
+      grossMap[pid] = allocateBillDiscounts(rows).reduce((s, e) => s + e.lineNet, 0)
+    })
     ;(allRet   || []).forEach(e => { retMap[e.period_id]   = (retMap[e.period_id]   || 0) + parseFloat(e.qty) * parseFloat(e.rate) })
     // unit_price captured on the row when present, else falls back to the recipe's current
     // price — this 11-month trend is exactly where always using today's price hurt most,
@@ -1193,7 +1222,7 @@ export default function ClientDashboard() {
   // already avoids this by querying `.eq('bucket','overhead')` before subtracting HR payroll
   // separately; this page keeps all three buckets (its KPI cards mean the combined figure) and
   // splits them for display instead, so the slices always sum to exactly the cost base behind the
-  // margin. Pro-gated same as netMarginCard since overheads are a Pro-only figure.
+  // margin. Gated on canOverheads (Growth) same as netMarginCard.
   //
   // Net Margin only joins the slices when positive — a negative-value pie slice renders as a
   // misleading sliver rather than "costs exceeded revenue," so a negative margin is surfaced via
@@ -1422,7 +1451,7 @@ export default function ClientDashboard() {
       <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent-ink)' }}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
       </div>
-      <div style={kpiSubtextStyle}>Gross − returns · {periodLabel} →</div>
+      <div style={kpiSubtextStyle}>After bill discounts &amp; returns · {periodLabel} →</div>
     </div>
   )
 
@@ -1495,7 +1524,10 @@ export default function ClientDashboard() {
       </div>
     </div>
   ) : (
-    <UpsellCard label="Fixed Costs & Net Margin" tier="Pro" blurb="See true profit after rent, labor & tax" />
+    // The tier is read from the feature catalog, not typed: this said "Pro" while Overheads has
+    // always been sold on Growth (GROWTH_KEYS, and `minPlan="growth"` on its route), so a Starter
+    // client was pointed at a plan two steps up for a feature one step up.
+    <UpsellCard label="Fixed Costs & Net Margin" tier={tierLabel(FEATURE_TIER.overheads)} blurb="See true profit after rent, labor & tax" />
   )
 
   const netMarginCard = canOverheads ? (
@@ -2164,8 +2196,8 @@ export default function ClientDashboard() {
           )}
 
           {/* Pie — Revenue vs Cost Breakdown, tabbed with Sales Mix (S557 — see the note above
-              costTabAvailable/mixTabAvailable). Cost Breakdown stays Pro-gated (canOverheads) since
-              overheads, the biggest lever in the split, are a Pro-only figure — same gate as the
+              costTabAvailable/mixTabAvailable). Cost Breakdown stays gated on canOverheads (Growth) since
+              overheads, the biggest lever in the split, are a Growth figure — same gate as the
               Est. Net Margin % KPI card that view is a composition of; Sales Mix has no tier gate,
               only a data-source one, matching what FoodBeverageSplit.jsx always did. */}
           {(costTabAvailable || mixTabAvailable) && (

@@ -39,6 +39,8 @@ const ROW = {
 }
 let mockRow = { ...ROW }
 let mockClientId = 'client-1'
+// What SettingsContext reports about its reads (S747). Empty = both loaded fine.
+let mockLoadState = {}
 // Stable identities. `recipeCategories` is the one an effect keys on directly
 // (`useEffect(() => setCats([...recipeCategories]), [recipeCategories])`), so a fresh [] per render
 // re-runs it forever and the suite hangs instead of failing.
@@ -76,6 +78,7 @@ jest.mock('../context/SettingsContext', () => ({
     savePlatformSupport: mockNoop,
     planPrices: null,
     savePlatformPlanPrices: mockNoop,
+    ...mockLoadState,
   }),
 }))
 
@@ -103,6 +106,7 @@ const click = name => fireEvent.click(screen.getByRole('button', { name }))
 beforeEach(() => {
   mockRow = { ...ROW }
   mockClientId = 'client-1'
+  mockLoadState = {}
   mockSaveSettings.mockClear()
 })
 
@@ -206,5 +210,94 @@ describe('with no client selected', () => {
     tab('Branding')
     expect(screen.getByLabelText(/Property Name/i)).toBeTruthy()
     expect(screen.queryByLabelText(/^App Name/i)).toBeNull()
+  })
+})
+
+describe('S747 — the invoice code is never invented', () => {
+  it('leaves a blank code blank, and a branding save does not write one', async () => {
+    mockRow = { ...ROW, invoice_prefix: null }
+    renderSettings()
+    tab('Property')
+    const box = screen.getByLabelText(/Invoice Prefix/i)
+    expect(box.value).toBe('')
+    expect(box.getAttribute('placeholder')).toBe('Your Business Code')
+    tab('Branding')
+    fireEvent.change(screen.getByLabelText(/Property Name/i), { target: { value: 'Casa Acai Kitchen' } })
+    click(/Save Changes/i)
+    await waitFor(() => expect(mockSaveSettings).toHaveBeenCalledTimes(1))
+    expect(mockSaveSettings.mock.calls[0][0]).toEqual({ app_name: 'Casa Acai Kitchen' })
+  })
+
+  it('asks before setting a FIRST code, because bills issued without one reprint with it', async () => {
+    mockRow = { ...ROW, invoice_prefix: null }
+    renderSettings()
+    tab('Property')
+    fireEvent.change(screen.getByLabelText(/Invoice Prefix/i), { target: { value: 'CAC' } })
+    click(/Save Changes/i)
+    await screen.findByText(/already issued bills without a code/i)
+    expect(mockSaveSettings).not.toHaveBeenCalled()
+  })
+
+  it('does not warn when a never-set VAT flag is toggled off and back on', async () => {
+    mockRow = { ...ROW, is_vat_registered: null }
+    renderSettings()
+    tab('Property')
+    const vat = screen.getByLabelText(/VAT Registered/i)
+    fireEvent.click(vat); fireEvent.click(vat)
+    fireEvent.change(screen.getByLabelText(/^Address/i), { target: { value: 'Jhamsikhel' } })
+    click(/Save Changes/i)
+    await waitFor(() => expect(mockSaveSettings).toHaveBeenCalledWith({ property_address: 'Jhamsikhel' }))
+    expect(screen.queryByText(/Change the bill type\?/i)).toBeNull()
+  })
+})
+
+describe('S747 — Save Changes saves only the tab it is on', () => {
+  it('leaves a consultant number typed on Support for its own Save', async () => {
+    renderSettings()
+    tab('Support')
+    fireEvent.change(screen.getByLabelText(/Consultant phone/i), { target: { value: '9801234567' } })
+    tab('Branding')
+    fireEvent.change(screen.getByLabelText(/Property Name/i), { target: { value: 'Renamed' } })
+    click(/Save Changes/i)
+    await waitFor(() => expect(mockSaveSettings).toHaveBeenCalledTimes(1))
+    expect(mockSaveSettings.mock.calls[0][0]).toEqual({ app_name: 'Renamed' })
+  })
+
+  it('leaves an unsaved Property edit for the Property tab', async () => {
+    renderSettings()
+    tab('Property')
+    fireEvent.change(screen.getByLabelText(/^Address/i), { target: { value: 'Jhamsikhel' } })
+    tab('Branding')
+    fireEvent.change(screen.getByLabelText(/Tagline/i), { target: { value: 'New line' } })
+    click(/Save Changes/i)
+    await waitFor(() => expect(mockSaveSettings).toHaveBeenCalledTimes(1))
+    expect(mockSaveSettings.mock.calls[0][0]).toEqual({ app_tagline: 'New line' })
+  })
+})
+
+describe('S747 — a failed read is not an editable form', () => {
+  it('offers no Branding fields and no Save when the client row could not be read', () => {
+    mockLoadState = { settingsLoadError: { message: 'boom', code: '500' } }
+    renderSettings()
+    tab('Branding')
+    expect(screen.queryByLabelText(/Property Name/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Save Changes/i })).toBeNull()
+    expect(screen.getByText(/settings could not be read/i)).toBeTruthy()
+  })
+
+  it('offers no plan prices and no Save when the platform row could not be read', () => {
+    mockLoadState = { platformLoadError: { message: 'boom', code: '500' } }
+    renderSettings()
+    tab('Plan Pricing')
+    expect(screen.queryByRole('button', { name: /Save Plan Prices/i })).toBeNull()
+    expect(screen.getByText(/saved plan prices could not be read/i)).toBeTruthy()
+  })
+
+  it('offers no support contact fields until the platform row has loaded', () => {
+    mockLoadState = { platformLoaded: false }
+    renderSettings()
+    tab('Support')
+    expect(screen.queryByRole('button', { name: /Save Support Contact/i })).toBeNull()
+    expect(screen.getByText(/Loading the saved support contact/i)).toBeTruthy()
   })
 })

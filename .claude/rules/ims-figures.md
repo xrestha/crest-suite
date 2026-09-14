@@ -1156,3 +1156,13 @@ account is reported as unrecoverable), and `log_audit()`'s profiles noise-skip a
 **`ims_count_assignments` is deliberately absent from `RESTORE_ORDER`**, for `legal_acceptances`'
 reason: every row keys on `profile_id` and a restore re-creates staff accounts with new ids, so the
 rows would either fail their FK or point at whoever inherited the id.
+
+## The dashboards joined the bill-discount rule (S747)
+
+S720 routed the summary family through `allocateBillDiscounts`; the Dashboard (`ClientDashboard.jsx`,
+period read and 12-month trend), the Owner Dashboard and the Monthly Owner Report
+(`netPurchaseFigures` in `computeMonthlyReport.js`, `CURRENT_SCHEMA_VERSION` 6) still valued purchases
+at raw `qty × rate`, and `get_group_summary` subtracted the discount once per line. Decided with
+Aashish: every page takes the discount off, so one month has one Food Cost %. Returns stay at list
+price everywhere, matching Consolidated P&L. A frozen v5 report keeps its figures; a v5-to-v6 trend
+comparison includes the change of basis.

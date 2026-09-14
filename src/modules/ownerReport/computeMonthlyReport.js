@@ -7,15 +7,38 @@ import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
-import { calcAmount, hourlyRateOf, tallyAttendance } from '../hr/payroll/payrollCompute'
+import { calcAmount, hourlyRateOf, tallyAttendance, isSsfContributor } from '../hr/payroll/payrollCompute'
 import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
 import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
+import { allocateBillDiscounts } from '../ims/reports/supplierAttribution'
 import { computeOrderAmounts, computeCategoryAmounts } from '../../utils/posBillingMath'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 import { computeVendorPurchasingSection } from './computeVendorPurchasingSection'
 import { computeInventoryDepthSection } from './computeInventoryDepthSection'
+
+// ── Net purchases (pure) ─────────────────────────────────────────────────────
+// Purchases NET of bill discounts, less returns — the definition Consolidated P&L and Monthly
+// Summary use (S601/S720), so the frozen report's Purchases, Food Cost %, Prime Cost %, True Net
+// Margin % and Inventory Turnover agree with those pages for the same month. `discount_amount` is
+// a BILL-level figure repeated on every line; allocateBillDiscounts() dedupes it per bill and
+// spreads it across that bill's lines, so the rows passed in must carry `discount_amount`,
+// `purchase_group_id` and the `vendor_id`/`invoice_ref`/`bs_day` fallback key. Returns are taken at
+// list value, exactly as on those two pages. The Cash/Credit split is built off the same line
+// values so the two halves still add up to the total (every return comes off Cash, as before).
+// Single-period input only: the fallback bill key carries no period.
+export function netPurchaseFigures(purchases, returns) {
+  const allocated = allocateBillDiscounts(purchases || [])
+  const returnTotal = (returns || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+  let cashNet = 0, creditNet = 0
+  allocated.forEach(p => {
+    if (p.payment_method === 'Credit') creditNet += p.lineNet; else cashNet += p.lineNet
+  })
+  cashNet -= returnTotal
+  const purchaseTotal = allocated.reduce((s, p) => s + p.lineNet, 0) - returnTotal
+  return { purchaseTotal, cashNet, creditNet }
+}
 
 // ── IMS section ──────────────────────────────────────────────────────────────
 // Same tables/formulas as OwnerDashboard.jsx's loadImsFigures/loadReorderStats. Revenue excludes
@@ -30,7 +53,8 @@ import { computeInventoryDepthSection } from './computeInventoryDepthSection'
 // of generation"), not a live "how overdue is it right now" figure that drifts once time passes.
 async function computeImsSection(clientId, period) {
   const results = await Promise.all([
-    fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method').eq('period_id', period.id).order('id')),
+    // discount_amount + the bill-key columns feed netPurchaseFigures() — see its comment.
+    fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').eq('period_id', period.id).order('id')),
     supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id),
     // Two sales fetches, because one row set cannot answer both questions. REVENUE excludes comps
     // (a comped dish collected nothing), CONSUMPTION includes them (its ingredients were still
@@ -68,9 +92,8 @@ async function computeImsSection(clientId, period) {
     { data: opening }, { data: closing }, { data: payablePayments }, { data: staffMealsData },
   ] = results
 
-  const grossTotal  = (purchases || []).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
-  const returnTotal = (returns   || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
-  const purchaseTotal = grossTotal - returnTotal
+  // Net of bill discounts since schema v6 — v1–v5 snapshots summed a raw qty × rate here.
+  const { purchaseTotal, cashNet, creditNet } = netPurchaseFigures(purchases, returns)
 
   const priceMap = {}; (recipes || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0 })
   const revenueTotal = (salesData || []).reduce((s, r) => {
@@ -87,13 +110,6 @@ async function computeImsSection(clientId, period) {
   // started and ended with, same as every other IMS report already shows.
   const openingStockValueTotal = (opening || []).reduce((s, o) => s + parseFloat(o.qty || 0) * (itemRateMap[o.item_id] || 0), 0)
   const closingStockValueTotal = (closing || []).reduce((s, c) => s + parseFloat(c.physical_qty || 0) * (itemRateMap[c.item_id] || 0), 0)
-
-  let cashNet = 0, creditNet = 0
-  ;(purchases || []).forEach(p => {
-    const v = parseFloat(p.qty || 0) * parseFloat(p.rate || 0)
-    if (p.payment_method === 'Credit') creditNet += v; else cashNet += v
-  })
-  ;(returns || []).forEach(r => { cashNet -= parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
 
   const paidMap = {}
   ;(payablePayments || []).forEach(p => { paidMap[p.purchase_entry_id] = (paidMap[p.purchase_entry_id] || 0) + parseFloat(p.amount || 0) })
@@ -128,6 +144,53 @@ async function computeImsSection(clientId, period) {
   }
 }
 
+// ── Payroll estimate (pure) ──────────────────────────────────────────────────
+// The fallback used when a closed period has no finalized payroll run: each active/probation
+// employee (or one whose end_date falls inside the period) accrues monthly-equivalent gross for
+// the days between join and end date, plus employer SSF on the capped base. `employees` must
+// carry `ssf_no` as well as `ssf_enrolled` (isSsfContributor needs both).
+export function estimatePayrollAccrual({ employees, components, period }) {
+  const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
+  const periodStartAd = bsToAd(period.bs_year, period.bs_month, 1)
+  const periodEndAd   = bsToAd(period.bs_year, period.bs_month, monthDays)
+  let accruedGross = 0, accruedSsfEmployer = 0
+  ;(employees || []).forEach(emp => {
+    const isActiveish = emp.status === 'active' || emp.status === 'probation'
+    const endAd = emp.end_date ? new Date(emp.end_date) : null
+    const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodEndAd
+    if (!isActiveish && !terminatedThisPeriod) return
+    const joinAd = emp.join_date ? new Date(emp.join_date) : null
+    if (joinAd && joinAd > periodEndAd) return
+
+    const empStart = joinAd && joinAd > periodStartAd ? joinAd : periodStartAd
+    const empEnd    = endAd && endAd < periodEndAd ? endAd : periodEndAd
+    const daysWorked = Math.max(0, Math.floor((empEnd - empStart) / 86400000) + 1)
+    if (daysWorked <= 0) return
+
+    const basic = parseFloat(emp.basic_salary) || 0
+    const basis = emp.pay_basis || 'monthly'
+    const allowances = basis === 'monthly'
+      ? (components || []).filter(c => c.employee_id === emp.id && c.type === 'earning')
+          .reduce((s, c) => s + calcAmount(c, basic), 0)
+      : 0
+    const monthlyEquivGross =
+      basis === 'daily'  ? basic * monthDays :
+      basis === 'hourly' ? basic * STANDARD_HOURS_PER_DAY * monthDays :
+      basic + allowances
+    const perDay = monthDays > 0 ? monthlyEquivGross / monthDays : 0
+    accruedGross += perDay * daysWorked
+
+    // Employer SSF only for a real contributor — enrolled AND carrying an SSF number — the gate
+    // computePayslip applies (isSsfContributor). The flag alone added 20% for staff payroll
+    // never contributes for, so an estimated snapshot ran above the finalized run it stands in for.
+    if (isSsfContributor(emp)) {
+      const ssfBase = Math.min(monthlyEquivGross, SSF_CAP) * (monthDays > 0 ? daysWorked / monthDays : 0)
+      accruedSsfEmployer += ssfBase * SSF_EMPLOYER_PCT
+    }
+  })
+  return { gross: accruedGross, ssfEmployer: accruedSsfEmployer }
+}
+
 // ── HR section ──────────────────────────────────────────────────────────────
 // Starts from OwnerDashboard.jsx's loadLaborCost (already period-parameterized), but returns the
 // gross/OT/SSF breakdown instead of only a pre-summed total, and adds headcount/leave/attendance.
@@ -140,7 +203,8 @@ async function computeHrSection(clientId, period) {
   const periodEndAd   = bsToAd(period.bs_year, period.bs_month, monthDays)
 
   const results = await Promise.all([
-    scopedFrom('hr_employees', clientId, 'id, status, basic_salary, pay_basis, ssf_enrolled, join_date, end_date'),
+    // `ssf_no` is load-bearing: the estimate's employer SSF gates on isSsfContributor().
+    scopedFrom('hr_employees', clientId, 'id, status, basic_salary, pay_basis, ssf_enrolled, ssf_no, join_date, end_date'),
     scopedFrom('hr_salary_components', clientId, 'employee_id, type, calc_type, value'),
     scopedFrom('hr_overtime_entries', clientId, 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
       .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
@@ -200,38 +264,7 @@ async function computeHrSection(clientId, period) {
     payroll = { gross, ot: { hours: otHours, amount: otAmount }, ssfEmployer, total: gross + otAmount + ssfEmployer }
     payrollSource = 'finalized'
   } else {
-    let accruedGross = 0, accruedSsfEmployer = 0
-    ;(employees || []).forEach(emp => {
-      const isActiveish = emp.status === 'active' || emp.status === 'probation'
-      const endAd = emp.end_date ? new Date(emp.end_date) : null
-      const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodEndAd
-      if (!isActiveish && !terminatedThisPeriod) return
-      const joinAd = emp.join_date ? new Date(emp.join_date) : null
-      if (joinAd && joinAd > periodEndAd) return
-
-      const empStart = joinAd && joinAd > periodStartAd ? joinAd : periodStartAd
-      const empEnd    = endAd && endAd < periodEndAd ? endAd : periodEndAd
-      const daysWorked = Math.max(0, Math.floor((empEnd - empStart) / 86400000) + 1)
-      if (daysWorked <= 0) return
-
-      const basic = parseFloat(emp.basic_salary) || 0
-      const basis = emp.pay_basis || 'monthly'
-      const allowances = basis === 'monthly'
-        ? (components || []).filter(c => c.employee_id === emp.id && c.type === 'earning')
-            .reduce((s, c) => s + calcAmount(c, basic), 0)
-        : 0
-      const monthlyEquivGross =
-        basis === 'daily'  ? basic * monthDays :
-        basis === 'hourly' ? basic * STANDARD_HOURS_PER_DAY * monthDays :
-        basic + allowances
-      const perDay = monthDays > 0 ? monthlyEquivGross / monthDays : 0
-      accruedGross += perDay * daysWorked
-
-      if (emp.ssf_enrolled) {
-        const ssfBase = Math.min(monthlyEquivGross, SSF_CAP) * (monthDays > 0 ? daysWorked / monthDays : 0)
-        accruedSsfEmployer += ssfBase * SSF_EMPLOYER_PCT
-      }
-    })
+    const { gross: accruedGross, ssfEmployer: accruedSsfEmployer } = estimatePayrollAccrual({ employees, components, period })
 
     let otTotal = 0, otHoursTotal = 0
     ;(otEntries || []).forEach(e => {
@@ -486,7 +519,17 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // freezing into the snapshot as a Star), and a dish that sold nothing is no longer "high
 // popularity" when the period's median is 0. `quadrantCounts` gains an `Unrated` key and
 // `items[].quadrant` can be null. A v4 matrix and a v5 matrix are not computed the same way.
-export const CURRENT_SCHEMA_VERSION = 5
+// 6: no shape change; two figures changed meaning. `ims.purchaseTotal` (with cashNet/creditNet
+// and everything computed from purchaseTotal — combined.foodCostPct, primeCostPct, netMarginPct
+// and inventoryDepth's turnover) is now NET of supplier bill discounts, allocated per bill through
+// allocateBillDiscounts(), where v1–v5 summed a raw qty × rate and so ran HIGH by every discount
+// against Consolidated P&L / Monthly Summary for the same month. And the ESTIMATED payroll branch
+// (`hr.payrollSource === 'estimated'`) adds employer SSF only for staff who are enrolled AND have
+// an SSF number (isSsfContributor, payroll's own gate), where v1–v5 used the flag alone; the
+// finalized branch was always right, since it sums stored payslips. Snapshots already generated
+// stay frozen — a v5 row and a v6 row are not computed the same way, and a Trend delta across
+// that boundary includes the change of basis.
+export const CURRENT_SCHEMA_VERSION = 6
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

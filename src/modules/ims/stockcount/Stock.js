@@ -1025,7 +1025,9 @@ export default function Stock() {
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
   // the route was reachable by any account at an ims_enabled client regardless of ims_role.
   if (!hasImsAccess('staff')) return <Navigate to="/dashboard" replace />
-  if (!loading && periods.length === 0) return <NoPeriodState what="stock count" />
+  // Not on a failed read (S747): a first load that fails leaves `periods` empty too, and this used to
+  // tell the counter there were no periods instead of showing the error card below.
+  if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="stock count" />
 
   return (
     <div>

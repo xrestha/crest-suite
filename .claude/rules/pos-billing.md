@@ -707,3 +707,23 @@ Migrated from the root `CLAUDE.md` (S663).
 Migrated from the root `CLAUDE.md` (S663). The invariant itself — *a lockout the client calls around an operation is not a lockout* — stays resident there; this is the full POS-side detail behind it.
 
 **A lockout the client calls around an operation is not a lockout.** POS and HR Self-Service both had `check_*_pin_lock` before and `record_*_pin_attempt` after, in the browser, with nothing server-side consulting them — so skipping the two RPCs walked a 4-digit PIN unimpeded. Both now run **inside** `pos-staff-login` / `hr-selfservice-login`, on the same request that signs in. Corollary: the frontend must **not** also call `record_*_pin_attempt`, or every failure double-counts and locks a fat-fingered employee out in 3 attempts instead of 5. Same reasoning applies to any future server-side check — if the browser can skip the call, it is advisory. **The POS close was the same shape and was fixed the same way in S576** — the discount cap (`pos_discount_limit`) and the void permission (`pos_allow_void`) were both React, over a plain same-client `FOR ALL` policy that hands every till session UPDATE on its own orders. It is now `guard_pos_order_close()`, a BEFORE UPDATE trigger rather than the `close_pos_order(...)` RPC the critique proposed: an RPC protects only the callers that choose to call it and leaves the open policy in place, while a trigger sees every write to the table. Note what it deliberately does *not* enforce — `paid_amount`, because re-deriving the bill total in SQL would be a second copy of the VAT-and-rounding arithmetic, and a drifted copy would reject real bills mid-service rather than merely misreport a number. **Item-level comp was the third and last of the family (S579)**: `guard_pos_item_comp()` fences the comp columns on `pos_order_items` while `apply_pos_item_comps` stays `SECURITY DEFINER` and so remains the only write path — and that RPC now checks Supervisor *rank* (it had only ever checked client) and derives `comped_by` from `auth.uid()` instead of a caller-supplied parameter. **Attribution the subject of the attribution can choose is not attribution**; `comped_by` is what the Sales Exception Report ranks staff by, so a caller able to pass any uuid could comp under a colleague's name.
+
+## A credit note that cannot reach Inventory is marked and posted later, like a bill (S747)
+
+`src/modules/pos/creditnotes/creditNotePosting.js` is the one implementation. The reversal used to
+be best-effort and silent — no open period for today, nothing written and nothing said; a refused
+insert never read — so a printed note left Inventory revenue overstated by the whole bill with no
+way to post it afterwards.
+
+- **`pos_credit_notes.ims_posted_at` is stamped only after the rows land**, and every reversal row
+  carries **`sales_entries.pos_credit_note_id`**. The backfill asks the link, never the stamp alone —
+  the same reason bills carry `pos_order_id` (above).
+- **The reversal takes back what the bill POSTED**: comped lines skipped, the bill discount spread by
+  the same `discRatio` `backfillPosToIms` uses, a `writeoff` bill reverses nothing. It used raw
+  `unit_price`, so a discounted bill's note removed more revenue than the bill ever added.
+- **The note issues whatever happens**, so failure is a notice with one button, not an error with a
+  retry. Recovery is Periods → Post POS bills to Inventory, which now posts waiting notes after the
+  bills; the floor counts them (`unpostedNotes`, head-count, keeps last value on a failed poll) and
+  the Credit Note Book badges them.
+- **Pre-migration notes were stamped as posted when their client had any `pos_credit` row** — NULL
+  on an old row means "unknown", and treating unknown as unposted is how bills double-posted.

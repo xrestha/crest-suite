@@ -6,6 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { getBsToday } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
+import { isSsfContributor } from '../payroll/payrollCompute'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import IncentiveConfigs from './IncentiveConfigs'
 import { errorLine } from '../../../shared/errorText'
@@ -37,7 +38,9 @@ function calcIncentiveTds({ emp, amount, ytd, fyStart }) {
   const remaining = Math.max(0, 12 - ytdMonths)
 
   const projGross = ytdGross + basic * remaining
-  const projSsf   = ytdSsf   + (emp.ssf_enrolled ? Math.min(basic, SSF_CAP_MONTHLY) * SSF_EMP_PCT * remaining : 0)
+  // The payroll engine's own SSF gate (flag AND registration number) — see FestivalAllowance.jsx.
+  const isSsf     = isSsfContributor(emp)
+  const projSsf   = ytdSsf   + (isSsf ? Math.min(basic, SSF_CAP_MONTHLY) * SSF_EMP_PCT * remaining : 0)
   const ssfDed    = Math.min(projSsf, Math.min(RETIREMENT_CAP, projGross / 3))
   const lifeIns   = Math.min(parseFloat(emp.life_insurance_premium)   || 0, LIFE_INS_CAP)
   const healthIns = Math.min(parseFloat(emp.health_insurance_premium) || 0, HEALTH_INS_CAP)
@@ -45,7 +48,7 @@ function calcIncentiveTds({ emp, amount, ytd, fyStart }) {
 
   return computeBonusTds({
     annualTaxable: taxable, bonusAmount: amount,
-    isSsf: !!emp.ssf_enrolled, isMarried: emp.marital_status === 'married', fyStart,
+    isSsf, isMarried: emp.marital_status === 'married', fyStart,
   })
 }
 
@@ -85,7 +88,7 @@ export default function IncentiveRun() {
     if (!clientId) return
     setLoading(true); setMsg('')
     const [{ data: emps }, { data: inc }, { data: psData }] = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, life_insurance_premium, health_insurance_premium')
+      scopedFrom('hr_employees', 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium')
         .in('status', ['active', 'probation']).order('full_name'),
       runLabel ? scopedFrom('hr_incentives').eq('bs_year', bsYear).eq('run_label', runLabel) : Promise.resolve({ data: [] }),
       // Paged, for the same reason as FestivalAllowance: the FY filter below is applied in JS, so

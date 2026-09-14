@@ -9,9 +9,9 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
-import { computePayslip } from './payrollCompute'
+import { computePayslip, isSsfContributor } from './payrollCompute'
 import { computeMonthlyTds } from './tds'
-import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift, groupByEmployee, sliceFor } from './payrollData'
+import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, dueAdvances, payslipDrift, groupByEmployee, sliceFor } from './payrollData'
 import PayslipBody from './PayslipBody'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -175,7 +175,9 @@ export default function PayrollRun() {
   }
 
   function buildRows(runId, ytdMap, tadaMap) {
-    const advMap = buildAdvanceMap(advances, repayments)
+    // Only advances already past their first recovery month (the BS month after issue) — see
+    // dueAdvances() in payrollData.js. Finalize's allocation below reads the same filter.
+    const advMap = buildAdvanceMap(advances, repayments, period)
     // Partition the three per-employee arrays once, rather than scanning each of them again for
     // every employee. `attendance` is one row per employee per DAY — ~1,200 rows at 40 staff — so
     // the old `.filter()` inside this `.map()` walked it 40 times over. Same slices, same order.
@@ -192,7 +194,7 @@ export default function PayrollRun() {
       // Same gate computePayslip applies: no registration number means no SSF contribution, so
       // this employee is not an SSF contributor for tax purposes either and the 1% first-slab
       // waiver must not apply. Letting the two disagree would tax against a deduction never made.
-      const isSsf    = !!(emp.ssf_enrolled && String(emp.ssf_no || '').trim())
+      const isSsf    = isSsfContributor(emp)
       const isMarried = emp.marital_status === 'married'
       const ytd   = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
       const tds   = computeMonthlyTds({
@@ -403,9 +405,14 @@ export default function PayrollRun() {
     const today = formatAd(new Date())
     const monthLabel = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} payroll`
 
+    // The allocation goes through dueAdvances() — the same filter buildAdvanceMap() deducted from —
+    // so a deduction is never booked against an advance issued this month (or later) that the
+    // run did not actually recover. Filtering on `status` alone put it on the oldest active
+    // advance whether or not that advance was due yet.
+    const dueNow = dueAdvances(advances, period)
     for (const slip of payslips) {
       if (!slip.advance_deduction || slip.advance_deduction <= 0) continue
-      const empAdvs = advances.filter(a => a.employee_id === slip.employee_id && a.status === 'active')
+      const empAdvs = dueNow.filter(a => a.employee_id === slip.employee_id)
       let remaining = slip.advance_deduction
 
       for (const adv of empAdvs) {
@@ -699,7 +706,7 @@ export default function PayrollRun() {
                       <th style={{ textAlign: 'right' }}><Tip text="Pay deducted for unpaid days — absences, unpaid leave, and half-days (gross ÷ days in month × unpaid days, allowances included)." width={270}>Absence</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="11% SSF — only for employees with an SSF number on file." width={230}>SSF</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="All configured deductions except SSF — CIT/PF, etc." width={250}>Other Ded</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Advance or loan installment auto-recovered this period from active advances in the Advances & Loans ledger. Repayment rows are written on Finalize." width={290}>Advance</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Advance or loan installment auto-recovered this period from active advances in the Advances & Loans ledger. Recovery starts with the payroll of the month after an advance was issued, so one issued this month is not deducted yet. Repayment rows are written on Finalize." width={290}>Advance</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Income tax, computed automatically from FY tax slabs using year-to-date projection. Editable while draft if you need to override." width={270}>TDS</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Travel/Daily Allowance reimbursement — a non-taxable amount added after TDS, not part of the taxable gross. Editable while draft." width={290}>TADA</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>Net Pay</th>
@@ -800,7 +807,7 @@ export default function PayrollRun() {
                 <li><strong>SSF</strong> deducts only for employees marked SSF-enrolled AND holding an SSF number — an enrolled employee with no number is flagged in the list and contributes nothing, since a contribution with no number cannot be filed on the challan.</li>
                 <li><strong>TDS</strong> comes from the fiscal-year tax slabs by year-to-date projection — finalize earlier months first so each month's tax builds on the last.</li>
                 <li><strong>TADA</strong> (travel/daily allowance) auto-fills from this period's Approved TADA Claims (🔗 marks a claim-linked amount) and is added after TDS as a non-taxable reimbursement — hand-edit or clear it freely. Finalize marks linked claims Paid; Reopen reverts them to Approved.</li>
-                <li><strong>Advances</strong>: active installments are auto-deducted, and repayment rows are written to Advances &amp; Loans on Finalize.</li>
+                <li><strong>Advances</strong>: active installments are auto-deducted starting with the payroll of the month <em>after</em> the advance was issued (an advance given any day in Bhadra is first cut in the Ashwin payroll), and repayment rows are written to Advances &amp; Loans on Finalize.</li>
               </ul>
             </div>
           </>

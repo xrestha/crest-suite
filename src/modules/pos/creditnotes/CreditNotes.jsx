@@ -239,7 +239,17 @@ export default function CreditNotes() {
                     const cnNo = `CN${n.credit_note_no}-${billingSettings.invoice_prefix}${billingSettings.invoice_prefix ? '-' : ''}${n.invoice_fy}`
                     return (
                       <tr key={n.id}>
-                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{cnNo}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                          <span style={{ whiteSpace: 'nowrap' }}>{cnNo}</span>
+                          {/* `in n` so a bundle deployed ahead of migration 20260914140200 (no such
+                              column, select('*')) marks nothing rather than every note (S747). */}
+                          {'ims_posted_at' in n && n.ims_posted_at == null && (
+                            <Tip width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}
+                              text="This note has not yet taken its bill's revenue back out of Inventory, because no Inventory period was open for the month it was issued in. Open that month in Periods and press Post POS bills to Inventory on it.">
+                              <span className="badge-amber">Not in Inventory</span>
+                            </Tip>
+                          )}
+                        </td>
                         <td>{n.original_invoice_label}</td>
                         <td>{bs.day} {BS_MONTHS[bs.month - 1]}</td>
                         <td>{n.buyer_name || 'CASH SALES'}</td>

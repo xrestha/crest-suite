@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { useAuth } from './AuthContext'
 import { DEFAULT_PLAN_PRICES, resolvePricing } from '../data/pricingPlans'
@@ -88,35 +88,76 @@ export function SettingsProvider({ children }) {
   const [platformPlanPrices, setPlatformPlanPrices] = useState(null)
   const [featureFlags, setFeatureFlags] = useState(DEFAULT_FLAGS)
   const [loading, setLoading] = useState(true)
+  // Whether the rows above are REAL (S747). Both reads used to drop their error, so a failed read
+  // and a row that genuinely holds nothing were the same object — and the admin Settings page
+  // rendered that object as editable, labelled "As saved". Its Plan Pricing and Support cards save
+  // the WHOLE price table / contact block, so changing one field over a failed read put every
+  // other price back to the shipped default for every client. The app at large stays fail-soft
+  // (the login page still renders on defaults); these tell an EDITOR not to offer the fields.
+  //   settingsLoadError — the read of the row `settings` belongs to failed
+  //   platformLoadError — the read of the platform row failed; the values above are last-known
+  //   platformLoaded    — the platform row has been read successfully at least once
+  const [settingsLoadError, setSettingsLoadError] = useState(null)
+  const [platformLoadError, setPlatformLoadError] = useState(null)
+  const [platformLoaded, setPlatformLoaded] = useState(false)
+  // The row the app currently WANTS, and a sequence per load (S747). Every client switch ran two
+  // loads (this provider's effect and Settings.js's own), nothing decided which response won, and
+  // a save's follow-up reload could land after the admin had already switched client — so one
+  // client's branding, VAT number and invoice code could render under another client's name.
+  // A response is applied only if it is for the wanted row AND no newer load for it has started.
+  const wantedCidRef = useRef(undefined)
+  const loadSeqRef = useRef(0)
 
-  useEffect(() => { loadSettings(isAdmin && !clientId ? null : clientId) }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const cid = isAdmin && !clientId ? null : clientId
+    wantedCidRef.current = cid ?? null
+    loadSettings(cid)
+  }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (clientId) loadFeatureFlags(clientId) }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadSettings(cid) {
+    const key = cid ?? null
+    const seq = ++loadSeqRef.current
+    const current = () => seq === loadSeqRef.current && key === wantedCidRef.current
     try {
       let query = supabase.from('settings').select('*')
       query = cid ? query.eq('client_id', cid) : query.is('client_id', null)
-      const { data } = await query.maybeSingle()
+      const { data, error } = await query.maybeSingle()
+      if (!current()) return
       setSettings(data ? { ...DEFAULT_SETTINGS, ...data } : DEFAULT_SETTINGS)
+      setSettingsLoadError(error || null)
       // Signed-out and admin-with-no-client already read the platform row above; a client
       // session read its own row, so the platform contact needs one more small read. Fail-soft:
       // on any error keep whatever was last known rather than blanking six surfaces (the KDS-poll
-      // rule — a failed read is not an empty value).
+      // rule — a failed read is not an empty value). That now holds on BOTH paths: the no-client
+      // path used to set both values to null from a failed read.
       if (cid) {
         const { data: prow, error: perr } = await supabase.from('settings')
           .select('support_contact, contact_phone, contact_email, contact_website, plan_prices').is('client_id', null).maybeSingle()
+        if (!current()) return
         if (!perr) {
           setPlatformSupport(platformSupportFromRow(prow))
           setPlatformPlanPrices(prow?.plan_prices || null)
+          setPlatformLoaded(true)
         }
+        setPlatformLoadError(perr || null)
       } else {
-        setPlatformSupport(platformSupportFromRow(data))
-        setPlatformPlanPrices(data?.plan_prices || null)
+        if (!error) {
+          setPlatformSupport(platformSupportFromRow(data))
+          setPlatformPlanPrices(data?.plan_prices || null)
+          setPlatformLoaded(true)
+        }
+        setPlatformLoadError(error || null)
       }
     } catch (e) {
+      if (!current()) return
       setSettings(DEFAULT_SETTINGS)
+      setSettingsLoadError(e)
+      setPlatformLoadError(e)
     } finally {
-      setLoading(false)
+      // Only the load that won ends `loading`: Pricing.js gates its figures on it spanning BOTH
+      // reads, and a superseded load finishing first would open that gate over stale values.
+      if (current()) setLoading(false)
     }
   }
 
@@ -282,6 +323,7 @@ export function SettingsProvider({ children }) {
   return (
     <SettingsContext.Provider value={{
       settings, featureFlags, loading, platformSupport, planPrices, pricing,
+      settingsLoadError, platformLoadError, platformLoaded,
       saveSettings, saveClientSettings, saveFeatureFlags, savePlatformSupport, savePlatformPlanPrices,
       loadSettings, loadClientSettings, loadClientFeatureFlags,
       isFeatureEnabled, recipeCategories

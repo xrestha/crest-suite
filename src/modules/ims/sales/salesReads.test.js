@@ -54,6 +54,9 @@ const FILES = [
   ['Variance.js', path.join(__dirname, '..', 'variance', 'Variance.js')],
   ['TheoreticalVariance.js', path.join(__dirname, '..', 'variance', 'TheoreticalVariance.js')],
   ['ShrinkageReport.js', path.join(__dirname, '..', 'variance', 'ShrinkageReport.js')],
+  // Joined in S747 with its grouped path, get_group_pnl, which had the SQL form of the same filter.
+  // Revenue is the top line of the statement and the denominator of every margin beneath it.
+  ['ConsolidatedPnl.jsx', path.join(__dirname, '..', '..', '..', 'pages', 'dashboard', 'ConsolidatedPnl.jsx')],
 ]
 
 describe.each(FILES)('%s reads sales_entries in a way NULL-source rows survive', (_name, file) => {

@@ -1891,6 +1891,20 @@ tr.interactive-row:focus-visible {
   }
 }
 
+/* Settings → Theme colour swatches (S747). The <input type="color"> is 0×0 behind the chip, so the
+   ring goes on the chip when the label holds focus — the same pair every :focus-visible uses. */
+.theme-swatch:focus-within .theme-swatch-chip {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+}
+
+/* Settings → Guides section list (S747): inline-styled buttons with no rule of their own fell back
+   to the UA outline, and the selected section was carried by colour alone (it now has aria-current). */
+.guide-nav-btn:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 1px;
+}
+
 /* Visually hidden but still focusable and still announced — for a real control that a styled
    element stands in front of (the logo file input). display:none would remove it from the tab
    order entirely, which is exactly the bug this replaces. */

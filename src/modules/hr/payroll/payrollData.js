@@ -2,7 +2,7 @@
 // page — kept in one place so both compute from identical YTD/advance/TADA inputs. Duplicating
 // this logic across two files would risk them silently drifting apart, defeating the whole point
 // of the Calculation page (it exists to always match what Payroll actually computes).
-import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
+import { adToBsSafe, bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { fiscalYearOf } from './tds'
 
@@ -145,16 +145,65 @@ const EMPTY = []
 // ordinary (a mid-month joiner), not an edge case.
 export const sliceFor = (index, empId) => index.get(empId) || EMPTY
 
+// ── When recovery of an advance starts ─────────────────────────────────────────────────────────
+// The payroll of the BS month AFTER the one the advance was issued in (owner's decision,
+// 2026-09-11 — the same rule hss-suite adopted; see docs/CROSS-REPO.md). The day inside the month
+// never matters: an advance handed over on 1 Bhadra and one handed over on 28 Bhadra both see
+// their first cut on the Ashwin payslip. Chaitra (12) rolls into Baisakh (1) of the next BS year.
+// The question is asked in BS because payroll periods are BS months; `issued_date` is stored AD.
+//
+// Until this existed, buildAdvanceMap() looked at `status` alone, so an advance issued in Bhadra
+// was deducted from a Shrawan run that was still open — a repayment dated a month before the
+// money was handed over — and Finalize then allocated that deduction onto the employee's oldest
+// active advance, which could be one not yet due.
+//
+// The AD string is parsed as a LOCAL date (`T00:00:00`, no zone): `new Date('YYYY-MM-DD')` is UTC
+// midnight, which adToBs's local getters read as the previous day for any viewer west of UTC.
+export function firstRecoveryMonth(issuedDate) {
+  const bs = issuedDate ? adToBsSafe(new Date(String(issuedDate).slice(0, 10) + 'T00:00:00')) : null
+  if (!bs) return null
+  return bs.month === 12 ? { bs_year: bs.year + 1, bs_month: 1 } : { bs_year: bs.year, bs_month: bs.month + 1 }
+}
+
+const monthIndex = p => p.bs_year * 12 + (p.bs_month - 1)
+
+// Is this advance due for a cut in the given payroll period? An issued date the calendar cannot
+// convert (missing, or outside the verified BS table — impossible from the picker, but a raw import
+// could) answers `false`: it is excluded from the run and stays visibly outstanding in Advances &
+// Loans, rather than being deducted from a month nobody chose. Errs on the employee's side, in the
+// open.
+export function advanceDueIn(adv, period) {
+  const first = firstRecoveryMonth(adv?.issued_date)
+  if (!first || !period || !period.bs_year || !period.bs_month) return false
+  return monthIndex(period) >= monthIndex(first)
+}
+
+// The advances a payroll run may touch: still open, and already past their first recovery month.
+// Every place that reads advances FOR A PERIOD — the deduction (buildAdvanceMap), Finalize's
+// allocation of it back onto individual advances, and the Calculation breakdown panel's count —
+// goes through this ONE filter so the three cannot disagree about which advances a month recovers.
+//
+// Deliberately NOT used by Final Settlement: an exit settlement recovers every outstanding advance
+// regardless of when it was issued, because there is no later payroll to recover it from.
+export function dueAdvances(advances, period) {
+  return (advances || []).filter(a => a.status === 'active' && advanceDueIn(a, period))
+}
+
 // Per-employee scheduled advance deduction for this period.
-// For each active advance: deduct min(installment, outstanding).
+// For each active advance already in recovery (dueAdvances): deduct min(installment, outstanding).
 // If no installment set, deduct full outstanding (treated as one-time advance).
-export function buildAdvanceMap(advances, repayments) {
+//
+// `period` is REQUIRED and the function throws without it: a caller that forgot it would otherwise
+// get an empty map, and an empty map is "nobody owes anything this month" — the quietest possible
+// way to stop recovering the company's money (or, before this rule, to recover it early).
+export function buildAdvanceMap(advances, repayments, period) {
+  if (!period || !period.bs_year || !period.bs_month) throw new Error('buildAdvanceMap needs the payroll period (bs_year, bs_month)')
   const repaidMap = {}
-  repayments.forEach(r => {
+  ;(repayments || []).forEach(r => {
     repaidMap[r.advance_id] = (repaidMap[r.advance_id] || 0) + (parseFloat(r.amount) || 0)
   })
   const advMap = {}
-  advances.filter(a => a.status === 'active').forEach(adv => {
+  dueAdvances(advances, period).forEach(adv => {
     const repaid = repaidMap[adv.id] || 0
     const outstanding = Math.max(0, parseFloat(adv.amount) - repaid)
     if (outstanding <= 0) return

@@ -21,7 +21,7 @@ export const POS_GUIDE_GROUPS = [
           'Crest POS is a till system built to feed the rest of Crest: every closed bill posts its revenue into IMS Sales Entry and its ingredient depletion into the Stock Movements ledger, so the food-cost figures the suite is sold on come from real service, not re-typed totals. It is sold flat — pos_enabled on or off, no tiers, and no feature flag of its own: everything in this guide, Guest QR Ordering and Loyalty included, comes WITH the module (S632). pos_enabled is the only thing standing between a client and a public guest menu.',
         workflow: [
           'Setup once: activate the till device on POS Setup, build tables and ticket routing in Table Management, create PIN staff on POS Staff.',
-          'Service: staff PIN in, take orders on the floor grid, Send Order fires KOT/BOT tickets (printed and on the Kitchen Display), Charge closes the bill.',
+          'Service: front-of-house staff PIN in and take orders on the floor grid; Send Order fires the KOT/BOT tickets (printed and on the Kitchen Display); a Supervisor or above presses Payment to close the bill. Kitchen and bar team logins only ever see the Kitchen Display.',
           'Cash discipline: a Supervisor opens a shift with a counted float, closes it against a recount; credit bills are settled later in Customers.',
           'Management: four reports (Sales, Exceptions, KOT Log, Covers) plus Credit Notes cover what sold, what was given away, what the kitchen was told, and how tables turned.',
         ],
@@ -31,7 +31,7 @@ export const POS_GUIDE_GROUPS = [
           { label: 'Attribution', desc: 'Every close, discount, comp and ticket send records whoever last PIN\'d in — which is why the 3-minute idle lock exists (below), and why the Exceptions report can rank staff at all.' },
         ],
         formulas: [
-          'The money spine: order lines → Charge → pos_orders (invoice) → revenue into IMS sales_entries + depletion into stock_movements → every IMS food-cost report.',
+          'The money spine: order lines → Payment → pos_orders (invoice) → revenue into IMS sales_entries + depletion into stock_movements → every IMS food-cost report.',
         ],
         gotchas: [
           'A PIN staff session on an activated till signs back out to the PIN screen after 3 idle minutes (the Kitchen Display is exempt — it is a wall screen). Admin and Owner sessions are exempt too: if an admin is being signed out on a till machine, that is a bug, not this feature.',
@@ -93,21 +93,21 @@ export const POS_GUIDE_GROUPS = [
         id: 'orders',
         title: 'Orders & Billing',
         route: '/pos/orders',
-        plan: 'Staff+ (all POS logins)',
+        plan: 'Staff+ (front-of-house logins) · Payment is Supervisor+',
         summary:
-          'The heart of the till: a floor grid of table tiles (covers, running total, pending items, kitchen status, offline-pending dot, guest-request badge) and, on tap-in, the full-screen order screen — menu tiles, cart, kitchen tickets, and the Charge flow with its Pay / Void / Complimentary billing modal.',
+          'The heart of the till: a floor grid of table tiles (covers, running total, pending items, kitchen status, offline-pending dot, guest-request badge) and, on tap-in, the full-screen order screen — menu tiles, cart, the Send Order / KOT / BOT buttons, and the Payment button that opens the Pay / Void / Complimentary billing window. Kitchen and bar team accounts cannot open this screen at all — whatever their rank, they are sent to the Kitchen Display.',
         workflow: [
-          'Tap a table → enter covers → add items (search or category tiles; kitchen notes from the preset list). The FIRST Send Order saves the order and auto-fires both KOT and BOT tickets; later additions go out via Send KOT / Send BOT.',
-          'Charge opens the billing modal with a live two-column bill preview. Pay: pick tender(s), apply any discount (reason required), confirm. Void and Complimentary each demand a reason and close the bill without revenue — on the NC number series for comps, no number at all for voids.',
+          'Tap a table → enter covers → add items (search or category tiles; kitchen notes from the preset list). The FIRST Send Order saves the order and sends every item to its station at once (KOT to the kitchen, BOT to the bar). After that the button reads Update Order and only SAVES — new items go out when you press KOT or BOT, whose badge counts what is still unsent.',
+          'Payment (Supervisor and above only — a Staff login does not see the button) opens the billing window with a live two-column bill preview. The order must be saved first and the till must be online. Pay: pick tender(s), apply any discount (reason required), Confirm Payment. Void and Complimentary each demand a reason and close the bill without revenue — on the NC number series for comps, no number at all for voids.',
           'Split payment: several tenders against one invoice; non-cash tenders are capped at the remaining balance and only the last one can be undone.',
-          'QR tender: a per-bill dynamic payment QR (the amount is injected into the merchant\'s registered QR); a confirmation poll auto-closes the bill when the payment lands.',
+          'QR tender: a per-bill payment QR with the amount already filled in and locked (injected into the merchant\'s registered QR). The screen tells the cashier to confirm once the payment shows on the merchant app — closing the bill is a cashier action today. A background check for an automatic "payment received" signal also runs, but it can only find one after a payment provider (FonePay/eSewa) is connected to Crest, which has not happened yet, and it never runs on a split payment.',
         ],
         fields: [
           { label: 'The tile colour strip', desc: 'The band across the top of each table tile answers "does this table need me?", not "is it occupied" — a waiter can see who is sitting down. Amber = something is waiting on a person (items typed but not fired, a guest QR order to accept, an order not yet synced). Green = food is Ready in the pass. Brass = live and in hand, nothing outstanding. Quiet = available or held. The Available/Occupied/Reserved badge beside it is where the table status itself is read, and every strip colour is repeated by a labelled chip on the same tile, so nothing depends on colour alone.' },
           { label: 'Discounts', desc: 'Clamped to the signed-in staff member\'s Discount Limit (set on POS Staff; blank = unlimited) and enforced again server-side, so a modified browser gains nothing. Every discount requires a reason and the buyer\'s name + phone.' },
           { label: 'Item-level comp (Supervisor+)', desc: 'Comp individual lines off a bill that is otherwise paid — a partial comp splits the line into a paid remainder and a comped row. Each comp ACTION takes one NC number (not one per line), reserved atomically before the bill closes; the person applying it is recorded server-side.' },
-          { label: 'Credit & delivery partners', desc: 'A Credit bill needs the buyer\'s name + phone (that is what builds the customer book). Foodmandu/Pathao-style partners are BUYERS on a Credit bill, not payment methods — their commission is deliberately computed at settlement in Customers, not at Charge.' },
-          { label: 'Loyalty points', desc: 'Optional per client (the loyalty flag). Points are earned automatically on any bill closed with a name and phone, at the rate of whichever scheme that customer is enrolled in — an untagged customer earns nothing, so it never switches itself on for an existing book. Redeeming at Charge is a TENDER, not a discount: VAT on the bill is unchanged, and it does not count against the discount cap set for that cashier. Schemes and enrolment live in Customers → Loyalty.' },
+          { label: 'Credit & delivery partners', desc: 'A Credit bill needs the buyer\'s name + phone (that is what builds the customer book). Foodmandu/Pathao-style partners are BUYERS on a Credit bill, not payment methods — their commission is deliberately computed at settlement in Customers, not at Payment.' },
+          { label: 'Loyalty points', desc: 'Part of POS for every POS client — there is nothing to buy or switch on. Points are earned automatically only when a bill is PAID with the customer\'s phone number on it, at the rate of whichever scheme that customer is enrolled in. Voided and Complimentary bills earn nothing, and a customer not enrolled in a scheme earns nothing — so loyalty never starts itself for an existing customer book. Redeeming in the Payment window is a TENDER, not a discount: VAT on the bill is unchanged, and it does not count against the discount cap set for that cashier. Schemes and enrolment live in Customers → Loyalty.' },
           { label: 'Offline', desc: 'Order-taking queues locally (IndexedDB) and syncs on reconnect; the real bill number is assigned by the database on sync. An order another device already closed while this one was offline is surfaced as a conflict to review — never auto-discarded. Billing is hard-blocked offline.' },
         ],
         formulas: [
@@ -116,9 +116,9 @@ export const POS_GUIDE_GROUPS = [
           'Comped lines are excluded from the payable base before any of this runs — a comp is not a 100% discount.',
         ],
         gotchas: [
-          'A bill where EVERY line is comped is blocked at Charge — use the Complimentary tab instead, otherwise a sequential tax-invoice number burns on a ₨0 document.',
+          'A bill where EVERY line is comped cannot be Confirmed on the Pay tab — use the Complimentary tab instead, otherwise a sequential tax-invoice number burns on a ₨0 document.',
           'Cash: an empty tendered box means "exact cash"; an entered amount below the total blocks Confirm with the shortfall named. Change is computed, not trusted.',
-          'The floor shows a standing count of closed bills not yet posted to Inventory — investigate via Periods (usually a month nobody opened) rather than re-ringing anything.',
+          'The floor shows a standing count of closed bills not yet posted to Inventory, and a separate amber banner counting credit notes not yet taken off Inventory sales — both are cleared from Periods → "Post POS bills to Inventory" (usually a month nobody opened), never by re-ringing or re-issuing anything.',
           'Reprints increment a visible print counter on the bill — an audit trail, not a malfunction.',
         ],
         connections: 'Closing posts revenue to IMS Sales Entry and depletion to Stock Movements. Tickets land in the KOT Log and on the Kitchen Display. Buyer identities build Customers; credit bills appear there for settlement. Exceptions, Sales Report and Covers all read what this screen writes.',
@@ -176,7 +176,7 @@ export const POS_GUIDE_GROUPS = [
           'Take: + New booking — name, phone (looked up in the customer book: visits, unsettled credit, past no-shows), guests, BS day + time, optional held tables, how they booked. Sitting length prefills per party size.',
           'Confirm: the 💬 button opens WhatsApp on this device with the confirmation message prefilled; the number is on the row for a phone call. Nothing is sent automatically — no SMS gateway, no sender ID to register.',
           'Seat: from the booking\'s Seat button (pick the table) or by tapping the held table on the Orders floor when it is due — either way the order opens with covers filled in and the booking flips to Seated with the order linked.',
-          'Close: paying the bill (any close type) marks the booking Completed. No-show and Cancel (reason required) end it otherwise; Mark done covers a party seated by hand or offline. All three live in the row\'s ⋯ menu; the row itself shows only the one next step (Confirm → Arrived → Seat).',
+          'Close: paying the bill (any close type) marks the booking Completed. No-show… and Cancel booking… (reason required) end it otherwise; Mark done… covers a party seated by hand or offline. All three live in the row\'s ⋯ menu; the row itself shows only the one next step (Confirm → Arrived → Seat).',
           'Undo: a no-show who turns up is put back to Arrived (⋯ → They turned up), which clears the mark from their phone number; a cancelled booking is reinstated to Booked. Both only on the booking\'s own day — after that it is a record, not a guest at the door.',
           'Decline vs cancel: a request from the booking link is DECLINED with its own reason list (No table at that time, Closed that day, Party too large), because that reason is shown on the guest\'s phone. Cancel reasons are for the book.',
           'Online requests: an amber band at the top of the page, polled every 15 s with a chime — Accept confirms, Decline needs a reason, and the guest\'s phone shows the answer within seconds.',
@@ -197,7 +197,7 @@ export const POS_GUIDE_GROUPS = [
           'The manual Reserved status on a table tile is unrelated — a hand-set hold with no record behind it. Bookings never write it and never read it.',
           'A booking for 12:15 AM belongs to the NEXT BS day in the book but shows on tonight\'s floor: the floor reads today plus six hours past midnight.',
           'Online requests are rate-limited server-side (one pending per phone, a per-network hourly cap) and there is no phone verification — the staff WhatsApp or call IS the verification. Bigger parties than the online maximum are told to call.',
-          'A booking seated while the till is offline keeps its status at Arrived: the link needs the server row and is never written from the offline queue. Press Done on it afterwards.',
+          'A booking seated while the till is offline keeps its status at Arrived: the link needs the server row and is never written from the offline queue. Use ⋯ → Mark done… on it afterwards.',
         ],
         connections: 'Reads pos_customers, pos_orders (credit, visits) at booking time. Writes order_id on seat from Order Taking and completes on bill close. Feeds Covers Report → Reservations, the No-shows column on Customers, and the Dashboard\'s Bookings Tonight tile (tonight\'s live bookings, covers still to come, requests waiting). Settings live on Tables → Reservations.',
       },
@@ -212,7 +212,7 @@ export const POS_GUIDE_GROUPS = [
           'Tables: add one by one or Quick Setup bulk-creates Table 1..N; set capacity (feeds the Covers report\'s seat count and the Reservations capacity strip); cycle status available → reserved → occupied → inactive; print each table\'s QR for the guest menu.',
           'Reservations: expected sitting length per party size, with the outlet\'s own MEASURED average beside each field and a one-tap "Use measured"; the WhatsApp template; the online-booking toggle, largest party and minimum notice; Copy link / Print QR for the booking page.',
           'Ticket Routing: assign categories to the Bar ticket — everything else goes to the Kitchen. The default split sends Beverage to the bar.',
-          'Delivery Partners: name + commission % + phone per partner — the list the Charge screen offers as Credit buyers and Customers uses at settlement.',
+          'Delivery Partners: name + commission % + phone per partner — the list the Payment window offers as Credit buyers and Customers uses at settlement.',
         ],
         fields: [
           { label: 'HSC codes', desc: 'Per-recipe harmonized codes for the printed tax invoice — data entry here, printing on the bill.' },
@@ -238,7 +238,7 @@ export const POS_GUIDE_GROUPS = [
         ],
         fields: [
           { label: 'Who owes what', desc: 'The credit ledger totalled by counterparty — each delivery platform separately, plus one Direct customers row so the rollup still ties to the Outstanding figure above it. Covers every Credit bill ever, unlike the date-ranged report.' },
-          { label: 'Settlement methods', desc: 'Cheque and Bank Transfer exist only here — they are settlement instruments, not till tenders, which is why the Charge screen never offers them.' },
+          { label: 'Settlement methods', desc: 'Cheque and Bank Transfer exist only here — they are settlement instruments, not till tenders, which is why the Payment window never offers them.' },
         ],
         formulas: [
           'Partner commission = round(ex-VAT bill base × commission %) — the base excludes comped lines and VAT, matching how the platforms invoice.',
@@ -281,14 +281,15 @@ export const POS_GUIDE_GROUPS = [
         route: '/pos/menu/:tableId',
         plan: 'Public (via table QR) · included with the Crest POS module',
         summary:
-          'What a guest sees after scanning the table\'s QR: the live menu with VAT-inclusive prices and nutrition facts. They can build a cart and submit it — which lands as a REQUEST for staff to accept, never directly on the order. Ordering comes with Crest POS; there is no separate flag to buy or switch on (S632).',
+          'What a guest sees after scanning the table\'s QR: the live menu with prices — VAT is added into the price only when the outlet is VAT-registered — and nutrition facts only when the client has the nutrition feature switched on (feature_flags.nutrition_facts). They can build a cart and submit it — which lands as a REQUEST for staff to accept, never directly on the order. Ordering comes with Crest POS; there is no separate flag to buy or switch on (S632).',
         workflow: [
           'Guest scans the QR printed from Table Management → browses the live menu.',
-          'With ordering on: build a cart → submit → the Orders floor shows a request badge with a chime → staff review and Accept, which merges the items into the table\'s order and fires tickets as usual.',
+          'With ordering on: build a cart → submit → the Orders floor shows a request badge with a chime → staff open the table and press Accept (or Dismiss). Accept only adds the items to that staff member\'s unsaved cart — nothing is saved until they press Send Order (a new table) or Update Order (an order already running). If they leave the table without saving, the request goes back on the list.',
+          'Tickets: on a new table, Send Order fires KOT/BOT as usual. On an order already running, Update Order only saves — staff must then press KOT / BOT to send the guest\'s items to the kitchen and bar.',
           'The guest\'s screen tracks a five-stage status — placed → confirmed → sent to kitchen → preparing → ready — driven by the real ticket status, including the prep-time countdown the kitchen entered on the KDS.',
         ],
         fields: [
-          { label: 'Why requests, not direct orders', desc: 'Anyone can scan a QR — staff acceptance is the fraud gate. Items reach the kitchen only after a signed-in staff member accepts them onto the order.' },
+          { label: 'Why requests, not direct orders', desc: 'Anyone can scan a QR — staff acceptance is the fraud gate. Items reach the kitchen only after a signed-in staff member accepts them, saves the order and sends the tickets.' },
         ],
         formulas: [],
         gotchas: [
@@ -323,7 +324,7 @@ export const POS_GUIDE_GROUPS = [
           { label: 'Comp food cost', desc: 'What a comp actually cost in ingredients (matching the printed Complimentary Slip). Kept in its own column and NEVER added into a revenue total — cost and forgone revenue are different units.' },
         ],
         formulas: [
-          'Void value = the voided bill\'s full menu value including VAT. Item-comp events group one Charge action into one row (one NC number), however many lines it comped.',
+          'Void value = the voided bill\'s full menu value including VAT. Item-comp events group one billing action into one row (one NC number), however many lines it comped.',
         ],
         gotchas: [
           'Item-level comps live on bills that are otherwise ordinary PAID invoices — the report fetches them separately and cross-references both ways, so neither the paid bill nor the comp hides the other.',
@@ -337,23 +338,29 @@ export const POS_GUIDE_GROUPS = [
         route: '/pos/credit-notes',
         plan: 'Manager only',
         summary:
-          'The IRD-compliant reversal instrument: issue a credit note against a paid tax invoice (always the WHOLE bill), and browse/reprint the numbered Credit Note Book. The note reverses the bill\'s revenue in IMS on the day it is issued.',
+          'The IRD-compliant reversal instrument: issue a credit note against a paid tax invoice (always the WHOLE bill), and browse/reprint the numbered Credit Note Book. Issuing a note also tries to take that bill\'s revenue back out of Inventory, into the period that is open TODAY. If it cannot, the note is still valid and printed — it is simply marked as waiting, and a manager posts it later from Periods.',
         workflow: [
-          'Issue New: find the bill (search by invoice number or browse the date range), pick a reason — Wrong customer / Tax correction / Duplicate bill — confirm, print.',
+          'Issue New: find the bill (type its invoice number, or browse the date range — only paid bills not already credited are listed), write the reason (typed freely; three shortcut buttons fill in Wrong customer / Tax correction / Duplicate bill), check the buyer details, then Issue & Print.',
+          'If there is no open Inventory period for this month (or the month is already closed, or the save fails), the note is STILL issued, numbered and printed. The screen says it is "not yet in Inventory", the note carries a "Not in Inventory" badge in the Credit Note Book, and an amber banner on the POS floor counts the waiting notes.',
+          'To post a waiting note: open its month in Periods and press "Post POS bills to Inventory" on that month — the same button that posts waiting bills. Safe to press twice; a note that already posted is skipped, never taken off twice.',
           'Credit Note Book: every issued note, reprintable with its print count.',
         ],
         fields: [
-          { label: 'Whole-bill only', desc: 'Partial credits are not supported — which is exactly why "price correction" is not on the reason list: it invited fixing one line by crediting the whole invoice. Correct a wrong bill by crediting it entirely and re-ringing it right.' },
+          { label: 'Whole-bill only', desc: 'Partial credits are not supported — which is exactly why "Price correction" and "Billing error" are not among the shortcut buttons: both invited fixing one wrong line by crediting the whole invoice. Correct a wrong bill by crediting it entirely and re-ringing it right. The reason box itself accepts any text and cannot be left empty.' },
+          { label: 'Not in Inventory (waiting)', desc: 'The note is a valid, numbered, printed document, but Inventory still counts that bill\'s revenue — for example, a note issued on the 1st of a new month before anyone opened that month in Periods. Sales in Inventory reports stay overstated by that bill until the note is posted.' },
         ],
         formulas: [
-          'CN face value = the bill total minus any item-comped lines (those never posted revenue, so there is nothing of theirs to reverse). The IMS revenue reversal excludes them identically.',
+          'CN face value = the bill total minus any item-comped lines (those never posted revenue, so there is nothing of theirs to reverse).',
+          'Inventory reversal = the exact negative of what the bill posted: one minus-quantity sales row per paid item, at its price reduced by the bill\'s discount share. Comped items are skipped. Example: a NPR 1,000 bill (before VAT) with a NPR 100 discount takes NPR 900 back out, not NPR 1,000.',
         ],
         gotchas: [
           'An invoice-number search deliberately ignores the date pickers — "customer came back with last week\'s bill" is the normal case, and the pickers default to today.',
           'The note is numbered in the fiscal year it is ISSUED, not the bill\'s — a post-Shrawan note never writes into a closed FY\'s number series.',
-          'The reversal posts on the issue day, not retroactively — last month\'s closed figures stay closed.',
+          'The reversal lands in the month the note is ISSUED, not the bill\'s month — last month\'s closed figures stay closed. A waiting note posts into the month it was issued in, not the month someone finally presses the button.',
+          'Stock is never touched — the food was served. A credit note corrects money and tax only.',
+          'If the note\'s month has already been closed, only an admin can post it from Periods, and that month\'s frozen Monthly Report then needs Regenerate Snapshot to reflect it.',
         ],
-        connections: 'Reverses Orders\' posted revenue in IMS Sales Entry. Credit-noted bills contribute returned quantity — never revenue — to the Sales and Covers reports. Numbering shares the per-FY series machinery with tax invoices.',
+        connections: 'Takes Orders\' posted revenue back out of IMS Sales Entry (as negative sales rows); waiting notes are posted from Periods → "Post POS bills to Inventory" and counted on the Orders floor. Sales Report: a credit-noted bill adds no revenue on any tab — the Category, Item and Product Type tabs count its items as returned quantity, and Bill Register keeps it listed, flagged Credit Noted, outside the totals. Covers Report leaves credit-noted bills out entirely. Numbering shares the per-FY series machinery with tax invoices.',
       },
       {
         id: 'sales-report',
@@ -363,8 +370,8 @@ export const POS_GUIDE_GROUPS = [
         summary:
           'The full POS sales picture in eleven tabs: Daily, Hourly, Bill Register, Comped Bills, Payment Summary, Delivery Partners, Category Wise, Product Type, Item Wise, Customer Wise, and the 1L+ Report. Excel export with the company letterhead on every tab.',
         workflow: [
-          'Pick the date range; every tab is a different slice of the same bills. Payment Summary rows click through to a pre-filtered Bill Register.',
-          'The 1L+ tab lists buyers whose purchases cross NPR 100,000 — the IRD Annexure 13 disclosure threshold — which is one reason buyer names are mandatory on credit and discounted bills.',
+          'Pick the date range; every tab except 1L+ is a different slice of the same bills. Payment Summary rows click through to a pre-filtered Bill Register.',
+          'The 1L+ tab works on a whole FISCAL YEAR, chosen from its own Fiscal Year dropdown — the date range does not apply to it. It lists buyers whose paid bills in that year cross NPR 1,00,000 — the IRD Annexure 13 disclosure threshold — leaves credit-noted bills out, and flags a buyer over the line with no PAN recorded. That threshold is one reason buyer names are mandatory on credit and discounted bills.',
         ],
         fields: [
           { label: 'By Partner rollup (Delivery Partners tab)', desc: 'One row per delivery platform — outstanding balance, commission taken, net received — plus the effective commission rate measured against the agreed one. The rate is the point: without it the tab can say how much a platform withheld but never whether that was the agreed amount. Clicking a row filters the bills, the KPIs and the export to that platform.' },
@@ -373,7 +380,7 @@ export const POS_GUIDE_GROUPS = [
         ],
         formulas: [
           'Every tab derives from ONE bill-math primitive: a grouping key over the same proportional-discount arithmetic, so any slice — category, item, hour, customer — reconciles exactly back to bill totals. A new slice is a new grouping, never a second copy of the math.',
-          'A credit-noted bill contributes returned quantity only, never revenue, on every tab identically.',
+          'A credit-noted bill adds no revenue on any tab. Category Wise, Item Wise and Product Type count its items as returned quantity; Bill Register still lists it, flagged Credit Noted, but outside the totals; every other tab, 1L+ included, leaves it out.',
           'Effective commission % = settled commission ÷ ex-VAT settled base — the same base Customers settles on, never the VAT-inclusive total (that would read about 13% low on every bill and accuse every platform of over-charging). Outstanding bills are excluded from both sides of it.',
         ],
         gotchas: [
@@ -424,7 +431,7 @@ export const POS_GUIDE_GROUPS = [
           'Spend per cover = bill revenue ÷ covers, over the same discount-aware bill math as the Sales Report.',
         ],
         gotchas: [
-          'Credit-noted bills are excluded — same rule as the Sales Report, so the two never disagree about a reversed evening.',
+          'Credit-noted bills are left out entirely — their covers, spend and turnover — matching the Sales Report\'s revenue figures, so the two never disagree about a reversed evening.',
           'Reads are paged; truncation here would not just shrink totals, it would skew the averages the report exists for.',
         ],
         connections: 'Covers come from Orders\' cover counts; capacity from Table Management; revenue math shared with the Sales Report. The Turnover tab\'s per-band averages are the same arithmetic (coversMath.js) the Reservations settings show as "Measured", so the two can never disagree. Booked-vs-walk-in reads the order link a seated booking carries.',
@@ -447,10 +454,10 @@ export const POS_GUIDE_GROUPS = [
         workflow: [
           'Add Staff: from an HR employee (when HR is on) or manually; set the job title (rank), team (FOH / Kitchen / Bar) and a 4-6 digit PIN.',
           'Per staff member: set a Discount Limit (blank = unlimited), tick Allow Void where trusted, Reset PIN when forgotten or after five failed attempts.',
-          'Rename the three rank levels to house titles; changing a title\'s level cascades to everyone holding it.',
+          'Manage Roles: add as many custom job titles as the house uses (Captain, Head Waiter, Cashier…) and map each one to a permission level — Staff, Supervisor or Manager. Changing a title\'s level cascades to everyone holding it; "Reset to defaults" returns to the plain Staff / Supervisor / Manager titles.',
         ],
         fields: [
-          { label: 'The three ranks', desc: 'Staff: take orders, view the floor. Supervisor: + close bills, apply discounts/comps, table setup, open/close shifts. Manager: + all reports, credit notes, staff management, device setup.' },
+          { label: 'The three ranks', desc: 'Staff: take orders on the floor, Kitchen Display, Reservations, view Parking Slips. Supervisor: + the Payment button (close bills, discounts, comps), Customers & Credit, open/close Shifts, issue Parking Slips. Manager: + Table Management, Menu Pricing, all reports, Credit Notes, POS Staff, device setup.' },
           { label: 'Allow Void', desc: 'Deliberately a per-person switch, NOT a Supervisor power — promoting someone to Supervisor does not let them void, and the checkbox is the only thing that does. It once looked like a rank power on paper, and managers promoted people to grant it, got Supervisors who still couldn\'t void, and no error explained why.' },
           { label: 'Team (FOH / Kitchen / Bar)', desc: 'Which station, not how much power — a Kitchen or Bar account sees only the Kitchen Display regardless of rank, and is locked to its own ticket queue there.' },
         ],

@@ -90,6 +90,21 @@ function daysAfterExit(endDateStr, period, monthDays) {
   return count
 }
 
+// Is this employee an SSF contributor? BOTH the enrolment flag AND a non-blank registration number
+// (decision 2026-08-18). Until then the flag alone deducted 11% while HrReports' challan tab filters
+// on `ssf_no` too — so a flagged employee with a blank number had money withheld that no filing
+// sheet ever claimed. Deducting nothing is the recoverable direction; the number is entered once,
+// in Pay Setup.
+//
+// ONE definition, because the same answer decides three things that must agree: the 11%/20%
+// deduction below, the TDS 1% first-slab waiver on Payroll Run and Payroll Calculation, and the
+// same waiver plus projected SSF relief on Festival Allowance and Incentive Run. A caller that
+// uses the flag alone waives tax against a contribution that is never made. Any query feeding it
+// must select `ssf_no` as well as `ssf_enrolled`.
+export function isSsfContributor(employee) {
+  return !!(employee?.ssf_enrolled && String(employee?.ssf_no || '').trim())
+}
+
 // Compute OT amount from approved hr_overtime_entries rows.
 // Weekday entries at 1.5×, holiday entries at 2×.
 function entryOt(approvedOtEntries, hr) {
@@ -116,11 +131,8 @@ function entryOt(approvedOtEntries, hr) {
 export function computePayslip(employee, components, attendanceRows, period, tds = 0, approvedOtEntries = [], advanceDeduction = 0) {
   const basis    = employee.pay_basis || 'monthly'
   const basic    = parseFloat(employee.basic_salary) || 0
-  // SSF requires BOTH the enrolment flag and a registration number (decision 2026-08-18). Until
-  // then the flag alone deducted 11% while HrReports' challan tab filters on `ssf_no` too — so a
-  // flagged employee with a blank number had money withheld that no filing sheet ever claimed.
-  // Deducting nothing is the recoverable direction; the number is entered once, in Pay Setup.
-  const enrolled = !!(employee.ssf_enrolled && String(employee.ssf_no || '').trim())
+  // SSF requires BOTH the enrolment flag and a registration number — see isSsfContributor above.
+  const enrolled = isSsfContributor(employee)
   const supersededOtDays = new Set(
     approvedOtEntries.map(e => e.bs_day).filter(d => d != null)
   )

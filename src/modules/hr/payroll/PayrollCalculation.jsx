@@ -6,9 +6,9 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
-import { computePayslip, calcAmount } from './payrollCompute'
+import { computePayslip, calcAmount, isSsfContributor } from './payrollCompute'
 import { computeMonthlyTdsBreakdown } from './tds'
-import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, payslipDrift, groupByEmployee, sliceFor } from './payrollData'
+import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, dueAdvances, payslipDrift, groupByEmployee, sliceFor } from './payrollData'
 import { ATTENDANCE_STATUSES, OT_MULTIPLIER } from '../payrollConstants'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -47,7 +47,10 @@ function CalcDetail({ row, monthDays, advances }) {
   const { emp, comps, slip, tdsBreakdown, advDed, tada, tadaAmount, netPay } = row
   const b = slip.breakdown
   const t = b.tally
-  const empAdvances = advances.filter(a => a.employee_id === emp.id && a.status === 'active')
+  // Callers pass dueAdvances(advances, period): open AND past the first recovery month, so an
+  // advance issued this month is not counted here while the deduction line below shows nothing
+  // for it. Filtering on `status` alone counted advances the run was not recovering.
+  const empAdvances = advances.filter(a => a.employee_id === emp.id)
   const fyLabel = `${tdsBreakdown.fyStart % 100}/${(tdsBreakdown.fyStart + 1) % 100}`
   const earningComps = comps.filter(c => c.type === 'earning')
 
@@ -168,7 +171,7 @@ function CalcDetail({ row, monthDays, advances }) {
         </Section>
 
         <Section title="Advance & TADA">
-          <Line label="Active Advances" value={empAdvances.length} />
+          <Line label="Advances in recovery this month" value={empAdvances.length} hint="Recovery starts the month after an advance is issued" />
           <Line label="Advance Deduction" value={`− NPR ${fmt(advDed)}`} color="var(--theme-red-text)" />
           <Line label="Approved TADA Claims" value={tada.ids.length} />
           <Line label="TADA Reimbursement" value={`+ NPR ${fmt(tadaAmount)}`} color="var(--theme-green-text)" />
@@ -298,13 +301,18 @@ export default function PayrollCalculation() {
 
   const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : '—'
   const monthDays = period ? daysInBsMonth(period.bs_year, period.bs_month) : 0
+  // The advances this month is recovering — the same dueAdvances() filter buildAdvanceMap applies,
+  // so the breakdown panel's count cannot disagree with the deduction beside it.
+  const dueNow = useMemo(() => (period ? dueAdvances(advances, period) : []), [advances, period])
   // Memoized as one block. `rows` recomputes the full payroll — computePayslip plus a TDS slab
   // walk — for every employee, and this page's only interactive state is `expandedId`/`printRow`,
   // so opening a single employee's detail panel re-ran the whole month's payroll for everyone.
   // The three `.filter()`s were also a full scan per employee of arrays that are one row per
   // employee per DAY; they are partitioned once now, in the same source order.
   const rows = useMemo(() => {
-    const advMap = buildAdvanceMap(advances, repayments)
+    // buildAdvanceMap throws without a period (an empty map would silently mean "nobody owes
+    // anything"), so it is only asked once one is selected — `rows` is empty until then anyway.
+    const advMap = period ? buildAdvanceMap(advances, repayments, period) : {}
     const payslipByEmp = Object.fromEntries(payslips.map(s => [s.employee_id, s]))
     const compsBy = groupByEmployee(components)
     const attBy   = groupByEmployee(attendance)
@@ -329,7 +337,7 @@ export default function PayrollCalculation() {
         ytdMonths:    ytd.count,
         // Mirrors PayrollRun's gate exactly — these two must agree or every SSF-enrolled employee
         // with a blank number shows a permanent false Stale flag against a correct payslip.
-        isSsf:        !!(emp.ssf_enrolled && String(emp.ssf_no || '').trim()),
+        isSsf:        isSsfContributor(emp),
         isMarried:    emp.marital_status === 'married',
         annualLifeInsurance:   parseFloat(emp.life_insurance_premium) || 0,
         annualHealthInsurance: parseFloat(emp.health_insurance_premium) || 0,
@@ -505,7 +513,7 @@ export default function PayrollCalculation() {
                               <div style={{ padding: '10px 22px 0', background: 'var(--theme-bg)', borderTop: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'flex-end' }}>
                                 <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => handlePrint(row)}>🖨 Print</button>
                               </div>
-                              <CalcDetail row={row} monthDays={monthDays} advances={advances} />
+                              <CalcDetail row={row} monthDays={monthDays} advances={dueNow} />
                             </td>
                           </tr>
                         )}
@@ -543,7 +551,7 @@ export default function PayrollCalculation() {
           <h1 style={{ fontSize: 20, marginBottom: 2 }}>Payroll Calculation</h1>
           <div style={{ fontSize: 13, marginBottom: 2 }}>{printRow.emp.full_name}{printRow.emp.employee_code ? ` (${printRow.emp.employee_code})` : ''}</div>
           <div style={{ fontSize: 12, color: '#555', marginBottom: 14 }}>{periodLabel} — generated {new Date().toLocaleDateString('en-IN')}</div>
-          <CalcDetail row={printRow} monthDays={monthDays} advances={advances} />
+          <CalcDetail row={printRow} monthDays={monthDays} advances={dueNow} />
         </div>
       )}
     </div>

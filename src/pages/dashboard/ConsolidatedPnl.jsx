@@ -204,9 +204,13 @@ export default function ConsolidatedPnl() {
       scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      // `source` selected and comps filtered in JS below, never `.neq('source','pos_comp')` (S747):
+      // the column is nullable and NULL <> 'pos_comp' is NULL, so the server-side form dropped
+      // every legacy row from REVENUE — the top line of the statement and the denominator of every
+      // margin under it. get_group_pnl (the grouped path) was fixed in the same change.
       fetchAllRows(() => supabase.from('sales_entries')
-        .select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId)
-        .neq('source', 'pos_comp').order('id')),
+        .select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId)
+        .order('id')),
       scopedFrom('recipes', 'id, selling_price'),
       supabase.from('overheads').select('bucket, amount').eq('period_id', periodId),
       scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', periodId).eq('status', 'finalized'),
@@ -226,10 +230,11 @@ export default function ConsolidatedPnl() {
     ] = results
 
     // Revenue — price-at-sale with current-price fallback, net of per-row discounts, comps
-    // already excluded by the query. Byte-for-byte MonthlySummary's rule.
+    // excluded here (a comped dish was never paid for) rather than by the query; see the read.
     const currentPriceMap = {}
     ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price) || 0 })
     const revenue = (salesData || []).reduce((s, row) => {
+      if (row.source === 'pos_comp') return s
       const price = row.unit_price != null ? parseFloat(row.unit_price) : (currentPriceMap[row.recipe_id] || 0)
       return s + parseFloat(row.qty_sold || 0) * price - (parseFloat(row.discount) || 0)
     }, 0)

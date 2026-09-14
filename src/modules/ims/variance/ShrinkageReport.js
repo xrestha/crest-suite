@@ -39,6 +39,9 @@ export default function ShrinkageReport() {
   const [loading, setLoading]         = useState(true)
   const [loadError, setLoadError]     = useState(null)
   const [periodsUsed, setPeriodsUsed] = useState(0)
+  // No closed period exists at all (S747). The build effect only runs when there are periods, so
+  // this page sat on "Analysing N closed periods…" for ever on a client whose months were all open.
+  const [noClosed, setNoClosed] = useState(false)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
   useEffect(() => { if (periods.length) buildReport() }, [periodCount, periods]) // eslint-disable-line
@@ -57,6 +60,9 @@ export default function ShrinkageReport() {
     const [{ data: p }, { data: c }] = initResults
     setCategories(c || [])
     setPeriods(p || [])
+    const none = !(p || []).length
+    setNoClosed(none)
+    if (none) { setReport([]); setSummary(null); setPeriodsUsed(0); setLoading(false) }
   }
 
   async function buildReport() {
@@ -330,6 +336,14 @@ export default function ShrinkageReport() {
       <div className="card">
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Analysing {periodCount} closed periods…</p>
+        ) : noClosed ? (
+          <div className="empty-state">
+            <p className="empty-state-text">
+              No period has been closed yet. Shrinkage compares what was counted at month end against what the
+              recipes say was used, so it needs at least one closed month — close a period in Periods once its
+              stock count is done.
+            </p>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">✓</div>

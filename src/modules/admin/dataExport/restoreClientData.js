@@ -31,7 +31,7 @@ const RESTORE_ORDER = [
   'requisitions', 'requisition_lines', 'ims_gate_passes',
   'demand_forecast_run_log', 'demand_forecast_daily',
   'purchase_entries', 'payable_payments', 'vendor_returns',
-  'opening_stock', 'closing_stock', 'wastages', 'staff_meals', 'sales_entries', 'budgets',
+  'opening_stock', 'closing_stock', 'wastages', 'staff_meals', 'budgets',
   // HR setup then transactions
   'hr_shift_types', 'hr_holiday_calendar', 'hr_leave_types', 'hr_employees',
   'hr_salary_components', 'hr_roster', 'hr_roster_publish_state', 'hr_shift_swap_requests',
@@ -49,6 +49,12 @@ const RESTORE_ORDER = [
   'pos_guest_order_requests', 'pos_payment_confirmations',
   'pos_cash_movements',
   'pos_credit_notes',
+  // sales_entries AFTER the POS tables (S747), not beside the other IMS transactions. Its
+  // pos_order_id (20260818170000) and pos_credit_note_id (20260914140200) are foreign keys, and
+  // restoring it before pos_orders refused the first chunk carrying a POS bill's revenue — which,
+  // since this loop breaks a table on its first failing chunk, dropped the client's whole sales
+  // history from the restore. Nothing references sales_entries, so moving it down is free.
+  'sales_entries',
   'stock_movements',
   // Config last — harmless either way, and keeps the noisy tables at the end of the log
   'feature_flags',

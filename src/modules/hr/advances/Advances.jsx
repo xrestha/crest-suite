@@ -10,7 +10,8 @@ import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { invalidStyle } from '../../../shared/inlineFieldState'
-import { adToBs } from '../../../utils/bsCalendar'
+import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
+import { firstRecoveryMonth } from '../payroll/payrollData'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -20,6 +21,13 @@ const fmtD = iso => {
   if (!iso) return '—'
   const bs = adToBs(new Date(iso + 'T00:00:00'))
   return `${bs.year}-${String(bs.month).padStart(2,'0')}-${String(bs.day).padStart(2,'0')}`
+}
+// "Ashwin 2083" for an advance issued any day of Bhadra 2083 — the payroll its first cut lands on.
+// Reads payrollData's firstRecoveryMonth(), the same rule Payroll Run deducts by, so what this page
+// promises and what the payslip does cannot drift apart.
+const recoveryFrom = iso => {
+  const m = firstRecoveryMonth(iso)
+  return m ? `${BS_MONTHS[m.bs_month - 1]} ${m.bs_year}` : null
 }
 const inp = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
@@ -236,7 +244,7 @@ export default function Advances() {
         {[
           { label: 'Total Outstanding', value: `NPR ${fmt(totalOutstanding)}`, tip: 'Sum of unpaid balances across all active advances and loans.' },
           { label: 'Employees Affected', value: employeesWithActive, tip: 'Number of employees with at least one active advance or loan.' },
-          { label: 'Active Advances', value: advanceCount, tip: 'Short-term advances (typically recovered in the next payslip).' },
+          { label: 'Active Advances', value: advanceCount, tip: 'Short-term advances, recovered through payroll starting the month after they were issued.' },
           { label: 'Active Loans', value: loanCount, tip: 'Multi-month loans with scheduled installment repayments.' },
         ].map(c => (
           <div key={c.label} className="card" style={{ padding: '14px 16px' }}>
@@ -268,7 +276,7 @@ export default function Advances() {
           <thead>
             <tr>
               <th>Employee</th>
-              <th><Tip text="Advance = short-term, next payslip. Loan = multi-month installment.">Type</Tip></th>
+              <th><Tip text="Advance = short-term. Loan = multi-month installment. Both are recovered through payroll starting the month after they were issued.">Type</Tip></th>
               <th>Issued (BS)</th>
               <th style={{ textAlign: 'right' }}><Tip text="Original amount issued.">Amount</Tip></th>
               <th style={{ textAlign: 'right' }}><Tip text="Scheduled monthly deduction from payroll.">Installment/Mo</Tip></th>
@@ -340,6 +348,7 @@ export default function Advances() {
                 Issued {fmtD(selectedAdv.issued_date)}
                 {selectedAdv.purpose && ` · ${selectedAdv.purpose}`}
                 {selectedAdv.installment_amount && ` · NPR ${fmt(selectedAdv.installment_amount)}/mo installment`}
+                {recoveryFrom(selectedAdv.issued_date) && ` · Recovered from the ${recoveryFrom(selectedAdv.issued_date)} payroll`}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -439,6 +448,11 @@ export default function Advances() {
                 <label style={lbl} htmlFor="adv-issued-date">Issued Date (BS)</label>
                 <BsCalendarPicker id="adv-issued-date" value={addForm.issued_date} onChange={v => setAdd('issued_date', v)} placeholder="Select date" clearable invalid={fieldErr['adv-issued-date']} />
                 <FieldError id="adv-issued-date" message={fieldErr['adv-issued-date']} />
+                <div style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 4 }}>
+                  {recoveryFrom(addForm.issued_date)
+                    ? `First salary cut: ${recoveryFrom(addForm.issued_date)} payroll.`
+                    : 'Salary cuts start from the payroll of the month after this date.'}
+                </div>
               </div>
             </div>
 

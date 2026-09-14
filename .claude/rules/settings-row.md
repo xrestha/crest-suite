@@ -157,3 +157,34 @@ That change needed one fix underneath it: `clientMrrBreakdown` read `imsPrices[c
 absent tier counted as free — `??` per tier, the way `resolvePricing` falls back per field, keeps a
 deliberate 0 and falls back on absent. **A "0 survives on purpose" contract has to hold at every
 reader, or the field that relies on it is only safe on the ones that were checked.**
+
+## S747: the save scope is the ACTIVE tab, a code is never invented, and a failed read is not a form
+
+Three rules from the Admin Settings re-analysis, each decided with Aashish. **The first supersedes the
+"union over the VISIBLE tabs" shape described in the S739 section above** — that section's diagnosis
+still stands; its remedy was one step short.
+
+- **Save Changes writes `TAB_FIELDS[activeTab]` and nothing else.** The union put a consultant
+  number half-typed on Support into a Branding save, through the one button the Support card's own
+  Save exists to keep it away from. `TAB_FIELDS` is still the map; `PAGE_FIELDS` is still what keeps
+  an unsaved edit alive across a reseed. A card with its own Save passes `scope` so its saving /
+  saved / error state renders beside that card and not on the header button.
+- **Never fill a column the user did not type.** Both admin editors seeded a blank `invoice_prefix`
+  from the property name, which made the form differ from the row, which made the next save commit
+  it — past the renumbering warning, because that only fired when an OLD code existed. A FIRST code
+  is as retroactive as a change (a code-less bill reprints with the new code in its number), so
+  `retroWarnings` / `retroBillWarnings` fire on any difference. The general test: a derived default
+  belongs in a placeholder, never in state a save diffs against the row.
+- **`settingsLoadError`, `platformLoadError`, `platformLoaded` (SettingsContext) are for EDITORS.**
+  The app stays fail-soft on a failed settings read — the login page still renders on defaults — but
+  a screen that SAVES from those values must not offer them: `savePlatformPlanPrices` and
+  `savePlatformSupport` write whole objects, so one edited field over a failed read reverted every
+  other price or contact slot for every client. `Settings.js` gates on `ROW_TABS` / `platformReady`.
+  The provider is also the ONLY loader now (`wantedCidRef` + a sequence discard superseded
+  responses) — a page calling `loadSettings` on the same client switch doubles the read and races it.
+
+**The Logos bucket is admin-write-only** (`20260914140100`). Its dashboard-made policies let any
+signed-in account of any client overwrite or delete any object, including `admin/logo.*`, Crest's own
+login-page mark. Only admins upload logos (Settings → Branding, ClientDrawer). **A storage bucket's
+policies live in `storage.objects` and were never in a migration** — read `pg_policies` live before
+trusting a bucket, the way `multi-outlet.md` says to audit table policies.

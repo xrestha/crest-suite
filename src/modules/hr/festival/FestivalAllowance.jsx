@@ -6,6 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { bsToAd, getBsToday } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
+import { isSsfContributor } from '../payroll/payrollCompute'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -43,7 +44,11 @@ function calcFestivalTds({ emp, amount, ytd, fyStart }) {
   const remaining       = Math.max(0, 12 - ytdMonths)
 
   const projGross  = ytdGross + basic * remaining
-  const projSsf    = ytdSsf   + (emp.ssf_enrolled ? Math.min(basic, SSF_CAP_MONTHLY) * SSF_EMP_PCT * remaining : 0)
+  // The payroll engine's own SSF gate (flag AND registration number). The flag alone projected SSF
+  // relief and waived the 1% first slab for an employee from whom payroll deducts no SSF at all,
+  // under-withholding tax on the bonus.
+  const isSsf      = isSsfContributor(emp)
+  const projSsf    = ytdSsf   + (isSsf ? Math.min(basic, SSF_CAP_MONTHLY) * SSF_EMP_PCT * remaining : 0)
   const ssfDed     = Math.min(projSsf, Math.min(RETIREMENT_CAP, projGross / 3))
   const lifeIns    = Math.min(parseFloat(emp.life_insurance_premium)   || 0, LIFE_INS_CAP)
   const healthIns  = Math.min(parseFloat(emp.health_insurance_premium) || 0, HEALTH_INS_CAP)
@@ -51,7 +56,7 @@ function calcFestivalTds({ emp, amount, ytd, fyStart }) {
 
   return computeBonusTds({
     annualTaxable: taxable, bonusAmount: amount,
-    isSsf: !!emp.ssf_enrolled, isMarried: emp.marital_status === 'married', fyStart,
+    isSsf, isMarried: emp.marital_status === 'married', fyStart,
   })
 }
 
@@ -83,7 +88,7 @@ export default function FestivalAllowance() {
   async function load() {
     setLoading(true); setMsg('')
     const [{ data: emps }, { data: fa }, { data: psData }] = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, life_insurance_premium, health_insurance_premium')
+      scopedFrom('hr_employees', 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_festival_allowances')
         .eq('bs_year', bsYear).eq('festival_name', festival),
