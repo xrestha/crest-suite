@@ -522,7 +522,7 @@ Deno.serve(async (req) => {
     // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
     // identity is already verified above via caller.auth.getUser()
     const { data: profile } = await admin
-      .from('profiles').select('role, pos_role, ims_role, hr_self_service, hr_role, client_id').eq('id', user.id).single()
+      .from('profiles').select('role, pos_role, ims_role, hr_self_service, hr_role, client_id, active_client_id').eq('id', user.id).single()
 
     // ── POS/IMS/HR manager-accessible actions (before admin-only guard) ──────
     // isCallerOwner must exclude every staff-account marker (pos_role, ims_role, hr_self_service,
@@ -537,6 +537,15 @@ Deno.serve(async (req) => {
     const isPosPrivileged    = isCallerAdmin || isCallerPosManager || isCallerOwner
     const isImsPrivileged    = isCallerAdmin || isCallerImsManager || isCallerOwner
     const isHrPrivileged     = isCallerAdmin || isCallerHrManager || isCallerOwner
+    // The client a non-admin caller is acting FOR: the outlet it has switched to, else its home.
+    // my_client_id()'s own rule, and the one every RLS policy and page already uses — so a grouped
+    // Owner managing a sibling outlet's staff reaches that outlet's employees and logins instead of
+    // being refused as if they belonged to another tenant (S748 open item, closed S750).
+    // active_client_id is privilege-bearing and written only by set_active_outlet(), which checks
+    // group membership and profile_outlet_access, and a revoke clears it — so trusting it here
+    // grants no reach RLS does not already grant. Legal acceptance deliberately keeps the HOME
+    // client (the contracting party is the account's own company).
+    const callerClientId     = profile?.active_client_id || profile?.client_id
 
     // ── Legal acceptance, recorded server-side ───────────────────────────────
     // Both actions below exist for one reason: the address, the identity and the timestamp on an
@@ -724,7 +733,7 @@ Deno.serve(async (req) => {
       if (!target) return json({ error: 'User not found' }, 404)
       if (target.role === 'admin') return json({ error: 'Forbidden' }, 403)
       if (isCallerAdmin) return null
-      if (target.client_id !== profile?.client_id) return json({ error: 'Forbidden' }, 403)
+      if (target.client_id !== callerClientId) return json({ error: 'Forbidden' }, 403)
       if (!STAFF_MARKER[module](target)) {
         return json({ error: `This is not a ${MODULE_LABEL[module]} staff account and cannot be managed from here` }, 403)
       }
@@ -779,7 +788,7 @@ Deno.serve(async (req) => {
     // Optional employee_id links the new POS account to an existing hr_employees record
     // (client has both HR + POS) — full_name is then taken from that employee, not retyped.
     if (action === 'create_pos_staff') {
-      const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
+      const targetClientId = isCallerAdmin ? params.client_id : callerClientId
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
 
       const { pin, pos_role, pos_job_title, pos_team, employee_id } = params
@@ -981,7 +990,7 @@ Deno.serve(async (req) => {
     if (action === 'create_hr_self_service_login') {
       if (!isHrPrivileged) return json({ error: 'Forbidden' }, 403)
 
-      const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
+      const targetClientId = isCallerAdmin ? params.client_id : callerClientId
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
 
       const { employee_id, pin } = params
@@ -1321,7 +1330,7 @@ Deno.serve(async (req) => {
     // Optional employee_id links the new IMS account to an existing hr_employees record, same
     // pattern as create_pos_staff's HR Employee mode — full_name is taken from that employee.
     if (action === 'create_ims_staff') {
-      const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
+      const targetClientId = isCallerAdmin ? params.client_id : callerClientId
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
 
       const { email, password, ims_role, ims_job_title, employee_id } = params
@@ -1398,7 +1407,7 @@ Deno.serve(async (req) => {
     // (AuthContext's imsCountOnly, enforced in ProtectedRoute), so a supervisor or manager PIN
     // would be a rank that cannot reach anything its rank unlocks.
     if (action === 'create_ims_pin_staff') {
-      const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
+      const targetClientId = isCallerAdmin ? params.client_id : callerClientId
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
 
       const { pin, ims_job_title, employee_id } = params
@@ -1500,7 +1509,7 @@ Deno.serve(async (req) => {
       const targetProfile = await loadTarget(userId)
       if (!targetProfile) return json({ error: 'User not found' }, 404)
       if (targetProfile.role === 'admin') return json({ error: 'Forbidden' }, 403)
-      if (!isCallerAdmin && targetProfile.client_id !== profile?.client_id) {
+      if (!isCallerAdmin && targetProfile.client_id !== callerClientId) {
         return json({ error: 'Forbidden' }, 403)
       }
       // Unlike POS, IMS has an "Existing User" mode (ImsStaff.jsx:190) that deliberately targets a
@@ -1582,7 +1591,7 @@ Deno.serve(async (req) => {
     // Structural mirror of create_ims_staff. Optional employee_id links the new HR-staff account
     // to an existing hr_employees record, same pattern as create_pos_staff's HR Employee mode.
     if (action === 'create_hr_staff') {
-      const targetClientId = isCallerAdmin ? params.client_id : profile?.client_id
+      const targetClientId = isCallerAdmin ? params.client_id : callerClientId
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
 
       const { email, password, hr_role, hr_job_title, employee_id } = params
@@ -1660,7 +1669,7 @@ Deno.serve(async (req) => {
       const targetProfile = await loadTarget(userId)
       if (!targetProfile) return json({ error: 'User not found' }, 404)
       if (targetProfile.role === 'admin') return json({ error: 'Forbidden' }, 403)
-      if (!isCallerAdmin && targetProfile.client_id !== profile?.client_id) {
+      if (!isCallerAdmin && targetProfile.client_id !== callerClientId) {
         return json({ error: 'Forbidden' }, 403)
       }
       // Mirror of update_ims_role's first-assignment gate — HR has the same "Existing User" mode

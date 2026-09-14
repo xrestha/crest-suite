@@ -1,5 +1,6 @@
 import {
   fiscalYearOf, slabsFor, applySlabs, computeMonthlyTds, computeBonusTds, computeMonthlyTdsBreakdown, retirementRelief,
+  projectBonusTaxableBase,
   SLABS_2083_84, SLABS_2082_83_SINGLE, SLABS_2082_83_MARRIED,
 } from './tds'
 
@@ -147,5 +148,41 @@ describe('retirement relief (SSF + CIT share a cap)', () => {
       ytdGross: 300000, ytdRetirement: 20000, ytdMonths: 2,
     })
     expect(b.annualOtherRetirement).toBe(20000 + 10000 * 10)
+  })
+})
+
+// S750 — Festival Allowance and Incentive Run tax a bonus on ONE projected base.
+describe('projectBonusTaxableBase', () => {
+  // The arithmetic both pages carried inline before, SSF only.
+  const oldSsfOnly = ({ basic, ytd, isSsf, life = 0, health = 0 }) => {
+    const remaining = Math.max(0, 12 - (ytd?.months || 0))
+    const projGross = (ytd?.gross || 0) + basic * remaining
+    const projSsf = (ytd?.ssf || 0) + (isSsf ? Math.min(basic, 100000) * 0.11 * remaining : 0)
+    const ssfDed = Math.min(projSsf, Math.min(500000, projGross / 3))
+    return Math.max(0, projGross - ssfDed - Math.min(life, 40000) - Math.min(health, 20000))
+  }
+
+  test('with no CIT it equals the old SSF-only projection exactly', () => {
+    const cases = [
+      { basic: 25000, ytd: undefined, isSsf: false },
+      { basic: 25000, ytd: { gross: 75000, ssf: 8250, months: 3 }, isSsf: true, life: 50000, health: 10000 },
+      { basic: 180000, ytd: { gross: 900000, ssf: 55000, months: 5 }, isSsf: true },
+    ]
+    for (const c of cases) {
+      expect(projectBonusTaxableBase({
+        basic: c.basic, ytd: c.ytd,
+        monthlySsf: c.isSsf ? Math.min(c.basic, 100000) * 0.11 : 0,
+        annualLifeInsurance: c.life || 0, annualHealthInsurance: c.health || 0,
+      })).toBeCloseTo(oldSsfOnly(c), 6)
+    }
+  })
+
+  test('CIT — this year so far and still to come — lowers the base, inside the shared cap', () => {
+    const withoutCit = projectBonusTaxableBase({ basic: 150000, ytd: { gross: 300000, months: 2 } })
+    const withCit = projectBonusTaxableBase({
+      basic: 150000, ytd: { gross: 300000, retirement: 20000, months: 2 }, monthlyRetirement: 10000,
+    })
+    // 20,000 already saved + 10,000 × 10 months to come = 1,20,000 relief.
+    expect(withoutCit - withCit).toBe(120000)
   })
 })

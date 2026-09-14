@@ -53,9 +53,20 @@ refuses an employee who already has a login (409, plus the `profiles_hr_employee
 index), so a new PIN is Remove then Enable. `hr-selfservice-login` refuses a login whose
 `hr_employees` embed is NULL: `hr_employee_id` is `ON DELETE SET NULL`, and an orphaned login used to
 sign in because `undefined?.access_blocked` is falsy. An employee with a login cannot be deleted
-(`hr_employees_guard_delete`). **Still open:** every staff action in `admin-user-ops` resolves a
-non-admin caller's client as `profile.client_id`, not the switched outlet, so a grouped Owner acting
-on a sibling outlet's staff is refused.
+(`hr_employees_guard_delete`).
+
+**A switched outlet is the caller's client everywhere (S750).** Every staff action in `admin-user-ops`
+resolved a non-admin caller's client as `profile.client_id` — the HOME outlet — and ten SECURITY
+DEFINER functions did the same (the IMS/HR/POS staff lists, the eligible-user pickers,
+`get_client_profile_names`, the comp and device-secret RPCs), so a grouped Owner switched to a
+sibling outlet saw empty staff lists and was refused every staff action there. `callerClientId`
+(`active_client_id || client_id`) in the function and `COALESCE(p.active_client_id, p.client_id)` /
+`my_client_id()` in SQL (`20260914190000`) are the rule. **A new caller check resolves the caller's
+client that way, never from `profiles.client_id` alone.** Legal acceptance deliberately keeps the home
+client. The same migration restored `get_ims_staff_list`'s manager-or-Owner gate, which S737's
+result-type fix had silently dropped: **re-creating a function to fix one thing re-creates every
+check in it from whatever copy you started from** — diff the live body, not the migration you
+remember.
 
 **Deactivate had no inverse (fixed S562).** `EmployeeForm.jsx`'s footer only ever rendered a Deactivate button (`employee.status === 'active'`) — once flipped to Inactive, the Edit form offered no way back to Active short of Delete-and-re-add, which loses the employee's history. Added a mirrored `handleActivate()` and a green Activate button rendered when `employee.status === 'inactive'`. Note this `status` Deactivate/Activate pair is orthogonal to S563's `access_blocked` Deactivate/Activate pair above — same words, two different columns, two different pages (Edit form vs. Employees list bulk bar).
 

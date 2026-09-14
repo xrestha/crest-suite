@@ -807,14 +807,20 @@ export default function ClientDashboard() {
   }
 
   async function loadHrStats(myId) {
-    const { data: employees, error } = await scopedFrom('hr_employees', 'status, basic_salary')
+    // HR staff rank cannot read employee or pay records (S750, migration 20260914200000). The read
+    // would come back EMPTY, not failed — and "0 employees · NPR 0 payroll" is the kind of zero this
+    // page must never paint. So the tiles are not loaded or shown below supervisor rank at all.
+    if (!hasHrAccess('supervisor')) { setHrStats(null); return }
+    const { data: employees, error } = await scopedFrom('hr_employees', 'status, basic_salary, pay_basis')
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
     setLoadErrors(prev => ({ ...prev, hr: error ? 'HR data failed to load — figures below may be incomplete or stale.' : '' }))
     const total     = employees?.length || 0
     const active    = employees?.filter(e => e.status === 'active').length || 0
     const probation = employees?.filter(e => e.status === 'probation').length || 0
+    // Monthly-paid staff only: a daily or hourly employee's basic_salary is a RATE, and adding it
+    // to a monthly total means nothing (the Employees page's tile had the same fault, S748).
     const payroll   = (employees || [])
-      .filter(e => e.status === 'active' || e.status === 'probation')
+      .filter(e => (e.status === 'active' || e.status === 'probation') && (e.pay_basis || 'monthly') === 'monthly')
       .reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0)
     setAndCache(setHrStats, 'hrStats', { total, active, probation, payroll })
   }
@@ -1635,7 +1641,8 @@ export default function ClientDashboard() {
     </div>
   )
 
-  const hrSecondaryCards = (
+  // Employee counts and payroll are supervisor-and-up figures (see loadHrStats).
+  const hrSecondaryCards = !hasHrAccess('supervisor') ? null : (
     <>
       <div {...kpiCard(() => navigate('/hr/employees'))}>
         <div style={kpiLabelStyle}>Total Employees</div>
@@ -1655,7 +1662,7 @@ export default function ClientDashboard() {
       </div>
       <div {...kpiCard(null)}>
         <div style={kpiLabelStyle}>
-          <Tip text="Sum of basic salary for active and probation employees. Full payroll with allowances, SSF and TDS is computed during payroll run." width={260}>Basic Payroll / Month</Tip>
+          <Tip text="Sum of monthly basic salary for active and probation employees paid monthly (daily and hourly rates are left out). Full payroll with allowances, SSF and TDS is computed during payroll run." width={260}>Basic Payroll / Month</Tip>
         </div>
         <div style={{ ...kpiValueStyle(18, 800), color: 'var(--theme-accent-ink)' }}>
           {!hrStats
@@ -2551,7 +2558,9 @@ export default function ClientDashboard() {
           new month starts at purchaseTotal 0 and this must not reappear monthly. Which module
           lists it shows, and when it removes itself, is decided inside GettingStartedCard. */}
       {showIms && activePeriod && !loading && stats && ((stats.itemCount === 0 && stats.purchaseTotal === 0) || isTrial) && (
-        <GettingStartedCard periodLabel={periodLabel} stats={stats} isTrial={isTrial} showHr={showHr} showPos={showPos} />
+        // showHr narrowed to supervisor-and-up: an HR staff-rank login cannot read employees (S750),
+        // so its count would come back 0 and tell it to "add your first employee".
+        <GettingStartedCard periodLabel={periodLabel} stats={stats} isTrial={isTrial} showHr={showHr && hasHrAccess('supervisor')} showPos={showPos} />
       )}
 
       {periodExpired && !loading && (

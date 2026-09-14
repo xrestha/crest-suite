@@ -571,8 +571,9 @@ the consequence of any clear is that marked absences and unpaid leave stop deduc
   or a third of income) and `retirementContributionOf()` in `payrollCompute.js` the only sum. The
   payslip stores `retirement_contribution` so `fetchYtdMap` relieves real prior months, and it is a
   `FRESHNESS_INPUT_FIELDS` member — ticking the box on an existing deduction moves no amount, only TDS,
-  which would otherwise read as a hand override. Monthly TDS and Final Settlement use it; **Festival
-  Allowance and Incentives still relieve SSF alone** (open). A marker, never a name match: the owner
+  which would otherwise read as a hand override. Monthly TDS, Final Settlement and — since S750 — Festival
+  Allowance and Incentive Run use it; the two bonus pages share `projectBonusTaxableBase()` in `tds.js`
+  rather than each carrying a copy of the projection (they had, and both relieved SSF alone). A marker, never a name match: the owner
   names these rows, and a guess would move real tax.
 - **A form saves the fields it owns and changed, never the row it loaded.** `EmployeeForm` spread the
   loaded row (up to 10 minutes old from the page cache) into its payload, so a phone-number edit

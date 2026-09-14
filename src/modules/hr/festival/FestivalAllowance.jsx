@@ -5,17 +5,14 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { bsToAd, getBsToday } from '../../../utils/bsCalendar'
-import { computeBonusTds, fiscalYearOf } from '../payroll/tds'
-import { isSsfContributor } from '../payroll/payrollCompute'
+import { computeBonusTds, fiscalYearOf, projectBonusTaxableBase } from '../payroll/tds'
+import { isSsfContributor, retirementContributionOf } from '../payroll/payrollCompute'
+import { SSF_CAP, SSF_EMPLOYEE_PCT } from '../payrollConstants'
+import { firstError } from '../../../shared/queryError'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { errorLine } from '../../../shared/errorText'
+import { errorLine, errorText } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 
-const LIFE_INS_CAP    = 40000
-const HEALTH_INS_CAP  = 20000
-const SSF_CAP_MONTHLY = 100000
-const SSF_EMP_PCT     = 0.11
-const RETIREMENT_CAP  = 500000
 
 const fmt = nprInt
 
@@ -33,27 +30,22 @@ function monthsBetween(joinDateStr, ref) {
 }
 
 // Festival TDS using actual YTD payslip data for accurate marginal rate.
-// ytd = { gross, ssf, months } from finalized payslips in this FY so far.
+// ytd = { gross, ssf, retirement, months } from finalized payslips in this FY so far.
 // Falls back to salary projection if no payslips exist.
-function calcFestivalTds({ emp, amount, ytd, fyStart }) {
+function calcFestivalTds({ emp, comps, amount, ytd, fyStart }) {
   if (!amount) return 0
-  const basic           = parseFloat(emp.basic_salary) || 0
-  const ytdGross        = ytd?.gross  || 0
-  const ytdSsf          = ytd?.ssf    || 0
-  const ytdMonths       = ytd?.months || 0
-  const remaining       = Math.max(0, 12 - ytdMonths)
-
-  const projGross  = ytdGross + basic * remaining
-  // The payroll engine's own SSF gate (flag AND registration number). The flag alone projected SSF
-  // relief and waived the 1% first slab for an employee from whom payroll deducts no SSF at all,
-  // under-withholding tax on the bonus.
-  const isSsf      = isSsfContributor(emp)
-  const projSsf    = ytdSsf   + (isSsf ? Math.min(basic, SSF_CAP_MONTHLY) * SSF_EMP_PCT * remaining : 0)
-  const ssfDed     = Math.min(projSsf, Math.min(RETIREMENT_CAP, projGross / 3))
-  const lifeIns    = Math.min(parseFloat(emp.life_insurance_premium)   || 0, LIFE_INS_CAP)
-  const healthIns  = Math.min(parseFloat(emp.health_insurance_premium) || 0, HEALTH_INS_CAP)
-  const taxable    = Math.max(0, projGross - ssfDed - lifeIns - healthIns)
-
+  const basic = parseFloat(emp.basic_salary) || 0
+  // The payroll engine's own SSF gate (flag AND registration number) — see isSsfContributor.
+  const isSsf = isSsfContributor(emp)
+  // One projection shared with the other bonus page (tds.js). CIT / provident fund marked
+  // retirement_fund now shares the SSF relief cap here too; until S750 a bonus relieved SSF alone.
+  const taxable = projectBonusTaxableBase({
+    basic, ytd,
+    monthlySsf: isSsf ? Math.min(basic, SSF_CAP) * SSF_EMPLOYEE_PCT : 0,
+    monthlyRetirement: retirementContributionOf(comps, basic),
+    annualLifeInsurance:   parseFloat(emp.life_insurance_premium)   || 0,
+    annualHealthInsurance: parseFloat(emp.health_insurance_premium) || 0,
+  })
   return computeBonusTds({
     annualTaxable: taxable, bonusAmount: amount,
     isSsf, isMarried: emp.marital_status === 'married', fyStart,
@@ -69,7 +61,8 @@ export default function FestivalAllowance() {
   const [festival,  setFestival]  = useState('Dashain')
   const [rows,      setRows]      = useState([])
   const [employees, setEmployees] = useState([])
-  const [ytdMap,    setYtdMap]    = useState({})  // employee_id → { gross, ssf, months }
+  const [ytdMap,    setYtdMap]    = useState({})  // employee_id → { gross, ssf, retirement, months }
+  const [retireComps, setRetireComps] = useState([]) // retirement-fund deductions, all employees
   const [loading,   setLoading]   = useState(true)
   const [busy,      setBusy]      = useState(false)
   const [msg,       setMsg]       = useState('')
@@ -79,6 +72,7 @@ export default function FestivalAllowance() {
   const finalized = rows.length > 0 && rows.every(r => r.status === 'finalized')
   const { fyStart } = fiscalYearOf(bsYear, 6)   // Ashwin ≈ Dashain month
   const hasYtd    = Object.keys(ytdMap).length > 0
+  const compsOf   = empId => retireComps.filter(c => c.employee_id === empId)
 
   useEffect(() => {
     if (!clientId) return
@@ -87,7 +81,7 @@ export default function FestivalAllowance() {
 
   async function load() {
     setLoading(true); setMsg('')
-    const [{ data: emps }, { data: fa }, { data: psData }] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('hr_employees', 'id, full_name, employee_code, department, pay_basis, basic_salary, join_date, bank_name, bank_account_no, status, marital_status, ssf_enrolled, ssf_no, life_insurance_premium, health_insurance_premium')
         .in('status', ['active', 'probation']).order('full_name'),
       scopedFrom('hr_festival_allowances')
@@ -98,12 +92,28 @@ export default function FestivalAllowance() {
       // a truncated YTD gross understates prior taxable income and under-withholds tax on the
       // festival bonus. Same shape as payrollData.js's fetchYtdMap.
       fetchAllRows(() =>
-        scopedFrom('hr_payslips', 'employee_id, gross, ssf_employee, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+        scopedFrom('hr_payslips', 'employee_id, gross, ssf_employee, retirement_contribution, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
           .eq('hr_payroll_runs.status', 'finalized')
           .order('id')),
+      // Retirement-fund deductions (CIT / provident fund) — they share the SSF relief cap on the
+      // bonus's tax, as monthly payroll relieves them.
+      scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value, retirement_fund')
+        .eq('type', 'deduction').eq('retirement_fund', true),
     ])
+    // A failed read is not an empty one. Every figure below becomes a TDS amount this page SAVES:
+    // no payslips reads as the fiscal year's first month, no retirement deductions as no CIT relief.
+    // Nothing is shown or generated over it (S750; the three reads used to drop their errors).
+    const failed = firstError(results)
+    if (failed) {
+      setMsg('error:Could not load the festival allowance data, so nothing can be generated or changed until it loads. ' + errorText(failed, 'operator'))
+      setEmployees([]); setRows([]); setYtdMap({}); setRetireComps([])
+      setLoading(false)
+      return
+    }
+    const [{ data: emps }, { data: fa }, { data: psData }, { data: rc }] = results
     setEmployees(emps || [])
     setRows(fa || [])
+    setRetireComps(rc || [])
 
     // Build YTD: sum finalized payslip gross+SSF in this FY
     const ytd = {}
@@ -112,9 +122,10 @@ export default function FestivalAllowance() {
       if (!mp) return
       const fy = fiscalYearOf(mp.bs_year, mp.bs_month)
       if (fy.fyStart !== fyStart) return
-      const e = ytd[r.employee_id] || { gross: 0, ssf: 0, months: 0 }
+      const e = ytd[r.employee_id] || { gross: 0, ssf: 0, retirement: 0, months: 0 }
       e.gross  += r.gross || 0
       e.ssf    += r.ssf_employee || 0
+      e.retirement += parseFloat(r.retirement_contribution) || 0
       e.months += 1
       ytd[r.employee_id] = e
     })
@@ -129,7 +140,7 @@ export default function FestivalAllowance() {
       const basic  = parseFloat(emp.basic_salary) || 0
       const mw     = monthsBetween(emp.join_date, ref)
       const amount = basis === 'monthly' ? Math.round(basic * mw / 12) : 0
-      const tds    = calcFestivalTds({ emp, amount, ytd: ytdMap[emp.id], fyStart })
+      const tds    = calcFestivalTds({ emp, comps: compsOf(emp.id), amount, ytd: ytdMap[emp.id], fyStart })
       return {
         employee_id: emp.id, bs_year: bsYear, festival_name: festival,
         pay_basis: basis, basic, months_worked: mw, amount, tds, status: 'draft',
@@ -178,7 +189,7 @@ export default function FestivalAllowance() {
     if (finalized) return
     const amount = parseFloat(value) || 0
     const emp    = empMap[row.employee_id] || {}
-    const tds    = calcFestivalTds({ emp, amount, ytd: ytdMap[row.employee_id], fyStart })
+    const tds    = calcFestivalTds({ emp, comps: compsOf(row.employee_id), amount, ytd: ytdMap[row.employee_id], fyStart })
     setRows(rs => rs.map(r => r.id === row.id ? { ...r, amount, tds } : r))
     await inlineWrite(row, { amount, tds }, 'The amount')
   }

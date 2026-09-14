@@ -96,6 +96,13 @@ export default function FinalSettlement() {
   const [msg,         setMsg]         = useState('')
   // A failed YTD read is not an employee with no prior payslips — see the load effect below.
   const [ytdFailed,   setYtdFailed]   = useState(false)
+  // The same rule for the two other reads a settlement's money comes from (S750): salary
+  // components are the ALLOWANCES in the final month's gross and the CIT relief on its tax, and
+  // leave requests are the balance leave encashment pays out. Both used to drop their error, so a
+  // failed read settled a leaver on basic alone with no encashment — finalized as a permanent record.
+  const [componentsFailed, setComponentsFailed] = useState(false)
+  const [leaveReqsFailed,  setLeaveReqsFailed]  = useState(false)
+  const inputsFailed = ytdFailed || componentsFailed || leaveReqsFailed
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [refusal,     setRefusal]     = useState(null) // why Finalize refused
   const [reopenTarget, setReopenTarget] = useState(null)
@@ -138,7 +145,16 @@ export default function FinalSettlement() {
   // from a leaver's final month.
   useEffect(() => {
     if (!clientId) return
-    scopedFrom('hr_salary_components').then(({ data }) => setComponents(data || []))
+    // Paged: one row per component per employee, client-wide.
+    fetchAllRows(() => scopedFrom('hr_salary_components').order('id')).then(({ data, error }) => {
+      if (error) {
+        setComponentsFailed(true); setComponents([])
+        setMsg("error:Could not load salary allowances and deductions, so this settlement can't be saved or finalized until they load — it would pay the final month on basic alone. " + errorText(error, 'operator'))
+        return
+      }
+      setComponentsFailed(false)
+      setComponents(data || [])
+    })
     scopedFrom('hr_leave_types').eq('active', true).order('sort_order').then(({ data }) => {
       const rows = data || []
       setLeaveTypes(rows)
@@ -164,7 +180,15 @@ export default function FinalSettlement() {
     if (!clientId || !empId) { setLeaveReqs([]); return }
     scopedFrom('hr_leave_requests', 'employee_id, leave_type_id, status, days, start_date')
       .eq('employee_id', empId)
-      .then(({ data }) => setLeaveReqs(data || []))
+      .then(({ data, error }) => {
+        if (error) {
+          setLeaveReqsFailed(true); setLeaveReqs([])
+          setMsg("error:Could not load this employee's leave, so the leave balance to encash is unknown and the settlement can't be saved or finalized until it loads. " + errorText(error, 'operator'))
+          return
+        }
+        setLeaveReqsFailed(false)
+        setLeaveReqs(data || [])
+      })
   }, [clientId, empId, scopedFrom])
 
   // Everything that depends on WHICH month the employee left in: festival allowance for that
@@ -1045,8 +1069,8 @@ export default function FinalSettlement() {
                   their last working date, and blocks their Crest Staff login.
                 </p>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btn-ghost" disabled={busy || ytdFailed} onClick={saveDraft}>{current ? 'Update draft' : 'Save draft'}</button>
-                  <button className="btn btn-primary" disabled={busy || ytdFailed} onClick={requestFinalize}>
+                  <button className="btn btn-ghost" disabled={busy || inputsFailed} onClick={saveDraft}>{current ? 'Update draft' : 'Save draft'}</button>
+                  <button className="btn btn-primary" disabled={busy || inputsFailed} onClick={requestFinalize}>
                     {busy ? 'Working…' : 'Finalize settlement'}
                   </button>
                 </div>

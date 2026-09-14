@@ -122,7 +122,7 @@ export default function HrDashboard() {
     setLoading(true)
 
     const results = await Promise.all([
-      scopedFrom('hr_employees', 'id, full_name, status, retirement_date, basic_salary'),
+      scopedFrom('hr_employees', 'id, full_name, status, retirement_date, basic_salary, pay_basis'),
       scopedFrom('hr_leave_types', 'id, name'),
       scopedFrom('hr_leave_requests', 'id, employee_id, leave_type_id, status, start_date, end_date, created_at')
         .eq('status', 'pending')
@@ -169,7 +169,8 @@ export default function HrDashboard() {
     const RETIRE_DAYS = 180
     let payrollBase = 0, retiringSoon = 0
     ;(emps || []).forEach(e => {
-      if (e.status === 'active' || e.status === 'probation') payrollBase += parseFloat(e.basic_salary || 0)
+      // Monthly-paid only — a daily/hourly basic_salary is a rate, not a month's pay (S750).
+      if ((e.status === 'active' || e.status === 'probation') && (e.pay_basis || 'monthly') === 'monthly') payrollBase += parseFloat(e.basic_salary || 0)
       if (e.retirement_date && (e.status === 'active' || e.status === 'probation')) {
         // retirement_date is a bare YYYY-MM-DD — `new Date(...)` on that parses as UTC midnight,
         // while todayMs above is LOCAL midnight. In Nepal (UTC+5:45) that's a ~5h45m mismatch,

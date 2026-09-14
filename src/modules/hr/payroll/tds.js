@@ -67,6 +67,27 @@ export function retirementRelief(annualContributions, annualGross) {
   return Math.max(0, Math.min(annualContributions || 0, Math.min(RETIREMENT_CAP_ABS, (annualGross || 0) / 3)))
 }
 
+// The annual taxable base a one-off payment (Festival Allowance, an Incentive run) is taxed on top
+// of: real year-to-date pay from finalized payslips plus basic for the months left, less the year's
+// retirement relief (SSF and CIT/provident fund in ONE cap) and insurance premiums.
+//
+// Festival Allowance and Incentive Run each carried a copy of this and both relieved SSF alone —
+// so an employee saving into CIT was taxed on a bonus as if they were not, while monthly payroll
+// relieved it (S748 open item, closed in S750). One definition now, used by both.
+//   ytd = { gross, ssf, retirement, months } — sums from this fiscal year's finalized payslips
+//   monthlySsf / monthlyRetirement — the employee's standing monthly contributions
+export function projectBonusTaxableBase({
+  basic = 0, ytd, monthlySsf = 0, monthlyRetirement = 0,
+  annualLifeInsurance = 0, annualHealthInsurance = 0,
+}) {
+  const remaining  = Math.max(0, 12 - (ytd?.months || 0))
+  const projGross  = (ytd?.gross || 0) + basic * remaining
+  const projRetire = (ytd?.ssf || 0) + (ytd?.retirement || 0) + (monthlySsf + monthlyRetirement) * remaining
+  const relief     = retirementRelief(projRetire, projGross)
+  const insurance  = Math.min(annualLifeInsurance, LIFE_INS_CAP) + Math.min(annualHealthInsurance, HEALTH_INS_CAP)
+  return Math.max(0, projGross - relief - insurance)
+}
+
 // Annual tax for a taxable amount. SSF contributors get the 1% first slab
 // (Social Security Tax) waived entirely.
 export function applySlabs(taxable, slabs, isSsfContributor) {
