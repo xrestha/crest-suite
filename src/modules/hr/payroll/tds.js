@@ -76,12 +76,23 @@ export function retirementRelief(annualContributions, annualGross) {
 // relieved it (S748 open item, closed in S750). One definition now, used by both.
 //   ytd = { gross, ssf, retirement, months } — sums from this fiscal year's finalized payslips
 //   monthlySsf / monthlyRetirement — the employee's standing monthly contributions
+//   monthlyGross   — what one future month is expected to pay (S751). It used to be `basic`, so an
+//                    employee on 50,000 basic + 35,000 allowances was projected at 6 lakh against a
+//                    real 10.2 lakh and a bonus in the 10% band was withheld at 1%. Falls back to
+//                    `basic` for a caller that does not supply it.
+//   remainingMonths — future months of the fiscal year this employee will actually be paid for
+//                    (S751: a joiner's pre-join months and a leaver's post-exit months are not).
+//                    Falls back to 12 − ytd.months.
+//   otherBonuses   — every OTHER finalized festival allowance / incentive already paid this fiscal
+//                    year (S751). Without it each bonus was taxed as the year's only one, and the
+//                    second landed in a lower band than it belonged in.
 export function projectBonusTaxableBase({
   basic = 0, ytd, monthlySsf = 0, monthlyRetirement = 0,
   annualLifeInsurance = 0, annualHealthInsurance = 0,
+  monthlyGross, remainingMonths, otherBonuses = 0,
 }) {
-  const remaining  = Math.max(0, 12 - (ytd?.months || 0))
-  const projGross  = (ytd?.gross || 0) + basic * remaining
+  const remaining  = Math.max(0, remainingMonths ?? (12 - (ytd?.months || 0)))
+  const projGross  = (ytd?.gross || 0) + (monthlyGross ?? basic) * remaining + (otherBonuses || 0)
   const projRetire = (ytd?.ssf || 0) + (ytd?.retirement || 0) + (monthlySsf + monthlyRetirement) * remaining
   const relief     = retirementRelief(projRetire, projGross)
   const insurance  = Math.min(annualLifeInsurance, LIFE_INS_CAP) + Math.min(annualHealthInsurance, HEALTH_INS_CAP)
@@ -115,6 +126,7 @@ export function computeMonthlyTdsBreakdown({
   period, monthlyGross, monthlySsf, ytdGross = 0, ytdSsf = 0, ytdWithheld = 0, ytdMonths,
   isSsf = false, annualLifeInsurance = 0, annualHealthInsurance = 0,
   isMarried = false, festivalBonus = 0, monthlyRetirement = 0, ytdRetirement = 0,
+  ytdBonusWithheld = 0,
 }) {
   const { fyStart, monthInFy } = fiscalYearOf(period.bs_year, period.bs_month)
   const slabs = slabsFor(fyStart, isMarried)
@@ -138,14 +150,20 @@ export function computeMonthlyTdsBreakdown({
   const priorMonths         = ytdMonths ?? (monthInFy - 1)
   const monthsEmployedSoFar = priorMonths + 1
   const monthsEmployedTotal = priorMonths + monthsAtCurrent
-  const cumulativeDue = monthsEmployedTotal > 0 ? (annualTax * monthsEmployedSoFar) / monthsEmployedTotal : annualTax
-  const tds = Math.max(0, Math.round(cumulativeDue - ytdWithheld))
+  // Tax already withheld on a festival allowance or incentive (`ytdBonusWithheld`, part of
+  // `ytdWithheld`) was settled at source when the bonus was paid. It is taken off the year's tax
+  // BEFORE the spread and off the withheld figure too (S751 review): spreading the whole year's tax,
+  // bonus included, while subtracting the bonus tax in full made the months straight after a bonus
+  // withhold nothing, and a leaver in between stayed under-withheld.
+  const salaryTax = Math.max(0, annualTax - ytdBonusWithheld)
+  const cumulativeDue = monthsEmployedTotal > 0 ? (salaryTax * monthsEmployedSoFar) / monthsEmployedTotal : salaryTax
+  const tds = Math.max(0, Math.round(cumulativeDue - (ytdWithheld - ytdBonusWithheld)))
 
   return {
     tds, fyStart, monthInFy, monthsAtCurrent, slabs, isSsf,
     ytdGross, ytdSsf, ytdWithheld, annualGross, annualSsf, annualOtherRetirement,
     retirementDeduction, insuranceDeduction, annualTaxable, annualTax, cumulativeDue,
-    monthsEmployedSoFar, monthsEmployedTotal,
+    monthsEmployedSoFar, monthsEmployedTotal, ytdBonusWithheld, salaryTax,
   }
 }
 

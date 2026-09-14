@@ -9,7 +9,14 @@ import { npr } from '../../../shared/nepalMoney'
 // `slip` needs the full hr_payslips shape and `emp` the employee identity fields — for the
 // self-service caller both arrive together from the get_my_hr_payslips RPC, since those accounts
 // are fenced off hr_employees directly by the S316 restrictive policies.
-export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint }) {
+//
+// `draft` (S751): the run this payslip belongs to is not finalized. A draft used to print exactly
+// like a final one, so a figure that Regenerate was about to change could be handed to an employee
+// as their pay. The employee's own copy never passes it — Self-Service only lists finalized payslips.
+const num = v => parseFloat(v) || 0
+const qty = n => String(Math.round(n * 100) / 100)
+
+export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint, draft = false }) {
   const c1 = forPrint ? '#000' : 'var(--theme-text3)'
   const c2 = forPrint ? '#000' : 'var(--theme-text1)'
   const fmtn = npr
@@ -21,8 +28,42 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
   )
   const isMonthly = slip.pay_basis === 'monthly'
   const ssfLine = emp.ssf_enrolled && emp.ssf_no ? `SSF ${emp.ssf_no}` : null
+
+  // Daily/hourly wages as ONE line: rate × paid units = earned (S751). It used to print the rate as
+  // if it were an earning, then "Hours worked (N)" beside the gross — where N included overtime hours
+  // and left out paid-leave and holiday hours, so rate × N never came to the amount printed.
+  // The units are what computePayslip pays: daily → worked_days (present, paid leave and holidays);
+  // hourly → hours_worked − ot_hours. The multiplication is printed only when it actually reproduces
+  // the gross; otherwise (paid leave or holiday hours, an approved overtime entry, a payslip written
+  // before these columns) it shows the rate and the amount, and no sum that does not add up.
+  let wageLabel = null
+  if (!isMonthly) {
+    const hourly = slip.pay_basis === 'hourly'
+    const rate = num(slip.basic)
+    const stored = hourly ? slip.hours_worked : slip.worked_days
+    const units = hourly ? num(slip.hours_worked) - num(slip.ot_hours) : num(stored)
+    const adds = stored != null && units > 0 && rate > 0 && Math.round(rate * units) === Math.round(num(slip.gross))
+    wageLabel = adds
+      ? `Wages — ${fmtn(rate)} × ${qty(units)} paid ${hourly ? 'hours' : 'days'}`
+      : `Wages earned (${hourly ? 'hourly' : 'daily'} rate ${fmtn(rate)})`
+  }
+  const retirement = num(slip.retirement_contribution)
+
   return (
     <div>
+      {draft && (
+        // Plain black border on paper, amber on screen — the stamp must survive a B&W printer.
+        <div role="note" style={{
+          marginBottom: 12, padding: '6px 10px', textAlign: 'center',
+          border: `2px solid ${forPrint ? '#000' : 'var(--theme-amber)'}`,
+          background: forPrint ? 'transparent' : 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+          color: forPrint ? '#000' : 'var(--theme-amber-text)',
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Draft — not final</div>
+          <div style={{ fontSize: 11, marginTop: 2 }}>Payroll for this month is not finalized yet, so these figures can still change.</div>
+        </div>
+      )}
+
       {/* Letterhead — a payslip with no employer identity on it is missing the single most
           basic thing a pay document is expected to have. bizInfo is best-effort: an client that
           hasn't filled in Settings → Property Address/PAN just gets a shorter header, not a
@@ -44,9 +85,9 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
       </div>
 
       <div style={{ fontSize: 10, color: c1, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Earnings</div>
-      <Row label={isMonthly ? 'Basic Salary' : `Wage (${slip.pay_basis})`} value={slip.basic} />
+      {isMonthly && <Row label="Basic Salary" value={slip.basic} />}
       {isMonthly && slip.allowances > 0 && <Row label="Allowances (incl. Dearness)" value={slip.allowances} />}
-      {!isMonthly && <Row label={slip.pay_basis === 'hourly' ? `Hours worked (${(slip.hours_worked || 0).toFixed(1)})` : `Days worked (${(slip.worked_days || 0).toFixed(1)})`} value={slip.gross} />}
+      {!isMonthly && <Row label={wageLabel} value={slip.gross} />}
       {slip.ot_amount > 0 && <Row label={`Overtime (${(slip.ot_hours || 0).toFixed(1)} hrs)`} value={slip.ot_amount} />}
       <Row label="Gross Earnings" value={slip.gross + slip.ot_amount} strong />
 
@@ -69,7 +110,11 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint 
         />
       )}
       {slip.ssf_employee > 0 && <Row label="SSF — Social Security Fund (11%)" value={slip.ssf_employee} neg />}
-      {slip.other_deductions > 0 && <Row label="Other Deductions" value={slip.other_deductions} neg />}
+      {/* The CIT / retirement-fund part is named (S751): it is the part that also lowers income tax,
+          and an employee checking their CIT statement needs the figure, not a lump. */}
+      {slip.other_deductions > 0 && (
+        <Row label={retirement > 0 ? `Other Deductions (incl. CIT ${fmtn(retirement)})` : 'Other Deductions'} value={slip.other_deductions} neg />
+      )}
       {(slip.advance_deduction || 0) > 0 && <Row label="Advance / Loan Recovery" value={slip.advance_deduction} neg />}
       {slip.tds > 0 && <Row label="TDS (income tax)" value={slip.tds} neg />}
       {(slip.absence_deduction + slip.ssf_employee + slip.other_deductions + (slip.advance_deduction || 0) + slip.tds) === 0 && (

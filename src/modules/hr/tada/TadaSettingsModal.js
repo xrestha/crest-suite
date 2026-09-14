@@ -93,13 +93,30 @@ export default function TadaSettingsModal({ clientId, vehicleRates, purposeOptio
       '4w': rates['4w'] === '' ? null : parseFloat(rates['4w']),
       ev:   rates.ev   === '' ? null : parseFloat(rates.ev),
     }
-    const { data: existing } = await supabase.from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    // A negative or unreadable rate would auto-fill a negative Transport amount on every claim.
+    if (Object.values(nextRates).some(r => r != null && !(Number.isFinite(r) && r >= 0))) {
+      setSaving(false); setMsg('error:A rate per km must be a number of 0 or more — or leave it blank.'); return
+    }
+    // settings is ONE row per client, read by nine pages (S730). The lookup's error used to be
+    // dropped (S751), so a failed read looked like "no row yet" and INSERTed a second one — after
+    // which every `.maybeSingle()` settings read in the product fails on "multiple rows". So: a
+    // failed read refuses to save, a found row is updated, and only a read that succeeded with no
+    // row inserts. A duplicate that already exists surfaces here as that same read error.
+    const { data: existing, error: readErr } = await supabase.from('settings').select('id').eq('client_id', clientId).maybeSingle()
+    if (readErr) {
+      setSaving(false)
+      setMsg('error:The settings were not saved — the existing settings could not be read, and saving blind could split them in two. ' + errorLine(readErr))
+      return
+    }
     const payload = { tada_vehicle_rates: nextRates, tada_purpose_options: options, tada_start_points: points }
-    const { error } = existing
-      ? await supabase.from('settings').update(payload).eq('id', existing.id)
-      : await supabase.from('settings').insert({ client_id: clientId, ...payload })
+    // `.select('id')` on the update: a write RLS filters out is 0 rows with no error, which would
+    // otherwise close the dialog as saved.
+    const { data: written, error } = existing
+      ? await supabase.from('settings').update(payload).eq('id', existing.id).select('id')
+      : await supabase.from('settings').insert({ client_id: clientId, ...payload }).select('id')
     setSaving(false)
     if (error) { setMsg('error:The settings were not saved. ' + errorLine(error)); return }
+    if (!written?.length) { setMsg('error:The settings were not saved — this login is not allowed to change them. Ask the Owner.'); return }
     onSaved(nextRates, options, points)
   }
 

@@ -159,8 +159,8 @@ export default function HrDashboard() {
       { data: tadaPending },
       { data: swapPending },
       { data: runs },
-      { data: advs },
-      { data: reps },
+      { data: advs, error: advsErr },
+      { data: reps, error: repsErr },
     ] = results
     let hadRealError = results.some(r => r.error)
 
@@ -213,7 +213,11 @@ export default function HrDashboard() {
     const repMap = {}
     ;(reps || []).forEach(r => { repMap[r.advance_id] = (repMap[r.advance_id] || 0) + parseFloat(r.amount || 0) })
     const outstanding = (advs || []).reduce((s, a) => s + Math.max(0, parseFloat(a.amount || 0) - (repMap[a.id] || 0)), 0)
-    setAdvOutstanding(outstanding)
+    // NULL on a failed read of EITHER side, never a figure (S751). A failed advances read summed
+    // nothing and printed "NPR 0" — the one value on this tile that tells a manager nobody owes the
+    // company anything. A failed repayments read is the opposite lie: every active advance counted
+    // as fully owed. `.eq('status','active')` above already leaves written-off and settled out.
+    setAdvOutstanding(advsErr || repsErr ? null : outstanding)
 
     // ── Last finalized payroll ─────────────────────────────────────────────────
     const lastRun = runs?.[0]
@@ -365,9 +369,10 @@ export default function HrDashboard() {
         />
         <KCard
           label="Advances Outstanding"
-          value={`NPR ${fmt(advOutstanding)}`}
-          sub="active advance & loan balances"
-          tip="Total remaining balance across all active (unsettled) advances and loans."
+          value={advOutstanding == null ? '—' : `NPR ${fmt(advOutstanding)}`}
+          sub={advOutstanding == null ? 'count unavailable — open the page' : 'active advance & loan balances'}
+          color={advOutstanding == null ? 'var(--theme-text2)' : undefined}
+          tip="What staff still owe on advances and loans that are being recovered from salary. Written-off balances are not counted."
           onClick={() => navigate('/hr/advances')}
         />
         <KCard

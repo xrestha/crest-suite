@@ -1,5 +1,5 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -8,523 +8,669 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
-import { BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
-import { computePayslip, isSsfContributor } from './payrollCompute'
-import { computeMonthlyTds } from './tds'
-import { fetchYtdMap, fetchApprovedTadaMap, buildAdvanceMap, dueAdvances, payslipDrift, groupByEmployee, sliceFor } from './payrollData'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { BS_MONTHS, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
+import { nepalBs, nepalCivilDate } from '../../../shared/nepalTime'
+import {
+  fetchYtdMap, fetchApprovedTadaMap, payslipDrift, periodAdBounds,
+  fetchPayrollEmployees, fetchEmployeesByIds, buildPayrollRows, allocateAdvanceRepayments,
+} from './payrollData'
 import PayslipBody from './PayslipBody'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-import { firstError } from '../../../shared/queryError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { errorText, errorLine } from '../../../shared/errorText'
 
 const fmt = nprInt
+const num = v => parseFloat(v) || 0
 
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)',
-  padding: '6px 8px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', fontFamily: 'inherit',
+// The error OBJECT of the first failed result, not firstError()'s message string — errorText's table
+// matches on the Postgres code as well as the message, and the code is what a string loses.
+const errorOf = results => ((results || []).find(r => r && r.error) || {}).error || null
+
+const isRunFinalizedError = err => /hr_run_finalized/i.test(typeof err === 'string' ? err : (err?.message || ''))
+
+const listNames = (ids, nameOf, max = 4) =>
+  ids.slice(0, max).map(nameOf).join(', ') + (ids.length > max ? `, +${ids.length - max} more` : '')
+
+const FRESH = { live: null, stale: [], missing: [], departed: [], overridden: [], ok: true, reason: null, empty: false }
+
+// Draft vs live — the ONE assessment (S751). The amber banner, the Finalize button and finalize()'s
+// own re-check all go through it; finalize() runs it over data re-read at the moment of committing,
+// because the page's copy can be minutes old and Finalize locks whatever it is shown.
+//
+// Four ways a draft is not finalizable, and every one of them blocks:
+//   stale     — a computed input moved since Generate (payslipDrift — inputs, never net_pay)
+//   missing   — someone on this month's payroll list has no payslip. A run with NO payslips (Generate's
+//               payslip insert failed) counts everyone as missing, so it can never be finalized empty.
+//   departed  — a stored payslip for someone NOT on the list: already paid by a finalized Final
+//               Settlement, or not employed that month at all. S600 made this bucket non-blocking,
+//               because Regenerate used to destroy a leaver's legitimate payslip. It cannot any more —
+//               fetchPayrollEmployees keeps a leaver on the list to their last day — so what is left
+//               in this bucket is exactly the payslips this run must not pay, and Regenerate removes them.
+//   reason    — the comparison itself could not run. A check that could not run has not passed; it
+//               used to `catch { return ok: true }`.
+function assessDraft(storedSlips, buildLive) {
+  const out = { live: null, stale: [], missing: [], departed: [], overridden: [], ok: false, reason: null }
+  try {
+    out.live = buildLive() || []
+  } catch (e) {
+    out.reason = 'This draft could not be checked against current salary, attendance and overtime data'
+      + (e?.message ? ` (${e.message})` : '') + ', so it cannot be finalized until it can.'
+    return out
+  }
+  const stored = storedSlips || []
+  if (stored.length === 0) {
+    out.missing = out.live.map(r => r.payslip.employee_id)
+    // No payslips AND nobody on the list: Regenerate would build nothing, Finalize would refuse, and the
+    // banner used to send the reader round that loop for ever. The page offers to delete the run instead.
+    out.empty = out.live.length === 0
+    out.reason = out.empty
+      ? "Nobody is on this month's payroll, and this run has no payslips — there is nothing for it to pay."
+      : 'This run has no payslips — they were never written, so there is nothing to finalize. Press Regenerate to build them.'
+    return out
+  }
+  const storedByEmp = new Map(stored.map(s => [s.employee_id, s]))
+  out.live.forEach(({ payslip }) => {
+    const s = storedByEmp.get(payslip.employee_id)
+    if (!s) { out.missing.push(payslip.employee_id); return }
+    const drift = payslipDrift(s, payslip)
+    if (drift === 'moved') out.stale.push(payslip.employee_id)
+    else if (drift === 'overridden') out.overridden.push(payslip.employee_id)
+  })
+  const liveIds = new Set(out.live.map(r => r.payslip.employee_id))
+  out.departed = stored.filter(s => !liveIds.has(s.employee_id)).map(s => s.employee_id)
+  out.ok = out.stale.length === 0 && out.missing.length === 0 && out.departed.length === 0
+  return out
+}
+
+// Where today sits against the payroll month, in Nepal — for the Finalize confirm (decision 5:
+// finalizing early is allowed, but the confirm says so). null once the month is over.
+function monthProgress(period) {
+  const today = nepalBs(new Date())
+  if (!today || !period) return null
+  const t = today.year * 12 + today.month
+  const p = period.bs_year * 12 + period.bs_month
+  if (t > p) return null
+  if (t < p) return { future: true }
+  return { left: Math.max(0, daysInBsMonth(period.bs_year, period.bs_month) - today.day) }
 }
 
 export default function PayrollRun() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const periodReq = useLatestRequest()
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const [periods,    setPeriods]    = useState([])
   const [period,     setPeriod]     = useState(null)
   const [run,        setRun]        = useState(null)
   const [payslips,   setPayslips]   = useState([])
   const [employees,  setEmployees]  = useState([])
+  // Left out of this month because a finalized Final Settlement already paid it — named on screen.
+  const [settled,    setSettled]    = useState([])
+  // People a stored payslip belongs to who are on neither list above (settled since, or not employed
+  // this month) — read by id so a banner, a row, a payslip or the workbook never says "Unknown".
+  const [extraEmps,  setExtraEmps]  = useState([])
   const [components, setComponents] = useState([])
   const [attendance, setAttendance] = useState([])
   const [otEntries,  setOtEntries]  = useState([])
   const [advances,   setAdvances]   = useState([])
   const [repayments, setRepayments] = useState([])
+  const [ytdMap,     setYtdMap]     = useState({})
+  const [tadaMap,    setTadaMap]    = useState({})
   const [loading,    setLoading]    = useState(true)
+  // A failed read — periods, any payroll input, the run, its payslips, or the names they need. Renders
+  // the error card INSTEAD of the register and hides every action: nothing below it is a real figure,
+  // and "No active employees. Add employees…" over a failed read sent an owner to re-enter staff.
+  const [loadError,  setLoadError]  = useState(null)
   const [busy,       setBusy]       = useState(false)
   const [msg,        setMsg]        = useState('')
   // Which consequential action is awaiting its ConfirmModal: null | 'regenerate' | 'finalize'
   // | 'reopen'. These three all write to other ledgers (payslips, advance repayments, TADA), so
   // their confirms carry consequence copy in the product's own Modal, not window.confirm (S575).
   const [confirmAction, setConfirmAction] = useState(null)
-  // Loaded on every page load, not just inside generate()/regenerate(), so the draft on screen can
-  // be compared against a live recomputation. Without them this page could only ever show what was
-  // stored at Generate time and had no way to know it had since gone stale.
-  const [ytdMap,     setYtdMap]     = useState({})
-  const [tadaMap,    setTadaMap]    = useState({})
+  // Pending leave/overtime for the Finalize confirm, read when it opens: { loading } | { leave, ot, failed }.
+  const [pending,    setPending]    = useState(null)
+  const pendingReq = useRef(0)
+  // The TDS box is controlled: a typed value lives here until blur, then the box shows what is stored.
+  // With `defaultValue` a refused save left the refused figure sitting in the box looking saved.
+  const [tdsDraft,   setTdsDraft]   = useState({})
   const [viewSlip,   setViewSlip]   = useState(null)
   const [printSlip,  setPrintSlip]  = useState(null)
   // Company letterhead for the payslip — a payslip with no employer identity on it at all is
   // missing the single most basic thing a pay document is expected to have. Same source fields
   // Tax Invoice already prints (settings.vat_number is Nepal's PAN, reused as-is — not a new ID).
   const [bizInfo, setBizInfo] = useState({ name: '', address: '', vatNumber: '' })
+  const [bizInfoFailed, setBizInfoFailed] = useState(false)
 
-  const empMap = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees])
+  const empMap = useMemo(
+    () => Object.fromEntries([...extraEmps, ...settled, ...employees].map(e => [e.id, e])),
+    [employees, settled, extraEmps],
+  )
+  const nameOf = id => empMap[id]?.full_name || '(employee record not found)'
 
   useEffect(() => {
     if (!clientId) return
+    // A response for the client this page showed BEFORE an admin switched is ignored, or one outlet's
+    // name would print on another outlet's payslips. A failed read still lets a payslip print — just
+    // without its letterhead, which the payslip dialog now says (S751).
+    let current = true
+    setBizInfo({ name: '', address: '', vatNumber: '' }); setBizInfoFailed(false)
     Promise.all([
       supabase.from('clients').select('name').eq('id', clientId).single(),
       supabase.from('settings').select('property_address, vat_number').eq('client_id', clientId).maybeSingle(),
-    ]).then(([{ data: client }, { data: settings }]) => {
-      setBizInfo({ name: client?.name || '', address: settings?.property_address || '', vatNumber: settings?.vat_number || '' })
+    ]).then(([client, settings]) => {
+      if (!current) return
+      if (client.error || settings.error) setBizInfoFailed(true)
+      setBizInfo({ name: client.data?.name || '', address: settings.data?.property_address || '', vatNumber: settings.data?.vat_number || '' })
     })
+    return () => { current = false }
   }, [clientId])
 
   useEffect(() => {
     if (!clientId) return
     async function init() {
-      setLoading(true)
+      // Claimed BEFORE the first await (S751, the S721 shape). Without it, once the period had been
+      // changed even once the guard's key stayed on that period, so after an outlet/client switch this
+      // init's own load failed isCurrent and every setter was skipped — the new outlet's month label
+      // over the old outlet's register, and Generate inserting the old outlet's payslips under the
+      // new client. The claim is re-keyed to the period id once it is known.
+      const claim = periodReq.begin(`init:${clientId}`)
+      // Everything the previous client showed is dropped before the first await, so no label, list or
+      // name from one outlet can sit over another's while this loads (S751 review).
+      setLoading(true); setMsg(''); setLoadError(null); setRun(null); setPayslips([])
+      setPeriods([]); setPeriod(null); setEmployees([]); setSettled([]); setExtraEmps([]); setConfirmAction(null)
       const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      if (pErr) { setMsg('error:Could not load the periods — nothing on this page is a real figure. ' + errorLine(pErr)); setLoading(false); return }
+      if (!periodReq.isCurrent(claim)) return
+      if (pErr) { setPeriods([]); setPeriod(null); setLoadError(pErr); setLoading(false); return }
       setPeriods(p || [])
-      const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
-      if (open) { setPeriod(open); await loadAll(open.id, open.bs_year, open.bs_month) }
-      setLoading(false)
+      const open = (p || []).find(x => x.status === 'open') || (p || [])[0] || null
+      setPeriod(open)
+      if (!open) { setLoading(false); return }
+      periodReq.begin(open.id)
+      await loadAll(open)
+      if (periodReq.isCurrent(open.id)) setLoading(false)
     }
     init()
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadAll(periodId, bsYear, bsMonth) {
+  // Everything a month's payslips are computed from, read together. Used by the page load AND by
+  // Generate, Regenerate and Finalize, so every write is computed from data read for that write — not
+  // from whatever was on screen when the page opened.
+  async function readInputs(p) {
     const results = await Promise.all([
-      scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle(),
-      scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, basic_salary, ssf_no, ssf_enrolled, life_insurance_premium, health_insurance_premium, marital_status, department, status, join_date, end_date')
-        .in('status', ['active', 'probation']).order('full_name'),
-      scopedFrom('hr_salary_components'),
-      // Paged: hr_attendance is one row per employee PER DAY, so a period holds staff × ~30 rows
-      // and crosses PostgREST's silent 1000-row cap at ~34 staff. A truncated read here doesn't
-      // fail loudly — it just makes the employees past the cutoff look like they have no
-      // attendance at all, which pays daily/hourly staff ZERO and pays monthly staff a full month
-      // with no absence deduction. The old query had no ORDER BY either, so which employees got
-      // cut was arbitrary and could differ between two runs of the same period (S529).
-      fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', periodId).order('id')),
-      // bs_day is load-bearing, not display data: computePayslip uses it to suppress
-      // attendance-sheet OT on days an approved entry already covers (approved supersedes).
+      // Who this month covers (decisions 4 and 14): active/probation plus anyone whose last day falls
+      // in or after it, minus anyone already paid by a finalized Final Settlement (returned as `settled`).
+      fetchPayrollEmployees(scopedFrom, p),
+      // Paged: a few rows per employee, so a large staff crosses the 1000-row cap, and a truncated read
+      // silently drops allowances and deductions from pay.
+      fetchAllRows(() => scopedFrom('hr_salary_components').order('id')),
+      // Paged: hr_attendance is one row per employee PER DAY and crosses the silent 1000-row cap at
+      // ~34 staff — employees past the cutoff look like they have no attendance at all (S529).
+      fetchAllRows(() => scopedFrom('hr_attendance').eq('period_id', p.id).order('id')),
+      // bs_day is load-bearing, not display data: approved entries supersede attendance OT per day.
       scopedFrom('hr_overtime_entries', 'employee_id, bs_day, ot_hours, ot_type')
-        .eq('bs_year', bsYear).eq('bs_month', bsMonth).eq('status', 'approved'),
-      // Paged. Both are UNFILTERED lifetime ledgers — every advance the client has ever issued
-      // and every repayment ever recorded against one — so unlike the period-scoped reads above
-      // they grow without bound and cross the silent 1000-row cap on their own. buildAdvanceMap
-      // derives outstanding as (amount − repaid), so a truncated repayments read makes advances
-      // look LESS repaid than they are and over-deducts from take-home pay; a truncated advances
-      // read drops the deduction entirely. `.order('issued_date')` is not unique — several
-      // advances share a date — so `.order('id')` is appended as the tiebreaker fetchAllRows
-      // requires, or paging repeats rows on one page and skips them on the next.
+        .eq('bs_year', p.bs_year).eq('bs_month', p.bs_month).eq('status', 'approved'),
+      // Paged. Both are UNFILTERED lifetime ledgers that grow without bound; a truncated repayments
+      // read makes advances look less repaid than they are and over-deducts. `.order('id')` is the
+      // unique tiebreaker fetchAllRows needs — issued_date is not unique.
       fetchAllRows(() => scopedFrom('hr_advances').order('issued_date').order('id')),
       fetchAllRows(() => scopedFrom('hr_advance_repayments').order('id')),
+      // An empty YTD map is a legitimate value (the fiscal year's first month), so a failed read here
+      // does not look like one — it under-withholds tax. Both return { data, error }.
+      fetchYtdMap(scopedFrom, p),
+      fetchApprovedTadaMap(scopedFrom, p),
     ])
-    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    // A failed read is not an empty month. Every one of these feeds pay: no attendance rows pays
-    // daily/hourly staff zero and monthly staff a full month with no absence deduction, and no
-    // advances/repayments drops or inflates a deduction — all of it looking like a complete,
-    // ordinary payroll. Surfaced and abandoned rather than rendered (S594's rule).
-    const failed = firstError(results)
-    if (failed) {
-      setMsg('error:' + errorText(failed, 'operator'))
-      setEmployees([]); setPayslips([]); setRun(null)
+    const error = errorOf(results)
+    if (error) return { data: null, error }
+    const [emps, comps, att, ot, advs, reps, ytd, tada] = results
+    return {
+      data: {
+        employees: emps.data.employees, settled: emps.data.settled,
+        components: comps.data || [], attendance: att.data || [], otEntries: ot.data || [],
+        advances: advs.data || [], repayments: reps.data || [],
+        ytdMap: ytd.data || {}, tadaMap: tada.data || {},
+      },
+      error: null,
+    }
+  }
+
+  async function loadAll(p) {
+    const [inputs, runRes] = await Promise.all([
+      readInputs(p),
+      scopedFrom('hr_payroll_runs').eq('period_id', p.id).maybeSingle(),
+    ])
+    let error = inputs.error || runRes.error
+    let slips = []
+    let extra = []
+    const runRow = runRes.data || null
+    if (!error && runRow) {
+      const slipRes = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      if (slipRes.error) error = slipRes.error
+      else {
+        slips = slipRes.data || []
+        const known = new Set([...inputs.data.employees, ...inputs.data.settled].map(e => e.id))
+        const names = await fetchEmployeesByIds(scopedFrom, slips.map(s => s.employee_id).filter(id => !known.has(id)))
+        if (names.error) error = names.error
+        else extra = names.data || []
+      }
+    }
+    if (!periodReq.isCurrent(p.id)) return   // superseded by a newer period selection
+    // A failed read is not an empty month, and a failed PAYSLIP read under a saved run is not a run
+    // with no payslips: either used to render as one — an empty register, a "No active employees"
+    // card, or a stale-draft comparison run against nothing. All of it is refused as a whole.
+    if (error) {
+      setLoadError(error)
+      setRun(null); setPayslips([]); setEmployees([]); setSettled([]); setExtraEmps([])
       return
     }
-    const [
-      { data: runRow }, { data: emps }, { data: comps }, { data: att }, { data: ot },
-      { data: advs },   { data: reps },
-    ] = results
-    setEmployees(emps || [])
-    setComponents(comps || [])
-    setAttendance(att || [])
-    setOtEntries(ot || [])
-    setAdvances(advs || [])
-    setRepayments(reps || [])
-    setRun(runRow || null)
-    if (runRow) {
-      const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
-      if (!periodReq.isCurrent(periodId)) return
-      // A failed slip read used to render an EMPTY register under a saved run's header, and the
-      // stale-draft comparison then ran against nothing. PayrollCalculation.jsx:271 is the shape.
-      if (slipErr) {
-        setMsg('error:Could not load this run\'s payslips — nothing below is a real figure. ' + errorText(slipErr, 'operator'))
-        setPayslips([]); setYtdMap({}); setTadaMap({})
-        return
-      }
-      setPayslips(slips || [])
-      // Only a saved run needs the freshness comparison; with no run there is nothing to be
-      // stale against, and these two are the page's only extra round trips.
-      const periodObj = { id: periodId, bs_year: bsYear, bs_month: bsMonth }
-      const maps = await Promise.all([
-        fetchYtdMap(scopedFrom, periodObj),
-        fetchApprovedTadaMap(scopedFrom, periodObj),
-      ])
-      if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-      // These two drive the freshness comparison. Falling back to empty maps would recompute every
-      // employee's TDS as if this were month 1 of the fiscal year, so the live figures would differ
-      // from the stored ones and the whole run would report itself stale — a false Regenerate
-      // prompt whose fix would then write those wrong figures in.
-      const mapsFailed = firstError(maps)
-      if (mapsFailed) { setMsg('error:' + errorText(mapsFailed, 'operator')); return }
-      setYtdMap(maps[0].data); setTadaMap(maps[1].data)
-    } else {
-      setPayslips([])
-      setYtdMap({}); setTadaMap({})
-    }
+    const d = inputs.data
+    setLoadError(null)
+    setEmployees(d.employees); setSettled(d.settled); setExtraEmps(extra)
+    setComponents(d.components); setAttendance(d.attendance); setOtEntries(d.otEntries)
+    setAdvances(d.advances); setRepayments(d.repayments)
+    setYtdMap(d.ytdMap); setTadaMap(d.tadaMap)
+    setRun(runRow); setPayslips(slips); setTdsDraft({})
   }
 
   async function handlePeriodChange(id) {
     periodReq.begin(id)   // claim the page before any await
     const p = periods.find(x => x.id === id); if (!p) return
-    setPeriod(p); setMsg(''); setLoading(true)
-    await loadAll(id, p.bs_year, p.bs_month); setLoading(false)
+    setPeriod(p); setMsg(''); setLoading(true); setConfirmAction(null)
+    await loadAll(p)
+    if (periodReq.isCurrent(id)) setLoading(false)
   }
 
-  function buildRows(runId, ytdMap, tadaMap) {
-    // Only advances already past their first recovery month (the BS month after issue) — see
-    // dueAdvances() in payrollData.js. Finalize's allocation below reads the same filter.
-    const advMap = buildAdvanceMap(advances, repayments, period)
-    // Partition the three per-employee arrays once, rather than scanning each of them again for
-    // every employee. `attendance` is one row per employee per DAY — ~1,200 rows at 40 staff — so
-    // the old `.filter()` inside this `.map()` walked it 40 times over. Same slices, same order.
-    const compsBy = groupByEmployee(components)
-    const attBy   = groupByEmployee(attendance)
-    const otBy    = groupByEmployee(otEntries)
-    return employees.map(emp => {
-      const comps        = sliceFor(compsBy, emp.id)
-      const att          = sliceFor(attBy, emp.id)
-      const empOtEntries = sliceFor(otBy, emp.id)
-      const advDed       = Math.round(advMap[emp.id] || 0)
-      // `breakdown` is Calculation-page-only (not a hr_payslips column) — dropped before insert.
-      const { breakdown, ...slip } = computePayslip(emp, comps, att, period, 0, empOtEntries, advDed)
-      // Same gate computePayslip applies: no registration number means no SSF contribution, so
-      // this employee is not an SSF contributor for tax purposes either and the 1% first-slab
-      // waiver must not apply. Letting the two disagree would tax against a deduction never made.
-      const isSsf    = isSsfContributor(emp)
-      const isMarried = emp.marital_status === 'married'
-      const ytd   = ytdMap[emp.id] || { gross: 0, ssf: 0, withheld: 0, count: 0 }
-      const tds   = computeMonthlyTds({
-        period,
-        // Actual income earned this month, not contractual gross — Nepal's Income Tax Act
-        // withholds TDS on remuneration actually paid, and absence_deduction is exactly the
-        // portion of gross this employee never received (forfeited unpaid days). SSF just below
-        // already uses the same absence-adjusted base (ssfBase); TDS previously didn't (S365).
-        // OT pay is taxable remuneration too and must be included, not just added post-tax.
-        monthlyGross:          slip.gross - slip.absence_deduction + slip.ot_amount,
-        monthlySsf:            slip.ssf_employee,
-        ytdGross:              ytd.gross,
-        ytdSsf:                ytd.ssf,
-        // CIT / provident fund marked retirement_fund in Pay Setup comes off taxable income inside
-        // the same cap as SSF (S748). Must stay identical to PayrollCalculation.jsx.
-        monthlyRetirement:     slip.retirement_contribution,
-        ytdRetirement:         ytd.retirement || 0,
-        ytdWithheld:           ytd.withheld,
-        // Actual count of prior finalized months this FY — lets a mid-year joiner's tax spread
-        // over the months they'll actually work instead of being front-loaded (see tds.js).
-        ytdMonths:             ytd.count,
-        isSsf,
-        isMarried,
-        annualLifeInsurance:   parseFloat(emp.life_insurance_premium) || 0,
-        annualHealthInsurance: parseFloat(emp.health_insurance_premium) || 0,
-      })
-      const tada = tadaMap[emp.id] || { total: 0, ids: [] }
-      const tadaAmount = Math.round(tada.total)
-      const net = slip.net_pay - tds + tadaAmount
-      return { run_id: runId, employee_id: emp.id, ...slip, tds, tada_amount: tadaAmount, tada_claim_ids: tada.ids, net_pay: net }
-    })
-  }
-
-  // Live-vs-stored freshness check. The draft on this page is a snapshot taken at Generate time,
-  // so approving overtime, editing attendance or approving a TADA claim afterwards leaves it
-  // quietly wrong — and Finalize locks whatever is on screen. `/hr/calculation` has always
-  // detected this; the detection just lived on a page nobody has to visit before finalizing.
-  // Deliberately reuses buildRows (the same function Generate persists from) rather than
-  // reimplementing the arithmetic — a second copy could drift and report false confidence.
-  // Memoized. This runs the WHOLE payroll engine — computePayslip plus a TDS slab walk for every
-  // employee — and as a bare render-body IIFE it re-ran on every state change on the page: opening
-  // the Finalize confirm, a status message, a busy flag, a TDS blur. None of those move any of its
-  // inputs. Its dependency list is exactly the loaded data the comparison reads.
-  const freshness = useMemo(() => {
-    if (!run || run.status === 'finalized' || employees.length === 0 || payslips.length === 0) {
-      return { stale: [], missing: [], departed: [], overridden: [], ok: true }
+  // The live recomputation from the loaded data — one buildPayrollRows (payrollData.js), the same
+  // function Generate inserts from and Payroll Calculation shows, never a second copy of the arithmetic.
+  // Memoized: it runs computePayslip plus a TDS slab walk for every employee, and none of the page's
+  // cheap state (a message, a busy flag, a TDS keystroke, an open confirm) moves any of its inputs.
+  const liveRows = useMemo(() => {
+    // Only a saved run reads it (freshness, the OT badge, ↺); with no run there is nothing to compare.
+    if (loading || loadError || !period || !run) return { rows: [], error: null }
+    try {
+      return { rows: buildPayrollRows({ runId: null, period, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap }), error: null }
+    } catch (e) {
+      return { rows: null, error: e }
     }
-    let live
-    try { live = buildRows(run.id, ytdMap, tadaMap) } catch { return { stale: [], missing: [], departed: [], overridden: [], ok: true } }
-    const storedByEmp = Object.fromEntries(payslips.map(s => [s.employee_id, s]))
-    const stale = [], missing = [], overridden = []
-    live.forEach(row => {
-      const stored = storedByEmp[row.employee_id]
-      if (!stored) { missing.push(row.employee_id); return }
-      // Compares the INPUTS, not net_pay — see payslipDrift's header for why the old net_pay
-      // comparison made an intended TDS override indistinguishable from real staleness, and
-      // deadlocked Finalize against Regenerate. An override is reported, never blocking.
-      const drift = payslipDrift(stored, row)
-      if (drift === 'moved') { stale.push(row.employee_id); return }
-      if (drift === 'overridden') overridden.push(row.employee_id)
-    })
-    // A third bucket: a payslip that exists in this run for someone who is no longer live.
-    //
-    // `live` only contains active/probation employees, so a stored payslip for someone since
-    // settled or deactivated matched nothing above and the run reported itself fresh — while
-    // Regenerate hard-deletes every payslip and re-inserts only the live ones, destroying an
-    // already-issued payslip with no warning. Final Settlement stamping an employee on Finalize
-    // is exactly what creates this state (S600).
-    const liveIds = new Set(live.map(r => r.employee_id))
-    const departed = payslips.filter(s => !liveIds.has(s.employee_id)).map(s => s.employee_id)
-    // Deliberately NOT part of `ok`. A departed employee's payslip is legitimate — they worked
-    // part of the month — so finalizing the run WITH it is the correct outcome. Blocking finalize
-    // on it would strand the run: Regenerate destroys the payslip, Finalize refuses, and there is
-    // no third move. It gates Regenerate instead, below.
-    return { stale, missing, departed, overridden, ok: stale.length === 0 && missing.length === 0 }
-    // buildRows is a stable closure over exactly these, so listing them is listing its inputs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, payslips, employees, components, attendance, otEntries, advances, repayments, period, ytdMap, tadaMap])
+  }, [loading, loadError, period, run, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap])
 
-  const nameOf = id => empMap[id]?.full_name || 'Unknown'
+  const liveByEmp = useMemo(() => new Map((liveRows.rows || []).map(r => [r.payslip.employee_id, r])), [liveRows])
+
+  // Live-vs-stored freshness. The draft is a snapshot taken at Generate time, so approving overtime,
+  // editing attendance or approving a TADA claim afterwards leaves it quietly wrong — and Finalize
+  // locks whatever is on screen. Only a draft has anything to be stale against.
+  const freshness = useMemo(() => {
+    if (loading || loadError || !run || run.status === 'finalized') return FRESH
+    return assessDraft(payslips, () => { if (liveRows.error) throw liveRows.error; return liveRows.rows })
+  }, [loading, loadError, run, payslips, liveRows])
 
   async function generate() {
-    if (!period || employees.length === 0) return
+    if (!period || busy) return
+    const p = period
     setBusy(true); setMsg('')
-    // Checked BEFORE anything is written. These maps decide the TDS on every payslip this inserts,
-    // and an empty YTD map is a legitimate-looking value (a fiscal year's first month), so a failed
-    // read here does not fail — it persists under-withheld tax that nothing later recomputes.
-    const maps = await Promise.all([fetchYtdMap(scopedFrom, period), fetchApprovedTadaMap(scopedFrom, period)])
-    const mapsFailed = firstError(maps)
-    if (mapsFailed) { setMsg('error:' + errorText(mapsFailed, 'operator')); setBusy(false); return }
-    const [{ data: ytdMap }, { data: tadaMap }] = maps
-    const { data: runRow, error: rErr } = await scopedInsert('hr_payroll_runs', { period_id: period.id, status: 'draft' }, { single: true })
-    if (rErr) { setMsg('error:The payroll run was not created — nothing has changed. ' + errorLine(rErr)); setBusy(false); return }
-    const { error: pErr } = await scopedInsert('hr_payslips', buildRows(runRow.id, ytdMap, tadaMap))
+    // Read for this write, and checked BEFORE anything is written: these inputs decide every payslip
+    // it inserts, and a failed YTD read persists under-withheld tax that nothing later recomputes.
+    const inputs = await readInputs(p)
+    if (inputs.error) { setMsg('error:The payroll run was not created — nothing has changed. The data it is built from could not be read. ' + errorLine(inputs.error)); setBusy(false); return }
+    if (inputs.data.employees.length === 0) {
+      await loadAll(p)
+      setMsg('error:The payroll run was not created — nobody is on the payroll for this month.'); setBusy(false); return
+    }
+    let rows
+    try { rows = buildPayrollRows({ runId: null, period: p, ...inputs.data }) } catch (e) {
+      setMsg('error:The payroll run was not created — the payslips could not be calculated. ' + errorLine(e)); setBusy(false); return
+    }
+    const { data: runRow, error: rErr } = await scopedInsert('hr_payroll_runs', { period_id: p.id, status: 'draft' }, { single: true })
+    if (rErr) {
+      // (client_id, period_id) is unique: another tab or another manager created this month's run
+      // between this page loading and this click. Show that run — "nothing has changed" was false,
+      // and leaving the Generate card up invited a second click into the same refusal.
+      if (rErr.code === '23505') {
+        await loadAll(p)
+        setMsg('error:A payroll run for this month was created a moment ago somewhere else (another tab, or another manager), so this click created nothing. That run is shown below — Regenerate it if it needs the latest data.')
+        setBusy(false); return
+      }
+      setMsg('error:The payroll run was not created — nothing has changed. ' + errorLine(rErr)); setBusy(false); return
+    }
+    const { error: pErr } = await scopedInsert('hr_payslips', rows.map(r => ({ ...r.payslip, run_id: runRow.id })))
     if (pErr) {
-      // The run row is committed at this point; Regenerate rebuilds its payslips.
-      await loadAll(period.id, period.bs_year, period.bs_month)
+      // The run row is committed at this point; it has no payslips, which blocks Finalize until
+      // Regenerate builds them.
+      await loadAll(p)
       setMsg('error:The run was created but its payslips were not — press Regenerate to build them. ' + errorLine(pErr)); setBusy(false); return
     }
-    await loadAll(period.id, period.bs_year, period.bs_month)
+    await loadAll(p)
     setMsg('ok:Payroll generated'); setBusy(false)
   }
 
   async function regenerate() {
-    if (!run || run.status === 'finalized') return
-    // The departed-payslip warning lives in the regenerate ConfirmModal's own body below (S612) —
-    // it used to be a second window.confirm raised on top of that modal's confirm, so the same
-    // action asked twice through two different kinds of dialog.
+    if (!run || run.status === 'finalized' || !period) return
+    const p = period
+    const runId = run.id
+    // The departed-payslip warning lives in the regenerate ConfirmModal's own body below (S612).
     setConfirmAction(null)
     setBusy(true); setMsg('')
-    // Checked before the DELETE below, not after. Regenerate hard-deletes every payslip in the run
-    // and re-inserts from these maps, so a failed read reached after the delete would leave the run
-    // rebuilt on empty YTD — or, if the insert then also failed, emptied outright.
-    const maps = await Promise.all([fetchYtdMap(scopedFrom, period), fetchApprovedTadaMap(scopedFrom, period)])
-    const mapsFailed = firstError(maps)
-    if (mapsFailed) { setMsg('error:' + errorText(mapsFailed, 'operator')); setBusy(false); return }
-    const [{ data: ytdMap }, { data: tadaMap }] = maps
-    // Delete-then-insert: once the delete has landed the run has NO payslips until the insert
-    // does, so each half names the state it leaves behind (S682).
-    const { error: delErr } = await scopedDelete('hr_payslips').eq('run_id', run.id)
-    if (delErr) { setMsg('error:The run was not recomputed — its payslips are unchanged. ' + errorLine(delErr)); setBusy(false); return }
-    const { error } = await scopedInsert('hr_payslips', buildRows(run.id, ytdMap, tadaMap))
-    if (error) {
-      await loadAll(period.id, period.bs_year, period.bs_month)
-      setMsg('error:The run\'s payslips were cleared but could not be rebuilt — press Regenerate again now. ' + errorLine(error)); setBusy(false); return
+    // Read before the DELETE below, not after: a failed read reached after the delete would leave the
+    // run rebuilt on empty YTD — or, if the insert then also failed, emptied outright.
+    const inputs = await readInputs(p)
+    if (inputs.error) { setMsg('error:The run was not recomputed — its payslips are unchanged. The data it is rebuilt from could not be read. ' + errorLine(inputs.error)); setBusy(false); return }
+    let rows
+    try { rows = buildPayrollRows({ runId, period: p, ...inputs.data }) } catch (e) {
+      setMsg('error:The run was not recomputed — its payslips are unchanged. The payslips could not be calculated. ' + errorLine(e)); setBusy(false); return
     }
-    await loadAll(period.id, period.bs_year, period.bs_month)
-    setMsg('ok:Recomputed'); setBusy(false)
-  }
-
-  // Both inline edits are optimistic; a refused write reloads so the register shows what is
-  // stored, and the message names the figure that did not land.
-  async function slipWrite(slip, patch, what) {
-    const { error } = await scopedUpdate('hr_payslips', patch).eq('id', slip.id)
-    if (error) {
-      setMsg(`error:${what} for ${nameOf(slip)} was not saved — the register shows what is stored. ` + errorLine(error))
-      await loadAll(period.id, period.bs_year, period.bs_month)
+    // Delete-then-insert: once the delete has landed the run has NO payslips until the insert does,
+    // so each half names the state it leaves behind (S682). A run finalized in another tab is refused
+    // by the database (hr_run_finalized) — reload, so this tab stops offering a draft's buttons on it.
+    const { error: delErr } = await scopedDelete('hr_payslips').eq('run_id', runId)
+    if (delErr) { await loadAll(p); setMsg('error:The run was not recomputed — its payslips are unchanged. ' + errorLine(delErr)); setBusy(false); return }
+    if (rows.length > 0) {
+      const { error } = await scopedInsert('hr_payslips', rows.map(r => r.payslip))
+      if (error) {
+        await loadAll(p)
+        setMsg(isRunFinalizedError(error)
+          ? 'error:The run was finalized somewhere else while this was recomputing, so its payslips were not rebuilt. The page has been reloaded to show it. ' + errorLine(error)
+          : 'error:The run\'s payslips were cleared but could not be rebuilt — press Regenerate again now. ' + errorLine(error))
+        setBusy(false); return
+      }
     }
+    await loadAll(p)
+    setMsg('ok:Recomputed from current data'); setBusy(false)
   }
 
-  async function updateTds(slip, value) {
-    if (run?.status === 'finalized') return
-    const tds = parseFloat(value) || 0
-    const net = slip.gross + slip.ot_amount - slip.absence_deduction - slip.ssf_employee - slip.other_deductions - (slip.advance_deduction || 0) - tds + (slip.tada_amount || 0)
-    setPayslips(ps => ps.map(s => s.id === slip.id ? { ...s, tds, net_pay: net } : s))
-    await slipWrite(slip, { tds, net_pay: net }, 'The TDS override')
+  // One write path for a hand-typed income tax and for putting the calculated one back. Optimistic;
+  // a refused write reloads so the controlled box shows what is stored, and the message names who.
+  // A draft run with no payslips over a month nobody is on (S751 review) — everyone on it was settled,
+  // or the only employee's dates moved out of the month. Regenerate builds nothing and Finalize refuses,
+  // so the one move left is to remove the empty run.
+  function requestDeleteEmptyRun() {
+    if (!run || run.status !== 'draft' || busy) return
+    askConfirm({
+      title: 'Delete this empty draft run?',
+      body: (
+        <p style={{ margin: 0 }}>
+          The {periodLabel} payroll run has no payslips, and nobody is on this month's payroll, so there is
+          nothing for it to pay. Deleting it removes only the empty draft. If someone is added to {monthName} later,
+          Generate Payroll makes a new run.
+        </p>
+      ),
+      confirmLabel: 'Delete empty run', danger: true, busyLabel: 'Deleting…',
+      run: deleteEmptyRun,
+    })
   }
 
-  // TADA (travel/daily allowance) is a non-taxable reimbursement — added after TDS,
-  // not run through gross/tax computation like the rest of the payslip.
-  async function updateTada(slip, value) {
-    if (run?.status === 'finalized') return
-    const tada = parseFloat(value) || 0
-    const net = slip.gross + slip.ot_amount - slip.absence_deduction - slip.ssf_employee - slip.other_deductions - (slip.advance_deduction || 0) - slip.tds + tada
-    setPayslips(ps => ps.map(s => s.id === slip.id ? { ...s, tada_amount: tada, net_pay: net } : s))
-    await slipWrite(slip, { tada_amount: tada, net_pay: net }, 'The TADA amount')
+  async function deleteEmptyRun() {
+    if (!run || !period) return
+    const p = period
+    const runId = run.id
+    setBusy(true); setMsg('')
+    // Re-checked, because deleting a run cascades to its payslips: a run another tab has just generated
+    // payslips into must not be deleted from a screen that showed it empty.
+    const { count, error: countErr } = await scopedFrom('hr_payslips', 'id', { count: 'exact', head: true }).eq('run_id', runId)
+    if (countErr || count == null) { await loadAll(p); setMsg('error:The run was not deleted — could not confirm it still has no payslips. ' + errorLine(countErr)); setBusy(false); return }
+    if (count > 0) { await loadAll(p); setMsg(`error:The run was not deleted — it has ${count} payslip${count === 1 ? '' : 's'} now (generated in another tab). The page has been reloaded.`); setBusy(false); return }
+    const { data, error } = await scopedDelete('hr_payroll_runs').eq('id', runId).eq('status', 'draft').select('id')
+    if (error) { await loadAll(p); setMsg('error:The run was not deleted. ' + errorLine(error)); setBusy(false); return }
+    if (!data || data.length === 0) { await loadAll(p); setMsg('error:The run was not deleted — it is no longer a draft (finalized in another tab), or this account may not delete payroll runs. The page has been reloaded.'); setBusy(false); return }
+    await loadAll(p)
+    setMsg('ok:Empty draft run deleted'); setBusy(false)
   }
 
-  // The ask half of Finalize. When the draft is stale, finalize()'s own refusal path runs
-  // immediately (it alerts with the named employees and returns before any write); otherwise the
-  // ConfirmModal opens with the consequence summary and its onConfirm calls finalize().
+  async function writeTds(slip, tds, overridden, okText) {
+    const who = nameOf(slip.employee_id)
+    const beforeTds = num(slip.gross) + num(slip.ot_amount) - num(slip.absence_deduction) - num(slip.ssf_employee) - num(slip.other_deductions)
+    const advance = num(slip.advance_deduction)
+    // The advance cut on this payslip was sized against the CALCULATED tax, and it is a freshness
+    // input, so a typed tax cannot resize it. A figure that would take take-home pay below zero is
+    // refused instead — the same floor the engine keeps (decision 2).
+    const room = Math.max(0, beforeTds - advance)
+    if (tds > room + 0.5) {
+      setMsg(`error:Income tax for ${who} was not changed — NPR ${fmt(tds)} is more than the pay left to take it from (NPR ${fmt(room)}), so take-home pay would go below zero.`)
+      return
+    }
+    const net = beforeTds - advance - tds + num(slip.tada_amount)
+    const p = period
+    setPayslips(ps => ps.map(s => s.id === slip.id ? { ...s, tds, tds_overridden: overridden, net_pay: net } : s))
+    // .select('id'): a write RLS refuses is 0 rows with no error, which used to read as saved.
+    const { data, error } = await scopedUpdate('hr_payslips', { tds, tds_overridden: overridden, net_pay: net }).eq('id', slip.id).select('id')
+    if (error || !data || data.length === 0) {
+      await loadAll(p)
+      setMsg(`error:Income tax for ${who} was not saved — the register shows what is stored. `
+        + (error ? errorLine(error) : 'The payslip was not updated: the run may have been finalized in another tab, or this account may not change payroll.'))
+      return
+    }
+    setMsg('ok:' + okText)
+  }
+
+  async function commitTds(slip, raw) {
+    setTdsDraft(d => { const n = { ...d }; delete n[slip.id]; return n })
+    if (!run || run.status !== 'draft' || busy) return
+    const text = String(raw ?? '').trim()
+    if (text === '') return   // an emptied box puts the stored figure back; type 0 to withhold nothing
+    const tds = Number(text)
+    const who = nameOf(slip.employee_id)
+    if (!Number.isFinite(tds) || tds < 0) {
+      setMsg(`error:Income tax for ${who} was not changed — "${text}" is not an amount. Type rupees, 0 or more.`)
+      return
+    }
+    if (Math.abs(tds - num(slip.tds)) < 0.005) return   // unchanged — nothing to write
+    await writeTds(slip, tds, true, `Income tax for ${who} set to NPR ${fmt(tds)} — kept as typed when you Finalize`)
+  }
+
+  async function resetTds(slip) {
+    const live = liveByEmp.get(slip.employee_id)
+    if (!live || busy) return
+    const who = nameOf(slip.employee_id)
+    await writeTds(slip, live.payslip.tds, false, `Income tax for ${who} put back to the calculated NPR ${fmt(live.payslip.tds)}`)
+  }
+
+  // Pending leave and overtime touching the month, for the Finalize confirm (decision 5). A failed
+  // count says "could not check", never 0 — zero is the reassuring answer.
+  async function loadPendingCounts(p) {
+    const token = ++pendingReq.current
+    setPending({ loading: true })
+    const { start, end } = periodAdBounds(p)
+    const [leave, ot] = await Promise.all([
+      scopedFrom('hr_leave_requests', 'id', { count: 'exact', head: true })
+        .eq('status', 'pending').lte('start_date', end).gte('end_date', start),
+      scopedFrom('hr_overtime_entries', 'id', { count: 'exact', head: true })
+        .eq('status', 'pending').eq('bs_year', p.bs_year).eq('bs_month', p.bs_month),
+    ])
+    if (token !== pendingReq.current) return
+    const failed = !!(leave.error || ot.error || leave.count == null || ot.count == null)
+    setPending({ loading: false, failed, leave: leave.count || 0, ot: ot.count || 0 })
+  }
+
+  // The ask half of Finalize. When the draft is not finalizable the refusal is stated at once;
+  // otherwise the ConfirmModal opens with the consequence summary and its onConfirm calls finalize(),
+  // which checks everything again against freshly read data before its first write.
   function requestFinalize() {
-    if (!run) return
-    if (!freshness.ok) { finalize(); return }
-    setConfirmAction('finalize')
-  }
-
-  async function finalize() {
-    if (!run) return
-
-    // Refuse outright while the draft disagrees with a live recomputation. This is the one
-    // irreversible action in the module (Reopen exists, but payslips have been issued by then),
-    // and the failure it prevents is silent: the numbers look complete and are simply out of date.
-    // Regenerate is one click away and non-destructive, so there is no reason to allow the
-    // override that a "proceed anyway" branch would offer.
+    if (!run || !period || busy || loading) return
     if (!freshness.ok) {
-      const staleNames   = freshness.stale.map(nameOf)
-      const missingNames = freshness.missing.map(nameOf)
-      // The amber stale-draft banner above the register already lists every affected employee
-      // and carries the Regenerate button; this only has to say why the click did nothing. It was
-      // a window.alert (S682) — a multi-line diagnostic in a box that cannot be copied, styled or
-      // read beside the register, and that a "block dialogs" setting turns into a silent no-op.
       const lines = [
-        'Not finalized — this draft no longer matches current attendance, overtime and TADA data.',
-        staleNames.length   ? `${staleNames.length} changed since Generate` : '',
-        missingNames.length ? `${missingNames.length} with no payslip` : '',
-        'Click Regenerate, then finalize.',
+        'Not finalized. ' + (freshness.reason || 'This draft no longer matches current salary, attendance, overtime and TADA data.'),
+        freshness.stale.length ? `${freshness.stale.length} changed since Generate` : '',
+        freshness.missing.length && payslips.length ? `${freshness.missing.length} with no payslip` : '',
+        freshness.departed.length ? `${freshness.departed.length} who should not be paid by this run` : '',
+        freshness.live && !freshness.empty ? 'Press Regenerate, then Finalize.' : '',
       ].filter(Boolean)
       setMsg('error:' + lines.join(' · '))
       return
     }
+    setConfirmAction('finalize')
+    loadPendingCounts(period)
+  }
 
-    // The consequence summary (payslip count, net total, ledger side-effects) lives in the
-    // ConfirmModal rendered below — those are real writes to other ledgers, so the ask is a
-    // proper dialog, not window.confirm. This function is only ever reached from its onConfirm
-    // (requestFinalize gates the button), so it commits directly.
+  async function finalize() {
+    if (!run || !period) return
+    const p = period
+    const runId = run.id
     setConfirmAction(null)
-    setBusy(true)
+    setBusy(true); setMsg('')
+    const stop = async text => { await loadAll(p); setMsg('error:' + text); setBusy(false) }
 
-    // Build per-advance repaid totals, excluding any prior auto-entries for this run
-    // (idempotent: on re-finalize after reopen, exclude stale rows we're about to replace)
-    const repaidMap = {}
-    repayments.filter(r => r.payroll_run_id !== run.id).forEach(r => {
-      repaidMap[r.advance_id] = (repaidMap[r.advance_id] || 0) + (parseFloat(r.amount) || 0)
+    // Re-read EVERYTHING before the first write (S751). This used to finalize from data loaded when
+    // the page opened: overtime approved, a claim approved or an employee settled in the meantime was
+    // simply locked in wrong, and the freshness gate it relied on was computed from the same old copy.
+    const [inputs, runRes, slipRes] = await Promise.all([
+      readInputs(p),
+      scopedFrom('hr_payroll_runs', 'id, status').eq('id', runId).maybeSingle(),
+      scopedFrom('hr_payslips').eq('run_id', runId),
+    ])
+    const readErr = inputs.error || runRes.error || slipRes.error
+    if (readErr) { await stop('Payroll was NOT finalized — nothing has changed. The latest salary, attendance, overtime, advance and TADA data could not be re-read, and a check that could not run has not passed. ' + errorText(readErr, 'operator')); return }
+    if (!runRes.data) { await stop('Payroll was NOT finalized — this run no longer exists. The page has been reloaded.'); return }
+    if (runRes.data.status !== 'draft') { await stop('Nothing was changed by this click — this run is already finalized, most likely in another tab. The page has been reloaded to show it.'); return }
+
+    const fresh = inputs.data
+    const slips = slipRes.data || []
+    const freshNames = new Map([...fresh.employees, ...fresh.settled].map(e => [e.id, e.full_name]))
+    const nameFresh = id => freshNames.get(id) || nameOf(id)
+    const check = assessDraft(slips, () => buildPayrollRows({ runId, period: p, ...fresh }))
+    if (!check.ok) {
+      const parts = [
+        check.stale.length ? `changed since Generate: ${listNames(check.stale, nameFresh)}` : '',
+        check.missing.length && slips.length ? `no payslip: ${listNames(check.missing, nameFresh)}` : '',
+        check.departed.length ? `should not be paid by this run: ${listNames(check.departed, nameFresh)}` : '',
+      ].filter(Boolean)
+      await stop('Payroll was NOT finalized — nothing has changed. '
+        + (check.reason || 'Checked against current data just now, this draft is out of date.')
+        + (parts.length ? ' ' + parts.join(' · ') + '.' : '')
+        + (check.live && !check.empty ? ' Press Regenerate, then Finalize.' : ''))
+      return
+    }
+
+    // The advance allocation runs over the FRESH ledgers, through the same dueAdvances() filter the
+    // deduction came from. formatAd over Nepal's civil date: the UTC slice is YESTERDAY between 00:00
+    // and 05:45 Nepal time, and a viewer abroad would stamp their own calendar's day.
+    const { repayRows, settleIds } = allocateAdvanceRepayments({
+      payslips: slips, advances: fresh.advances, repayments: fresh.repayments, period: p, runId,
+      repaidDate: formatAd(nepalCivilDate(new Date()) || new Date()),
+      note: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year} payroll`,
     })
+    // Exactly the claims these payslips pay — TADA is locked to its claims now (decision 6), so there is
+    // no "cleared to 0, leave the claim Approved" case left to skip.
+    const tadaClaimIds = [...new Set(slips.flatMap(s => (Array.isArray(s.tada_claim_ids) ? s.tada_claim_ids : [])))]
 
-    // Build auto-repayment rows and track which advances become fully settled
-    const repayRows = []
-    const settleIds = []
-    // formatAd, not toISOString().slice(0,10): the UTC slice is YESTERDAY between 00:00 and 05:45
-    // Nepal time, which is exactly when a payroll gets finalized after a late shift.
-    const today = formatAd(new Date())
-    const monthLabel = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} payroll`
+    // Writes to four ledgers, and supabase-js never throws — it resolves `{ error }`. Stop at the first
+    // failure and say which ledger did NOT move (S682). Reopen → Finalize is idempotent (the
+    // delete-then-insert below), so "reopen and finalize again" is always a safe recovery, and the
+    // reload first means the register shows the true state, not the intended one.
+    const failAt = async (what, error) => {
+      await loadAll(p)
+      setMsg('error:' + what + (error ? ' ' + errorText(error, 'operator') : ''))
+      setBusy(false)
+    }
+    // Conditional on still being a draft, and the row count checked: a second tab's Finalize, or an RLS
+    // refusal, is 0 rows and no error — both used to go on to write every ledger a second time.
+    const { data: runRows, error: runErr } = await scopedUpdate('hr_payroll_runs', { status: 'finalized', finalized_at: new Date().toISOString() })
+      .eq('id', runId).eq('status', 'draft').select('id')
+    if (runErr) { await failAt('Payroll was NOT finalized — nothing has changed.', runErr); return }
+    if (!runRows || runRows.length === 0) { await failAt('Payroll was NOT finalized by this click and nothing was changed — the run was no longer a draft (finalized in another tab a moment ago), or this account may not finalize payroll. The page has been reloaded to show its real state.'); return }
 
-    // The allocation goes through dueAdvances() — the same filter buildAdvanceMap() deducted from —
-    // so a deduction is never booked against an advance issued this month (or later) that the
-    // run did not actually recover. Filtering on `status` alone put it on the oldest active
-    // advance whether or not that advance was due yet.
-    const dueNow = dueAdvances(advances, period)
-    for (const slip of payslips) {
-      if (!slip.advance_deduction || slip.advance_deduction <= 0) continue
-      const empAdvs = dueNow.filter(a => a.employee_id === slip.employee_id)
-      let remaining = slip.advance_deduction
+    // Re-count AFTER the flip (S751 review). The check above read the payslips before the flip, and a
+    // Regenerate in another tab could delete and rebuild them in the gap. Once the run is finalized the
+    // database locks its payslips, so this count is the final one: if it is not the set that was
+    // checked, the ledgers below would be written from a list the run no longer holds.
+    const { count: slipCount, error: countErr } = await scopedFrom('hr_payslips', 'id', { count: 'exact', head: true }).eq('run_id', runId)
+    if (countErr || slipCount == null) { await failAt('The run is marked finalized, but its payslips could not be re-counted, so nothing else was written — no TADA claims marked Paid, no advance repayments recorded. Reopen it and finalize again.', countErr); return }
+    if (slipCount !== slips.length) {
+      await failAt(`The run was finalized with ${slipCount} payslip${slipCount === 1 ? '' : 's'}, but ${slips.length} were checked — it was regenerated in another tab at the same moment. Nothing else was written: no TADA claims marked Paid, no advance repayments recorded. Reopen it, Regenerate, and finalize again.`)
+      return
+    }
 
-      for (const adv of empAdvs) {
-        if (remaining <= 0) break
-        const repaid = repaidMap[adv.id] || 0
-        const outstanding = Math.max(0, parseFloat(adv.amount) - repaid)
-        if (outstanding <= 0) continue
-        const installment = parseFloat(adv.installment_amount) || outstanding
-        const thisPayment = Math.min(Math.min(installment, outstanding), remaining)
-        repayRows.push({
-          advance_id: adv.id,
-          employee_id: slip.employee_id,
-          repaid_date: today,
-          amount: thisPayment,
-          notes: monthLabel,
-          payroll_run_id: run.id,
-        })
-        if (repaid + thisPayment >= parseFloat(adv.amount) - 0.01) settleIds.push(adv.id)
-        remaining -= thisPayment
+    // TADA BEFORE advances (S751 review). A claim left Approved after its payroll is finalized is payable
+    // a second time — through TADA Claims, or through next month's run, which pays every Approved claim
+    // whose trip is over. An advance recovery left unrecorded is only a ledger that under-reports, and
+    // Reopen → Finalize writes it. So the step whose absence can pay money twice goes first.
+    const tadaNote = tadaClaimIds.length > 0
+      ? ` Its ${tadaClaimIds.length} TADA claim${tadaClaimIds.length === 1 ? ' was' : 's were'} already marked Paid.`
+      : ' It pays no TADA claims.'
+    if (tadaClaimIds.length > 0) {
+      const { data: paidRows, error: tadaErr } = await scopedUpdate('hr_tada_claims', { status: 'paid', paid_at: new Date().toISOString(), paid_method: 'Payroll' })
+        .in('id', tadaClaimIds).eq('status', 'approved').select('id')
+      if (tadaErr) { await failAt(`Payroll is finalized, but ${tadaClaimIds.length} TADA claim(s) paid through it still show as Approved — mark them Paid in TADA Claims so they are not reimbursed twice. Its advance repayments were not recorded yet: Reopen and finalize again once the claims are sorted.`, tadaErr); return }
+      const moved = (paidRows || []).length
+      if (moved < tadaClaimIds.length) {
+        await failAt(`Payroll is finalized, but only ${moved} of the ${tadaClaimIds.length} TADA claims it pays were marked Paid — the other ${tadaClaimIds.length - moved} were no longer Approved when it tried, so they were changed in TADA Claims after the check (rejected, or paid by hand). Open TADA Claims to see where they stand; if any should not be in this payroll, Reopen it, Regenerate and finalize again. Its advance repayments were not recorded yet.`)
+        return
       }
     }
 
-    // TADA claims auto-filled into a payslip get marked Paid so the same trip is never
-    // reimbursed both through TADA Claims and through this payroll run. Skipped for any
-    // payslip where the clerk zeroed TADA back out — those claims stay Approved, unpaid.
-    const tadaClaimIds = []
-    payslips.forEach(s => {
-      if ((s.tada_amount || 0) > 0 && Array.isArray(s.tada_claim_ids)) tadaClaimIds.push(...s.tada_claim_ids)
-    })
-
-    // Five writes to four ledgers, and supabase-js never throws — it resolves `{ error }`. Before
-    // S682 all five ran bare and the page then said "Finalized" whatever had landed, so a dropped
-    // connection could leave the run finalized with no repayment rows, or repayments recorded and
-    // the advances still active, or TADA claims still Approved and payable a second time. Stop at
-    // the first failure and say which ledger did NOT move. Reopen → Finalize is idempotent by
-    // design (the delete-then-insert above), so "reopen and finalize again" is always a safe
-    // recovery, and the reload first means the register shows the true state, not the intended one.
-    const failAt = async (what, error) => {
-      await loadAll(period.id, period.bs_year, period.bs_month)
-      setMsg('error:' + what + ' ' + errorText(error, 'operator'))
-      setBusy(false)
-    }
-    const { error: runErr } = await scopedUpdate('hr_payroll_runs', { status: 'finalized', finalized_at: new Date().toISOString() }).eq('id', run.id)
-    if (runErr) { await failAt('Payroll was NOT finalized — nothing has changed.', runErr); return }
     // Idempotent: delete prior auto-repayments for this run, then re-insert
-    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('payroll_run_id', run.id)
-    if (delErr) { await failAt('The run is marked finalized, but its advance repayments were not recorded. Reopen it and finalize again.', delErr); return }
+    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('payroll_run_id', runId)
+    if (delErr) { await failAt('The run is marked finalized, but its advance repayments were not recorded.' + tadaNote + ' Reopen it and finalize again.', delErr); return }
     if (repayRows.length > 0) {
       const { error: insErr } = await scopedInsert('hr_advance_repayments', repayRows)
-      if (insErr) { await failAt('The run is marked finalized, but its advance repayments were not recorded. Reopen it and finalize again.', insErr); return }
+      if (insErr) { await failAt('The run is marked finalized, but its advance repayments were not recorded.' + tadaNote + ' Reopen it and finalize again.', insErr); return }
     }
     if (settleIds.length > 0) {
       const { error: settleErr } = await scopedUpdate('hr_advances', { status: 'settled' }).in('id', settleIds)
-      if (settleErr) { await failAt(`Repayments were recorded, but ${settleIds.length} fully repaid advance(s) still show as active. Reopen and finalize again, or settle them in Advances & Loans.`, settleErr); return }
-    }
-    if (tadaClaimIds.length > 0) {
-      const { error: tadaErr } = await scopedUpdate('hr_tada_claims', { status: 'paid', paid_at: new Date().toISOString(), paid_method: 'Payroll' })
-        .in('id', tadaClaimIds).eq('status', 'approved')
-      if (tadaErr) { await failAt(`Payroll is finalized, but ${tadaClaimIds.length} TADA claim(s) paid through it still show as Approved — mark them Paid in TADA Claims so they are not reimbursed twice.`, tadaErr); return }
+      if (settleErr) { await failAt(`Repayments were recorded, but ${settleIds.length} fully repaid advance(s) still show as active.${tadaNote} Reopen and finalize again, or settle them in Advances & Loans.`, settleErr); return }
     }
 
-    await loadAll(period.id, period.bs_year, period.bs_month)
+    await loadAll(p)
     const suffix = repayRows.length > 0 ? ` — ${repayRows.length} advance repayment(s) auto-recorded` : ''
     setMsg('ok:Finalized' + suffix)
     setBusy(false)
   }
 
   async function reopen() {
-    if (!run) return
+    if (!run || !period) return
+    const p = period
+    const runId = run.id
     setConfirmAction(null)
-    setBusy(true)
+    setBusy(true); setMsg('')
 
     // Which advances did THIS run touch? Read them off its own tagged rows before deleting them —
-    // this is the only record of what it settled.
+    // this is the only record of what it settled. Scoped to this run's own advances, a reopen can never
+    // reactivate an advance a Final Settlement closed (S600).
     //
-    // The reactivation below used to consider every settled advance in the client, filtered only
-    // on "has an outstanding balance now". That was survivable while payroll was the sole writer
-    // of repayment rows. It stopped being safe once Final Settlement began writing them too
-    // (S600): reopening a payroll run could reactivate an advance a settlement had closed and
-    // already deducted in full, handing a departed employee a live loan and silently invalidating
-    // the settlement's frozen figure. Scoped to this run's own advances, that cannot happen.
-    //
-    // Both guard reads carry their error (S682): a failed read here used to leave `touchedIds`
-    // empty, delete the run's repayment rows anyway and skip every reactivation — the exact
-    // divergence the paragraph above says this code prevents. FinalSettlement.jsx's reopen has
-    // the same shape: refuse before the first write, and after it name what is already changed.
+    // Both guard reads carry their error (S682): a failed read here used to leave `touchedIds` empty,
+    // delete the run's repayment rows anyway and skip every reactivation. And the run is re-read: a
+    // run another tab already reopened is left alone rather than reset a second time (S751).
     const failAt = async (what, error) => {
-      await loadAll(period.id, period.bs_year, period.bs_month)
-      setMsg('error:' + what + ' ' + errorText(error, 'operator'))
+      await loadAll(p)
+      setMsg('error:' + what + (error ? ' ' + errorText(error, 'operator') : ''))
       setBusy(false)
     }
-    const { data: ownReps, error: ownErr } = await scopedFrom('hr_advance_repayments', 'advance_id').eq('payroll_run_id', run.id)
-    if (ownErr) { setMsg('error:Could not read this run\'s advance repayments, so nothing was changed — try again. ' + errorText(ownErr, 'operator')); setBusy(false); return }
-    const touchedIds = [...new Set((ownReps || []).map(r => r.advance_id))]
+    // The payslips are re-read too, so the TADA claims reverted below are the ones this run's stored
+    // payslips actually carry — not the page's copy of them (S751 review).
+    const [runRes, ownRes, slipRes] = await Promise.all([
+      scopedFrom('hr_payroll_runs', 'id, status').eq('id', runId).maybeSingle(),
+      scopedFrom('hr_advance_repayments', 'advance_id').eq('payroll_run_id', runId),
+      scopedFrom('hr_payslips', 'id, tada_claim_ids').eq('run_id', runId),
+    ])
+    const readErr = runRes.error || ownRes.error || slipRes.error
+    if (readErr) { setMsg('error:Could not re-read this run, its payslips and its advance repayments, so nothing was changed — try again. ' + errorText(readErr, 'operator')); setBusy(false); return }
+    if (!runRes.data || runRes.data.status !== 'finalized') { await failAt('Nothing was changed by this click — this run is no longer finalized (it was reopened in another tab). The page has been reloaded.'); return }
+    const touchedIds = [...new Set((ownRes.data || []).map(r => r.advance_id))]
+    const notes = []
 
-    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('payroll_run_id', run.id)
+    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('payroll_run_id', runId)
     if (delErr) { setMsg('error:Nothing was changed — this run\'s advance repayments could not be removed. Try again. ' + errorText(delErr, 'operator')); setBusy(false); return }
 
     if (touchedIds.length > 0) {
-      const { data: updatedReps, error: updErr } = await scopedFrom('hr_advance_repayments', 'advance_id, amount').in('advance_id', touchedIds)
-      if (updErr) { await failAt(`This run's repayments were removed, but its ${touchedIds.length} advance(s) could not be re-checked, so none were reactivated. Reactivate them in Advances & Loans, or press Reopen again.`, updErr); return }
-      const updatedRepaidMap = {}
-      ;(updatedReps || []).forEach(r => {
-        updatedRepaidMap[r.advance_id] = (updatedRepaidMap[r.advance_id] || 0) + (parseFloat(r.amount) || 0)
-      })
-      const reactivateIds = advances
-        .filter(a => touchedIds.includes(a.id) && a.status === 'settled')
-        .filter(a => Math.max(0, parseFloat(a.amount) - (updatedRepaidMap[a.id] || 0)) > 0.01)
+      // Fresh reads of the touched advances, not the page's copy — its statuses are whatever they were
+      // when the page loaded. (The repayments trigger now reactivates a settled advance whose balance
+      // returns; this write stays as the belt to that brace.)
+      const [advRes, repRes] = await Promise.all([
+        scopedFrom('hr_advances', 'id, employee_id, amount, status').in('id', touchedIds),
+        scopedFrom('hr_advance_repayments', 'advance_id, amount').in('advance_id', touchedIds),
+      ])
+      const reErrRead = advRes.error || repRes.error
+      if (reErrRead) { await failAt(`This run's repayments were removed, but its ${touchedIds.length} advance(s) could not be re-checked, so none were reactivated. Reactivate them in Advances & Loans, or press Reopen again.`, reErrRead); return }
+      const repaid = {}
+      ;(repRes.data || []).forEach(r => { repaid[r.advance_id] = (repaid[r.advance_id] || 0) + num(r.amount) })
+      // A write-off is a decision, and the repayments trigger leaves it alone — so removing this run's
+      // recovery does not reopen the loan. Named, and never reactivated (the filter below skips it).
+      const writtenOff = (advRes.data || []).filter(a => a.status === 'written_off')
+      if (writtenOff.length > 0) {
+        notes.push(`${writtenOff.map(a => `${nameOf(a.employee_id)}'s advance of NPR ${fmt(a.amount)}`).join(', ')} ${writtenOff.length === 1 ? 'is' : 'are'} written off — ${writtenOff.length === 1 ? 'its write-off does' : 'their write-offs do'} not change, so check ${writtenOff.length === 1 ? 'it' : 'them'} in Advances & Loans.`)
+      }
+      const reactivateIds = (advRes.data || [])
+        .filter(a => a.status === 'settled' && Math.max(0, num(a.amount) - (repaid[a.id] || 0)) > 0.01)
         .map(a => a.id)
       if (reactivateIds.length > 0) {
         const { error: reErr } = await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivateIds)
@@ -534,62 +680,75 @@ export default function PayrollRun() {
 
     // Revert TADA claims this run auto-marked Paid — but only ones marked paid BY payroll,
     // never a claim a manager separately paid by hand via TADA Claims.
-    const tadaClaimIds = []
-    payslips.forEach(s => {
-      if (Array.isArray(s.tada_claim_ids) && s.tada_claim_ids.length > 0) tadaClaimIds.push(...s.tada_claim_ids)
-    })
+    const tadaClaimIds = [...new Set((slipRes.data || []).flatMap(s => (Array.isArray(s.tada_claim_ids) ? s.tada_claim_ids : [])))]
     if (tadaClaimIds.length > 0) {
-      const { error: tadaErr } = await scopedUpdate('hr_tada_claims', { status: 'approved', paid_at: null, paid_method: null })
-        .in('id', tadaClaimIds).eq('paid_method', 'Payroll')
+      const { data: revertedRows, error: tadaErr } = await scopedUpdate('hr_tada_claims', { status: 'approved', paid_at: null, paid_method: null })
+        .in('id', tadaClaimIds).eq('paid_method', 'Payroll').select('id')
       if (tadaErr) { await failAt('Advances were reset, but the TADA claims paid through this run still show as Paid. Press Reopen again, or fix them in TADA Claims.', tadaErr); return }
+      // Carried on rather than stopped: advances are already reset, and leaving the run finalized over
+      // them would be the worse half-state. The shortfall is named in the result instead.
+      const reverted = (revertedRows || []).length
+      if (reverted < tadaClaimIds.length) {
+        notes.push(`Only ${reverted} of the ${tadaClaimIds.length} TADA claims this run paid went back to Approved — the other ${tadaClaimIds.length - reverted} ${tadaClaimIds.length - reverted === 1 ? 'is' : 'are'} no longer marked paid by payroll (changed in TADA Claims, or this account may not reopen them). Check TADA Claims before regenerating, or a claim may be paid twice or not at all.`)
+      }
     }
 
-    const { error: draftErr } = await scopedUpdate('hr_payroll_runs', { status: 'draft', finalized_at: null }).eq('id', run.id)
+    const { data: draftRows, error: draftErr } = await scopedUpdate('hr_payroll_runs', { status: 'draft', finalized_at: null })
+      .eq('id', runId).eq('status', 'finalized').select('id')
     if (draftErr) { await failAt('Its ledgers were reset, but the run still shows as finalized — press Reopen again.', draftErr); return }
-    await loadAll(period.id, period.bs_year, period.bs_month)
-    setMsg('ok:Reopened'); setBusy(false)
+    if (!draftRows || draftRows.length === 0) { await failAt('Its ledgers were reset, but the run was not returned to draft — it changed in another tab, or this account may not reopen payroll. The page has been reloaded; press Reopen again if it still shows Finalized.'); return }
+    await loadAll(p)
+    setMsg(notes.length > 0 ? 'error:Reopened — but: ' + notes.join(' ') : 'ok:Reopened'); setBusy(false)
   }
+
+  const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : '—'
+  const monthName = period ? BS_MONTHS[period.bs_month - 1] : 'this month'
+  const finalized = run?.status === 'finalized'
 
   function printPayslip(slip, emp) {
     setPrintSlip({ slip, emp })
-    setTimeout(() => { printWithTitle(`Payslip - ${emp.full_name} - ${periodLabel}`); setPrintSlip(null) }, 60)
+    setTimeout(() => { printWithTitle(`Payslip - ${emp.full_name} - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintSlip(null) }, 60)
   }
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
+    const status = finalized ? 'Finalized' : 'Draft'
     const rows = payslips.map(s => {
       const emp = empMap[s.employee_id] || {}
       return {
-        'Employee': emp.full_name || '', 'Code': emp.employee_code || '', 'Pay Basis': s.pay_basis,
+        'Employee': emp.full_name || nameOf(s.employee_id), 'Code': emp.employee_code || '', 'Department': emp.department || '',
+        'Status': status, 'Pay Basis': s.pay_basis,
         'Basic/Rate': s.basic, 'Allowances': s.allowances, 'Gross': s.gross,
         'Present Days': s.present_days, 'Absent Days': s.absent_days,
+        'Unpaid Days': s.unpaid_days ?? '', 'Worked Days': s.worked_days ?? '', 'Hours Worked': s.hours_worked ?? '',
         'OT Hours': s.ot_hours, 'OT Amount': s.ot_amount,
         'Absence Ded': s.absence_deduction, 'SSF Employee': s.ssf_employee,
-        'Other Ded': s.other_deductions, 'Advance Ded': s.advance_deduction || 0,
+        'Other Ded': s.other_deductions, 'Retirement (CIT)': s.retirement_contribution || 0,
+        'Advance Ded': s.advance_deduction || 0,
         'TDS': s.tds, 'TADA': s.tada_amount || 0, 'Net Pay': s.net_pay,
         'SSF Employer': s.ssf_employer,
       }
     })
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Payroll')
+    XLSX.utils.book_append_sheet(wb, ws, finalized ? 'Payroll' : 'Payroll DRAFT')
     const label = period ? `${BS_MONTHS[period.bs_month - 1]}-${period.bs_year}` : ''
-    XLSX.writeFile(wb, `payroll_${label}.xlsx`)
+    XLSX.writeFile(wb, `payroll_${label}${finalized ? '' : '_DRAFT'}.xlsx`)
   }
 
-  const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : '—'
-  const finalized = run?.status === 'finalized'
   const totals = payslips.reduce((a, s) => {
-    a.gross  += s.gross; a.ot += s.ot_amount; a.ssfEmp += s.ssf_employee; a.ssfEmpr += s.ssf_employer
-    a.advDed += s.advance_deduction || 0
-    a.ded    += s.absence_deduction + s.other_deductions
-    a.tds    += s.tds || 0
-    a.tada   += s.tada_amount || 0
-    a.net    += s.net_pay
+    a.gross   += num(s.gross); a.ot += num(s.ot_amount)
+    a.absence += num(s.absence_deduction); a.ssfEmp += num(s.ssf_employee); a.other += num(s.other_deductions)
+    a.advDed  += num(s.advance_deduction); a.tds += num(s.tds); a.tada += num(s.tada_amount)
+    a.net     += num(s.net_pay); a.ssfEmpr += num(s.ssf_employer)
     return a
-  }, { gross: 0, ot: 0, ssfEmp: 0, ssfEmpr: 0, ded: 0, advDed: 0, tds: 0, tada: 0, net: 0 })
+  }, { gross: 0, ot: 0, absence: 0, ssfEmp: 0, other: 0, advDed: 0, tds: 0, tada: 0, net: 0, ssfEmpr: 0 })
+  const totalDeductions = totals.absence + totals.ssfEmp + totals.other + totals.advDed + totals.tds
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
+
+  const showActions = run && !loading && !loadError
+  const negCell = v => <td style={{ textAlign: 'right', color: v > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{v > 0 ? `−${fmt(v)}` : '—'}</td>
 
   return (
     <div>
@@ -599,25 +758,22 @@ export default function PayrollRun() {
             <h1 className="page-title">Payroll</h1>
             <p className="page-subtitle">
               Monthly payroll run — {periodLabel}
-              {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 0 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
+              {run && !loading && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 0 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select aria-label="Period" className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
+            <select aria-label="Period" className="form-select" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)} disabled={loading}>
               {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : ''}</option>)}
             </select>
-            {run && (
+            {/* Hidden while loading and after a failed read (S751): a click then would act on a run and
+                payslips the page could not show — the old outlet's, after a client switch. */}
+            {showActions && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export</button>
-                {!finalized && <button className="btn btn-ghost" onClick={() => setConfirmAction('regenerate')} disabled={busy} style={{ fontSize: 12 }}>↻ Regenerate</button>}
-                {!finalized && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy} style={{ fontSize: 12 }}>Finalize</button>}
+                <button className="btn btn-ghost" onClick={exportExcel} disabled={busy} style={{ fontSize: 12 }}>⬇ Export</button>
+                {!finalized && !freshness.empty && <button className="btn btn-ghost" onClick={() => setConfirmAction('regenerate')} disabled={busy} style={{ fontSize: 12 }}>↻ Regenerate</button>}
+                {!finalized && !freshness.empty && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy} style={{ fontSize: 12 }}>Finalize</button>}
                 {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform OPERATOR, while
-                    the tenant's own Owner is `isOwner`; both resolve hrRole to 'manager'. Gating on
-                    isAdmin therefore locked the one person accountable for this payroll out of
-                    reopening it, for a correction they would have to phone support to get. The page
-                    is already manager-gated and the confirmation below states what reopening
-                    reverses (advance repayments, TADA closures). Same change in FestivalAllowance
-                    and IncentiveRun. */}
+                    the tenant's own Owner is `isOwner`; both resolve hrRole to 'manager' (S620). */}
                 {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={() => setConfirmAction('reopen')} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
               </div>
             )}
@@ -625,10 +781,10 @@ export default function PayrollRun() {
           </div>
         </div>
 
-        {/* Stale-draft warning. Finalize refuses while this is showing, but the refusal alone
-            would only be discovered at the moment of committing — this states the problem, names
-            who it affects and points at the one-click fix beforehand. */}
-        {!loading && (!freshness.ok || freshness.departed?.length > 0) && (
+        {/* Stale-draft warning. Finalize refuses while this is showing, but the refusal alone would
+            only be discovered at the moment of committing — this states the problem, names who it
+            affects and points at the one-click fix beforehand. */}
+        {!loading && !loadError && run && !finalized && !freshness.ok && (
           <div
             role="alert"
             className="card"
@@ -639,53 +795,81 @@ export default function PayrollRun() {
             }}
           >
             <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
-              ⚠ This draft is out of date — Regenerate before finalizing
+              {freshness.empty
+                ? `⚠ Nobody is on the ${monthName} payroll`
+                : freshness.live ? '⚠ This draft is out of date — Regenerate before finalizing' : '⚠ This draft could not be checked, so it cannot be finalized'}
             </p>
             <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+              {freshness.reason && <>{freshness.reason}{' '}</>}
               {freshness.stale.length > 0 && (
-                <>Attendance, overtime or TADA changed since this run was generated, so{' '}
+                <>Attendance, overtime, pay setup, advances or TADA changed since this run was generated, so{' '}
                   <strong style={{ color: 'var(--theme-text1)' }}>{freshness.stale.length}</strong>{' '}
                   employee{freshness.stale.length === 1 ? "'s figures no longer match" : "s' figures no longer match"}
-                  {' '}({freshness.stale.slice(0, 4).map(nameOf).join(', ')}{freshness.stale.length > 4 ? `, +${freshness.stale.length - 4} more` : ''}).{' '}
+                  {' '}({listNames(freshness.stale, nameOf)}).{' '}
                 </>
               )}
-              {freshness.missing.length > 0 && (
+              {freshness.missing.length > 0 && payslips.length > 0 && (
                 <><strong style={{ color: 'var(--theme-text1)' }}>{freshness.missing.length}</strong>{' '}
-                  employee{freshness.missing.length === 1 ? ' was' : 's were'} added after this run and {freshness.missing.length === 1 ? 'has' : 'have'} no payslip in it
-                  {' '}({freshness.missing.slice(0, 4).map(nameOf).join(', ')}{freshness.missing.length > 4 ? `, +${freshness.missing.length - 4} more` : ''}).{' '}
+                  employee{freshness.missing.length === 1 ? ' is' : 's are'} on the {monthName} payroll with no payslip in this run
+                  {' '}({listNames(freshness.missing, nameOf)}).{' '}
                 </>
               )}
-              {freshness.departed?.length > 0 && (
+              {freshness.departed.length > 0 && (
                 <><strong style={{ color: 'var(--theme-text1)' }}>{freshness.departed.length}</strong>{' '}
-                  employee{freshness.departed.length === 1 ? ' has a payslip' : 's have payslips'} here but {freshness.departed.length === 1 ? 'is' : 'are'} no longer active
-                  {' '}({freshness.departed.slice(0, 4).map(nameOf).join(', ')}{freshness.departed.length > 4 ? `, +${freshness.departed.length - 4} more` : ''}) —
-                  {' '}Regenerate would delete {freshness.departed.length === 1 ? 'it' : 'them'}.{' '}
+                  payslip{freshness.departed.length === 1 ? ' here belongs to someone who' : 's here belong to people who'} should not be paid by this run
+                  {' '}({listNames(freshness.departed, nameOf)}) — already paid by a Final Settlement, or not employed in {monthName}. Regenerate removes {freshness.departed.length === 1 ? 'it' : 'them'}.{' '}
                 </>
               )}
-              Regenerate rebuilds the draft from current data; manual TDS and TADA edits are reset.
+              {freshness.live && !freshness.empty && 'Regenerate rebuilds the draft from current data; income tax typed by hand is reset.'}
             </p>
+            {freshness.empty && (
+              <button className="btn btn-danger btn-sm" style={{ marginTop: 8 }} onClick={requestDeleteEmptyRun} disabled={busy}>
+                Delete this empty draft run
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Leavers whose Final Settlement already paid this month are left out on purpose (decision 4).
+            Neutral, not a warning — nothing is wrong — but named, so a missing waiter reads as a decision. */}
+        {!loading && !loadError && period && !finalized && settled.length > 0 && (
+          <div className="card" role="note" style={{ marginBottom: 12, padding: '10px 16px', fontSize: 12, color: 'var(--theme-text2)' }}>
+            <Tip text="A finalized Final Settlement pays the last month's salary itself, so a payslip here as well would pay those days twice. Reopening the settlement brings them back onto this payroll." width={290}>
+              <strong style={{ color: 'var(--theme-text1)' }}>Left out — already paid by Final Settlement:</strong>
+            </Tip>{' '}
+            {settled.map(e => e.full_name).join(', ')}
           </div>
         )}
 
         {loading ? (
           <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
-        ) : employees.length === 0 ? (
-          <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No active employees. Add employees in HR → Employees first.</div>
+        ) : loadError ? (
+          // Before every empty state, deliberately: a failed read leaves the lists empty, and this page
+          // used to answer that by telling an owner to go and add the employees they already have.
+          <ReportLoadError error={loadError} />
+        ) : !period ? (
+          <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No months yet. Create a period in Periods first — payroll runs one month at a time.</div>
         ) : !run ? (
-          <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-            <div aria-hidden="true" style={{ fontSize: 24, marginBottom: 12 }}>💵</div>
-            <div style={{ fontSize: 14, color: 'var(--theme-text1)', marginBottom: 6 }}>No payroll run for {periodLabel} yet</div>
-            <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 18 }}>Generates a draft from each employee's salary structure and {periodLabel} attendance. You can review and edit before finalizing.</div>
-            <button className="btn btn-primary" onClick={generate} disabled={busy}>{busy ? 'Generating…' : 'Generate Payroll'}</button>
-          </div>
+          employees.length === 0 ? (
+            <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>
+              Nobody is on the payroll for {periodLabel}. It covers active and probation staff, and anyone whose last working day falls in or after this month. Add employees in HR → Employees.
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+              <div aria-hidden="true" style={{ fontSize: 24, marginBottom: 12 }}>💵</div>
+              <div style={{ fontSize: 14, color: 'var(--theme-text1)', marginBottom: 6 }}>No payroll run for {periodLabel} yet</div>
+              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 18 }}>Generates a draft for {employees.length} employee{employees.length === 1 ? '' : 's'} from each one's salary structure and {periodLabel} attendance. You can review it before finalizing.</div>
+              <button className="btn btn-primary" onClick={generate} disabled={busy}>{busy ? 'Generating…' : 'Generate Payroll'}</button>
+            </div>
+          )
         ) : (
           <>
             {/* Stat cards */}
             <div className="stat-grid">
               {[
                 { label: 'Total Gross',  value: totals.gross, color: 'var(--theme-accent-ink)', tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
-                { label: 'Deductions',   value: totals.ded + totals.ssfEmp + totals.advDed, color: 'var(--theme-red-text)', tip: 'SSF employee + absence deductions + other deductions + advance recovery + TDS.' },
-                { label: 'Net Payable',  value: totals.net, color: 'var(--theme-green-text)', tip: 'Total take-home pay to disburse this period.' },
+                { label: 'Deductions',   value: totalDeductions, color: 'var(--theme-red-text)', tip: 'Everything taken off pay: unpaid days, SSF (11%), other deductions such as CIT, advance recovery, and income tax (TDS).' },
+                { label: 'Net Payable',  value: totals.net, color: 'var(--theme-green-text)', tip: 'Total take-home pay to disburse this period, TADA reimbursements included.' },
                 { label: 'Employer SSF', value: totals.ssfEmpr, color: 'var(--theme-text2)', tip: '20% SSF the company pays on top — not part of net payable.' },
               ].map(s => (
                 <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
@@ -693,7 +877,7 @@ export default function PayrollRun() {
                     <Tip text={s.tip} width={260}>{s.label}</Tip>
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>NPR {fmt(s.value)}</div>
-                  <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 3 }}>{payslips.length} employees</div>
+                  <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 3 }}>{payslips.length} payslip{payslips.length === 1 ? '' : 's'}</div>
                 </div>
               ))}
             </div>
@@ -706,35 +890,39 @@ export default function PayrollRun() {
                     <tr>
                       <th>Employee</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Gross earnings: basic + allowances (monthly) or earned wage (daily/hourly)." width={250}>Gross</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Overtime pay at 1.5× the hourly rate." width={200}>OT</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Overtime pay: 1.5× the hourly rate on ordinary days, 2× on public holidays (the holiday rate comes from approved Overtime entries)." width={260}>OT</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Pay deducted for unpaid days — absences, unpaid leave, and half-days (gross ÷ days in month × unpaid days, allowances included)." width={270}>Absence</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="11% SSF — only for employees with an SSF number on file." width={230}>SSF</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="All configured deductions except SSF — CIT/PF, etc." width={250}>Other Ded</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Advance or loan installment auto-recovered this period from active advances in the Advances & Loans ledger. Recovery starts with the payroll of the month after an advance was issued, so one issued this month is not deducted yet. Repayment rows are written on Finalize." width={290}>Advance</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Income tax, computed automatically from FY tax slabs using year-to-date projection. Editable while draft if you need to override." width={270}>TDS</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Travel/Daily Allowance reimbursement — a non-taxable amount added after TDS, not part of the taxable gross. Editable while draft." width={290}>TADA</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="All configured deductions except SSF — CIT/PF, etc. Never more than the month earned: someone who joined on the 28th has it cut to what they were paid." width={270}>Other Ded</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Advance or loan instalment recovered this month from Advances & Loans. Recovery starts with the payroll of the month after an advance was issued, and never takes pay below zero — whatever this month cannot cover stays owed. Repayment rows are written on Finalize." width={300}>Advance</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Income tax, worked out from the fiscal-year tax slabs. You can type over it while this is a draft — a typed figure is kept when you Finalize, and ↺ puts back the calculated one." width={280}>TDS</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Travel/Daily Allowance reimbursement — the total of approved claims whose trip was over by the end of the month. Added after income tax and not taxed. To change it, change the claim in TADA Claims." width={290}>TADA</Tip></th>
                       <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>Net Pay</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {payslips.map(s => {
-                      const emp = empMap[s.employee_id] || {}
+                      const emp = empMap[s.employee_id] || { id: s.employee_id, full_name: nameOf(s.employee_id) }
                       const isMonthly = s.pay_basis === 'monthly'
-                      const advDed = s.advance_deduction || 0
-                      // Overtime recorded in BOTH the attendance sheet's OT column AND approved
-                      // Overtime entries pays twice — flag it so the payroll runner can fix the source.
-                      const attOtHrs = attendance.filter(a => a.employee_id === s.employee_id)
-                        .reduce((sum, a) => sum + (parseFloat(a.ot_hours) || 0), 0)
-                      const otBothSources = attOtHrs > 0 && otEntries.some(e => e.employee_id === s.employee_id)
+                      const advDed = num(s.advance_deduction)
+                      const tada = num(s.tada_amount)
+                      const claimCount = Array.isArray(s.tada_claim_ids) ? s.tada_claim_ids.length : 0
+                      const live = liveByEmp.get(s.employee_id)
+                      // Approved overtime and the attendance sheet's OT column on the SAME day — the
+                      // approved entry supersedes, so nothing is paid twice, but the difference needs
+                      // explaining. Read from the engine's own breakdown (S751) rather than re-scanning
+                      // the whole attendance array per row per render, which also flagged any employee
+                      // with OT in both places on DIFFERENT days, where nothing was superseded at all.
+                      const supersededHrs = num(live?.detail?.breakdown?.otSupersededHrs)
                       return (
                         <tr key={s.id}>
                           <td>
-                            <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name || '—'}</div>
-                            <div style={{ display: 'flex', gap: 6, marginTop: 2, alignItems: 'center' }}>
+                            <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
+                            <div style={{ display: 'flex', gap: 6, marginTop: 2, alignItems: 'center', flexWrap: 'wrap' }}>
                               {emp.employee_code && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{emp.employee_code}</span>}
                               {!isMonthly && <span className="badge badge-gray" style={{ fontSize: 10, fontWeight: 700 }}>{s.pay_basis}</span>}
-                              {!emp.ssf_enrolled && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>no SSF</span>}
+                              {'ssf_enrolled' in emp && !emp.ssf_enrolled && <span style={{ fontSize: 10, color: 'var(--theme-text2)' }}>no SSF</span>}
                               {/* Enrolled but no registration number: SSF is deliberately NOT deducted
                                   (it would never reach the challan), and this is the only place that
                                   otherwise looks identical to a correctly-contributing employee. */}
@@ -743,8 +931,8 @@ export default function PayrollRun() {
                                   <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>⚠ SSF no. missing</span>
                                 </Tip>
                               )}
-                              {otBothSources && (
-                                <Tip text={`This employee has OT in both places for this period — ${attOtHrs.toFixed(1)} hr on the attendance sheet and approved Overtime entries. They are no longer added together: on any day an approved entry exists, it supersedes the attendance sheet's hours for that day, so nothing is paid twice. Days with no approved entry still pay their attendance OT at 1.5×.`} width={300}>
+                              {supersededHrs > 0 && (
+                                <Tip text={`This employee has OT in both places on the same day. ${supersededHrs.toFixed(1)} hr typed on the attendance sheet was replaced by an approved Overtime entry for that day and is not paid, so nothing is paid twice. Payroll Calculation shows the split.`} width={300}>
                                   <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 0, padding: '1px 6px', cursor: 'help' }}>OT: 2 sources</span>
                                 </Tip>
                               )}
@@ -752,27 +940,49 @@ export default function PayrollRun() {
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.gross)}</td>
                           <td style={{ textAlign: 'right', color: s.ot_amount > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{s.ot_amount > 0 ? `+${fmt(s.ot_amount)}` : '—'}</td>
-                          <td style={{ textAlign: 'right', color: s.absence_deduction > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.absence_deduction > 0 ? `−${fmt(s.absence_deduction)}` : '—'}</td>
-                          <td style={{ textAlign: 'right', color: s.ssf_employee > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.ssf_employee > 0 ? `−${fmt(s.ssf_employee)}` : '—'}</td>
-                          <td style={{ textAlign: 'right', color: s.other_deductions > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.other_deductions > 0 ? `−${fmt(s.other_deductions)}` : '—'}</td>
+                          {negCell(num(s.absence_deduction))}
+                          {negCell(num(s.ssf_employee))}
+                          {negCell(num(s.other_deductions))}
                           <td style={{ textAlign: 'right', color: advDed > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>{advDed > 0 ? `−${fmt(advDed)}` : '—'}</td>
                           <td style={{ textAlign: 'right' }}>
-                            {finalized
-                              ? <span style={{ color: s.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.tds > 0 ? `−${fmt(s.tds)}` : '—'}</span>
-                              : <input type="number" min="0" defaultValue={s.tds || ''} onBlur={e => updateTds(s, e.target.value)} placeholder="0" aria-label={`TDS for ${emp?.full_name || 'employee'}`} style={{ ...inp, width: 80, textAlign: 'right' }} />}
+                            {finalized ? (
+                              <span style={{ color: s.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.tds > 0 ? `−${fmt(s.tds)}` : '—'}</span>
+                            ) : (
+                              <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
+                                {s.tds_overridden && live && (
+                                  <Tip text={`Typed by hand. The calculated figure from current data is NPR ${fmt(live.payslip.tds)} — press ↺ to put it back.`} width={260}>
+                                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => resetTds(s)} disabled={busy}
+                                      aria-label={`Put income tax for ${emp.full_name} back to the calculated NPR ${fmt(live.payslip.tds)}`}
+                                      style={{ padding: '0 6px' }}>↺</button>
+                                  </Tip>
+                                )}
+                                <input
+                                  type="number" min="0" step="any" inputMode="decimal"
+                                  className="form-input form-input--auto"
+                                  value={tdsDraft[s.id] ?? String(s.tds ?? 0)}
+                                  onChange={e => { const v = e.target.value; setTdsDraft(d => ({ ...d, [s.id]: v })) }}
+                                  onBlur={e => commitTds(s, e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                                  disabled={busy}
+                                  aria-label={`Income tax (TDS) for ${emp.full_name}`}
+                                  style={{ width: 84, textAlign: 'right', padding: '6px 8px', fontSize: 13 }}
+                                />
+                              </div>
+                            )}
                           </td>
                           <td style={{ textAlign: 'right' }}>
+                            {/* Read-only (decision 6): TADA always equals its approved claims' total. It
+                                used to be a free-typed box, and a typed amount paid a figure no claim
+                                backed while Finalize still marked the claims Paid. */}
                             <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
-                              {(s.tada_claim_ids || []).length > 0 && (
+                              {claimCount > 0 && (
                                 <Tip text={finalized
-                                  ? `Auto-paid from ${s.tada_claim_ids.length} approved TADA claim(s) for this period — marked Paid in TADA Claims when this run was finalized.`
-                                  : `Auto-filled from ${s.tada_claim_ids.length} approved TADA claim(s) for this period. Finalizing will mark them Paid — clear this to 0 to skip paying them via payroll.`} width={280}>
+                                  ? `Paid from ${claimCount} approved TADA claim${claimCount === 1 ? '' : 's'} — marked Paid in TADA Claims when this run was finalized.`
+                                  : `The total of ${claimCount} approved TADA claim${claimCount === 1 ? '' : 's'} whose trip was over by the end of ${monthName}. Finalizing marks ${claimCount === 1 ? 'it' : 'them'} Paid. To change the amount, change the claim in TADA Claims, then Regenerate.`} width={290}>
                                   <span style={{ fontSize: 10, cursor: 'help' }}>🔗</span>
                                 </Tip>
                               )}
-                              {finalized
-                                ? <span style={{ color: (s.tada_amount || 0) > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{(s.tada_amount || 0) > 0 ? `+${fmt(s.tada_amount)}` : '—'}</span>
-                                : <input type="number" min="0" defaultValue={s.tada_amount || ''} onBlur={e => updateTada(s, e.target.value)} placeholder="0" aria-label={`TADA amount for ${emp?.full_name || 'employee'}`} style={{ ...inp, width: 80, textAlign: 'right' }} />}
+                              <span style={{ color: tada > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{tada > 0 ? `+${fmt(tada)}` : '—'}</span>
                             </div>
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>
@@ -784,14 +994,17 @@ export default function PayrollRun() {
                     })}
                   </tbody>
                   <tfoot>
+                    {/* One total per column (S751). A single figure spanning Absence→Advance sat right-
+                        aligned under Advance and read as the month's advance recovery. */}
                     <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Total — {payslips.length}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{totals.ot > 0 ? `+${fmt(totals.ot)}` : '—'}</td>
-                      <td colSpan={4} style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
-                        {(totals.ded + totals.ssfEmp + totals.advDed) > 0 ? `−${fmt(totals.ded + totals.ssfEmp + totals.advDed)}` : '—'}
-                      </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{totals.tds > 0 ? `−${fmt(totals.tds)}` : '—'}</td>
+                      {negCell(totals.absence)}
+                      {negCell(totals.ssfEmp)}
+                      {negCell(totals.other)}
+                      <td style={{ textAlign: 'right', color: totals.advDed > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>{totals.advDed > 0 ? `−${fmt(totals.advDed)}` : '—'}</td>
+                      {negCell(totals.tds)}
                       <td style={{ textAlign: 'right', color: totals.tada > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{totals.tada > 0 ? `+${fmt(totals.tada)}` : '—'}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(totals.net)}</td>
                       <td></td>
@@ -800,18 +1013,18 @@ export default function PayrollRun() {
                 </table>
               </div>
             </div>
-            {/* One topic per line, not a 180-word wall (S613) — the reader is looking up ONE of
-                these rules mid-payroll, never reading all four. The stray \' this block used to
-                render on screen went with it (JSX text takes a plain apostrophe). */}
+            {/* One topic per line, not a 180-word wall (S613) — the reader is looking up ONE of these
+                rules mid-payroll, never reading all of them. */}
             <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
               <p style={{ margin: 0, fontWeight: 600 }}>
-                {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can override any TDS value inline.'}
+                {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can type over any income tax (TDS) figure.'}
               </p>
               <ul style={{ margin: '6px 0 0', paddingLeft: 16 }}>
+                <li><strong>Who is paid</strong>: active and probation staff, and anyone who left during the month — paid up to their last working day. Someone whose Final Settlement already paid the month is left out and named above.</li>
                 <li><strong>SSF</strong> deducts only for employees marked SSF-enrolled AND holding an SSF number — an enrolled employee with no number is flagged in the list and contributes nothing, since a contribution with no number cannot be filed on the challan.</li>
-                <li><strong>TDS</strong> comes from the fiscal-year tax slabs by year-to-date projection — finalize earlier months first so each month's tax builds on the last.</li>
-                <li><strong>TADA</strong> (travel/daily allowance) auto-fills from this period's Approved TADA Claims (🔗 marks a claim-linked amount) and is added after TDS as a non-taxable reimbursement — hand-edit or clear it freely. Finalize marks linked claims Paid; Reopen reverts them to Approved.</li>
-                <li><strong>Advances</strong>: active installments are auto-deducted starting with the payroll of the month <em>after</em> the advance was issued (an advance given any day in Bhadra is first cut in the Ashwin payroll), and repayment rows are written to Advances &amp; Loans on Finalize.</li>
+                <li><strong>TDS</strong> (income tax) comes from the fiscal-year tax slabs by year-to-date projection — finalize earlier months first so each month's tax builds on the last.</li>
+                <li><strong>TADA</strong> (travel/daily allowance) is paid by the first payroll after a claim is Approved and its trip is over — a trip from 30 Bhadra to 2 Ashwin is paid in the Ashwin payroll, and never twice. It is added after income tax and is not taxed. The amount is always the claims' own total (🔗 shows how many); to change it, change the claim in TADA Claims and Regenerate. Finalize marks those claims Paid; Reopen puts them back to Approved.</li>
+                <li><strong>Advances</strong>: instalments are deducted starting with the payroll of the month <em>after</em> the advance was issued (an advance given any day in Bhadra is first cut in the Ashwin payroll). A cut never takes pay below zero — if this month's pay is less than the instalment, only what was earned is taken and the rest stays owed for the next payroll. Repayment rows are written to Advances &amp; Loans on Finalize.</li>
               </ul>
             </div>
           </>
@@ -820,7 +1033,7 @@ export default function PayrollRun() {
 
       {/* On-screen payslip modal */}
       {viewSlip && (
-        <PayslipModal data={viewSlip} period={period} periodLabel={periodLabel} bizInfo={bizInfo} onClose={() => setViewSlip(null)} onPrint={() => printPayslip(viewSlip.slip, viewSlip.emp)} />
+        <PayslipModal data={viewSlip} periodLabel={periodLabel} bizInfo={bizInfo} bizInfoFailed={bizInfoFailed} draft={!finalized} onClose={() => setViewSlip(null)} onPrint={() => printPayslip(viewSlip.slip, viewSlip.emp)} />
       )}
 
       {/* Print-only payslip — explicit padding (margin off the paper edge, unlike the on-screen
@@ -830,49 +1043,49 @@ export default function PayrollRun() {
       {printSlip && (
         <div className="print-only" style={{ padding: '28px 36px' }}>
           <div style={{ maxWidth: 420 }}>
-            <PayslipBody slip={printSlip.slip} emp={printSlip.emp} periodLabel={periodLabel} bizInfo={bizInfo} forPrint />
+            <PayslipBody slip={printSlip.slip} emp={printSlip.emp} periodLabel={periodLabel} bizInfo={bizInfo} draft={!finalized} forPrint />
           </div>
         </div>
       )}
 
       {confirmAction === 'regenerate' && (() => {
-        // Regenerate rebuilds from LIVE employees, so a payslip belonging to someone since settled
-        // or deactivated is deleted and never re-inserted. That payslip is real — they worked part
-        // of the month — and losing it is silent, which is why the modal names them (S600 gate;
-        // folded in here from a second window.confirm that used to stack on top of this one, S612).
-        const departedNames = (freshness.departed || []).map(nameOf)
+        // Regenerate rebuilds from this month's payroll list, so a payslip for someone not on it —
+        // already paid by a Final Settlement, or not employed this month — is deleted and not
+        // re-inserted. That is the right outcome now (S751), and the modal still names them.
+        const departedNames = freshness.departed.map(nameOf)
         return (
           <ConfirmModal
             title="Regenerate this payroll draft?"
             confirmLabel="Regenerate"
-            danger={departedNames.length > 0}
             busy={busy} busyLabel="Recomputing…"
             onConfirm={regenerate}
             onCancel={() => setConfirmAction(null)}
           >
             <p style={{ margin: 0 }}>
               Every payslip is recomputed from current salary, attendance, overtime and tax data.
-              Manual TDS and TADA overrides are reset — TADA re-fills from the claims currently
-              Approved for this period. Nothing is finalized by this step.
+              Income tax typed by hand is reset to the calculated figure, and TADA is re-read from
+              claims that are Approved with the trip over by the end of {monthName}. Nothing is
+              finalized by this step.
             </p>
             {departedNames.length > 0 && (
-              <p style={{ margin: '10px 0 0', color: 'var(--theme-red-text)' }}>
+              <p style={{ margin: '10px 0 0' }}>
                 {departedNames.slice(0, 8).join(', ')}{departedNames.length > 8 ? `, +${departedNames.length - 8} more` : ''}{' '}
                 {departedNames.length === 1 ? 'has a payslip' : 'have payslips'} in this run but{' '}
-                {departedNames.length === 1 ? 'is' : 'are'} no longer active (settled or deactivated) —{' '}
-                {departedNames.length === 1 ? 'that payslip' : 'those payslips'} will be deleted and not restored.
+                {departedNames.length === 1 ? 'is' : 'are'} not on the {monthName} payroll (already paid by a Final Settlement, or not employed this month) —{' '}
+                {departedNames.length === 1 ? 'that payslip' : 'those payslips'} will be removed.
               </p>
             )}
           </ConfirmModal>
         )
       })()}
       {confirmAction === 'finalize' && period && (() => {
-        const netTotal  = payslips.reduce((s, p) => s + (p.net_pay || 0), 0)
-        const tadaCount = payslips.reduce((n, p) => n + ((p.tada_amount || 0) > 0 && Array.isArray(p.tada_claim_ids) ? p.tada_claim_ids.length : 0), 0)
-        const advCount  = payslips.filter(p => (p.advance_deduction || 0) > 0).length
+        const netTotal  = totals.net
+        const tadaCount = new Set(payslips.flatMap(p => (Array.isArray(p.tada_claim_ids) ? p.tada_claim_ids : []))).size
+        const advCount  = payslips.filter(p => num(p.advance_deduction) > 0).length
+        const progress  = monthProgress(period)
         return (
           <ConfirmModal
-            title={`Finalize ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year} payroll?`}
+            title={`Finalize ${periodLabel} payroll?`}
             confirmLabel="Finalize Payroll"
             busy={busy} busyLabel="Finalizing…"
             onConfirm={finalize}
@@ -884,49 +1097,85 @@ export default function PayrollRun() {
               <li><strong>{payslips.length}</strong> payslip{payslips.length === 1 ? '' : 's'}, NPR <strong>{fmt(netTotal)}</strong> total net pay</li>
               {advCount > 0 && <li>{advCount} advance/loan recover{advCount === 1 ? 'y' : 'ies'} will be recorded in Advances &amp; Loans</li>}
               {tadaCount > 0 && <li>{tadaCount} TADA claim{tadaCount === 1 ? '' : 's'} will be marked Paid</li>}
-              {/* Manually adjusted TDS/TADA no longer blocks Finalize (it is an intended edit, not
-                  staleness — see `freshness`), so this is the one place it gets stated. It belongs
-                  here rather than in the amber stale banner: nothing is wrong, but locking a
-                  hand-set figure as a permanent record is worth seeing at the moment you do it. */}
+              {/* A typed income tax does not block Finalize (it is an intended edit, not staleness), so
+                  this is the one place it gets stated: locking a hand-set figure is worth seeing. */}
               {freshness.overridden.length > 0 && (
                 <li>
                   <strong>{freshness.overridden.length}</strong> payslip{freshness.overridden.length === 1 ? ' has' : 's have'}{' '}
-                  a manually adjusted TDS or TADA figure ({freshness.overridden.slice(0, 4).map(nameOf).join(', ')}
-                  {freshness.overridden.length > 4 ? `, +${freshness.overridden.length - 4} more` : ''}) — locked as entered, not recomputed
+                  income tax typed by hand ({listNames(freshness.overridden, nameOf)}) — locked as entered, not recomputed
                 </li>
               )}
+              {/* Finalizing early is allowed (decision 5); the confirm says what that means. */}
+              {progress?.future && <li><strong>{monthName} hasn't started yet</strong> — attendance, leave and overtime for it can still change pay after you finalize.</li>}
+              {progress && !progress.future && (
+                <li>
+                  <strong>{monthName} isn't over yet</strong> — {progress.left === 0 ? 'today is its last day' : `${progress.left} day${progress.left === 1 ? '' : 's'} left after today`}. Attendance, leave or overtime still to come would need a Reopen.
+                </li>
+              )}
+              {pending?.loading && <li style={{ color: 'var(--theme-text2)' }}>Checking for leave and overtime still waiting for a decision…</li>}
+              {pending && !pending.loading && pending.failed && (
+                <li style={{ color: 'var(--theme-amber-text)' }}>Could not check for pending leave or overtime requests — look in Leave and Overtime before finalizing.</li>
+              )}
+              {pending && !pending.loading && !pending.failed && pending.leave > 0 && (
+                <li style={{ color: 'var(--theme-amber-text)' }}><strong>{pending.leave}</strong> leave request{pending.leave === 1 ? '' : 's'} touching {monthName} {pending.leave === 1 ? 'is' : 'are'} still pending — deciding {pending.leave === 1 ? 'it' : 'them'} later can change pay, and then needs a Reopen.</li>
+              )}
+              {pending && !pending.loading && !pending.failed && pending.ot > 0 && (
+                <li style={{ color: 'var(--theme-amber-text)' }}><strong>{pending.ot}</strong> overtime entr{pending.ot === 1 ? 'y' : 'ies'} for {monthName} {pending.ot === 1 ? 'is' : 'are'} still pending and will not be paid by this run.</li>
+              )}
+              {pending && !pending.loading && !pending.failed && pending.leave === 0 && pending.ot === 0 && (
+                <li>No leave or overtime requests for {monthName} are waiting for a decision.</li>
+              )}
             </ul>
-            <p style={{ margin: 0 }}>Payslips are locked as a permanent record. This can be undone with Reopen.</p>
+            <p style={{ margin: 0 }}>Everything is checked once more against current data before anything is written. Payslips are then locked as a permanent record; this can be undone with Reopen.</p>
           </ConfirmModal>
         )
       })()}
-      {confirmAction === 'reopen' && (
-        <ConfirmModal
-          title="Reopen this payroll for editing?"
-          confirmLabel="Reopen Payroll"
-          busy={busy} busyLabel="Reopening…"
-          onConfirm={reopen}
-          onCancel={() => setConfirmAction(null)}
-        >
-          <p style={{ margin: 0 }}>
-            The run returns to draft: advance repayments auto-recorded by this run are reversed,
-            and TADA claims it auto-marked Paid revert to Approved. Payslips already handed to
-            staff will no longer match until you finalize again.
-          </p>
-        </ConfirmModal>
-      )}
+      {confirmAction === 'reopen' && (() => {
+        // Advances this run recovered that have since been written off: the reopen removes the recovery
+        // but cannot reopen the loan, so they are named before anyone presses it (S751 review).
+        const ownAdvanceIds = new Set(repayments.filter(r => r.payroll_run_id === run?.id).map(r => r.advance_id))
+        const writtenOff = advances.filter(a => ownAdvanceIds.has(a.id) && a.status === 'written_off')
+        return (
+          <ConfirmModal
+            title="Reopen this payroll for editing?"
+            confirmLabel="Reopen Payroll"
+            busy={busy} busyLabel="Reopening…"
+            onConfirm={reopen}
+            onCancel={() => setConfirmAction(null)}
+          >
+            <p style={{ margin: 0 }}>
+              The run returns to draft: advance repayments auto-recorded by this run are reversed,
+              and TADA claims it auto-marked Paid revert to Approved. Payslips already handed to
+              staff will no longer match until you finalize again.
+            </p>
+            {writtenOff.length > 0 && (
+              <p style={{ margin: '10px 0 0', color: 'var(--theme-amber-text)' }}>
+                {writtenOff.map(a => `${nameOf(a.employee_id)}'s advance of NPR ${fmt(a.amount)}`).join(', ')}{' '}
+                {writtenOff.length === 1 ? 'has' : 'have'} since been written off — {writtenOff.length === 1 ? 'its write-off does' : 'their write-offs do'} not
+                change when this run's recovery is removed, so check {writtenOff.length === 1 ? 'it' : 'them'} in Advances &amp; Loans afterwards.
+              </p>
+            )}
+          </ConfirmModal>
+        )
+      })()}
+      {confirmEl}
     </div>
   )
 }
 
-function PayslipModal({ data, periodLabel, bizInfo, onClose, onPrint }) {
+function PayslipModal({ data, periodLabel, bizInfo, bizInfoFailed, draft, onClose, onPrint }) {
   const { slip, emp } = data
   return (
     // The shared Modal, not a hand-rolled overlay: this dialog shows an employee's pay document,
     // so it needs the focus trap and Escape that Modal provides. Printing is a separate path
-    // (the `printSlip` render below), which is why Modal's own `no-print` overlay is fine here.
+    // (the `printSlip` render above), which is why Modal's own `no-print` overlay is fine here.
     <Modal onClose={onClose} title="Payslip" maxWidth={460}>
-      <PayslipBody slip={slip} emp={emp} periodLabel={periodLabel} bizInfo={bizInfo} />
+      {bizInfoFailed && (
+        <p role="note" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          The company name, address and PAN could not be loaded, so this payslip will print without its letterhead. Reload the page to try again.
+        </p>
+      )}
+      <PayslipBody slip={slip} emp={emp} periodLabel={periodLabel} bizInfo={bizInfo} draft={draft} />
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
         <button className="btn btn-ghost" onClick={onClose}>Close</button>
         <button className="btn btn-primary" onClick={onPrint}>🖨 Print</button>
@@ -934,4 +1183,3 @@ function PayslipModal({ data, periodLabel, bizInfo, onClose, onPrint }) {
     </Modal>
   )
 }
-

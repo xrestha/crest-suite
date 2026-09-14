@@ -250,7 +250,7 @@ export function computePayslip(employee, components, attendanceRows, period, tds
       ssf_employee:      ssfEmp,
       ssf_employer:      ssfEmpr,
       net_pay: gross + otAmount - absenceDed - ssfEmp - otherDed - tdsVal - advDed,
-      breakdown: { basis, monthDays, tally: t, hourlyRate: hr, gross, unpaidDays, perDay, paidFraction, ssfBase, preJoinDays, postExitDays, notEmployedDays, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount },
+      breakdown: { basis, monthDays, tally: t, hourlyRate: hr, gross, unpaidDays, perDay, paidFraction, ssfBase, preJoinDays, postExitDays, notEmployedDays, otAttendanceHrs: t.sumOt, otAttendanceAmt: otAmount, otherDeductionsCut: 0 },
     }
   }
 
@@ -274,5 +274,38 @@ export function computePayslip(employee, components, attendanceRows, period, tds
     }
   }
 
+  // Take-home pay never goes below zero on account of a fixed deduction (decided with Aashish,
+  // 2026-09-14). A CIT of NPR 1,500 is taken in full for any month worked — but an employee who
+  // joined on the 28th earned less than that, and the payslip used to print a negative net pay
+  // while booking the whole 1,500 as retirement relief for money never paid in. The deduction is
+  // cut to what the month actually earned, and the retirement figure with it, so tax relief
+  // follows the money. Measured before TDS and the advance cut, which callers cap separately
+  // (payrollData.js buildPayrollRows).
+  const beforeTdsAndAdvance = result.net_pay + tdsVal + advDed
+  if (beforeTdsAndAdvance < 0 && result.other_deductions > 0) {
+    const cut = Math.min(result.other_deductions, -beforeTdsAndAdvance)
+    const otherDed = result.other_deductions - cut
+    result = {
+      ...result,
+      other_deductions: otherDed,
+      retirement_contribution: Math.min(result.retirement_contribution, otherDed),
+      net_pay: result.net_pay + cut,
+      breakdown: { ...result.breakdown, otherDeductionsCut: cut },
+    }
+  }
+
   return result
+}
+
+// Is this employee employed on at least one day of the period? join_date on or before the month's
+// last day, and end_date (if any) on or after its first. An employee who is not gets NO payslip
+// (decided with Aashish, 2026-09-14) — one hired for next month used to get a zero-gross payslip
+// here whose fixed deductions printed a negative net pay, and once finalized that empty month
+// counted as a prior month in the tax spread. AD date strings compare lexically.
+export function employedInPeriod(employee, periodStartAd, periodEndAd) {
+  const join = employee?.join_date ? String(employee.join_date).slice(0, 10) : null
+  const end  = employee?.end_date  ? String(employee.end_date).slice(0, 10)  : null
+  if (join && join > periodEndAd) return false
+  if (end && end < periodStartAd) return false
+  return true
 }

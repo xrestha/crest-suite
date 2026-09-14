@@ -41,6 +41,13 @@ const TABLE_LABELS = {
   hr_overtime_entries:    'Overtime',
   hr_shift_types:         'Shift Type',
   hr_shift_swap_requests: 'Shift Swap',
+  // audited since S751 — every one of these moves money: an advance and its write-off, a repayment,
+  // a bonus amount or type, a travel claim's approval and payment
+  hr_advances:            'Advance / Loan',
+  hr_advance_repayments:  'Advance Repayment',
+  hr_incentives:          'Incentive',
+  hr_incentive_configs:   'Incentive Type',
+  hr_tada_claims:         'TADA Claim',
   // POS module
   pos_orders:             'POS Order',
   pos_credit_notes:       'Credit Note',

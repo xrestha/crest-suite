@@ -6,7 +6,7 @@ import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { BS_MONTHS, adToBs, adToBsSafe, formatAd, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { workingDaysInRange, DAY_TYPES } from '../leave/leaveConstants'
-import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount } from '../tada/tadaShared'
+import { CATEGORIES, VEHICLE_TYPES, DEFAULT_PURPOSE_OPTIONS, DEFAULT_START_POINTS, OTHER_PURPOSE, PURCHASE_PURPOSE, EMPTY_TADA_ITEM, recomputeTadaAmount, tadaItemsTotal, tadaLineAmount, acceptTadaAmount, tadaDatesError } from '../tada/tadaShared'
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
 import PayslipBody from '../payroll/PayslipBody'
@@ -410,7 +410,10 @@ export default function SelfServiceHome() {
       items: p.items.map((it, i) => i === idx ? { ...it, vehicle: v, amount: recomputeTadaAmount(it, it.distanceKm, v, tadaVehicleRates) } : it),
     }))
   }
-  const tadaTotal = tadaForm.items.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0)
+  // Positive lines only — what submit_my_tada_claim saves — so the Total shown is the total sent (S751).
+  const tadaTotal = tadaItemsTotal(tadaForm.items)
+  const tadaEndMsg = tadaForm.start_date && tadaForm.end_date && tadaForm.end_date < tadaForm.start_date
+    ? 'The trip ends before it starts.' : ''
 
   function openTada() {
     setTadaForm(emptyTadaForm()); setTadaPurposeMode('preset'); setTadaStartPointMode('preset')
@@ -419,17 +422,24 @@ export default function SelfServiceHome() {
   }
 
   async function submitTada() {
-    if (!tadaForm.start_date || !tadaForm.end_date) { setTadaMsg('Set the trip dates.'); return }
-    const validItems = tadaForm.items.filter(it => parseFloat(it.amount) > 0)
+    // A reversed trip is refused here before the round trip; the RPC refuses it too (tada_dates_invalid).
+    const datesErr = tadaDatesError(tadaForm.start_date, tadaForm.end_date)
+    if (datesErr) { setTadaMsg(datesErr); return }
+    if (tadaForm.items.some(it => it.amount !== '' && !acceptTadaAmount(it.amount))) {
+      setTadaMsg('One of the amounts is not a real figure. Check them and try again.'); return
+    }
+    const validItems = tadaForm.items.filter(it => tadaLineAmount(it) > 0)
     if (validItems.length === 0) { setTadaMsg('Add at least one expense line with an amount.'); return }
     setTadaSubmitting(true); setTadaMsg('')
     const { error } = await supabase.rpc('submit_my_tada_claim', {
       p_trip_purpose: tadaForm.trip_purpose, p_destination: tadaForm.destination,
       p_start_date: tadaForm.start_date, p_end_date: tadaForm.end_date, p_notes: tadaForm.notes,
-      p_items: validItems.map(it => ({ category: it.category, description: it.description || null, amount: parseFloat(it.amount) })),
+      p_items: validItems.map(it => ({ category: it.category, description: it.description || null, amount: tadaLineAmount(it) })),
       p_start_point: tadaForm.start_point,
     })
     setTadaSubmitting(false)
+    // employeeErrorText is errorText(err, 'staff'): tada_duplicate / tada_dates_invalid /
+    // tada_amount_invalid each have an employee sentence there, so a refused claim says why.
     if (error) { setTadaMsg(employeeErrorText(error)); return }
     setTadaOpen(false)
     setDone('Claim submitted for approval.')
@@ -764,9 +774,10 @@ export default function SelfServiceHome() {
               </div>
               <div className="ss-field" style={{ flex: 1 }}>
                 <label htmlFor="ss-tada-end">End (BS)</label>
-                <BsCalendarPicker id="ss-tada-end" touch value={tadaForm.end_date} onChange={v => setTada('end_date', v)} placeholder="Select date" clearable />
+                <BsCalendarPicker id="ss-tada-end" touch value={tadaForm.end_date} onChange={v => setTada('end_date', v)} placeholder="Select date" clearable invalid={tadaEndMsg} />
               </div>
             </div>
+            {tadaEndMsg && <span className="field-error" id="ss-tada-end-err" role="alert">{tadaEndMsg}</span>}
 
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -793,7 +804,7 @@ export default function SelfServiceHome() {
                       {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                     <input aria-label={`Description for line ${idx + 1}`} style={inp} placeholder="Description (optional)" value={it.description} onChange={e => setTadaItem(idx, 'description', e.target.value)} />
-                    <input aria-label={`Amount for line ${idx + 1}`} style={inp} type="number" min="0" inputMode="decimal" placeholder="Amount (NPR)" value={it.amount} onChange={e => setTadaItem(idx, 'amount', e.target.value)} />
+                    <input aria-label={`Amount for line ${idx + 1}`} style={inp} type="number" min="0" inputMode="decimal" placeholder="Amount (NPR)" value={it.amount} onChange={e => { if (acceptTadaAmount(e.target.value)) setTadaItem(idx, 'amount', e.target.value) }} />
                     {it.category === 'Transport' && (
                       <>
                         <select aria-label={`Vehicle for line ${idx + 1}`} className="form-select" style={{ width: '100%' }} value={it.vehicle} onChange={e => setTadaItemVehicle(idx, e.target.value)}>

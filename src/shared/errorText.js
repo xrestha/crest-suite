@@ -180,6 +180,112 @@ const rules = [
     staff: "Payroll for that month has already been finalized, so it can't be changed. Nothing was changed — ask your manager.",
     operator: 'Payroll for that month is finalized and its payslips were built from these records, so nothing was changed. Reopen the payroll run for that month first if it really needs correcting, then finalize it again.',
   },
+  // ── Payroll money pages (S751, migration 20260914210000) ──────────────────────────────────
+  {
+    test: e => /hr_run_finalized/i.test(e.message || ''),
+    staff: 'That payroll is already finalized, so it cannot be changed. Nothing was changed — ask your manager.',
+    operator: 'This payroll run is finalized, so its payslips are locked and nothing was changed. Reopen the run first if it really needs correcting — another tab may have finalized it after this page loaded, so reload to see its real state.',
+  },
+  {
+    test: e => /period_has_finalized_payroll/i.test(e.message || ''),
+    staff: 'That month has finalized payroll, so it cannot be deleted. Nothing was changed.',
+    operator: 'That month has a finalized payroll run, and deleting the month would erase its payslips — so it was not deleted.',
+  },
+  {
+    test: e => /bonus_finalized/i.test(e.message || ''),
+    staff: 'That run is already finalized, so it cannot be changed. Nothing was changed.',
+    operator: 'This run is finalized, so its amounts are locked and nothing was changed. Reopen it first if it needs correcting — another tab may have finalized it after this page loaded, so reload to see its real state.',
+  },
+  {
+    test: e => /bonus_name_blank/i.test(e.message || ''),
+    staff: 'Give the run a name first. Nothing was saved.',
+    operator: 'The run needs a name (for example "Dashain" or "Tihar Bonus"). Nothing was saved.',
+  },
+  {
+    test: e => /advance_has_repayments/i.test(e.message || ''),
+    staff: 'That advance already has repayments, so it cannot be deleted. Nothing was changed.',
+    operator: 'This advance already has repayments recorded against it — some from payroll — so deleting it would erase that history. It was not deleted. If the money will not come back, write the balance off instead.',
+  },
+  {
+    test: e => /advance_amount_below_repaid/i.test(e.message || ''),
+    staff: 'More than that has already been repaid. Nothing was saved.',
+    operator: 'More than that amount has already been repaid on this advance, so the change was not saved.',
+  },
+  {
+    test: e => /advance_not_repaid/i.test(e.message || ''),
+    staff: 'Money is still owed on that advance, so it was not marked settled.',
+    operator: 'Money is still owed on this advance, so it was not marked settled. Record the repayment, or use Write off if the balance will not be repaid.',
+  },
+  {
+    test: e => /write_off_reason_required/i.test(e.message || ''),
+    staff: 'Say why the balance is being written off. Nothing was changed.',
+    operator: 'A write-off needs a reason, so nothing was changed. Say why the balance will not be repaid.',
+  },
+  {
+    test: e => /write_off_nothing_owed/i.test(e.message || ''),
+    staff: 'Nothing is owed on that advance. Nothing was changed.',
+    operator: 'Nothing is owed on this advance, so there is nothing to write off.',
+  },
+  {
+    test: e => /repayment_exceeds_outstanding/i.test(e.message || ''),
+    staff: 'That is more than is still owed. Nothing was saved.',
+    operator: 'That repayment is more than is still owed on this advance (the amount still owed is in the technical detail), so it was not recorded.',
+  },
+  {
+    test: e => /advance_not_found/i.test(e.message || ''),
+    staff: 'That advance no longer exists. Nothing was saved — reload the page.',
+    operator: 'That advance no longer exists (it may have been deleted on another screen), so nothing was recorded. Reload the page.',
+  },
+  {
+    test: e => /employee_not_found/i.test(e.message || ''),
+    staff: "That employee could not be found. Nothing was saved — reload the page.",
+    operator: 'That employee could not be found (removed, or not part of this business), so the claim was not saved. Reload the page and pick the employee again.',
+  },
+  {
+    test: e => /repayment_advance_mismatch/i.test(e.message || ''),
+    staff: "That repayment doesn't match the advance. Nothing was saved.",
+    operator: 'That repayment does not belong to this advance (different employee), so it was not recorded. Reload the page and try again.',
+  },
+  {
+    test: e => /advance_not_active/i.test(e.message || ''),
+    staff: 'That advance is closed, so nothing can be repaid on it. Nothing was saved.',
+    operator: 'This advance is settled or written off, so no repayment can be recorded on it. Reactivate it first if money really came back.',
+  },
+  {
+    test: e => /tada_own_claim/i.test(e.message || ''),
+    staff: 'You cannot approve or reject your own claim. Nothing was changed — ask another manager.',
+    operator: 'This is your own claim, so someone else has to approve or reject it. Nothing was changed.',
+  },
+  {
+    test: e => /tada_pay_rank/i.test(e.message || ''),
+    staff: 'Only an HR manager can mark a claim paid. Nothing was changed.',
+    operator: 'Marking a claim paid needs an HR manager, so nothing was changed.',
+  },
+  {
+    test: e => /tada_paid_method_required/i.test(e.message || ''),
+    staff: 'Choose how the claim was paid. Nothing was changed.',
+    operator: 'Choose how the claim was paid (cash, bank…). Nothing was changed.',
+  },
+  {
+    test: e => /tada_claim_locked|tada_transition_invalid|tada_claim_must_start_pending/i.test(e.message || ''),
+    staff: 'That claim has already been decided, so it cannot be changed that way. Nothing was changed.',
+    operator: 'That claim has already moved on (approved, rejected or paid — possibly from another screen), so this change was not made. Reload to see where it is now.',
+  },
+  {
+    test: e => /tada_dates_invalid/i.test(e.message || ''),
+    staff: 'The trip ends before it starts — check the dates. Nothing was sent.',
+    operator: 'The trip end date is before its start date, so the claim was not saved.',
+  },
+  {
+    test: e => /tada_amount_invalid/i.test(e.message || ''),
+    staff: 'One of the amounts is not a real figure. Check them and try again. Nothing was sent.',
+    operator: 'One of the expense amounts was negative or not a number, so the claim was not saved.',
+  },
+  {
+    test: e => /tada_duplicate/i.test(e.message || ''),
+    staff: 'You have already sent this claim — same dates and same amount. It was not sent again.',
+    operator: 'An identical claim (same employee, dates and amount) already exists, so this one was not saved again.',
+  },
   {
     test: e => /leave_overlap/i.test(e.message || ''),
     staff: 'You already have a leave request covering some of those days. Nothing was sent — cancel or change that one first.',

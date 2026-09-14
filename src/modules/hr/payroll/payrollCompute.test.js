@@ -31,16 +31,34 @@ describe('isSsfContributor', () => {
 
   // Reads the source, so a page that goes back to the flag alone fails here rather than on a tax
   // figure. Each of these computes TDS with an `isSsf` waiver.
+  // S751 moved the TDS computation out of the pages into two shared builders — payrollData.js's
+  // buildPayrollRows (both payroll pages) and bonusTax.js's computeRunBonusTds (both bonus pages) —
+  // so the positive assertion lives there, and the pages keep the negative one: none of them may
+  // go back to the flag.
+  test.each([
+    ['payrollData.js', 'payroll', /isSsfContributor\(emp\)/],
+    ['bonusTax.js', 'payroll', /isSsfContributor\(employee\)/],
+  ])('%s decides SSF through isSsfContributor', (file, dir, re) => {
+    expect(fs.readFileSync(path.join(__dirname, '..', dir, file), 'utf8')).toMatch(re)
+  })
   test.each([
     ['PayrollRun.jsx', 'payroll'],
     ['PayrollCalculation.jsx', 'payroll'],
     ['FestivalAllowance.jsx', 'festival'],
     ['IncentiveRun.jsx', 'incentives'],
-  ])('%s decides SSF through isSsfContributor, never the flag alone', (file, dir) => {
+    ['payrollData.js', 'payroll'],
+    ['bonusTax.js', 'payroll'],
+  ])('%s never decides SSF on the flag alone', (file, dir) => {
     const src = fs.readFileSync(path.join(__dirname, '..', dir, file), 'utf8')
-    expect(src).toMatch(/isSsfContributor\(emp\)/)
-    expect(src).not.toMatch(/isSsf\s*:\s*!!\s*emp\.ssf_enrolled\b/)
-    expect(src).not.toMatch(/\(\s*emp\.ssf_enrolled\s*\?/)
+    expect(src).not.toMatch(/isSsf\s*:\s*!!\s*(emp|employee)\.ssf_enrolled\b/)
+    expect(src).not.toMatch(/\(\s*(emp|employee)\.ssf_enrolled\s*\?/)
+  })
+  test('the two payroll pages and the two bonus pages compute through the shared builders', () => {
+    const read = (dir, f) => fs.readFileSync(path.join(__dirname, '..', dir, f), 'utf8')
+    expect(read('payroll', 'PayrollRun.jsx')).toMatch(/buildPayrollRows\(/)
+    expect(read('payroll', 'PayrollCalculation.jsx')).toMatch(/buildPayrollRows\(/)
+    expect(read('festival', 'FestivalAllowance.jsx')).toMatch(/computeRunBonusTds\(/)
+    expect(read('incentives', 'IncentiveRun.jsx')).toMatch(/computeRunBonusTds\(/)
   })
 })
 

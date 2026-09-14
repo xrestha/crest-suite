@@ -14,6 +14,7 @@ import { fetchSsfStartMap, ssfMonthsFrom } from '../gratuity/ssfEnrolment'
 import { leaveBalance } from '../leave/leaveBalance'
 import { tallyAttendance, calcAmount, retirementContributionOf } from '../payroll/payrollCompute'
 import { fetchYtdMap } from '../payroll/payrollData'
+import { bonusFiscalYear } from '../payroll/bonusTax'
 import { firstError } from '../../../shared/queryError'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { SSF_CAP, SSF_GRATUITY_PCT, GRATUITY_VESTING_MONTHS, SSF_EMPLOYEE_PCT } from '../payrollConstants'
@@ -102,7 +103,9 @@ export default function FinalSettlement() {
   // failed read settled a leaver on basic alone with no encashment — finalized as a permanent record.
   const [componentsFailed, setComponentsFailed] = useState(false)
   const [leaveReqsFailed,  setLeaveReqsFailed]  = useState(false)
-  const inputsFailed = ytdFailed || componentsFailed || leaveReqsFailed
+  // Outstanding advances are what the settlement recovers — see their load effect (S751).
+  const [advancesState, setAdvancesState] = useState('ok') // 'loading' | 'ok' | 'failed'
+  const inputsFailed = ytdFailed || componentsFailed || leaveReqsFailed || advancesState !== 'ok'
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [refusal,     setRefusal]     = useState(null) // why Finalize refused
   const [reopenTarget, setReopenTarget] = useState(null)
@@ -123,21 +126,38 @@ export default function FinalSettlement() {
 
   // Load outstanding advances when employee changes. There is no stored balance column —
   // outstanding is always derived as amount − SUM(repayments), same as PayrollRun's advance map.
+  //
+  // Both reads used to drop their errors (S751): a failed read showed no advances, and Finalize
+  // then paid the leaver in full — the company's money written off as a permanent record with
+  // nothing on screen having gone wrong. And nothing identified which employee a response was for,
+  // so picking A then B could land A's advances on B's settlement. `advancesState` is 'loading'
+  // until THIS employee's reads land, and Save/Finalize refuse on anything but 'ok'.
   useEffect(() => {
-    if (!clientId || !empId) { setAdvances([]); return }
+    if (!clientId || !empId) { setAdvances([]); setAdvancesState('ok'); return }
+    let cancelled = false
+    setAdvances([]); setAdvancesState('loading')
     Promise.all([
       scopedFrom('hr_advances', 'id, amount, purpose, issued_date, status')
         .eq('employee_id', empId).eq('status', 'active'),
       scopedFrom('hr_advance_repayments', 'advance_id, amount')
         .eq('employee_id', empId),
-    ]).then(([{ data: advs }, { data: reps }]) => {
+    ]).then(([advRes, repRes]) => {
+      if (cancelled) return // the picker has moved on to another employee
+      const err = advRes.error || repRes.error // the object, so its code reaches the detail line
+      if (err) {
+        setAdvancesState('failed')
+        setMsg("error:Could not load this employee's outstanding advances, so what the settlement recovers is unknown and it can't be saved or finalized until they load — it would pay the leaver in full. " + errorLine(err))
+        return
+      }
       const repaid = {}
-      ;(reps || []).forEach(r => { repaid[r.advance_id] = (repaid[r.advance_id] || 0) + (parseFloat(r.amount) || 0) })
-      const enriched = (advs || [])
+      ;(repRes.data || []).forEach(r => { repaid[r.advance_id] = (repaid[r.advance_id] || 0) + (parseFloat(r.amount) || 0) })
+      const enriched = (advRes.data || [])
         .map(a => ({ ...a, outstanding: Math.max(0, (parseFloat(a.amount) || 0) - (repaid[a.id] || 0)) }))
         .filter(a => a.outstanding > 0)
       setAdvances(enriched)
+      setAdvancesState('ok')
     })
+    return () => { cancelled = true }
   }, [clientId, empId, scopedFrom])
 
   // Salary components carry the allowances that make up gross pay. The settlement used to divide
@@ -205,8 +225,11 @@ export default function FinalSettlement() {
       const { fyStart } = fiscalYearOf(lastDate.year, lastDate.month)
       const [fest, ytd, per] = await Promise.all([
         // Deliberately not filtered by festival_name: it is free text and clients run Tihar too.
-        scopedFrom('hr_festival_allowances', 'id, festival_name, bs_year, amount, tds, status')
-          .eq('employee_id', empId).eq('bs_year', fyStart),
+        // Rows carry the PAY month since S751 (`bs_month`, default Ashwin), and one paid Baisakh–
+        // Ashadh sits in bs_year = fyStart + 1 — `.eq('bs_year', fyStart)` missed it and the leaver
+        // was paid a pro-rata festival share a second time. Read both BS years, keep this FY's rows.
+        scopedFrom('hr_festival_allowances', 'id, festival_name, bs_year, bs_month, amount, tds, status')
+          .eq('employee_id', empId).in('bs_year', [fyStart, fyStart + 1]),
         fetchYtdMap(scopedFrom, period).catch(err => ({ data: null, error: err })),
         scopedFrom('monthly_periods', 'id')
           .eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle(),
@@ -226,7 +249,7 @@ export default function FinalSettlement() {
         return
       }
       setYtdFailed(false)
-      setFestRows(fest.data || [])
+      setFestRows((fest.data || []).filter(f => bonusFiscalYear(f).fyStart === fyStart))
       setYtdMap(ytd.data || {})
 
       // Attendance for the final month. One row per employee per day, so it is paged — a
@@ -446,6 +469,14 @@ export default function FinalSettlement() {
   // Everything that would make finalizing wrong, checked BEFORE anything is written.
   async function checkRefusals() {
     const out = []
+
+    // 0. The advances this settlement recovers must have been READ for this employee (S751). A
+    //    failed or still-running read is an empty list, and an empty list pays the leaver in full.
+    if (advancesState !== 'ok') {
+      out.push(advancesState === 'failed'
+        ? 'Could not load ' + emp.full_name + "'s outstanding advances, so the amount this settlement recovers is unknown. Reload the page — finalizing now would pay them in full and write the advances off by omission."
+        : emp.full_name + "'s outstanding advances are still loading. Wait a moment and finalize again.")
+    }
 
     // 1. Already settled for this spell. A rehired employee may legitimately have an older
     //    settlement, so this refuses only one overlapping the CURRENT join date — where service
