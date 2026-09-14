@@ -321,6 +321,23 @@ Recorded so they aren't rediscovered from scratch:
   tracker that has silently stopped; it now keeps the last known stage and says so. And a raw
   `err.message` from `submit_guest_order` was rendered to an anonymous member of the public.
 
+  **S746 re-analysed it from Admin → Guest Menu, and found the public surface disagreeing with the
+  floor.** Three rules, each decided with Aashish:
+  - **An inactive table's QR shows the menu and takes no orders.** Both guest RPCs ignored
+    `pos_tables.status` while `PosOrders.jsx` makes an inactive tile unclickable, so a guest order
+    lit up a table nobody could open. `get_guest_menu` returns `guest_ordering_enabled = false` for
+    it and `submit_guest_order` refuses it — the flag alone would be advisory. Status is nullable,
+    so the test is `IS DISTINCT FROM 'inactive'`: a NULL-status table was never taken out of service.
+  - **A dish with no selling price is not on the public menu** (`selling_price > 0` in both RPCs).
+    It rendered NPR 0 and went into a request snapshot with a NULL `unit_price`.
+  - **The admin preview frame cannot place an order.** `GuestMenu` detects it is framed
+    (`window.self !== window.top`; `frame-ancestors 'self'` means only this app can frame it) and
+    swaps Place Order for a disabled button and a note. A guest's phone never frames the page.
+  **Any new guest-side refusal needs both halves** — the flag the page reads to hide a control, and
+  the check inside `submit_guest_order` — and `pos_enabled` stays the first gate in both (S632).
+  The admin page states every one of these above the frame, because a menu that is switched off,
+  empty, or order-less looks identical to a broken one from inside it.
+
   **S603's pass was the input classes.** POS carried 20 of the 62 text controls in the product that
   were wearing `className="form-select"` — a `<select>` class, so `cursor: pointer`, so a text box
   announcing itself as a menu — across `PosTableManagement`, `PosShifts`, `PosStaff`,

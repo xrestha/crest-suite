@@ -97,8 +97,8 @@ function loadStoredCart(tableId) {
 
 // Fully public, unauthenticated page — reached by a guest scanning a table's QR code (see
 // PosTableManagement.jsx's "Print QR" action). Shows the live POS menu for that table's client;
-// if the client has guest_ordering enabled (Pro-tier feature flag, see migration
-// 20260707210000_guest_ordering.sql) guests can also add items to a cart and submit an order.
+// guest ordering comes with the POS module (S632) and is off only at a table marked inactive
+// (S746), so guests can also add items to a cart and submit an order.
 // A submitted order lands as a 'pending' pos_guest_order_requests row, NOT directly in
 // pos_order_items — a staff member must review and Accept it in PosOrders.jsx before it becomes
 // part of the real order. All data comes from get_guest_menu, which does its own authorization
@@ -120,6 +120,14 @@ export default function GuestMenu() {
   const [guestNote, setGuestNote] = useState(() => loadStoredCart(tableId)?.guestNote || '')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  // True when this page is rendered inside a frame, which in this product means Admin → Guest
+  // Menu's preview. That preview is the real live page, so Place Order there used to send a
+  // genuine order to the client's staff (S746, decided with Aashish). A guest's phone never frames
+  // the page, so their view is unchanged. Reading window.top across origins throws; a foreign
+  // frame counts as a preview too, which is the safe direction.
+  const [inPreview] = useState(() => {
+    try { return window.self !== window.top } catch { return true }
+  })
   const [requestId, setRequestId] = useState(() => loadStoredRequest(tableId)?.requestId || null)
   // { items: [{name, qty}], covers } — kept alongside the request id so the confirmation card can
   // show what was actually ordered even after items/cart are cleared, and survives a page reload.
@@ -515,6 +523,14 @@ export default function GuestMenu() {
               All prices are inclusive of VAT.
             </p>
           )}
+          {/* get_guest_menu turns ordering off for a table marked inactive (S746). Without a line
+              saying so, the only difference is the missing Add buttons, which reads as a broken
+              page rather than a table that is not taking orders. */}
+          {!orderingEnabled && (
+            <p style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--theme-text2)' }}>
+              Ordering from this table isn't available right now — please order with a member of staff.
+            </p>
+          )}
         </div>
 
         {(rows.some(r => r.is_veg != null) || allAllergens.length > 0) && (
@@ -735,12 +751,23 @@ export default function GuestMenu() {
                 }}>
                   Sending to {tableName}
                 </p>
-                <button
-                  className="btn btn-primary" disabled={submitting} onClick={placeOrder}
-                  style={{ marginTop: 4 }}
-                >
-                  {submitting ? 'Placing order…' : `Place Order · ${fmtNpr(cartTotal)}`}
-                </button>
+                {inPreview ? (
+                  <>
+                    <button type="button" className="btn btn-primary" disabled style={{ marginTop: 4 }}>
+                      Place Order · {fmtNpr(cartTotal)}
+                    </button>
+                    <p role="note" style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)', textAlign: 'center' }}>
+                      Ordering is off in the admin preview. Open the menu in a new tab to place a real order.
+                    </p>
+                  </>
+                ) : (
+                  <button
+                    type="button" className="btn btn-primary" disabled={submitting} onClick={placeOrder}
+                    style={{ marginTop: 4 }}
+                  >
+                    {submitting ? 'Placing order…' : `Place Order · ${fmtNpr(cartTotal)}`}
+                  </button>
+                )}
               </>
             )}
           </div>

@@ -765,9 +765,10 @@ const ADMIN_FEATURES = [
                   icon: '📱', name: 'Guest Menu Preview',
                   guide: 'Preview the currently-viewed client\'s guest QR menu without needing a printed QR code or asking the client for one. Pick a client in the top-bar switcher first, then pick one of that client\'s tables — the page embeds the exact live page a guest sees after scanning that table\'s QR (GuestMenu.jsx), including guest ordering if the client has that Pro-tier feature enabled.',
                   tips: [
-                    'This is the real, live guest page, not a mockup — if guest ordering is on and you place an order, it creates a genuine pending order the client\'s own staff will see in POS Orders',
+                    'This is the real, live guest page, not a mockup — but Place Order is switched off inside the preview, so nothing added there reaches the client\'s staff. Open in New Tab is the real page, where an order is a genuine pending order in POS Orders',
                     'Copy Link or Open in New Tab if you want to test on an actual phone instead of the embedded preview',
-                    'If the client has no tables set up yet, add one in Tables first',
+                    'The page says why a guest menu looks the way it does: POS switched off (no menu at all), dishes switched on for POS with no selling price (left off the guest menu until priced), and tables marked inactive (listed as "(inactive)" — their QR still shows the menu, but guests cannot order from it)',
+                    'If the client has no tables set up yet, add one in Table Management first',
                   ],
                 },
                 {

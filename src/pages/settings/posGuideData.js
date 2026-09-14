@@ -293,6 +293,9 @@ export const POS_GUIDE_GROUPS = [
         formulas: [],
         gotchas: [
           'The page authorizes itself server-side from the table id (table → client → POS enabled) since a guest has no login — an invalid or stale QR gets nothing.',
+          'A table marked inactive in Table Management still shows the menu from its QR, but ordering is off and the server refuses a guest order for it — the floor cannot open an inactive table, so the order would have nowhere to land (S746).',
+          'A dish switched on for POS with no selling price is left off the guest menu and refused in a guest order until it is priced — it used to appear, and be orderable, at NPR 0 (S746). Admin → Guest Menu counts how many were left off.',
+          'Admin → Guest Menu embeds this page with Place Order switched off, so previewing can never send a real order; guests\' phones are unaffected.',
           'The guest\'s cart and submitted request survive a page reload (kept on the device), and the countdown simply disappears rather than ever showing negative "your food is late" minutes.',
         ],
         connections: 'Menu content and On-POS visibility come from Menu Pricing (IMS guide). Requests surface on the Orders floor; ticket status flows back from the KDS. The QR itself is printed per table in Table Management. There is nothing to toggle: guest ordering is gated on pos_enabled alone, so it is live the moment POS is on. The feature_flags.guest_ordering switch still shown in the admin Feature Access modal is inert and grants nothing (S632).',
