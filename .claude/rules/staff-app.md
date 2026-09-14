@@ -105,6 +105,8 @@ Every figure comes from an RPC the portal already called: `get_my_hr_payslips`,
 **Keep it that way where possible** — the whole rebuild carried no migration and no Edge Function
 deploy, which is why it could not break the admin side.
 
+**Every one of those RPCs calls `hr_self_service_assert_active()` first (S753), and a new one must too.** `hr_employees.access_blocked` used to refuse only the NEXT PIN login, so a phone already signed in kept reading payslips and filing leave after the employee was blocked. Blocking now revokes the account's sessions by trigger, and the check refuses the access token that is still valid for up to an hour (`self_service_blocked`, with a `'staff'` sentence in `errorText.js`). The fourteen were patched from their live bodies inside migration `20260915090000`; an RPC added later without the call is the hole.
+
 `submit_my_tada_claim` refuses an identical claim sent twice (`tada_duplicate`), a trip ending before
 it starts (`tada_dates_invalid`) and a non-number amount (`tada_amount_invalid`) since S751 — each has a
 `'staff'` sentence in `errorText.js`, and the form checks the dates first. Live data had five pairs of

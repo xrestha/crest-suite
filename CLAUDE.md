@@ -224,7 +224,7 @@ The lookup table covers BS 2000–2087; out-of-range years fall back to a 30-day
 
 ### HR payroll engine
 
-See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; `computePayslip` prorates for both `join_date` and `end_date`, so any query feeding it must select both; SSF needs the enrolment flag **and** `ssf_no`; approved OT supersedes attendance OT per `bs_day`; `hr_tada_claims` has no period columns; Final Settlement writes draft-first; and HR's five approval queues share ONE status vocabulary in `payrollConstants.js`, where amber means open and brass means decided-but-unpaid.
+See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; `computePayslip` prorates for both `join_date` and `end_date`, so any query feeding it must select both; SSF needs the enrolment flag **and** `ssf_no`; approved OT supersedes attendance OT per `bs_day`; `hr_tada_claims` has no period columns; payroll and settlement Finalize/Reopen are DB functions under `hr_pay_lock`; and HR's five approval queues share ONE status vocabulary in `payrollConstants.js`, where amber means open and brass means decided-but-unpaid.
 
 ### Page-revisit caching (`src/shared/sessionDataCache.js`, added S460)
 
