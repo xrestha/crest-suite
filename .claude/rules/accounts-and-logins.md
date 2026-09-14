@@ -116,7 +116,10 @@ Found re-analysing `ImsStaff.jsx`; the rules hold for `HrStaff.jsx` and `PosStaf
   reading Supervisor. Now: the first custom role is added beside the defaults; a role that logins
   hold cannot be removed; Reset refuses while a custom title is held; a title outside the scheme
   renders as its own option with an amber orphan mark, never as the first role sharing its level.
-  **Still open on HrStaff and PosStaff.**
+  **HrStaff got all of it and PosStaff the role-scheme half in S752**, plus: no "No Access" option
+  on any of the three pages (a login with no rank matched every Owner test — `pos_email` is in all of
+  them now, and admin-user-ops refuses a rankless create/update), no silent re-rank on load (a
+  banner and a confirmed Apply), and HR Manager granted by the Owner/admin only.
 - **Help copy that tells the Owner to give their own login a role is teaching the demotion trap.**
   The IMS Staff tip said exactly that for 300 sessions. The Owner's login already has every page;
   the person taking over gets a Manager login of their own.

@@ -23,7 +23,7 @@ Constants in `src/modules/hr/payrollConstants.js`: SSF rates (11% employee / 20%
 
 **`hr_payslips.unpaid_days` vs `absent_days` (S570, migration `20260818120000`).** `absent_days` is literal absences and must stay that way — Payroll Run's Excel export renders it under the header "Absent Days". The payslip's absence line covers absences **plus** unpaid leave, half days and pre-join days, so it prints `unpaid_days`; printing the narrow figure understated it (one absence + three unpaid-leave days read "(1.0 days)" against four days of money). Payslips finalized before the migration have no value and correctly print no count rather than a wrong one.
 
-> **S751 supersedes parts of the next five sections** — the TADA filter (S565), the `net_pay`/override comparison (S570/S620), the departed bucket being non-blocking (S600), and the two pages' own `buildRows`. Read the S751 section at the end first.
+> **S751 supersedes parts of the next five sections** — the TADA filter (S565), the `net_pay`/override comparison (S570/S620), the departed bucket being non-blocking (S600), and the two pages' own `buildRows`. **S752 supersedes the Final Settlement and gratuity parts of S600/S613/S620** — the partial-month salary, the SSF start-date offset, the browser-side Finalize/Reopen and its `isAdmin` Reopen gate. Read the S751 and S752 sections at the end first.
 
 **Payroll Run refuses to finalize a stale draft (S570).** The draft is a snapshot from Generate time, so approving OT or editing attendance afterwards left it quietly wrong while Finalize locked whatever was on screen — and the only staleness detection lived on `/hr/calculation`, a page nobody had to visit first. `PayrollRun.jsx` now recomputes live via **`buildRows` itself** (never a second copy of the arithmetic) and compares `net_pay` per employee; mismatches and employees added after the run block Finalize outright, with a named amber banner pointing at Regenerate. Finalize's confirm is now a consequence summary — payslip count, total net pay, advance recoveries and TADA claims to be closed — because those are real writes to other ledgers. This is why `fetchYtdMap`/`fetchApprovedTadaMap` are loaded on every page load here, not just inside generate/regenerate.
 
@@ -238,7 +238,7 @@ order preserves it too, which is the property the test pins.
 `isAdmin`, so the person accountable for a run had to contact support to correct it. All three are
 now `hasHrAccess('manager')`, matching the guard already on each page.
 
-**`FinalSettlement.jsx` is deliberately still `isAdmin`** and is the one place this pattern was left
+**(Superseded S752: Reopen is now Owner or HR manager, in the database, with a reason.)** `FinalSettlement.jsx` was deliberately still `isAdmin` and was the one place this pattern was left
 alone: reopening a settlement un-blocks a departed employee's Crest Staff login and reverses their
 status stamp, which is a different order of consequence from re-running a month. Decide it on its own
 merits rather than sweeping it for consistency.
@@ -731,3 +731,46 @@ Sixteen decisions taken with Aashish (2026-09-14). Migration `20260914210000`; e
   claim's employee, dates and total are frozen. Manager-entered claims go through `create_tada_claim`
   (one transaction); `submit_my_tada_claim` refuses an identical claim twice, NaN and reversed dates.
   **numeric accepts `'NaN'` and `NaN > 0` is true** — a CHECK needs `<> 'NaN'` spelled out.
+
+## Final Settlement, Gratuity, HR Reports and HR Staff (S752)
+
+Twelve decisions taken with Aashish (2026-09-14). Migration `20260914230000`; tests in
+`settlementCompute.test.js` and `gratuityCompute.test.js`.
+
+- **A leaver's final month is paid INSIDE the settlement, through the payroll engine.**
+  `computeSettlement()` (`settlement/settlementCompute.js`) calls `computePayslip` with `end_date` =
+  last working day and attendance/OT cut at that `bs_day`, then `computeFinalMonthTds()` (`tds.js`),
+  which trues the year up to actual income. Every figure is stored (`month_*`, `calc_version = 2`)
+  and **a finalized row is rendered from what it stored, never recomputed** — `statementOf(row)` is
+  the one renderer. SSF challan, TDS Report and TDS Certificate read settlements; a new filing sheet
+  must too, or a leaver's last month vanishes from it.
+- **Finalize and Reopen are database functions, not browser sequences.** `finalize_final_settlement`
+  re-reads outstanding advances, the approved TADA id set, finalized payslips for the month or later
+  and an overlapping finalized settlement, and refuses (`settlement_stale*`, `settlement_month_paid`,
+  `settlement_overlap`) before writing any ledger. `reopen_final_settlement` needs a reason and puts
+  back only what its own `final_settlement_id` rows name. **Both take `hr_pay_lock(client)`, and so
+  does payroll Finalize** (`hr_payroll_runs_guard_settled`) — two checks in two transactions paid
+  Shrawan 2083 twice, 22 seconds apart. A new path that finalizes pay for a month takes the same lock.
+- **`hr_final_settlements_guard`**: insert as draft only; a draft cannot become finalized by UPDATE; a
+  finalized row cannot be deleted or edited, only marked paid once (`paid_amount := net_payout`).
+  One finalized settlement per spell is a unique index.
+- **Notice is basic ÷ 30 per calendar day, and its direction follows the reason** (`noticeDirection`):
+  resignation deducts (`notice_deduction`), termination adds (`notice_pay`, taxed with the lump sum),
+  mutual/retirement none. Leave encashment is EARNED to date (`earnedLeaveBalance`: quota × completed
+  months this BS year ÷ 12 − taken − encashed), still ÷26. TADA: every approved unpaid claim.
+- **Gratuity counts COMPLETED months** (`completedMonths`, BS anniversary walk, day clamped) and the
+  SSF offset is **stored employer SSF × `SSF_GRATUITY_SHARE_OF_EMPLOYER`** (`fetchSsfContributions` /
+  `ssfFundedFor`), never a start date × a rate. `calcGratuity` takes `ssfFunded = {amount, months} |
+  null`; null is unknown coverage, and unknown is no offset.
+- **Nobody below the Owner decides their own record**: `hr_leave_requests_guard_decision` (stamps
+  `decided_by`), `hr_overtime_guard_own`, `hr_advances_guard_own` refuse `hr_own_request`;
+  `hr_self_decision_exempt()` is admin OR Owner. A new approval queue gets the same trigger.
+- **HR-role logins read `monthly_periods`.** The S430 `no_hr_role_staff` FOR ALL policy made every
+  months join empty for them, so three settlement gates passed vacuously; it is per-command write
+  policies now. **When a check reads a table an HR login cannot see, it is not a check for that login.**
+- **Staff rank (all three modules):** no rankless staff login (admin-user-ops refuses, pages have no
+  "No Access"); HR Manager is granted by Owner/admin only; the staff role lists in `settings` are
+  Owner-or-that-module's-manager (`settings_guard_staff_roles`); **no page re-ranks on load** — a
+  mismatch is a banner and a confirmed Apply. `pos_email` joins every negative Owner test.
+- `RESTORE_ORDER` restores `hr_advance_repayments`/`hr_tada_claims` AFTER the payroll runs and
+  settlements they reference; Danger Zone deletes repayments before runs (their FK is NO ACTION).
