@@ -376,6 +376,13 @@ already spent and that no longer even fit its one-id loader. **Not swept:** `Sup
 which selects an id and derives rather than loads. `MonthlyOwnerReport.jsx` stood on this list until S682 wired it and holds a `periodReq`
 now.
 
+**The four POS report pages were swept in S754**: `SalesReport`, `CoversReport`,
+`PosExceptionReport` and `KotLog`, the last with one guard per tab loader. They pick a date RANGE
+rather than a period, so the key is `` `${clientId}:${fromIso}:${toIso}` ``, and the 1L+ tab keys
+on client + fiscal year. A reload of the same range still lands, and an admin's client switch does
+not. The race here was the S601 one exactly: the export's scope line and filename come from the
+pickers, which move before the data does.
+
 ## The 1000-row truncation sweeps: S528, S529, S613, S628
 
 The RULE (and `fetchAllRowsChunked`) stays in the root `CLAUDE.md`. These are the sweep histories behind it, migrated S663 — read them before starting another sweep.

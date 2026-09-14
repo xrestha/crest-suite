@@ -140,6 +140,9 @@ export async function getCachedPosSettings(clientId) {
 }
 
 // ── POS: per-table order snapshot (last-known-good, warmed on every online open) ──
+// The snapshot is { orderId, orderNo, covers, items, itemsVersion }. Each item carries sent_to_kot
+// AND sent_qty, and itemsVersion is the pos_orders.items_version the lines were read or saved at
+// (S754) — an order reopened from here offline queues its edits against that version.
 
 export async function cachePosOrderForTable(tableId, snapshot) {
   await idbPut('pos_order_cache', { table_id: tableId, ...snapshot, updated_at: Date.now() })
@@ -147,8 +150,22 @@ export async function cachePosOrderForTable(tableId, snapshot) {
 export async function getCachedPosOrderForTable(tableId) {
   return await idbGet('pos_order_cache', tableId)
 }
+// Dropped when the table's order closes (S754). The snapshot outlived its order: a table billed
+// online and later opened offline reloaded the paid order's lines as if still open, and the next
+// save replayed them onto a dead order id. One readwrite transaction (idbDelete), like every write here.
+export async function clearCachedPosOrderForTable(tableId) {
+  await idbDelete('pos_order_cache', tableId)
+}
 
 // ── POS: order queue — one row per order touched while offline, upsert-merged ──
+//
+// A queued entry's `items` carry sent_to_kot and sent_qty per line. `items_version` is the version of
+// the order the FIRST offline edit was made against (S754): the replay passes it to
+// save_pos_order_items as p_expected_version, so an order another tablet saved in the meantime is
+// refused and surfaced as a conflict rather than overwritten. It is therefore kept from the first
+// enqueue — every later offline edit to the same order builds on that same server state, and a later
+// patch must not move the base forward to a version this device never saw. An order created offline
+// has no version (the server row does not exist yet).
 
 export async function enqueuePosOrder(orderId, patch) {
   // The read (get) and the write (put) MUST live in one readwrite transaction. IndexedDB
@@ -166,6 +183,9 @@ export async function enqueuePosOrder(orderId, patch) {
     let merged
     getReq.onsuccess = () => {
       const existing = getReq.result
+      const baseVersion = Number.isInteger(existing?.items_version) ? existing.items_version
+        : Number.isInteger(patch.items_version) ? patch.items_version
+        : undefined
       merged = {
         ...(existing || {}),
         ...patch,
@@ -173,6 +193,8 @@ export async function enqueuePosOrder(orderId, patch) {
         kot_sends: [...(existing?.kot_sends || []), ...(patch.kot_sends || [])],
         updated_at: Date.now(),
       }
+      if (baseVersion === undefined) delete merged.items_version
+      else merged.items_version = baseVersion
       store.put(merged)
     }
     getReq.onerror = e => reject(e.target.error)

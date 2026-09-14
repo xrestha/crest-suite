@@ -32,6 +32,9 @@ export function usePosIdleLock(enabled, onWarn, onLock) {
   const lockRef = useRef(null)
   const onWarnRef = useRef(onWarn)
   const onLockRef = useRef(onLock)
+  // When someone last actually touched the till. Only real input moves it — never a tab becoming
+  // visible again (S754).
+  const lastActivityRef = useRef(Date.now())
   onWarnRef.current = onWarn
   onLockRef.current = onLock
 
@@ -39,6 +42,7 @@ export function usePosIdleLock(enabled, onWarn, onLock) {
     if (!enabled) return
 
     let countdown = null
+    let locked = false
 
     const clearAll = () => {
       clearTimeout(warnRef.current)
@@ -46,36 +50,57 @@ export function usePosIdleLock(enabled, onWarn, onLock) {
       clearInterval(countdown)
     }
 
-    const reset = () => {
+    const lock = () => {
+      if (locked) return
+      locked = true
+      clearAll()
+      onLockRef.current?.()
+    }
+
+    // Arms the warning and the lock for `remainingMs` from now. The countdown reads a deadline
+    // rather than decrementing a counter, so re-arming with less than the full warning window left
+    // shows the true seconds remaining.
+    const arm = (remainingMs) => {
       clearAll()
       onWarnRef.current?.(null)
+      const deadline = Date.now() + remainingMs
+      const secsLeft = () => Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
       warnRef.current = setTimeout(() => {
-        let left = Math.round(POS_IDLE_WARN_MS / 1000)
-        onWarnRef.current?.(left)
-        countdown = setInterval(() => {
-          left -= 1
-          onWarnRef.current?.(left > 0 ? left : 0)
-        }, 1000)
-      }, POS_IDLE_LOCK_MS - POS_IDLE_WARN_MS)
-      lockRef.current = setTimeout(() => {
-        clearAll()
-        onLockRef.current?.()
-      }, POS_IDLE_LOCK_MS)
+        onWarnRef.current?.(secsLeft())
+        countdown = setInterval(() => onWarnRef.current?.(secsLeft()), 1000)
+      }, Math.max(0, remainingMs - POS_IDLE_WARN_MS))
+      lockRef.current = setTimeout(lock, remainingMs)
+    }
+
+    const onActivity = () => {
+      lastActivityRef.current = Date.now()
+      arm(POS_IDLE_LOCK_MS)
     }
 
     // pointerdown/keydown/touchstart rather than mousemove: a mouse nudged by a passing tray, or
     // a cable brushing a touchscreen, should not count as someone being present. Every one of
-    // these requires a deliberate act. `visibilitychange` resets on return so switching to the
-    // KOT window and back doesn't burn the timer.
+    // these requires a deliberate act.
     const EVENTS = ['pointerdown', 'keydown', 'touchstart', 'wheel']
-    EVENTS.forEach(e => window.addEventListener(e, reset, { passive: true }))
-    const onVisible = () => { if (document.visibilityState === 'visible') reset() }
+    EVENTS.forEach(e => window.addEventListener(e, onActivity, { passive: true }))
+
+    // S754: returning to the tab used to call a full reset, so a tablet that slept for an hour
+    // (timers do not run while it sleeps) handed whoever woke it three more minutes of the absent
+    // waiter's session — under that waiter's name on every bill. The idle time is measured from
+    // the last real input instead: past the lock period it locks at once, since the grace period
+    // was already spent while nobody was there; otherwise only what is left of it is re-armed.
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || locked) return
+      const remaining = POS_IDLE_LOCK_MS - (Date.now() - lastActivityRef.current)
+      if (remaining <= 0) lock()
+      else arm(remaining)
+    }
     document.addEventListener('visibilitychange', onVisible)
 
-    reset()
+    lastActivityRef.current = Date.now()
+    arm(POS_IDLE_LOCK_MS)
     return () => {
       clearAll()
-      EVENTS.forEach(e => window.removeEventListener(e, reset))
+      EVENTS.forEach(e => window.removeEventListener(e, onActivity))
       document.removeEventListener('visibilitychange', onVisible)
       onWarnRef.current?.(null)
     }

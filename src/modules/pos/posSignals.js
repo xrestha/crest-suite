@@ -68,11 +68,42 @@ export const RESERVATION_STATUS_BADGE = {
 // Started / Ready, they do not "start" or "ready" it). A monotone progression inert → working →
 // done: nothing here is a fault, so nothing here is red or amber. Only Ready asks for anything —
 // somebody has to run the food — and it is the one that is green.
-export const KOT_STATUS_LABEL = { new: 'Sent', in_progress: 'Started', ready: 'Ready' }
-export const KOT_STATUS_BADGE = { new: 'badge-gray', in_progress: 'badge-yellow', ready: 'badge-green' }
+//
+// Served (S754, migration 20260916110000) is the stage after Ready: the food reached the table.
+// It is FINISHED and asks nothing of anyone, so it is inert grey — never green (green on the floor
+// means "food in the pass, run it") and never a strip colour. A served ticket leaves the Kitchen
+// Display, and on the floor it stops counting as ready.
+export const KOT_STATUS_LABEL = { new: 'Sent', in_progress: 'Started', ready: 'Ready', served: 'Served' }
+export const KOT_STATUS_BADGE = { new: 'badge-gray', in_progress: 'badge-yellow', ready: 'badge-green', served: 'badge-gray' }
 // Lower = less done. When a table has several open tickets at different stages, the floor badge
-// shows the least-advanced one — that is the one still needing attention.
-export const KOT_STATUS_RANK  = { new: 0, in_progress: 1, ready: 2 }
+// shows the least-advanced one still in the kitchen's hands — that is the one needing attention.
+export const KOT_STATUS_RANK  = { new: 0, in_progress: 1, ready: 2, served: 3 }
+
+// One order's tickets, summarised for a floor tile or takeaway card: `stage` is the least-advanced
+// ticket that has not been served ('served' once every ticket has), `ready` how many tickets sit in
+// the pass. `statuses` is that order's pos_kot_log statuses; cancelled (a voided order's tickets) and
+// anything unknown are ignored. Null when there is nothing to show.
+export function summarizeTicketStages(statuses) {
+  const live = (statuses || []).filter(s => s in KOT_STATUS_RANK)
+  if (live.length === 0) return null
+  const ready = live.filter(s => s === 'ready').length
+  const inHand = live.filter(s => s !== 'served')
+  const stage = inHand.length === 0
+    ? 'served'
+    : inHand.reduce((worst, s) => (KOT_STATUS_RANK[s] < KOT_STATUS_RANK[worst] ? s : worst))
+  return { stage, ready, open: inHand.length }
+}
+
+// The chip for that summary. Owner decision (S754): when some of a table's food is ready and some is
+// not, the tile says "N ready" — the ready food is what a waiter crossing the room has to act on,
+// and the least-advanced stage ("Sent") hid it. All of it ready reads plain "Ready".
+export function ticketSummaryChip(summary) {
+  if (!summary) return null
+  if (summary.ready > 0) {
+    return { label: summary.ready === summary.open ? 'Ready' : `${summary.ready} ready`, className: KOT_STATUS_BADGE.ready }
+  }
+  return { label: KOT_STATUS_LABEL[summary.stage], className: KOT_STATUS_BADGE[summary.stage] }
+}
 
 // ---------------------------------------------------------------------------------------------
 // How a bill was closed. A comp and a discount are decided facts about a bill where the money did
@@ -113,11 +144,15 @@ export const STATION_BADGE = { KOT: 'badge-purple', BOT: 'badge-yellow' }
 //
 // Attention outranks state, and every colour here is also carried by a labelled chip on the same
 // tile (⚠ N / 📵 / 🔔 Guest order / the Ready badge), so nothing is conveyed by colour alone.
+//
+// `kotStatus` is either a stage string or a summarizeTicketStages() summary (S754). Any ready ticket
+// turns the strip green — "some of it is ready" is still food in the pass — and served never does.
 export function tableStripColor({ status, order, kotStatus, guestPending }) {
+  const foodReady = kotStatus && typeof kotStatus === 'object' ? kotStatus.ready > 0 : kotStatus === 'ready'
   if (status === 'inactive')                                return 'var(--theme-border-lt)'
   if (guestPending)                                         return 'var(--theme-amber)'  // a guest is waiting on you
   if (order && (order.pending > 0 || order.offlinePending)) return 'var(--theme-amber)'  // typed, not fired / not synced
-  if (kotStatus === 'ready')                                return 'var(--theme-green)'  // food in the pass, run it
+  if (foodReady)                                            return 'var(--theme-green)'  // food in the pass, run it
   if (order || status === 'occupied')                       return 'var(--theme-accent)' // live and in hand
   return 'var(--theme-border)'                                                           // available or held: quiet
 }
@@ -125,7 +160,8 @@ export function tableStripColor({ status, order, kotStatus, guestPending }) {
 // The kitchen board's card strip, same reasoning one level in. The board already sorts every
 // ticket into a labelled New / In Progress / Ready column and puts the next action on its own
 // button, so a stage-coloured strip repeated information three other things already carried —
-// while spending red and amber, the two hues lateness needs. Quiet until a cook is needed.
+// while spending red and amber, the two hues lateness needs. Quiet until a cook is needed. A served
+// ticket is not on the board at all (S754), so it has no strip.
 export function ticketStripColor({ status, isLate, isWarn }) {
   if (isLate)             return 'var(--theme-red)'
   if (isWarn)             return 'var(--theme-amber)'

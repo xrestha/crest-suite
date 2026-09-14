@@ -7,16 +7,130 @@ export const fmtNpr = npr
 
 // Shared shape for a pos_order_items row, whether it's about to go straight to Supabase or into
 // the offline queue (enqueuePosOrder) — keeps the two write paths from drifting apart.
-export const toItemPayload = i => ({
-  recipe_id:   i.recipe_id || null,
-  name:        i.name,
-  category:    i.category   || 'Other',
-  qty:         i.qty,
-  unit_price:  i.unit_price,
-  vat_rate:    i.vat_rate   ?? 0,
-  sent_to_kot: i.sent_to_kot || false,
-  notes:       i.notes || null,
-})
+//
+// sent_qty (stored since migration 20260916100000) is how much of the line the station already
+// has: the whole qty when the line is flagged sent, otherwise the carried count from the last send.
+// Clamped to qty — after a pull (qty cut below what was fired) the in-memory count stays at the old
+// figure, and storing it would make save_pos_order_items record the same removal on every later save.
+// unit_price / vat_rate / name / category ride along but are IGNORED by the server: an existing line
+// keeps its stored values and a new one is priced from the recipe.
+export const toItemPayload = i => {
+  const qty = Number(i.qty) || 0
+  const kitchenQty = i.sent_to_kot ? qty : (Number(i.sent_qty) || 0)
+  return {
+    recipe_id:   i.recipe_id || null,
+    name:        i.name,
+    category:    i.category   || 'Other',
+    qty:         i.qty,
+    unit_price:  i.unit_price,
+    vat_rate:    i.vat_rate   ?? 0,
+    sent_to_kot: i.sent_to_kot || false,
+    sent_qty:    Math.max(0, Math.min(qty, Math.floor(kitchenQty))),
+    notes:       i.notes || null,
+  }
+}
+
+// Every read that puts an OPEN order on the order screen selects exactly this, so the three paths
+// (table tile, takeaway card, offline-conflict recovery) and the stale-order reload cannot drift on
+// what an order carries. items_version and sent_qty need migration 20260916100000.
+export const OPEN_ORDER_SELECT =
+  'id, order_no, covers, status, items_version, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes)'
+
+// A stored line as the cart holds it. sent_qty is the stored count, falling back to the whole qty for
+// a line flagged sent before the column existed (its sent_qty defaulted to 0).
+export const cartLineFromStored = i => ({ ...i, sent_qty: i.sent_qty || (i.sent_to_kot ? i.qty : 0) })
+
+const lineKeyOf = i => i.recipe_id || `name:${i.name}`
+
+// Lines this device had that `serverLines` does not — by recipe and by quantity difference — as
+// UNSENT lines of just the difference. What a stale save (another tablet saved first) or a stale
+// offline replay would otherwise lose without a word.
+export function missingFromServer(localLines, serverLines) {
+  const onServer = new Map()
+  for (const s of serverLines || []) onServer.set(lineKeyOf(s), (onServer.get(lineKeyOf(s)) || 0) + (Number(s.qty) || 0))
+  const missing = []
+  for (const i of localLines || []) {
+    const diff = (Number(i.qty) || 0) - (onServer.get(lineKeyOf(i)) || 0)
+    if (diff > 0) {
+      missing.push({
+        recipe_id: i.recipe_id || null, name: i.name, category: i.category || 'Other', qty: diff,
+        unit_price: i.unit_price, vat_rate: i.vat_rate, notes: i.notes || '', sent_to_kot: false, sent_qty: 0,
+      })
+    }
+  }
+  return missing
+}
+
+// Puts `incoming` on top of `base` as UNSENT: a recipe already on the order gains the quantity, and
+// keeps what the station already has as its sent count, so only the addition goes on the next ticket.
+export function mergeUnsentLines(base, incoming) {
+  const merged = (base || []).map(l => ({ ...l }))
+  for (const inc of incoming || []) {
+    const at = inc.recipe_id ? merged.findIndex(l => l.recipe_id === inc.recipe_id) : -1
+    if (at >= 0) {
+      const l = merged[at]
+      merged[at] = {
+        ...l,
+        qty: (Number(l.qty) || 0) + (Number(inc.qty) || 0),
+        sent_to_kot: false,
+        sent_qty: l.sent_to_kot ? l.qty : (l.sent_qty || 0),
+        notes: l.notes || inc.notes || null,
+      }
+    } else {
+      merged.push({ ...inc, sent_to_kot: false, sent_qty: 0 })
+    }
+  }
+  return merged
+}
+
+// Whether the order's stored lines are exactly what `payload` (toItemPayload rows) would store — same
+// recipes, quantities, sent flags, sent counts and notes. A save refused as stale whose stored lines
+// already match is this device's OWN earlier save, whose response was lost: the retry is then a
+// success, not a conflict (S754).
+export function storedLinesMatchPayload(storedLines, payload) {
+  const sig = rows => (rows || [])
+    .map(r => [r.recipe_id || '', Number(r.qty) || 0, r.sent_to_kot ? 1 : 0, Number(r.sent_qty) || 0, (r.notes || '').trim()].join(''))
+    .sort()
+    .join('')
+  return sig(storedLines) === sig(payload)
+}
+
+const SAME_NUMBER = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.0001
+
+// How the server's priced lines (save_pos_order_items' returned `items`) differ from the cart:
+// 'price' when a unit price or VAT rate moved (the total on screen is no longer the bill), 'label'
+// when only a name or category did, null when they agree or there is nothing to compare.
+export function menuDrift(localLines, serverItems) {
+  if (!Array.isArray(serverItems)) return null
+  const byRecipe = new Map(serverItems.filter(s => s.recipe_id).map(s => [s.recipe_id, s]))
+  let drift = null
+  for (const i of localLines || []) {
+    const s = byRecipe.get(i.recipe_id)
+    if (!s) continue
+    if (!SAME_NUMBER(s.unit_price, i.unit_price) || !SAME_NUMBER(s.vat_rate, i.vat_rate)) return 'price'
+    if ((s.name || '') !== (i.name || '') || (s.category || 'Other') !== (i.category || 'Other')) drift = 'label'
+  }
+  return drift
+}
+
+// The cart with each line's price, VAT rate, name and category taken from the server's lines (by
+// recipe). Quantities, notes and sent flags are left alone, so a line tapped in while the save was in
+// flight is not disturbed. Returns the same array when nothing changed.
+export function withServerLineFields(localLines, serverItems) {
+  if (!Array.isArray(serverItems) || !Array.isArray(localLines)) return localLines
+  const byRecipe = new Map(serverItems.filter(s => s.recipe_id).map(s => [s.recipe_id, s]))
+  let changed = false
+  const next = localLines.map(i => {
+    const s = byRecipe.get(i.recipe_id)
+    if (!s) return i
+    const category = s.category || 'Other'
+    if (SAME_NUMBER(s.unit_price, i.unit_price) && SAME_NUMBER(s.vat_rate, i.vat_rate)
+        && (s.name || '') === (i.name || '') && category === (i.category || 'Other')) return i
+    changed = true
+    return { ...i, unit_price: Number(s.unit_price) || 0, vat_rate: Number(s.vat_rate) || 0, name: s.name, category }
+  })
+  return changed ? next : localLines
+}
 
 // Only these payment methods are scanned by the customer — Cash/Card/Credit already have their
 // own settlement path, so a "scan to pay" QR on the bill would be irrelevant or misleading there.
@@ -32,6 +146,8 @@ export {
   KOT_STATUS_BADGE,
   KOT_STATUS_RANK,
   tableStripColor,
+  summarizeTicketStages,
+  ticketSummaryChip,
 } from '../posSignals'
 
 // Per-line-item KOT/BOT timer shown in the order cart next to the "✓ KOT/BOT" sent badge — same
@@ -46,6 +162,8 @@ export {
 // the kitchen's own estimate.
 export function kotTimerLabel(ticket, now) {
   if (!ticket) return null
+  // Finished and at the table (S754) — nothing left to watch, so it is quiet.
+  if (ticket.status === 'served') return { text: 'Served', color: 'var(--theme-text3)' }
   if (ticket.status === 'ready') {
     if (ticket.started_at && ticket.ready_at) {
       const actualMin = Math.round((new Date(ticket.ready_at).getTime() - new Date(ticket.started_at).getTime()) / 60000)

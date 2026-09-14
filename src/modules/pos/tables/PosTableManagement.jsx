@@ -12,9 +12,10 @@ import { TABLE_STATUS_BADGE as STATUS_BADGE, TABLE_STATUS_LABEL as STATUS_LABEL,
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBsSafe, formatBsDay, formatAd } from '../../../utils/bsCalendar'
-import { turnoverByBand, PARTY_BANDS } from '../reports/coversMath'
+import { turnoverByBand, dineInOnly, PARTY_BANDS } from '../reports/coversMath'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS, DEFAULT_WHATSAPP_TEMPLATE } from '../reservations/reservationSettings'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 
@@ -39,6 +40,7 @@ export default function PosTableManagement() {
 
   const [tables,    setTables]    = useState([])
   const [loading,   setLoading]   = useState(true)
+  const [tablesError, setTablesError] = useState(null) // the last pos_tables read that failed
   const [secFilter, setSecFilter] = useState('All')
   // Transient banner above the floor grid for cycleStatus errors — that action happens directly
   // on a floor tile, outside the Add/Edit modal, so the modal's own `msg` banner isn't visible.
@@ -68,6 +70,7 @@ export default function PosTableManagement() {
   const [routingSaving,   setRoutingSaving]   = useState(false)
   const [routingMsg,      setRoutingMsg]      = useState('')
   const [routingLoaded,   setRoutingLoaded]   = useState(false)
+  const [routingLoadError, setRoutingLoadError] = useState(null)
 
   // Quick Notes
   const [notePresets,   setNotePresets]   = useState([])
@@ -83,6 +86,7 @@ export default function PosTableManagement() {
   const [hscLoaded,  setHscLoaded]  = useState(false)
   const [hscSaving,  setHscSaving]  = useState({})   // { recipeId: bool }
   const [hscError,   setHscError]   = useState(null) // the last HSC write that did not land
+  const [hscLoadError, setHscLoadError] = useState(null) // the item list could not be read
 
   // Discount Reasons
   const [discReasons,   setDiscReasons]   = useState(DEFAULT_DISCOUNT_REASONS)
@@ -110,6 +114,7 @@ export default function PosTableManagement() {
   const [resvSaving,   setResvSaving]   = useState(false)
   const [resvMsg,      setResvMsg]      = useState('')
   const [resvLoaded,   setResvLoaded]   = useState(false)
+  const [resvLoadError, setResvLoadError] = useState(null)
   const [outletName,   setOutletName]   = useState('')
   const [bookingQrUrl, setBookingQrUrl] = useState('')
   const [newClosedDate, setNewClosedDate] = useState('') // AD iso from the BS picker, pending Add
@@ -128,6 +133,15 @@ export default function PosTableManagement() {
     setDiscLoaded(false)
     setDeliveryLoaded(false)
     setResvLoaded(false)
+    // S754: the reservation form also drops the previous client's values, not only its flag — the
+    // booking QR and outlet name are rendered from state, and a load error belongs to the old id.
+    setResv(DEFAULT_RESERVATION_SETTINGS)
+    setResvMeasured(null)
+    setOutletName('')
+    setBookingQrUrl('')
+    setResvLoadError(null)
+    setRoutingLoadError(null)
+    setHscLoadError(null)
     if (!clientId) return
     if (mainTab === 'routing') loadRouting()
     else if (mainTab === 'notes') loadNotePresets()
@@ -141,8 +155,13 @@ export default function PosTableManagement() {
 
   async function load() {
     setLoading(true)
-    const { data } = await scopedFrom('pos_tables')
+    const { data, error } = await scopedFrom('pos_tables')
       .order('sort_order').order('name')
+    // S754: a failed read is not an empty floor. Rendering it as zero tables auto-opened Quick
+    // Setup, and Generate then created a second Table 1–10 beside the real ones. The grid, the
+    // counts and Quick Setup all stand down until a read succeeds.
+    if (error) { setTables([]); setTablesError(error); setLoading(false); return }
+    setTablesError(null)
     const rows = data || []
     setTables(rows)
     if (rows.length === 0) setQsOpen(true)
@@ -223,23 +242,39 @@ export default function PosTableManagement() {
 
   function handleDelete() {
     if (!target) return
-    // pos_reservations cascades on this delete and guest_orders blocks it — the two FKs behave
-    // oppositely and neither is visible from the button, so the ask says both (S682).
+    // Three references, three behaviours, none visible from the button (S682, corrected S754):
+    // pos_reservation_tables cascades only the LINK, so a booking survives with this table taken
+    // off it; pos_guest_order_requests is a plain FK and refuses the delete (worded in errorText);
+    // pos_orders.table_id has no FK at all, so an open bill would outlive its table and vanish from
+    // the floor — which is why run() reads for one first.
     askConfirm({
       title: `Delete "${target.name}"?`,
       confirmLabel: 'Delete Table', danger: true, busyLabel: 'Deleting…',
       body: (
         <>
           <p style={{ margin: '0 0 8px' }}>
-            The table leaves the floor plan and its QR code stops working. <strong>Every reservation booked on it is deleted
-            with it</strong> — move those to another table first if they are still coming.
+            The table leaves the floor plan and its QR code stops working. <strong>Bookings holding it are kept, but lose
+            this table</strong> — give them another table on the Reservations page if they are still coming.
+          </p>
+          <p style={{ margin: '0 0 8px' }}>
+            A table with an open bill cannot be deleted, and nor can one that has ever taken a QR guest order — mark that
+            one Inactive instead.
           </p>
           <p style={{ margin: 0 }}>Past bills keep the table name they were closed under. This cannot be undone.</p>
         </>
       ),
       run: async () => {
-        const { error } = await scopedDelete('pos_tables').eq('id', target.id)
+        // S754: the page half of the open-bill guard (a DB trigger is separate). A check that could
+        // not run has not passed, so a failed read refuses the delete rather than waving it through.
+        const { data: openBills, error: openErr } = await scopedFrom('pos_orders', 'id')
+          .eq('table_id', target.id).eq('status', 'open').limit(1)
+        if (openErr) { setMsg('error:"' + target.name + '" was not deleted — could not check whether it has an open bill. ' + errorLine(openErr)); return }
+        if (openBills?.length) { setMsg('error:' + target.name + ' has an open bill — close or bill it first.'); return }
+        // .select('id'): a delete RLS refuses matches zero rows with no error, which would otherwise
+        // close the dialog as though it had worked.
+        const { data: deleted, error } = await scopedDelete('pos_tables').eq('id', target.id).select('id')
         if (error) { setMsg('error:"' + target.name + '" was not deleted — it is still on the floor. ' + errorLine(error)); return }
+        if (!deleted?.length) { setMsg('error:"' + target.name + '" was not deleted — this account may not remove tables, or it was already removed on another device. Reload the page to check.'); return }
         await load(); closeModal()
       },
     })
@@ -302,14 +337,18 @@ export default function PosTableManagement() {
   // ── Ticket Routing ───────────────────────────────────────────────────────────
 
   async function loadRouting() {
-    setRoutingLoading(true)
-    const [{ data: recipeData }, { data: settingsData }] = await Promise.all([
+    setRoutingLoading(true); setRoutingLoadError(null)
+    const [{ data: recipeData, error: rErr }, { data: settingsData, error: sErr }] = await Promise.all([
       // Same nullable-column rule as below, though nothing changes here in practice: a NULL
       // category contributes no routing category either way (`.filter(Boolean)`). Written the safe
       // way so the next reader does not have to work that out (S714).
       scopedFrom('recipes', 'category').eq('pos_enabled', true).or('category.is.null,category.neq.Sub-Recipe'),
       supabase.from('settings').select('pos_bot_categories').eq('client_id', clientId).maybeSingle(),
     ])
+    // S754: either read failing leaves the ['Beverage'] default on screen, and Save writes the
+    // WHOLE on-screen set — so a failed read followed by Save re-routed every real bar category
+    // to the kitchen. Stay not-loaded; Save stays disabled; re-opening the tab retries.
+    if (rErr || sErr) { setRoutingLoadError(loadFailedError('the ticket routing', rErr || sErr)); setRoutingLoading(false); return }
     const cats = Array.from(new Set((recipeData || []).map(r => r.category).filter(Boolean))).sort()
     setCategories(cats)
     const botArr = settingsData?.pos_bot_categories ?? ['Beverage']
@@ -361,6 +400,13 @@ export default function PosTableManagement() {
   // tab retries.
   const loadFailed = what => error =>
     `error:Could not load ${what} — Save is disabled until it loads. Re-open this tab to retry. ` + errorText(error, 'operator')
+  // The same sentence as an ActionError object (S754), for the tabs whose failed read replaces the
+  // tab body rather than riding beside Save — an empty-state card there would be a claim about the
+  // client ("no categories"), and the object form keeps the technical detail as fine print.
+  const loadFailedError = (what, error) => {
+    const { text, detail } = asActionError(error)
+    return { text: `Could not load ${what} — Save is disabled until it loads. Re-open this tab to retry. ${text}`, detail }
+  }
 
   async function loadNotePresets() {
     setNotesLoading(true)
@@ -410,12 +456,20 @@ export default function PosTableManagement() {
   // ── HSC Codes ────────────────────────────────────────────────────────────────
 
   async function loadHscItems() {
-    setHscLoading(true)
-    const { data } = await scopedFrom('recipes', 'id, name, category, hsc_code')
+    setHscLoading(true); setHscLoadError(null)
+    const { data, error } = await scopedFrom('recipes', 'id, name, category, hsc_code')
       .eq('is_active', true).eq('pos_enabled', true)
       // `.or(...)`, not `.neq` — category is nullable and a server-side .neq drops NULL rows,
       // hiding an uncategorised dish from HSC code assignment (S714).
       .or('category.is.null,category.neq.Sub-Recipe').order('name')
+    // S754: a failed read is not "No POS-enabled menu items" — that card sends the owner to Menu
+    // Pricing to switch on dishes that are already on. Stay not-loaded so re-opening retries.
+    if (error) {
+      const { text, detail } = asActionError(error)
+      setHscLoadError({ text: `Could not load the menu items, so no HSC codes are shown. Re-open this tab to retry. ${text}`, detail })
+      setHscItems([]); setHscLoading(false)
+      return
+    }
     setHscItems(data || [])
     setHscLoading(false)
     setHscLoaded(true)
@@ -569,20 +623,25 @@ export default function PosTableManagement() {
   function bookingUrl() { return `${window.location.origin}/pos/book/${clientId}` }
 
   async function loadReservationSettings() {
-    setResvLoading(true); setResvMsg('')
+    setResvLoading(true); setResvMsg(''); setResvLoadError(null)
     const since = new Date(Date.now() - 90 * 86400000).toISOString()
     const [{ data: s, error: sErr }, { data: client }, { data: orders, error: oErr }] = await Promise.all([
       supabase.from('settings').select('pos_reservation_settings').eq('client_id', clientId).maybeSingle(),
       supabase.from('clients').select('name').eq('id', clientId).maybeSingle(),
       // 90 days of paid bills crosses 1000 rows on a busy outlet — paged, unique tiebreaker.
-      fetchAllRows(() => scopedFrom('pos_orders', 'id, covers, opened_at, closed_at').eq('close_type', 'paid').gte('closed_at', since).order('id')),
+      fetchAllRows(() => scopedFrom('pos_orders', 'id, table_id, covers, opened_at, closed_at').eq('close_type', 'paid').gte('closed_at', since).order('id')),
     ])
-    if (sErr) { setResvMsg('error:' + sErr.message); setResvLoading(false); return }
+    // S754: on a failed settings read the form still holds DEFAULT_RESERVATION_SETTINGS, and Save
+    // writes the whole object — so one routine Save replaced the outlet's real hours, closures and
+    // template with the defaults. Stay not-loaded (Save disabled) and say so in the operator's words.
+    if (sErr) { setResvLoadError(loadFailedError('the reservation settings', sErr)); setResvLoading(false); return }
     setResv(normalizeReservationSettings(s?.pos_reservation_settings))
     setOutletName(client?.name || '')
     // The measured figure is a hint beside the field, not the field — a failed read drops the
     // hint, never the tab.
-    setResvMeasured(oErr ? null : turnoverByBand(orders || []))
+    // S754: dine-in only, the same rule as the Covers Report — a takeaway bill is one "cover" that
+    // never held a table, and it dragged the 1–2 band's measured turn time down.
+    setResvMeasured(oErr ? null : turnoverByBand(dineInOnly(orders)))
     setResvLoading(false)
     setResvLoaded(true)
     QRCode.toDataURL(bookingUrl(), { margin: 1, width: 240 }).then(setBookingQrUrl).catch(() => setBookingQrUrl(''))
@@ -734,7 +793,9 @@ export default function PosTableManagement() {
 
           {routingLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading categories…</p>
-          ) : categories.length === 0 ? (
+          ) : routingLoadError ? (
+            <ActionError error={routingLoadError} />
+          ) : !routingLoaded ? null : categories.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               No menu categories found. Add recipes in Menu Pricing first.
             </div>
@@ -783,7 +844,7 @@ export default function PosTableManagement() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 18 }}>
-                <button className="btn btn-primary" onClick={saveRouting} disabled={routingSaving}>
+                <button className="btn btn-primary" onClick={saveRouting} disabled={routingSaving || !routingLoaded}>
                   {routingSaving ? 'Saving…' : 'Save Routing'}
                 </button>
                 {routingMsg && (
@@ -874,6 +935,8 @@ export default function PosTableManagement() {
           <ActionError error={hscError} />
           {hscLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : hscLoadError ? (
+            <ActionError error={hscLoadError} />
           ) : hscItems.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               No POS-enabled menu items found. Toggle items On POS in Menu Pricing first.
@@ -1060,10 +1123,13 @@ export default function PosTableManagement() {
       {/* ══ TABLES TAB ══ */}
       {mainTab === 'tables' && (
         <>
-          {/* Quick Setup trigger */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
-            <button className="tab-btn" onClick={() => { setQsOpen(true); setQsMsg('') }}>⚡ Quick Setup</button>
-          </div>
+          {/* Quick Setup trigger — hidden while the floor could not be read (S754): generating a
+              batch against a floor we cannot see is how Table 1–10 got created twice. */}
+          {!tablesError && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+              <button className="tab-btn" onClick={() => { setQsOpen(true); setQsMsg('') }}>⚡ Quick Setup</button>
+            </div>
+          )}
 
           {qsOpen && (
             <Modal onClose={() => setQsOpen(false)}>
@@ -1120,7 +1186,7 @@ export default function PosTableManagement() {
               </p>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <button className="btn btn-primary" onClick={handleGenerate} disabled={qsSaving}>
+                <button className="btn btn-primary" onClick={handleGenerate} disabled={qsSaving || !!tablesError}>
                   {qsSaving ? 'Creating…' : `Generate ${parseInt(qs.count, 10) || 0} Tables`}
                 </button>
                 {qsMsg && (
@@ -1182,6 +1248,8 @@ export default function PosTableManagement() {
           {/* Floor grid */}
           {loading ? (
             <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
+          ) : tablesError ? (
+            <ReportLoadError error={tablesError} />
           ) : visible.length === 0 && tables.length > 0 ? (
             <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
               No tables in this section.
@@ -1268,7 +1336,9 @@ export default function PosTableManagement() {
 
           {resvLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
-          ) : (
+          ) : resvLoadError ? (
+            <ActionError error={resvLoadError} />
+          ) : !resvLoaded ? null : (
             <>
               <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>
                 Expected sitting length <Tip text="Per party size. Prefills the booking form and sizes the block on the capacity strip. 'Measured' is this outlet's own average from opening a table to paying its bill over the last 90 days — the Covers Report's Turnover Time figure." width={300}>ⓘ</Tip>
@@ -1422,7 +1492,7 @@ export default function PosTableManagement() {
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <button className="btn btn-primary" onClick={saveReservationSettings} disabled={resvSaving}>
+                <button className="btn btn-primary" onClick={saveReservationSettings} disabled={resvSaving || !resvLoaded}>
                   {resvSaving ? 'Saving…' : 'Save Reservation Settings'}
                 </button>
                 {resvMsg && (

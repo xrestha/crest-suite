@@ -110,8 +110,15 @@ export function printCreditNoteHtml(html, onPopupBlocked) {
 
 // Shared by first-print (issuance) and reprint (Credit Note Book) so print_count/copy-label
 // behaves identically to buildBillHtml/printBill.
+//
+// Returns { printed, newCount, countError }. S754: the counter used to be bumped BEFORE the pop-up
+// was opened and whatever it returned, so a blocked pop-up still advanced print_count and the next
+// real print came out labelled as a later copy than any that had ever existed. The window is opened
+// first now, and the count only moves when it actually did.
 export async function printCreditNote(clientId, creditNote, items, settings, outletName, hscMap) {
   const newCount = (creditNote.print_count || 0) + 1
-  await scopedUpdate('pos_credit_notes', clientId, { print_count: newCount }).eq('id', creditNote.id)
-  printCreditNoteHtml(buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, COPY_LABEL(newCount)))
+  const printed = printCreditNoteHtml(buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, COPY_LABEL(newCount)))
+  if (!printed) return { printed: false, newCount: creditNote.print_count || 0, countError: null }
+  const { error } = await scopedUpdate('pos_credit_notes', clientId, { print_count: newCount }).eq('id', creditNote.id)
+  return { printed: true, newCount, countError: error || null }
 }

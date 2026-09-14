@@ -9,13 +9,60 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-10 (S733 — added B3's offline-sync breadcrumb entry, the POS half of a fix Stock Count took in S731/S732)
+Last updated: 2026-09-14 (S754 — the POS re-analysis: owner-ranked next builds, its known gaps, and B4's two items moved to `POS_DECISIONS.md`)
 
 ---
 
+## A. Next builds — ranked by the owner (S754, 2026-09-14)
+
+In this order. Service charge was offered and **not** chosen.
+
+- [ ] 🔴 **Table move / merge / split.** Moving a running order to another table, joining two
+  tables onto one bill, and splitting one table's order across bills. S754 added a unique index
+  allowing one open order per table (`pos_orders_one_open_per_table`), so a merge has to close or
+  re-point the second order in the same transaction rather than leave two open.
+- [ ] 🔴 **Add-ons and sizes.** Half/full plates, extra cheese, large/small. A line's price now
+  comes from `recipes.selling_price` inside `save_pos_order_items` (S754), so a modifier's price
+  has to come from the menu on the server too, never from the tablet.
+- [ ] 🔴 **Kitchen and bar printers.** Routing KOT/BOT to a network printer per station instead of
+  the till's own print dialog. `pos_bot_categories` already decides the station.
+
+## A2. Known gaps left by S754
+
+The S754 migrations (`20260916100000`, `20260916110000`, `20260916120000`) and Edge Functions
+(`pos-staff-login`, `admin-user-ops`) were written and tested but **not applied or deployed live**
+when these were filed. Every item below assumes they are.
+
+- [ ] 🟡 **Two bookings saved in the same second can hold the same table.** The overlap refusal
+  (`reservationConflicts.js`) runs in the browser against the bookings on screen. No database
+  constraint backs it, so two devices saving at once both land. The fix is an exclusion constraint
+  (or a check inside a save function) over `pos_reservation_tables` × the booking window.
+- [ ] 🟡 **Clear Occupied deletes open orders directly**, so the pulled-item record
+  (`pos_kot_removals`, written inside `save_pos_order_items`) is never written for food already
+  fired on them. The Kitchen Display's struck-through "cancelled" lines and KOT Log → Pulled Items
+  both miss those. Route the clear through the RPC, or record the removal first.
+- [ ] 🟡 **Credit-note amounts are computed in the browser** (`IssueCreditNoteModal`) and stored as
+  sent. `guard_pos_credit_note` fixes who issues it and that it is never edited. It does not check
+  that the note's gross, VAT and net match the bill it credits.
+- [ ] 🟡 **The public booking rate limit trusts the first hop of `x-forwarded-for`**
+  (`submit_reservation_request`), which a caller can set. S754 deliberately left it alone, because
+  nobody has confirmed which hop Supabase's proxy chain appends as trusted. Confirm that first, then
+  key the limit on that hop.
+- [ ] 🔵 **Remove the legacy shared device key once every client has switched it off.** Code to
+  remove: the `verify_pos_legacy_device` branch in `pos-staff-login`, its `PGRST202` fallback, and
+  `get_pos_staff`'s secret comparison. POS Setup shows when each client's shared key was last used.
+- [ ] 🟡 **Archiving a client does not revoke its tablet keys** (`pos_devices`). Deleting a client
+  cascades them away. Archive keeps the client restorable, so an archived outlet's tablets keep keys
+  that `pos_devices` still counts as live. Archive should revoke them, and a restore should mean
+  re-activating each tablet.
+- [ ] 🟡 **A credit note's reason line prints "(no money returned)".** When the manager picks
+  Other or None for how money went back, that choice is appended to the stored reason, because the
+  note has no remarks column. It then prints on the tax document as if it were the reason. It needs
+  its own column, or it should stay off the print.
+
 ## B. Reports — compliance-adjacent
 
-- [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier; `pos_orders` itself never hard-deletes once billed, verified). **Narrowed by S698 on the purchases side, not closed:** the replacement is now one transaction inside `save_purchase_bill` rather than two requests, so a bill can no longer end up holding both versions, and a bill with `payable_payments` against it is refused outright by a `BEFORE DELETE` trigger. The lines themselves are still replaced rather than superseded, so an audit trail beyond `audit_logs` would still need a version column. `sales_entries` is unchanged.
+- [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier). **`pos_orders` itself cannot be deleted or edited once billed, enforced by the database since S754** (`guard_pos_order_delete` plus the closed-bill lock in `guard_pos_order_close`, migration `20260916100000`, applied live 2026-09-14). Before that it was only true because no screen offered it: a till login could delete a billed order over REST. **Narrowed by S698 on the purchases side, not closed:** the replacement is now one transaction inside `save_purchase_bill` rather than two requests, so a bill can no longer end up holding both versions, and a bill with `payable_payments` against it is refused outright by a `BEFORE DELETE` trigger. The lines themselves are still replaced rather than superseded, so an audit trail beyond `audit_logs` would still need a version column. `sales_entries` is unchanged.
 - [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code)
 - [ ] 🟡 `pos_order_items.recipe_id` has **no foreign key at all** (found S711 while enumerating what
   references `recipes`). Every other referencing column is constrained one way or another —
@@ -58,19 +105,9 @@ Last updated: 2026-09-10 (S733 — added B3's offline-sync breadcrumb entry, the
 S670 pinned every clock-time *render* to `Asia/Kathmandu` (`src/shared/nepalTime.js`). Two things in
 the same family were deliberately not taken, because each changes a figure rather than a label:
 
-- [ ] 🔵 **`SalesReport.jsx` range bounds are still runtime-local.** `loadRange` builds `fromTs`/`toTs`
-  with `new Date(iso + 'T00:00:00').toISOString()`, so for a viewer outside Nepal the report selects a
-  slightly different **set** of bills — every tab, including the Annexure 13 One Lakh Above sheet,
-  where a bill crossing a boundary can move a party across the disclosure threshold. Provably
-  identical for a viewer in Nepal. Fix is `bsDayBoundaryIso()` (or a `nepalDayBoundaryIso` in
-  `nepalTime.js`, since the `+05:45` literal now exists in four places). Wants its own
-  before/after row-count check, which is why it was not bundled.
-- [ ] 🔵 **`closed_at` is written by the till, `opened_at` by the server.** A till with a wrong clock
-  can record a close before its own open; the Bill Register now flags that past a minute's tolerance
-  rather than hiding it, but the only real fix is one clock. `guard_pos_order_close()` is already a
-  `BEFORE UPDATE` trigger firing on exactly that transition, so `NEW.closed_at := now()` is a two-line
-  addition — but it retroactively splits the column's meaning across old and new rows, so it needs a
-  deliberate decision rather than a drive-by.
+Both items that stood here — the Sales Report's runtime-local range bounds and `closed_at` written
+by the till — were closed by S754 and moved to `POS_DECISIONS.md`.
+
 - [ ] 🟡 **Covers Report's Avg Turn Time silently shrinks its sample.** `if (mins < 0) continue`
   drops skewed pairs with nothing on screen saying how many, and drops nothing for an absurdly large
   positive (a bill left open for days). A footnote naming the excluded count would make it honest.

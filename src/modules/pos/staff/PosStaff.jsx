@@ -8,6 +8,7 @@ import { POS_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../posSi
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const PERMISSION_LEVELS = [
@@ -40,13 +41,43 @@ const EMPTY_ROLE  = { label: '', level: 'staff' }
 
 function pinValid(pin) { return /^\d{4,6}$/.test(pin) }
 
+// admin-user-ops answers a refusal in the body as `{ error: '<a sentence we wrote>' }`, sometimes
+// with a 2xx and sometimes as a non-2xx whose body supabase-js leaves on `error.context`. That
+// sentence is copy, not a Postgres shape, so it is shown as written — running it through errorText
+// would flatten it to "that didn't work" (S714). Only a failure with no body — a dropped
+// connection, a function that never answered — goes through the table (S754).
+async function edgeRefusal(error, data) {
+  if (data?.error) return data.error
+  try { const b = await error?.context?.json(); if (b?.error) return b.error } catch (_) { /* no JSON body */ }
+  return error ? errorLine(error) : ''
+}
+
 export default function PosStaff() {
-  const { clientId, hasPosAccess, hrEnabled } = useAuth()
+  const { clientId, hasPosAccess, hrEnabled, isAdmin, isOwner, profile } = useAuth()
+  // What this viewer may hand out (S754 — mirrors admin-user-ops' refusePosPowerEscalation and
+  // requireManageableTarget, so the screen offers only what the server will accept). Admin and the
+  // Owner are unbounded. A POS manager: never Manager rank, never their own login or a peer
+  // manager's, a discount limit no higher than their own (NULL = unlimited), Void only if they have it.
+  const canGrantAnything = isAdmin || isOwner
+  const viewerCap = canGrantAnything || profile?.pos_discount_limit === null || profile?.pos_discount_limit === undefined
+    ? null : Number(profile.pos_discount_limit)
+  const viewerCanVoid = canGrantAnything || profile?.pos_allow_void === true
+  const permissionLevels = canGrantAnything ? PERMISSION_LEVELS : PERMISSION_LEVELS.filter(l => l.value !== 'manager')
+  // A row this viewer may not change at all. Mirrors requireManageableTarget: own row and any
+  // other manager's row are the Owner's or the operator's.
+  const rowLockReason = p => {
+    if (canGrantAnything) return ''
+    if (p.id === profile?.id) return 'Your own login is changed by the account owner.'
+    if (p.pos_role === 'manager') return 'A manager’s login is changed by the account owner.'
+    return ''
+  }
   const { scopedFrom } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
   const [staff,       setStaff]       = useState([])
   const [employees,   setEmployees]   = useState([]) // hr_employees, only fetched when hrEnabled
   const [loading,     setLoading]     = useState(true)
+  const [loadError,   setLoadError]   = useState(null)   // the staff list or the role scheme could not be read (S754)
+  const [empWarn,     setEmpWarn]     = useState('')     // the HR employee list for + Add Staff could not be read
   const [saving,      setSaving]      = useState({})
   const [msg,         setMsg]         = useState('')
   const [search,      setSearch]      = useState('')
@@ -70,6 +101,8 @@ export default function PosStaff() {
   const [newPin,      setNewPin]      = useState('')
   const [resetting,   setResetting]   = useState(false)
   const [pinMsg,      setPinMsg]      = useState('')
+  // Bumped to throw away an uncontrolled discount input's typed value after a refusal (S754).
+  const [inputEpoch,  setInputEpoch]  = useState(0)
 
   const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
   const linkedEmployeeIds = new Set(staff.map(p => p.hr_employee_id).filter(Boolean))
@@ -99,16 +132,37 @@ export default function PosStaff() {
 
   async function init() {
     setLoading(true)
-    const [{ data: staffData }, { data: settingsData }, { data: empData }] = await Promise.all([
+    setLoadError(null)
+    const [staffRes, settingsRes, empRes] = await Promise.all([
       supabase.rpc('get_pos_staff_list', { p_client_id: clientId }),
-      supabase.from('settings').select('pos_custom_roles').eq('client_id', clientId).single(),
+      // maybeSingle: a client with no settings row yet is not a failed read. `.single()` turned
+      // that case into an error, and the error was dropped along with every real one.
+      supabase.from('settings').select('pos_custom_roles').eq('client_id', clientId).maybeSingle(),
       hrEnabled
         ? scopedFrom('hr_employees', 'id, full_name, employee_code, status').in('status', ['active', 'probation']).order('full_name')
-        : Promise.resolve({ data: [] }),
+        : Promise.resolve({ data: [], error: null }),
     ])
-    if (settingsData?.pos_custom_roles?.length) setCustomRoles(settingsData.pos_custom_roles)
-    setStaff(staffData || [])
-    setEmployees(empData || [])
+    // S754, the HrStaff shape. Every read error here was dropped: a failed staff read rendered
+    // "No staff yet — create your first POS account" over logins that exist, and a failed settings
+    // read left effectiveRoles on DEFAULT_ROLES — so adding a role saved [defaults + new] over the
+    // stored custom scheme, and the mismatch banner offered to re-rank every custom-titled login
+    // against a scheme it had never read. Nothing below renders, and no scheme edit is reachable,
+    // until both have loaded.
+    const readErr = staffRes.error || settingsRes.error
+    if (readErr) {
+      const e = asActionError(readErr)
+      const what = staffRes.error ? 'The staff list' : "This team's role list"
+      setLoadError({ text: `${what} could not be loaded, so nothing below is shown and roles cannot be changed. ` + e.text, detail: e.detail })
+      setLoading(false)
+      return
+    }
+    const saved = settingsRes.data?.pos_custom_roles
+    setCustomRoles(saved?.length ? saved : [])
+    setStaff(staffRes.data || [])
+    setEmployees(empRes.error ? [] : (empRes.data || []))
+    setEmpWarn(empRes.error
+      ? 'The HR employee list could not be loaded, so + Add Staff can only create POS-only staff until the page is reloaded.'
+      : '')
     setLoading(false)
     // No re-ranking here (S752). This page used to move every login whose level no longer matched
     // its role the moment anyone opened it; a mismatch is now shown and moves only on Apply.
@@ -163,6 +217,9 @@ export default function PosStaff() {
 
   async function saveRoles(roles) {
     if (!clientId) return false   // never write a client_id:null (global-defaults) settings row during the admin no-client window
+    // A scheme that was never read cannot be written back: `roles` would be built from the
+    // defaults and overwrite the stored list (S754).
+    if (loading || loadError) { setRolesError("The role list hasn't loaded, so roles can't be changed yet. Reload the page and try again."); return false }
     setRolesSaving(true); setRolesError('')
     // maybeSingle + an error check: with .single() a missing row and a failed read both arrived as
     // an error that was dropped, so any failed read fell into the INSERT branch and wrote a second
@@ -178,7 +235,7 @@ export default function PosStaff() {
       const { error } = await supabase.from('settings').insert({ client_id: clientId, pos_custom_roles: roles })
       err = error
     }
-    if (err) { setRolesError('Error saving roles: ' + err.message); setRolesSaving(false); return false }
+    if (err) { setRolesError('The role list was not saved. ' + errorLine(err)); setRolesSaving(false); return false }
     setCustomRoles(roles)
     setRolesSaving(false)
     return true
@@ -193,12 +250,23 @@ export default function PosStaff() {
     const affected = staff.filter(p => p.pos_job_title === changedLabel && p.pos_role !== level)
     // One Edge Function call per affected account, none of them dependent on any other, so the
     // manager waits on the slowest rather than on the sum.
-    await Promise.all(affected.map(async p => {
-      const { error } = await supabase.functions.invoke('admin-user-ops', {
+    const outcomes = await Promise.all(affected.map(async p => {
+      const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: changedLabel },
       })
-      if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, pos_role: level } : s))
+      // S754: admin-user-ops can answer 2xx with `{ error }` in the body; only `error` was checked,
+      // so a refused move still showed the new level on the row.
+      const failed = !!(error || data?.error)
+      if (!failed) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, pos_role: level } : s))
+      return { p, failed }
     }))
+    const failed = outcomes.filter(o => o.failed)
+    if (failed.length > 0) {
+      // The role itself saved; say which logins did not follow it. They show in the mismatch
+      // banner, where Apply role levels can retry them.
+      setRolesError(`“${changedLabel}” now carries ${level}, but ${failed.length} login(s) could not be moved and keep their previous access: ` +
+        failed.map(o => o.p.full_name).join(', ') + '.')
+    }
   }
 
   // The first custom role starts FROM the defaults, and a role a login holds cannot be removed —
@@ -247,6 +315,7 @@ export default function PosStaff() {
     if (!pinValid(addForm.pin))    { setAddMsg('PIN must be 4–6 digits.'); return }
     const role = effectiveRoles.find(r => r.label === addForm.job_title)
     if (!role) { setAddMsg('Select a role.'); return }
+    if (role.level === 'manager' && !canGrantAnything) { setAddMsg('Only the account owner can give a login Manager access. Pick a Staff or Supervisor role.'); return }
     setAdding(true); setAddMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
@@ -260,9 +329,7 @@ export default function PosStaff() {
       },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to create staff'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setAddMsg('Error: ' + detail); setAdding(false); return
+      setAddMsg((await edgeRefusal(error, data)) || 'The login was not created.'); setAdding(false); return
     }
     setAddModal(false); setAdding(false); load()
   }
@@ -286,9 +353,14 @@ export default function PosStaff() {
           body: { action: 'delete_pos_staff', userId: p.id },
         })
         if (error || data?.error) {
-          let detail = data?.error || error?.message || 'Failed to delete'
-          try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-          setMsg(`${p.full_name}'s login was not deleted — their PIN still works. ` + detail); return
+          const why = await edgeRefusal(error, data)
+          // Only a refusal the function WROTE proves the login survived; a dropped call does not.
+          const answered = !!data?.error || error?.name === 'FunctionsHttpError'
+          setMsg(answered
+            ? `${p.full_name}'s login was not deleted — their PIN still works. ` + why
+            : `It is not known whether ${p.full_name}'s login was deleted — the call did not come back. Reload the page to see. ` + why)
+          if (!answered) load()
+          return
         }
         load()
       },
@@ -305,9 +377,7 @@ export default function PosStaff() {
       body: { action: 'reset_pos_pin', userId: pinTarget.id, pin: newPin },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to reset PIN'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setPinMsg('Error: ' + detail); setResetting(false); return
+      setPinMsg((await edgeRefusal(error, data)) || 'The PIN was not changed.'); setResetting(false); return
     }
     setPinTarget(null); setResetting(false)
   }
@@ -318,6 +388,7 @@ export default function PosStaff() {
     // Never send "no role": a login with no marker reads as the Owner (S752). Removing someone's
     // POS access means deleting the login.
     if (!role) { setMsg(`“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
+    if (role.level === 'manager' && !canGrantAnything) { setMsg('Only the account owner can give a login Manager access.'); return }
     setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
@@ -328,9 +399,7 @@ export default function PosStaff() {
       },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to update role'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg('Error: ' + detail)
+      setMsg(`${staff.find(s => s.id === profileId)?.full_name || 'That login'} keeps its previous role. ` + (await edgeRefusal(error, data)))
     } else {
       setStaff(prev => prev.map(p => p.id === profileId
         ? { ...p, pos_role: role?.level || null, pos_job_title: jobTitle || null }
@@ -347,9 +416,7 @@ export default function PosStaff() {
       body: { action: 'update_pos_role', userId: profileId, pos_team: team },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to update team'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg('Error: ' + detail)
+      setMsg('The team was not changed. ' + (await edgeRefusal(error, data)))
     } else {
       setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_team: team } : p))
     }
@@ -362,14 +429,20 @@ export default function PosStaff() {
     const trimmed = (rawValue ?? '').toString().trim()
     const limit = trimmed === '' ? null : Math.min(100, Math.max(0, parseFloat(trimmed)))
     if (trimmed !== '' && Number.isNaN(limit)) return
+    // S754: a capped manager cannot give more than their own cap, and "no limit" is more than any
+    // cap. Said here, before the call, rather than as the server's refusal after it.
+    if (viewerCap !== null && (limit === null || limit > viewerCap)) {
+      setMsg(`You can give a discount limit of up to ${viewerCap}% — your own limit. ${limit === null ? '"No limit" is more than that. ' : ''}Ask the account owner for more.`)
+      setInputEpoch(n => n + 1)   // re-key the input back to the stored value
+      return
+    }
     setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: { action: 'update_pos_role', userId: profileId, pos_discount_limit: limit },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to update discount limit'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg('Error: ' + detail)
+      setMsg('The discount limit was not changed. ' + (await edgeRefusal(error, data)))
+      setInputEpoch(n => n + 1)
     } else {
       setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_discount_limit: limit } : p))
     }
@@ -383,9 +456,7 @@ export default function PosStaff() {
       body: { action: 'update_pos_role', userId: profileId, pos_allow_void: allow },
     })
     if (error || data?.error) {
-      let detail = data?.error || error?.message || 'Failed to update void permission'
-      try { const b = await error?.context?.json(); detail = b?.error || detail } catch (_) {}
-      setMsg('Error: ' + detail)
+      setMsg('Void permission was not changed. ' + (await edgeRefusal(error, data)))
     } else {
       setStaff(prev => prev.map(p => p.id === profileId ? { ...p, pos_allow_void: allow } : p))
     }
@@ -417,10 +488,10 @@ export default function PosStaff() {
             placeholder="Search staff…" className="form-input form-input--auto" style={{ maxWidth: 180 }}
           />
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)}>
+            <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }} onClick={() => setRolesModal(true)} disabled={loading || !!loadError}>
               Manage Roles
             </button>
-            <button className="btn btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={openAdd}>
+            <button className="btn btn-primary" style={{ whiteSpace: 'nowrap' }} onClick={openAdd} disabled={loading || !!loadError}>
               + Add Staff
             </button>
           </div>
@@ -438,7 +509,8 @@ export default function PosStaff() {
       </div>
 
       {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red-text)', marginBottom: 16 }}>{msg}</p>}
-      {!loading && mismatched.length > 0 && (
+      {!loading && !loadError && empWarn && <p role="status" style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginBottom: 16 }}>{empWarn}</p>}
+      {!loading && !loadError && mismatched.length > 0 && (
         <div role="alert" className="card" style={{
           padding: '12px 16px', marginBottom: 16,
           border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
@@ -460,6 +532,11 @@ export default function PosStaff() {
 
       {loading ? (
         <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
+      ) : loadError ? (
+        <div>
+          <ActionError error={loadError} />
+          <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={init}>Try again</button>
+        </div>
       ) : staff.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
           No staff yet. Click <strong>+ Add Staff</strong> to create your first POS account.
@@ -489,11 +566,31 @@ export default function PosStaff() {
                 <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--theme-text2)', padding: 24 }}>No staff match "{search}".</td></tr>
               )}
               {visibleStaff.map(p => {
-                const displayTitle = p.pos_job_title || effectiveRoles.find(r => r.level === p.pos_role)?.label || ''
+                // S754, the HrStaff shape: the row's title exactly as stored. A title the scheme no
+                // longer defines is its own option, so the select shows the truth — it used to
+                // render blank, or a login with no title showed the first role sharing its level,
+                // a role it was never given.
+                const displayTitle = p.pos_job_title || (p.pos_role ? `${p.pos_role.charAt(0).toUpperCase() + p.pos_role.slice(1)} (no role name)` : '')
+                const orphan = !!displayTitle && !effectiveRoles.some(r => r.label === displayTitle)
+                // S754: a row the viewer may not change renders read-only, with the reason on hover,
+                // rather than as live controls the server then refuses one at a time.
+                const lockReason = rowLockReason(p)
+                const rowDisabled = !!saving[p.id] || !!lockReason
+                const blocked = p.settlement_blocked === true
                 return (
                   <tr key={p.id}>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.full_name || '—'}</div>
+                      {blocked && (
+                        <Tip text="This person's Final Settlement blocked their logins, so this PIN no longer signs in and they are off the till's staff picker. The login is kept so every bill and shift they recorded keeps their name.">
+                          <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Blocked at settlement</span>
+                        </Tip>
+                      )}
+                      {lockReason && !blocked && (
+                        <Tip text={lockReason}>
+                          <span style={{ fontSize: 10, color: 'var(--theme-text3)', marginRight: 6 }}>Owner changes this login</span>
+                        </Tip>
+                      )}
                       {p.hr_employee_id && (
                         <Tip text="This POS login is linked to an HR employee record — name stays in sync with HR.">
                           <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 HR{p.employee_code ? ` · ${p.employee_code}` : ''}</span>
@@ -506,15 +603,26 @@ export default function PosStaff() {
                           className="form-select"
                           style={{ minWidth: 160 }}
                           value={displayTitle || ''}
-                          disabled={saving[p.id]}
+                          disabled={rowDisabled}
+                          title={lockReason || undefined}
                           onChange={e => updateRole(p.id, e.target.value)}
                         >
                           {!displayTitle && <option value="" disabled>— pick a role —</option>}
+                          {orphan && <option value={displayTitle} disabled>{displayTitle} — not in the role list</option>}
+                          {/* A Manager-level role is the Owner's to give (S754); kept as an option so a
+                              row already holding one still displays it, but not pickable. */}
                           {effectiveRoles.map(r => (
-                            <option key={r.label} value={r.label}>{r.label}</option>
+                            <option key={r.label} value={r.label} disabled={r.level === 'manager' && !canGrantAnything}>
+                              {r.label}{r.level === 'manager' && !canGrantAnything ? ' (Owner only)' : ''}
+                            </option>
                           ))}
                         </select>
                         {saving[p.id] && <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Saving…</span>}
+                        {orphan && !saving[p.id] && (
+                          <Tip text="This login's role is not in the team's role list, so its access level is no longer tied to anything. Pick a current role to put it back under one.">
+                            <span className="badge badge-amber">△ orphan</span>
+                          </Tip>
+                        )}
                       </div>
                     </td>
                     <td>
@@ -530,7 +638,8 @@ export default function PosStaff() {
                         className="form-select"
                         style={{ minWidth: 140 }}
                         value={p.pos_team || 'foh'}
-                        disabled={saving[p.id]}
+                        disabled={rowDisabled}
+                        title={lockReason || undefined}
                         onChange={e => updateTeam(p.id, e.target.value)}
                       >
                         {TEAM_OPTIONS.map(t => (
@@ -543,14 +652,15 @@ export default function PosStaff() {
                         <input aria-label="Discount limit percent"
                           type="number"
                           min={0}
-                          max={100}
+                          max={viewerCap ?? 100}
                           step={1}
                           className="form-input"
                           style={{ width: 70 }}
-                          placeholder="No limit"
-                          disabled={saving[p.id]}
+                          placeholder={viewerCap !== null ? `≤ ${viewerCap}` : 'No limit'}
+                          disabled={rowDisabled}
+                          title={lockReason || (viewerCap !== null ? `You can give up to ${viewerCap}% — your own limit.` : undefined)}
                           defaultValue={p.pos_discount_limit ?? ''}
-                          key={`${p.id}-${p.pos_discount_limit ?? 'none'}`}
+                          key={`${p.id}-${p.pos_discount_limit ?? 'none'}-${inputEpoch}`}
                           onBlur={e => {
                             if (e.target.value === (p.pos_discount_limit ?? '').toString()) return
                             updateDiscountLimit(p.id, e.target.value)
@@ -564,7 +674,10 @@ export default function PosStaff() {
                         type="checkbox"
                         aria-label={`Allow ${p.full_name || 'this account'} to void bills`}
                         checked={!!p.pos_allow_void}
-                        disabled={saving[p.id]}
+                        // Void is only the viewer's to give if they hold it; taking it away is always
+                        // allowed on a row they manage (S754).
+                        disabled={rowDisabled || (!p.pos_allow_void && !viewerCanVoid)}
+                        title={lockReason || (!p.pos_allow_void && !viewerCanVoid ? 'Your own login cannot void bills, so you cannot give Void permission. Ask the account owner.' : undefined)}
                         onChange={e => updateAllowVoid(p.id, e.target.checked)}
                       />
                     </td>
@@ -575,13 +688,19 @@ export default function PosStaff() {
                     </td>
                     <td style={{ position: 'sticky', right: 0, background: 'var(--theme-card)' }}>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}>
+                        {/* A settlement-blocked login cannot sign in whatever its PIN, so a new PIN
+                            would only look like access restored (S754). */}
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}
+                          disabled={blocked || !!lockReason}
+                          title={blocked ? 'Blocked at Final Settlement — a new PIN would not let them sign in.' : lockReason || undefined}>
                           Reset PIN
                         </button>
                         <button
                           className="btn btn-ghost"
                           style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                           onClick={() => deleteStaff(p)}
+                          disabled={!!lockReason}
+                          title={lockReason || undefined}
                         >
                           Delete
                         </button>
@@ -621,7 +740,7 @@ export default function PosStaff() {
                       disabled={rolesSaving}
                     >
                       {PERMISSION_LEVELS.map(l => (
-                        <option key={l.value} value={l.value}>{l.label}</option>
+                        <option key={l.value} value={l.value} disabled={l.value === 'manager' && !canGrantAnything}>{l.label}</option>
                       ))}
                     </select>
                     <button
@@ -657,7 +776,7 @@ export default function PosStaff() {
                   value={newRole.level}
                   onChange={e => setNewRole(r => ({ ...r, level: e.target.value }))}
                 >
-                  {PERMISSION_LEVELS.map(l => (
+                  {permissionLevels.map(l => (
                     <option key={l.value} value={l.value}>{l.label}</option>
                   ))}
                 </select>
@@ -706,7 +825,9 @@ export default function PosStaff() {
                 <label style={labelStyle} htmlFor="pos-staff-hr-employee">
                   <Tip text="Links this POS login to an existing HR employee record — their name stays in sync with HR, and payroll/attendance can be matched to the same person.">HR Employee</Tip>
                 </label>
-                {unlinkedEmployees.length === 0 ? (
+                {empWarn ? (
+                  <p role="alert" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: 0 }}>{empWarn}</p>
+                ) : unlinkedEmployees.length === 0 ? (
                   <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>
                     Every active HR employee already has POS access — add one in HR → Employees first, or switch to POS-only Staff.
                   </p>
@@ -759,11 +880,16 @@ export default function PosStaff() {
                 onChange={e => setAddForm(f => ({ ...f, job_title: e.target.value }))}
               >
                 {effectiveRoles.map(r => (
-                  <option key={r.label} value={r.label}>
-                    {r.label} ({r.level.charAt(0).toUpperCase() + r.level.slice(1)})
+                  <option key={r.label} value={r.label} disabled={r.level === 'manager' && !canGrantAnything}>
+                    {r.label} ({r.level.charAt(0).toUpperCase() + r.level.slice(1)}){r.level === 'manager' && !canGrantAnything ? ' — Owner only' : ''}
                   </option>
                 ))}
               </select>
+              {!canGrantAnything && viewerCap !== null && (
+                <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
+                  A login you create starts with a discount limit of {viewerCap}% — your own — and without Void permission.
+                </p>
+              )}
             </div>
 
             <div style={{ marginBottom: 20 }}>

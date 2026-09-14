@@ -5,6 +5,8 @@ paths:
   - "src/context/SettingsContext.js"
   - "src/pages/adminClients/ClientDrawer.js"
   - "src/modules/pos/tables/PosTableManagement.jsx"
+  - "src/modules/pos/reports/CoversReport.jsx"
+  - "src/modules/pos/customers/LoyaltyTab.jsx"
   - "src/modules/hr/tada/TadaSettingsModal.js"
   - "src/modules/ims/stockcount/StockCountSettings.jsx"
 # Started S739. The rule below was written in S730 and lived in ims-figures.md, whose `paths:` has
@@ -106,6 +108,23 @@ answer is a confirmation naming the consequence, not a refusal. **The general te
 stored value is rendered at write time or at read time** — anything resolved at read time is a
 change to history, and an IRD-relevant document number is the worst case of it. The Monthly Owner
 Report is the counter-example done right: it snapshots `is_vat_registered` at generation.
+
+**Since S754 the database decides who may write them** (`settings_guard_staff_roles`, migration
+`20260916110000`, applied live 2026-09-14). Before that, any same-client login could PATCH them
+over REST, a POS PIN waiter included, and `payment_qr_data` is the merchant QR a guest pays into.
+- **Owner only** (admin exempt): `is_vat_registered`, `invoice_prefix`, `vat_number`,
+  `property_address`, `property_phone`, `payment_qr_data`. Every one is resolved at print time on
+  bills and credit notes.
+- **POS manager or Owner:** the till-setup columns `pos_bot_categories`, `pos_note_presets`,
+  `pos_discount_reasons`, `pos_delivery_partners`, `pos_reservation_settings`, `pos_open_time`,
+  `pos_close_time`, `pos_loyalty_point_value`.
+
+On INSERT a column counts as set only when it differs from its column DEFAULT (`c_insert_base`).
+The old body compared against NULL, so a POS manager writing a trial client's FIRST settings row
+tripped the role-list check on `pos_custom_roles`' `'[]'` default. **A new guarded column with a
+non-NULL default must join that baseline**; the migration's assertion block checks it against the
+live defaults. A write that screen scopes as a PATCH (the rule above) is what lets a manager save
+one of their tabs without touching an Owner column.
 
 ## The second editor for the same columns is where the fix did not reach (S739)
 

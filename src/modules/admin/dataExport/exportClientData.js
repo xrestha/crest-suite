@@ -194,7 +194,7 @@ export async function exportClientData(clientId, onProgress = () => {}) {
     totalRows: Object.values(data).reduce((sum, rows) => sum + rows.length, 0),
     notes: [
       'staff_pin_vault holds AES-GCM ciphertext only; the key stays in the database.',
-      'client_secrets and audit_logs are deliberately excluded.',
+      'client_secrets, pos_devices (per-tablet POS keys) and audit_logs are deliberately excluded.',
       '*_by_name columns are resolved at export time and are not database columns.',
       'The .json artifact is the restorable one. The .xlsx is for reading.',
     ],

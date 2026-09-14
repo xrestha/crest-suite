@@ -33,6 +33,21 @@ export function isNetworkError(err) {
   return NETWORK_ERROR_RE.test(e.message || '')
 }
 
+// A stable machine code raised by a guard (S754). The POS guards put it in the Postgres HINT, which
+// PostgREST returns as `hint` and supabase-js keeps as `error.hint`; most of them also lead the
+// message with it (`pos_shift_rank: …`). Either is accepted, so an error that reached a page as a
+// bare message string — or through a wrapper that dropped `hint` — still matches. Word boundaries,
+// so `pos_cash_movement_rank` never matches `pos_cash_movement_locked`.
+function hasCode(e, ...codes) {
+  if (codes.includes(e.hint)) return true
+  const msg = e.message || ''
+  return codes.some(c => new RegExp(`(^|[^a-z_])${c}([^a-z_]|$)`, 'i').test(msg))
+}
+
+// Which table a POS guard refused on. Every S754 message leads with it (`pos_credit_notes: …`),
+// and one hint (bill_locked) is shared by refusals whose consequences differ by table.
+const onTable = (e, table) => new RegExp(`^${table}:`, 'i').test(e.message || '')
+
 const rules = [
   // Offline / DNS / CORS — supabase-js surfaces these as a bare TypeError from fetch, stringified
   // into `error.message` by PostgrestBuilder rather than thrown.
@@ -56,6 +71,171 @@ const rules = [
     test: e => e.code === 'PGRST301' || /jwt|token is expired|invalid claim/i.test(e.message || ''),
     staff: 'Your session has ended. Sign in again to continue.',
     operator: 'Your session has ended. Sign in again to continue.',
+  },
+
+  // ── POS money path and rank guards (S754, migrations 20260916100000 + 20260916110000) ───────
+  // Every one of these is raised by a BEFORE trigger, a statement trigger or inside the RPC before
+  // it writes — the statement rolls back — so each may say nothing was changed. They sit ahead of
+  // the generic 42501 / 23505 rules below, which could only say "not allowed" / "already exists".
+  // Keyed on the hint code, never on the prose, so rewording a migration message cannot unhook one.
+  //
+  // bill_locked is one hint for four different refusals; the table the message names picks which.
+  {
+    test: e => hasCode(e, 'bill_locked') && onTable(e, 'pos_credit_notes') && /issued against a paid bill/i.test(e.message || ''),
+    staff: 'Only a paid bill can be credited — not a void or a complimentary bill. No Credit Note was issued.',
+    operator: 'A Credit Note can only be issued against a paid bill of this outlet — not a voided or complimentary one — so no note was issued and nothing was numbered.',
+  },
+  {
+    test: e => hasCode(e, 'bill_locked') && onTable(e, 'pos_credit_notes'),
+    staff: 'An issued Credit Note is a numbered tax document, so it cannot be changed or deleted. Nothing was changed.',
+    operator: 'An issued Credit Note is a numbered tax document, so it cannot be edited or deleted — nothing was changed. If it was issued in error, the correction is a new bill, not a change to the note.',
+  },
+  {
+    test: e => hasCode(e, 'bill_locked') && /already has a credit note|not issued against it/i.test(e.message || ''),
+    staff: 'This bill already has a Credit Note linked to it. Nothing was changed.',
+    operator: 'This bill already has a Credit Note linked to it, or the note was not issued against this bill, so the link was not changed. A bill is credited once — find its note in the Credit Note Book.',
+  },
+  {
+    test: e => hasCode(e, 'bill_locked') && /unsettled credit bill/i.test(e.message || ''),
+    staff: 'This bill has already been settled. Nothing was changed — reload the list.',
+    operator: 'This bill is not an unsettled Credit bill any more — it was probably settled on another device a moment ago — so nothing was recorded twice. Reload the list to see where it stands.',
+  },
+  {
+    test: e => hasCode(e, 'bill_locked'),
+    staff: 'This bill is closed and printed, so it can no longer be changed. Nothing was changed — ask a manager about a Credit Note if it needs correcting.',
+    operator: 'This bill is closed and printed, so it is locked for everyone and nothing was changed. To correct it, issue a Credit Note. It may have been closed on another device a moment ago — reload to see it.',
+  },
+  {
+    test: e => hasCode(e, 'credit_note_exists'),
+    staff: 'This bill has already been credited, so no second Credit Note was issued.',
+    operator: 'This bill already has a Credit Note — a bill is credited once — so no second note was issued and nothing was numbered. Find the existing note in the Credit Note Book; another manager may have issued it a moment ago.',
+  },
+  {
+    test: e => hasCode(e, 'stale_order'),
+    staff: 'This order was changed on another device since you opened it. Nothing was saved — reload the order and add your changes again.',
+    operator: 'This order was changed on another device since it was opened here, so this save was refused rather than overwrite theirs. Nothing was saved — reload the order and make the change again.',
+  },
+  {
+    test: e => hasCode(e, 'order_not_open'),
+    staff: 'This bill has already been closed, so it cannot be changed. Nothing was changed — reload the floor.',
+    operator: 'This bill is already closed (possibly on another device), so it can no longer be changed and nothing was changed. Reload the floor to see it.',
+  },
+  {
+    test: e => hasCode(e, 'order_not_closed'),
+    staff: 'That can only be recorded once the bill is closed. Nothing was changed.',
+    operator: 'Credit Note, settlement and close details can only be recorded on a closed bill, and this one is still open — nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'line_not_on_menu'),
+    staff: 'Something on this order is no longer on the menu. Nothing was saved — remove it and save again.',
+    operator: 'A dish on this order is no longer on the menu (named in the detail below), so the order was not saved. Remove it from the order and save again — or put the dish back on the POS menu in Menu Pricing first.',
+  },
+  {
+    test: e => hasCode(e, 'award_window_closed'),
+    staff: 'This bill closed too long ago for points to be added from the till. The bill itself is fine — ask the owner to add the points.',
+    operator: 'Loyalty points are added as a bill closes, and this one closed more than 10 minutes ago, so none were added. The bill is unaffected; the Owner can add the points.',
+  },
+  {
+    test: e => hasCode(e, 'redeem_exceeds_bill'),
+    staff: 'Those points are worth more than this bill. None were redeemed — redeem fewer.',
+    operator: 'Those points are worth more than this bill, so none were redeemed. Redeem fewer points.',
+  },
+  {
+    test: e => hasCode(e, 'pos_cash_refund_rank'),
+    staff: 'Paying a refund out of the drawer needs a manager. No refund was recorded.',
+    operator: 'Paying a Credit Note refund out of the drawer needs a POS manager or the Owner, so no refund was recorded on the shift.',
+  },
+  {
+    test: e => hasCode(e, 'pos_cash_refund_over'),
+    staff: 'That refund is more than the Credit Note. No refund was recorded.',
+    operator: 'The cash refund is more than the Credit Note is worth, so it was not recorded. Refund at most the note’s net amount.',
+  },
+  {
+    test: e => hasCode(e, 'pos_cash_refund_note'),
+    staff: 'A refund has to be tied to a Credit Note. No refund was recorded.',
+    operator: 'A cash refund must name a Credit Note of this outlet, and this one did not, so no refund was recorded.',
+  },
+  {
+    test: e => hasCode(e, 'pos_cash_movement_rank'),
+    staff: 'Recording cash in or out of the drawer needs a supervisor. Nothing was recorded.',
+    operator: 'Recording cash in or out of the drawer needs a POS supervisor, a POS manager or the Owner, so nothing was recorded.',
+  },
+  {
+    test: e => hasCode(e, 'pos_cash_movement_locked'),
+    staff: 'A cash entry cannot be changed or deleted once recorded. Nothing was changed.',
+    operator: 'A cash movement is a drawer record, so it cannot be edited or deleted — nothing was changed. Record a correcting Cash In or Cash Out instead.',
+  },
+  {
+    test: e => hasCode(e, 'pos_cash_movement_shift_closed', 'pos_cash_movement_no_shift'),
+    staff: 'There is no open shift for this cash to go on. Nothing was recorded — a supervisor has to open a shift first.',
+    operator: 'Cash can only be recorded against an open shift, and this one is closed (or none is open), so nothing was recorded. Open a shift, then record it again.',
+  },
+  {
+    test: e => hasCode(e, 'pos_shift_rank'),
+    staff: 'Opening or closing a shift needs a supervisor. Nothing was changed.',
+    operator: 'Opening or closing a shift needs a POS supervisor, a POS manager or the Owner, so nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'pos_shift_closed'),
+    staff: 'This shift is already closed. Nothing was changed — reload the page.',
+    operator: 'This shift is already closed and its settlement slip is signed, so it cannot be changed and nothing was changed. It was probably closed on another device — reload to see the closed shift.',
+  },
+  {
+    test: e => hasCode(e, 'pos_shift_locked'),
+    staff: 'A shift cannot be deleted. Nothing was removed.',
+    operator: 'A shift is a cash record and cannot be deleted — every bill and cash movement on it would lose its shift. Nothing was removed.',
+  },
+  {
+    test: e => hasCode(e, 'pos_shift_must_open'),
+    staff: 'A shift has to start open. Nothing was saved.',
+    operator: 'A shift starts open and is closed with Close Shift, so this was not saved.',
+  },
+  {
+    test: e => hasCode(e, 'pos_table_has_open_order'),
+    staff: 'That table still has an open bill, so it cannot be deleted. Nothing was removed.',
+    operator: 'That table still has an open bill (its order number is in the detail below), so it was not deleted — the bill would vanish from the floor with nobody able to reach it. Bill or void that order first.',
+  },
+  {
+    test: e => hasCode(e, 'pos_tables_rank'),
+    staff: 'Only the owner or a POS manager can add, rename, move or delete tables. Nothing was changed.',
+    operator: 'Only the Owner or a POS manager can add, rename, move or delete tables, so nothing was changed. Marking a table occupied or free from the floor is unaffected.',
+  },
+  {
+    test: e => hasCode(e, 'pos_setup_rank'),
+    staff: 'Only the owner or a POS manager can change the till setup. Nothing was saved.',
+    operator: 'Only the Owner or a POS manager can change the till setup (the setting is named in the detail below), so nothing was saved.',
+  },
+  {
+    test: e => hasCode(e, 'invoice_settings_rank'),
+    staff: 'Only the owner can change the invoice and VAT details printed on bills. Nothing was saved.',
+    operator: 'Only the Owner can change the invoice and VAT details printed on bills, so nothing was saved. They are read when any bill or Credit Note is printed — reprints of old ones included — which is why they are fenced.',
+  },
+  {
+    test: e => hasCode(e, 'loyalty_enrol_rank'),
+    staff: 'Only the owner or a POS manager can enrol a customer in a loyalty scheme. Nothing was changed.',
+    operator: 'Only the Owner or a POS manager can enrol a customer in a loyalty scheme or take them out of one, so the enrolment was not changed.',
+  },
+  {
+    test: e => hasCode(e, 'loyalty_rank'),
+    staff: 'Only the owner or a POS manager can change loyalty schemes. Nothing was changed.',
+    operator: 'Only the Owner or a POS manager can create, change or delete a loyalty scheme, so nothing was changed.',
+  },
+  // rank_required is one hint for several rank refusals; the recipe price guard and the loyalty
+  // award have consequences worth naming, the rest share the generic sentence.
+  {
+    test: e => hasCode(e, 'rank_required') && onTable(e, 'recipes'),
+    staff: 'Only a manager or the owner can change a menu price, its VAT rate or whether a dish is on the POS menu. Nothing was saved.',
+    operator: 'A menu price, its VAT rate and whether a dish is on the POS menu are set by a manager or the Owner, so this save was refused and nothing was changed. Ask one to change it in Menu Pricing.',
+  },
+  {
+    test: e => hasCode(e, 'rank_required') && /person who closed it/i.test(e.message || ''),
+    staff: 'Points for a bill are added by whoever closed it, as it closes. The bill itself is fine — ask the owner to add the points.',
+    operator: 'Loyalty points for a bill are added by the person who closed it, as it closes, so none were added from this login. The bill is unaffected; the Owner can add the points.',
+  },
+  {
+    test: e => hasCode(e, 'rank_required'),
+    staff: 'Your login does not have the rank for that. Nothing was changed — ask a supervisor or manager.',
+    operator: 'This login’s POS rank is too low for that (the rank it needs is in the detail below), so nothing was changed. Raise it on POS Staff if this person should be able to.',
   },
 
   // The submit_my_* RPCs raise this literal when profiles.hr_self_service is off or unlinked.
@@ -148,6 +328,17 @@ const rules = [
     test: e => /vendor_has_references/i.test(e.message || ''),
     staff: 'That supplier now has records against it, so it cannot be deleted. Nothing was removed.',
     operator: 'That supplier has purchases, orders, returns or gate passes recorded against it — possibly entered just now on another device — and deleting it would take that history with it. Nothing was removed. Deactivate it and then archive it: it leaves the Vendors page and every dropdown, and every past record keeps its supplier.',
+  },
+
+  // A POS table that has ever taken a QR guest order (S754). pos_guest_order_requests.table_id is
+  // a plain FK, so Postgres refuses the delete inside the statement — the table is untouched, and
+  // the reservation links that would have cascaded are rolled back with it. Keyed on the child
+  // table's name as well as 23503 so no other foreign-key refusal inherits this wording. Inactive
+  // is the lossless way through: the floor tile stops opening and the QR stops taking orders.
+  {
+    test: e => e.code === '23503' && /pos_guest_order_requests/i.test(e.message || ''),
+    staff: 'That table has QR guest orders on record, so it cannot be deleted. Ask your manager to mark it Inactive instead.',
+    operator: 'This table has taken QR guest orders, which stay on record against it, so it cannot be deleted — retrying will not get past this. Mark it Inactive instead: it can no longer be opened on the Orders floor, its QR stops taking orders, and its history is kept.',
   },
 
   // The closing_stock recount guard (S737). Names who holds the row and what to do about it,

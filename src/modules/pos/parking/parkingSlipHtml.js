@@ -1,7 +1,7 @@
-import { adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { scopedUpdate } from '../../../shared/scopedDb'
-import { nepalTime } from '../../../shared/nepalTime'
+import { nepalTime, nepalDateAd, nepalBs } from '../../../shared/nepalTime'
 
 // Pure 80mm-thermal parking token builder — same shape as posOrderPrintHtml.js/creditNoteHtml.js.
 // Not a bill: no items, no VAT — just a claim ticket so the vehicle number is what a valet reads
@@ -9,8 +9,11 @@ import { nepalTime } from '../../../shared/nepalTime'
 export function buildParkingSlipHtml(slip, outletName, propertyAddress, issuedByName, copyLabel) {
   const now       = new Date(slip.time_in || Date.now())
   const nowStr    = nepalTime(now)
-  const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const bs        = adToBsSafe(now)
+  // S754: Date and Miti pinned to Nepal like the Time In beside them. toLocaleDateString and
+  // adToBsSafe(now) read the RUNTIME's day, so a token issued 00:15 Kathmandu printed the previous
+  // day's date under that morning's time for any till not set to Nepal time.
+  const adDateStr = nepalDateAd(now)
+  const bs        = nepalBs(now)
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
 
   return `<!DOCTYPE html>

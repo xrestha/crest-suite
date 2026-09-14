@@ -55,7 +55,8 @@ const NAV = [
   { to: '/stock',            label: 'Stock Count',       icon: ClipboardCheck, minImsRole: 'staff' },
   { to: '/requisitions',     label: 'Requisitions',      icon: ArrowRightLeft, featureKey: 'requisitions',    minPlan: 'growth', minImsRole: 'staff' },
   { to: '/recipes',          label: 'Recipe Costing',    icon: ChefHat, featureKey: 'recipe_costing',  minPlan: 'growth', minImsRole: 'supervisor' },
-  { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter', minImsRole: 'manager' },
+  // S754: no minImsRole — Menu Pricing's audience spans two modules (see menuPricingAccess in isItemVisible).
+  { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter', menuPricingAccess: true },
   { to: '/menu-engineering', label: 'Menu Engineering',  icon: PieChart, featureKey: 'menu_engineering',minPlan: 'pro', minImsRole: 'manager' },
   { to: '/overheads',        label: 'Overheads',         icon: Receipt, featureKey: 'overheads',       minPlan: 'growth', minImsRole: 'manager' },
 ]
@@ -162,7 +163,7 @@ const POS_GROUPS = [
     { to: '/pos/shifts', label: 'Shifts', icon: Clock, minPosRole: 'supervisor' },
   ]},
   { key: 'pos-menu', label: 'Menu', items: [
-    { to: '/menu-pricing', label: 'Menu Pricing', icon: Tag, featureKey: 'menu_pricing', minPlan: 'starter', minPosRole: 'manager' },
+    { to: '/menu-pricing', label: 'Menu Pricing', icon: Tag, featureKey: 'menu_pricing', minPlan: 'starter', menuPricingAccess: true },
   ]},
   { key: 'pos-reports', label: 'Reports', items: [
     { to: '/pos/exceptions', label: 'Exceptions', icon: TriangleAlert, minPosRole: 'manager' },
@@ -515,6 +516,15 @@ export default function Layout() {
     // this same predicate, and the one time that condition was duplicated by hand it was applied
     // to Group Console and not to its two siblings (S617/S638).
     if (item.ownerOnly && !isAdmin && !isOwner) return false
+    // S754 (owner decision): Menu Pricing opens for a POS manager OR an IMS manager OR the Owner /
+    // admin, whichever module panel it is listed in. It used to carry minImsRole in the IMS panel
+    // and minPosRole in the POS panel, so the same page was offered to two different sets depending
+    // on which panel you looked in. One predicate on both items, the same one MenuPricing.js
+    // enforces on the route — plus canReachPosPath, because ModuleGate asks it of /menu-pricing
+    // (it is a POS route too), so a kitchen/bar station account is redirected there regardless.
+    if (item.menuPricingAccess && !(
+      (isAdmin || isOwner || hasPosAccess('manager') || hasImsAccess('manager')) && canReachPosPath(item.to)
+    )) return false
     if (item.featureKey && !hasFeature(item.featureKey)) return false
     if (item.minPosRole && !hasPosAccess(item.minPosRole)) return false
     // minPosRole is unique to POS nav items (IMS/HR use minImsRole/minHrRole), so this scopes

@@ -10,7 +10,7 @@ import { escapeHtml as esc } from '../../../utils/escapeHtml'
 // in explicitly so the same functions back both the real print (printBill/printCompSlip) and the
 // live in-modal preview, and so they can be unit-tested independently of the component.
 
-export function buildKotBotHtml({ station, items, ticketNo, outletName, tableName, takenBy, covers }) {
+export function buildKotBotHtml({ station, items, ticketNo, outletName, tableName, takenBy, covers, reprint = false }) {
   const stamp        = new Date()
   const now          = nepalTime(stamp)
   // nepalBs pins the day to Nepal before the converter reads its local getters, so a ticket sent
@@ -37,6 +37,7 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
 </head><body>
   ${outletName ? `<div class="c b" style="font-size:14px">${esc(outletName)}</div>` : ''}
   <div class="c b lg">${stationLabel}</div>
+  ${reprint ? `<div class="c b" style="font-size:15px;margin-top:3px">*** REPRINT — NOT A NEW ORDER ***</div>` : ''}
   <hr>
   <div class="row"><span class="b" style="font-size:15px">${esc(tableName)}</span><span class="b" style="font-size:15px">${ticketNo ? `#${ticketNo}` : ''}</span></div>
   <div class="row"><span>${takenBy ? `Taken by: ${esc(takenBy)}` : ''}</span><span>Covers: ${covers}</span></div>
@@ -44,11 +45,16 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
   <hr>
   ${items.map(i => {
       const delta = (i.sent_qty || 0) > 0 ? i.qty - i.sent_qty : 0
+      const note  = i.notes ? `<div class="note">↳ ${esc(i.notes)}</div>` : ''
+      // Already sent, quantity unchanged — only the note moved (S754). This used to fall through to
+      // "×qty", which a station reads as a fresh order and cooks again. It prints no quantity at all.
+      if ((i.sent_qty || 0) > 0 && delta === 0) {
+        return `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">CHANGE</span></div><div class="note b">CHANGE ONLY — not a new order</div>${note}`
+      }
       // A negative delta (qty reduced since the last send, then resent) needs its own label —
       // falling back to a plain "×qty" here would read as a fresh full order rather than a cut,
       // and the kitchen has no other way to tell "this is 3 now" from "make 3 more".
       const label = delta > 0 ? `+${delta}` : delta < 0 ? `↓${Math.abs(delta)} (now ${i.qty})` : `×${i.qty}`
-      const note  = i.notes ? `<div class="note">↳ ${esc(i.notes)}</div>` : ''
       return `<div class="row"><span class="b">${esc(i.name)}</span><span class="qty">${label}</span></div>${note}`
     }).join('')}
   <hr>

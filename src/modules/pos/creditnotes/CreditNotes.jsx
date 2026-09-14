@@ -10,6 +10,9 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBsSafe, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { printCreditNote } from './creditNoteHtml'
 import IssueCreditNoteModal from './IssueCreditNoteModal'
+import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const fmtNpr = npr
 
@@ -22,27 +25,44 @@ export default function CreditNotes() {
   const [toIso,   setToIso]   = useState(formatAd(new Date()))
   const [invoiceSearch, setInvoiceSearch] = useState('')
 
+  // S754: the search box drove a full reload on every keystroke ("2", "22", "223", "2238" — four
+  // concurrent paged reads) and whichever landed last won the list. Debounced here, and each load
+  // is keyed so a superseded one cannot write its result over the current one.
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(invoiceSearch), 300)
+    return () => clearTimeout(t)
+  }, [invoiceSearch])
+  const candReq = useLatestRequest()
+  const notesReq = useLatestRequest()
+
   const [candidates, setCandidates] = useState([])
   const [candLoading, setCandLoading] = useState(false)
+  const [candError, setCandError] = useState(null)
   const [pickedOrder, setPickedOrder] = useState(null)
 
   const [notes, setNotes] = useState([])
   const [notesLoading, setNotesLoading] = useState(false)
+  const [notesError, setNotesError] = useState(null)
+  // S754: a reprint that could not read its lines or whose pop-up was blocked said nothing.
+  const [bookMsg, setBookMsg] = useState(null)
   const [staffNames, setStaffNames] = useState({})
   const [billingSettings, setBillingSettings] = useState({ is_vat_registered: true, invoice_prefix: '', vat_number: '', property_address: '', property_phone: '' })
   const [outletName, setOutletName] = useState('')
 
   const loadCandidates = useCallback(async () => {
     if (!clientId) return
+    const key = candReq.begin(`${clientId}|${fromIso}|${toIso}|${debouncedSearch.trim()}`)
     setCandLoading(true)
+    setCandError(null)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
     // An invoice number is a direct lookup, so it deliberately ignores the date range: both
     // pickers default to today, and the single most common real trigger — "a customer came back
     // with a bill from last week" — used to return "No un-credited bills in this range" with
     // nothing saying the date range was the reason.
-    const searchNo = parseInt(invoiceSearch.trim(), 10)
-    const byInvoiceNo = invoiceSearch.trim() !== '' && !isNaN(searchNo)
+    const searchNo = parseInt(debouncedSearch.trim(), 10)
+    const byInvoiceNo = debouncedSearch.trim() !== '' && !isNaN(searchNo)
     // A FUNCTION returning a fresh builder, not one builder reused: a supabase-js builder is a
     // one-shot thenable, so paging a shared one silently returns the first page every time.
     const makeQuery = () => {
@@ -57,17 +77,23 @@ export default function CreditNotes() {
     // Paged: the range is whatever the two pickers are set to, so a widened window at a busy
     // outlet passes 1000 bills — and the truncation would drop the bill the customer is standing
     // there holding, indistinguishably from it having already been credited.
-    const { data } = await fetchAllRows(makeQuery)
-    setCandidates(data || [])
+    const { data, error } = await fetchAllRows(makeQuery)
+    if (!candReq.isCurrent(key)) return
     setCandLoading(false)
-  }, [clientId, fromIso, toIso, invoiceSearch, scopedFrom])
+    // S754: a failed read rendered "No un-credited bills in this range" — i.e. told a manager the
+    // bill in the customer's hand had already been credited.
+    if (error) { setCandError(error); setCandidates([]); return }
+    setCandidates(data || [])
+  }, [clientId, fromIso, toIso, debouncedSearch, scopedFrom, candReq])
 
   const loadNotes = useCallback(async () => {
     if (!clientId) return
+    const key = notesReq.begin(`${clientId}|${fromIso}|${toIso}`)
     setNotesLoading(true)
+    setNotesError(null)
     const fromTs = new Date(fromIso + 'T00:00:00').toISOString()
     const toTs   = new Date(toIso + 'T23:59:59.999').toISOString()
-    const [{ data: cn }, { data: profs }, { data: settings }, { data: cl }] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('pos_credit_notes')
         .gte('created_at', fromTs).lte('created_at', toTs).order('created_at', { ascending: false }),
       // Raw `profiles` reads are RLS-limited to the caller's own row (id = auth.uid() OR admin) —
@@ -78,6 +104,13 @@ export default function CreditNotes() {
       supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
       supabase.from('clients').select('name').eq('id', clientId).single(),
     ])
+    if (!notesReq.isCurrent(key)) return
+    // S754: every one of these dropped `error`. A failed notes read showed "No Credit Notes issued"
+    // and let the Excel register export EMPTY for the range; a failed settings read fell to the
+    // `?? true` default and labelled a PAN-bill client's notes and reprints as VAT.
+    const failed = results.find(r => r.error)
+    if (failed) { setNotesError(failed.error); setNotes([]); setNotesLoading(false); return }
+    const [{ data: cn }, { data: profs }, { data: settings }, { data: cl }] = results
     setStaffNames(Object.fromEntries((profs || []).map(p => [p.id, p.full_name])))
     setBillingSettings({
       is_vat_registered: settings?.is_vat_registered ?? true,
@@ -89,7 +122,7 @@ export default function CreditNotes() {
     setOutletName(cl?.name || '')
     setNotes(cn || [])
     setNotesLoading(false)
-  }, [clientId, fromIso, toIso, scopedFrom])
+  }, [clientId, fromIso, toIso, scopedFrom, notesReq])
 
   useEffect(() => { if (tab === 'issue') loadCandidates() }, [tab, loadCandidates])
   useEffect(() => { if (tab === 'book') loadNotes() }, [tab, loadNotes])
@@ -97,18 +130,32 @@ export default function CreditNotes() {
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 
   async function reprintNote(note) {
-    const { data: items } = await scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped').eq('order_id', note.order_id)
+    setBookMsg(null)
+    const { data: items, error: itemsErr } = await scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped').eq('order_id', note.order_id)
+    // S754: a failed read here printed a numbered Credit Note with no lines on it, and still
+    // advanced its copy counter. Refuse instead — nothing has printed, so a retry is safe.
+    if (itemsErr) { setBookMsg(asActionError(itemsErr, 'operator')); return }
     // Same exclusion as the original issuance (IssueCreditNoteModal.jsx) — item-level comps were
     // never billed, so they were never on this Credit Note in the first place.
     const payableItems = (items || []).filter(i => !i.comped)
     const recipeIds = [...new Set(payableItems.map(i => i.recipe_id).filter(Boolean))]
     let hscMap = {}
     if (recipeIds.length > 0) {
-      const { data } = await scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds)
+      const { data, error: hscErr } = await scopedFrom('recipes', 'id, hsc_code').in('id', recipeIds)
+      if (hscErr) { setBookMsg(asActionError(hscErr, 'operator')); return }
       hscMap = Object.fromEntries((data || []).map(r => [r.id, r.hsc_code]))
     }
-    await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap)
-    setNotes(prev => prev.map(n => n.id === note.id ? { ...n, print_count: (n.print_count || 0) + 1 } : n))
+    const { printed, newCount, countError } = await printCreditNote(clientId, note, payableItems, billingSettings, outletName, hscMap)
+    if (!printed) {
+      setBookMsg(`The print window for CN${note.credit_note_no} was blocked by the browser, so nothing printed. Allow pop-ups for this site and press Reprint again.`)
+      return
+    }
+    if (countError) {
+      // Printed, but the counter did not move — the next reprint will carry this same copy label.
+      setBookMsg({ text: `CN${note.credit_note_no} printed, but its reprint count could not be saved, so the next reprint will carry the same copy label as this one.`, detail: asActionError(countError, 'operator').detail })
+      return
+    }
+    setNotes(prev => prev.map(n => n.id === note.id ? { ...n, print_count: newCount } : n))
   }
 
   async function exportExcel() {
@@ -170,6 +217,8 @@ export default function CreditNotes() {
 
           {candLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : candError ? (
+            <ReportLoadError error={candError} />
           ) : candidates.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               No un-credited bills in this range.
@@ -214,11 +263,18 @@ export default function CreditNotes() {
               <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="credit-notes-to-bs-2">To (BS)</label>
               <BsCalendarPicker id="credit-notes-to-bs-2" value={toIso} onChange={setToIso} />
             </div>
-            <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={notes.length === 0}>⬇ Excel</button>
+            {/* Gated on loading and the error too (S754): the workbook is named for the pickers'
+                range, so exporting mid-load or after a failed read wrote an empty or stale
+                register under the new range's filename. */}
+            <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel} disabled={notesLoading || !!notesError || notes.length === 0}>⬇ Excel</button>
           </div>
+
+          <ActionError error={bookMsg} className="action-error--top" />
 
           {notesLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : notesError ? (
+            <ReportLoadError error={notesError} />
           ) : notes.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               No Credit Notes issued in this range.

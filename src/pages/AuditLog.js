@@ -51,6 +51,10 @@ const TABLE_LABELS = {
   // POS module
   pos_orders:             'POS Order',
   pos_credit_notes:       'Credit Note',
+  // audited since S754 — a closed shift is the signed drawer count, and a cash movement (a refund
+  // on a credit note included) is money leaving or entering that drawer
+  pos_shifts:             'POS Shift',
+  pos_cash_movements:     'Cash Movement',
   // Crest Suite
   assets_register:          'Fixed Asset',
   assets_depreciation_runs: 'Depreciation Run',
@@ -91,7 +95,9 @@ const IGNORE_KEYS = new Set([
 // every touch of that row but aren't themselves the audit-worthy event (e.g. a bill reprint
 // bumping print_count while status/discount/void stay the same).
 const TABLE_EXTRA_IGNORE = {
-  pos_orders: new Set(['covers', 'print_count', 'comp_print_count']),
+  // items_version (S754) is bumped by save_pos_order_items on every cart save — the optimistic lock
+  // between two tablets, not an event. log_audit() skips a write that changes only it.
+  pos_orders: new Set(['covers', 'print_count', 'comp_print_count', 'items_version']),
 }
 
 const FIELD_LABELS = {

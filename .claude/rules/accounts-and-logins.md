@@ -88,7 +88,7 @@ Each axis gates two things that must both be kept in sync when adding a page: th
 
 `pos_team` (`foh|kitchen|bar`, default `foh`, added S431) is a separate, **orthogonal** axis on `profiles` — which physical station a POS account works, independent of `pos_role`'s rank (a kitchen-team account can be Staff or Manager rank; the team axis only changes what's in its nav, not what its rank permits). Gated by an explicit allowlist (`Layout.js`'s `KITCHEN_TEAM_ALLOWED_PATHS`) rather than per-item tags — fail-closed, so a newly-added POS page is hidden from kitchen/bar by default until someone deliberately adds it to the list. `KitchenDisplay.jsx` additionally uses it to lock the KOT/BOT ticket-station toggle (not the same "station" concept — `pos_kot_log.station` is the ticket's printer routing, unrelated to the staff `pos_team` column) to the account's own queue.
 
-`pos_discount_limit` (nullable numeric %, `NULL` = unlimited) and `pos_allow_void` (boolean, default `false`, added S517) are two more per-staff overrides on `profiles`, same family as `pos_team` — a manager sets them per staff member on `/pos/staff` (POS Staff), and both are enforced in `PosOrders.jsx` against `profile.pos_discount_limit`/`pos_allow_void` from `useAuth()` (never against rank alone — a Supervisor isn't automatically capped/voidable, only whoever has the flag set). **`admin-user-ops`'s `update_pos_role` action must build every field it writes conditionally** (`if (x !== undefined) updatePayload.x = x`), never unconditionally as `x || null` — `updateTeam`/`updateDiscountLimit`/`updateAllowVoid` each call this one action with only their own single field in the request body, so any field written unconditionally gets silently reset to its default on every other field's update. This bit `pos_role` itself: it was unconditional from the start (only `pos_team` got the conditional treatment when added at S431), so setting a staff member's Discount Limit or Allow Void was silently wiping their role to "No Access" — found live smoke-testing S517 against a real staff account, fixed by making `pos_role`/`pos_job_title` conditional too. Any future field added to this same staff-permission family must follow the conditional pattern from the start, not retrofit it after the same bug repeats.
+`pos_discount_limit` (nullable numeric %, `NULL` = unlimited) and `pos_allow_void` (boolean, default `false`, added S517) are two more per-staff overrides on `profiles`, same family as `pos_team` — a manager sets them per staff member on `/pos/staff` (POS Staff), and both are enforced in `PosOrders.jsx` against `profile.pos_discount_limit`/`pos_allow_void` from `useAuth()` (and server-side by `guard_pos_order_close()` since S577; who may SET them is capped at the caller's own since S754, see below) (never against rank alone — a Supervisor isn't automatically capped/voidable, only whoever has the flag set). **`admin-user-ops`'s `update_pos_role` action must build every field it writes conditionally** (`if (x !== undefined) updatePayload.x = x`), never unconditionally as `x || null` — `updateTeam`/`updateDiscountLimit`/`updateAllowVoid` each call this one action with only their own single field in the request body, so any field written unconditionally gets silently reset to its default on every other field's update. This bit `pos_role` itself: it was unconditional from the start (only `pos_team` got the conditional treatment when added at S431), so setting a staff member's Discount Limit or Allow Void was silently wiping their role to "No Access" — found live smoke-testing S517 against a real staff account, fixed by making `pos_role`/`pos_job_title` conditional too. Any future field added to this same staff-permission family must follow the conditional pattern from the start, not retrofit it after the same bug repeats.
 
 ## The staff pages: what a module manager may and may not do (S729)
 
@@ -106,7 +106,19 @@ Found re-analysing `ImsStaff.jsx`; the rules hold for `HrStaff.jsx` and `PosStaf
   reset (own password excepted). Before it, "Managers can only be deleted by admin" was two
   requests long — clear the role, then delete — and a manager could reset a peer's password and
   sign in as them. **The Owner is exempt alongside admin.** A new staff-management action takes
-  both helpers, in that order.
+  both helpers, in that order. **POS did not get it until S754** (`admin-user-ops`, deployed
+  2026-09-14). This section said the rules held for `PosStaff.jsx` too, but POS delete still ran
+  the old "Managers can only be deleted by admin" test, which also refused the Owner, and POS role
+  changes and PIN resets had no peer check at all. A PIN reset on a peer manager was a way to sign
+  in as them. `requireManageableTarget(target, 'pos')` now runs on all three. **A rule written as
+  "holds for all three pages" is a claim about three files — grep each one.**
+- **A manager cannot hand out more than they hold (S754, POS).** Only the Owner or admin grants
+  POS Manager rank (the HR rule). `refusePosPowerEscalation()` refuses a `pos_discount_limit` above
+  the caller's own cap, and refuses "no limit" (NULL) from any capped caller. It also refuses
+  `pos_allow_void` from a caller who cannot void. Otherwise a 10%-capped manager could give a waiter
+  an unlimited discount and then use that waiter's PIN. **A login a capped manager creates without
+  naming a limit starts at the creator's cap**, because the column default is NULL = unlimited, so
+  omission was itself an escalation. Admin and the Owner are exempt.
 - **Converting a marker-less login into staff must refuse the LAST one.** Owner is the absence of
   markers, so "Existing User" mode on a client's only plain login leaves no Owner at all.
   `isLastOwnerLogin()` guards `update_ims_role` and `update_hr_role`; a failed count counts as last.

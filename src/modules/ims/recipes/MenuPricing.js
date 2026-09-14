@@ -42,7 +42,7 @@ const EMPTY_FORM = { name: '', category: '', price: '', vatRate: 0.13, costPrice
 const DRAFT_SORT_KEYS = { newFc: true, change: true }
 
 export default function MenuPricing() {
-  const { clientId, profile, clientModules, hasImsAccess } = useAuth()
+  const { clientId, profile, clientModules, hasImsAccess, hasPosAccess, isAdmin, isOwner } = useAuth()
   const { settings } = useSettings()
   // `fcFigure` is the one rendered form of a banded food-cost figure — colour, the ✓/△/▲ mark and
   // the band name as a title, together. This page used to take the three apart into its own
@@ -434,9 +434,15 @@ export default function MenuPricing() {
   const posOnCount  = recipes.filter(r => r.pos_enabled).length
   const posOffCount = recipes.filter(r => !r.pos_enabled).length
 
-  // IMS staff-role gate only applies to clients that actually have IMS — a POS-only client's
-  // Owner login has no ims_role at all and must never be blocked from this shared route.
-  if (clientModules?.ims && !hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
+  // S754 (owner decision): Menu Pricing opens for a POS manager OR an IMS manager OR the Owner /
+  // admin, on any client — everyone else is redirected, by URL as well as by nav. This sits above
+  // BOTH returns below (the POS-only branch and the IMS branch) and after every hook. The previous
+  // gate applied only on IMS clients and only asked the IMS rank, so on a client with both modules
+  // a POS manager was refused a page their own POS panel listed, while on a POS-only client ANY POS
+  // account (a Staff-rank waiter included) could open it by URL and change prices. hasPosAccess /
+  // hasImsAccess already return false when their module is off, so a rank on a module the client
+  // does not have grants nothing. Layout.js's `menuPricingAccess` nav predicate is the same set.
+  if (!(isAdmin || isOwner || hasPosAccess('manager') || hasImsAccess('manager'))) return <Navigate to="/dashboard" replace />
 
   /* ── POS-only view (no IMS) ─────────────────────────────────────────────── */
   if (!clientModules?.ims) return (

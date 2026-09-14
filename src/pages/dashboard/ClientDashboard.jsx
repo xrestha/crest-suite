@@ -934,9 +934,14 @@ export default function ClientDashboard() {
     const READY_WAITING_MS = 20 * 60 * 1000 // "ready & still waiting for pickup", not all-day ready count
 
     const openNow = rows.filter(r => r.status === 'new' || r.status === 'in_progress').length
-    const lateCount = rows.filter(r => r.status !== 'ready' && (nowMs - new Date(r.sent_at).getTime()) > LATE_MS).length
-    const readyRows = rows.filter(r => r.status === 'ready')
-    const readyWaiting = readyRows.filter(r => r.ready_at && (nowMs - new Date(r.ready_at).getTime()) < READY_WAITING_MS).length
+    // S754: 'served' is a finished ticket (the floor has taken Ready food to the table). Counting
+    // anything not 'ready' as late would call every served ticket over 15 minutes old late.
+    const finished = r => r.status === 'ready' || r.status === 'served'
+    const lateCount = rows.filter(r => !finished(r) && (nowMs - new Date(r.sent_at).getTime()) > LATE_MS).length
+    // Still waiting at the pass means Ready and NOT yet served; prep time and completed-today count
+    // every ticket that reached Ready, served or not.
+    const readyRows = rows.filter(finished)
+    const readyWaiting = readyRows.filter(r => r.status === 'ready' && r.ready_at && (nowMs - new Date(r.ready_at).getTime()) < READY_WAITING_MS).length
     const prepDurationsMin = readyRows
       .filter(r => r.started_at && r.ready_at)
       .map(r => (new Date(r.ready_at).getTime() - new Date(r.started_at).getTime()) / 60000)

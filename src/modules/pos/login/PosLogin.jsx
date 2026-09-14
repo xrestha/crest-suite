@@ -2,8 +2,15 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useTheme } from '../../../context/ThemeContext'
-import { errorText } from '../../../shared/errorText'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
+import { withTimeout } from '../../../utils/withTimeout'
+
+// The exact `error` strings pos-staff-login returns on a 401 (supabase/functions/pos-staff-login).
+const ERR_INVALID_CREDENTIALS = 'Invalid credentials'
+const ERR_DEVICE_NOT_ACTIVATED = 'This device is not activated'
+// S754: a connection or server failure is not a wrong PIN, and the PIN stays in the dots so the
+// waiter can press Login again once the signal is back.
+const UNREACHABLE_MSG = "Couldn't reach the server — check the connection"
 
 const KEYS = [
   ['1', '2', '3'],
@@ -19,6 +26,10 @@ export default function PosLogin() {
   const clientId     = localStorage.getItem('pos_device_client_id')
   const clientName   = localStorage.getItem('pos_device_client_name') || 'Crest POS'
   const deviceSecret = localStorage.getItem('pos_device_secret')
+  // S754: a tablet activated since per-tablet keys holds its own device id beside its secret. One
+  // activated before holds only the restaurant's shared secret, and keeps using the old picker and
+  // the legacy branch of pos-staff-login until a manager activates it again or retires that key.
+  const deviceId     = localStorage.getItem('pos_device_id')
 
   const [staff,     setStaff]     = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -28,24 +39,33 @@ export default function PosLogin() {
   const [loadError, setLoadError] = useState('')
   const [retryToken, setRetryToken] = useState(0)
   const [signingIn, setSigningIn] = useState(false)
+  // The device key was refused by the picker itself — revoked from POS Setup, or never registered.
+  const [deviceDead, setDeviceDead] = useState(false)
 
   useEffect(() => {
     // No silent bounce — an unactivated device shows its own explanatory screen below
     // instead of instantly redirecting to /login with no indication of why.
     if (!clientId || !deviceSecret) { setLoading(false); return }
     setLoadError('')
+    setDeviceDead(false)
     setLoading(true)
     // The RPC's `error` used to be discarded, so a network failure fell through to the empty-state
     // copy — a till mid-service was told "No staff accounts found. Ask your manager to add staff",
     // which sends the manager to the wrong page to fix a problem that isn't there. Self-Service's
     // equivalent screen already separated these two; this is that fix ported back.
-    supabase.rpc('get_pos_staff', { p_client_id: clientId, p_device_secret: deviceSecret })
-      .then(({ data, error }) => {
-        if (error) setLoadError("Couldn't reach the server. Check this device's connection and try again.")
-        else setStaff(data || [])
-        setLoading(false)
-      })
-  }, [clientId, deviceSecret, retryToken])
+    const request = deviceId
+      ? supabase.rpc('get_pos_device_staff', { p_client_id: clientId, p_device_id: deviceId, p_device_secret: deviceSecret })
+      : supabase.rpc('get_pos_staff', { p_client_id: clientId, p_device_secret: deviceSecret })
+    request.then(({ data, error }) => {
+      // get_pos_device_staff RAISES on a dead key (rather than returning no rows) precisely so this
+      // screen can say "activate again" instead of "no staff accounts found", which would send the
+      // manager to POS Staff to fix a problem that is not there.
+      if (error && String(error.message || '').includes('pos_device_not_active')) setDeviceDead(true)
+      else if (error) setLoadError("Couldn't reach the server. Check this device's connection and try again.")
+      else setStaff(data || [])
+      setLoading(false)
+    })
+  }, [clientId, deviceId, deviceSecret, retryToken])
 
   const pressKey = useCallback((k) => {
     if (k === '⌫') { setPin(p => p.slice(0, -1)); setError(''); return }
@@ -80,35 +100,59 @@ export default function PosLogin() {
       // walk the 4-digit keyspace with those two RPCs never on the path. And pos_email itself no
       // longer comes back from get_pos_staff at all, so the browser never holds a working login
       // identifier — same fix S464 applied to HR Self-Service. See the Edge Function's comment.
-      const { data, error: err } = await supabase.functions.invoke('pos-staff-login', {
-        body: { client_id: clientId, device_secret: deviceSecret, staff_id: selected.id, pin },
-      })
+      // withTimeout: a supabase-js call can stall before it reaches fetch (utils/withTimeout.js),
+      // which would leave "Signing in…" on screen with no way back but a reload.
+      const { data, error: err } = await withTimeout(supabase.functions.invoke('pos-staff-login', {
+        body: { client_id: clientId, device_id: deviceId || undefined, device_secret: deviceSecret, staff_id: selected.id, pin },
+      }), 20000, 'Sign-in')
 
-      if (err || !data?.access_token) {
-        // Locked/incorrect comes back non-2xx, so supabase-js puts the body on error.context.
-        let lockedUntil = null
-        try { const b = await err?.context?.json(); lockedUntil = b?.locked ? b.locked_until : null } catch (_) { /* keep the generic message */ }
-        // Names the way out, not just the wall. The lockout clears on its own, but 15 minutes is
-        // a long time mid-service, and the person who can fix it immediately is standing in the
-        // same building: any POS manager can reset a PIN from POS Staff. Deliberately "your
-        // manager" rather than support — this never needs to reach Crest.
-        setError(lockedUntil
-          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}, or ask your manager to reset your PIN.`
-          : 'Incorrect PIN. Try again.')
-        setPin('')
+      if (err) {
+        // S754: every failure used to read "Incorrect PIN" — a dropped connection, a deactivated
+        // till and a crashed function alike — and cleared the PIN. supabase-js resolves a non-2xx
+        // as a FunctionsHttpError whose `context` is the Response; a network failure is a
+        // FunctionsFetchError and a gateway failure a FunctionsRelayError, both with no body worth
+        // reading. Only a 4xx from the function itself says anything about the PIN.
+        const status = err.name === 'FunctionsHttpError' ? err.context?.status : null
+        if (!status || status >= 500) { setError(UNREACHABLE_MSG); return }
+        let body = null
+        try { body = await err.context.json() } catch (_) { /* no JSON body — handled below */ }
+
+        if (status === 423 || body?.locked) {
+          // Names the way out, not just the wall. The lockout clears on its own, but 15 minutes is
+          // a long time mid-service, and the person who can fix it immediately is standing in the
+          // same building: any POS manager can reset a PIN from POS Staff. Deliberately "your
+          // manager" rather than support — this never needs to reach Crest.
+          const when = body?.locked_until ? formatLockRemaining(body.locked_until) : 'later'
+          setError(`Too many incorrect attempts. Try again ${when}, or ask your manager to reset your PIN.`)
+          setPin('')
+        } else if (status === 401 && body?.error === ERR_DEVICE_NOT_ACTIVATED) {
+          // The device key no longer works: this tablet was revoked in POS Setup, or it still
+          // holds the shared key a manager has since switched off (S754). No PIN will work until a
+          // manager activates it again from /pos.
+          setError('This till needs to be activated again by a manager')
+        } else if (status === 401 && body?.error === ERR_INVALID_CREDENTIALS) {
+          setError('Incorrect PIN. Try again.')
+          setPin('')
+        } else {
+          // A 4xx this screen does not recognise. Not a wrong PIN, so don't say it is.
+          setError(`Couldn't sign in${body?.error ? ` (${body.error})` : ''}. Ask your manager.`)
+        }
         return
       }
+      if (!data?.access_token) { setError(UNREACHABLE_MSG); return }
 
       await supabase.auth.setSession({
         access_token: data.access_token,
         refresh_token: data.refresh_token,
       })
-      navigate('/pos', { replace: true })
-    } catch (e) {
-      // The staff audience: a waiter can only escalate, and "TypeError: Failed to fetch" is not
-      // a sentence they can act on (S682).
-      setError(errorText(e, 'staff'))
-      setPin('')
+      // S754: /pos is POS Setup, manager-only, and bounced every waiter to /dashboard. The till is
+      // /pos/orders; a kitchen/bar station account is sent on to its KDS by ModuleGate
+      // (canReachPosPath → STATION_TEAM_HOME), so no team check is needed here.
+      navigate('/pos/orders', { replace: true })
+    } catch (_) {
+      // withTimeout's rejection, or anything else thrown on the way: the connection, not the PIN.
+      // Keep the PIN (S754).
+      setError(UNREACHABLE_MSG)
     } finally {
       setSigningIn(false)
     }
@@ -129,6 +173,30 @@ const pinDots = Math.max(4, pin.length)
   // Also catches a device activated before device-secret verification was introduced — its
   // stored client_id is still present but there's no secret to authorize get_pos_staff with,
   // so it needs a one-time re-activation rather than silently showing "no staff found".
+  // Its key was refused — revoked, or the restaurant's shared key was switched off. Same screen
+  // shape as never activated, because the way out is the same: a manager, on this tablet, in /pos.
+  if (deviceDead) {
+    return (
+      <div style={{
+        minHeight: '100vh', background: 'var(--theme-bg)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}>
+        <div className="card" role="alert" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 8 }}>
+            This till needs to be activated again by a manager
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
+            Its device key was revoked, so staff can't sign in on it. An owner or POS manager can sign
+            in here, open <strong>Crest POS</strong>, and activate this tablet again.
+          </p>
+          <button className="btn btn-primary" onClick={() => navigate('/login')}>
+            Owner Login
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (!clientId || !deviceSecret) {
     return (
       <div style={{
@@ -195,6 +263,9 @@ const pinDots = Math.max(4, pin.length)
           ) : staff.length === 0 ? (
             <p style={{ color: 'var(--theme-text3)', textAlign: 'center', maxWidth: 300 }}>
               No staff accounts found. Ask your manager to add staff in POS → POS Staff.
+              {/* A tablet on the pre-S754 shared key cannot tell "no staff" from "the shared key was
+                  switched off" — get_pos_staff answers both with no rows. */}
+              {!deviceId && ' If staff were showing here before, this till may need to be activated again by a manager.'}
             </p>
           ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, justifyContent: 'center', maxWidth: 500 }}>

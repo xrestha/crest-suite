@@ -62,7 +62,13 @@ class SaveRefusal extends Error {
 const errorDetail = e => [e?.code, e?.message].filter(Boolean).join(' · ')
 
 export default function Recipes() {
-  const { clientId, hasFeature, isAdmin, hasImsAccess } = useAuth()
+  const { clientId, hasFeature, isAdmin, isOwner, profile, posEnabled, hasImsAccess } = useAuth()
+  // Who may put a price on the menu (S754, owner decision). Mirrors caller_can_set_menu_price() in
+  // migration 20260916100000 EXACTLY — admin, the Owner, or a login whose RAW pos_role or ims_role
+  // is 'manager' — because guard_recipe_menu_price refuses anyone else a change to selling_price,
+  // vat_rate or pos_enabled. Raw columns, not hasPosAccess/hasImsAccess: those also require the
+  // module to be enabled, which the database does not.
+  const canSetMenuPrice = isAdmin || isOwner || profile?.pos_role === 'manager' || profile?.ims_role === 'manager'
   const showNutrition = hasFeature('nutrition_facts')
   const { settings, recipeCategories } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
@@ -710,6 +716,17 @@ export default function Recipes() {
         payload.recipe_code = recipeForm.recipe_code?.trim().toUpperCase() || null
       }
 
+      // S754: below manager the price and VAT fields of an EXISTING dish are read-only, and they are
+      // left out of the update entirely rather than re-sent. Re-sending is what the trigger was
+      // written to tolerate, but a round trip through the form is not always byte-identical (a
+      // stored 0 comes back as null; converting to Sub-Recipe nulls the price) and either would be
+      // refused as a price change the supervisor never made. A NEW dish keeps its price — the
+      // trigger admits it and takes the dish off the POS menu instead.
+      if (selectedRecipe && !canSetMenuPrice) {
+        delete payload.selling_price
+        delete payload.vat_rate
+      }
+
       // A 23505 on this table is the per-client recipe_code unique index — the only unique
       // constraint a menu item's payload can violate. Name it so the operator fixes the code,
       // rather than surfacing a raw Postgres constraint string.
@@ -1046,6 +1063,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
 
   // ── Derived values for edit form ──────────────────────────────
   const isSubRecipeForm = recipeForm.category === 'Sub-Recipe'
+  // S754: an existing dish's price and VAT are a manager's (see canSetMenuPrice).
+  const priceLocked = !!selectedRecipe && !canSetMenuPrice
   // Memoized: these walk the item list per ingredient row and used to re-run on every keystroke
   // anywhere on the page (including the list view's search box, where the edit form isn't even
   // on screen).
@@ -1465,8 +1484,12 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           {activeTab === 'all' && <td><span className="badge badge-yellow">{recipe.category}</span></td>}
                           <td style={{ color: 'var(--theme-text2)' }}>
                             {(recipe.recipe_ingredients || []).length} items
-                            {(recipe.recipe_ingredients || []).length === 0 && recipe.pos_enabled !== false && (
-                              <Tip text="No ingredients linked to this recipe. POS sales of this item won't deplete Item Master stock or show up in Stock Movements — add at least one ingredient here to fix that." width={280}>
+                            {/* S754: no longer keyed on pos_enabled. A dish a supervisor creates now
+                                arrives OFF the POS menu (guard_recipe_menu_price), so that test hid the
+                                badge on exactly the new, ingredient-less dishes — and manual Sales Entry
+                                depletes through the recipe too, so a dish off the till still needs one. */}
+                            {(recipe.recipe_ingredients || []).length === 0 && recipe.category !== 'Sub-Recipe' && (
+                              <Tip text="No ingredients linked to this recipe. Its sales — from the POS or from Sales Entry — won't deplete Item Master stock or show up in Stock Movements. Add at least one ingredient here to fix that." width={280}>
                                 <span className="badge badge-amber" style={{ marginLeft: 6, fontSize: 10 }}>No BOM</span>
                               </Tip>
                             )}
@@ -1544,11 +1567,13 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     <input id="recipe-fcode" value={recipeForm.recipe_code} onChange={e => setRecipeForm(f => ({ ...f, recipe_code: e.target.value }))} placeholder="e.g. MOM-03" style={{ fontFamily: 'monospace' }} />
                   </div>
                   <div className="form-field">
-                    <label htmlFor="recipe-f9"><Tip text="Enter the menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation." width={280}>Menu Price (NPR{liveVat > 0 ? `, incl. ${(liveVat * 100).toFixed(0)}% VAT` : ', no VAT'})</Tip></label>
+                    <label htmlFor="recipe-f9"><Tip text={priceLocked ? 'The menu price is set by a manager or the Owner, in Menu Pricing. It is shown here so the food cost below is worked out against it.' : 'Enter the menu price. The system strips VAT and stores the ex-VAT price for accurate food cost calculation.'} width={280}>Menu Price (NPR{liveVat > 0 ? `, incl. ${(liveVat * 100).toFixed(0)}% VAT` : ', no VAT'})</Tip></label>
                     <div style={{ position: 'relative' }}>
                       <input
                         id="recipe-f9"
                         type="number"
+                        disabled={priceLocked}
+                        aria-describedby={priceLocked ? 'recipe-price-locked' : undefined}
                         key={`${recipeForm.selling_price ? 'has-price' : 'no-price'}-vat${recipeForm.vat_rate}`}
                         defaultValue={recipeForm.selling_price ? (parseFloat(recipeForm.selling_price) * (1 + liveVat)).toFixed(2) : ''}
                         onBlur={e => {
@@ -1566,6 +1591,16 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           {liveVat > 0 ? 'Ex-VAT stored' : 'Stored'}: NPR {parseFloat(recipeForm.selling_price).toFixed(2)}
                         </div>
                       )}
+                      {priceLocked && (
+                        <div id="recipe-price-locked" style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
+                          Set by a manager or the Owner in Menu Pricing.
+                        </div>
+                      )}
+                      {!selectedRecipe && !canSetMenuPrice && posEnabled && (
+                        <div role="note" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>
+                          △ This dish will be off the POS menu until a manager turns it on in Menu Pricing.
+                        </div>
+                      )}
                       {settings.warn_below_cost_pricing && liveCost > 0 && livePrice > 0 && liveCost > livePrice && (
                         <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>
                           ⚠ This price is below cost (NPR {liveCost.toFixed(2)} to make) — Food Cost {liveFcPct?.toFixed(0)}%. Check ingredient costs, or this may be intentional (e.g. a loss-leader).
@@ -1575,7 +1610,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   </div>
                   <div className="form-field">
                     <label htmlFor="recipe-f5"><Tip text="Standard Nepal VAT is 13%. Set to 0% for VAT-exempt dishes (some raw food items).">VAT Rate</Tip></label>
-                    <select id="recipe-f5" value={recipeForm.vat_rate} onChange={e => setRecipeForm(f => ({ ...f, vat_rate: e.target.value }))}>
+                    <select id="recipe-f5" value={recipeForm.vat_rate} disabled={priceLocked}
+                      title={priceLocked ? 'The VAT rate is part of the menu price — set by a manager or the Owner in Menu Pricing.' : undefined}
+                      onChange={e => setRecipeForm(f => ({ ...f, vat_rate: e.target.value }))}>
                       <option value="0.13">13% (VAT)</option>
                       <option value="0">0% (No VAT)</option>
                     </select>

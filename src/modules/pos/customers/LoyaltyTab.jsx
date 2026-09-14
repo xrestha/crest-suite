@@ -21,7 +21,12 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 //   * A scheme sets the earn RATE and a minimum spend, and nothing else. What a point is WORTH is
 //     one client-level number (Table Management → Loyalty), because schemes differing in both
 //     directions is a thing no cashier can explain at the till.
-export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
+//
+// Who may change it (S754, owner decision): schemes, the point value and who is enrolled are set by
+// a POS manager or the Owner — the database refuses anyone else (loyalty_rank, loyalty_enrol_rank,
+// pos_setup_rank). A supervisor still opens this tab to look a balance up, so it renders read-only
+// for them with one line saying who can change it, rather than as controls that each fail.
+export default function LoyaltyTab({ pointValue, onPointValueSaved, canManage = false }) {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
 
@@ -49,7 +54,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
     // A failed read must not render as "no schemes yet" — that reads as a correct empty state and
     // would have someone re-create schemes that already exist (S594).
     if (schemeRes.error || custRes.error) {
-      setLoadError((schemeRes.error || custRes.error).message)
+      setLoadError(schemeRes.error || custRes.error)
       setSchemes([]); setMembers([]); setLoading(false)
       return
     }
@@ -60,7 +65,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
     // client's ledger rather than one customer's and it grows with every bill ever rung.
     const { data: rows, error: ledErr } = await fetchAllRows(() =>
       scopedFrom('pos_loyalty_ledger', 'customer_id, points').order('id'))
-    if (ledErr) { setLoadError(ledErr.message); setLoading(false); return }
+    if (ledErr) { setLoadError(ledErr); setLoading(false); return }
     const byCustomer = {}
     for (const r of rows || []) byCustomer[r.customer_id] = (byCustomer[r.customer_id] || 0) + (r.points || 0)
     setBalances(byCustomer)
@@ -72,7 +77,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
 
   async function addScheme() {
     const name = newName.trim()
-    if (!name) return
+    if (!name || !canManage) return
     setSavingScheme(true)
     setMsg('')
     const { error } = await scopedInsert('pos_loyalty_schemes', {
@@ -87,6 +92,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
   }
 
   async function patchScheme(id, patch) {
+    if (!canManage) return
     setMsg('')
     const { error } = await scopedUpdate('pos_loyalty_schemes', patch).eq('id', id)
     // An optimistic paint that drops the error shows as saved what the database refused (S613).
@@ -116,6 +122,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
   }
 
   async function tag(customerId, schemeId) {
+    if (!canManage) return
     setMsg('')
     const { error } = await scopedUpdate('pos_customers', { loyalty_scheme_id: schemeId || null }).eq('id', customerId)
     if (error) { setMsg(`error:The enrolment was not changed. ${errorLine(error)}`); return }
@@ -127,9 +134,10 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
     setMsg('')
     const v = Number(valueStr)
     if (!Number.isFinite(v) || v <= 0) { setSavingValue(false); setMsg('error:A point has to be worth more than zero.'); return }
-    const ok = await onPointValueSaved(v)
+    const failure = await onPointValueSaved(v)
     setSavingValue(false)
-    if (!ok) setMsg("error:Couldn't save the point value.")
+    // A string is a sentence the page wrote; anything else is a Supabase error to word (S754).
+    if (failure) setMsg(`error:The point value was not changed. ${typeof failure === 'string' ? failure : errorLine(failure)}`)
   }
 
   const enrolled = members.filter(m => m.loyalty_scheme_id)
@@ -139,6 +147,13 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
       {msg && (
         <p role="alert" style={{ fontSize: 12, margin: '0 0 12px', color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
           {msg.replace(/^(error|ok):/, '')}
+        </p>
+      )}
+
+      {!canManage && (
+        <p role="note" style={{ fontSize: 12, margin: '0 0 12px', color: 'var(--theme-text2)' }}>
+          Balances are shown for looking a customer up. Schemes, the value of a point and who is enrolled are
+          changed by a POS manager or the Owner.
         </p>
       )}
 
@@ -155,10 +170,13 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
               id="loyalty-point-value" type="number" min="0.01" step="0.01"
               className="form-input" value={valueStr}
               onChange={e => setValueStr(e.target.value)}
+              readOnly={!canManage}
             />
-            <button className="btn btn-ghost" onClick={savePointValue} disabled={savingValue}>
-              {savingValue ? 'Saving…' : 'Save'}
-            </button>
+            {canManage && (
+              <button className="btn btn-ghost" onClick={savePointValue} disabled={savingValue}>
+                {savingValue ? 'Saving…' : 'Save'}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -202,6 +220,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
                             type="number" min="0" step="0.1" defaultValue={s.points_per_100}
                             className="form-input form-input--auto" style={{ width: 80, textAlign: 'right' }}
                             aria-label={`Points per NPR 100 for ${s.name}`}
+                            disabled={!canManage}
                             onBlur={e => { const v = Number(e.target.value); if (v !== Number(s.points_per_100)) patchScheme(s.id, { points_per_100: v }) }}
                           />
                         </td>
@@ -210,6 +229,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
                             type="number" min="0" step="1" defaultValue={s.min_spend_to_earn}
                             className="form-input form-input--auto" style={{ width: 90, textAlign: 'right' }}
                             aria-label={`Minimum spend to earn for ${s.name}`}
+                            disabled={!canManage}
                             onBlur={e => { const v = Number(e.target.value); if (v !== Number(s.min_spend_to_earn)) patchScheme(s.id, { min_spend_to_earn: v }) }}
                           />
                         </td>
@@ -217,12 +237,13 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
                           <input
                             type="checkbox" checked={s.is_active}
                             aria-label={`${s.name} is active`}
+                            disabled={!canManage}
                             onChange={() => patchScheme(s.id, { is_active: !s.is_active })}
                           />
                         </td>
                         <td style={{ textAlign: 'right' }}>{members.filter(m => m.loyalty_scheme_id === s.id).length}</td>
                         <td style={{ textAlign: 'right' }}>
-                          <button className="btn btn-ghost btn-sm" onClick={() => removeScheme(s)}>Delete</button>
+                          {canManage && <button className="btn btn-ghost btn-sm" onClick={() => removeScheme(s)}>Delete</button>}
                         </td>
                       </tr>
                     ))}
@@ -231,7 +252,10 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: schemes.length ? 14 : 0 }}>
+            {!canManage && schemes.length === 0 && (
+              <p style={{ color: 'var(--theme-text3)', fontSize: 13, margin: 0 }}>No schemes yet — a POS manager or the Owner adds them.</p>
+            )}
+            {canManage && <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: schemes.length ? 14 : 0 }}>
               <div className="form-field" style={{ margin: 0 }}>
                 <label htmlFor="new-scheme-name">Name</label>
                 <input id="new-scheme-name" className="form-input" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Regulars" />
@@ -247,7 +271,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
               <button className="btn btn-primary" onClick={addScheme} disabled={savingScheme || !newName.trim()}>
                 {savingScheme ? 'Adding…' : '+ Add scheme'}
               </button>
-            </div>
+            </div>}
           </div>
 
           {/* ── Members ── */}
@@ -261,7 +285,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
                 No customers yet — the book fills itself from any bill closed with a name and phone.
               </p>
             ) : schemes.length === 0 ? (
-              <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Add a scheme above before enrolling anyone.</p>
+              <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>{canManage ? 'Add a scheme above before enrolling anyone.' : 'Nobody can be enrolled until a scheme exists.'}</p>
             ) : (
               <div className="table-wrap">
                 <table className="data-table">
@@ -286,6 +310,7 @@ export default function LoyaltyTab({ pointValue, onPointValueSaved }) {
                               className="form-select" style={{ maxWidth: 200 }}
                               value={m.loyalty_scheme_id || ''}
                               aria-label={`Loyalty scheme for ${m.name}`}
+                              disabled={!canManage}
                               onChange={e => tag(m.id, e.target.value)}
                             >
                               <option value="">Not enrolled</option>

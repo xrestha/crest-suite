@@ -162,8 +162,24 @@ button, which writes `sales_entries` and `stock_movements` and whose module carr
 own. Now `!isAdmin && !isOwner && !hasImsAccess('supervisor')`. **The general rule: a guard whose
 condition is a module flag must name what happens when that flag is off** — falling through to
 `true` is a decision, not a default, and the audit grep for `min*Role` cannot see it because the
-`min*Role` tag is present and correct on the nav item. `MenuPricing.js:339` is the same line and
-still carries it (no write exposed in that state, and its two branches are an ask-first file).
+`min*Role` tag is present and correct on the nav item. `MenuPricing.js` carried the same line
+until S754, and it did expose a write in that state: on a POS-only client ANY POS login, a
+Staff-rank waiter included, could open it by URL and change prices (next paragraph).
+
+**A page listed in TWO module panels with two different rank tags is two different audiences
+(S754).** `/menu-pricing` had `minImsRole: 'manager'` in the IMS panel and `minPosRole: 'manager'`
+in the POS panel, while the route only asked the IMS rank, and only on an IMS client. So on a client
+with both modules a POS manager was refused a page their own POS panel listed. Owner decision: it
+opens for **a POS manager, an IMS manager, the Owner or admin**, on any client.
+- **One predicate on both nav items.** It is `menuPricingAccess: true`, read by `isItemVisible` and
+  ANDed with `canReachPosPath`, because `ModuleGate` asks that of the route too.
+- **The same set on the route**, above both of `MenuPricing.js`' returns.
+- **In the database too:** `caller_can_set_menu_price()` / `guard_recipe_menu_price`
+  (`20260916100000`), so the rank is not only a page rule.
+
+The database version tests the RAW `pos_role`/`ims_role` columns, while the page's `hasPosAccess`
+also requires the module to be on. **The general rule: a route shared across modules states its
+audience once, as a named predicate, never as one module's `min*Role` per panel.**
 
 **The eighth is an account axis, and it could NOT go in `ModuleGate` (S737).** An IMS count PIN
 account exists to enter a closing count on a shared store-room tablet, so it reaches `/stock` and

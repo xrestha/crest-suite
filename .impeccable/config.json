@@ -119,6 +119,12 @@
         ],
         "createdAt": "2026-09-04T13:35:03.286Z",
         "reason": "Sidebar collapse: .sidebar-wrap animates width 240<->56px and .main-content its matching margin-left in lockstep (Layout.css L361/L863). A transform cannot express it — the content column's reserved space must actually change, or the sidebar slides OVER the content instead of the page reflowing. Sanctioned since 2026-08-18; the two per-value entries recording that decision are inert, because extractFindingIgnoreValue() returns '' for layout-transition (not in directValueRules), so only a file-scoped wildcard can suppress it. Rationale also in DESIGN.md and .claude/rules/design-system.md."
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "26px",
+        "createdAt": "2026-09-14T13:49:33.162Z",
+        "reason": "80mm thermal parking-slip print template (parkingSlipHtml.js) - vehicle number sized for a printed token; print templates are the documented allowed class, value predates S754"
       }
     ]
   }

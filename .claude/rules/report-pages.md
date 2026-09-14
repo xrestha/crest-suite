@@ -155,6 +155,15 @@ of the letterhead already existed (`SalesReport.jsx`, `CoversReport.jsx`, `month
 and the three new pages had none. Its `scopeLine` parameter is **required**, not optional — a sheet
 that does not state what it covers cannot be reconciled a month later by the person who made it.
 
+**`useBizInfo()` returns `error` since S754, and an exporting page must gate on it.** The
+client-name read used to take `data` and drop `error`, so a failed read shipped every workbook with
+a blank `CompanyName :` line and nothing on the page said so. It is a field rather than a throw so
+existing consumers kept working, which makes it opt-in: **a page that exports disables its export
+while `error` is set** and shows its own notice. Give that read its own error slot, not the page's
+`loadError`. On Covers Report the letterhead read reported into `loadError`, which the range load
+clears on its first line, and both effects fire on mount, so the failure was wiped before anyone
+could see it.
+
 `.data-table tfoot` and `font-variant-numeric: tabular-nums` are now rules in `Layout.css` rather
 than per-call-site inline styles. `tfoot` had **no rule at all**, so every totals row in the product
 was hand-styled; `tabular-nums` appeared on exactly one page (`ConsolidatedPnl` found it

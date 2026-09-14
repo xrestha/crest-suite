@@ -8,9 +8,94 @@ import Tip from '../../../components/Tip'
 import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor } from '../posSignals'
 import { errorText, errorLine } from '../../../shared/errorText'
+import { nepalBs, nepalCivilDate, nepalTime } from '../../../shared/nepalTime'
+import { bsDayBoundaryIso, formatAd } from '../../../utils/bsCalendar'
 
 const STATIONS = ['KOT', 'BOT']
 const POLL_MS = 4000
+// S754: the board's day is the SERVICE day, not the device's calendar day. It used to start at the
+// device's local midnight, recomputed every poll, so a ticket sent at 11:52 PM vanished at 00:00
+// while the kitchen was still cooking it and could no longer be marked Ready. Same six hours past
+// midnight the floor's reservation window uses (PosOrders.jsx), pinned to Nepal rather than to the
+// runtime's timezone.
+const SERVICE_DAY_ROLLOVER_MS = 6 * 60 * 60 * 1000
+
+function serviceDayStartIso() {
+  const anchor = Date.now() - SERVICE_DAY_ROLLOVER_MS
+  const bs = nepalBs(anchor)
+  const iso = bs ? bsDayBoundaryIso(bs.year, bs.month, bs.day) : null
+  if (iso) return iso
+  // Outside the verified BS table: the same Nepal civil day, built from the AD date directly.
+  const civil = nepalCivilDate(anchor)
+  return `${formatAd(civil)}T00:00:00.000+05:45`
+}
+
+// Kitchen notes typed on the order line ("no onion"). Tickets written before notes were copied
+// onto pos_kot_log.items carry no key at all, and render nothing (S754).
+function itemNote(i) {
+  return typeof i?.notes === 'string' ? i.notes.trim() : ''
+}
+// S754 (owner decision): a pulled or reduced line shows on the ticket that sent it, so the kitchen
+// stops cooking it. pos_kot_removals (written inside save_pos_order_items, migration 20260819130000)
+// carries order, recipe, name, quantity, reason and time — but NOT the station or the ticket, so the
+// attribution is made here:
+//   - candidates are lines on this board's tickets for the same order whose recipe matches (by
+//     recipe_id when both sides have one, by name otherwise), sent at or before the removal;
+//     if none were sent before it (clock skew), every matching line is a candidate;
+//   - one candidate is the confident case and takes the whole removal;
+//   - several: the quantity is taken from the LATEST ticket first, capped at what that ticket
+//     sent, spilling to earlier ones — so a removal that fits the latest ticket lands entirely on
+//     it (the owner's stated fallback), and a removal larger than one ticket's line is not shown
+//     as "1 → 0" with the rest silently dropped. Anything still left over stays on the latest.
+// Removals are processed oldest first so each one sees what earlier ones already took. A removal
+// whose recipe was sent to the OTHER station has no candidate on this board and shows nothing here.
+function attachRemovals(tickets, removals) {
+  const onBoard = new Set(tickets.map(t => t.order_id))
+  const byTicket = new Map()   // ticket id -> { [lineIdx]: [{ qty, removed_at, reason }] }
+  const remaining = new Map()  // `${ticketId}:${lineIdx}` -> qty not yet taken by a removal
+  const sameLine = (r, i) => (r.recipe_id && i.recipe_id) ? r.recipe_id === i.recipe_id : (i.name || '') === (r.item_name || '')
+  const ordered = (removals || [])
+    .filter(r => onBoard.has(r.order_id) && Number(r.qty_removed) > 0)
+    .sort((a, b) => (new Date(a.removed_at) - new Date(b.removed_at)) || String(a.id).localeCompare(String(b.id)))
+  for (const r of ordered) {
+    const removedMs = new Date(r.removed_at).getTime()
+    const matches = []
+    for (const t of tickets) {
+      if (t.order_id !== r.order_id) continue
+      ;(t.items || []).forEach((i, idx) => { if (sameLine(r, i)) matches.push({ t, idx, qty: Number(i.qty) || 0 }) })
+    }
+    if (matches.length === 0) continue
+    const before = matches.filter(m => new Date(m.t.sent_at).getTime() <= removedMs)
+    const candidates = (before.length > 0 ? before : matches)
+      .sort((a, b) => (new Date(b.t.sent_at) - new Date(a.t.sent_at)) || String(b.t.id).localeCompare(String(a.t.id)))
+    const add = (m, qty) => {
+      const lines = byTicket.get(m.t.id) || {}
+      ;(lines[m.idx] = lines[m.idx] || []).push({ qty, removed_at: r.removed_at, reason: r.reason })
+      byTicket.set(m.t.id, lines)
+    }
+    let left = Number(r.qty_removed)
+    for (const m of candidates) {
+      if (left <= 0) break
+      const key = `${m.t.id}:${m.idx}`
+      const cap = remaining.has(key) ? remaining.get(key) : m.qty
+      const take = Math.min(cap, left)
+      if (take <= 0) continue
+      add(m, take)
+      remaining.set(key, cap - take)
+      left -= take
+    }
+    if (left > 0) add(candidates[0], left)
+  }
+  return tickets.map(t => {
+    const lines = byTicket.get(t.id) || null
+    // A plain string the poll signature can compare, so a new cancellation repaints the board.
+    const sig = lines
+      ? Object.keys(lines).sort().map(k => `${k}:${lines[k].map(e => `${e.qty}@${e.removed_at}@${e.reason || ''}`).join(',')}`).join(';')
+      : ''
+    return { ...t, removals: lines, removalSig: sig }
+  })
+}
+
 // A ticket sitting in Ready for longer than this drops off the board (still in the DB, still
 // counted by KOT Register/Reconciliation — this is display-only decluttering, not a delete).
 const READY_VISIBLE_MS = 10 * 60 * 1000
@@ -23,11 +108,18 @@ const LATE_MS = 15 * 60 * 1000
 // same grey/brass/green KOT_STATUS_BADGE puts on a floor tile. It deliberately does not reuse the
 // card strip's colours: those mean lateness now, and a legend keyed to a retired encoding is
 // worse than no legend.
+//
+// Ready → Served (S754, migration 20260916110000): the runner taps Served when the food has left the
+// pass, and the ticket leaves the board. There is no fourth column — a served ticket has nothing left
+// for the kitchen to do, the same reason a cancelled one is not shown.
 const COLUMNS = [
   { status: 'new',         label: 'New',         action: 'Start',  next: 'in_progress', dot: 'var(--theme-text3)' },
   { status: 'in_progress', label: 'In Progress',  action: 'Ready',  next: 'ready',       dot: 'var(--theme-accent)' },
-  { status: 'ready',       label: 'Ready',        action: null,     next: null,          dot: 'var(--theme-green)' },
+  { status: 'ready',       label: 'Ready',        action: 'Served', next: 'served',      dot: 'var(--theme-green)' },
 ]
+// The stages the board shows. Read with `.in(...)` rather than "not cancelled", so a served ticket
+// is not fetched, paged and then filtered out every 4 seconds for the rest of the service day.
+const BOARD_STATUSES = COLUMNS.map(c => c.status)
 
 // The card's colour strip carries LATENESS, not stage — see ticketStripColor in ../posSignals.js.
 // It used to be a stage colour (new red / in progress amber / ready green), which was the loudest
@@ -76,21 +168,39 @@ export default function KitchenDisplay() {
   // KOT/BOT toggle is a real station change, not a fresh arrival on the previous station.
   const seenTicketIds = useRef(new Set())
   const loadedOnce = useRef(false)
+  // S754: the last cancellations read that succeeded. A failed read keeps these (a line the kitchen
+  // was told is cancelled must not quietly become uncancelled) and says the list may be stale.
+  const lastRemovals = useRef([])
+  const [removalsError, setRemovalsError] = useState('')
 
   const load = useCallback(async () => {
-    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0)
-    // 'cancelled' (set by PosOrders.jsx's closeOrder when the parent order is voided) is excluded
-    // entirely rather than shown as a 4th column — there's nothing left for kitchen/bar to do
-    // with a ticket whose order no longer exists.
+    const serviceDayStart = serviceDayStartIso()
+    // 'cancelled' (set by PosOrders.jsx's closeOrder when the parent order is voided) and 'served'
+    // (S754) are excluded entirely rather than shown as a 4th column — there's nothing left for
+    // kitchen/bar to do with a ticket whose order no longer exists or whose food is at the table.
     // Paged. pos_kot_log is one row per send per station, so a long service at a busy outlet can
     // cross the 1000-row cap inside a single day — and this query is sorted OLDEST first, so a
     // truncated read drops the newest tickets: precisely the ones the kitchen is waiting on, with
     // no error to say anything was dropped. `.order('id')` is the unique tiebreaker paging needs.
-    const { data, error } = await fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
-      .eq('station', station)
-      .neq('status', 'cancelled')
-      .gte('sent_at', startOfDay.toISOString())
-      .order('sent_at', { ascending: true }).order('id'))
+    const [{ data, error }, removalsRes] = await Promise.all([
+      fetchAllRows(() => scopedFrom('pos_kot_log', 'id, order_id, order_no, table_name, station, items, sent_at, status, started_at, ready_at, estimated_prep_minutes')
+        .eq('station', station)
+        .in('status', BOARD_STATUSES)
+        .gte('sent_at', serviceDayStart)
+        .order('sent_at', { ascending: true }).order('id')),
+      // S754: today's pulled/reduced lines, over the same service-day window as the tickets. Read by
+      // window rather than `.in(order_id, …)` — the board's order list would ride in the URL — and
+      // narrowed to the orders on the board in attachRemovals. Paged: one row per pulled line.
+      fetchAllRows(() => scopedFrom('pos_kot_removals', 'id, order_id, recipe_id, item_name, qty_removed, reason, removed_at')
+        .gte('removed_at', serviceDayStart)
+        .order('removed_at', { ascending: true }).order('id')),
+    ])
+    if (removalsRes.error) {
+      setRemovalsError('Could not check for cancelled items — cancellations shown are from the last successful check, and newer ones may be missing. ' + errorText(removalsRes.error, 'staff'))
+    } else {
+      setRemovalsError('')
+      lastRemovals.current = removalsRes.data || []
+    }
     if (error) {
       // One failed poll must not write its empty result (the S654 rule, found here in S682): it
       // erased every New/Cooking/Ready ticket from the wall — the kitchen reads "nothing to cook"
@@ -101,7 +211,7 @@ export default function KitchenDisplay() {
       return
     }
     setPollError('')
-    const rows = data || []
+    const rows = attachRemovals(data || [], lastRemovals.current)
     const newTickets = rows.filter(t => t.status === 'new')
     if (loadedOnce.current && newTickets.some(t => !seenTicketIds.current.has(t.id))) {
       playNewTicketChime()
@@ -111,9 +221,12 @@ export default function KitchenDisplay() {
     // A wall-mounted board polls all day and the answer is usually unchanged; without the
     // bail-out the whole board re-rendered on every tick. `items` is not in the signature because
     // a pos_kot_log row's lines are immutable once written (see PosOrders' own ticket poll), so
-    // any real change to what a ticket holds arrives as a different id.
+    // any real change to what a ticket holds arrives as a different id. That still holds for the
+    // per-line `notes` (S754): they are written with the row at insert, never patched afterwards.
+    // The cancellations ARE drawn and DO change without the ticket changing, so their derived
+    // `removalSig` is in the signature — without it a pulled line would never repaint (S754).
     setIfChanged(setTickets, rows,
-      rs => rowsSignature(rs, ['id', 'status', 'started_at', 'ready_at', 'estimated_prep_minutes']))
+      rs => rowsSignature(rs, ['id', 'status', 'started_at', 'ready_at', 'estimated_prep_minutes', 'removalSig']))
     setLoading(false)
   }, [scopedFrom, station])
 
@@ -173,12 +286,25 @@ export default function KitchenDisplay() {
     const patch = { status: nextStatus, status_updated_by: profile?.id || null }
     if (nextStatus === 'in_progress') { patch.started_at = new Date().toISOString(); patch.estimated_prep_minutes = estimatedMinutes }
     if (nextStatus === 'ready') patch.ready_at = new Date().toISOString()
-    const { error } = await scopedUpdate('pos_kot_log', patch).eq('id', ticket.id)
+    if (nextStatus === 'served') patch.served_at = new Date().toISOString()
+    // S754: conditional on the status this screen last saw. Unconditional, a Ready tap resurrected
+    // a ticket whose order had been voided (closeOrder sets 'cancelled') and two screens advancing
+    // the same ticket silently overwrote each other. `.select('id')` because a write whose filter
+    // matches nothing returns no error — only the empty result says it did not land.
+    const { data: moved, error } = await scopedUpdate('pos_kot_log', patch)
+      .eq('id', ticket.id).eq('status', prevStatus).select('id')
+    const revert = () => setTickets(prev => prev.map(t => t.id === ticket.id
+      ? { ...t, status: prevStatus, estimated_prep_minutes: ticket.estimated_prep_minutes }
+      : t))
     if (error) {
-      setTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, status: prevStatus } : t))
+      revert()
       // errorLine, not error.message: the reader is a cook, and "Failed to fetch" is not a
       // sentence they can act on (S683). The ticket is back where it was; say so.
       setKdsError(`${ticket.table_name || 'This ticket'} was not moved — it is back where it was. ${errorLine(error, 'staff')}`)
+    } else if (!moved?.length) {
+      revert()
+      setKdsError('This ticket was already moved, served from the floor, or cancelled')
+      load()
     }
     setAdvancing(prev => { const next = new Set(prev); next.delete(ticket.id); return next })
   }
@@ -240,7 +366,7 @@ export default function KitchenDisplay() {
 
       {/* A real Dismiss button, not a "(tap to dismiss)" div: role="alert" is not an interactive
           role, and the div had no tabIndex or key handler — mouse and touch only. */}
-      {[pollError && ['poll', pollError, () => setPollError('')], kdsError && ['kds', kdsError, () => setKdsError('')]]
+      {[pollError && ['poll', pollError, () => setPollError('')], removalsError && ['removals', removalsError, () => setRemovalsError('')], kdsError && ['kds', kdsError, () => setKdsError('')]]
         .filter(Boolean).map(([key, text, dismiss]) => (
         <div key={key} role="alert" style={{
           display: 'flex', alignItems: 'center', gap: 12,
@@ -343,9 +469,37 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
         <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12 }}>
-        {(ticket.items || []).map((i, idx) => (
-          <div key={idx} style={{ fontSize: 16, color: 'var(--theme-text2)' }}>{i.qty} × {i.name}</div>
-        ))}
+        {(ticket.items || []).map((i, idx) => {
+          const note = itemNote(i)
+          // S754: a line pulled or reduced after this ticket was sent. The strike-through and the
+          // word "cancelled" carry it, not only the red — the kitchen must stop cooking it.
+          const pulled = ticket.removals?.[idx]
+          if (pulled?.length) {
+            const removedQty = pulled.reduce((n, e) => n + e.qty, 0)
+            const nowQty = Math.max(0, (Number(i.qty) || 0) - removedQty)
+            const last = pulled.reduce((a, e) => (new Date(e.removed_at) > new Date(a.removed_at) ? e : a))
+            const reasons = [...new Set(pulled.map(e => (e.reason || '').trim()).filter(Boolean))].join(' / ')
+            return (
+              <div key={idx} style={{ fontSize: 16, color: 'var(--theme-text2)' }}>
+                {nowQty === 0 ? (
+                  <s style={{ color: 'var(--theme-text3)' }}>{i.qty} × {i.name}</s>
+                ) : (
+                  <span><s style={{ color: 'var(--theme-text3)' }}>{i.qty}</s> → {nowQty} × {i.name}</span>
+                )}
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-red-text)', paddingLeft: 16 }}>
+                  {nowQty === 0 ? 'Cancelled' : `${removedQty} cancelled`} {nepalTime(last.removed_at)} · {reasons || 'no reason given'}
+                </div>
+                {nowQty > 0 && note && <div style={{ fontSize: 16, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
+              </div>
+            )
+          }
+          return (
+            <div key={idx} style={{ fontSize: 16, color: 'var(--theme-text2)' }}>
+              {i.qty} × {i.name}
+              {note && <div style={{ fontSize: 16, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
+            </div>
+          )
+        })}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>

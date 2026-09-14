@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { NUTRIENTS } from '../../../utils/nutrition'
 import Modal from '../../../components/Modal'
+import { guestOrderRefusal } from './guestOrderRefusal'
 // Scoped bone-and-pine palette for this surface only — see the header of guestMenu.css for why a
 // public menu must not read the global theme tokens.
 import './guestMenu.css'
@@ -454,14 +455,29 @@ export default function GuestMenu() {
       // Never `err.message`. This is an anonymous member of the public on their own phone, and a
       // raw PostgREST/Postgres string ("new row violates row-level security policy for table
       // ...") tells them nothing they can act on while leaking schema detail to an unauthenticated
-      // surface. The one distinction worth drawing is the one the guest can do something about —
-      // being offline — so that is the only branch.
+      // surface. S754: the server now raises a stable code in `err.hint` for every refusal, so each
+      // gets its own sentence (guestOrderRefusal.js) — including the dishes that went off the menu,
+      // by name, since the whole order is refused when any one of them is unavailable.
       console.error('submit_guest_order failed', err)
-      setSubmitError(
-        navigator.onLine === false
-          ? "You appear to be offline. Reconnect and try again, or ask a staff member to take your order."
-          : "We couldn't send that order. Please try again, or ask a staff member for help."
-      )
+      const refusal = guestOrderRefusal(err, rows?.[0]?.outlet_name, { online: navigator.onLine !== false })
+      setSubmitError(refusal.text)
+      // The menu on screen offered a dish the server no longer has. Re-read it in place — not via
+      // retryLoadMenu, which blanks the page to its loading state and would close the review sheet
+      // the guest needs to fix the order in. A failed re-read keeps the menu they have.
+      if (refusal.refreshMenu) {
+        supabase.rpc('get_guest_menu', { p_table_id: tableId }).then(({ data: fresh, error: freshErr }) => {
+          if (freshErr || !Array.isArray(fresh)) return
+          setRows(fresh)
+          // A dish the fresh menu no longer carries would silently drop out of the review sheet
+          // (cartLines filters on the menu), so take it off the cart and SAY it was taken off.
+          const onMenu = new Set(fresh.map(r => r.recipe_id))
+          const gone = Object.keys(cart).filter(id => cart[id] > 0 && !onMenu.has(id))
+          if (gone.length > 0) {
+            setCart(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => onMenu.has(id))))
+            if (refusal.removedText) setSubmitError(refusal.removedText)
+          }
+        })
+      }
       return
     }
     sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: data, items: itemsSnapshot, covers }))

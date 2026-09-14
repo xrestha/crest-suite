@@ -531,7 +531,7 @@ Deno.serve(async (req) => {
     // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
     // identity is already verified above via caller.auth.getUser()
     const { data: profile } = await admin
-      .from('profiles').select('role, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id').eq('id', user.id).single()
+      .from('profiles').select('role, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id, pos_discount_limit, pos_allow_void').eq('id', user.id).single()
 
     // ── POS/IMS/HR manager-accessible actions (before admin-only guard) ──────
     // isCallerOwner must exclude every staff-account marker (pos_role, pos_email, ims_role,
@@ -804,6 +804,29 @@ Deno.serve(async (req) => {
     // minting a peer is a manager nobody below the Owner can undo.
     const MANAGER_GRANT_MSG = 'Only the account owner can give a login Manager access.'
 
+    // A POS manager cannot hand out more than they hold (S754, decided with Aashish — the rule HR
+    // uses for Manager rank, applied to the two per-staff powers on POS Staff). Before this a manager
+    // capped at 10% could give a waiter an unlimited discount, or Void permission the manager did not
+    // have, and then use that waiter's PIN. NULL discount limit = unlimited, so a capped manager can
+    // never grant NULL. Admin and the Owner are exempt. Returns a ready-to-send error or null.
+    const callerDiscountCap: number | null =
+      profile?.pos_discount_limit === null || profile?.pos_discount_limit === undefined ? null : Number(profile.pos_discount_limit)
+    function refusePosPowerEscalation(limit: unknown, allowVoid: unknown) {
+      if (isCallerAdmin || isCallerOwner) return null
+      if (limit !== undefined && callerDiscountCap !== null) {
+        if (limit === null) {
+          return json({ error: `You can give a discount limit of up to ${callerDiscountCap}% — your own limit. "No limit" is more than that; ask the account owner.` }, 403)
+        }
+        if (typeof limit === 'number' && limit > callerDiscountCap) {
+          return json({ error: `You can give a discount limit of up to ${callerDiscountCap}% — your own limit. Ask the account owner for more.` }, 403)
+        }
+      }
+      if (allowVoid === true && profile?.pos_allow_void !== true) {
+        return json({ error: 'Your own login cannot void bills, so you cannot give Void permission to anyone. Ask the account owner.' }, 403)
+      }
+      return null
+    }
+
     // ── Create a POS staff member — name + PIN, auto-generated email ──────────
     // Optional employee_id links the new POS account to an existing hr_employees record
     // (client has both HR + POS) — full_name is then taken from that employee, not retyped.
@@ -811,7 +834,7 @@ Deno.serve(async (req) => {
       const targetClientId = isCallerAdmin ? params.client_id : callerClientId
       if (!targetClientId) return json({ error: 'client_id required' }, 400)
 
-      const { pin, pos_role, pos_job_title, pos_team, employee_id } = params
+      const { pin, pos_role, pos_job_title, pos_team, employee_id, pos_discount_limit, pos_allow_void } = params
       let { full_name } = params
       if (!pin) return json({ error: 'pin is required' }, 400)
       if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
@@ -819,9 +842,26 @@ Deno.serve(async (req) => {
       const validRoles = ['staff', 'supervisor', 'manager']
       if (!pos_role) return json({ error: NO_RANK_MSG }, 400)
       if (!validRoles.includes(pos_role)) return json({ error: 'Invalid pos_role' }, 400)
+      // Manager rank is granted by the Owner or the operator only (S754, the HR rule).
+      if (pos_role === 'manager' && !(isCallerAdmin || isCallerOwner)) return json({ error: MANAGER_GRANT_MSG }, 403)
 
       const validTeams = ['foh', 'kitchen', 'bar']
       if (pos_team && !validTeams.includes(pos_team)) return json({ error: 'Invalid pos_team' }, 400)
+
+      if (pos_discount_limit !== undefined && pos_discount_limit !== null &&
+          (typeof pos_discount_limit !== 'number' || pos_discount_limit < 0 || pos_discount_limit > 100)) {
+        return json({ error: 'Invalid pos_discount_limit' }, 400)
+      }
+      if (pos_allow_void !== undefined && typeof pos_allow_void !== 'boolean') {
+        return json({ error: 'Invalid pos_allow_void' }, 400)
+      }
+      const createEscalation = refusePosPowerEscalation(pos_discount_limit, pos_allow_void)
+      if (createEscalation) return createEscalation
+      // The column's default is NULL = unlimited, so a login a capped manager creates without naming a
+      // limit would hold more than its creator. It starts at the creator's own cap instead.
+      const createDiscountLimit = pos_discount_limit !== undefined
+        ? pos_discount_limit
+        : (!(isCallerAdmin || isCallerOwner) && callerDiscountCap !== null ? callerDiscountCap : undefined)
 
       if (employee_id) {
         const { data: employee } = await admin
@@ -868,6 +908,8 @@ Deno.serve(async (req) => {
         // Omitted (not `pos_team: pos_team || null`) so a brand-new row falls through to the
         // column's own DEFAULT 'foh' rather than an explicit null clashing with the NOT NULL.
         ...(pos_team ? { pos_team } : {}),
+        ...(createDiscountLimit !== undefined ? { pos_discount_limit: createDiscountLimit } : {}),
+        ...(pos_allow_void !== undefined ? { pos_allow_void } : {}),
       }, { onConflict: 'id' })
 
       if (profileErr) {
@@ -1125,6 +1167,13 @@ Deno.serve(async (req) => {
       const posTarget = await loadTarget(userId)
       const posDenied = requireStaffTarget(posTarget, 'pos')
       if (posDenied) return posDenied
+      // A POS manager changes waiters and supervisors — never a peer manager, never their own login
+      // (S754, decided with Aashish; the S729 rule HR and IMS already follow).
+      const posManageDenied = requireManageableTarget(posTarget!, 'pos')
+      if (posManageDenied) return posManageDenied
+      if (pos_role === 'manager' && !(isCallerAdmin || isCallerOwner)) return json({ error: MANAGER_GRANT_MSG }, 403)
+      const posEscalation = refusePosPowerEscalation(pos_discount_limit, pos_allow_void)
+      if (posEscalation) return posEscalation
 
       // Every field here is only written when the caller actually sent it. updateTeam/
       // updateDiscountLimit/updateAllowVoid each call this action with only their one field set
@@ -1160,9 +1209,10 @@ Deno.serve(async (req) => {
       const posTarget = await loadTarget(userId)
       const posDenied = requireStaffTarget(posTarget, 'pos')
       if (posDenied) return posDenied
-      if (!isCallerAdmin && posTarget?.pos_role === 'manager') {
-        return json({ error: 'Managers can only be deleted by admin' }, 403)
-      }
+      // Was "Managers can only be deleted by admin", which also refused the Owner. A manager's login
+      // is the Owner's or the operator's to remove, and a manager cannot remove their own (S754).
+      const posDeleteManageDenied = requireManageableTarget(posTarget!, 'pos')
+      if (posDeleteManageDenied) return posDeleteManageDenied
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
       if (delErr) return json({ error: delErr.message }, 400)
@@ -1181,6 +1231,11 @@ Deno.serve(async (req) => {
       const pinTarget = await loadTarget(userId)
       const pinDenied = requireStaffTarget(pinTarget, 'pos')
       if (pinDenied) return pinDenied
+      // Not allowSelf: every non-Owner caller here is a POS manager, and a manager's login — their own
+      // included — is changed by the Owner or the operator (S754). A PIN reset on a peer manager was
+      // a way to sign in as them.
+      const pinManageDenied = requireManageableTarget(pinTarget!, 'pos')
+      if (pinManageDenied) return pinManageDenied
 
       // Salt must be this account's existing email, not a freshly generated one — the login
       // side derives from whatever pos_email currently holds, so a reset that salted with

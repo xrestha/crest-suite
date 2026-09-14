@@ -7,6 +7,9 @@ paths:
   - "src/pages/ResetPassword.js"
   - "src/utils/weakPasswords.js"
   - "src/modules/pos/staff/**"
+  - "src/modules/pos/devices/**"
+  - "src/modules/pos/login/**"
+  - "src/modules/pos/Pos.js"
   - "src/modules/hr/selfservice/**"
   - "src/modules/ims/count/**"
   - "supabase/functions/**"
@@ -57,6 +60,53 @@ Three things worth knowing before touching it:
 - **Vault writes are best-effort and must stay that way.** `vaultPin()` in `admin-user-ops` logs and continues on failure. The account is fully valid without a vault row — the PIN works, login works, only admin recovery is unavailable — so failing a staff creation over a vault error would trade a recovery convenience for an outage on a live restaurant floor.
 - **The login functions' legacy-PIN branch is the only place a pre-existing account's plaintext PIN is ever observable**, so it doubles as the backfill: it writes the vault row alongside the password upgrade. Accounts that never sign in and are never reset simply stay unrecoverable, which `rederive_pin_passwords` reports (`unrecoverable` count) rather than hides.
 - **Viewing is platform-admin only** (`view_staff_pin` gates on `isCallerAdmin`), surfaced in Admin → Clients → Staff PINs, deliberately *not* on `PosStaff.jsx` where Owners and POS managers would see it. A forgotten PIN is still the Owner's one-click Reset PIN. Widening the gate is one line, but it exposes every PIN to every client login.
+
+### A key per POS tablet, and the shared key retired by hand (S754)
+
+Migration `20260916120000` and `pos-staff-login` were applied and deployed live on 2026-09-14. **Until S754 every till of a client held one value, `client_secrets.pos_device_secret`,
+copied into the localStorage of every tablet ever activated.** A lost, sold or stolen tablet could
+only be cut off by rotating the key for the whole floor. Nothing recorded which tablets held it or
+when one was last used.
+
+- **`pos_devices` is one row per tablet and holds only `secret_hash`**, which is plain SHA-256.
+  There is deliberately no pepper: the secret is 244 bits of CSPRNG output, so its hash cannot be
+  guessed the way a 4–6 digit PIN's can. `register_pos_device(p_client_id, p_name)` returns the raw
+  secret exactly once, straight into localStorage (`pos_device_id` + `pos_device_secret`).
+  `list_pos_devices` returns metadata only, and `revoke_pos_device` retires one tablet.
+  `pos_device_caller_may_manage` limits all three to admin, the Owner or a POS manager of that
+  outlet whose login is not settlement-blocked.
+- **The table has no client grants and therefore no RLS policies** — `client_secrets`' reasoning:
+  Postgres has no column-level RLS, so any SELECT an Owner could run would show the hash. RLS is
+  still enabled, so a grant added by mistake opens nothing on its own.
+- **Not `log_audit()`-audited** (it snapshots whole rows, hash included). The three write functions
+  insert their own audit row with the hash removed, using the trigger's vocabulary so the Audit Log
+  page renders it.
+- **Not exported, not restored.** A backup is a file on someone's disk, and a device credential must
+  not come back to life from one. A restored client re-activates each tablet in one tap.
+- **The sign-in gate.** `pos-staff-login` calls `verify_pos_device` (a per-tablet key) or
+  `verify_pos_legacy_device` (the shared key). Both are service-role only, and each is one UPDATE
+  that matches and stamps last use. **It fails CLOSED with a 503**, unlike the lockout RPCs: a read
+  error is a refusal, but `PosLogin` reads a 5xx as "couldn't reach the server" and keeps the PIN,
+  rather than telling the floor to re-activate the till over a blip. Both refusals return the
+  same 401 string, because which half failed is not something to tell a caller holding a dead key.
+  The picker is `get_pos_device_staff`, which RAISES on a dead key rather than returning no rows, so
+  "revoked" and "no staff" are different screens.
+
+**The shared key is retired explicitly, never automatically when the first tablet registers.** An
+outlet with three tills that re-activates one would otherwise lose the other two mid-service.
+`pos-staff-login` stamps `pos_legacy_key_last_used_at` on every legacy sign-in, and POS Setup shows
+that stamp. A manager presses Switch off once the tablets have moved.
+`retire_pos_legacy_device_key` then **rotates** `client_secrets.pos_device_secret` to a value no
+tablet holds, so every path still comparing against it stops matching at once. That includes
+`get_pos_staff` and a stale `pos-staff-login`, so neither had to be redefined.
+`get_pos_device_secret` refuses to hand the key out after that. Deactivating a tablet that has
+its own key revokes that key, not just the localStorage copy.
+
+**`pos-staff-login` falls back to the pre-S754 check only on `PGRST202`** (the verify function is
+not in the schema cache, i.e. the function deployed ahead of the migration), so a deploy-order slip
+does not lock out every tablet already on a floor. Any other error refuses. **When every client has
+switched the shared key off, delete the legacy branch, its fallback and `get_pos_staff`'s secret
+comparison** (`POS_TODO.md` A2). **Archiving a client does not revoke its tablet keys yet.**
 
 ### Login/auth pages: seven things that were wrong once and are easy to reintroduce
 

@@ -29,8 +29,21 @@ const CORS = {
 //
 // verify_jwt is off for this function (supabase/config.toml) — it runs BEFORE authentication, so
 // the caller has no session to present, same as pos-payment-webhook and billing-export. What
-// authenticates the caller here is the per-client device secret, verified server-side below
-// against client_secrets.pos_device_secret exactly as get_pos_staff does.
+// authenticates the caller here is the tablet's device key, verified server-side below.
+//
+// TWO KINDS OF DEVICE KEY (S754, migration 20260916120000):
+//   * { device_id, device_secret } — a key per tablet, issued by register_pos_device and checked by
+//     verify_pos_device against pos_devices (hash only, not revoked, same client). A revoked tablet
+//     stops at this gate on its very next sign-in.
+//   * { device_secret } alone — the client's shared key from before S754, still accepted so every
+//     tablet already on a restaurant floor keeps working the moment this deploys. It stops working
+//     when a manager switches it off in POS Setup (retire_pos_legacy_device_key rotates it), and
+//     each use stamps client_secrets.pos_legacy_key_last_used_at so POS Setup can show whether any
+//     tablet still depends on it. Delete the legacy branch once every client has retired it.
+// Both refusals return the SAME 401 string: which half failed is not something to tell a caller
+// holding a key that does not work.
+const ERR_DEVICE = 'This device is not activated'
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -43,7 +56,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
   try {
-    const { client_id, device_secret, staff_id, pin } = await req.json()
+    const { client_id, device_id, device_secret, staff_id, pin } = await req.json()
     if (!client_id || !device_secret || !staff_id || !pin) {
       return json({ error: 'client_id, device_secret, staff_id and pin are required' }, 400)
     }
@@ -56,13 +69,44 @@ Deno.serve(async (req) => {
     // secret nor the email is ever echoed back to the caller in any response.
     const admin = createClient(url, svc, { auth: { autoRefreshToken: false, persistSession: false } })
 
-    // Device gate first — an unactivated/forged device gets nothing, not even a lock-state oracle.
-    // The secret lives in the admin-only client_secrets table (migration 20260810140000), not on
-    // the clients row, where every staff account of the client could read it.
-    const { data: deviceRow } = await admin
-      .from('client_secrets').select('client_id')
-      .eq('client_id', client_id).eq('pos_device_secret', device_secret).maybeSingle()
-    if (!deviceRow) return json({ error: 'This device is not activated' }, 401)
+    // Device gate first — an unactivated, revoked or forged device gets nothing, not even a
+    // lock-state oracle. Both checks are one UPDATE inside the database (match + stamp last use),
+    // service_role-only, so the definition of "a live key" exists once, beside get_pos_device_staff.
+    //
+    // FAILS CLOSED, unlike the lockout RPCs below: a read error here is a refusal, because the
+    // alternative is signing a PIN in on a device nobody has verified. But it is a 503, not the
+    // 401: PosLogin reads a 5xx as "couldn't reach the server" and keeps the PIN, where the 401
+    // would tell the floor the till needs re-activating over what may be a transient blip.
+    if (device_id) {
+      const { data: ok, error: devErr } = await admin.rpc('verify_pos_device', {
+        p_client_id: client_id, p_device_id: device_id, p_device_secret: String(device_secret),
+      })
+      if (devErr) {
+        console.error('[pos-staff-login] verify_pos_device FAILED — refusing the device:', devErr.code, devErr.message)
+        return json({ error: 'Could not verify this device' }, 503)
+      }
+      if (ok !== true) return json({ error: ERR_DEVICE }, 401)
+    } else {
+      const { data: ok, error: legacyErr } = await admin.rpc('verify_pos_legacy_device', {
+        p_client_id: client_id, p_device_secret: String(device_secret),
+      })
+      if (legacyErr) {
+        // PGRST202 = the function is not in the schema cache, i.e. this deployed ahead of
+        // 20260916120000. Only for that case, fall back to the pre-S754 check so tablets already
+        // on the floor are not locked out by a deploy-order slip. Any other error refuses.
+        if (legacyErr.code !== 'PGRST202') {
+          console.error('[pos-staff-login] verify_pos_legacy_device FAILED — refusing the device:', legacyErr.code, legacyErr.message)
+          return json({ error: 'Could not verify this device' }, 503)
+        }
+        console.error('[pos-staff-login] verify_pos_legacy_device missing — migration 20260916120000 not applied; using the pre-S754 check')
+        const { data: deviceRow } = await admin
+          .from('client_secrets').select('client_id')
+          .eq('client_id', client_id).eq('pos_device_secret', device_secret).maybeSingle()
+        if (!deviceRow) return json({ error: ERR_DEVICE }, 401)
+      } else if (ok !== true) {
+        return json({ error: ERR_DEVICE }, 401)
+      }
+    }
 
     // Checked before the sign-in attempt so an already-locked account doesn't burn a real auth
     // attempt. Same ordering as hr-selfservice-login.

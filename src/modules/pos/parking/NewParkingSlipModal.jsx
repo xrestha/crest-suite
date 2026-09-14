@@ -5,10 +5,26 @@ import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError, { fieldAria } from '../../../components/FieldError'
-import { getBsToday, BS_MONTHS } from '../../../utils/bsCalendar'
+import ActionError, { asActionError } from '../../../components/ActionError'
+import { BS_MONTHS, bsDayBoundaryIso, formatAd } from '../../../utils/bsCalendar'
+import { nepalBs, nepalCivilDate, nepalDateAd } from '../../../shared/nepalTime'
 import { printParkingSlip } from './parkingSlipHtml'
 
 const VEHICLE_TYPES = ['Two Wheeler', 'Four Wheeler']
+
+// S754 (owner decision): parking's "day" is the SERVICE day — it starts at Nepal midnight of the BS
+// day that (now − 6h) falls on, so it rolls over at 6 AM Nepal time rather than at the device's
+// midnight. Same shape as serviceDayStartIso() in kds/KitchenDisplay.jsx; used both for the
+// auto-close sweep (PosParkingSlips) and for "today's bills" below, so the two cannot disagree.
+const SERVICE_DAY_ROLLOVER_MS = 6 * 60 * 60 * 1000
+export function serviceDayStartIso(nowMs = Date.now()) {
+  const anchor = nowMs - SERVICE_DAY_ROLLOVER_MS
+  const bs = nepalBs(anchor)
+  const iso = bs ? bsDayBoundaryIso(bs.year, bs.month, bs.day) : null
+  if (iso) return iso
+  // Outside the verified BS table: the same Nepal civil day, built from the AD date directly.
+  return `${formatAd(nepalCivilDate(anchor))}T00:00:00.000+05:45`
+}
 
 // Issue+auto-print a new customer vehicle parking token. Standalone — not tied to any order/table,
 // so a walk-in who hasn't ordered yet can still get one. Only entry point is PosParkingSlips.jsx,
@@ -32,17 +48,21 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
   // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
   const [vehicleErr, setVehicleErr] = useState('')
 
-  const bsToday = getBsToday()
-  const dateLabel = `${bsToday.day} ${BS_MONTHS[bsToday.month - 1]} ${bsToday.year}`
+  // S754: the same Nepal day the printed token will carry (parkingSlipHtml.js), not the runtime's —
+  // getBsToday() reads local getters, so a till off Nepal time showed a different day from the slip.
+  // nepalBs is null outside the verified BS table; fall back to the AD date rather than a wrong BS one.
+  const now = new Date()
+  const bsToday = nepalBs(now)
+  const dateLabel = bsToday ? `${bsToday.day} ${BS_MONTHS[bsToday.month - 1]} ${bsToday.year}` : nepalDateAd(now)
 
   // Only today's billed orders — a slip is issued the same moment a customer is parked, so a bill
   // from a past day is never the right link (and would just be noise in the dropdown).
   useEffect(() => {
-    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0)
+    // S754: the service day (6 AM Nepal rollover), not the device's midnight — see serviceDayStartIso.
     scopedFrom('pos_orders', 'id, order_no, invoice_no, table_name, buyer_name, paid_amount')
       .eq('status', 'billed')
       .not('invoice_no', 'is', null)
-      .gte('closed_at', startOfDay.toISOString())
+      .gte('closed_at', serviceDayStartIso())
       .order('closed_at', { ascending: false })
       .then(({ data, error }) => { setBillsError(!!error); setTodaysBills(data || []); setBillsLoading(false) })
   }, [scopedFrom])
@@ -77,7 +97,12 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
       bill_invoice_no: linkedBill?.invoice_no || null,
       issued_by:      profile?.id || null,
     }, { single: true })
-    if (insErr) { setError(insErr.message); setSaving(false); return }
+    // S754: the sentence, not Postgres' raw message; the detail rides along as fine print.
+    if (insErr) {
+      const { text, detail } = asActionError(insErr, 'staff')
+      setError({ text: `No slip was printed. ${text}`, detail })
+      setSaving(false); return
+    }
     setSaving(false)
     printParkingSlip(clientId, slip, outletName, propertyAddress, profile?.full_name)
     onIssued()
@@ -158,7 +183,7 @@ export default function NewParkingSlipModal({ outletName, propertyAddress, onClo
           />
         </div>
       </div>
-      {error && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13, margin: '12px 0 0' }}>{error}</p>}
+      <ActionError error={error} />
       <div className="form-actions" style={{ justifyContent: 'flex-end' }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>

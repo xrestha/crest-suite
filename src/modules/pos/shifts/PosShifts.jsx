@@ -7,10 +7,11 @@ import { scopedFrom as scopedFromRaw } from '../../../shared/scopedDb'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
-import { errorLine } from '../../../shared/errorText'
+import { errorLine, isNetworkError } from '../../../shared/errorText'
 import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
@@ -143,7 +144,8 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   <div class="row"><span>Opening Cash:</span><span>${npr2(opening)}</span></div>
   <div class="row"><span>Cash Sales:</span><span>${npr2(report.cashSales)}</span></div>
   ${report.cashIn  ? `<div class="row"><span>Cash In${report.creditSettlementsCash ? ` (incl. ${npr2(report.creditSettlementsCash)} credit settled)` : ''}:</span><span>+${npr2(report.cashIn)}</span></div>` : ''}
-  ${report.cashOut ? `<div class="row"><span>Cash Out:</span><span>-${npr2(report.cashOut)}</span></div>` : ''}
+  ${report.cashOut ? `<div class="row"><span>Cash Out${report.refundsCash ? ` (incl. ${npr2(report.refundsCash)} refunded)` : ''}:</span><span>-${npr2(report.cashOut)}</span></div>` : ''}
+  ${(report.movements || []).filter(m => m.kind === 'refund').map(m => `<div class="row ind"><span>${esc(movementLabel(m))}</span><span>-${npr2(Number(m.amount) || 0)}</span></div>`).join('')}
   <div class="row tot"><span>Expected Cash:</span><span>${npr2(expected)}</span></div>
   <div class="row"><span>Counted Cash:</span><span>${npr2(closing)}</span></div>
   <div class="row tot"><span>Variance:</span><span>${varianceLabel}</span></div>
@@ -170,8 +172,28 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
 </body></html>`
 }
 
+// The throwing form of firstError() (shared/queryError.js), keeping the Supabase error OBJECT so
+// ReportLoadError/errorLine can still show its code (S754).
+function throwIfFailed(results) {
+  const bad = (results || []).find(r => r && r.error)
+  if (bad) throw bad.error
+}
+
 // Shared X/Z-report totals from a shift's closed orders — used for the live Current Shift view
 // and for expanding a past shift in History. Void/Comp valuation mirrors PosExceptionReport.jsx.
+// "Table 3, Table 7 and 2 takeaways (#41, #42)" — what a supervisor needs to find the open orders
+// on the floor before deciding to close over them (S754).
+function openOrdersLabel(orders) {
+  const tables = orders.filter(o => o.table_id && o.table_name).map(o => o.table_name)
+  const takeaways = orders.filter(o => !(o.table_id && o.table_name))
+  const parts = [...tables]
+  if (takeaways.length > 0) {
+    const nos = takeaways.map(o => (o.order_no != null ? `#${o.order_no}` : null)).filter(Boolean)
+    parts.push(`${takeaways.length} takeaway${takeaways.length === 1 ? '' : 's'}${nos.length ? ` (${nos.join(', ')})` : ''}`)
+  }
+  return parts.length <= 1 ? (parts[0] || '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
 async function loadShiftReport(clientId, shiftId) {
   // Both reads are filtered on the shift alone — neither needs the other's result — so they go
   // together. This is the report the drawer is counted against and it is rebuilt every time a
@@ -181,22 +203,49 @@ async function loadShiftReport(clientId, shiftId) {
   // stopped at 1000 would understate the drawer with no error anywhere — the silently-wrong-total
   // shape, on the one screen whose entire job is reconciling against cash. `.order('id')` is both
   // the tiebreaker paging needs and the deterministic order the query previously had none of.
-  const [{ data: orders }, { data: movements }] = await Promise.all([
+  const firstWave = await Promise.all([
     fetchAllRows(() => scopedFromRaw('pos_orders', clientId, 'id, close_type, payment_method, paid_amount, discount_amount, closed_at')
       .eq('shift_id', shiftId).order('id')),
     // Cash that moved without being a sale: supplier payments, staff advances, float drops, and
     // customers settling an older Credit bill in cash. Expected Cash used to be `opening + cash
     // sales`, which meant a credit settlement put real money in the drawer that the reconciliation
     // did not know about — the shift then reported an unexplainable "over" (S573).
-    scopedFromRaw('pos_cash_movements', clientId, 'id, direction, kind, amount, reason, created_at, created_by')
+    // `*`, not a column list (S754): pos_credit_note_id arrives with migration 20260916110000, and
+    // naming a column the database does not have yet fails this whole read — the Z-report the
+    // drawer is closed against — rather than one label.
+    scopedFromRaw('pos_cash_movements', clientId, '*')
       .eq('shift_id', shiftId).order('created_at'),
   ])
+  // S754: both batches used to drop `error`, so a failed read built a complete Z-report of NPR 0 —
+  // and the close flow froze THAT into closing_report and printed it on the signed slip. Throw the
+  // original error object (not firstError's message string) so its code survives into the detail
+  // line; every caller catches and refuses to render or close on it.
+  throwIfFailed(firstWave)
+  const [{ data: orders }, { data: movements }] = firstWave
   const list = orders || []
   const moveList = movements || []
   const cashIn  = moveList.filter(m => m.direction === 'in').reduce((s, m) => s + (Number(m.amount) || 0), 0)
   const cashOut = moveList.filter(m => m.direction === 'out').reduce((s, m) => s + (Number(m.amount) || 0), 0)
   const creditSettlementsCash = moveList
     .filter(m => m.kind === 'credit_settlement').reduce((s, m) => s + (Number(m.amount) || 0), 0)
+  // Credit Note cash refunds (S754). Already inside cashOut — the database pins a refund to
+  // direction 'out' — so expectedCashOf needs no change; this is only so the screen and the signed
+  // slip can say how much of Cash Out went back to customers.
+  const refundsCash = moveList
+    .filter(m => m.kind === 'refund').reduce((s, m) => s + (Number(m.amount) || 0), 0)
+  // The note number beside each refund. A label, never a figure, so a failed lookup degrades to
+  // "Refund" rather than failing the report the drawer is counted against.
+  const noteIds = [...new Set(moveList.filter(m => m.kind === 'refund' && m.pos_credit_note_id).map(m => m.pos_credit_note_id))]
+  if (noteIds.length > 0) {
+    const { data: notes, error: notesErr } = await scopedFromRaw('pos_credit_notes', clientId, 'id, credit_note_no, invoice_fy').in('id', noteIds)
+    if (!notesErr) {
+      const byId = new Map((notes || []).map(n => [n.id, n]))
+      for (const m of moveList) {
+        const n = m.kind === 'refund' ? byId.get(m.pos_credit_note_id) : null
+        if (n) m.credit_note_label = `Credit Note ${n.credit_note_no ?? '?'}${n.invoice_fy ? ` (${n.invoice_fy})` : ''}`
+      }
+    }
+  }
 
   // Split-payment orders (multiple tenders against one bill) don't carry a single payment_method
   // — their real per-method breakdown lives in pos_order_payments instead. Fetched up front so the
@@ -208,12 +257,14 @@ async function loadShiftReport(clientId, shiftId) {
   // Both derive their id list from `orders` above and neither reads the other, so they are one
   // wave rather than two. Chunked because an `.in()` list is spelled out in the URL and both
   // return several rows per order — a busy shift's split bills alone can outgrow either limit.
-  const [{ data: payments }, { data: items }] = await Promise.all([
+  const secondWave = await Promise.all([
     fetchAllRowsChunked(splitOrderIds,
       ids => scopedFromRaw('pos_order_payments', clientId, 'order_id, payment_method, amount').in('order_id', ids).order('id')),
     fetchAllRowsChunked(needItems.map(o => o.id),
       ids => scopedFromRaw('pos_order_items', clientId, 'order_id, qty, unit_price, vat_rate, recipe_id').in('order_id', ids).order('id')),
   ])
+  throwIfFailed(secondWave)
+  const [{ data: payments }, { data: items }] = secondWave
   const paymentsByOrder = (payments || []).reduce((acc, p) => { (acc[p.order_id] = acc[p.order_id] || []).push(p); return acc }, {})
   const itemsByOrder = (items || []).reduce((acc, i) => { (acc[i.order_id] = acc[i.order_id] || []).push(i); return acc }, {})
 
@@ -253,8 +304,16 @@ async function loadShiftReport(clientId, shiftId) {
   return {
     orderCount, paidCount, voidCount, compCount, byMethod,
     discountTotal, voidTotal, compTotal, salesTotal, cashSales,
-    movements: moveList, cashIn, cashOut, creditSettlementsCash,
+    movements: moveList, cashIn, cashOut, creditSettlementsCash, refundsCash,
   }
+}
+
+// One label per movement kind, for the screen and the signed slip alike. A refund used to fall
+// into "Cash out" (S754).
+function movementLabel(m) {
+  if (m.kind === 'credit_settlement') return 'Credit settled'
+  if (m.kind === 'refund') return m.credit_note_label ? `Refund — ${m.credit_note_label}` : 'Refund'
+  return m.direction === 'in' ? 'Cash in' : 'Cash out'
 }
 
 // The one definition of what should be in the drawer. Opening float, plus cash taken over the
@@ -316,11 +375,15 @@ function ReportBody({ report, opening, closing, variance }) {
             )}
             {(report.cashOut || 0) > 0 && (
               <tr>
-                <td><Tip text="Cash taken out of the drawer during the shift — paying a supplier, a staff advance, or a float drop to the safe.">Cash Out</Tip></td>
+                <td><Tip text="Cash taken out of the drawer during the shift — paying a supplier, a staff advance, a float drop to the safe, or a refund handed back on a Credit Note.">
+                  Cash Out{report.refundsCash > 0 ? ` (incl. ${fmtNpr(report.refundsCash)} refunded on Credit Notes)` : ''}
+                </Tip></td>
                 <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>−{fmtNpr(report.cashOut)}</td>
               </tr>
             )}
-            <tr><td style={{ fontWeight: 700 }}>Expected Cash</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(opening + report.cashSales + (report.cashIn || 0) - (report.cashOut || 0))}</td></tr>
+            {/* expectedCashOf, not an inline copy of it (S754) — the one definition the slip,
+                the close modal and the frozen snapshot all use. */}
+            <tr><td style={{ fontWeight: 700 }}>Expected Cash</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(expectedCashOf({ opening_cash: opening }, report))}</td></tr>
             {closing != null && (
               <>
                 <tr><td>Counted Cash</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(closing)}</td></tr>
@@ -348,6 +411,8 @@ export default function PosShifts() {
   const [openShift,   setOpenShift]   = useState(undefined) // undefined = loading, null = none open
   const [currentReport, setCurrentReport] = useState(null)
   const [reportLoading, setReportLoading] = useState(false)
+  // S754: a failed Z-report read. Rendered as ReportLoadError in place of the totals, never as zeros.
+  const [reportError, setReportError] = useState(null)
   // Pay In / Pay Out — cash that moves without being a sale (S573).
   const [cashMoveOpen,   setCashMoveOpen]   = useState(false)
   const [cashMoveDir,    setCashMoveDir]    = useState('out')
@@ -365,23 +430,27 @@ export default function PosShifts() {
   // expected, diff } — set by submitClose, committed by commitClose. Held as state (not a
   // window.confirm) so the ask renders in the product's own dialog, on top of the close modal.
   const [confirmShort, setConfirmShort] = useState(null)
+  // S754 (owner decision): orders still open at close — { count, label } — pending a confirm. Closing
+  // is allowed; the bills simply land on whichever shift is open when they are charged.
+  const [confirmOpenOrders, setConfirmOpenOrders] = useState(null)
 
   const [staffNames, setStaffNames] = useState({})
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyError, setHistoryError] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
   const [reportsMap, setReportsMap] = useState({}) // { shiftId: report }
+  const [reportErrorsMap, setReportErrorsMap] = useState({}) // { shiftId: error } — S754
 
   const [outletName,     setOutletName]     = useState('')
   const [propertyAddress, setPropertyAddress] = useState('')
 
-  // Escape-to-close — this modal doesn't use the shared Modal.js component.
-  useEffect(() => {
-    function onKeyDown(e) { if (e.key === 'Escape' && modal && !saving) setModal(null) }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [modal, saving])
+  // S754: the page-level document Escape listener that lived here is gone. The dialog is on the
+  // shared Modal now, whose Escape stack answers only the TOPMOST dialog — this listener fired
+  // regardless, so Escape on the drawer-short ConfirmModal also closed the Close Shift modal behind
+  // it and reopening wiped the denomination count. Modal's onClose below does the same
+  // `if (!saving) setModal(null)`.
 
   useEffect(() => {
     if (!clientId) return
@@ -404,6 +473,8 @@ export default function PosShifts() {
     // switch for the common case where nobody's looking at History.
     setHistory([])
     setReportsMap({})
+    setReportErrorsMap({})
+    setHistoryError(null)
     setExpandedId(null)
     setHistoryLoaded(false)
     if (mainTab === 'history') loadHistory()
@@ -436,23 +507,37 @@ export default function PosShifts() {
     setOpenShift(data || null)
     if (data) {
       setReportLoading(true)
-      const report = await loadShiftReport(clientId, data.id)
-      setCurrentReport(report)
-      setReportLoading(false)
+      try {
+        const report = await loadShiftReport(clientId, data.id)
+        setCurrentReport(report)
+        setReportError(null)
+      } catch (err) {
+        // S754: a failed read is not a quiet shift. Null the report too, so the close modal cannot
+        // show an Expected Cash left over from an earlier read — submitClose re-reads regardless.
+        setCurrentReport(null)
+        setReportError(err)
+      } finally {
+        setReportLoading(false)
+      }
     } else {
       setCurrentReport(null)
+      setReportError(null)
     }
   }
 
   async function loadHistory() {
     setHistoryLoading(true)
+    setHistoryError(null)
     // Paged: two or three shifts a day with no date bound crosses 1000 rows inside the first
     // year, and the truncation would take the OLDEST shifts off a screen whose whole purpose is
     // looking back at them.
-    const { data } = await fetchAllRows(() => scopedFrom('pos_shifts').eq('status', 'closed')
+    const { data, error } = await fetchAllRows(() => scopedFrom('pos_shifts').eq('status', 'closed')
       .order('closed_at', { ascending: false }).order('id'))
-    setHistory(data || [])
     setHistoryLoading(false)
+    // S754: rendered "No closed shifts yet." on a failed read. Left un-loaded so reopening the
+    // tab retries.
+    if (error) { setHistoryError(error); return }
+    setHistory(data || [])
     setHistoryLoaded(true)
   }
 
@@ -465,11 +550,17 @@ export default function PosShifts() {
     if (expandedId === shift.id) { setExpandedId(null); return }
     setExpandedId(shift.id)
     if (reportsMap[shift.id]) return
+    setReportErrorsMap(m => ({ ...m, [shift.id]: null }))
     // Prefer the snapshot frozen at close — recomputing live is what let a reprinted Z-report
     // disagree with the signed one. Only shifts closed before S573 have no snapshot and fall
     // back to a live recompute.
-    const report = shift.closing_report || await loadShiftReport(clientId, shift.id)
-    setReportsMap(m => ({ ...m, [shift.id]: report }))
+    try {
+      const report = shift.closing_report || await loadShiftReport(clientId, shift.id)
+      setReportsMap(m => ({ ...m, [shift.id]: report }))
+    } catch (err) {
+      // S754: the row shows the failure, not a Z-report of zeros. Not cached, so re-expanding retries.
+      setReportErrorsMap(m => ({ ...m, [shift.id]: err }))
+    }
   }
 
   function openModal(type) {
@@ -501,7 +592,20 @@ export default function PosShifts() {
       created_by: profile?.id || null,
     })
     setCashMoveSaving(false)
-    if (error) { setCashMoveMsg('The cash movement was not recorded — the drawer count is unchanged. ' + errorLine(error)); return }
+    if (error) {
+      // S754: a guard refusal (rank, closed shift) is raised before the insert, and errorLine names
+      // it. A dropped connection proves nothing either way, so it sends them to the list instead
+      // of claiming the drawer is unchanged — a blind retry would record the cash twice.
+      if (isNetworkError(error)) {
+        setCashMoveMsg('The connection dropped, so it is not known whether this was recorded. Reopen Cash In / Out and check the list before recording it again. ' + errorLine(error))
+        await loadOpenShift()
+      } else {
+        setCashMoveMsg(errorLine(error))
+        // A closed shift underneath the form: show the page's real state.
+        if (error.hint === 'pos_cash_movement_shift_closed' || /pos_cash_movement_shift_closed/.test(error.message || '')) await loadOpenShift()
+      }
+      return
+    }
     setCashMoveAmount(''); setCashMoveReason(''); setCashMoveOpen(false)
     await loadOpenShift()
   }
@@ -530,24 +634,51 @@ export default function PosShifts() {
   }
 
   async function submitClose() {
-    if (!openShift || !currentReport) return
+    // No `!currentReport` bail (S754): the report is re-read below before anything is written, and
+    // after a failed modal-open read that bail made Close Shift a button that silently did nothing.
+    if (!openShift) return
     setSaving(true); setMsg('')
 
-    // A table still open past shift-end never shows up in loadShiftReport (it only aggregates
-    // paid/void/writeoff orders) — closing anyway lets that order get paid later under an
-    // already-closed, already-signed-off shift, so its cash silently never reconciles.
-    const { count: openOrderCount } = await scopedFrom('pos_orders', 'id', { count: 'exact', head: true })
-      .eq('shift_id', openShift.id).eq('status', 'open')
-    if (openOrderCount > 0) {
+    // S754 (owner decision): WARN about orders still open, then let the close proceed. The check
+    // this replaces filtered `.eq('shift_id', openShift.id)` — but shift_id is written onto an
+    // order only when it is BILLED (closeOrder), so an open order never carries one and the
+    // refusal could not fire. Every open order for the client is read instead. Carry-over needs no
+    // write: an order billed after this close is stamped with the shift open at that moment, so its
+    // cash reconciles on the next shift. A failed read refuses the close — a check that could not
+    // run has not passed.
+    const { data: openOrders, error: openErr } = await scopedFrom('pos_orders', 'id, order_no, table_id, table_name')
+      .eq('status', 'open').order('order_no')
+    if (openErr) {
       setSaving(false)
-      setMsg(`error:${openOrderCount} order${openOrderCount !== 1 ? 's are' : ' is'} still open on this shift — settle or void ${openOrderCount !== 1 ? 'them' : 'it'} before closing.`)
+      setMsg('error:Could not check whether any orders are still open, so nothing was closed. Try Close Shift again. ' + errorLine(openErr))
       return
     }
+    if ((openOrders || []).length > 0) {
+      setSaving(false)
+      setConfirmOpenOrders({ count: openOrders.length, label: openOrdersLabel(openOrders) })
+      return
+    }
+    await continueClose()
+  }
+
+  // The rest of the close, after the open-orders warning has been answered (or was not needed).
+  async function continueClose() {
+    setConfirmOpenOrders(null)
+    setSaving(true); setMsg('')
 
     // Re-read once more immediately before writing. The modal refresh above can be minutes old by
     // the time the drawer has actually been counted, and a bill closed during the count belongs in
     // this shift's figures. This is the snapshot that gets frozen and signed.
-    const freshReport = await loadShiftReport(clientId, openShift.id)
+    let freshReport
+    try {
+      freshReport = await loadShiftReport(clientId, openShift.id)
+    } catch (err) {
+      // S754: this used to freeze a Z-report of zeros into closing_report and print it on the
+      // signed slip. The close write has not been attempted, so "nothing was closed" is true.
+      setSaving(false)
+      setMsg("error:This shift's sales could not be read, so Expected Cash cannot be worked out — nothing was closed. The count you entered is still here; try Close Shift again. " + errorLine(err))
+      return
+    }
     const closing_cash = sumDenoms(denomCounts)
     const expected = expectedCashOf(openShift, freshReport)
 
@@ -590,8 +721,17 @@ export default function PosShifts() {
       },
     }).eq('id', openShift.id).eq('status', 'open').select()
     setSaving(false)
-    if (error) { setMsg('error:That was not saved. ' + errorLine(error)); return }
-    if (!closed || closed.length === 0) {
+    // S754: pos_shifts_guard refuses an UPDATE of a closed shift outright (it used to match zero
+    // rows and fall to the branch below), so that refusal is the same double-close and is handled
+    // the same way. Rank and other refusals are worded by errorLine.
+    const closedUnderneath = error && (error.hint === 'pos_shift_closed' || /pos_shift_closed/.test(error.message || ''))
+    if (error && !closedUnderneath) {
+      setMsg(isNetworkError(error)
+        ? "error:The connection dropped, so it is not known whether the shift closed. Reload the page before trying again — if it shows as closed, its slip is in Shift History. " + errorLine(error)
+        : 'error:The shift was not closed. ' + errorLine(error))
+      return
+    }
+    if (closedUnderneath || !closed || closed.length === 0) {
       setMsg('error:This shift was already closed — refresh to see the latest reconciliation.')
       setModal(null)
       await loadOpenShift()
@@ -693,7 +833,7 @@ export default function PosShifts() {
                       {currentReport.movements.map(m => (
                         <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0', color: 'var(--theme-text2)' }}>
                           <span>
-                            {m.kind === 'credit_settlement' ? 'Credit settled' : m.direction === 'in' ? 'Cash in' : 'Cash out'}
+                            {movementLabel(m)}
                             {m.reason ? ` — ${m.reason}` : ''}
                           </span>
                           <strong style={{ color: m.direction === 'in' ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
@@ -706,8 +846,10 @@ export default function PosShifts() {
                 </div>
               )}
 
-              {reportLoading || !currentReport ? (
+              {reportLoading || (!currentReport && !reportError) ? (
                 <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading live totals…</p>
+              ) : reportError ? (
+                <ReportLoadError error={reportError} />
               ) : (
                 <ReportBody report={currentReport} opening={openShift.opening_cash} closing={null} variance={0} />
               )}
@@ -721,6 +863,8 @@ export default function PosShifts() {
         <>
           {historyLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
+          ) : historyError ? (
+            <ReportLoadError error={historyError} />
           ) : history.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               No closed shifts yet.
@@ -739,7 +883,15 @@ export default function PosShifts() {
                 </thead>
                 <tbody>
                   {history.map(s => {
-                    const variance = (s.closing_cash || 0) - (s.opening_cash + (reportsMap[s.id]?.cashSales || 0))
+                    // S754: this was `closing - (opening + cashSales)`, ignoring cash in/out, so any
+                    // shift with a supplier payment or credit settlement showed a variance that
+                    // disagreed with its own Z-report. The frozen snapshot's variance is the signed
+                    // figure; only a pre-S573 recompute has none and derives it through the one
+                    // definition. The snapshot needs no expand, so the column shows it straight away.
+                    const shiftReport = reportsMap[s.id] || s.closing_report
+                    const variance = !shiftReport ? 0
+                      : shiftReport.variance != null ? Number(shiftReport.variance)
+                      : (Number(s.closing_cash) || 0) - expectedCashOf(s, shiftReport)
                     return (
                       <Fragment key={s.id}>
                         <tr onClick={() => toggleExpand(s)} style={{ cursor: 'pointer' }}>
@@ -756,7 +908,7 @@ export default function PosShifts() {
                           <td>{fmtSpan(s.opened_at, s.closed_at)}</td>
                           <td style={{ fontSize: 12 }}>{staffNames[s.opened_by] || '—'} / {staffNames[s.closed_by] || '—'}</td>
                           <td style={{ textAlign: 'right' }}>
-                            {reportsMap[s.id] ? (
+                            {shiftReport ? (
                               <span className={Math.abs(variance) < 1 ? 'badge-green' : variance < 0 ? 'badge-red' : 'badge-amber'} style={{ fontSize: 11 }}>
                                 {Math.abs(variance) < 1 ? 'Balanced' : fmtNpr(variance)}
                               </span>
@@ -768,7 +920,9 @@ export default function PosShifts() {
                         {expandedId === s.id && (
                           <tr>
                             <td colSpan={5} style={{ background: 'var(--theme-bg)', padding: '16px 18px' }}>
-                              {!reportsMap[s.id] ? (
+                              {reportErrorsMap[s.id] ? (
+                                <ReportLoadError error={reportErrorsMap[s.id]} />
+                              ) : !reportsMap[s.id] ? (
                                 <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading…</span>
                               ) : (
                                 <>
@@ -823,6 +977,14 @@ export default function PosShifts() {
                 {currentReport.cashOut > 0 && <> − cash out {fmtNpr(currentReport.cashOut)}</>})
               </p>
             )}
+            {/* S754: without this the modal simply had no Expected Cash line and no live variance,
+                with nothing saying why. */}
+            {modal === 'close' && reportError && !reportLoading && (
+              <p role="alert" style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-red-text)' }}>
+                This shift's sales could not be read, so Expected Cash is unknown. You can still count the
+                drawer — Close Shift reads the sales again first, and closes nothing if that read fails too.
+              </p>
+            )}
 
             <DenomGrid counts={denomCounts} onChange={setDenomCounts} />
 
@@ -869,6 +1031,24 @@ export default function PosShifts() {
                 overlay stacks above the panel for free; a sibling at the default 100 would render
                 underneath. Modal nests properly since S574 — only the topmost answers Escape and
                 Tab — and ConfirmModal takes a zIndex prop now if this ever needs to move out. */}
+            {/* S754: same placement rule as the drawer-short confirm below — a child of this dialog. */}
+            {confirmOpenOrders && (
+              <ConfirmModal
+                title={`${confirmOpenOrders.count} order${confirmOpenOrders.count === 1 ? ' is' : 's are'} still open`}
+                confirmLabel="Close shift anyway"
+                busy={saving} busyLabel="Closing…"
+                onConfirm={continueClose}
+                onCancel={() => setConfirmOpenOrders(null)}
+              >
+                <p style={{ margin: '0 0 10px' }}>
+                  <strong>{confirmOpenOrders.label}</strong> {confirmOpenOrders.count === 1 ? 'is' : 'are'} still open — {confirmOpenOrders.count === 1 ? "it'll" : "they'll"} be billed on the next shift.
+                </p>
+                <p style={{ margin: 0 }}>
+                  {confirmOpenOrders.count === 1 ? 'It is' : 'They are'} not on this shift's Z-report, and the cash taken for {confirmOpenOrders.count === 1 ? 'it' : 'them'} counts
+                  toward the drawer of whichever shift is open when {confirmOpenOrders.count === 1 ? "it's" : "they're"} charged. Cancel to bill {confirmOpenOrders.count === 1 ? 'it' : 'them'} first.
+                </p>
+              </ConfirmModal>
+            )}
             {confirmShort && (
               <ConfirmModal
                 title={`Drawer is ${confirmShort.diff > 0 ? 'over' : 'short'} by ${fmtNpr(Math.abs(confirmShort.diff))}`}

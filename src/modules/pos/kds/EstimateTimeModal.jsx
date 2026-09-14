@@ -40,8 +40,19 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
         <div style={{ fontSize: 13, color: 'var(--theme-text3)', marginBottom: 2 }}>
           {ticket.table_name || 'Takeaway'} <span style={{ color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
         </div>
+        {/* One line per item so a kitchen note can sit under the dish it belongs to (S754) — the cook
+            estimates prep time for "no onion, extra spicy", not just the dish name. Tickets
+            written before notes were carried onto pos_kot_log.items have no key and show none. */}
         <div style={{ fontSize: 13, color: 'var(--theme-text2)', marginBottom: 8 }}>
-          {(ticket.items || []).map(i => `${i.qty}× ${i.name}`).join(', ')}
+          {(ticket.items || []).map((i, idx) => {
+            const note = typeof i?.notes === 'string' ? i.notes.trim() : ''
+            return (
+              <div key={idx}>
+                {i.qty}× {i.name}
+                {note && <div style={{ fontSize: 13, color: 'var(--theme-text1)' }}>↳ {note}</div>}
+              </div>
+            )
+          })}
         </div>
 
         <div style={{ fontSize: 32, fontWeight: 700, color: value ? 'var(--theme-text1)' : 'var(--theme-text3)', marginBottom: 10, fontVariantNumeric: 'tabular-nums' }}>

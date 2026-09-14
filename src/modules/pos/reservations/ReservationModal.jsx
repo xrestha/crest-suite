@@ -8,10 +8,11 @@ import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { formatAd } from '../../../utils/bsCalendar'
-import { nepalCivilDate, nepalTime24 } from '../../../shared/nepalTime'
+import { nepalCivilDate, nepalTime, nepalTime24 } from '../../../shared/nepalTime'
 import { normalizePhone } from '../../../utils/phone'
-import { SOURCES, OCCASIONS, tableIdsOf } from './reservationStatus'
+import { SOURCES, OCCASIONS, LIVE_STATUSES, tableIdsOf } from './reservationStatus'
 import { durationFor } from './reservationSettings'
+import { findTableConflicts, MAX_DURATION_MINUTES } from './reservationConflicts'
 
 const fmtNpr = npr
 
@@ -100,8 +101,12 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
       const when = new Date(instantOf(dateIso, time)).getTime()
       if (!Number.isFinite(when)) e.time = 'That is not a valid time.'
       // An hour of slack: a host logging a walk-in party that sat down a few minutes ago is a
-      // real case; a booking for yesterday is a typo.
-      else if (when < Date.now() - 60 * 60000) e.time = 'That time has already passed.'
+      // real case; a booking for yesterday is a typo. S754: only when the time is being SET — a new
+      // booking, or an edit that moved the date/time. Updating the party size of a booking that
+      // arrived late is an edit to a past booking by definition, and was refused here.
+      // Compared to the minute, because the time box holds HH:MM and drops any stored seconds.
+      else if ((!row || Math.floor(when / 60000) !== Math.floor(new Date(row.reserved_for).getTime() / 60000))
+        && when < Date.now() - 60 * 60000) e.time = 'That time has already passed.'
     }
     setErrors(e)
     return Object.keys(e).length === 0
@@ -120,6 +125,38 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
       occasion: occasion || null,
       notes: notes.trim() || null,
     }
+
+    // S754 (owner decision): one table, one party at a time. Checked against a FRESH read at save
+    // time — the page's list can be minutes old and another device may have just booked the table —
+    // and a failed read refuses rather than saving blind. The read reaches back the longest
+    // duration a booking can have, so a long booking already running at the new start is seen.
+    // Not atomic: two devices saving the same table in the same second can both pass. There is no
+    // database constraint behind this (none was in scope), so it narrows the race, not closes it.
+    if (tableIds.size > 0) {
+      const start = new Date(payload.reserved_for).getTime()
+      const end = start + payload.duration_minutes * 60000
+      const { data: nearby, error: readErr } = await scopedFrom('pos_reservations',
+        'id, customer_name, party_size, reserved_for, duration_minutes, status, pos_reservation_tables(table_id)')
+        .in('status', LIVE_STATUSES)
+        .gte('reserved_for', new Date(start - MAX_DURATION_MINUTES * 60000).toISOString())
+        .lt('reserved_for', new Date(end).toISOString())
+      if (readErr) {
+        setSaving(false)
+        const { text, detail } = asActionError(readErr, 'staff')
+        setSaveError({ text: `Could not check whether these tables are already held at that time, so nothing was saved. Try again. ${text}`, detail })
+        return
+      }
+      const conflicts = findTableConflicts({ id: row?.id, ...payload }, [...tableIds], nearby)
+      if (conflicts.length > 0) {
+        setSaving(false)
+        const nameOf = tid => (tables || []).find(t => t.id === tid)?.name || 'A selected table'
+        const lines = conflicts.map(({ tableId, booking: b }) =>
+          `${nameOf(tableId)} is already held for ${b.customer_name} ×${b.party_size} at ${nepalTime(b.reserved_for)}`)
+        setSaveError({ text: `${[...new Set(lines)].join('; ')}. Pick another table or change the time — nothing was saved.` })
+        return
+      }
+    }
+
     let id = row?.id
     if (row) {
       const { data, error } = await scopedUpdate('pos_reservations', payload).eq('id', row.id).select('id')
