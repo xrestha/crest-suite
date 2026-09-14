@@ -774,3 +774,37 @@ Twelve decisions taken with Aashish (2026-09-14). Migration `20260914230000`; te
   mismatch is a banner and a confirmed Apply. `pos_email` joins every negative Owner test.
 - `RESTORE_ORDER` restores `hr_advance_repayments`/`hr_tada_claims` AFTER the payroll runs and
   settlements they reference; Danger Zone deletes repayments before runs (their FK is NO ACTION).
+
+## The S751/S752 open list (S753)
+
+Decisions taken with Aashish (2026-09-14). Migration `20260915090000`.
+
+- **Payroll Finalize and Reopen are database functions** (`finalize_payroll_run(run, payslip_ids,
+  repayments)` / `reopen_payroll_run(run)`), one transaction each under `hr_pay_lock`. The page still
+  re-reads and runs `assessDraft` + `allocateAdvanceRepayments` (the JS engine owns the arithmetic);
+  the function refuses unless the stored payslip ids are exactly the ones checked, re-validates the
+  allocation (sums per payslip, advance active and owed), and writes every ledger or none. This
+  supersedes S682's per-ledger failure messages and S751's post-flip payslip recount.
+- **A repayment tagged `payroll_run_id` or `final_settlement_id` is written only by those functions**
+  (`hr_advance_repayments_guard_ledger`; admin passes for a restore). Advances & Loans deletes Manual
+  rows only, and the database now agrees.
+- **A leaver's staff logins are BLOCKED at settlement Finalize, never deleted** (decided): every
+  `profiles` FK from bills, KOTs, shifts and cash movements is `ON DELETE SET NULL`, so deleting a
+  waiter's login blanks their name on every bill they closed. Finalize bans the auth user, revokes
+  its sessions, stamps `profiles.settlement_blocked_by` and lists names in `blocked_logins`; Reopen
+  unbans exactly its own. Only logins linked through `hr_employee_id` are found.
+  `settlement_linked_logins(employee)` names them for the confirm. Nobody below the Owner finalizes
+  or reopens their own settlement.
+- **`access_blocked` ends Self-Service access** — sessions revoked by trigger, and the fourteen
+  Staff-app RPCs call `hr_self_service_assert_active()` first (patched from their LIVE bodies inside
+  the migration). **A new Staff-app RPC must call it too**, or a blocked employee keeps using it for
+  the life of their access token.
+- **Payslips and settlements store `life_insurance_premium` / `health_insurance_premium`**; the TDS
+  certificate reads the latest stored pair of the year and falls back to the employee record (saying
+  so) only for years paid before S753.
+- **A typed or kept bonus tax is `tds_overridden`** on `hr_festival_allowances` / `hr_incentives`;
+  every automatic tax write clears it.
+- **Cost to Business = `payrollCashCost()`**: earned pay (gross − absence + OT) + employer SSF; travel
+  claims shown apart.
+- **Still with the accountant, deliberately unchanged:** leave encashment ÷26, the 12-month gratuity
+  rule, and taxing exit lump sums on top of the year at slab rates.

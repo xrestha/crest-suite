@@ -26,6 +26,19 @@ paths:
 
 `BS_YEAR_MIN`/`BS_YEAR_MAX` (derived from the table's own keys, so a future extension widens them for free) and `adToBsSafe(adDate)` are the actual fix, not just the wider table — `adToBsSafe` returns `null` instead of a silently-wrong date when the result falls outside the verified range, so a caller can render the raw AD date instead of a confident wrong BS one. **`BsCalendarPicker` adopted it in S569** — the one shared component every DOB/join-date/arbitrary-date field goes through now resolves its value via `adToBsSafe` (an out-of-range value displays as its truthful `YYYY-MM-DD (AD)` form instead of an approximated BS date), its year dropdown is clamped to `BS_YEAR_MIN..BS_YEAR_MAX` (it used to offer 2088–2090, which would have *stored* wrong AD dates via approximated `bsToAd`), and month navigation stops at the table's edges. The remaining direct `adToBs(` call sites all convert operational timestamps (`closed_at`, roster days, period dates) that are inside the verified range by construction — a *new* call site that renders a stored arbitrary date should still reach for `adToBsSafe`.
 
+## The table is checked against reality every year, not just round-tripped (S753)
+
+`bsCalendar.test.js` asserts Baisakh 1 (Nepali New Year) for every BS year 2000–2083 — 84 anchors
+read from five calendar publishers that agree on every year, never computed from this table. The
+round-trip sweep only proves the converters are inverses of each other (a mistyped month length
+round-trips perfectly); the anchors localize a bad row to one year. For 2000–2071 those publishers
+likely share one circulated table, so those anchors prove agreement with the published calendar,
+not a gazette. **Extending the table means extending the anchors from an independent source.**
+
+**Display goes through `adToBsSafe()`** (null out of range — show the AD date marked `(AD)`);
+grouping, filtering and row-writing stay on `adToBs()`. S753 swept the display sites; the few where one
+value is both shown and computed are listed in `docs/CROSS-REPO.md`.
+
 ## Fixing the table does not fix the dates already written with it (S620)
 
 `BsCalendarPicker` does not store what the user picked. Line 148 is

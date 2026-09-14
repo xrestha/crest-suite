@@ -294,6 +294,23 @@ otherwise fail the assertion that this one is not. **`VENDOR_REF_TABLES` has no 
 is inline in `Vendors.js` and mirrored in `vendor_reference_counts`, correct today and held together
 by nothing, so a fifth table with a `vendor_id` FK reaches neither copy on its own.
 
+## A money ledger a function writes is written only by that function (S753)
+
+Payroll Finalize moved into `finalize_payroll_run`, and the moment it did the old browser path became
+the hole: a manager's JWT could still `DELETE` a payroll-written repayment over REST. The pattern is
+the pair — a SECURITY DEFINER function that writes the tagged rows, and a SECURITY INVOKER trigger
+(`hr_advance_repayments_guard_ledger`) that refuses a client session any insert, update or delete of a
+row carrying the tag, with the operator exempt for a restore and a whole-client cascade let through.
+**When a write moves into a DEFINER function, the row guards it bypasses must be re-checked inside
+it** — `finalize_payroll_run` re-validates advance ownership, status and the owed cap because
+`hr_advance_repayments_guard` returns early for the owner role.
+
+**Patching many functions at once: from the live body, in the migration.** S753 added one line to
+fourteen Staff-app RPCs with a `DO` block reading `pg_get_functiondef`, inserting after the top-level
+`BEGIN`, `EXECUTE`-ing the result and asserting `prosrc` afterwards. Two traps it met: some bodies were
+saved with CRLF, so the pattern is `\nBEGIN[ \t]*\r?\n`; and `CREATE OR REPLACE` keeps grants, so no
+re-grant is needed. Dry-run such a migration with `BEGIN;` + the file + a final `RAISE EXCEPTION`.
+
 ## Sales Entry saves through one atomic RPC, not three round trips
 
 Migrated from the root `CLAUDE.md` (S663).

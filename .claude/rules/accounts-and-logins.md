@@ -123,6 +123,10 @@ Found re-analysing `ImsStaff.jsx`; the rules hold for `HrStaff.jsx` and `PosStaf
 - **Help copy that tells the Owner to give their own login a role is teaching the demotion trap.**
   The IMS Staff tip said exactly that for 300 sessions. The Owner's login already has every page;
   the person taking over gets a Manager login of their own.
-- **Audit rows from `admin-user-ops` carry no actor.** `log_audit()` reads `auth.uid()`, which is
-  null under the service role, so a role grant or password reset is recorded but not by whom — on
-  all three staff pages. Known, unfixed.
+- **Audit rows from `admin-user-ops` name the caller (S753).** `log_audit()` read only `auth.uid()`,
+  null under the service role. The function now re-creates its service client with an
+  `x-crest-actor` header once the caller is verified, and `log_audit()` trusts that header only when
+  `auth.role()` is `service_role`. Writes GoTrue makes itself (a `deleteUser` cascade) still carry no
+  actor.
+- **A leaver's staff login is blocked at Final Settlement, not deleted (S753)** — see `hr-payroll.md`.
+  A deleted login's id is SET NULL on every bill, KOT and shift it recorded.
