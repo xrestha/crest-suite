@@ -76,6 +76,19 @@ const rules = [
     operator: 'This account is limited to its assigned sections and that item is in another one — or in no category at all, which cannot be assigned. Nothing was saved. Change it in Stock Count → Settings → Who counts what, or file the item into a category in Item Master.',
   },
 
+  // S752 rank refusals raised with ERRCODE 42501 — ahead of the generic permission rule, which
+  // could only say "you're not allowed" without saying who is.
+  {
+    test: e => /staff_roles_rank/i.test(e.message || ''),
+    staff: 'Only the owner or a manager can change the role list. Nothing was changed.',
+    operator: 'Only the Owner, or a manager of that module, can change its role list, so nothing was saved. The list decides every login\'s access level, which is why it is fenced.',
+  },
+  {
+    test: e => /settlement_rank/i.test(e.message || ''),
+    staff: 'Only the owner or an HR manager can do that to a settlement. Nothing was changed.',
+    operator: 'Finalizing or reopening a Final Settlement needs the Owner or an HR manager, so nothing was changed.',
+  },
+
   // RLS refused, or EXECUTE was never granted on a new function signature.
   {
     test: e => e.code === '42501' || /permission denied|row-level security|violates row-level/i.test(e.message || ''),
@@ -285,6 +298,67 @@ const rules = [
     test: e => /tada_duplicate/i.test(e.message || ''),
     staff: 'You have already sent this claim — same dates and same amount. It was not sent again.',
     operator: 'An identical claim (same employee, dates and amount) already exists, so this one was not saved again.',
+  },
+  // ── HR Staff, Final Settlement and self-approval (S752, migration 20260914230000) ──────────
+  {
+    test: e => /hr_own_request/i.test(e.message || ''),
+    staff: 'That request is your own, so someone else has to decide it. Nothing was changed.',
+    operator: 'This is your own record, so someone else — another manager or the Owner — has to approve, reject or write it off. Nothing was changed.',
+  },
+  {
+    test: e => /run_has_settled_employee/i.test(e.message || ''),
+    staff: 'Someone on that payroll has already been paid through a Final Settlement. Nothing was finalized.',
+    operator: 'The run was not finalized: someone on it already has a finalized Final Settlement that pays this month (named in the detail below). Regenerate the run — it leaves settled leavers out — and finalize again.',
+  },
+  {
+    test: e => /settlement_stale_advances/i.test(e.message || ''),
+    staff: 'That employee\'s advances changed since the settlement was worked out. Nothing was finalized.',
+    operator: 'Nothing was finalized: the employee\'s outstanding advances changed since this settlement was calculated (a payroll recovery, a repayment or a write-off landed). Reload the page so the settlement recovers what is really owed, then finalize again.',
+  },
+  {
+    test: e => /settlement_stale_tada/i.test(e.message || ''),
+    staff: 'That employee\'s travel claims changed since the settlement was worked out. Nothing was finalized.',
+    operator: 'Nothing was finalized: the employee\'s approved travel claims changed since this settlement was calculated (one was approved, paid or rejected meanwhile). Reload the page and finalize again.',
+  },
+  {
+    test: e => /settlement_stale/i.test(e.message || ''),
+    staff: 'That settlement needs to be opened and saved again first. Nothing was finalized.',
+    operator: 'Nothing was finalized: this draft was saved by an older version of the page, or its month no longer matches its last working date. Open it, check the figures, press Update draft, then finalize.',
+  },
+  {
+    test: e => /settlement_month_paid/i.test(e.message || ''),
+    staff: 'Payroll has already paid that month. Nothing was finalized.',
+    operator: 'Nothing was finalized: a finalized payroll run already pays this employee for the final month (or a later one), so the settlement would pay that month twice. Reopen that payroll run and regenerate it without them, or move the last working date.',
+  },
+  {
+    test: e => /settlement_overlap|hr_final_settlements_one_finalized_per_spell/i.test(e.message || ''),
+    staff: 'That employee already has a finalized settlement. Nothing was finalized.',
+    operator: 'Nothing was finalized: this employee already has a finalized settlement for this spell of service, and a second would pay the same gratuity again. Reopen the existing one instead, or add a new employee record for a rehire.',
+  },
+  {
+    test: e => /settlement_already_finalized|settlement_not_finalized/i.test(e.message || ''),
+    staff: 'That settlement changed on another screen. Reload to see it.',
+    operator: 'This settlement was finalized or reopened on another screen while it was open here, so nothing was changed. Reload the page to see its real state.',
+  },
+  {
+    test: e => /settlement_reopen_written_off/i.test(e.message || ''),
+    staff: 'An advance this settlement recovered was written off since. Nothing was reopened.',
+    operator: 'Nothing was reopened: an advance this settlement recovered has since been written off (named in the detail below). Reopening would forgive the recovered money silently. Put that advance back to Active in Advances & Loans first.',
+  },
+  {
+    test: e => /settlement_reopen_reason/i.test(e.message || ''),
+    staff: 'Say why the settlement is being reopened. Nothing was changed.',
+    operator: 'Write down why this settlement is being reopened — the reason is kept on the record. Nothing was changed.',
+  },
+  {
+    test: e => /settlement_finalized|settlement_finalize_path|settlement_must_start_draft/i.test(e.message || ''),
+    staff: 'That settlement is finalized, so it cannot be changed. Nothing was changed.',
+    operator: 'This settlement is finalized, so its figures are locked and nothing was changed. Reopen it first if it needs correcting — another tab may have finalized it after this page loaded, so reload to see its real state.',
+  },
+  {
+    test: e => /settlement_employee_missing|settlement_not_found/i.test(e.message || ''),
+    staff: 'That settlement or employee no longer exists. Reload the page.',
+    operator: 'This settlement or its employee record no longer exists, so nothing was changed. Reload the page.',
   },
   {
     test: e => /leave_overlap/i.test(e.message || ''),

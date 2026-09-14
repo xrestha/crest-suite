@@ -111,6 +111,9 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   if (runIds.length > 0) {
     await del(admin.from('hr_payslips').delete().in('run_id', runIds), 'hr_payslips')
   }
+  // Repayments BEFORE the runs (S752): payroll_run_id is ON DELETE NO ACTION, so deleting a run a
+  // payroll recovery points at threw here, after the payslips were already gone.
+  await del(admin.from('hr_advance_repayments').delete().eq('client_id', clientId), 'hr_advance_repayments')
   await del(admin.from('hr_payroll_runs').delete().eq('client_id', clientId), 'hr_payroll_runs')
   // Before hr_advance_repayments (whose final_settlement_id points at it) and before
   // hr_employees, so neither is left referencing a row that no longer exists.
@@ -522,18 +525,19 @@ Deno.serve(async (req) => {
     // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
     // identity is already verified above via caller.auth.getUser()
     const { data: profile } = await admin
-      .from('profiles').select('role, pos_role, ims_role, hr_self_service, hr_role, client_id, active_client_id').eq('id', user.id).single()
+      .from('profiles').select('role, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id').eq('id', user.id).single()
 
     // ── POS/IMS/HR manager-accessible actions (before admin-only guard) ──────
-    // isCallerOwner must exclude every staff-account marker (pos_role, ims_role, hr_self_service,
-    // hr_role) — a staff account of one type has none of the other three set, so without excluding
-    // all four here it would incorrectly pass as "owner" for privileged actions outside its own
-    // domain (e.g. an HR self-service PIN account calling create_pos_staff).
+    // isCallerOwner must exclude every staff-account marker (pos_role, pos_email, ims_role,
+    // hr_self_service, hr_role) — a staff account of one type has none of the other markers set, so
+    // without excluding all of them here it would incorrectly pass as "owner" for privileged actions
+    // outside its own domain (e.g. an HR self-service PIN account calling create_pos_staff).
+    // pos_email since S752: a PIN login whose pos_role was cleared passed as the Owner.
     const isCallerAdmin      = profile?.role === 'admin'
     const isCallerPosManager = profile?.pos_role === 'manager'
     const isCallerImsManager = profile?.ims_role === 'manager'
     const isCallerHrManager  = profile?.hr_role === 'manager'
-    const isCallerOwner      = profile?.role === 'client' && !profile?.pos_role && !profile?.ims_role && !profile?.hr_self_service && !profile?.hr_role
+    const isCallerOwner      = profile?.role === 'client' && !profile?.pos_role && !profile?.pos_email && !profile?.ims_role && !profile?.hr_self_service && !profile?.hr_role
     const isPosPrivileged    = isCallerAdmin || isCallerPosManager || isCallerOwner
     const isImsPrivileged    = isCallerAdmin || isCallerImsManager || isCallerOwner
     const isHrPrivileged     = isCallerAdmin || isCallerHrManager || isCallerOwner
@@ -776,13 +780,23 @@ Deno.serve(async (req) => {
         .from('profiles')
         .select('id', { count: 'exact', head: true })
         .eq('client_id', target.client_id as string).eq('role', 'client')
-        .is('pos_role', null).is('ims_role', null).is('hr_role', null)
+        .is('pos_role', null).is('pos_email', null).is('ims_role', null).is('hr_role', null)
         .or('hr_self_service.is.null,hr_self_service.eq.false')
       // A guard that drops its read passes vacuously -- treat "could not count" as "last".
       if (error) return true
       return (count ?? 0) <= 1
     }
     const LAST_OWNER_MSG = 'This is the only Owner login for this client — giving it a staff role would leave nobody with Owner access. Create the staff member as a new login instead.'
+
+    // A staff login ALWAYS carries a rank (S752, decided with Aashish). Owner is the absence of every
+    // staff marker, so a login created with no rank — or one whose rank was cleared with "No Access"
+    // — became a full Owner: every salary, all IMS and POS data, and Owner rights in this very
+    // function. An HR manager could create a login they controlled and clear it. "No Access" is now
+    // Delete on the pages, and the server refuses the shapes that minted an Owner.
+    const NO_RANK_MSG = 'A staff login always has an access level. To take someone\'s access away, delete their login — clearing the level would turn it into a full Owner login.'
+    // Manager rank is granted by the Owner or the operator only (S752, decided for HR): a manager
+    // minting a peer is a manager nobody below the Owner can undo.
+    const MANAGER_GRANT_MSG = 'Only the account owner can give a login Manager access.'
 
     // ── Create a POS staff member — name + PIN, auto-generated email ──────────
     // Optional employee_id links the new POS account to an existing hr_employees record
@@ -797,7 +811,8 @@ Deno.serve(async (req) => {
       if (!/^\d{4,6}$/.test(pin)) return json({ error: 'PIN must be 4–6 digits' }, 400)
 
       const validRoles = ['staff', 'supervisor', 'manager']
-      if (pos_role && !validRoles.includes(pos_role)) return json({ error: 'Invalid pos_role' }, 400)
+      if (!pos_role) return json({ error: NO_RANK_MSG }, 400)
+      if (!validRoles.includes(pos_role)) return json({ error: 'Invalid pos_role' }, 400)
 
       const validTeams = ['foh', 'kitchen', 'bar']
       if (pos_team && !validTeams.includes(pos_team)) return json({ error: 'Invalid pos_team' }, 400)
@@ -1082,6 +1097,8 @@ Deno.serve(async (req) => {
       if (!userId) return json({ error: 'userId is required' }, 400)
 
       const validRoles = ['staff', 'supervisor', 'manager']
+      // Sent but empty is "No Access": refused, the same as HR and IMS (S752).
+      if (pos_role !== undefined && !pos_role) return json({ error: NO_RANK_MSG }, 400)
       if (pos_role && !validRoles.includes(pos_role)) return json({ error: 'Invalid pos_role' }, 400)
 
       const validTeams = ['foh', 'kitchen', 'bar']
@@ -1353,7 +1370,8 @@ Deno.serve(async (req) => {
       }
 
       const validRoles = ['staff', 'supervisor', 'manager']
-      if (ims_role && !validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
+      if (!ims_role) return json({ error: NO_RANK_MSG }, 400)
+      if (!validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
 
       if (employee_id) {
         const { data: employee } = await admin
@@ -1504,7 +1522,8 @@ Deno.serve(async (req) => {
       if (!userId) return json({ error: 'userId is required' }, 400)
 
       const validRoles = ['staff', 'supervisor', 'manager']
-      if (ims_role && !validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
+      if (!ims_role) return json({ error: NO_RANK_MSG }, 400)
+      if (!validRoles.includes(ims_role)) return json({ error: 'Invalid ims_role' }, 400)
 
       const targetProfile = await loadTarget(userId)
       if (!targetProfile) return json({ error: 'User not found' }, 404)
@@ -1535,8 +1554,7 @@ Deno.serve(async (req) => {
       // every pure-IMS / IMS+POS table regardless of ims_role (no_pos_pin_staff /
       // no_self_service_accounts / no_hr_role_staff don't check ims_role at all) — granting
       // ims_role here would look like it worked in the UI while every real read/write still
-      // silently failed. Only reject when actually setting a role; clearing one (ims_role: null)
-      // is always safe.
+      // silently failed. (Clearing a role is refused above since S752 — it minted an Owner.)
       if (ims_role && (targetProfile?.pos_role || targetProfile?.hr_self_service || targetProfile?.hr_role)) {
         return json({ error: 'This account already has POS, HR self-service, or HR staff access and cannot also be an IMS staff account' }, 400)
       }
@@ -1614,7 +1632,9 @@ Deno.serve(async (req) => {
       }
 
       const validRoles = ['staff', 'supervisor', 'manager']
-      if (hr_role && !validRoles.includes(hr_role)) return json({ error: 'Invalid hr_role' }, 400)
+      if (!hr_role) return json({ error: NO_RANK_MSG }, 400)
+      if (!validRoles.includes(hr_role)) return json({ error: 'Invalid hr_role' }, 400)
+      if (hr_role === 'manager' && !(isCallerAdmin || isCallerOwner)) return json({ error: MANAGER_GRANT_MSG }, 403)
 
       if (employee_id) {
         const { data: employee } = await admin
@@ -1664,7 +1684,8 @@ Deno.serve(async (req) => {
       if (!userId) return json({ error: 'userId is required' }, 400)
 
       const validRoles = ['staff', 'supervisor', 'manager']
-      if (hr_role && !validRoles.includes(hr_role)) return json({ error: 'Invalid hr_role' }, 400)
+      if (!hr_role) return json({ error: NO_RANK_MSG }, 400)
+      if (!validRoles.includes(hr_role)) return json({ error: 'Invalid hr_role' }, 400)
 
       const targetProfile = await loadTarget(userId)
       if (!targetProfile) return json({ error: 'User not found' }, 404)
@@ -1683,6 +1704,9 @@ Deno.serve(async (req) => {
       if (targetProfile.hr_role) {
         const hrManageDenied = requireManageableTarget(targetProfile, 'hr')
         if (hrManageDenied) return hrManageDenied
+      }
+      if (hr_role === 'manager' && targetProfile.hr_role !== 'manager' && !(isCallerAdmin || isCallerOwner)) {
+        return json({ error: MANAGER_GRANT_MSG }, 403)
       }
       // Same reasoning as update_ims_role's guard — an account already marked POS PIN staff, IMS
       // staff, or HR self-service is RLS-blocked from every hr_ table regardless of hr_role.
@@ -1851,6 +1875,8 @@ Deno.serve(async (req) => {
         if (runIds.length > 0) {
           await del(admin.from('hr_payslips').delete().in('run_id', runIds), 'hr_payslips')
         }
+        // Repayments before the runs they point at (payroll_run_id is ON DELETE NO ACTION) — S752.
+        await del(admin.from('hr_advance_repayments').delete().eq('client_id', clientId), 'hr_advance_repayments')
         await del(admin.from('hr_payroll_runs').delete().eq('client_id', clientId), 'hr_payroll_runs')
         // Before hr_advance_repayments (whose final_settlement_id points at it) and before
         // hr_employees, so neither is left referencing a row that no longer exists.

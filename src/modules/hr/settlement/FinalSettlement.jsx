@@ -1,29 +1,36 @@
-import { nprInt } from '../../../shared/nepalMoney'
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { nprInt, npr2 } from '../../../shared/nepalMoney'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
+import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs } from '../../../utils/bsCalendar'
-import { computeBonusTds, fiscalYearOf, retirementRelief } from '../payroll/tds'
+import { fiscalYearOf } from '../payroll/tds'
 import { printWithTitle } from '../../../utils/printTitle'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
-import { calcGratuity } from '../gratuity/gratuityCompute'
-import { fetchSsfStartMap, ssfMonthsFrom } from '../gratuity/ssfEnrolment'
-import { leaveBalance } from '../leave/leaveBalance'
-import { tallyAttendance, calcAmount, retirementContributionOf } from '../payroll/payrollCompute'
+import { fetchSsfContributions } from '../gratuity/ssfEnrolment'
+import { leaveUsed, leaveEncashed } from '../leave/leaveBalance'
 import { fetchYtdMap } from '../payroll/payrollData'
 import { bonusFiscalYear } from '../payroll/bonusTax'
 import { firstError } from '../../../shared/queryError'
-import { errorText, errorLine } from '../../../shared/errorText'
-import { SSF_CAP, SSF_GRATUITY_PCT, GRATUITY_VESTING_MONTHS, SSF_EMPLOYEE_PCT } from '../payrollConstants'
+import { errorLine } from '../../../shared/errorText'
+import { nepalDateAd } from '../../../shared/nepalTime'
+import { computeSettlement, earnedLeaveBalance, noticeDirection, settlementColumns, LEAVE_DAY_DIVISOR, NOTICE_DAY_DIVISOR } from './settlementCompute'
 
 const fmt = nprInt
+const EMPLOYEE_COLUMNS = 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked'
+const STATUS_AFTER = { resignation: 'resigned', mutual: 'resigned', termination: 'terminated', retirement: 'inactive' }
 
-// Labour Act convention: leave encashment and notice pay are both a day-rate of basic ÷ 26,
-// deliberately NOT the calendar length of the month (which is what partial salary divides by).
-const DAY_DIVISOR = 26
+const amberBanner = {
+  marginBottom: 12, padding: '10px 16px', fontSize: 12, lineHeight: 1.7, color: 'var(--theme-text2)',
+  borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+  background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+}
 
 // Format service as "X yr Y mo"
 function fmtService(months) {
@@ -34,7 +41,7 @@ function fmtService(months) {
   return `${y} yr ${m} mo`
 }
 
-function BsDateSelect({ id, label, year, month, day, onChange, tip }) {
+function BsDateSelect({ id, label, year, month, day, onChange, tip, disabled }) {
   const daysInMonth = daysInBsMonth(year, month)
   const yearRange = []
   for (let y = 2075; y <= 2090; y++) yearRange.push(y)
@@ -49,13 +56,13 @@ function BsDateSelect({ id, label, year, month, day, onChange, tip }) {
         {tip ? <Tip text={tip} width={260}>{label}</Tip> : label}
       </label>
       <div style={{ display: 'flex', gap: 6 }}>
-        <select id={`${id}-year`} className="form-select" value={year}  onChange={e => set({ year: +e.target.value })}>
+        <select id={`${id}-year`} className="form-select" value={year} disabled={disabled} onChange={e => set({ year: +e.target.value })}>
           {yearRange.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
-        <select id={`${id}-month`} aria-label={`${label} — month`} className="form-select" value={month} onChange={e => set({ month: +e.target.value })}>
+        <select id={`${id}-month`} aria-label={`${label} — month`} className="form-select" value={month} disabled={disabled} onChange={e => set({ month: +e.target.value })}>
           {BS_MONTHS.map((n, i) => <option key={i+1} value={i+1}>{n}</option>)}
         </select>
-        <select id={`${id}-day`} aria-label={`${label} — day`} className="form-select" value={Math.min(day, daysInMonth)} onChange={e => set({ day: +e.target.value })}>
+        <select id={`${id}-day`} aria-label={`${label} — day`} className="form-select" value={Math.min(day, daysInMonth)} disabled={disabled} onChange={e => set({ day: +e.target.value })}>
           {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
         </select>
       </div>
@@ -63,696 +70,457 @@ function BsDateSelect({ id, label, year, month, day, onChange, tip }) {
   )
 }
 
+// ── The statement, from ONE row shape ─────────────────────────────────────────────────────────
+// A live calculation is turned into exactly the columns a saved row stores (settlementColumns), so a
+// draft on screen, a finalized settlement and its reprint all render through this one function. It
+// used to recompute an opened settlement from today's data: a finalized one reprinted with advance
+// recovery 0 (those advances were now settled by it) and today's salary beside the old net figure.
+function statementOf(row, { advances = null, tadaClaims = null } = {}) {
+  const n = k => parseFloat(row?.[k]) || 0
+  const v2 = (row?.calc_version || 1) >= 2
+  const basic = n('basic_salary')
+  const earnings = []
+  const deductions = []
+  if (v2) {
+    const unpaid = n('month_unpaid_days')
+    earnings.push({
+      key: 'month', label: 'Final month salary',
+      tip: 'Basic plus allowances for the final month, as payroll computes it: days after the last working day, absences and unpaid leave are taken off.',
+      formula: `${fmt(n('month_gross'))}${unpaid > 0 ? ` − ${fmt(n('month_absence_deduction'))} (${Math.round(unpaid * 10) / 10} unpaid days)` : ''}`,
+      amount: n('month_gross') - n('month_absence_deduction'),
+    })
+    if (n('month_ot_amount') > 0) {
+      earnings.push({ key: 'ot', label: `Overtime (${Math.round(n('month_ot_hours') * 10) / 10} h)`, tip: 'Approved overtime and attendance-sheet overtime up to the last working day, at the payroll rates.', formula: 'final month', amount: n('month_ot_amount') })
+    }
+  } else if (n('partial_salary') > 0) {
+    earnings.push({ key: 'month', label: 'Partial month salary', tip: 'Calculated before S752: gross pay over the month\'s days, with no overtime, SSF or tax on the month.', formula: '', amount: n('partial_salary') })
+  }
+  if (n('tada_amount') > 0) {
+    const claims = tadaClaims && tadaClaims.length > 0 ? tadaClaims.map(c => c.trip_purpose || 'trip').join(', ') : ''
+    earnings.push({ key: 'tada', label: 'Travel claims (TADA)', tip: 'Approved travel and allowance claims not yet paid. The settlement pays them and marks them paid.', formula: claims, amount: n('tada_amount') })
+  }
+  if (n('leave_encashment') > 0) {
+    earnings.push({ key: 'leave', label: `Leave encashment (${n('leave_days_encashed')} days)`, tip: `Unused leave earned this year, paid at basic ÷ ${row.day_divisor || LEAVE_DAY_DIVISOR} per day.`, formula: `${fmt(basic)} ÷ ${row.day_divisor || LEAVE_DAY_DIVISOR} × ${n('leave_days_encashed')}`, amount: n('leave_encashment') })
+  }
+  if (n('gratuity') > 0) {
+    earnings.push({
+      key: 'gratuity', label: `Gratuity (${fmtService(parseInt(row.service_months, 10) || 0)})${n('gratuity_ssf_covered') > 0 ? ' — net of SSF-funded' : ''}`,
+      tip: n('gratuity_ssf_covered') > 0
+        ? 'One month\'s basic per year of service, minus the gratuity share of the employer SSF actually contributed during this spell — so it is not paid twice.'
+        : 'One month\'s basic per year of completed service (basic ÷ 12 × months).',
+      formula: n('gratuity_ssf_covered') > 0
+        ? `${fmt(n('gratuity_accrued'))} − ${fmt(n('gratuity_ssf_covered'))} (SSF, ${parseInt(row.gratuity_ssf_months, 10) || 0} mo)`
+        : `${fmt(basic)} ÷ 12 × ${parseInt(row.service_months, 10) || 0}`,
+      amount: n('gratuity'),
+    })
+  }
+  if (n('festival_pro') > 0) {
+    earnings.push({
+      key: 'festival', label: 'Festival allowance share',
+      tip: 'Festival (Dashain) allowance not yet paid this fiscal year: basic × completed months worked this fiscal year ÷ 12.',
+      formula: row.festival_months != null ? `${fmt(basic)} × ${row.festival_months} ÷ 12` : '',
+      amount: n('festival_pro'),
+    })
+  }
+  if (n('notice_pay') > 0) {
+    earnings.push({ key: 'notice_pay', label: `Notice pay owed (${n('notice_days')} days)`, tip: 'The employment was ended without the notice period being given, so the employer pays it: basic ÷ 30 per calendar day of notice.', formula: `${fmt(basic)} ÷ ${row.notice_divisor || NOTICE_DAY_DIVISOR} × ${n('notice_days')}`, amount: n('notice_pay') })
+  }
+
+  if (n('month_ssf_employee') > 0) deductions.push({ key: 'ssf', label: 'SSF — employee 11%', tip: 'The employee\'s Social Security Fund contribution on the final month\'s basic, capped.', formula: 'final month', amount: n('month_ssf_employee') })
+  if (n('month_other_deductions') > 0) deductions.push({ key: 'other', label: 'Salary deductions (CIT, etc.)', tip: 'The fixed deductions set up in Pay Setup for this employee, for the final month.', formula: n('month_retirement_contribution') > 0 ? `incl. ${fmt(n('month_retirement_contribution'))} retirement fund` : 'final month', amount: n('month_other_deductions') })
+  if (n('month_tds') > 0) deductions.push({ key: 'tds_month', label: 'TDS on final month salary', tip: 'The year\'s income is no longer a projection, so tax is trued up to what was actually earned this fiscal year, less what was already withheld.', formula: 'year to date', amount: n('month_tds') })
+  if (n('lump_tds') > 0) deductions.push({ key: 'tds_lump', label: 'TDS on exit payments', tip: 'Tax on gratuity, leave encashment, festival share and notice pay, at the marginal rate above this year\'s actual taxable income.', formula: 'marginal rate', amount: n('lump_tds') })
+  if (n('notice_deduction') > 0) deductions.push({ key: 'notice', label: `Notice not served (${n('notice_days')} days)`, tip: 'The employee resigned without serving the notice period: basic ÷ 30 per calendar day of notice.', formula: `${fmt(basic)} ÷ ${row.notice_divisor || NOTICE_DAY_DIVISOR} × ${n('notice_days')}`, amount: n('notice_deduction') })
+  if (n('advance_deduction') > 0) {
+    if (advances && advances.length > 0) {
+      for (const a of advances) {
+        deductions.push({ key: `adv-${a.id}`, label: `Advance recovery — ${a.purpose || 'Advance'}`, tip: `Issued ${a.issued_date || '—'}. Outstanding balance recovered from the final payment.`, formula: `${fmt(a.amount)} − repaid`, amount: parseFloat(a.outstanding) || 0 })
+      }
+    } else {
+      deductions.push({ key: 'adv', label: 'Advance recovery', tip: 'Outstanding advances recovered from the final payment.', formula: '', amount: n('advance_deduction') })
+    }
+  }
+  const totalDeductions = deductions.reduce((a, d) => a + d.amount, 0)
+  return { earnings, deductions, gross: n('gross_payout'), totalDeductions, net: n('net_payout'), employerSsf: n('month_ssf_employer') }
+}
+
 const today = getBsToday()
 
 export default function FinalSettlement() {
-  const { clientId, hasHrAccess, isAdmin } = useAuth()
+  const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
   const [employees,  setEmployees]  = useState([])
+  const [empListError, setEmpListError] = useState(null)
   const [empId,      setEmpId]      = useState('')
   const [reason,     setReason]     = useState('resignation')
   const [lastDate,   setLastDate]   = useState({ year: today.year, month: today.month, day: today.day })
-  const [noticeDays, setNoticeDays] = useState(30)    // notice period per contract (calendar days)
+  const [noticeDays, setNoticeDays] = useState(30)
   const [noticeServed, setNoticeServed] = useState(true)
-  const [leaveDays,  setLeaveDays]  = useState(0)
-  const [festPaid,   setFestPaid]   = useState(true)  // was festival allowance paid this FY?
-  const [advances,   setAdvances]   = useState([])
-
-  // ── The sources that used to be typed in by hand ──
-  const [components,  setComponents]  = useState([])   // hr_salary_components → allowances
-  const [leaveTypes,  setLeaveTypes]  = useState([])
-  const [leaveReqs,   setLeaveReqs]   = useState([])
+  const [leaveDays,  setLeaveDays]  = useState('0')
   const [leaveTypeId, setLeaveTypeId] = useState('')
-  const [festRows,    setFestRows]    = useState([])
-  const [ssfStart,    setSsfStart]    = useState({})
-  const [ytdMap,      setYtdMap]      = useState({})
-  const [attendance,  setAttendance]  = useState(null) // null = not looked up yet for this month
-  const [attendanceKnown, setAttendanceKnown] = useState(false)
+  const [festPaid,   setFestPaid]   = useState(true)
 
-  // ── The record ──
-  const [settlements, setSettlements] = useState([])   // every settlement for this client
-  const [current,     setCurrent]     = useState(null) // the row being viewed/edited, if saved
-  const [busy,        setBusy]        = useState(false)
-  const [msg,         setMsg]         = useState('')
-  // A failed YTD read is not an employee with no prior payslips — see the load effect below.
-  const [ytdFailed,   setYtdFailed]   = useState(false)
-  // The same rule for the two other reads a settlement's money comes from (S750): salary
-  // components are the ALLOWANCES in the final month's gross and the CIT relief on its tax, and
-  // leave requests are the balance leave encashment pays out. Both used to drop their error, so a
-  // failed read settled a leaver on basic alone with no encashment — finalized as a permanent record.
-  const [componentsFailed, setComponentsFailed] = useState(false)
-  const [leaveReqsFailed,  setLeaveReqsFailed]  = useState(false)
-  // Outstanding advances are what the settlement recovers — see their load effect (S751).
-  const [advancesState, setAdvancesState] = useState('ok') // 'loading' | 'ok' | 'failed'
-  const inputsFailed = ytdFailed || componentsFailed || leaveReqsFailed || advancesState !== 'ok'
+  // Client-wide inputs: salary components, leave types, SSF contributions, the settlement register.
+  const [clientData, setClientData] = useState({ status: 'loading', error: null, components: [], leaveTypes: [], ssf: {}, settlements: [] })
+  // This employee's inputs for the month they leave in.
+  const [empData, setEmpData] = useState({ key: null, status: 'idle', error: null })
+  const [reloadTick, setReloadTick] = useState(0)
+
+  const [current,  setCurrent]  = useState(null) // the saved row being viewed, draft or finalized
+  const [busy,     setBusy]     = useState(false)
+  const [msg,      setMsg]      = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [refusal,     setRefusal]     = useState(null) // why Finalize refused
   const [reopenTarget, setReopenTarget] = useState(null)
-  // Load employee list.
-  // ssf_no is selected because the gratuity SSF gate is `ssf_enrolled AND ssf_no`, matching
-  // payroll; status/end_date/access_blocked because Finalize stamps all three and Reopen has to
-  // put back exactly what was there.
+  const [reopenReason, setReopenReason] = useState('')
+
+  const clientReq = useLatestRequest()
+  const empReq = useLatestRequest()
+  // Which prefills have run, so reopening a saved draft keeps its own leave days and festival tick.
+  const prefilled = useRef({ leave: null, fest: null })
+
   const loadEmployees = useCallback(async () => {
-    const { data, error } = await scopedFrom('hr_employees', 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked')
+    const { data, error } = await scopedFrom('hr_employees', EMPLOYEE_COLUMNS)
       .in('status', ['active', 'probation'])
       .order('full_name')
-    // A failed read is not an empty picker (S682): keep the last-good list and say so.
-    if (error) { setMsg('error:Could not load the employee list — the picker shows the last successful load. ' + errorLine(error)); return }
-    setEmployees(data || [])
-  }, [scopedFrom])
-
-  useEffect(() => { if (clientId) loadEmployees() }, [clientId, loadEmployees])
-
-  // Load outstanding advances when employee changes. There is no stored balance column —
-  // outstanding is always derived as amount − SUM(repayments), same as PayrollRun's advance map.
-  //
-  // Both reads used to drop their errors (S751): a failed read showed no advances, and Finalize
-  // then paid the leaver in full — the company's money written off as a permanent record with
-  // nothing on screen having gone wrong. And nothing identified which employee a response was for,
-  // so picking A then B could land A's advances on B's settlement. `advancesState` is 'loading'
-  // until THIS employee's reads land, and Save/Finalize refuse on anything but 'ok'.
-  useEffect(() => {
-    if (!clientId || !empId) { setAdvances([]); setAdvancesState('ok'); return }
-    let cancelled = false
-    setAdvances([]); setAdvancesState('loading')
-    Promise.all([
-      scopedFrom('hr_advances', 'id, amount, purpose, issued_date, status')
-        .eq('employee_id', empId).eq('status', 'active'),
-      scopedFrom('hr_advance_repayments', 'advance_id, amount')
-        .eq('employee_id', empId),
-    ]).then(([advRes, repRes]) => {
-      if (cancelled) return // the picker has moved on to another employee
-      const err = advRes.error || repRes.error // the object, so its code reaches the detail line
-      if (err) {
-        setAdvancesState('failed')
-        setMsg("error:Could not load this employee's outstanding advances, so what the settlement recovers is unknown and it can't be saved or finalized until they load — it would pay the leaver in full. " + errorLine(err))
-        return
-      }
-      const repaid = {}
-      ;(repRes.data || []).forEach(r => { repaid[r.advance_id] = (repaid[r.advance_id] || 0) + (parseFloat(r.amount) || 0) })
-      const enriched = (advRes.data || [])
-        .map(a => ({ ...a, outstanding: Math.max(0, (parseFloat(a.amount) || 0) - (repaid[a.id] || 0)) }))
-        .filter(a => a.outstanding > 0)
-      setAdvances(enriched)
-      setAdvancesState('ok')
+    if (error) { setEmpListError(error); return }
+    setEmpListError(null)
+    setEmployees(prev => {
+      // Keep a leaver who was added to open their settlement — Finalize takes them off this list.
+      const extra = prev.filter(p => !(data || []).some(d => d.id === p.id) && p.id === empId)
+      return [...(data || []), ...extra]
     })
-    return () => { cancelled = true }
-  }, [clientId, empId, scopedFrom])
+  }, [scopedFrom, empId])
 
-  // Salary components carry the allowances that make up gross pay. The settlement used to divide
-  // BASIC for its partial month while payroll divides GROSS, so every allowance silently vanished
-  // from a leaver's final month.
+  const loadClientData = useCallback(async forClient => {
+    clientReq.begin(forClient)
+    setClientData(d => ({ ...d, status: 'loading' }))
+    const [comps, types, ssf, setts] = await Promise.all([
+      // Paged: one row per component per employee, client-wide.
+      fetchAllRows(() => scopedFrom('hr_salary_components').order('id')),
+      scopedFrom('hr_leave_types').eq('active', true).order('sort_order'),
+      fetchSsfContributions(scopedFrom),
+      scopedFrom('hr_final_settlements', '*').order('last_working_date', { ascending: false }),
+    ])
+    if (!clientReq.isCurrent(forClient)) return
+    // Every one of these is money on the statement or a guard on it: components are the allowances
+    // and CIT, leave types and the register decide the encashable balance, SSF contributions net off
+    // gratuity. A failed read here is a failed settlement, never a smaller one (S613/S750).
+    const error = firstError([comps, types, ssf, setts])
+    if (error) {
+      setClientData({ status: 'failed', error, components: [], leaveTypes: [], ssf: {}, settlements: [] })
+      return
+    }
+    const leaveTypes = types.data || []
+    setClientData({ status: 'ok', error: null, components: comps.data || [], leaveTypes, ssf: ssf.data || {}, settlements: setts.data || [] })
+    setLeaveTypeId(prev => prev || (leaveTypes.find(t => (parseFloat(t.annual_quota) || 0) > 0) || leaveTypes[0])?.id || '')
+  }, [scopedFrom]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!clientId) return
-    // Paged: one row per component per employee, client-wide.
-    fetchAllRows(() => scopedFrom('hr_salary_components').order('id')).then(({ data, error }) => {
-      if (error) {
-        setComponentsFailed(true); setComponents([])
-        setMsg("error:Could not load salary allowances and deductions, so this settlement can't be saved or finalized until they load — it would pay the final month on basic alone. " + errorText(error, 'operator'))
-        return
-      }
-      setComponentsFailed(false)
-      setComponents(data || [])
-    })
-    scopedFrom('hr_leave_types').eq('active', true).order('sort_order').then(({ data }) => {
-      const rows = data || []
-      setLeaveTypes(rows)
-      // Default to the first capped type — "annual leave" has no guaranteed code, because type
-      // codes are user-editable and custom types mint their own.
-      if (!leaveTypeId) setLeaveTypeId((rows.find(t => (parseFloat(t.annual_quota) || 0) > 0) || rows[0])?.id || '')
-    })
-    fetchSsfStartMap(scopedFrom).then(setSsfStart).catch(() => setSsfStart({}))
-    loadSettlements()
-  }, [clientId])  // eslint-disable-line react-hooks/exhaustive-deps
+    // A client switch must not leave the previous client's employee or settlement on screen.
+    setEmpId(''); setCurrent(null); setMsg(''); setLeaveTypeId('')
+    loadEmployees()
+    loadClientData(clientId)
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadSettlements = useCallback(async () => {
-    const { data, error } = await scopedFrom('hr_final_settlements', '*').order('last_working_date', { ascending: false })
-    // The table ships in a migration applied by hand, so a deployed frontend can genuinely arrive
-    // first. Degrade to "history unavailable" rather than white-screening the calculator.
-    if (error) { setSettlements([]); return }
-    setSettlements(data || [])
-  }, [scopedFrom])
+  const currentKey = clientId && empId ? `${clientId}:${empId}:${lastDate.year}-${lastDate.month}` : null
 
-  // Leave requests for the selected employee — the balance is bucketed client-side by BS year,
-  // exactly as the Balances tab does.
+  // Everything that depends on WHO leaves and in WHICH month.
   useEffect(() => {
-    if (!clientId || !empId) { setLeaveReqs([]); return }
-    scopedFrom('hr_leave_requests', 'employee_id, leave_type_id, status, days, start_date')
-      .eq('employee_id', empId)
-      .then(({ data, error }) => {
-        if (error) {
-          setLeaveReqsFailed(true); setLeaveReqs([])
-          setMsg("error:Could not load this employee's leave, so the leave balance to encash is unknown and the settlement can't be saved or finalized until it loads. " + errorText(error, 'operator'))
-          return
-        }
-        setLeaveReqsFailed(false)
-        setLeaveReqs(data || [])
-      })
-  }, [clientId, empId, scopedFrom])
-
-  // Everything that depends on WHICH month the employee left in: festival allowance for that
-  // fiscal year, the year-to-date tax base, and the final month's attendance.
-  useEffect(() => {
-    if (!clientId || !empId) { setFestRows([]); setYtdMap({}); setAttendance(null); setAttendanceKnown(false); return }
-    let cancelled = false
-    const period = { bs_year: lastDate.year, bs_month: lastDate.month }
-
+    if (!currentKey) { setEmpData({ key: null, status: 'idle', error: null }); return }
+    const key = currentKey
+    empReq.begin(key)
+    setEmpData({ key, status: 'loading', error: null })
     ;(async () => {
-      // Festival is keyed on bs_year = the FISCAL year start, not the calendar year of the last
-      // working date — Dashain falls in Ashwin, so for a Baisakh–Ashadh leaver fyStart is the
-      // previous BS year and filtering on lastDate.year would read the wrong one entirely.
+      const period = { bs_year: lastDate.year, bs_month: lastDate.month }
       const { fyStart } = fiscalYearOf(lastDate.year, lastDate.month)
-      const [fest, ytd, per] = await Promise.all([
-        // Deliberately not filtered by festival_name: it is free text and clients run Tihar too.
-        // Rows carry the PAY month since S751 (`bs_month`, default Ashwin), and one paid Baisakh–
-        // Ashadh sits in bs_year = fyStart + 1 — `.eq('bs_year', fyStart)` missed it and the leaver
-        // was paid a pro-rata festival share a second time. Read both BS years, keep this FY's rows.
+      const results = await Promise.all([
+        scopedFrom('hr_advances', 'id, amount, purpose, issued_date, status').eq('employee_id', empId).eq('status', 'active'),
+        scopedFrom('hr_advance_repayments', 'advance_id, amount').eq('employee_id', empId),
+        scopedFrom('hr_leave_requests', 'employee_id, leave_type_id, status, days, start_date').eq('employee_id', empId),
+        // Festival rows carry the PAY month (S751); one paid Baisakh–Ashadh sits in bs_year = fyStart + 1.
         scopedFrom('hr_festival_allowances', 'id, festival_name, bs_year, bs_month, amount, tds, status')
           .eq('employee_id', empId).in('bs_year', [fyStart, fyStart + 1]),
         fetchYtdMap(scopedFrom, period).catch(err => ({ data: null, error: err })),
-        scopedFrom('monthly_periods', 'id')
-          .eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle(),
+        scopedFrom('monthly_periods', 'id').eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle(),
+        scopedFrom('hr_overtime_entries', 'employee_id, bs_day, ot_hours, ot_type')
+          .eq('employee_id', empId).eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).eq('status', 'approved'),
+        // Every approved, unpaid claim: no later payroll will ever include a leaver (S752, decided).
+        scopedFrom('hr_tada_claims', 'id, total_amount, trip_purpose, start_date, end_date')
+          .eq('employee_id', empId).eq('status', 'approved').order('id'),
       ])
-      if (cancelled) return
-      // This used to be `.catch(() => ({}))` — a failed YTD read degraded to an empty map, which
-      // is a REAL and ordinary value here (an employee finalized in the fiscal year's first month
-      // genuinely has no prior payslips). So the settlement would compute this person's tax as
-      // though they had earned nothing all year, withhold too little, and finalize that figure as
-      // a permanent record — with nothing on screen having gone wrong. The write actions are
-      // blocked while this is set, because an error nobody can act on is not a guard.
-      const loadFailed = firstError([fest, ytd, per])
-      if (loadFailed) {
-        setYtdFailed(true)
-        setMsg('error:' + errorText(loadFailed, 'operator') + " Until this loads, the tax on this settlement cannot be calculated, so it can't be saved or finalized.")
-        setAttendance([]); setAttendanceKnown(false)
-        return
+      if (!empReq.isCurrent(key)) return
+      const err = firstError(results)
+      if (err) { setEmpData({ key, status: 'failed', error: err }); return }
+      const [adv, reps, leave, fest, ytd, per, ot, tada] = results
+      let attendance = []
+      if (per.data?.id) {
+        // One row per employee per day, paged — a truncated read would quietly pay a full month.
+        const att = await fetchAllRows(() => scopedFrom('hr_attendance', 'bs_day, status, hours_worked, ot_hours')
+          .eq('employee_id', empId).eq('period_id', per.data.id).order('id'))
+        if (!empReq.isCurrent(key)) return
+        // A failed attendance read is not "nothing marked": it blocks, rather than paying every day.
+        if (att.error) { setEmpData({ key, status: 'failed', error: att.error }); return }
+        attendance = att.data || []
       }
-      setYtdFailed(false)
-      setFestRows((fest.data || []).filter(f => bonusFiscalYear(f).fyStart === fyStart))
-      setYtdMap(ytd.data || {})
-
-      // Attendance for the final month. One row per employee per day, so it is paged — a
-      // truncated read here would quietly pay a full month.
-      if (!per.data?.id) { setAttendance([]); setAttendanceKnown(false); return }
-      const { data: att, error: attErr } = await fetchAllRows(() => scopedFrom('hr_attendance', 'bs_day, status, hours_worked, ot_hours')
-        .eq('employee_id', empId).eq('period_id', per.data.id).order('id'))
-      if (cancelled) return
-      // A failed read is not "nothing recorded": fall back to calendar proration, as an
-      // unrecorded month does, and say why (S682).
-      if (attErr) {
-        setAttendance([]); setAttendanceKnown(false)
-        setMsg('error:Could not load the final month\'s attendance, so the final month is prorated by calendar days. Reload before finalizing. ' + errorLine(attErr))
-        return
-      }
-      setAttendance(att || [])
-      // MISSING ATTENDANCE IS NOT ZERO ATTENDANCE. With no rows marked we fall back to calendar
-      // proration and say so, rather than deducting a month nobody recorded or silently assuming
-      // the employee worked every day.
-      setAttendanceKnown((att || []).length > 0)
+      const repaid = {}
+      ;(reps.data || []).forEach(r => { repaid[r.advance_id] = (repaid[r.advance_id] || 0) + (parseFloat(r.amount) || 0) })
+      const advances = (adv.data || [])
+        .map(a => ({ ...a, outstanding: Math.max(0, Math.round(((parseFloat(a.amount) || 0) - (repaid[a.id] || 0)) * 100) / 100) }))
+        .filter(a => a.outstanding > 0)
+      const claims = tada.data || []
+      setEmpData({
+        key, status: 'ok', error: null,
+        advances,
+        leaveReqs: leave.data || [],
+        festRows: (fest.data || []).filter(f => bonusFiscalYear(f).fyStart === fyStart),
+        ytd: (ytd.data || {})[empId] || null,
+        attendance,
+        attendanceKnown: attendance.length > 0,
+        otEntries: ot.data || [],
+        tadaClaims: claims,
+        tada: { total: claims.reduce((a, c) => a + (parseFloat(c.total_amount) || 0), 0), ids: claims.map(c => c.id) },
+      })
     })()
+  }, [currentKey, reloadTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => { cancelled = true }
-  }, [clientId, empId, lastDate.year, lastDate.month, scopedFrom])
+  const emp = employees.find(e => e.id === empId) || null
+  const frozen = current?.status === 'finalized' ? current : null
+  const ready = !frozen && !!emp && clientData.status === 'ok' && empData.status === 'ok' && empData.key === currentKey
 
-  const emp = employees.find(e => e.id === empId)
-
-  // ── What the database already knows ──────────────────────────
-  // Leave is bucketed by BS CALENDAR year (Baisakh–Chaitra) — deliberately not the Shrawan-start
-  // fiscal year the festival and TDS figures on this same page use. Two year definitions, one
-  // screen; the field's hint says which is which rather than leaving it to be inferred.
-  const leaveYear = lastDate.year
-  const selectedLeaveType = leaveTypes.find(t => t.id === leaveTypeId) || null
-  const balance = useMemo(() => (
-    emp && selectedLeaveType
-      ? leaveBalance({ requests: leaveReqs, settlements, leaveType: selectedLeaveType, employeeId: emp.id, bsYear: leaveYear })
-      : null
-  ), [emp, selectedLeaveType, leaveReqs, settlements, leaveYear])
-
-  // Unpaid leave has no accrued value to buy back, so encashing it is a category error rather
-  // than an unusual choice. `paid` is the discriminator, not the quota: a client can create an
-  // uncapped type that is still paid, and quota-only logic would treat those two the same.
+  // ── Leave: earned this BS year, less taken and already encashed (S752) ──
+  const selectedLeaveType = clientData.leaveTypes.find(t => t.id === leaveTypeId) || null
   const encashable = selectedLeaveType ? selectedLeaveType.paid !== false : true
+  const leaveBal = useMemo(() => {
+    if (!ready || !selectedLeaveType) return null
+    const used = leaveUsed(empData.leaveReqs, { employeeId: emp.id, leaveTypeId: selectedLeaveType.id, bsYear: lastDate.year })
+    const encashed = leaveEncashed(clientData.settlements.filter(s => s.id !== current?.id),
+      { employeeId: emp.id, leaveTypeId: selectedLeaveType.id, bsYear: lastDate.year })
+    return earnedLeaveBalance({ quota: selectedLeaveType.annual_quota, used, encashed, joinDate: emp.join_date, lastDate })
+  }, [ready, selectedLeaveType, empData, emp, lastDate, clientData.settlements, current])
 
-  // Prefill on selection, and ALWAYS write something — the first version returned early for any
-  // type with no quota, which left the previous type's day count sitting in the box. Switching
-  // from Bereavement (13 days) to Unpaid therefore kept 13 and happily costed it, paying real
-  // money for leave that has none. Found on a real settlement screen, not by reading the code.
+  // "Paid" means a FINALIZED festival run carrying a real amount — a draft is not a payment.
+  const festivalAlreadyPaid = ready && (empData.festRows || []).some(f => f.status === 'finalized' && (parseFloat(f.amount) || 0) > 0)
+
+  // Prefill once per employee/month/leave type — AFTER this employee's leave has loaded. It used to
+  // run in the same render the leave read started, so it filled the box from the previous state
+  // (nothing taken) and never refreshed: the hint showed the right balance while the box, which is
+  // what gets paid, held the whole quota.
   useEffect(() => {
-    if (!balance) return
-    setLeaveDays(encashable && balance.capped
-      ? String(Math.max(0, Math.round(balance.remaining * 10) / 10))
-      : '0')
-  }, [empId, leaveTypeId, leaveYear, encashable])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  // "Paid" means a FINALIZED run carrying a real amount — a 0-value row legitimately exists for
-  // wage staff, and a draft run is not a payment.
-  const festivalAlreadyPaid = festRows.some(f => f.status === 'finalized' && (parseFloat(f.amount) || 0) > 0)
-  useEffect(() => { setFestPaid(festivalAlreadyPaid) }, [empId, festivalAlreadyPaid])
-
-  // ── Core computation ─────────────────────────────────────────
-  const result = useMemo(() => {
-    if (!emp) return null
-
-    const basic      = parseFloat(emp.basic_salary) || 0
-    const lastAdDate = bsToAd(lastDate.year, lastDate.month, lastDate.day)
-
-    // Gross, not basic. Payroll pays `basic + allowances` and prorates THAT; this page divided
-    // basic alone, so every allowance an employee had silently vanished from their final month.
-    const empComponents = components.filter(c => c.employee_id === emp.id)
-    const allowances    = empComponents.filter(c => c.type === 'earning').reduce((a, c) => a + calcAmount(c, basic), 0)
-    const gross         = basic + allowances
-
-    // ── Partial month ──
-    const totalDaysInLastMonth = daysInBsMonth(lastDate.year, lastDate.month)
-    const workedThrough        = lastDate.day
-    // Days actually not worked, from the attendance that was marked up to the last working day.
-    // With nothing marked, `unpaidInMonth` stays 0 and this is a plain calendar proration — the
-    // page says which of the two it did rather than presenting them identically.
-    const attUpToExit = (attendance || []).filter(a => a.bs_day <= workedThrough)
-    const t           = tallyAttendance(attUpToExit)
-    const unpaidInMonth = attendanceKnown
-      ? t.absent + t.unpaid_leave + t.half_day * 0.5 + t.half_unpaid_leave * 0.5
-      : 0
-    const paidDays      = Math.max(0, workedThrough - unpaidInMonth)
-    const partialSalary = (gross / totalDaysInLastMonth) * paidDays
-
-    // ── Leave encashment (Labour Act: basic ÷ 26 per day) ──
-    const leaveEncashment = (basic / DAY_DIVISOR) * (parseFloat(leaveDays) || 0)
-
-    // ── Gratuity ──
-    // One shared implementation with the Gratuity Tracker, and the SSF offset counted only from
-    // the month contributions actually began (see ssfEnrolment.js) rather than from the join date.
-    const g = calcGratuity(emp, { asOf: lastAdDate, ssfMonths: ssfMonthsFrom(ssfStart[emp.id], lastAdDate) })
-    const serviceMonths = g.months
-    const vested        = g.vested
-
-    // ── Festival pro-ration (if not yet paid this FY) ──
-    const { fyStart, monthInFy: curMonthInFy } = fiscalYearOf(lastDate.year, lastDate.month)
-    const festivalPro = !festPaid ? basic * (curMonthInFy / 12) : 0
-
-    // ── Notice pay deduction (if notice not served) ──
-    const noticeDeduction = noticeServed ? 0 : (basic / DAY_DIVISOR) * (parseFloat(noticeDays) || 0)
-
-    // ── Outstanding advances ──
-    const advanceDeduction = advances.reduce((a, x) => a + (x.outstanding || 0), 0)
-
-    // ── TDS on the lump-sum components ──
-    // The annual base is the employee's REAL year-to-date earnings from finalized payslips plus
-    // this final month — not `basic × 12`. A leaver has no remaining months of the fiscal year, so
-    // projecting a full year of income over them put the lump in a higher marginal band and
-    // systematically over-withheld. computeBonusTds taxes the lump at the margin above this base.
-    const ytd         = ytdMap[emp.id] || { gross: 0, ssf: 0 }
-    const ytdGross    = parseFloat(ytd.gross) || 0
-    const ytdSsf      = parseFloat(ytd.ssf) || 0
-    const annualBasis = ytdGross + partialSalary
-    // SSF relief for the year: what was actually contributed, plus this month's, capped by the
-    // statutory ⅓-of-income / NPR 500,000 ceiling.
-    const thisMonthSsf = g.enrolled ? Math.min(basic, SSF_CAP) * SSF_EMPLOYEE_PCT : 0
-    // CIT / provident fund shares the same cap (S748) — the year's real contributions plus this
-    // final month's, exactly as monthly payroll now relieves them.
-    const retirementYear = ytdSsf + thisMonthSsf + (parseFloat(ytd.retirement) || 0) + retirementContributionOf(empComponents, basic)
-    const ssfDeduction = retirementRelief(retirementYear, annualBasis)
-    const lifeIns      = Math.min(parseFloat(emp.life_insurance_premium) || 0, 40000)
-    const healthIns    = Math.min(parseFloat(emp.health_insurance_premium) || 0, 20000)
-    const annualTaxable = Math.max(0, annualBasis - ssfDeduction - lifeIns - healthIns)
-
-    const lumpSum = g.payable + leaveEncashment + festivalPro
-    const lumpTds = computeBonusTds({
-      annualTaxable, bonusAmount: lumpSum,
-      isSsf: g.enrolled, isMarried: emp.marital_status === 'married', fyStart,
-    })
-
-    // ── Summary ──
-    const grossPayout     = partialSalary + leaveEncashment + g.payable + festivalPro
-    const totalDeductions = noticeDeduction + advanceDeduction + lumpTds
-    const netPayout       = grossPayout - totalDeductions
-
-    // What the payout can actually cover of the outstanding advances. A settlement that nets
-    // negative has NOT recovered the full balance, so Finalize must not mark those advances
-    // settled — there is no receivable ledger to move the shortfall into.
-    const advanceRecovered = Math.max(0, Math.min(advanceDeduction, grossPayout - noticeDeduction - lumpTds))
-    const advanceShortfall = advanceDeduction - advanceRecovered
-
-    return {
-      basic, gross, allowances, serviceMonths, vested,
-      totalDaysInLastMonth, daysWorked: paidDays, workedThrough, unpaidInMonth, attendanceKnown,
-      leaveEncashment,
-      gratuity: g.payable, gratuityAccrued: g.totalAccrued, gratuitySsfCovered: g.ssfCovered,
-      ssfCoverageKnown: g.coverageKnown, ssfCoveredMonths: g.coveredMonths, ssfEnrolled: g.enrolled,
-      partialSalary, festivalPro,
-      noticeDeduction, advanceDeduction, advanceRecovered, advanceShortfall, lumpTds,
-      grossPayout, totalDeductions, netPayout,
-      annualTaxable, lumpSum, fyStart, ytdMonths: ytd.count || 0,
+    if (!ready) return
+    const leaveKey = `${currentKey}:${leaveTypeId}:${lastDate.day}`
+    if (prefilled.current.leave !== leaveKey) {
+      prefilled.current.leave = leaveKey
+      setLeaveDays(encashable && leaveBal?.capped ? String(leaveBal.remaining) : '0')
     }
-  }, [emp, lastDate, leaveDays, festPaid, noticeServed, noticeDays, advances,
-      components, attendance, attendanceKnown, ssfStart, ytdMap])
+    if (prefilled.current.fest !== currentKey) {
+      prefilled.current.fest = currentKey
+      setFestPaid(festivalAlreadyPaid)
+    }
+  }, [ready, currentKey, leaveTypeId, lastDate.day, leaveBal, encashable, festivalAlreadyPaid])
 
-  // ── The record ───────────────────────────────────────────────
-  // Settlements for the selected employee. Never .maybeSingle(): an employee can be rehired and
-  // settled again, and a second row is a legitimate state rather than a data error.
-  const empSettlements = settlements.filter(x => x.employee_id === empId)
-  const finalized = empSettlements.find(x => x.status === 'finalized') || null
+  // ── The calculation ──
+  const calc = useMemo(() => {
+    if (!ready) return null
+    const empComponents = clientData.components.filter(c => c.employee_id === emp.id)
+    return computeSettlement({
+      emp, lastDate, reason, noticeDays, noticeServed,
+      leaveDays: encashable ? leaveDays : 0,
+      festivalPaid: festPaid,
+      components: empComponents,
+      attendance: empData.attendance,
+      otEntries: empData.otEntries,
+      ytd: empData.ytd,
+      tada: empData.tada,
+      advances: empData.advances,
+      ssfRows: clientData.ssf[emp.id] || [],
+    })
+  }, [ready, clientData, emp, lastDate, reason, noticeDays, noticeServed, leaveDays, encashable, festPaid, empData])
 
-  const snapshot = () => ({
-    employee_id: emp.id,
-    separation_reason: reason,
-    last_working_date: formatAd(bsToAd(lastDate.year, lastDate.month, lastDate.day)),
-    notice_days: parseFloat(noticeDays) || 0,
-    notice_served: noticeServed,
-    leave_days_encashed: parseFloat(leaveDays) || 0,
-    leave_type_id: leaveTypeId || null,
-    festival_paid: festPaid,
-    // Frozen context. A reprint must never re-derive these from the live employee record, or the
-    // workings printed beside each figure stop matching the figure itself the first time someone
-    // gets a raise.
-    employee_name: emp.full_name,
-    employee_code: emp.employee_code || null,
-    department: emp.department || null,
-    basic_salary: result.basic,
-    join_date: emp.join_date || null,
-    ssf_enrolled: !!emp.ssf_enrolled,
-    ssf_no: emp.ssf_no || null,
-    ssf_cap: SSF_CAP,
-    ssf_gratuity_pct: SSF_GRATUITY_PCT,
-    vesting_months: GRATUITY_VESTING_MONTHS,
-    day_divisor: DAY_DIVISOR,
-    // Frozen figures
-    service_months: result.serviceMonths,
-    partial_salary: result.partialSalary,
-    leave_encashment: result.leaveEncashment,
-    gratuity_accrued: result.gratuityAccrued,
-    gratuity_ssf_covered: result.gratuitySsfCovered,
-    gratuity: result.gratuity,
-    festival_pro: result.festivalPro,
-    notice_deduction: result.noticeDeduction,
-    advance_deduction: result.advanceDeduction,
-    lump_tds: result.lumpTds,
-    gross_payout: result.grossPayout,
-    net_payout: result.netPayout,
-  })
+  const liveRow = useMemo(() => calc ? settlementColumns(calc, {
+    emp, reason, noticeDays, noticeServed, leaveDays: encashable ? leaveDays : 0, leaveTypeId, festivalPaid: festPaid,
+    leaveDaysEarned: leaveBal?.capped ? Math.round(leaveBal.earned * 100) / 100 : null,
+  }) : null, [calc, emp, reason, noticeDays, noticeServed, leaveDays, encashable, leaveTypeId, festPaid, leaveBal])
+
+  const shownRow = frozen || liveRow
+  const statement = useMemo(() => shownRow ? statementOf(shownRow, frozen ? {} : { advances: empData.advances, tadaClaims: empData.tadaClaims }) : null,
+    [shownRow, frozen, empData])
+
+  const direction = noticeDirection(reason)
+
+  // ── Writes ────────────────────────────────────────────────────────────────────────────────────
+  // Only a DRAFT is ever written from here. The database refuses anything else (S752), and the
+  // `.eq('status', 'draft')` plus the row check make a refusal from a stale tab say so.
+  async function writeDraft() {
+    const row = { ...liveRow, status: 'draft' }
+    if (current && current.status === 'draft' && current.employee_id === emp.id) {
+      const { data, error } = await scopedUpdate('hr_final_settlements', row)
+        .eq('id', current.id).eq('status', 'draft').select().maybeSingle()
+      if (error) { setMsg('error:The draft was not saved. ' + errorLine(error)); return null }
+      if (!data) {
+        setMsg('error:The draft was not saved — this settlement is no longer a draft on the server (it was finalized or deleted on another screen). Reload the page to see it.')
+        return null
+      }
+      return data
+    }
+    const { data, error } = await scopedInsert('hr_final_settlements', row, { single: true })
+    if (error) { setMsg('error:The draft was not saved. ' + errorLine(error)); return null }
+    return data
+  }
 
   async function saveDraft() {
-    if (!emp || !result) return
+    if (!liveRow) return
     setBusy(true); setMsg('')
-    const row = { ...snapshot(), status: 'draft' }
-    const { data, error } = current
-      ? await scopedUpdate('hr_final_settlements', row).eq('id', current.id).select().single()
-      : await scopedInsert('hr_final_settlements', row, { single: true })
+    const saved = await writeDraft()
     setBusy(false)
-    if (error) { setMsg('error:The draft was not saved. ' + errorLine(error)); return }
-    setCurrent(data)
-    await loadSettlements()
+    if (!saved) return
+    setCurrent(saved)
+    await loadClientData(clientId)
     setMsg('ok:Draft saved.')
   }
 
-  // Everything that would make finalizing wrong, checked BEFORE anything is written.
-  async function checkRefusals() {
-    const out = []
-
-    // 0. The advances this settlement recovers must have been READ for this employee (S751). A
-    //    failed or still-running read is an empty list, and an empty list pays the leaver in full.
-    if (advancesState !== 'ok') {
-      out.push(advancesState === 'failed'
-        ? 'Could not load ' + emp.full_name + "'s outstanding advances, so the amount this settlement recovers is unknown. Reload the page — finalizing now would pay them in full and write the advances off by omission."
-        : emp.full_name + "'s outstanding advances are still loading. Wait a moment and finalize again.")
-    }
-
-    // 1. Already settled for this spell. A rehired employee may legitimately have an older
-    //    settlement, so this refuses only one overlapping the CURRENT join date — where service
-    //    months would span both spells and pay gratuity twice for the same years.
-    const overlapping = settlements.find(x => x.employee_id === empId && x.status === 'finalized'
-      && (!emp.join_date || x.last_working_date >= emp.join_date))
-    if (overlapping) {
-      out.push(emp.full_name + ' already has a finalized settlement dated ' + overlapping.last_working_date
-        + ', covering service that overlaps their current join date. Settling again would pay gratuity twice for the same years.'
-        + ' Reopen that settlement instead, or add a new employee record for the new spell.')
-    }
-
-    // 2. The final month already paid by payroll — otherwise that month is paid about 1.5 times:
-    //    once in full by the run, and again as partial salary here.
-    // Every read in this gate REFUSES when it cannot run (S613): these guards used to drop their
-    // errors, so a failed payslips read meant "no payroll covers this month" — the gate passing
-    // vacuously on exactly the double-payment it exists to block. Unverifiable ≠ clear.
-    const { data: per, error: perErr } = await scopedFrom('monthly_periods', 'id')
-      .eq('bs_year', lastDate.year).eq('bs_month', lastDate.month).maybeSingle()
-    if (perErr) {
-      out.push('Could not verify whether payroll already covers the final month (' + errorLine(perErr) + '). Try again — finalizing without this check could pay that month twice.')
-    }
-    if (per?.id) {
-      const { data: slips, error: slipsErr } = await scopedFrom('hr_payslips', 'id, hr_payroll_runs!inner(status, period_id)')
-        .eq('employee_id', empId)
-        .eq('hr_payroll_runs.period_id', per.id)
-        .eq('hr_payroll_runs.status', 'finalized')
-      if (slipsErr) {
-        out.push('Could not verify whether payroll already covers the final month (' + errorLine(slipsErr) + '). Try again — finalizing without this check could pay that month twice.')
-      }
-      if ((slips || []).length > 0) {
-        out.push('A finalized payroll run already covers ' + BS_MONTHS[lastDate.month - 1] + ' ' + lastDate.year
-          + ' for ' + emp.full_name + ', so their pay for that month has been issued once already.'
-          + ' Reopen that payroll run (it now prorates for the end date), or set the last working date to a month payroll has not run.')
-      }
-    }
-
-    // 3. Concurrent finalize — `busy` guards one tab, not two.
-    if (current?.id) {
-      const { data: fresh, error: freshErr } = await scopedFrom('hr_final_settlements', 'status').eq('id', current.id).maybeSingle()
-      if (freshErr) {
-        out.push('Could not verify this settlement\'s current status (' + errorLine(freshErr) + '). Try again before finalizing.')
-      }
-      if (fresh?.status === 'finalized') {
-        out.push('This settlement was finalized somewhere else while it was open here. Reload the page to see it.')
-      }
-    }
-    return out
-  }
-
-  async function requestFinalize() {
-    if (!emp || !result) return
-    setBusy(true); setMsg('')
-    const refusals = await checkRefusals()
-    setBusy(false)
-    if (refusals.length > 0) { setRefusal(refusals); return }
-    setConfirmOpen(true)
-  }
-
-  // The order IS the design. The settlement row goes in as a DRAFT first so every later step has
-  // an id to tag itself with, and only becomes authoritative once the ledgers have actually been
-  // written. A crash part-way therefore leaves a draft — which closes nothing and claims nothing —
-  // rather than a finalized document asserting money moved that never did.
+  // Finalize is ONE database transaction (finalize_final_settlement). It re-reads the advances, the
+  // travel claims, payroll for the month and any other finalized settlement, refuses if anything
+  // moved since this screen calculated, and writes every ledger — or nothing.
   async function finalize() {
-    if (!emp || !result) return
+    if (!liveRow) return
     setConfirmOpen(false)
     setBusy(true); setMsg('')
-
-    const fail = (where, error) => {
-      setBusy(false)
-      setMsg('error:Stopped at ' + where + ': ' + errorLine(error)
-        + '. The settlement is saved as a draft and nothing after that point was written — fix the problem and finalize again.')
-      loadSettlements()
-    }
-
-    // 1. The row, as a draft.
-    const row = {
-      ...snapshot(),
-      status: 'draft',
-      prior_status: emp.status,
-      prior_end_date: emp.end_date || null,
-      prior_access_blocked: !!emp.access_blocked,
-    }
-    const { data: saved, error: sErr } = current
-      ? await scopedUpdate('hr_final_settlements', row).eq('id', current.id).select().single()
-      : await scopedInsert('hr_final_settlements', row, { single: true })
-    if (sErr) return fail('saving the settlement', sErr)
+    const saved = await writeDraft()
+    if (!saved) { setBusy(false); return }
     setCurrent(saved)
-
-    // 2. Clear anything a previous attempt tagged with this settlement, so re-running recovers
-    //    once rather than twice.
-    const { error: dErr } = await scopedDelete('hr_advance_repayments').eq('final_settlement_id', saved.id)
-    if (dErr) return fail('clearing previous advance recovery', dErr)
-
-    // 3. Recover the advances, capped at what the payout actually covers. A zero-amount row would
-    //    fail the table's amount > 0 CHECK and take the whole batch with it, so it is filtered out.
-    let remaining = result.advanceRecovered
-    const repayRows = []
-    const settledIds = []
-    for (const adv of advances) {
-      if (remaining <= 0.005) break
-      const take = Math.min(adv.outstanding, remaining)
-      if (take > 0.005) {
-        repayRows.push({
-          advance_id: adv.id,
-          employee_id: emp.id,
-          repaid_date: row.last_working_date,
-          amount: Math.round(take * 100) / 100,
-          notes: 'Final settlement',
-          final_settlement_id: saved.id,
-        })
-        // Only a fully recovered advance is settled. A partly recovered one stays active with a
-        // real outstanding balance, because that money genuinely has not been repaid.
-        if (take >= adv.outstanding - 0.01) settledIds.push(adv.id)
-        remaining -= take
-      }
+    const { data, error } = await supabase.rpc('finalize_final_settlement', { p_settlement_id: saved.id })
+    if (error) {
+      setBusy(false)
+      setMsg('error:' + errorLine(error) + ' The figures are saved as a draft; nothing else was written.')
+      await loadClientData(clientId)
+      return
     }
-    if (repayRows.length > 0) {
-      const { error } = await scopedInsert('hr_advance_repayments', repayRows)
-      if (error) return fail('recording advance recovery', error)
-    }
-    if (settledIds.length > 0) {
-      const { error } = await scopedUpdate('hr_advances', { status: 'settled' }).in('id', settledIds)
-      if (error) return fail('closing the recovered advances', error)
-    }
-
-    // 4. Stamp the employee. access_blocked is a separate column from status by design (S561/S563),
-    //    so ending their app login cannot remove them from a payroll picker.
-    const statusFor = { resignation: 'resigned', mutual: 'resigned', termination: 'terminated', retirement: 'inactive' }
-    const newStatus = statusFor[reason] || 'resigned'
-    const { error: eErr } = await scopedUpdate('hr_employees', {
-      status: newStatus,
-      end_date: row.last_working_date,
-      access_blocked: true,
-    }).eq('id', emp.id)
-    if (eErr) return fail('updating the employee record', eErr)
-
-    // 5. Only now is the document authoritative.
-    const { error: fErr } = await scopedUpdate('hr_final_settlements', {
-      status: 'finalized', finalized_at: new Date().toISOString(),
-    }).eq('id', saved.id)
-    if (fErr) return fail('finalizing', fErr)
-
-    await Promise.all([loadSettlements(), loadEmployees()])
-    // Keep the employee we just settled on screen. loadEmployees() only returns active/probation
-    // staff, so finalizing removes the very person whose settlement you are looking at — the form
-    // and its Mark-paid/Reopen buttons emptied out the instant the action succeeded, and the only
-    // way back was through the history list. Found by running a real settlement end to end.
-    setEmployees(prev => prev.some(e => e.id === emp.id)
-      ? prev
-      : [...prev, { ...emp, status: newStatus, end_date: row.last_working_date, access_blocked: true }])
+    setCurrent(data)
+    await Promise.all([loadClientData(clientId), loadEmployees()])
+    setReloadTick(t => t + 1)
     setBusy(false)
-    setMsg('ok:Settlement finalized. '
-      + (settledIds.length > 0 ? settledIds.length + ' advance(s) closed. ' : '')
-      + emp.full_name + ' is now ' + newStatus + ' and their Crest Staff login is blocked.')
+    setMsg('ok:Settlement finalized. ' + (data.employee_name || emp.full_name) + ' is now ' + (STATUS_AFTER[data.separation_reason] || 'resigned')
+      + '; advances recovered: NPR ' + fmt(data.advance_recovered)
+      + ((data.tada_claim_ids || []).length > 0 ? '; ' + data.tada_claim_ids.length + ' travel claim(s) marked paid' : '') + '.')
   }
 
-  // The exact reverse, scoped to what THIS settlement wrote — never a hand-entered repayment, and
-  // never an advance another process closed.
-  async function reopen(row) {
+  async function reopen() {
+    const row = reopenTarget
+    if (!row || !reopenReason.trim()) return
     setBusy(true); setMsg('')
-    // Refuse on a failed read (S613): dropping this error meant the reopen proceeded WITHOUT
-    // reactivating the advances this settlement had closed — the ledgers silently diverge.
-    const { data: ownReps, error: repsErr } = await scopedFrom('hr_advance_repayments', 'advance_id').eq('final_settlement_id', row.id)
-    if (repsErr) { setBusy(false); setMsg('error:Could not read this settlement\'s advance recoveries (' + errorLine(repsErr) + '). Nothing was changed — try again.'); return }
-    const touched = [...new Set((ownReps || []).map(r => r.advance_id))]
-
-    const { error: delErr } = await scopedDelete('hr_advance_repayments').eq('final_settlement_id', row.id)
-    if (delErr) { setBusy(false); setMsg('error:Could not remove the settlement\'s advance recoveries (' + errorLine(delErr) + '). Nothing else was changed — try again.'); return }
-
-    if (touched.length > 0) {
-      const [{ data: advs }, { data: reps }] = await Promise.all([
-        scopedFrom('hr_advances', 'id, amount, status').in('id', touched),
-        scopedFrom('hr_advance_repayments', 'advance_id, amount').in('advance_id', touched),
-      ])
-      const repaid = {}
-      ;(reps || []).forEach(r => { repaid[r.advance_id] = (repaid[r.advance_id] || 0) + (parseFloat(r.amount) || 0) })
-      const reactivate = (advs || [])
-        .filter(a => a.status === 'settled' && Math.max(0, parseFloat(a.amount) - (repaid[a.id] || 0)) > 0.01)
-        .map(a => a.id)
-      if (reactivate.length > 0) {
-        const { error: reErr } = await scopedUpdate('hr_advances', { status: 'active' }).in('id', reactivate)
-        // The recoveries above are already removed; name what is still not back (S682).
-        if (reErr) { setBusy(false); setMsg(`error:The settlement's advance recoveries were removed, but ${reactivate.length} advance(s) could not be reactivated — reactivate them in Advances & Loans, then press Reopen again. ` + errorLine(reErr)); loadSettlements(); return }
-      }
-    }
-
-    // Put the employee back exactly as they were, including an end date or a login block someone
-    // may have set by hand before the settlement overwrote it.
-    const { error: empErr } = await scopedUpdate('hr_employees', {
-      status: row.prior_status || 'active',
-      end_date: row.prior_end_date || null,
-      access_blocked: !!row.prior_access_blocked,
-    }).eq('id', row.employee_id)
-    if (empErr) { setBusy(false); setMsg('error:Advances were reset, but the employee record was not restored — set their status, end date and login block by hand in Employees, then press Reopen again. ' + errorLine(empErr)); loadSettlements(); return }
-
-    const { error: stErr } = await scopedUpdate('hr_final_settlements', {
-      status: 'draft', finalized_at: null, paid_at: null, paid_method: null,
-    }).eq('id', row.id)
-    if (stErr) { setBusy(false); setMsg('error:Everything was reset, but the settlement still shows as finalized — press Reopen again. ' + errorLine(stErr)); loadSettlements(); return }
-
-    await Promise.all([loadSettlements(), loadEmployees()])
+    const { data, error } = await supabase.rpc('reopen_final_settlement', { p_settlement_id: row.id, p_reason: reopenReason.trim() })
     setBusy(false)
-    setMsg('ok:Settlement reopened — advances reactivated and the employee record restored.')
+    if (error) { setMsg('error:' + errorLine(error)); return }
+    setReopenTarget(null); setReopenReason('')
+    setCurrent(data)
+    await loadClientData(clientId)
+    setReloadTick(t => t + 1)
+    setMsg('ok:Settlement reopened as a draft — its advance recoveries and travel-claim payments were undone. ' + (data.employee_name || 'The employee') + ' is still marked as left; change their status in Employees if they are not leaving after all.')
+  }
+
+  async function deleteDraft(row) {
+    // A routine single-row delete of a draft, which claims nothing and moved no money.
+    if (!window.confirm(`Delete the draft settlement for ${row.employee_name || 'this employee'}? It has not moved any money.`)) return
+    setBusy(true); setMsg('')
+    const { data, error } = await scopedDelete('hr_final_settlements').eq('id', row.id).eq('status', 'draft').select('id')
+    setBusy(false)
+    if (error) { setMsg('error:The draft was not deleted. ' + errorLine(error)); return }
+    if (!data?.length) { setMsg('error:The draft was not deleted — it is no longer a draft on the server (it may have been finalized on another screen). Reload the page.'); return }
+    if (current?.id === row.id) setCurrent(null)
+    await loadClientData(clientId)
+    setMsg('ok:Draft deleted.')
+  }
+
+  async function markPaid(row, method) {
+    setBusy(true); setMsg('')
+    const { data, error } = await scopedUpdate('hr_final_settlements', { paid_at: new Date().toISOString(), paid_method: method })
+      .eq('id', row.id).eq('status', 'finalized').is('paid_at', null).select()
+    setBusy(false)
+    if (error) { setMsg('error:The settlement was not marked as paid — it still shows as owed. ' + errorLine(error)); return }
+    if (!data?.length) { setMsg('error:Nothing was changed — this settlement is already recorded as paid, or was reopened, on another screen. Reload the page.'); return }
+    setCurrent(data[0])
+    await loadClientData(clientId)
+    setMsg('ok:Marked as paid by ' + method.toLowerCase() + '.')
   }
 
   async function openSettlement(row) {
-    // The picker only lists active/probation staff, so the employee this settlement belongs to is
-    // almost certainly not in it — Finalize is what removed them. Fetch that one row and add it,
-    // or opening a past settlement would resolve to no employee and render nothing.
     if (!employees.some(e => e.id === row.employee_id)) {
-      const { data, error } = await scopedFrom('hr_employees', 'id, full_name, employee_code, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, marital_status, life_insurance_premium, health_insurance_premium, department, status, end_date, access_blocked')
-        .eq('id', row.employee_id).maybeSingle()
+      const { data, error } = await scopedFrom('hr_employees', EMPLOYEE_COLUMNS).eq('id', row.employee_id).maybeSingle()
       if (error) { setMsg('error:Could not load this employee\'s record, so the settlement cannot be opened — try again. ' + errorLine(error)); return }
-      if (data) setEmployees(prev => [...prev, data])
+      if (data) setEmployees(prev => prev.some(e => e.id === data.id) ? prev : [...prev, data])
     }
     const [y, m, d] = String(row.last_working_date).split('-').map(Number)
     const bs = adToBs(new Date(y, m - 1, d))
+    const key = `${clientId}:${row.employee_id}:${bs.year}-${bs.month}`
+    // A saved draft keeps the leave days and festival tick it was saved with.
+    prefilled.current = { leave: `${key}:${row.leave_type_id || leaveTypeId}:${bs.day}`, fest: key }
     setEmpId(row.employee_id)
     setReason(row.separation_reason || 'resignation')
     setLastDate({ year: bs.year, month: bs.month, day: bs.day })
     setNoticeDays(row.notice_days ?? 30)
     setNoticeServed(!!row.notice_served)
     setLeaveDays(String(row.leave_days_encashed ?? 0))
-    setLeaveTypeId(row.leave_type_id || '')
+    if (row.leave_type_id) setLeaveTypeId(row.leave_type_id)
     setFestPaid(!!row.festival_paid)
     setCurrent(row)
     setMsg('')
-    // The app shell owns the scrollport, not the window (.layout-root is height:100dvh /
-    // overflow-y:auto so the top bar can be sticky — see Layout.css). window.scrollTo is a no-op
-    // against a body that does not scroll, and this is the one call site in the shell that used
-    // it: loading a draft settlement into the form above must bring the form back into view.
+    // The app shell owns the scrollport (.layout-root), not the window.
     document.querySelector('.layout-root')?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  async function markPaid(row, method) {
-    setBusy(true)
-    const { error } = await scopedUpdate('hr_final_settlements', { paid_at: new Date().toISOString(), paid_method: method }).eq('id', row.id)
-    await loadSettlements()
-    setBusy(false)
-    if (error) { setMsg('error:The settlement was not marked as paid — it still shows as owed. ' + errorLine(error)); return }
-    setMsg('ok:Marked as paid.')
+  function pickEmployee(id) {
+    setMsg('')
+    // Picking someone else never carries the previous settlement along: "Update draft" used to
+    // rewrite whatever row was open, finalized ones included, with the new person's figures.
+    const draft = clientData.settlements.find(x => x.employee_id === id && x.status === 'draft')
+    if (draft) { openSettlement(draft); return }
+    setCurrent(null)
+    setEmpId(id)
   }
 
-  function handlePrint() { printWithTitle(`Final Settlement - ${emp.full_name}`) }
+  function handlePrint() {
+    const name = shownRow?.employee_name || emp?.full_name || 'employee'
+    printWithTitle(`Final Settlement - ${name}${frozen ? '' : ' (DRAFT)'}`)
+  }
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
+
+  const inputsBlocked = clientData.status !== 'ok' || (empId && !frozen && empData.status !== 'ok')
+  const loadFailure = clientData.status === 'failed' ? clientData.error : (empId && empData.status === 'failed' ? empData.error : null)
+  const lastAdLabel = formatAd(bsToAd(lastDate.year, lastDate.month, lastDate.day))
 
   return (
     <div>
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Final Settlement</h1>
-          <p className="page-subtitle">Resignation / termination payout calculator</p>
+          <p className="page-subtitle">Resignation / termination payout: the final month, exit payments and recoveries</p>
         </div>
-        {result && (
+        {statement && (
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handlePrint}>🖨 Print</button>
         )}
       </div>
+
+      {empListError && (
+        <div className="no-print" style={{ marginBottom: 12 }}>
+          <ReportLoadError error={empListError} />
+        </div>
+      )}
 
       {/* ── Inputs ────────────────────────────────────────── */}
       <div className="card no-print" style={{ padding: 20, marginBottom: 20 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
 
-          {/* Employee */}
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-employee">Employee</label>
-            <select id="settle-employee" className="form-select" value={empId} onChange={e => setEmpId(e.target.value)}>
+            <select id="settle-employee" className="form-select" value={empId} disabled={busy} onChange={e => pickEmployee(e.target.value)}>
               <option value="">— Select employee —</option>
-              {employees.filter(e => (e.pay_basis || 'monthly') === 'monthly').map(e => (
+              {employees.filter(e => (e.pay_basis || 'monthly') === 'monthly' || e.id === empId).map(e => (
                 <option key={e.id} value={e.id}>{e.full_name}{e.employee_code ? ` (${e.employee_code})` : ''}</option>
               ))}
             </select>
-            {/* The filter above is silent otherwise: a daily-wage cook simply isn't in the list,
-                with nothing saying why — while Gratuity Tracker tells users wage-worker gratuity
-                "is computed at final settlement". Stating the gap beats an unexplained absence. */}
             <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
               Monthly-salaried employees only — settlement for daily and hourly staff isn't supported yet.
               {' '}Someone already marked resigned, terminated or inactive is not listed: settle them first,
@@ -761,10 +529,9 @@ export default function FinalSettlement() {
             </p>
           </div>
 
-          {/* Reason */}
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-reason">Separation Reason</label>
-            <select id="settle-reason" className="form-select" value={reason} onChange={e => setReason(e.target.value)}>
+            <select id="settle-reason" className="form-select" value={reason} disabled={!!frozen} onChange={e => setReason(e.target.value)}>
               <option value="resignation">Resignation</option>
               <option value="termination">Termination</option>
               <option value="retirement">Retirement</option>
@@ -772,356 +539,239 @@ export default function FinalSettlement() {
             </select>
           </div>
 
-          {/* Last working date */}
           <div style={{ gridColumn: 'span 2' }}>
             <BsDateSelect
               id="settle-last-date"
               label="Last Working Date (BS)"
-              tip="The last day the employee worked. Used to calculate partial-month salary and total service months."
+              tip="The last day the employee worked, in full. The final month is paid to this day, and service is counted to the end of it."
               year={lastDate.year} month={lastDate.month} day={lastDate.day}
               onChange={setLastDate}
+              disabled={!!frozen}
             />
           </div>
 
-          {/* Unused leave days */}
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-leave-days">
-              <Tip text="Number of unused annual leave days to encash. Nepal Labour Act rate: basic ÷ 26 per day." width={260}>Unused Leave Days</Tip>
+              <Tip text={`Unused leave to pay out, at basic ÷ ${LEAVE_DAY_DIVISOR} per day. Filled in with the leave EARNED this BS year — the yearly quota × completed months worked ÷ 12 — less days taken and already paid out.`} width={280}>Unused Leave Days</Tip>
             </label>
             <input id="settle-leave-days" type="number" className="form-input form-input--auto" min={0} max={365}
-              value={leaveDays} disabled={!encashable}
+              value={leaveDays} disabled={!encashable || !!frozen}
               onChange={e => setLeaveDays(e.target.value)} />
-            {leaveTypes.length > 0 && (
-              <select
-                aria-label="Leave type being encashed"
-                className="form-select"
-                style={{ width: '100%', marginTop: 6 }}
-                value={leaveTypeId}
-                onChange={e => setLeaveTypeId(e.target.value)}
-              >
-                {leaveTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {clientData.leaveTypes.length > 0 && (
+              <select aria-label="Leave type being encashed" className="form-select" style={{ width: '100%', marginTop: 6 }}
+                value={leaveTypeId} disabled={!!frozen} onChange={e => setLeaveTypeId(e.target.value)}>
+                {clientData.leaveTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             )}
-            {/* Where the prefilled number came from. Leave is bucketed by BS CALENDAR year, while
-                the festival and TDS figures on this same page use the Shrawan-start fiscal year —
-                so the year is stated rather than left to be assumed. */}
-            {!encashable ? (
+            {!frozen && ready && (!encashable ? (
               <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
                 {selectedLeaveType?.name} is unpaid leave — there is no accrued value to buy back, so nothing is encashed.
               </p>
-            ) : balance && balance.capped ? (
+            ) : leaveBal?.capped ? (
               <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
-                Balance for BS {leaveYear}: {fmt(balance.quota)} quota − {balance.used} taken
-                {balance.encashed > 0 ? ` − ${balance.encashed} already encashed` : ''} = <strong>{Math.round(balance.remaining * 10) / 10} days</strong>.
+                BS {lastDate.year}: {fmt(leaveBal.quota)} a year × {leaveBal.monthsWorked} of 12 months worked = {Math.round(leaveBal.earned * 10) / 10} earned
+                {' '}− {leaveBal.used} taken{leaveBal.encashed > 0 ? ` − ${leaveBal.encashed} already paid out` : ''} = <strong>{leaveBal.remaining} days</strong>.
                 {' '}Carry-forward from earlier years is not included — the app does not track it.
               </p>
             ) : (
               <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
                 {selectedLeaveType?.name} has no annual quota, so there is no balance to encash from — enter the days yourself if this type is genuinely being paid out.
               </p>
-            )}
+            ))}
           </div>
 
-          {/* Notice period */}
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }} htmlFor="settle-notice-days">
-              <Tip text="Required notice period per employment contract (in calendar days). If notice was not served, this amount is deducted from final pay." width={280}>Notice Period (days)</Tip>
+              <Tip text="The notice period in the employment contract, in calendar days. Notice pay is basic ÷ 30 per day." width={280}>Notice Period (days)</Tip>
             </label>
-            <input id="settle-notice-days" type="number" className="form-input form-input--auto" min={0} max={90} value={noticeDays} onChange={e => setNoticeDays(e.target.value)} />
+            <input id="settle-notice-days" type="number" className="form-input form-input--auto" min={0} max={90}
+              value={noticeDays} disabled={!direction || !!frozen} onChange={e => setNoticeDays(e.target.value)} />
+            <p style={{ margin: '5px 0 0', fontSize: 11, color: 'var(--theme-text3)', lineHeight: 1.6 }}>
+              {direction === 'deduct' ? 'Resigned without serving notice: the employee owes it, and it is deducted.'
+                : direction === 'add' ? 'Terminated without notice: the employer owes it, and it is added.'
+                : 'No notice pay either way for a mutual separation or a retirement.'}
+            </p>
           </div>
 
-          {/* Checkboxes */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'flex-end', paddingBottom: 2 }}>
+            {direction && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={noticeServed} disabled={!!frozen} onChange={e => setNoticeServed(e.target.checked)} />
+                <Tip text={direction === 'deduct'
+                  ? 'Tick if the employee worked their full notice period. Untick and the notice period is deducted from the settlement.'
+                  : 'Tick if the employee was given their full notice period. Untick and the employer pays the notice period in the settlement.'} width={280}>
+                  {direction === 'deduct' ? 'Notice period served' : 'Notice period given'}
+                </Tip>
+              </label>
+            )}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={noticeServed} onChange={e => setNoticeServed(e.target.checked)} />
-              <Tip text="Check if the employee served their full notice period. If unchecked, notice-period pay will be deducted from the settlement." width={280}>Notice period served</Tip>
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--theme-text1)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={festPaid} onChange={e => setFestPaid(e.target.checked)} />
-              <Tip text="Check if the employee has already received their festival (Dashain) allowance this fiscal year. If unchecked, a pro-rated festival amount is included in the payout." width={300}>Festival allowance paid this FY</Tip>
+              <input type="checkbox" checked={festPaid} disabled={!!frozen} onChange={e => setFestPaid(e.target.checked)} />
+              <Tip text="Tick if the employee has already received their festival (Dashain) allowance this fiscal year. Untick and a share for the completed months worked this fiscal year is paid." width={300}>Festival allowance paid this FY</Tip>
             </label>
           </div>
         </div>
       </div>
 
       {/* ── Result ────────────────────────────────────────── */}
-      {!empId && (
+      {!empId && !loadFailure && (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>
-          Select an employee to calculate final settlement.
+          Select an employee to calculate their final settlement.
         </div>
       )}
 
-      {emp && result && (
+      {/* A failed read is not a smaller settlement: nothing below is shown or saved until it loads. */}
+      {loadFailure && !frozen && (
+        <div className="no-print" style={{ marginBottom: 16 }}>
+          <ReportLoadError error={loadFailure} />
+          <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '8px 0 0' }}>
+            Until this loads the settlement cannot be calculated, saved or finalized — a missing salary component, advance,
+            leave record or SSF contribution would change what the leaver is paid. Reload the page to try again.
+          </p>
+        </div>
+      )}
+
+      {empId && !frozen && !loadFailure && !ready && (
+        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading this employee's pay, leave, advances and claims…</div>
+      )}
+
+      {shownRow && statement && (
         <div>
-          {/* Missing attendance is not zero attendance. Saying which of the two prorations was
-              used is the difference between a figure someone can check and one they must trust. */}
-          {!result.attendanceKnown && (
-            <div className="card no-print" style={{ marginBottom: 12, padding: '10px 16px', fontSize: 12, lineHeight: 1.7, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)' }}>
-              No attendance is marked for {BS_MONTHS[lastDate.month - 1]} {lastDate.year}, so the partial month is prorated on
-              calendar days alone — any absence or unpaid leave in that month is not deducted. Mark it in HR → Attendance first if it
-              matters, because after this settlement is finalized {emp.full_name} leaves the attendance sheet and it can no longer be entered.
+          {!frozen && calc && !empData.attendanceKnown && (
+            <div role="alert" className="card no-print" style={amberBanner}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>No attendance is marked for {BS_MONTHS[lastDate.month - 1]} {lastDate.year}</strong>
+              <div>The final month is paid for every day up to the last working day — any absence or unpaid leave in it is not deducted.
+              Mark it in HR → Attendance first if it matters: once this settlement is finalized {emp?.full_name} leaves the attendance sheet.</div>
             </div>
           )}
-          {result.ssfEnrolled && !result.ssfCoverageKnown && (
-            <div className="card no-print" style={{ marginBottom: 12, padding: '10px 16px', fontSize: 12, lineHeight: 1.7, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)' }}>
-              {emp.full_name} is marked SSF-enrolled but no finalized payslip carries an SSF deduction, so there is no evidence of when
-              contributions began. No SSF-funded portion is netted off their gratuity — the full Labour Act accrual is being paid.
+          {current?.reopened_at && current.status === 'draft' && (
+            <div className="card no-print" style={amberBanner}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>Reopened {nepalDateAd(current.reopened_at)}</strong>
+              <div>Reason: {current.reopen_reason}. {current.paid_at ? `It had been recorded as paid (NPR ${fmt(current.paid_amount)} by ${String(current.paid_method || '').toLowerCase()}) — that record is kept.` : ''}</div>
             </div>
           )}
-          {/* Print header (hidden on screen) */}
+
+          {/* Print header (hidden on screen). A draft says so on paper. */}
           <div className="print-only" style={{ marginBottom: 24 }}>
-            <h2 style={{ margin: 0 }}>Final Settlement Statement</h2>
+            <h2 style={{ margin: 0 }}>Final Settlement Statement{frozen ? '' : ' — DRAFT'}</h2>
             <div style={{ fontSize: 13, marginTop: 4 }}>
-              {emp.full_name}{emp.employee_code ? ` · ${emp.employee_code}` : ''} · {emp.department || ''}
+              {shownRow.employee_name}{shownRow.employee_code ? ` · ${shownRow.employee_code}` : ''}{shownRow.department ? ` · ${shownRow.department}` : ''}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>
-              Last working date: {lastDate.day} {BS_MONTHS[lastDate.month - 1]} {lastDate.year} BS ·
-              Service: {fmtService(result.serviceMonths)} ·
-              Reason: {reason.charAt(0).toUpperCase() + reason.slice(1)}
+            <div style={{ fontSize: 12, marginTop: 2 }}>
+              Last working date: {shownRow.last_working_date} ({frozen ? '' : `${lastDate.day} ${BS_MONTHS[lastDate.month - 1]} ${lastDate.year} BS · `}AD) ·
+              {' '}Service: {fmtService(parseInt(shownRow.service_months, 10) || 0)} ·
+              {' '}Reason: {String(shownRow.separation_reason || '').charAt(0).toUpperCase() + String(shownRow.separation_reason || '').slice(1)}
+            </div>
+            <div style={{ fontSize: 12, marginTop: 2 }}>
+              {frozen
+                ? `Finalized ${nepalDateAd(frozen.finalized_at)}${frozen.paid_at ? ` · Paid NPR ${fmt(frozen.paid_amount ?? frozen.net_payout)} by ${String(frozen.paid_method || '').toLowerCase()} on ${nepalDateAd(frozen.paid_at)}` : ' · Not yet paid'}`
+                : current ? 'Draft — not finalized. These figures are not a payment record.' : 'Not saved — a calculation only.'}
             </div>
           </div>
 
-          {/* Employee summary */}
           <div className="card no-print" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 13 }}>
-            <div><span style={{ color: 'var(--theme-text2)' }}>Employee: </span><strong>{emp.full_name}</strong></div>
-            <div><span style={{ color: 'var(--theme-text2)' }}>Basic: </span><strong>NPR {fmt(result.basic)}</strong></div>
-            <div><span style={{ color: 'var(--theme-text2)' }}>Service: </span><strong>{fmtService(result.serviceMonths)}</strong></div>
+            <div><span style={{ color: 'var(--theme-text2)' }}>Employee: </span><strong>{shownRow.employee_name}</strong></div>
+            <div><span style={{ color: 'var(--theme-text2)' }}>Basic: </span><strong>NPR {fmt(shownRow.basic_salary)}</strong></div>
+            <div><span style={{ color: 'var(--theme-text2)' }}>Service: </span><strong>{fmtService(parseInt(shownRow.service_months, 10) || 0)}</strong></div>
             <div><span style={{ color: 'var(--theme-text2)' }}>Gratuity: </span>
-              <Tip text="The 12-month vesting cliff used here is a commonly applied assumption, not something confirmed in the current Labour Act 2074 text — Sections 52/53 read as accruing monthly from day 1 with no explicit tenure threshold found. Other sources still cite 1-year or 5-year thresholds. Verify with an accountant before finalizing a settlement for anyone close to the 1-year mark." width={340}>
-                {result.vested
+              <Tip text={`The ${shownRow.vesting_months || 12}-month threshold is a commonly applied assumption, not something confirmed in the current Labour Act 2074 text — Sections 52/53 read as accruing monthly from day 1. Service counts completed months only. Verify with an accountant before finalizing a settlement for anyone close to the threshold.`} width={340}>
+                {(parseInt(shownRow.service_months, 10) || 0) >= (shownRow.vesting_months || 12)
                   ? <span className="badge-green">Vested</span>
-                  : <span className="badge-amber">Not vested ({result.serviceMonths} / 12 mo)</span>}
+                  : <span className="badge-amber">Not vested ({parseInt(shownRow.service_months, 10) || 0} / {shownRow.vesting_months || 12} mo)</span>}
               </Tip>
             </div>
-          </div>
-
-          {/* Earnings table */}
-          <div className="card" style={{ padding: 0, marginBottom: 12 }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)', fontWeight: 600, fontSize: 13 }}>Earnings</div>
-            <div className="table-wrap">
-              <table className="data-table" style={{ tableLayout: 'fixed' }}>
-                <colgroup>
-                  <col style={{ width: '55%' }} />
-                  <col style={{ width: '25%' }} />
-                  <col style={{ width: '20%' }} />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Component</th>
-                    <th style={{ textAlign: 'right' }}>Formula</th>
-                    <th style={{ textAlign: 'right' }}>Amount (NPR)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>
-                      <Tip text="Gross pay (basic plus allowances, the same figure payroll prorates) divided by the days in the last BS month, times the days actually worked. Unpaid days marked on the attendance sheet up to the last working day are excluded." width={320}>Partial Month Salary</Tip>
-                      {result.unpaidInMonth > 0 && (
-                        <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>
-                          {result.workedThrough} days to the last working day, less {result.unpaidInMonth} unpaid from attendance
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                      {fmt(result.gross)} ÷ {result.totalDaysInLastMonth} × {result.daysWorked}
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.partialSalary)}</td>
-                  </tr>
-                  {parseFloat(leaveDays) > 0 && (
-                    <tr>
-                      <td>
-                        <Tip text="Encashment of unused annual leave at the rate of basic ÷ 26 per day (Nepal Labour Act)." width={260}>Leave Encashment ({leaveDays} days)</Tip>
-                      </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                        {fmt(result.basic)} ÷ 26 × {leaveDays}
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.leaveEncashment)}</td>
-                    </tr>
-                  )}
-                  {result.vested && result.gratuity > 0 && (
-                    <tr>
-                      <td>
-                        <Tip text={result.gratuitySsfCovered > 0
-                          ? 'Gratuity accrual (1 month basic per year of service) minus the portion already funded through the employer’s monthly SSF contribution (3.33% of capped basic goes to the SSF gratuity fund) — so it isn’t paid twice.'
-                          : 'Gratuity under Nepal Labour Act: 1 month basic per year of service. Formula: basic ÷ 12 × total months of service.'} width={300}>
-                          Gratuity ({fmtService(result.serviceMonths)}){result.gratuitySsfCovered > 0 ? ' — net of SSF-funded' : ''}
-                        </Tip>
-                      </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                        {result.gratuitySsfCovered > 0
-                          ? `${fmt(result.gratuityAccrued)} − ${fmt(result.gratuitySsfCovered)} (SSF, ${result.ssfCoveredMonths} mo)`
-                          : `${fmt(result.basic)} ÷ 12 × ${result.serviceMonths}`}
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.gratuity)}</td>
-                    </tr>
-                  )}
-                  {result.festivalPro > 0 && (
-                    <tr>
-                      <td>
-                        <Tip text="Pro-rated festival (Dashain) allowance for months worked since Shrawan of this fiscal year, since full allowance has not yet been paid." width={300}>Festival Pro-ration ({result.fyStart})</Tip>
-                      </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                        {fmt(result.basic)} × {result.lumpSum > 0 ? Math.round((result.festivalPro / result.basic) * 100) / 100 : '—'}
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(result.festivalPro)}</td>
-                    </tr>
-                  )}
-                </tbody>
-                <tfoot>
-                  <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                    <td>Gross Payout</td>
-                    <td></td>
-                    <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-green-text)' }}>{fmt(result.grossPayout)}</td>
-                  </tr>
-                </tfoot>
-              </table>
+            <div>
+              <span style={{ color: 'var(--theme-text2)' }}>Status: </span>
+              {frozen
+                ? (frozen.paid_at ? <span className="badge-green">Paid</span> : <span className="badge-yellow">Finalized</span>)
+                : current ? <span className="badge-gray">Draft</span> : <span className="badge-gray">Not saved</span>}
             </div>
           </div>
 
-          {/* Deductions table */}
-          {result.totalDeductions > 0 && (
-            <div className="card" style={{ padding: 0, marginBottom: 12 }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)', fontWeight: 600, fontSize: 13 }}>Deductions</div>
-              <div className="table-wrap">
-                <table className="data-table" style={{ tableLayout: 'fixed' }}>
-                  <colgroup>
-                    <col style={{ width: '55%' }} />
-                    <col style={{ width: '25%' }} />
-                    <col style={{ width: '20%' }} />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>Component</th>
-                      <th style={{ textAlign: 'right' }}>Formula</th>
-                      <th style={{ textAlign: 'right' }}>Amount (NPR)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {!noticeServed && result.noticeDeduction > 0 && (
-                      <tr>
-                        <td>
-                          <Tip text="Pay in lieu of notice: deducted when the employee does not serve the required notice period. Rate: basic ÷ 26 per day." width={280}>Notice Pay Deduction ({noticeDays} days unserved)</Tip>
-                        </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>
-                          {fmt(result.basic)} ÷ 26 × {noticeDays}
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>{fmt(result.noticeDeduction)}</td>
-                      </tr>
-                    )}
-                    {result.lumpTds > 0 && (
-                      <tr>
-                        <td>
-                          <Tip text="TDS on lump-sum components (gratuity + leave encashment + festival pro-ration) computed at the marginal income tax rate using the incremental method." width={300}>TDS on Lump Sum</Tip>
-                        </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>Marginal rate on NPR {fmt(result.lumpSum)}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>{fmt(result.lumpTds)}</td>
-                      </tr>
-                    )}
-                    {advances.map(adv => (
-                      <tr key={adv.id}>
-                        <td>
-                          <Tip text={`Advance issued on ${adv.issued_date || '—'}. Outstanding balance (amount minus repayments recorded in Advances & Loans) recovered from final pay.`} width={270}>
-                            Advance Recovery — {adv.purpose || 'Advance'}
-                          </Tip>
-                        </td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{fmt(adv.amount)} − repaid</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>{fmt(adv.outstanding)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                      <td>Total Deductions</td>
-                      <td></td>
-                      <td style={{ textAlign: 'right', fontSize: 15, color: 'var(--theme-red-text)' }}>{fmt(result.totalDeductions)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
+          <StatementTable title="Payments" lines={statement.earnings} totalLabel="Gross Payout" total={statement.gross} tone="green" />
+          {statement.deductions.length > 0 && (
+            <StatementTable title="Deductions" lines={statement.deductions} totalLabel="Total Deductions" total={statement.totalDeductions} tone="red" />
           )}
 
-          {/* Net payout */}
-          <div className="card" style={{ padding: '18px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="card" style={{ padding: '18px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4 }}>NET SETTLEMENT AMOUNT</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>Gross NPR {fmt(result.grossPayout)} − Deductions NPR {fmt(result.totalDeductions)}</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>Gross NPR {fmt(statement.gross)} − Deductions NPR {fmt(statement.totalDeductions)}</div>
             </div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: result.netPayout >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-              NPR {fmt(Math.abs(result.netPayout))}
-              {result.netPayout < 0 && <span style={{ fontSize: 13, marginLeft: 8, color: 'var(--theme-red-text)' }}>(recoverable)</span>}
+            <div style={{ fontSize: 24, fontWeight: 800, color: statement.net >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+              NPR {npr2(Math.abs(statement.net))}
+              {statement.net < 0 && <span style={{ fontSize: 13, marginLeft: 8, color: 'var(--theme-red-text)' }}>(owed by the employee)</span>}
             </div>
           </div>
+
+          {statement.employerSsf > 0 && (
+            <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+              Employer SSF (20%) for the final month, not paid to the employee: <strong>NPR {fmt(statement.employerSsf)}</strong> — deposit it with the employee's 11% (it appears on HR Reports → SSF Challan for {BS_MONTHS[(shownRow.settle_bs_month || lastDate.month) - 1]}).
+            </p>
+          )}
+          {!frozen && calc && calc.advanceShortfall > 0.01 && (
+            <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+              △ The payout covers NPR {fmt(calc.advanceRecovered)} of the NPR {fmt(calc.advanceDeduction)} advances owed. The other NPR {fmt(calc.advanceShortfall)} stays owed on the advance after Finalize.
+            </p>
+          )}
 
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }} className="no-print">
             <strong style={{ color: 'var(--theme-text2)' }}>Notes:</strong>
-            {' '}Partial salary is gross pay (basic plus allowances, as payroll computes it) over the BS month day count
-            {' '}({result.totalDaysInLastMonth} days for {BS_MONTHS[lastDate.month-1]} {lastDate.year})
-            {result.attendanceKnown ? ', less unpaid days marked on the attendance sheet' : ', prorated on calendar days as no attendance is marked'}.
-            {' '}Leave encashment at basic ÷ {DAY_DIVISOR} per day (Nepal Labour Act).
-            {' '}TDS on the lump sum is the marginal rate above this employee's actual year-to-date earnings
-            {result.ytdMonths > 0 ? ` (${result.ytdMonths} finalized month${result.ytdMonths === 1 ? '' : 's'} this fiscal year)` : ' (no finalized payroll yet this fiscal year)'} —
-            {' '}final liability still depends on their total annual income.
-            {!result.vested && ' Gratuity is not included as service is under 1 year (this 1-year threshold is a common assumption, not confirmed in the current Labour Act text — verify with an accountant if this employee is close to the boundary).'}
-            {result.gratuitySsfCovered > 0 && ' Gratuity is shown net of the portion already funded through employer SSF contributions.'}
-            {' '}Consult your CA before disbursing.
+            {' '}The final month is computed the way payroll computes a month — allowances, overtime, SSF, salary deductions — and
+            {' '}its tax is trued up to what was actually earned this fiscal year. Exit payments are taxed at the marginal rate above that.
+            {' '}Tax on retirement and gratuity payments can have special treatment; consult your CA before disbursing.
           </div>
 
-          {/* The amber "3 things this page does not do for you" checklist that stood here is gone:
-              Finalize now does all three. What replaces it is a statement of what will actually
-              happen, in front of the button that does it. */}
+          {/* ── Actions ── */}
           <div className="card no-print" style={{ marginTop: 16, padding: '14px 18px' }}>
-            {finalized ? (
+            {frozen ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
-                  <span className="badge-green" style={{ marginRight: 8 }}>Finalized</span>
-                  {finalized.paid_at
-                    ? <>Paid{finalized.paid_method ? ' via ' + finalized.paid_method : ''} on {String(finalized.paid_at).slice(0, 10)}.</>
+                  Finalized {nepalDateAd(frozen.finalized_at)}.{' '}
+                  {frozen.paid_at
+                    ? <>Paid NPR {fmt(frozen.paid_amount ?? frozen.net_payout)} by {String(frozen.paid_method || '').toLowerCase()} on {nepalDateAd(frozen.paid_at)}.</>
                     : <>Not yet recorded as paid.</>}
+                  {parseFloat(frozen.advance_recovered) > 0 && <> NPR {fmt(frozen.advance_recovered)} of advances recovered.</>}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {!finalized.paid_at && (
+                  {!frozen.paid_at && (
                     <>
-                      <button className="btn btn-ghost" disabled={busy} onClick={() => markPaid(finalized, 'Cash')}>Mark paid — Cash</button>
-                      <button className="btn btn-ghost" disabled={busy} onClick={() => markPaid(finalized, 'Bank')}>Mark paid — Bank</button>
+                      <button className="btn btn-ghost" disabled={busy} onClick={() => markPaid(frozen, 'Cash')}>Mark paid — Cash</button>
+                      <button className="btn btn-ghost" disabled={busy} onClick={() => markPaid(frozen, 'Bank')}>Mark paid — Bank</button>
                     </>
                   )}
-                  {isAdmin && (
-                    <button className="btn btn-danger" disabled={busy} onClick={() => setReopenTarget(finalized)}>Reopen</button>
-                  )}
+                  <button className="btn btn-danger" disabled={busy} onClick={() => { setReopenReason(''); setReopenTarget(frozen) }}>Reopen</button>
                 </div>
               </div>
             ) : (
               <>
                 <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
-                  Finalizing records this settlement and does the three things that used to be left to you:
-                  it closes {result.advanceRecovered > 0 ? 'the recovered advances' : 'any recovered advances'},
-                  marks {emp.full_name} as {reason === 'termination' ? 'terminated' : reason === 'retirement' ? 'inactive' : 'resigned'} with
-                  their last working date, and blocks their Crest Staff login.
+                  Finalizing records this settlement and, in one step: recovers the outstanding advances, marks the travel claims paid,
+                  marks {shownRow.employee_name} as {STATUS_AFTER[reason]} with their last working date, and blocks new sign-ins to Crest Staff.
                 </p>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btn-ghost" disabled={busy || inputsFailed} onClick={saveDraft}>{current ? 'Update draft' : 'Save draft'}</button>
-                  <button className="btn btn-primary" disabled={busy || inputsFailed} onClick={requestFinalize}>
+                  <button className="btn btn-ghost" disabled={busy || inputsBlocked || !liveRow} onClick={saveDraft}>{current ? 'Update draft' : 'Save draft'}</button>
+                  <button className="btn btn-primary" disabled={busy || inputsBlocked || !liveRow} onClick={() => setConfirmOpen(true)}>
                     {busy ? 'Working…' : 'Finalize settlement'}
                   </button>
+                  {current?.status === 'draft' && (
+                    <button className="btn btn-ghost" disabled={busy} onClick={() => deleteDraft(current)}>Delete draft</button>
+                  )}
                 </div>
               </>
-            )}
-            {msg && (
-              <p role={msg.startsWith('error') ? 'alert' : 'status'} style={{
-                margin: '10px 0 0', fontSize: 13, lineHeight: 1.6,
-                color: msg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
-              }}>{msg.replace(/^(ok|error):/, '')}</p>
             )}
           </div>
         </div>
       )}
 
-      {/* ── Settlement history ─────────────────────────────────────
-          The artefact the feature exists to produce. Without it a settlement was a printout and
-          nothing else — "what did we pay them, and how was gratuity worked out?" had no answer
-          inside the system. */}
-      {settlements.length > 0 && (
+      {msg && (
+        <p role={msg.startsWith('error') ? 'alert' : 'status'} className="no-print" style={{
+          margin: '12px 0 0', fontSize: 13, lineHeight: 1.6,
+          color: msg.startsWith('error') ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
+        }}>{msg.replace(/^(ok|error):/, '')}</p>
+      )}
+
+      {/* ── Settlement history ── */}
+      {clientData.settlements.length > 0 && (
         <div className="card no-print" style={{ padding: 0, marginTop: 20 }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)', fontWeight: 600, fontSize: 13 }}>
             Settlement history
@@ -1139,24 +789,22 @@ export default function FinalSettlement() {
                 </tr>
               </thead>
               <tbody>
-                {settlements.map(x => (
+                {clientData.settlements.map(x => (
                   <tr key={x.id}>
-                    {/* The frozen name, not a live lookup — the employee row may since have been
-                        edited or deleted, and this document should still read correctly. */}
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {x.employee_name || '—'}
                       {x.employee_code ? <span style={{ color: 'var(--theme-text3)' }}> · {x.employee_code}</span> : null}
                     </td>
-                    <td className="num">{x.last_working_date}</td>
+                    <td className="num" style={{ whiteSpace: 'nowrap' }}>{x.last_working_date}</td>
                     <td style={{ textTransform: 'capitalize' }}>{x.separation_reason}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }} className="num">{fmt(x.net_payout)}</td>
                     <td>
                       {x.status === 'finalized'
                         ? (x.paid_at ? <span className="badge-green">Paid</span> : <span className="badge-yellow">Finalized</span>)
-                        : <span className="badge-gray">Draft</span>}
+                        : <span className="badge-gray">Draft{x.reopened_at ? ' · reopened' : ''}</span>}
                     </td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button className="btn btn-ghost btn-sm" onClick={() => openSettlement(x)}>Open</button>
+                      <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => openSettlement(x)}>Open</button>
                     </td>
                   </tr>
                 ))}
@@ -1166,25 +814,9 @@ export default function FinalSettlement() {
         </div>
       )}
 
-      {/* Refusals are shown as a dialog rather than an inline warning: each one means money would
-          be paid twice, and the operator has to read it before doing anything else. */}
-      {refusal && (
+      {confirmOpen && liveRow && statement && (
         <ConfirmModal
-          title="This settlement cannot be finalized"
-          confirmLabel="I understand"
-          cancelLabel="Close"
-          onConfirm={() => setRefusal(null)}
-          onCancel={() => setRefusal(null)}
-        >
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {refusal.map((r, i) => <li key={i} style={{ marginBottom: 8 }}>{r}</li>)}
-          </ul>
-        </ConfirmModal>
-      )}
-
-      {confirmOpen && emp && result && (
-        <ConfirmModal
-          title={'Finalize ' + emp.full_name + "'s settlement?"}
+          title={'Finalize ' + liveRow.employee_name + "'s settlement?"}
           confirmLabel="Finalize"
           busyLabel="Finalizing…"
           busy={busy}
@@ -1193,51 +825,83 @@ export default function FinalSettlement() {
           onCancel={() => setConfirmOpen(false)}
         >
           <ul style={{ margin: 0, paddingLeft: 18 }}>
-            <li><strong>NPR {fmt(result.netPayout)}</strong> net payable{result.netPayout < 0 ? ' (recoverable from the employee)' : ''}.</li>
-            {result.advanceRecovered > 0 && (
-              <li>
-                <strong>NPR {fmt(result.advanceRecovered)}</strong> recovered against outstanding advances, which are then closed
-                so the next payroll run cannot deduct them again.
-              </li>
+            <li><strong>NPR {npr2(statement.net)}</strong> net payable{statement.net < 0 ? ' — owed BY the employee' : ''}.</li>
+            {calc?.advanceRecovered > 0 && (
+              <li><strong>NPR {fmt(calc.advanceRecovered)}</strong> recovered against outstanding advances{calc.advanceShortfall > 0.01 ? `; NPR ${fmt(calc.advanceShortfall)} stays owed` : ', which then close'}.</li>
             )}
-            {result.advanceShortfall > 0.01 && (
-              <li style={{ color: 'var(--theme-amber-text)' }}>
-                <strong>NPR {fmt(result.advanceShortfall)}</strong> of advance is NOT covered by this payout, so that advance stays
-                active and open — the money has not been repaid.
-              </li>
+            {(liveRow.tada_claim_ids || []).length > 0 && (
+              <li>{liveRow.tada_claim_ids.length} approved travel claim(s), NPR {fmt(liveRow.tada_amount)}, are paid here and marked paid.</li>
             )}
             <li>
-              {emp.full_name} becomes <strong>{reason === 'termination' ? 'terminated' : reason === 'retirement' ? 'inactive' : 'resigned'}</strong>,
-              with an end date of {formatAd(bsToAd(lastDate.year, lastDate.month, lastDate.day))}. They leave every payroll, roster and attendance screen.
+              {liveRow.employee_name} becomes <strong>{STATUS_AFTER[reason]}</strong> with an end date of {lastAdLabel}, and leaves every payroll, roster and attendance screen.
             </li>
-            <li>Their Crest Staff login is blocked.</li>
-            {parseFloat(leaveDays) > 0 && (
-              <li>{leaveDays} leave day(s) are recorded as encashed and come off their balance.</li>
-            )}
+            <li>New sign-ins to Crest Staff are blocked. If they also have an HR, IMS or POS staff login, remove it on that Staff page — this does not.</li>
+            {parseFloat(liveRow.leave_days_encashed) > 0 && <li>{liveRow.leave_days_encashed} leave day(s) are recorded as paid out and come off their balance.</li>}
+            <li>If anything changed since this screen calculated — an advance, a claim, payroll for the month — nothing is finalized and you are told what.</li>
           </ul>
         </ConfirmModal>
       )}
 
       {reopenTarget && (
-        <ConfirmModal
-          title="Reopen this settlement?"
-          confirmLabel="Reopen"
-          busyLabel="Reopening…"
-          busy={busy}
-          danger
-          onConfirm={() => reopen(reopenTarget)}
-          onCancel={() => setReopenTarget(null)}
-        >
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            <li>The advances this settlement recovered are reactivated with their balances restored.</li>
-            <li>
-              {reopenTarget.employee_name} goes back to <strong>{reopenTarget.prior_status || 'active'}</strong>, with their
-              previous end date and login access.
-            </li>
-            <li>The settlement becomes a draft again. The document you printed will no longer match it until you re-finalize.</li>
+        <Modal title="Reopen this settlement?" onClose={busy ? () => {} : () => setReopenTarget(null)} maxWidth={480}>
+          <ul style={{ margin: '0 0 14px', paddingLeft: 18, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            <li>The advance recoveries it made are removed, so those advances are owed again.</li>
+            <li>The travel claims it paid go back to Approved.</li>
+            <li>{reopenTarget.employee_name} stays marked as left. If they are not leaving after all, change their status in Employees.</li>
+            {reopenTarget.paid_at && <li>It was recorded as paid (NPR {fmt(reopenTarget.paid_amount ?? reopenTarget.net_payout)}); that record is kept.</li>}
+            <li>The settlement becomes a draft. A printed copy no longer matches it until it is finalized again.</li>
           </ul>
-        </ConfirmModal>
+          <label htmlFor="settle-reopen-reason" style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)', marginBottom: 5 }}>Why is it being reopened? (kept on the record)</label>
+          <textarea id="settle-reopen-reason" className="form-input" rows={3} value={reopenReason} onChange={e => setReopenReason(e.target.value)} disabled={busy} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+            <button type="button" className="btn btn-ghost" onClick={() => setReopenTarget(null)} disabled={busy}>Cancel</button>
+            <button type="button" className="btn btn-danger" onClick={reopen} disabled={busy || !reopenReason.trim()}>{busy ? 'Reopening…' : 'Reopen'}</button>
+          </div>
+        </Modal>
       )}
+    </div>
+  )
+}
+
+function StatementTable({ title, lines, totalLabel, total, tone }) {
+  return (
+    <div className="card" style={{ padding: 0, marginBottom: 12 }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--theme-border)', fontWeight: 600, fontSize: 13 }}>{title}</div>
+      <div className="table-wrap">
+        <table className="data-table" style={{ tableLayout: 'fixed' }}>
+          <colgroup>
+            <col style={{ width: '50%' }} />
+            <col style={{ width: '30%' }} />
+            <col style={{ width: '20%' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th style={{ textAlign: 'right' }}>Working</th>
+              <th style={{ textAlign: 'right' }}>Amount (NPR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.length === 0 && (
+              <tr><td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Nothing.</td></tr>
+            )}
+            {lines.map(l => (
+              <tr key={l.key}>
+                <td><Tip text={l.tip} width={300}>{l.label}</Tip></td>
+                <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{l.formula}</td>
+                <td style={{ textAlign: 'right', fontWeight: 600, color: tone === 'red' ? 'var(--theme-red-text)' : undefined }}>{fmt(l.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>{totalLabel}</td>
+              <td></td>
+              <td style={{ textAlign: 'right', fontSize: 15, color: tone === 'red' ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{fmt(total)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>
   )
 }

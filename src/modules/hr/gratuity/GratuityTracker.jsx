@@ -5,11 +5,16 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
 import { calcGratuity } from './gratuityCompute'
-import { fetchSsfStartMap, ssfMonthsFrom } from './ssfEnrolment'
+import { fetchSsfContributions, ssfFundedFor } from './ssfEnrolment'
 import ReportLoadError from '../../../components/ReportLoadError'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { firstError } from '../../../shared/queryError'
+import { GRATUITY_VESTING_MONTHS } from '../payrollConstants'
+import { formatAd } from '../../../utils/bsCalendar'
 
 const fmt = nprInt
 const fmtD = iso => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+const VEST = GRATUITY_VESTING_MONTHS
 
 // Format service duration as "X yr Y mo"
 function fmtService(months) {
@@ -24,37 +29,50 @@ export default function GratuityTracker() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
   const [employees, setEmployees] = useState([])
-  // When SSF contributions actually began, per employee — derived from payroll rather than
-  // assumed from the join date. See ssfEnrolment.js for why that distinction is worth six figures.
-  const [ssfStart,  setSsfStart]  = useState({})
+  // The employer SSF actually contributed, per employee, from finalized payslips and settlements —
+  // the gratuity share of it is what the SSF has already funded (S752, see ssfEnrolment.js).
+  const [ssfRows,   setSsfRows]   = useState({})
+  // Finalized settlements not yet recorded as paid: their gratuity is still owed, but the employee
+  // has left the active list above, so without this it was owed and counted nowhere.
+  const [unpaidSettlements, setUnpaidSettlements] = useState([])
   const [loading,   setLoading]   = useState(true)
   const [loadError, setLoadError] = useState(null) // a failed read is not "no active employees"
   const [filter,    setFilter]    = useState('all')   // all | vested | vesting
   const [dept,      setDept]      = useState('all')
+  const clientReq = useLatestRequest()
 
   useEffect(() => {
     if (!clientId) return
-    load()
+    load(clientId)
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function load() {
+  async function load(forClient) {
+    clientReq.begin(forClient)   // an operator switching clients must not land the previous one's list
     setLoading(true)
     // ssf_no is selected because the SSF gate is `ssf_enrolled AND ssf_no`, matching payroll — a
     // flagged employee with a blank number had nothing contributed on their behalf.
-    const { data, error } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, status')
-      .in('status', ['active', 'probation'])
-      .order('full_name')
+    const [emps, ssf, unpaid] = await Promise.all([
+      scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, join_date, basic_salary, pay_basis, ssf_enrolled, ssf_no, status')
+        .in('status', ['active', 'probation'])
+        .order('full_name'),
+      fetchSsfContributions(scopedFrom),
+      scopedFrom('hr_final_settlements', 'id, employee_name, gratuity, last_working_date')
+        .eq('status', 'finalized').is('paid_at', null),
+    ])
+    if (!clientReq.isCurrent(forClient)) return
+    // The SSF read failing is a failed report, not "no SSF offset": the page would otherwise show every
+    // enrolled employee's full accrual as the liability (S752 — a figure the page has not computed).
+    const error = firstError([emps, ssf, unpaid])
     if (error) { setLoadError(error); setLoading(false); return }
     setLoadError(null)
-    setEmployees(data || [])
-    // Best-effort: without it every employee reads as "coverage unknown", which shows no offset
-    // rather than a wrong one.
-    try { setSsfStart(await fetchSsfStartMap(scopedFrom)) } catch { setSsfStart({}) }
+    setEmployees(emps.data || [])
+    setSsfRows(ssf.data || {})
+    setUnpaidSettlements(unpaid.data || [])
     setLoading(false)
   }
 
   const gratuityOf = useCallback(
-    e => calcGratuity(e, { ssfMonths: ssfMonthsFrom(ssfStart[e.id]) }), [ssfStart])
+    e => calcGratuity(e, { ssfFunded: ssfFundedFor(ssfRows[e.id], { joinDate: e.join_date }) }), [ssfRows])
 
   // `allRows` is the same set as `rows` minus the vested/vesting filter, so calcGratuity used to
   // run TWICE per employee — once for the table and once again for the filter-pill counts, on
@@ -88,29 +106,35 @@ export default function GratuityTracker() {
   }, [rows])
   const nonMonthly = useMemo(
     () => employees.filter(e => (e.pay_basis || 'monthly') !== 'monthly').length, [employees])
+  const unpaidGratuity = useMemo(
+    () => unpaidSettlements.reduce((a, s) => a + (parseFloat(s.gratuity) || 0), 0), [unpaidSettlements])
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
-    const ws = XLSX.utils.json_to_sheet(rows.map(r => ({
+    const today = formatAd(new Date())
+    // The scope goes in the sheet: the filters are not visible in a workbook opened a month later.
+    const scope = `Gratuity accrual as of ${today} · ${dept === 'all' ? 'all departments' : dept}`
+      + ` · ${filter === 'vested' ? `vested (${VEST}+ months) only` : filter === 'vesting' ? `under ${VEST} months only` : 'all service lengths'}`
+      + ` · monthly-paid active and probation staff${nonMonthly > 0 ? ` (${nonMonthly} daily/hourly not included)` : ''}`
+    const ws = XLSX.utils.aoa_to_sheet([[scope], []])
+    XLSX.utils.sheet_add_json(ws, rows.map(r => ({
       'Employee':          r.full_name,
       'Code':              r.employee_code || '',
       'Department':        r.department || '',
       'Designation':       r.designation || '',
       'Join Date':         r.join_date || '',
       'Service':           fmtService(r.g.months),
-      'Vested (≥1 yr)':    r.g.vested ? 'Yes' : 'No',
+      [`Vested (${VEST}+ mo)`]: r.g.vested ? 'Yes' : 'No',
       'Basic (NPR)':       r.g.basic,
       'Monthly Accrual':   Math.round(r.g.monthlyAccrual),
       'Total Accrued':     Math.round(r.g.totalAccrued),
-      'SSF Covered':       !r.g.enrolled ? 'Not enrolled'
-        : !r.g.coverageKnown ? 'No SSF payslip history'
-        : Math.round(r.g.ssfCovered),
-      'SSF Months':        r.g.enrolled && r.g.coverageKnown ? r.g.coveredMonths : '',
+      'SSF Funded':        r.g.coveredMonths > 0 ? Math.round(r.g.ssfCovered) : 'No SSF contributions',
+      'SSF Months':        r.g.coveredMonths,
       'Net Liability':     Math.round(r.g.netLiability),
-    })))
+    })), { origin: 'A3' })
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Gratuity Accrual')
-    XLSX.writeFile(wb, `Gratuity_Accrual_${new Date().toISOString().slice(0,10)}.xlsx`)
+    XLSX.writeFile(wb, `Gratuity_Accrual_${today}.xlsx`)
   }
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
@@ -122,8 +146,8 @@ export default function GratuityTracker() {
           <h1 className="page-title">Gratuity Accrual</h1>
           <p className="page-subtitle">
             Labour Act: 1 month basic per year of service ·{' '}
-            <Tip text="The 12-month vesting cliff shown here is a commonly applied assumption, not something this app has confirmed in the current 2074 Act's own text — Sections 52/53 read as a defined-contribution scheme (a portable SSF balance) accruing monthly from day 1, with no explicit tenure threshold found. Other sources still cite 1-year or 5-year thresholds. Confirm with an accountant before relying on this for an actual payout, especially for anyone close to the 1-year mark." width={340}>
-              Vests after 1 year (unconfirmed — verify with an accountant)
+            <Tip text={`The ${VEST}-month threshold shown here is a commonly applied assumption, not something this app has confirmed in the current 2074 Act's own text — Sections 52/53 read as a defined-contribution scheme (a portable SSF balance) accruing monthly from day 1, with no explicit tenure threshold found. Other sources still cite 1-year or 5-year thresholds. Service counts completed months only: someone who joined on the 20th completes a month on the 20th of the next. Confirm with an accountant before relying on this for an actual payout, especially for anyone close to the threshold.`} width={340}>
+              Vests after {VEST} completed months (unconfirmed — verify with an accountant)
             </Tip>
           </p>
         </div>
@@ -144,7 +168,7 @@ export default function GratuityTracker() {
           <div className="stat-grid">
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                <Tip text="Total gratuity liability accrued under the Nepal Labour Act for all active monthly-paid employees. Formula: basic ÷ 12 × months of service." width={280}>Total Liability</Tip>
+                <Tip text="Gratuity still owed in cash for active monthly-paid employees: the Labour Act accrual (basic ÷ 12 × completed months of service) minus what their employer SSF contributions have already funded. The gross accrual before that is shown underneath." width={280}>Total Liability</Tip>
               </div>
               <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {fmt(totalNet)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Gross accrued: NPR {fmt(totalAccrued)}</div>
@@ -158,33 +182,37 @@ export default function GratuityTracker() {
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                <Tip text="Employees who have completed ≥ 1 year of service, commonly treated as eligible for gratuity payment on departure. This 1-year threshold is not confirmed in the current Labour Act 2074 text (which reads as day-1 accrual with no explicit vesting gate) — verify with an accountant before relying on it for an actual payout." width={320}>Vested Employees</Tip>
+                <Tip text={`Employees who have completed ${VEST} months of service, commonly treated as eligible for gratuity payment on departure. This threshold is not confirmed in the current Labour Act 2074 text (which reads as day-1 accrual with no explicit vesting gate) — verify with an accountant before relying on it for an actual payout.`} width={320}>Vested Employees</Tip>
               </div>
               <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-green-text)' }}>{vestedCount}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{rows.length - vestedCount} still vesting</div>
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                <Tip text="Amount already funded through the SSF employer gratuity contribution (3.33% of capped basic per month). Reduces the additional cash liability for SSF-enrolled employees." width={300}>SSF Fund (est.)</Tip>
+                <Tip text="The gratuity share of the employer SSF actually contributed this spell of service — 3.33 out of every 20 the employer paid, summed from finalized payslips and settlements. A raise, an unpaid month or a month with no payroll is counted as it really was." width={300}>SSF Funded</Tip>
               </div>
               <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-purple-text)' }}>NPR {fmt(totalSsf)}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>3.33% employer SSF → gratuity fund</div>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>from contributions actually paid</div>
             </div>
           </div>
 
-          {/* An enrolled employee with no SSF-bearing payslip on record gets NO offset — which is
-              the safe direction, but it silently inflates the liability figure above unless it is
-              said out loud. Before this the opposite happened silently: the offset was applied
-              across their whole service whether SSF had funded it or not. */}
-          {rows.filter(r => r.g.enrolled && !r.g.coverageKnown).length > 0 && (
+          {/* An enrolled employee with no stored SSF contribution gets NO offset, which is right —
+              nothing was contributed — but it inflates the liability above, so it is said. */}
+          {rows.filter(r => r.g.enrolled && r.g.coveredMonths === 0).length > 0 && (
             <div className="card" style={{ marginBottom: 14, padding: '10px 16px', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', fontSize: 12, color: 'var(--theme-text3)' }}>
-              ⚠ {rows.filter(r => r.g.enrolled && !r.g.coverageKnown).length} SSF-enrolled staff have no finalized payslip carrying an SSF deduction, so there is no evidence of when contributions began. No SSF offset is applied for them — their liability above is the full Labour Act accrual.
+              ⚠ {rows.filter(r => r.g.enrolled && r.g.coveredMonths === 0).length} SSF-enrolled staff have no finalized payslip carrying an SSF contribution yet, so nothing is netted off their gratuity — their liability above is the full Labour Act accrual.
+            </div>
+          )}
+
+          {unpaidSettlements.length > 0 && (
+            <div className="card" style={{ marginBottom: 14, padding: '10px 16px', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', fontSize: 12, color: 'var(--theme-text3)' }}>
+              ⚠ Not in the figures above: {unpaidSettlements.length} finalized Final Settlement{unpaidSettlements.length === 1 ? '' : 's'} not yet recorded as paid, carrying NPR {fmt(unpaidGratuity)} of gratuity ({unpaidSettlements.map(s => s.employee_name || 'a leaver').join(', ')}). Mark {unpaidSettlements.length === 1 ? 'it' : 'them'} paid on Final Settlement once the money has gone.
             </div>
           )}
 
           {nonMonthly > 0 && (
             <div className="card" style={{ marginBottom: 14, padding: '10px 16px', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', fontSize: 12, color: 'var(--theme-text3)' }}>
-              ⚠ {nonMonthly} daily/hourly staff excluded — gratuity for wage workers is computed at settlement based on actual days/hours worked.
+              ⚠ {nonMonthly} daily/hourly staff are not shown. Crest does not calculate gratuity for wage workers yet — here or on Final Settlement — so work theirs out with your accountant.
             </div>
           )}
 
@@ -193,8 +221,8 @@ export default function GratuityTracker() {
             <div className="tab-bar">
               {[
                 { key: 'all',     label: `All (${allRows.length})` },
-                { key: 'vested',  label: `Vested ≥1 yr (${allRows.filter(r => r.g.vested).length})` },
-                { key: 'vesting', label: `Vesting <1 yr (${allRows.filter(r => !r.g.vested).length})` },
+                { key: 'vested',  label: `Vested ${VEST}+ mo (${allRows.filter(r => r.g.vested).length})` },
+                { key: 'vesting', label: `Under ${VEST} mo (${allRows.filter(r => !r.g.vested).length})` },
               ].map(f => (
                 <button key={f.key} className={`tab-btn${filter === f.key ? ' tab-btn--active' : ''}`} onClick={() => setFilter(f.key)}>{f.label}</button>
               ))}
@@ -216,19 +244,19 @@ export default function GratuityTracker() {
                     <th>Employee</th>
                     <th>Join Date</th>
                     <th style={{ textAlign: 'center' }}>
-                      <Tip text="Total months of continuous service from join date to today." width={220}>Service</Tip>
+                      <Tip text="Completed months of service from the join date to today. A month completes on the same day of the next month." width={220}>Service</Tip>
                     </th>
                     <th style={{ textAlign: 'center' }}>
-                      <Tip text="Vested = ≥ 12 months of service, commonly treated as eligible for full gratuity payment on departure — this threshold is not confirmed in the current Labour Act 2074 text. Verify with an accountant." width={300}>Vested</Tip>
+                      <Tip text={`Vested = ${VEST} completed months of service, commonly treated as eligible for full gratuity payment on departure — this threshold is not confirmed in the current Labour Act 2074 text. Verify with an accountant.`} width={300}>Vested</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="Basic salary ÷ 12 = amount added to the gratuity pool each month." width={240}>Monthly Accrual</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Total accrued under Nepal Labour Act: (basic ÷ 12) × months of service. Equals one month's basic per year." width={280}>Labour Act Total</Tip>
+                      <Tip text="Total accrued under Nepal Labour Act: (basic ÷ 12) × completed months of service. Equals one month's basic per year." width={280}>Labour Act Total</Tip>
                     </th>
                     <th style={{ textAlign: 'right' }}>
-                      <Tip text="Estimated amount already funded via the SSF employer gratuity sub-fund (3.33% of capped basic per month × months). Only for SSF-enrolled employees." width={300}>SSF Covered</Tip>
+                      <Tip text="The gratuity share of the employer SSF actually contributed during this spell of service (3.33 of every 20 paid), from finalized payslips. Blank when nothing has been contributed." width={300}>SSF Funded</Tip>
                     </th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
                       <Tip text="Estimated additional cash liability beyond the SSF fund. Labour Act Total − SSF Covered. This is what you may need to pay in addition to SSF on departure." width={300}>Net Liability</Tip>
@@ -247,12 +275,14 @@ export default function GratuityTracker() {
                       <td style={{ textAlign: 'center' }}>
                         {r.g.vested
                           ? <span className="badge-green">Vested</span>
-                          : <span className="badge-amber">Vesting · {12 - r.g.months} mo left</span>}
+                          : <span className="badge-amber">Vesting · {VEST - r.g.months} mo left</span>}
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(r.g.monthlyAccrual)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(r.g.totalAccrued)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>
-                        {r.ssf_enrolled ? fmt(r.g.ssfCovered) : <span style={{ color: 'var(--theme-text2)', fontSize: 11 }}>Not enrolled</span>}
+                        {r.g.coveredMonths > 0
+                          ? <>{fmt(r.g.ssfCovered)}<span style={{ display: 'block', fontSize: 10, color: 'var(--theme-text2)' }}>{r.g.coveredMonths} mo</span></>
+                          : <span style={{ color: 'var(--theme-text2)', fontSize: 11 }}>{r.g.enrolled ? 'No contributions yet' : 'Not enrolled'}</span>}
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 700 }}>{fmt(r.g.netLiability)}</td>
                     </tr>
@@ -272,9 +302,9 @@ export default function GratuityTracker() {
           </div>
 
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
-            <strong style={{ color: 'var(--theme-text2)' }}>Nepal Labour Act:</strong> Gratuity accrues at 1 month basic salary per year of service, payable on departure after completing ≥ 1 year. &nbsp;
-            <strong style={{ color: 'var(--theme-text2)' }}>SSF note:</strong> The employer's 20% SSF contribution includes a 3.33% gratuity sub-fund. Whether SSF fully satisfies the Labour Act obligation is a legal question — consult your CA. The <em>Net Liability</em> column shows the residual after subtracting the SSF portion. &nbsp;
-            Only monthly-paid employees are shown; daily/hourly gratuity depends on actual days worked and is computed at final settlement.
+            <strong style={{ color: 'var(--theme-text2)' }}>Nepal Labour Act:</strong> Gratuity accrues at 1 month basic salary per year of service, payable on departure after {VEST} completed months (an assumption — see the note at the top). &nbsp;
+            <strong style={{ color: 'var(--theme-text2)' }}>SSF note:</strong> The employer's 20% SSF contribution includes a 3.33% gratuity sub-fund. Whether SSF fully satisfies the Labour Act obligation is a legal question — consult your CA. The <em>Net Liability</em> column shows the residual after subtracting what SSF has actually been paid. &nbsp;
+            Only monthly-paid employees are shown.
           </div>
         </>
       )}

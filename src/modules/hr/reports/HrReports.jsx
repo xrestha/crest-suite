@@ -9,13 +9,28 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf, retirementRelief } from '../payroll/tds'
 import { DEFAULT_BONUS_MONTH, bonusFiscalYear, fetchFinalizedBonuses } from '../payroll/bonusTax'
-import { SSF_CAP } from '../payrollConstants'
+import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, SSF_DEPOSIT_DAY } from '../payrollConstants'
+import { isSsfContributor } from '../payroll/payrollCompute'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { firstError } from '../../../shared/queryError'
 
 const fmt = nprInt
-const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+// A date-only string parsed as LOCAL midnight — `new Date('YYYY-MM-DD')` is UTC midnight, a day early
+// for any viewer west of UTC.
+const fmtDate = d => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+
+// The SSF base a contribution was actually worked out on — employee 11% + employer 20% ÷ 31%. The
+// challan printed min(basic, cap), which is the contract basic for a monthly employee with unpaid
+// days and the DAY RATE for a daily worker (754 against a month of contributions), so SOSYS was
+// handed a base that did not produce the deposit beside it (S752).
+const ssfBaseOf = (employee, employer) => Math.round((num(employee) + num(employer)) / (SSF_EMPLOYEE_PCT + SSF_EMPLOYER_PCT))
+// What a payslip's tax was worked out on: earned pay (gross − absence + overtime) less the employee's
+// SSF and CIT. The sheet subtracted neither the absence deduction nor CIT (S752).
+const payslipTaxable = s => num(s.gross) - num(s.absence_deduction) + num(s.ot_amount) - num(s.ssf_employee) - num(s.retirement_contribution)
+// A finalized Final Settlement's exit payments — taxed as a lump sum on top of the final month.
+const settlementLump = s => num(s.gratuity) + num(s.leave_encashment) + num(s.festival_pro) + num(s.notice_pay)
 
 // A finalized Festival Allowance or Incentive row, named the way an owner reads it (S751).
 const bonusMonthOf = b => b.bs_month || DEFAULT_BONUS_MONTH
@@ -53,6 +68,10 @@ export default function HrReports() {
   // Their tax is withheld that month and has to be deposited with the month's salary TDS; before
   // S751 this page read hr_payslips alone, so the TDS sheet never mentioned it.
   const [monthBonuses, setMonthBonuses] = useState([])
+  // Finalized Final Settlements whose final month is the selected period (S752). A settled leaver is
+  // not on that month's payroll, so their final month's SSF and tax — and the tax on their exit
+  // payments — reached no filing sheet at all.
+  const [monthSettlements, setMonthSettlements] = useState([])
   const [loading,   setLoading]   = useState(true)
   // S612 silent-zero rule: a failed read must render as a failure, never as "no payroll run" or
   // a challan of zeros — these are figures an accountant files on.
@@ -63,10 +82,12 @@ export default function HrReports() {
   const [certEmpId,   setCertEmpId]   = useState('')
   const [certSlips,   setCertSlips]   = useState([])
   const [certBonuses, setCertBonuses] = useState([])   // finalized festival allowances + incentives in certFy (S751)
+  const [certSettlements, setCertSettlements] = useState([])   // finalized Final Settlements in certFy (S752)
   const [certLoading, setCertLoading] = useState(false)
   const [certError,   setCertError]   = useState(null)   // cert tab has its own load lifecycle
   const [clientName,  setClientName]  = useState('')
   const [clientPan,   setClientPan]   = useState('')
+  const [clientInfoError, setClientInfoError] = useState(null)
 
   const empMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const nameById = Object.fromEntries(employees.map(e => [e.id, e.full_name]))
@@ -74,40 +95,58 @@ export default function HrReports() {
   useEffect(() => {
     if (!clientId) return
     async function init() {
+      // Claimed for the client first, so a slower load for the previous client cannot land here.
+      const initKey = `client:${clientId}`
+      periodReq.begin(initKey)
       setLoading(true)
       setLoadError(null)
+      // A switch to a client with no periods must not keep the previous client's payroll on screen.
+      setPeriod(null); setRun(null); setPayslips([]); setYtdTds({}); setMonthBonuses([]); setMonthSettlements([])
+      setCertEmpId(''); setCertSlips([]); setCertBonuses([]); setCertSettlements([])
       const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+      if (!periodReq.isCurrent(initKey)) return
       if (pErr) { setLoadError(pErr); setLoading(false); return }
       setPeriods(p || [])
       // Employee master loads independently of any payroll run (powers the Roster tab).
       const { data: emps, error: empErr } = await scopedFrom('hr_employees', 'id, full_name, employee_code, department, designation, employment_type, supervisor_id, retirement_date, join_date, pay_basis, bank_name, bank_account_no, bank_branch, ssf_no, ssf_enrolled, pan_no, life_insurance_premium, health_insurance_premium, status')
         .order('full_name')
+      if (!periodReq.isCurrent(initKey)) return
       if (empErr) { setLoadError(empErr); setLoading(false); return }
       setEmployees(emps || [])
       const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
       // Claim before loading (S721 rule): once a period change has run, the ref is never null again,
       // so an admin client switch re-running init() would otherwise have every setter in loadAll
       // skipped as "stale" and show the previous client's TDS sheet under the new one.
-      if (open) { periodReq.begin(open.id); setPeriod(open); await loadAll(open.id, open) }
+      if (open) {
+        periodReq.begin(open.id); setPeriod(open); await loadAll(open.id, open)
+        if (!periodReq.isCurrent(open.id)) return
+      }
       setLoading(false)
     }
     init()
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch company name and PAN once for the TDS certificate header. settings.vat_number IS
-  // Nepal's PAN (same field the Tax Invoice and the payslip letterhead already print) — the
-  // certificate used to leave a blank line for it, so an accountant hand-wrote a number the
-  // system already held. Falls back to the blank line only when it genuinely isn't set.
+  // Company name and PAN for the TDS certificate header. settings.vat_number IS Nepal's PAN (same
+  // field the Tax Invoice and the payslip letterhead already print). Both are RESET on a client
+  // switch and a failed read is kept as an error: the PAN used to be set only when present and never
+  // cleared, so an operator moving from a client with a PAN to one without printed the first
+  // client's PAN on the second's certificate (S752).
   useEffect(() => {
     if (!clientId) return
+    let cancelled = false
+    setClientName(''); setClientPan(''); setClientInfoError(null)
     Promise.all([
       supabase.from('clients').select('name').eq('id', clientId).single(),
       supabase.from('settings').select('vat_number').eq('client_id', clientId).maybeSingle(),
-    ]).then(([{ data: client }, { data: settings }]) => {
-      if (client) setClientName(client.name)
-      if (settings?.vat_number) setClientPan(settings.vat_number)
+    ]).then(results => {
+      if (cancelled) return
+      const err = firstError(results)
+      if (err) { setClientInfoError(err); return }
+      setClientName(results[0].data?.name || '')
+      setClientPan(results[1].data?.vat_number || '')
     })
+    return () => { cancelled = true }
   }, [clientId])
 
   // Fetch finalized payslips AND finalized festival allowances / incentives for the selected FY +
@@ -115,7 +154,7 @@ export default function HrReports() {
   // payslip, so a certificate built from payslips alone understated both the income and the tax
   // (S751). Either read failing fails the certificate — half a tax record is not a smaller one.
   useEffect(() => {
-    if (tab !== 'cert' || !certFy || !certEmpId) { setCertSlips([]); setCertBonuses([]); return }
+    if (tab !== 'cert' || !certFy || !certEmpId) { setCertSlips([]); setCertBonuses([]); setCertSettlements([]); return }
     let cancelled = false   // an employee/FY switch mid-read must not land the previous one's record
     setCertLoading(true)
     setCertError(null)
@@ -124,12 +163,15 @@ export default function HrReports() {
         .eq('employee_id', certEmpId)
         .eq('hr_payroll_runs.status', 'finalized'),
       fetchFinalizedBonuses(scopedFrom),
-    ]).then(([{ data, error }, bonusRes]) => {
+      scopedFrom('hr_final_settlements', '*').eq('employee_id', certEmpId).eq('status', 'finalized'),
+    ]).then(([{ data, error }, bonusRes, settleRes]) => {
         if (cancelled) return
         // S612: a failed read must not render as "no finalized payslips found for this FY" —
         // that sentence is a claim about the employee's tax record.
-        const err = error || bonusRes.error
-        if (err) { setCertError(err); setCertSlips([]); setCertBonuses([]); setCertLoading(false); return }
+        const err = error || bonusRes.error || settleRes.error
+        if (err) { setCertError(err); setCertSlips([]); setCertBonuses([]); setCertSettlements([]); setCertLoading(false); return }
+        setCertSettlements((settleRes.data || []).filter(s => s.settle_bs_year
+          && fiscalYearOf(s.settle_bs_year, s.settle_bs_month).fyStart === certFy.fyStart))
         const bonuses = (bonusRes.data || [])
           .filter(b => b.employee_id === certEmpId && bonusFiscalYear(b).fyStart === certFy.fyStart)
           .sort((a, b) => (bonusFiscalYear(a).monthInFy - bonusFiscalYear(b).monthInFy) || bonusLabel(a).localeCompare(bonusLabel(b)))
@@ -159,11 +201,16 @@ export default function HrReports() {
     // before issuing it was pure serialisation. It is also the page's biggest read (every finalized
     // payslip the client has, paged), so it is the one worth overlapping.
     const ytdPromise = loadYtd(p, periodId)
-    const { data: runRow, error: runErr } = await scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle()
+    const [{ data: runRow, error: runErr }, { data: settled, error: settleErr }] = await Promise.all([
+      scopedFrom('hr_payroll_runs').eq('period_id', periodId).maybeSingle(),
+      scopedFrom('hr_final_settlements', '*').eq('status', 'finalized')
+        .eq('settle_bs_year', p.bs_year).eq('settle_bs_month', p.bs_month),
+    ])
     if (!periodReq.isCurrent(periodId)) { await ytdPromise; return }   // superseded by a newer period selection
     // S612 silent-zero rule: a failed read here would wear the "no payroll run this period"
     // empty state — and the challan/TDS sheets on this page are figures an accountant files on.
-    if (runErr) { setLoadError(runErr); setRun(null); setPayslips([]); await ytdPromise; return }
+    if (runErr || settleErr) { setLoadError(runErr || settleErr); setRun(null); setPayslips([]); setMonthSettlements([]); await ytdPromise; return }
+    setMonthSettlements(settled || [])
     setRun(runRow || null)
     if (runRow) {
       const { data: slips, error: slipErr } = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
@@ -188,6 +235,9 @@ export default function HrReports() {
     // "withheld so far this year" from the month they are paid in, and the ones paid IN this month
     // are tax the owner has to deposit for it.
     const bonusPromise = fetchFinalizedBonuses(scopedFrom)
+    // Finalized settlements' tax counts toward "withheld this year" too (S752).
+    const settlePromise = fetchAllRows(() => scopedFrom('hr_final_settlements', 'id, employee_id, month_tds, lump_tds, settle_bs_year, settle_bs_month')
+      .eq('status', 'finalized').order('id'))
     // Paged. The fiscal-year narrowing happens in JS below, so this reads EVERY finalized
     // payslip the client has ever had — one row per employee per month, for as long as they have
     // run payroll — not just this FY's. Unpaged it silently stopped at PostgREST's 1000-row cap
@@ -198,12 +248,12 @@ export default function HrReports() {
       scopedFrom('hr_payslips', 'employee_id, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
         .eq('hr_payroll_runs.status', 'finalized')
         .order('id'))
-    const bonusRes = await bonusPromise
+    const [bonusRes, settleRes] = await Promise.all([bonusPromise, settlePromise])
     if (periodId !== undefined && !periodReq.isCurrent(periodId)) return
     // A failed read must not zero every YTD TDS figure on the filing sheets (S612) — and a failed
     // bonus read must not quietly drop the bonus tax from them either, which would print a smaller
     // deposit that looks exactly like a month with no bonuses (S751).
-    const readErr = error || bonusRes.error
+    const readErr = error || bonusRes.error || settleRes.error
     if (readErr) { setLoadError(readErr); setYtdTds({}); setMonthBonuses([]); return }
     const map = {}
     ;(data || []).forEach(r => {
@@ -213,6 +263,12 @@ export default function HrReports() {
       const fy = fiscalYearOf(mp.bs_year, mp.bs_month)
       if (fy.fyStart !== cur.fyStart || fy.monthInFy > cur.monthInFy) return
       map[r.employee_id] = (map[r.employee_id] || 0) + (r.tds || 0)
+    })
+    ;(settleRes.data || []).forEach(s => {
+      if (!s.settle_bs_year) return
+      const fy = fiscalYearOf(s.settle_bs_year, s.settle_bs_month)
+      if (fy.fyStart !== cur.fyStart || fy.monthInFy > cur.monthInFy) return
+      map[s.employee_id] = (map[s.employee_id] || 0) + num(s.month_tds) + num(s.lump_tds)
     })
     const inMonth = []
     ;(bonusRes.data || []).forEach(b => {
@@ -229,7 +285,11 @@ export default function HrReports() {
     periodReq.begin(id)   // claim the page before any await
     const p = periods.find(x => x.id === id); if (!p) return
     setPeriod(p); setLoading(true)
-    await loadAll(id, p); setLoading(false)
+    await loadAll(id, p)
+    // Only the load still current may clear the loading state. A superseded one used to, which let
+    // Export write the previous month's figures under this month's filename while the newer read
+    // was still in flight (S752).
+    if (periodReq.isCurrent(id)) setLoading(false)
   }
 
   const periodLabel = period ? `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : '—'
@@ -238,41 +298,58 @@ export default function HrReports() {
 
   // ── Derived rows ────────────────────────────────────────────────────────────
   const rows = payslips.map(s => ({ s, emp: empMap[s.employee_id] || {} }))
-  const ssfRows = rows.filter(({ emp }) => emp.ssf_enrolled && emp.ssf_no && String(emp.ssf_no).trim())
-  const noSsfCount = rows.length - ssfRows.length
+  // Who is on the challan is decided by what was DEDUCTED, not by today's employee record (S752): a
+  // number added in Magh put a zero-contribution row on Kartik's challan, and unticking the flag
+  // dropped a worker whose 11% had been withheld. A finalized settlement's final month joins it.
+  const ssfRows = [
+    ...rows.filter(({ s }) => num(s.ssf_employee) + num(s.ssf_employer) > 0)
+      .map(({ s, emp }) => ({ id: s.id, name: emp.full_name || '(employee no longer on file)', ssfNo: emp.ssf_no || '', employee: num(s.ssf_employee), employer: num(s.ssf_employer), settlement: false })),
+    ...monthSettlements.filter(st => num(st.month_ssf_employee) + num(st.month_ssf_employer) > 0)
+      .map(st => ({ id: st.id, name: st.employee_name || empMap[st.employee_id]?.full_name || '(employee no longer on file)', ssfNo: st.ssf_no || empMap[st.employee_id]?.ssf_no || '', employee: num(st.month_ssf_employee), employer: num(st.month_ssf_employer), settlement: true })),
+  ]
+  // Enrolled today but nothing deducted this month — almost always a missing SSF number.
+  const noSsfCount = rows.filter(({ s, emp }) => emp.ssf_enrolled && !isSsfContributor(emp) && num(s.ssf_employee) === 0).length
 
-  async function downloadSheet(data, sheet, ext = 'xlsx') {
+  const runState = run ? (finalized ? 'FINALIZED' : 'DRAFT — figures may change') : 'no payroll run'
+  // Every export states what it covers, including whether the run was a draft: a bank file or a
+  // challan exported from a draft used to be indistinguishable from a finalized one (S752).
+  async function downloadSheet(data, sheet, ext = 'xlsx', { scoped = true } = {}) {
     const XLSX = await import('xlsx')
-    const ws = XLSX.utils.json_to_sheet(data)
+    const scope = `${clientName || 'Payroll'} — ${sheet} — ${scoped ? `${periodLabel} — payroll ${runState}` : `as of ${fmtDate(new Date().toISOString().slice(0, 10))}`}`
+    const ws = ext === 'csv' ? XLSX.utils.json_to_sheet(data) : XLSX.utils.aoa_to_sheet([[scope], []])
+    if (ext !== 'csv') XLSX.utils.sheet_add_json(ws, data, { origin: 'A3' })
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, sheet)
-    XLSX.writeFile(wb, `${sheet.replace(/\s+/g, '_').toLowerCase()}_${fileLabel}.${ext}`, ext === 'csv' ? { bookType: 'csv' } : undefined)
+    // A bank CSV must stay machine-readable (no scope line), so a draft says so in its file name.
+    const draftTag = ext === 'csv' && run && !finalized ? '_DRAFT' : ''
+    XLSX.writeFile(wb, `${sheet.replace(/\s+/g, '_').toLowerCase()}${scoped ? `_${fileLabel}` : ''}${draftTag}.${ext}`, ext === 'csv' ? { bookType: 'csv' } : undefined)
   }
 
-  // Summary totals
+  // Summary totals. Gross is earned pay (after absence), so Gross − Deductions + TADA = Net Payable;
+  // the advance cut was missing from Deductions and the absence deduction was counted as a cost.
   const tot = rows.reduce((a, { s }) => {
-    a.gross += s.gross + s.ot_amount
-    a.ded   += s.absence_deduction + s.ssf_employee + s.other_deductions + s.tds
-    a.net   += s.net_pay
-    a.empCost += s.gross + s.ot_amount + s.ssf_employer
+    a.gross += num(s.gross) - num(s.absence_deduction) + num(s.ot_amount)
+    a.ded   += num(s.ssf_employee) + num(s.other_deductions) + num(s.tds) + num(s.advance_deduction)
+    a.tada  += num(s.tada_amount)
+    a.net   += num(s.net_pay)
+    a.empCost += num(s.gross) - num(s.absence_deduction) + num(s.ot_amount) + num(s.ssf_employer)
     return a
-  }, { gross: 0, ded: 0, net: 0, empCost: 0 })
+  }, { gross: 0, ded: 0, tada: 0, net: 0, empCost: 0 })
 
   // Department breakdown
   const deptMap = {}
   rows.forEach(({ s, emp }) => {
     const d = emp.department || '—'
     const e = deptMap[d] || { dept: d, count: 0, gross: 0, ded: 0, net: 0 }
-    e.count += 1; e.gross += s.gross + s.ot_amount
-    e.ded += s.absence_deduction + s.ssf_employee + s.other_deductions + s.tds
-    e.net += s.net_pay
+    e.count += 1; e.gross += num(s.gross) - num(s.absence_deduction) + num(s.ot_amount)
+    e.ded += num(s.ssf_employee) + num(s.other_deductions) + num(s.tds) + num(s.advance_deduction)
+    e.net += num(s.net_pay)
     deptMap[d] = e
   })
   const depts = Object.values(deptMap).sort((a, b) => b.net - a.net)
 
-  const ssfTotals = ssfRows.reduce((a, { s }) => {
-    const base = Math.min(s.basic, SSF_CAP)
-    a.base += base; a.emp += s.ssf_employee; a.empr += s.ssf_employer; a.total += s.ssf_employee + s.ssf_employer
+  const ssfTotals = ssfRows.reduce((a, r) => {
+    a.base += ssfBaseOf(r.employee, r.employer); a.emp += r.employee; a.empr += r.employer; a.total += r.employee + r.employer
     return a
   }, { base: 0, emp: 0, empr: 0, total: 0 })
 
@@ -285,7 +362,7 @@ export default function HrReports() {
   const tdsRows = (() => {
     const byEmp = new Map()
     const rowFor = id => {
-      if (!byEmp.has(id)) byEmp.set(id, { id, emp: empMap[id] || {}, s: null, bonuses: [], bonusAmount: 0, bonusTds: 0 })
+      if (!byEmp.has(id)) byEmp.set(id, { id, emp: empMap[id] || {}, s: null, st: null, bonuses: [], bonusAmount: 0, bonusTds: 0, exitAmount: 0, exitTds: 0 })
       return byEmp.get(id)
     }
     rows.forEach(({ s }) => { rowFor(s.employee_id).s = s })
@@ -293,24 +370,36 @@ export default function HrReports() {
       const r = rowFor(b.employee_id)
       r.bonuses.push(b); r.bonusAmount += num(b.amount); r.bonusTds += num(b.tds)
     })
+    // A settled leaver's final month is their salary line; their exit payments are a line of their own.
+    monthSettlements.forEach(st => {
+      const r = rowFor(st.employee_id)
+      r.st = st; r.exitAmount += settlementLump(st); r.exitTds += num(st.lump_tds)
+    })
     return [...byEmp.values()].map(r => {
-      const salaryTds = r.s ? (r.s.tds || 0) : 0
+      const salaryTds = (r.s ? num(r.s.tds) : 0) + (r.st ? num(r.st.month_tds) : 0)
+      const taxable = r.s || r.st
+        ? (r.s ? payslipTaxable(r.s) : 0) + (r.st ? num(r.st.partial_salary) - num(r.st.month_ssf_employee) - num(r.st.month_retirement_contribution) : 0)
+        : null
       return {
         ...r,
-        name: r.emp.full_name || '(employee no longer on file)',
-        taxable: r.s ? r.s.gross + r.s.ot_amount - r.s.ssf_employee : null,
+        name: r.emp.full_name || r.st?.employee_name || '(employee no longer on file)',
+        pan: r.emp.pan_no || '',
+        taxable,
         salaryTds,
-        monthTds: salaryTds + r.bonusTds,
-        ytd: (ytdTds[r.id] || 0) + (r.s && !finalized ? salaryTds : 0),
+        monthTds: salaryTds + r.bonusTds + r.exitTds,
+        // ytdTds already carries finalized settlements; only a DRAFT run's own tax is added on top.
+        ytd: (ytdTds[r.id] || 0) + (r.s && !finalized ? num(r.s.tds) : 0),
       }
     }).sort((a, b) => a.name.localeCompare(b.name))
   })()
   const tdsTotals = tdsRows.reduce((a, r) => {
     a.salaryTds += r.salaryTds; a.bonusAmount += r.bonusAmount; a.bonusTds += r.bonusTds
+    a.exitAmount += r.exitAmount; a.exitTds += r.exitTds
     a.monthTds += r.monthTds; a.ytd += r.ytd
     return a
-  }, { salaryTds: 0, bonusAmount: 0, bonusTds: 0, monthTds: 0, ytd: 0 })
+  }, { salaryTds: 0, bonusAmount: 0, bonusTds: 0, exitAmount: 0, exitTds: 0, monthTds: 0, ytd: 0 })
   const hasMonthBonuses = monthBonuses.length > 0
+  const hasMonthSettlements = monthSettlements.length > 0
 
   const TABS = [
     { id: 'roster',   label: 'Employee Directory' },
@@ -345,7 +434,9 @@ export default function HrReports() {
 
   return (
     <div>
-      <div className="page-header page-header--split">
+      {/* The certificate is a document of its own fiscal year: this month's header and its Draft chip
+          used to print above it. */}
+      <div className={`page-header page-header--split${tab === 'cert' ? ' no-print' : ''}`}>
         <div>
           <h1 className="page-title">HR Reports</h1>
           <p className="page-subtitle">
@@ -393,20 +484,22 @@ export default function HrReports() {
                     </select>
                   </div>
                 </div>
-                {(certSlips.length > 0 || certBonuses.length > 0) && !certLoading && !certError && (
+                {(certSlips.length > 0 || certBonuses.length > 0 || certSettlements.length > 0) && !certLoading && !certError && !clientInfoError && (
                   <button className="btn btn-primary" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => printWithTitle(`TDS Certificate - ${empMap[certEmpId]?.full_name || ''} - FY ${certFy.label}`)}>🖨 Print Certificate</button>
                 )}
               </div>
               {(!certFy || !certEmpId) ? (
                 <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text2)' }}>Select a fiscal year and employee above to generate the TDS certificate.</div>
-              ) : certError ? (
-                <ReportLoadError error={certError} />
+              ) : certError || clientInfoError ? (
+                // The employer's name and PAN are on the certificate: a failed read of them is a failed
+                // certificate, not one with a blank PAN line.
+                <ReportLoadError error={certError || clientInfoError} />
               ) : certLoading ? (
                 <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
-              ) : certSlips.length === 0 && certBonuses.length === 0 ? (
-                <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text2)' }}>No finalized payslips, festival allowances or incentives found for this employee in FY {certFy.label}.</div>
+              ) : certSlips.length === 0 && certBonuses.length === 0 && certSettlements.length === 0 ? (
+                <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text2)' }}>No finalized payslips, festival allowances, incentives or final settlement found for this employee in FY {certFy.label}.</div>
               ) : (
-                <TdsCertificate emp={empMap[certEmpId] || {}} slips={certSlips} bonuses={certBonuses} fy={certFy} clientName={clientName} clientPan={clientPan} />
+                <TdsCertificate emp={empMap[certEmpId] || {}} slips={certSlips} bonuses={certBonuses} settlements={certSettlements} fy={certFy} clientName={clientName} clientPan={clientPan} />
               )}
             </div>
           )}
@@ -429,7 +522,7 @@ export default function HrReports() {
                       Code: e.employee_code || '', Name: e.full_name, Department: e.department || '', Designation: e.designation || '',
                       Supervisor: e.supervisor_id ? (nameById[e.supervisor_id] || '') : '',
                       'Join Date': fmtDate(e.join_date), 'Retirement Date': e.retirement_date ? fmtDate(e.retirement_date) : '', Status: e.status,
-                    })), 'Employee Directory')}>⬇ Export</button>
+                    })), 'Employee Directory', 'xlsx', { scoped: false })}>⬇ Export</button>
                 </div>
               </div>
               {rosterRows.length === 0 ? (
@@ -470,7 +563,9 @@ export default function HrReports() {
 
           {/* The TDS sheet still renders with no run when a finalized bonus was paid this month —
               that tax is due whether or not salary has been run yet (S751). */}
-          {tab !== 'roster' && tab !== 'cert' && (!run && !(tab === 'tds' && hasMonthBonuses) ? (
+          {tab !== 'roster' && tab !== 'cert' && (!period ? (
+            <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text2)' }}>No periods yet for this client.</div>
+          ) : !run && !((tab === 'tds' && (hasMonthBonuses || hasMonthSettlements)) || (tab === 'ssf' && hasMonthSettlements)) ? (
             <div className="card" style={{ padding: 40, textAlign: 'center' }}>
               <div aria-hidden="true" style={{ fontSize: 24, marginBottom: 12 }}>📊</div>
               <div style={{ fontSize: 14, color: 'var(--theme-text1)', marginBottom: 6 }}>No payroll run for {periodLabel}</div>
@@ -478,9 +573,15 @@ export default function HrReports() {
             </div>
           ) : (
             <>
+              {/* Printed too: a draft challan or TDS sheet on paper must say it is a draft. */}
               {run && !finalized && (
-                <div className="no-print" style={{ marginBottom: 14, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 25%, transparent)', borderRadius: 0, fontSize: 12, color: 'var(--theme-accent-ink)' }}>
-                  ⚠ This payroll is still a draft — figures may change. Finalize it in Payroll before filing or paying.
+                <div role="alert" style={{ marginBottom: 14, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>
+                  ⚠ DRAFT — this payroll is not finalized and its figures may change. Finalize it in Payroll before filing or paying.
+                </div>
+              )}
+              {hasMonthSettlements && (tab === 'ssf' || tab === 'tds') && (
+                <div style={{ marginBottom: 14, padding: '10px 14px', border: '1px solid var(--theme-border)', fontSize: 12, color: 'var(--theme-text2)' }}>
+                  Includes the final month of {monthSettlements.length} finalized Final Settlement{monthSettlements.length === 1 ? '' : 's'} ({monthSettlements.map(s => s.employee_name || 'a leaver').join(', ')}) — paid through the settlement, not this payroll run.
                 </div>
               )}
 
@@ -489,10 +590,10 @@ export default function HrReports() {
             <div>
               <div className="stat-grid stat-grid--compact" style={{ marginBottom: 28 }}>
                 {[
-                  { label: 'Total Gross',    value: tot.gross,   color: 'var(--theme-accent-ink)', tip: 'Gross earnings + overtime across all payslips.' },
-                  { label: 'Total Deductions', value: tot.ded,   color: 'var(--theme-red-text)', tip: 'Absence + SSF employee + other deductions + TDS.' },
-                  { label: 'Net Payable',    value: tot.net,     color: 'var(--theme-green-text)', tip: 'Total take-home pay to disburse.' },
-                  { label: 'Employer Cost',  value: tot.empCost, color: 'var(--theme-text3)', tip: 'What the business spends: gross + overtime + employer SSF (20%).' },
+                  { label: 'Total Earned',   value: tot.gross,   color: 'var(--theme-accent-ink)', tip: 'Pay actually earned across all payslips: gross, less absence and unpaid days, plus overtime.' },
+                  { label: 'Total Deductions', value: tot.ded,   color: 'var(--theme-red-text)', tip: 'Employee SSF + salary deductions (CIT, etc.) + TDS + advance recoveries.' },
+                  { label: 'Net Payable',    value: tot.net,     color: 'var(--theme-green-text)', tip: tot.tada > 0 ? `Total take-home pay to disburse: earned − deductions + NPR ${fmt(tot.tada)} of travel claims (TADA) paid with the salary.` : 'Total take-home pay to disburse: earned − deductions.' },
+                  { label: 'Employer Cost',  value: tot.empCost, color: 'var(--theme-text3)', tip: 'What the business spends on salary: pay earned + employer SSF (20%). Travel claims are reimbursements and are not included.' },
                 ].map(s => (
                   <div key={s.label} className="card" style={{ padding: '16px 18px' }}>
                     <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -507,12 +608,12 @@ export default function HrReports() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--theme-border)' }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>By Department</span>
                   <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} onClick={() => downloadSheet(
-                    depts.map(d => ({ Department: d.dept, Headcount: d.count, 'Gross (NPR)': Math.round(d.gross), 'Deductions (NPR)': Math.round(d.ded), 'Net (NPR)': Math.round(d.net) })),
+                    depts.map(d => ({ Department: d.dept, Headcount: d.count, 'Earned (NPR)': Math.round(d.gross), 'Deductions (NPR)': Math.round(d.ded), 'Net (NPR)': Math.round(d.net) })),
                     'Payroll Summary')}>⬇ Export</button>
                 </div>
                 <div className="table-wrap">
                   <table className="data-table">
-                    <thead><tr><th>Department</th><th style={{ textAlign: 'right' }}>Headcount</th><th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>Deductions</th><th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>Net</th></tr></thead>
+                    <thead><tr><th>Department</th><th style={{ textAlign: 'right' }}>Headcount</th><th style={{ textAlign: 'right' }}>Earned</th><th style={{ textAlign: 'right' }}>Deductions</th><th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Take-home pay, including any travel claims paid with the salary." width={220}>Net</Tip></th></tr></thead>
                     <tbody>
                       {depts.map(d => (
                         <tr key={d.dept}>
@@ -545,31 +646,35 @@ export default function HrReports() {
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>SSF Challan — {periodLabel}</span>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                     Total to deposit: <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {fmt(ssfTotals.total)}</strong>
-                    {noSsfCount > 0 && <span> · {noSsfCount} employee{noSsfCount > 1 ? 's' : ''} without an SSF number excluded</span>}
+                    {' '}· due by the {SSF_DEPOSIT_DAY}th of the following month
+                    {noSsfCount > 0 && <span> · {noSsfCount} enrolled employee{noSsfCount > 1 ? 's' : ''} with no SSF number, so nothing was deducted</span>}
                   </div>
                 </div>
                 <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} onClick={() => downloadSheet(
-                  ssfRows.map(({ s, emp }) => ({ 'SSF No': emp.ssf_no, Employee: emp.full_name, 'SSF Basic': Math.round(Math.min(s.basic, SSF_CAP)), 'Employee 11%': s.ssf_employee, 'Employer 20%': s.ssf_employer, 'Total 31%': s.ssf_employee + s.ssf_employer })),
+                  ssfRows.map(r => ({ 'SSF No': r.ssfNo, Employee: r.name, 'Paid through': r.settlement ? 'Final settlement' : 'Payroll', 'SSF Basic': ssfBaseOf(r.employee, r.employer), 'Employee 11%': r.employee, 'Employer 20%': r.employer, 'Total 31%': r.employee + r.employer })),
                   'SSF Challan')}>⬇ Export</button>
               </div>
               <div className="no-print" style={{ padding: '10px 18px', fontSize: 11, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)', background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)' }}>
                 SSF's SOSYS portal (Collection screen) has no bulk-upload option — confirmed against the official SOSYS manual, entries are typed in one employee at a time. Use this sheet as your reference while entering SOSYS's Collection grid: type each row's <strong>SSF No</strong> and <strong>SSF Basic</strong> — SOSYS calculates the deposit itself, which should match this sheet's <strong>Total 31%</strong>.
               </div>
               {ssfRows.length === 0 ? (
-                <div style={{ padding: 28, textAlign: 'center', color: 'var(--theme-text2)', fontSize: 13 }}>No SSF-enrolled employees in this run.</div>
+                <div style={{ padding: 28, textAlign: 'center', color: 'var(--theme-text2)', fontSize: 13 }}>No SSF was deducted from anyone in {periodLabel}.</div>
               ) : (
                 <div className="table-wrap">
                   <table className="data-table">
-                    <thead><tr><th>SSF No</th><th>Employee</th><th style={{ textAlign: 'right' }}><Tip text="Basic salary capped at NPR 100,000 — the SSF contribution base." width={240}>SSF Basic</Tip></th><th style={{ textAlign: 'right' }}><Tip text="SSF deducted from employee's pay = 11% of basic (capped at NPR 100,000 basic)." width={250}>Employee 11%</Tip></th><th style={{ textAlign: 'right' }}><Tip text="SSF paid by the company on top of salary = 20% of basic (capped at NPR 100,000 basic)." width={260}>Employer 20%</Tip></th><th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Total SSF deposit to submit = Employee 11% + Employer 20%." width={240}>Total 31%</Tip></th></tr></thead>
+                    <thead><tr><th>SSF No</th><th>Employee</th><th style={{ textAlign: 'right' }}><Tip text={`The basic the contribution was actually worked out on — the basic earned this month (less unpaid days), or what a daily or hourly worker earned — capped at NPR ${fmt(SSF_CAP)}. This is the figure to type into SOSYS.`} width={260}>SSF Basic</Tip></th><th style={{ textAlign: 'right' }}><Tip text={`SSF deducted from the employee's pay: 11% of the SSF basic (capped at NPR ${fmt(SSF_CAP)}).`} width={250}>Employee 11%</Tip></th><th style={{ textAlign: 'right' }}><Tip text={`SSF paid by the company on top of salary: 20% of the SSF basic (capped at NPR ${fmt(SSF_CAP)}).`} width={260}>Employer 20%</Tip></th><th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Total SSF deposit to submit = Employee 11% + Employer 20%." width={240}>Total 31%</Tip></th></tr></thead>
                     <tbody>
-                      {ssfRows.map(({ s, emp }) => (
-                        <tr key={s.id}>
-                          <td style={{ color: 'var(--theme-text3)', fontSize: 12 }}>{emp.ssf_no}</td>
-                          <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{emp.full_name}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(Math.min(s.basic, SSF_CAP))}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.ssf_employee)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.ssf_employer)}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(s.ssf_employee + s.ssf_employer)}</td>
+                      {ssfRows.map(r => (
+                        <tr key={r.id}>
+                          <td style={{ color: r.ssfNo ? 'var(--theme-text3)' : 'var(--theme-amber-text)', fontSize: 12 }}>{r.ssfNo || '⚠ no SSF number on file'}</td>
+                          <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>
+                            {r.name}
+                            {r.settlement && <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--theme-text2)' }}>final month · Final Settlement</div>}
+                          </td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(ssfBaseOf(r.employee, r.employer))}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.employee)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.employer)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmt(r.employee + r.employer)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -633,16 +738,19 @@ export default function HrReports() {
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                     Income tax to deposit for this month: <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {fmt(tdsTotals.monthTds)}</strong>
                     {hasMonthBonuses && <span> · includes NPR {fmt(tdsTotals.bonusTds)} withheld from festival allowances and incentives paid this month</span>}
+                    {hasMonthSettlements && <span> · includes NPR {fmt(tdsTotals.exitTds)} withheld from final settlement exit payments</span>}
                   </div>
                 </div>
                 <button className="btn btn-ghost no-print" style={{ fontSize: 12 }} onClick={() => downloadSheet(
                   tdsRows.map(r => ({
-                    Employee: r.name, PAN: r.emp.pan_no || '',
+                    Employee: r.name, PAN: r.pan,
                     'Taxable salary (month)': r.taxable === null ? '' : Math.round(r.taxable),
                     'Tax on salary (month)': r.salaryTds,
                     'Festival allowance & incentives paid (month)': r.bonusAmount,
                     'Paid as': r.bonuses.map(bonusLabel).join('; '),
                     'Tax on festival allowance & incentives (month)': r.bonusTds,
+                    'Exit payments — final settlement (month)': r.exitAmount,
+                    'Tax on exit payments (month)': r.exitTds,
                     'Total tax to deposit (month)': r.monthTds,
                     'Tax withheld so far this fiscal year': r.ytd,
                   })),
@@ -650,7 +758,7 @@ export default function HrReports() {
               </div>
               {!run && (
                 <div style={{ padding: '10px 18px', fontSize: 11, color: 'var(--theme-text2)', borderBottom: '1px solid var(--theme-border)' }}>
-                  No payroll run for {periodLabel} yet, so no salary tax is listed — only the tax already withheld from festival allowances and incentives paid this month.
+                  No payroll run for {periodLabel} yet, so no payroll salary tax is listed — only tax already withheld on festival allowances, incentives and final settlements paid this month.
                 </div>
               )}
               {tdsRows.length === 0 ? (
@@ -660,10 +768,11 @@ export default function HrReports() {
                 <table className="data-table">
                   <thead><tr>
                     <th>Employee</th><th>PAN</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Taxable salary this month = gross + overtime − SSF employee contribution." width={250}>Taxable salary</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Taxable salary this month = pay earned (gross − absence and unpaid days + overtime) − employee SSF − CIT / provident fund. The same figure the month's tax was worked out on." width={270}>Taxable salary</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Income tax (TDS) taken out of this month's payslip." width={240}>Tax on salary</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Festival allowances (e.g. Dashain) and incentives that were finalized with this month as their pay month. They are paid separately from the payslip, but they are income all the same." width={280}>Festival allowance &amp; incentives</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Income tax (TDS) withheld from those festival allowances and incentives. It is due for deposit with this month's salary tax." width={270}>Tax on them</Tip></th>
+                    {hasMonthSettlements && <th style={{ textAlign: 'right' }}><Tip text="Gratuity, leave encashment, festival share and notice pay paid in a Final Settlement finalized for this month, and the tax withheld on them." width={280}>Exit payments / tax</Tip></th>}
                     <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}><Tip text="Everything withheld from this employee this month: tax on salary + tax on festival allowances and incentives. This is what you deposit with the Inland Revenue Department for the month." width={290}>Total to deposit</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Income tax withheld from this employee so far this fiscal year (from Shrawan), up to and including this month — finalized payslips plus finalized festival allowances and incentives. If this month's payroll is still a draft, its tax is included too." width={300}>Withheld this year</Tip></th>
                   </tr></thead>
@@ -671,7 +780,7 @@ export default function HrReports() {
                     {tdsRows.map(r => (
                       <tr key={r.id}>
                         <td style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{r.name}</td>
-                        <td style={{ color: 'var(--theme-text3)', fontSize: 12 }}>{r.emp.pan_no || '—'}</td>
+                        <td style={{ color: 'var(--theme-text3)', fontSize: 12 }}>{r.pan || '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{r.taxable === null ? '—' : fmt(r.taxable)}</td>
                         <td style={{ textAlign: 'right', color: r.salaryTds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{r.salaryTds > 0 ? fmt(r.salaryTds) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
@@ -679,6 +788,12 @@ export default function HrReports() {
                           {r.bonuses.length > 0 && <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>{r.bonuses.map(b => b.source === 'festival' ? (b.festival_name || 'Festival') : (b.run_label || 'Incentive')).join(' · ')}</div>}
                         </td>
                         <td style={{ textAlign: 'right', color: r.bonusTds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{r.bonusTds > 0 ? fmt(r.bonusTds) : '—'}</td>
+                        {hasMonthSettlements && (
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
+                            {r.exitAmount > 0 ? fmt(r.exitAmount) : '—'}
+                            {r.exitTds > 0 && <div style={{ fontSize: 10, color: 'var(--theme-red-text)' }}>tax {fmt(r.exitTds)}</div>}
+                          </td>
+                        )}
                         <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{r.monthTds > 0 ? fmt(r.monthTds) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(r.ytd)}</td>
                       </tr>
@@ -689,6 +804,7 @@ export default function HrReports() {
                     <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(tdsTotals.salaryTds)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(tdsTotals.bonusAmount)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmt(tdsTotals.bonusTds)}</td>
+                    {hasMonthSettlements && <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(tdsTotals.exitAmount)}<div style={{ fontSize: 10, color: 'var(--theme-red-text)' }}>tax {fmt(tdsTotals.exitTds)}</div></td>}
                     <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmt(tdsTotals.monthTds)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(tdsTotals.ytd)}</td>
                   </tr></tfoot>
@@ -709,28 +825,42 @@ export default function HrReports() {
   }
 }
 
-function TdsCertificate({ emp, slips, bonuses = [], fy, clientName, clientPan }) {
+function TdsCertificate({ emp, slips, bonuses = [], settlements = [], fy, clientName, clientPan }) {
   const fmtN = nprInt
   const today = getBsToday()
   const issuedDate = `${BS_MONTHS[today.month - 1]} ${today.day}, ${today.year} B.S.`
 
-  // Salary figures (finalized payslips) and one-off payments (finalized festival allowances and
-  // incentives) are totalled separately and then together (S751): both are employment income the
-  // employer withheld tax on, and the certificate's Total TDS Withheld is a claim the employee files
-  // on — leaving the bonus tax out understated it.
+  // Salary figures (finalized payslips, and a Final Settlement's final month) and one-off payments
+  // (finalized festival allowances and incentives, and a settlement's exit payments) are totalled
+  // separately and then together (S751/S752): all of it is employment income the employer withheld
+  // tax on, and the certificate's Total TDS Withheld is a claim the employee files on.
+  //
+  // Income is what was EARNED — gross less the absence deduction, plus overtime. The certificate
+  // counted gross, so every unpaid day raised the stated income above what tax was worked out on.
   const salary = slips.reduce((a, s) => {
-    a.gross += (s.gross || 0) + (s.ot_amount || 0)
-    a.ssf   += s.ssf_employee || 0
+    a.gross += num(s.gross) - num(s.absence_deduction) + num(s.ot_amount)
+    a.ssf   += num(s.ssf_employee)
     a.retirement += num(s.retirement_contribution)
-    a.tds   += s.tds || 0
+    a.tds   += num(s.tds)
     return a
   }, { gross: 0, ssf: 0, retirement: 0, tds: 0 })
+  settlements.forEach(st => {
+    salary.gross += num(st.partial_salary)
+    salary.ssf   += num(st.month_ssf_employee)
+    salary.retirement += num(st.month_retirement_contribution)
+    salary.tds   += num(st.month_tds)
+  })
+  const exitPay = settlements.reduce((a, st) => { a.amount += settlementLump(st); a.tds += num(st.lump_tds); return a }, { amount: 0, tds: 0 })
   const bonus = bonuses.reduce((a, b) => {
     a.amount += num(b.amount)
     a.tds    += num(b.tds)
     return a
   }, { amount: 0, tds: 0 })
+  bonus.amount += exitPay.amount
+  bonus.tds    += exitPay.tds
+  const oneOffCount = bonuses.length + settlements.filter(st => settlementLump(st) > 0).length
   const totals = { gross: salary.gross + bonus.amount, ssf: salary.ssf, tds: salary.tds + bonus.tds }
+  const monthCount = slips.length + settlements.length
   // SSF and CIT / provident fund share ONE relief, capped at NPR 5,00,000 or a third of income — the
   // cap monthly payroll withholds by (tds.js retirementRelief, S748). The certificate took SSF off
   // uncapped and CIT not at all, so for anyone saving into CIT it stated a higher taxable income than
@@ -782,14 +912,14 @@ function TdsCertificate({ emp, slips, bonuses = [], fy, clientName, clientPan })
             <thead>
               <tr>
                 <th>Month</th>
-                <th style={{ textAlign: 'right' }}>Gross Income</th>
+                <th style={{ textAlign: 'right' }}><Tip text="Pay earned in the month: gross, less absence and unpaid days, plus overtime." width={240}>Income Earned</Tip></th>
                 <th style={{ textAlign: 'right' }}>SSF Deducted</th>
-                <th style={{ textAlign: 'right' }}>Other Deductions</th>
+                <th style={{ textAlign: 'right' }}><Tip text="CIT / provident fund contributions, which reduce taxable income within the same cap as SSF." width={240}>CIT / PF</Tip></th>
                 <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>TDS Withheld</th>
               </tr>
             </thead>
             <tbody>
-              {slips.length === 0 && (
+              {monthCount === 0 && (
                 <tr><td colSpan={5} style={{ color: 'var(--theme-text2)', textAlign: 'center' }}>No finalized payslips this fiscal year — only festival allowances or incentives were paid.</td></tr>
               )}
               {slips.map(s => {
@@ -797,20 +927,29 @@ function TdsCertificate({ emp, slips, bonuses = [], fy, clientName, clientPan })
                 return (
                   <tr key={s.id}>
                     <td>{BS_MONTHS[mp.bs_month - 1]} {mp.bs_year}</td>
-                    <td style={{ textAlign: 'right' }}>{fmtN((s.gross || 0) + (s.ot_amount || 0))}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{s.ssf_employee > 0 ? fmtN(s.ssf_employee) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{(s.absence_deduction + s.other_deductions) > 0 ? fmtN(s.absence_deduction + s.other_deductions) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: s.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.tds > 0 ? fmtN(s.tds) : '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtN(num(s.gross) - num(s.absence_deduction) + num(s.ot_amount))}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{num(s.ssf_employee) > 0 ? fmtN(s.ssf_employee) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{num(s.retirement_contribution) > 0 ? fmtN(s.retirement_contribution) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: num(s.tds) > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{num(s.tds) > 0 ? fmtN(s.tds) : '—'}</td>
                   </tr>
                 )
               })}
+              {settlements.map(st => (
+                <tr key={st.id}>
+                  <td>{BS_MONTHS[st.settle_bs_month - 1]} {st.settle_bs_year}<div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>final month · Final Settlement</div></td>
+                  <td style={{ textAlign: 'right' }}>{fmtN(st.partial_salary)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{num(st.month_ssf_employee) > 0 ? fmtN(st.month_ssf_employee) : '—'}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{num(st.month_retirement_contribution) > 0 ? fmtN(st.month_retirement_contribution) : '—'}</td>
+                  <td style={{ textAlign: 'right', color: num(st.month_tds) > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{num(st.month_tds) > 0 ? fmtN(st.month_tds) : '—'}</td>
+                </tr>
+              ))}
             </tbody>
             <tfoot>
               <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                <td style={{ color: 'var(--theme-text2)' }}>{bonuses.length > 0 ? 'Salary total' : 'Total'} ({slips.length} month{slips.length !== 1 ? 's' : ''})</td>
+                <td style={{ color: 'var(--theme-text2)' }}>{oneOffCount > 0 ? 'Salary total' : 'Total'} ({monthCount} month{monthCount !== 1 ? 's' : ''})</td>
                 <td style={{ textAlign: 'right' }}>{fmtN(salary.gross)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtN(salary.ssf)}</td>
-                <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>—</td>
+                <td style={{ textAlign: 'right' }}>{salary.retirement > 0 ? fmtN(salary.retirement) : '—'}</td>
                 <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtN(salary.tds)}</td>
               </tr>
             </tfoot>
@@ -819,9 +958,9 @@ function TdsCertificate({ emp, slips, bonuses = [], fy, clientName, clientPan })
       </div>
 
       {/* Festival allowances and incentives — paid outside the payslip, taxed all the same (S751) */}
-      {bonuses.length > 0 && (
+      {oneOffCount > 0 && (
         <div style={{ marginBottom: 24 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Festival Allowances &amp; Incentives</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Festival Allowances, Incentives &amp; Exit Payments</div>
           <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 10 }}>
             Paid separately from the monthly payslip. Each is employment income, and the tax withheld from it is included in the totals below.
           </div>
@@ -844,15 +983,23 @@ function TdsCertificate({ emp, slips, bonuses = [], fy, clientName, clientPan })
                     <td style={{ textAlign: 'right', color: num(b.tds) > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{num(b.tds) > 0 ? fmtN(num(b.tds)) : '—'}</td>
                   </tr>
                 ))}
+                {settlements.filter(st => settlementLump(st) > 0).map(st => (
+                  <tr key={`settle-${st.id}`}>
+                    <td>Final settlement — gratuity, leave, festival share, notice</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{BS_MONTHS[st.settle_bs_month - 1]} {st.settle_bs_year}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtN(settlementLump(st))}</td>
+                    <td style={{ textAlign: 'right', color: num(st.lump_tds) > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{num(st.lump_tds) > 0 ? fmtN(st.lump_tds) : '—'}</td>
+                  </tr>
+                ))}
               </tbody>
               <tfoot>
                 <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
-                  <td colSpan={2} style={{ color: 'var(--theme-text2)' }}>Festival allowances &amp; incentives total ({bonuses.length})</td>
+                  <td colSpan={2} style={{ color: 'var(--theme-text2)' }}>One-off payments total ({oneOffCount})</td>
                   <td style={{ textAlign: 'right' }}>{fmtN(bonus.amount)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtN(bonus.tds)}</td>
                 </tr>
                 <tr style={{ fontWeight: 700 }}>
-                  <td colSpan={2} style={{ color: 'var(--theme-text1)' }}>Total for the year — salary + festival allowances &amp; incentives</td>
+                  <td colSpan={2} style={{ color: 'var(--theme-text1)' }}>Total for the year — salary + one-off payments</td>
                   <td style={{ textAlign: 'right' }}>{fmtN(totals.gross)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtN(totals.tds)}</td>
                 </tr>
@@ -867,9 +1014,9 @@ function TdsCertificate({ emp, slips, bonuses = [], fy, clientName, clientPan })
         <div style={card}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Taxable Income Computation</div>
           {[
-            ...(bonuses.length > 0 ? [
-              { label: `Salary & overtime (${slips.length} month${slips.length !== 1 ? 's' : ''})`, value: salary.gross, neg: false },
-              { label: 'Add: Festival allowances & incentives', value: bonus.amount, neg: false, sub: `${bonuses.length} payment${bonuses.length !== 1 ? 's' : ''}` },
+            ...(oneOffCount > 0 ? [
+              { label: `Salary & overtime earned (${monthCount} month${monthCount !== 1 ? 's' : ''})`, value: salary.gross, neg: false },
+              { label: 'Add: Festival allowances, incentives & exit payments', value: bonus.amount, neg: false, sub: `${oneOffCount} payment${oneOffCount !== 1 ? 's' : ''}` },
             ] : []),
             { label: 'Total Gross Income',               value: totals.gross, neg: false },
             { label: salary.retirement > 0 ? 'Less: SSF + CIT / provident fund' : 'Less: SSF Employee Contribution', value: retirementOff, neg: true,
@@ -896,12 +1043,12 @@ function TdsCertificate({ emp, slips, bonuses = [], fy, clientName, clientPan })
         <div style={card}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>TDS Summary</div>
           {[
-            { label: 'Finalized months',      value: String(slips.length) },
-            ...(bonuses.length > 0 ? [
+            { label: 'Finalized months',      value: String(monthCount) },
+            ...(oneOffCount > 0 ? [
               { label: 'Tax withheld from salary', value: `NPR ${fmtN(salary.tds)}` },
-              { label: 'Tax withheld from festival allowances & incentives', value: `NPR ${fmtN(bonus.tds)}` },
+              { label: 'Tax withheld from one-off payments', value: `NPR ${fmtN(bonus.tds)}` },
             ] : []),
-            { label: 'SSF Enrolled',           value: emp.ssf_enrolled ? 'Yes' : 'No' },
+            { label: 'SSF Contributor',        value: isSsfContributor(emp) ? 'Yes' : salary.ssf > 0 ? 'Contributed this year' : 'No' },
             { label: 'Employee PAN',           value: emp.pan_no || '—' },
           ].map((r, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>

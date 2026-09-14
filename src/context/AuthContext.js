@@ -220,7 +220,9 @@ export function AuthProvider({ children }) {
         // .eq('client_id', <home>), so every client-scoped table returned zero rows with
         // error: null — the whole app empty, and by the S594 rule indistinguishable from an empty
         // tenant. Never noticed because no client has a group_id yet.
-        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_job_title, hr_role, hr_job_title')
+        // pos_email (the caller's own row only) is a staff marker in its own right: a PIN login whose
+        // pos_role was cleared must never read as the Owner (S752) — see isOwner below.
+        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_email, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_job_title, hr_role, hr_job_title')
         .eq('id', userId)
         .single()
 
@@ -375,8 +377,10 @@ export function AuthProvider({ children }) {
   // corresponding module when it's enabled; staff use their explicit pos_role/ims_role/hr_role. An
   // HR self-service account also has role 'client' with none of the four set — without excluding
   // all four staff-account markers here, any one of them would incorrectly count as Owner and
-  // inherit manager-level access to a module it has no business in.
-  const isOwner = !isAdmin && profile?.role === 'client' && !profile?.pos_role && !profile?.hr_self_service && !profile?.ims_role && !profile?.hr_role
+  // inherit manager-level access to a module it has no business in. pos_email is tested as well as
+  // pos_role (S752): a PIN login is staff whatever its rank says, and a cleared rank used to make it
+  // the Owner. The same test is in admin-user-ops (isCallerOwner) and is_client_owner().
+  const isOwner = !isAdmin && profile?.role === 'client' && !profile?.pos_role && !profile?.pos_email && !profile?.hr_self_service && !profile?.ims_role && !profile?.hr_role
   const posRole = isAdmin || isOwner ? 'manager' : (profile?.pos_role || null)
   const imsRole = isAdmin || isOwner ? 'manager' : (profile?.ims_role || null)
   const hrRole  = isAdmin || isOwner ? 'manager' : (profile?.hr_role || null)

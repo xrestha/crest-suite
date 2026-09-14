@@ -171,6 +171,30 @@ export function computeMonthlyTds(args) {
   return computeMonthlyTdsBreakdown(args).tds
 }
 
+// A leaver's LAST month: the year's income is no longer a projection, so the tax is trued up to it.
+// computeMonthlyTdsBreakdown projects this month's pay across the rest of the fiscal year — right for
+// someone who stays, and for a leaver it spreads the year's tax over months that will never be paid,
+// so it under-withholds (S752). Here the annual figure is what was actually earned: this fiscal
+// year's finalized payslips and bonuses (`ytd*`) plus this month. The tax already withheld on
+// salary is subtracted; over-withholding earlier in the year is not refunded here (0, never negative).
+//   Returns { tds, annualGross, annualTaxable, annualTax } — `annualTaxable` is the base a lump sum
+//   paid in the same settlement is taxed on top of (computeBonusTds).
+export function computeFinalMonthTds({
+  fyStart, monthlyIncome, monthlySsf = 0, monthlyRetirement = 0,
+  ytdGross = 0, ytdSsf = 0, ytdRetirement = 0, ytdWithheld = 0, ytdBonusWithheld = 0,
+  isSsf = false, isMarried = false, annualLifeInsurance = 0, annualHealthInsurance = 0,
+}) {
+  const slabs = slabsFor(fyStart, isMarried)
+  const annualGross = ytdGross + monthlyIncome
+  const relief = retirementRelief(ytdSsf + ytdRetirement + monthlySsf + monthlyRetirement, annualGross)
+  const insurance = Math.min(annualLifeInsurance, LIFE_INS_CAP) + Math.min(annualHealthInsurance, HEALTH_INS_CAP)
+  const annualTaxable = Math.max(0, annualGross - relief - insurance)
+  const annualTax = applySlabs(annualTaxable, slabs, isSsf)
+  const salaryTax = Math.max(0, annualTax - ytdBonusWithheld)
+  const tds = Math.max(0, Math.round(salaryTax - (ytdWithheld - ytdBonusWithheld)))
+  return { tds, annualGross, annualTaxable, annualTax, relief, insurance }
+}
+
 // TDS on a one-time lump-sum payment (festival bonus, gratuity, settlement).
 // Uses incremental marginal method: tax(annualTaxable + bonus) − tax(annualTaxable).
 // annualTaxable: estimated annual taxable income WITHOUT the bonus (already net of SSF/insurance).

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -106,30 +106,52 @@ export default function PosStaff() {
         ? scopedFrom('hr_employees', 'id, full_name, employee_code, status').in('status', ['active', 'probation']).order('full_name')
         : Promise.resolve({ data: [] }),
     ])
-    const roles = settingsData?.pos_custom_roles?.length ? settingsData.pos_custom_roles : DEFAULT_ROLES
     if (settingsData?.pos_custom_roles?.length) setCustomRoles(settingsData.pos_custom_roles)
-    const staffList = staffData || []
-    setStaff(staffList)
+    setStaff(staffData || [])
     setEmployees(empData || [])
     setLoading(false)
+    // No re-ranking here (S752). This page used to move every login whose level no longer matched
+    // its role the moment anyone opened it; a mismatch is now shown and moves only on Apply.
+  }
 
-    // Silently fix any pos_role values that don't match the job title's configured level
-    const mismatched = staffList.filter(p => {
-      if (!p.pos_job_title) return false
-      const expected = roles.find(r => r.label === p.pos_job_title)?.level
-      return expected && expected !== p.pos_role
+  // Logins whose stored level no longer matches the level their role carries.
+  const mismatched = useMemo(() => staff.filter(p => {
+    if (!p.pos_job_title) return false
+    const expected = effectiveRoles.find(r => r.label === p.pos_job_title)?.level
+    return expected && expected !== p.pos_role
+  }), [staff, effectiveRoles])
+
+  function applyMismatches() {
+    const list = mismatched
+    const levelOf = p => effectiveRoles.find(r => r.label === p.pos_job_title)?.level
+    askConfirm({
+      title: `Change the access level of ${list.length} login${list.length === 1 ? '' : 's'}?`,
+      confirmLabel: 'Change Access', busyLabel: 'Changing…',
+      body: (
+        <div>
+          <p style={{ margin: 0 }}>Each login below moves to the level its role now carries.</p>
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+            {list.map(p => <li key={p.id}>{p.full_name}: {p.pos_role || 'no level'} → {levelOf(p)}</li>)}
+          </ul>
+        </div>
+      ),
+      run: async () => {
+        setMsg('')
+        const outcomes = await Promise.all(list.map(async p => {
+          const level = levelOf(p)
+          const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+            body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: p.pos_job_title },
+          })
+          if (!error && !data?.error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, pos_role: level } : s))
+          return { p, failed: !!(error || data?.error) }
+        }))
+        const failed = outcomes.filter(o => o.failed)
+        if (failed.length > 0) {
+          setMsg(`${failed.length} login(s) could not be moved and keep their previous access: ` +
+            failed.map(o => o.p.full_name).join(', ') + '.')
+        }
+      },
     })
-    // Independent per-row writes, so together rather than one after another — each is an Edge
-    // Function call, the most expensive round trip in the app, and this runs on every visit to
-    // the page. Sequencing them bought nothing: they touch different accounts and the loop never
-    // stopped on a failure anyway.
-    await Promise.all(mismatched.map(async p => {
-      const level = roles.find(r => r.label === p.pos_job_title)?.level
-      const { error } = await supabase.functions.invoke('admin-user-ops', {
-        body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: p.pos_job_title },
-      })
-      if (!error) setStaff(prev => prev.map(s => s.id === p.id ? { ...s, pos_role: level } : s))
-    }))
   }
 
   async function load() {
@@ -169,8 +191,8 @@ export default function PosStaff() {
     if (!ok) return
     // Sync existing staff whose job title matches the changed role
     const affected = staff.filter(p => p.pos_job_title === changedLabel && p.pos_role !== level)
-    // Same shape as init()'s sync above — one Edge Function call per affected account, none of
-    // them dependent on any other, so the manager waits on the slowest rather than on the sum.
+    // One Edge Function call per affected account, none of them dependent on any other, so the
+    // manager waits on the slowest rather than on the sum.
     await Promise.all(affected.map(async p => {
       const { error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_pos_role', userId: p.id, pos_role: level, pos_job_title: changedLabel },
@@ -179,16 +201,37 @@ export default function PosStaff() {
     }))
   }
 
-  function addCustomRole() {
+  // The first custom role starts FROM the defaults, and a role a login holds cannot be removed —
+  // either would leave a row's role select blank beside a badge that still names a level (S729/S752).
+  async function addCustomRole() {
     const label = newRole.label.trim()
     if (!label) return
-    if (customRoles.some(r => r.label.toLowerCase() === label.toLowerCase())) return
-    saveRoles([...customRoles, { label, level: newRole.level }])
-    setNewRole(EMPTY_ROLE)
+    const base = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
+    if (base.some(r => r.label.toLowerCase() === label.toLowerCase())) {
+      setRolesError(`There is already a role called “${label}”.`); return
+    }
+    const ok = await saveRoles([...base, { label, level: newRole.level }])
+    if (ok) setNewRole(EMPTY_ROLE)   // keep what was typed if the save failed
   }
 
-  function deleteCustomRole(i) { saveRoles(customRoles.filter((_, idx) => idx !== i)) }
-  function resetToDefaults()   { saveRoles([]) }
+  function deleteCustomRole(i) {
+    const label = customRoles[i].label
+    const holders = staff.filter(p => p.pos_job_title === label)
+    if (holders.length > 0) {
+      setRolesError(`${holders.length} login(s) still hold the “${label}” role — ${holders.map(p => p.full_name).join(', ')}. Move them to another role first.`)
+      return
+    }
+    saveRoles(customRoles.filter((_, idx) => idx !== i))
+  }
+
+  function resetToDefaults() {
+    const orphans = staff.filter(p => p.pos_job_title && !DEFAULT_ROLES.some(d => d.label === p.pos_job_title))
+    if (orphans.length > 0) {
+      setRolesError(`${orphans.length} login(s) hold a custom role — ${orphans.map(p => p.full_name).join(', ')}. Move them to Staff, Supervisor or Manager first, then reset.`)
+      return
+    }
+    saveRoles([])
+  }
 
   // ── Add staff ──────────────────────────────────────────────────────────────
   function openAdd() {
@@ -271,7 +314,10 @@ export default function PosStaff() {
 
   // ── Role update ────────────────────────────────────────────────────────────
   async function updateRole(profileId, jobTitle) {
-    const role = jobTitle ? effectiveRoles.find(r => r.label === jobTitle) : null
+    const role = effectiveRoles.find(r => r.label === jobTitle)
+    // Never send "no role": a login with no marker reads as the Owner (S752). Removing someone's
+    // POS access means deleting the login.
+    if (!role) { setMsg(`“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
     setSaving(s => ({ ...s, [profileId]: true })); setMsg('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
@@ -392,6 +438,24 @@ export default function PosStaff() {
       </div>
 
       {msg && <p role="alert" style={{ fontSize: 13, color: 'var(--theme-red-text)', marginBottom: 16 }}>{msg}</p>}
+      {!loading && mismatched.length > 0 && (
+        <div role="alert" className="card" style={{
+          padding: '12px 16px', marginBottom: 16,
+          border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-amber-text)' }}>
+              △ {mismatched.length} login{mismatched.length === 1 ? '' : 's'} carry an access level their role no longer has
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>
+              {mismatched.map(p => p.full_name).join(', ')}. Their access has not changed — nothing moves until you apply it.
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={applyMismatches}>Apply role levels…</button>
+        </div>
+      )}
       {confirmEl}
 
       {loading ? (
@@ -445,7 +509,7 @@ export default function PosStaff() {
                           disabled={saving[p.id]}
                           onChange={e => updateRole(p.id, e.target.value)}
                         >
-                          <option value="">— No Access —</option>
+                          {!displayTitle && <option value="" disabled>— pick a role —</option>}
                           {effectiveRoles.map(r => (
                             <option key={r.label} value={r.label}>{r.label}</option>
                           ))}

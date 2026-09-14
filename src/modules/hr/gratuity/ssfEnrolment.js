@@ -1,69 +1,77 @@
-import { bsToAd, formatAd } from '../../../utils/bsCalendar'
-import { monthsBetween } from './gratuityCompute'
+import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { SSF_GRATUITY_SHARE_OF_EMPLOYER } from './gratuityCompute'
 
-// When did SSF contributions actually start for each employee?
+// What the SSF has already funded toward each employee's gratuity.
 //
-// Nothing in the schema records it — `hr_employees.ssf_enrolled` is a bare boolean with no date —
-// and that gap is expensive: the gratuity offset used to be multiplied across an employee's entire
-// service, so a ten-year employee enrolled two years ago had eight phantom years netted off what
-// they were owed. SSF only began accepting contributions in 2075/76 and most clients enrolled
-// later still, so "enrolled since they joined" is close to never true.
+// Nothing in the schema records when SSF contributions began or how much went in, but payroll does:
+// every finalized payslip stores the employer's 20% (`ssf_employer`), and a finalized Final
+// Settlement stores its final month's (`month_ssf_employer`). The gratuity share of each is
+// SSF_GRATUITY_PCT out of SSF_EMPLOYER_PCT.
 //
-// The evidence we do have is payroll: the first finalized payslip that actually carries an SSF
-// deduction is the month contributions began. That is a fact rather than an assumption, and it is
-// already stored.
-//
-// An employee with no such payslip returns `null` — not zero. `calcGratuity` treats null as
-// "unknown coverage" and applies no offset at all, which is the only safe direction when the
-// alternative is quietly reducing a leaver's gratuity.
+// S752, decided with Aashish: the offset is the sum of those real contributions. Before it this file
+// found only the FIRST SSF-bearing payslip and the gratuity page multiplied today's basic across
+// every month since, which a raise, an unpaid month or a month with no payroll all made wrong.
 
 /**
- * → { [employee_id]: { bsYear, bsMonth } | undefined }
- * Employees absent from the map have no SSF-bearing finalized payslip on record.
+ * → { data: { [employee_id]: [{ bs_year, bs_month, employer }] }, error }
+ * Every finalized SSF contribution the client has on record, per employee. Paged: one row per
+ * contributing employee per month, for as long as the client has run payroll (S628).
  */
-export async function fetchSsfStartMap(scopedFrom) {
-  // Paged. This reads every SSF-bearing finalized payslip in the client's history — one row per
-  // enrolled employee per month — and picks the EARLIEST per employee below. Unpaged it stopped at
-  // PostgREST's 1000-row cap (~20 staff x 4 years) with no error and, since an unordered query has
-  // no guarantee about which 1000 come back, the rows dropped could be exactly the early ones the
-  // map is looking for. That reports a later SSF start than the truth, which shortens the
-  // contribution count and shrinks the gratuity offset on a leaver's final settlement — or, if an
-  // employee's rows are dropped entirely, returns `null` for them and applies no offset at all.
-  // `.order('id')` is the unique tiebreaker fetchAllRows requires.
-  const { data, error } = await fetchAllRows(() =>
-    scopedFrom(
-      'hr_payslips',
-      'employee_id, ssf_employee, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))',
-    )
-      .gt('ssf_employee', 0)
-      .eq('hr_payroll_runs.status', 'finalized')
-      .order('id'))
-
-  if (error) throw error
-
+export async function fetchSsfContributions(scopedFrom) {
+  const [slips, settlements] = await Promise.all([
+    fetchAllRows(() =>
+      scopedFrom(
+        'hr_payslips',
+        'id, employee_id, ssf_employer, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))',
+      )
+        .gt('ssf_employer', 0)
+        .eq('hr_payroll_runs.status', 'finalized')
+        .order('id')),
+    fetchAllRows(() =>
+      scopedFrom('hr_final_settlements', 'id, employee_id, month_ssf_employer, settle_bs_year, settle_bs_month')
+        .eq('status', 'finalized')
+        .gt('month_ssf_employer', 0)
+        .order('id')),
+  ])
+  if (slips.error) return { data: null, error: slips.error }
+  if (settlements.error) return { data: null, error: settlements.error }
   const map = {}
-  for (const row of data || []) {
-    const mp = row.hr_payroll_runs?.monthly_periods
-    if (!mp) continue
-    const cur = map[row.employee_id]
-    // Earliest (bs_year, bs_month) wins.
-    if (!cur || mp.bs_year < cur.bsYear || (mp.bs_year === cur.bsYear && mp.bs_month < cur.bsMonth)) {
-      map[row.employee_id] = { bsYear: mp.bs_year, bsMonth: mp.bs_month }
-    }
+  const add = (empId, bs_year, bs_month, employer) => {
+    ;(map[empId] = map[empId] || []).push({ bs_year, bs_month, employer: parseFloat(employer) || 0 })
   }
-  return map
+  for (const r of slips.data || []) {
+    const mp = r.hr_payroll_runs?.monthly_periods
+    if (mp) add(r.employee_id, mp.bs_year, mp.bs_month, r.ssf_employer)
+  }
+  for (const s of settlements.data || []) {
+    if (s.settle_bs_year && s.settle_bs_month) add(s.employee_id, s.settle_bs_year, s.settle_bs_month, s.month_ssf_employer)
+  }
+  return { data: map, error: null }
 }
 
 /**
- * Months of SSF contribution up to `asOf`, from a map entry — or `null` when there is no evidence,
- * which `calcGratuity` reads as "apply no offset and say the coverage is unknown".
+ * The gratuity SSF has funded for ONE employee during their current spell of service:
+ * `{ amount, months }`. Only months ending on or after `joinDate` count — a rehire's earlier spell was
+ * settled with its own gratuity. `beforeBs` ({ bs_year, bs_month }) leaves out that month and later,
+ * for a settlement that adds its own final month itself. A failed read (`rows === undefined` from a
+ * null map) is the caller's to refuse; an employee with no contributions is `{ 0, 0 }`.
  */
-export function ssfMonthsFrom(startEntry, asOf = new Date()) {
-  if (!startEntry) return null
-  // Day 1 of the month it started: the month is the unit gratuity accrues in, and the exact day
-  // never affects a whole-month count.
-  const ad = bsToAd(startEntry.bsYear, startEntry.bsMonth, 1)
-  if (!ad || isNaN(ad)) return null
-  return monthsBetween(formatAd(ad), asOf)
+export function ssfFundedFor(rows, { joinDate = null, beforeBs = null } = {}) {
+  let amount = 0, months = 0
+  const join = joinDate ? String(joinDate).slice(0, 10) : null
+  const cutoff = beforeBs ? beforeBs.bs_year * 12 + beforeBs.bs_month : null
+  for (const r of rows || []) {
+    if (cutoff != null && r.bs_year * 12 + r.bs_month >= cutoff) continue
+    if (join) {
+      let monthEnd
+      try { monthEnd = formatAd(bsToAd(r.bs_year, r.bs_month, daysInBsMonth(r.bs_year, r.bs_month))) } catch { monthEnd = null }
+      if (monthEnd && monthEnd < join) continue
+    }
+    if (r.employer > 0) {
+      amount += r.employer * SSF_GRATUITY_SHARE_OF_EMPLOYER
+      months += 1
+    }
+  }
+  return { amount, months }
 }

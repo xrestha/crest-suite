@@ -143,10 +143,8 @@ export default function ImsStaff() {
       return
     }
     const saved = settingsRes.data?.ims_custom_roles
-    const roles = saved?.length ? saved : DEFAULT_ROLES
     if (saved?.length) setCustomRoles(saved)
-    const staffList = staffRes.data || []
-    setStaff(staffList)
+    setStaff(staffRes.data || [])
     setEmployees(empRes.error ? [] : (empRes.data || []))
     setEligibleUsers(eligibleRes.error ? [] : (eligibleRes.data || []))
     const missing = [empRes.error && 'the HR employee list', eligibleRes.error && 'the existing-login list'].filter(Boolean)
@@ -154,37 +152,54 @@ export default function ImsStaff() {
       ? `Some + Add Staff options could not be loaded (${missing.join(' and ')}) — those modes are hidden until the page is reloaded.`
       : '')
     setLoading(false)
+    // No re-ranking here (S752). This page used to move every login whose level no longer matched
+    // its role the moment anyone opened it, so a role-list edit silently promoted people on the next
+    // page view. A mismatch is now shown in a banner and moves only through applyMismatches().
+  }
 
-    // Bring any ims_role that no longer matches its role's configured level back into line — in
-    // parallel (each is an independent single-row UPDATE by id; sequencing bought no atomicity and
-    // made a page that had already painted wait on N Edge Function round trips), and reporting
-    // every row that failed rather than dropping each error in turn. A refused row is now also a
-    // real outcome: a peer manager's row is refused for an IMS manager caller (S729), and that
-    // manager should see whose level is still out of line rather than a badge that quietly stays.
-    const mismatched = staffList.filter(p => {
-      if (!p.ims_job_title) return false
-      const expected = roles.find(r => r.label === p.ims_job_title)?.level
-      return expected && expected !== p.ims_role
+  // Logins whose stored level no longer matches the level their role carries.
+  const mismatched = useMemo(() => staff.filter(p => {
+    if (!p.ims_job_title) return false
+    const expected = effectiveRoles.find(r => r.label === p.ims_job_title)?.level
+    return expected && expected !== p.ims_role
+  }), [staff, effectiveRoles])
+
+  function applyMismatches() {
+    const list = mismatched
+    const levelOf = p => effectiveRoles.find(r => r.label === p.ims_job_title)?.level
+    askConfirm({
+      title: `Change the access level of ${list.length} login${list.length === 1 ? '' : 's'}?`,
+      confirmLabel: 'Change Access', busyLabel: 'Changing…',
+      body: (
+        <div>
+          <p style={{ margin: 0 }}>Each login below moves to the level its role now carries. A move up opens pages they could not open before.</p>
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+            {list.map(p => <li key={p.id}>{p.full_name || p.email}: {cap(p.ims_role) || 'no level'} → {cap(levelOf(p))}</li>)}
+          </ul>
+        </div>
+      ),
+      run: async () => {
+        setMsg(''); setNotice('')
+        const outcomes = await Promise.all(list.map(async p => {
+          const level = levelOf(p)
+          const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+            body: { action: 'update_ims_role', userId: p.id, ims_role: level, ims_job_title: p.ims_job_title },
+          })
+          return { p, level, failed: !!(error || data?.error), detail: data?.error || error?.message }
+        }))
+        const levelById = Object.fromEntries(outcomes.filter(o => !o.failed).map(o => [o.p.id, o.level]))
+        if (Object.keys(levelById).length > 0) {
+          setStaff(prev => prev.map(s => s.id in levelById ? { ...s, ims_role: levelById[s.id] } : s))
+        }
+        const failed = outcomes.filter(o => o.failed)
+        if (failed.length > 0) {
+          setMsg(`${failed.length} login(s) could not be moved and keep their previous access: ${names(failed.map(o => o.p))}. ` +
+            (failed[0].detail || 'Try again, or ask the account owner.'))
+        } else {
+          setNotice(`${list.length} login${list.length === 1 ? '' : 's'} moved to the level their role carries.`)
+        }
+      },
     })
-    if (mismatched.length === 0) return
-    const outcomes = await Promise.all(mismatched.map(async p => {
-      const level = roles.find(r => r.label === p.ims_job_title)?.level
-      const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-        body: { action: 'update_ims_role', userId: p.id, ims_role: level, ims_job_title: p.ims_job_title },
-      })
-      return { p, level, failed: !!(error || data?.error) }
-    }))
-    if (loadedClientRef.current !== forClient) return
-    const applied = outcomes.filter(o => !o.failed)
-    if (applied.length > 0) {
-      const levelById = Object.fromEntries(applied.map(o => [o.p.id, o.level]))
-      setStaff(prev => prev.map(s => s.id in levelById ? { ...s, ims_role: levelById[s.id] } : s))
-    }
-    const failed = outcomes.filter(o => o.failed)
-    if (failed.length > 0) {
-      setMsg(`${failed.length} login(s) still carry an access level that does not match their role and could not be corrected: ` +
-        names(failed.map(o => o.p)) + '. Their access is unchanged — set the role again, or ask the account owner.')
-    }
   }
 
   async function load() {
@@ -443,10 +458,10 @@ export default function ImsStaff() {
 
   // ── Role update ────────────────────────────────────────────────────────────
   async function updateRole(profileId, jobTitle) {
-    const role = jobTitle ? effectiveRoles.find(r => r.label === jobTitle) : null
-    // A title the scheme no longer defines must not reach the server as "no role": that write
-    // would REVOKE the login's access, not re-label it.
-    if (jobTitle && !role) { setMsg(`“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
+    const role = effectiveRoles.find(r => r.label === jobTitle)
+    // Never send "no role": a login with no marker reads as the Owner (S752). Removing someone's
+    // IMS access means deleting the login.
+    if (!role) { setMsg(`“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
     setSaving(s => ({ ...s, [profileId]: true })); setMsg(''); setNotice('')
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
@@ -509,6 +524,24 @@ export default function ImsStaff() {
       {msg && <ActionError error={msg} className="action-error--top" />}
       {notice && <p role="status" style={{ fontSize: 13, color: 'var(--theme-green-text)', marginBottom: 16 }}>{notice}</p>}
       {partialWarn && <p role="status" style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginBottom: 16 }}>{partialWarn}</p>}
+      {!loading && !loadError && mismatched.length > 0 && (
+        <div role="alert" className="card" style={{
+          padding: '12px 16px', marginBottom: 16,
+          border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-amber-text)' }}>
+              △ {mismatched.length} login{mismatched.length === 1 ? '' : 's'} carry an access level their role no longer has
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>
+              {names(mismatched)}. Their access has not changed — nothing moves until you apply it.
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={applyMismatches}>Apply role levels…</button>
+        </div>
+      )}
       {confirmEl}
 
       {loading ? (
@@ -566,8 +599,8 @@ export default function ImsStaff() {
                           title={isSelf ? 'Your own role can only be changed by the account owner or an administrator' : undefined}
                           onChange={e => updateRole(p.id, e.target.value)}
                         >
-                          <option value="">— No Access —</option>
-                          {orphan && <option value={currentTitle}>{currentTitle} — not in the role list</option>}
+                          {!currentTitle && <option value="" disabled>— pick a role —</option>}
+                          {orphan && <option value={currentTitle} disabled>{currentTitle} — not in the role list</option>}
                           {effectiveRoles.map(r => (
                             <option key={r.label} value={r.label}>{r.label}</option>
                           ))}

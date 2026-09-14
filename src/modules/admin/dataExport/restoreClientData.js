@@ -35,10 +35,16 @@ const RESTORE_ORDER = [
   // HR setup then transactions
   'hr_shift_types', 'hr_holiday_calendar', 'hr_leave_types', 'hr_employees',
   'hr_salary_components', 'hr_roster', 'hr_roster_publish_state', 'hr_shift_swap_requests',
-  'hr_incentive_configs', 'hr_incentives', 'hr_tada_claims', 'hr_tada_claim_items',
-  'hr_advances', 'hr_advance_repayments', 'hr_festival_allowances',
+  'hr_incentive_configs', 'hr_incentives',
+  'hr_advances', 'hr_festival_allowances',
   'hr_overtime_entries', 'hr_leave_requests', 'hr_attendance',
   'hr_payroll_runs', 'hr_payslips', 'hr_final_settlements',
+  // AFTER the runs and settlements (S752): a repayment carries payroll_run_id and
+  // final_settlement_id, and a TADA claim final_settlement_id — all non-deferrable FKs. Restoring
+  // them first refused the first chunk holding a payroll or settlement recovery and, this loop
+  // breaking a table on its first failing chunk, dropped the whole repayment ledger: every advance
+  // came back fully owed.
+  'hr_advance_repayments', 'hr_tada_claims', 'hr_tada_claim_items',
   // POS — tables/customers before orders; credit notes after orders (circular FK, see below)
   // pos_cash_movements after pos_shifts and pos_orders — it holds an FK to both.
   'pos_tables', 'pos_loyalty_schemes', 'pos_customers', 'pos_shifts', 'pos_parking_slips',
