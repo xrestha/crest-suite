@@ -42,11 +42,10 @@ In this order. Service charge was offered and **not** chosen.
     both ways counts its choices twice there, as it already did its recipe.
   - **Smoke-tested end to end in a browser on BHATTI CHOILA (2026-09-15)** — all steps passed;
     the SMK items, groups, open shift, paid Table 3 bill and open Table 4 order were left there on
-    purpose. Two cosmetic findings from it:
-    - The till cart row squeezes `option_summary` beside the qty buttons (a word or two per line,
-      and the dish name wraps too) — render it full-width under the row.
-    - The Customization Report footnote sits flush under its table, and the Choice margin tab
-      shows "—" for a choice with no stock lines without saying why.
+    purpose. Its two cosmetic findings (the cart row squeezing `option_summary`, the report
+    footnote flush under its table) were closed by the S759 critique pass, which also made the
+    Choice margin tab say why a row has no cost. Still to press on a real till after S759: the
+    cart's choices line, the picker's scroll-to-short-group, and the guest sheet's sticky header.
   - Release 2: combos / build-your-own bundles.
   - Deleting a **sub-recipe** that an option's stock line uses is refused by the plain FK
     `pos_option_ingredients.sub_recipe_id` with a generic message — `deleteRecipe`'s pre-check only

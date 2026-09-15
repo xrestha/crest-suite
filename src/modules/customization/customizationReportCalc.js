@@ -10,6 +10,14 @@
 //                    "first N" pick adds 0) × plates, EX-VAT and BEFORE any bill-level discount —
 //                    the discount is spread over whole bills, not over choices. Comped plates were
 //                    made but not paid for, so they count as picks and add nothing charged.
+//                    Split by sign into `extrasEarned` (the positive picks — add-ons) and
+//                    `sizeAdjustments` (the negative ones — a Half priced below the dish), because a
+//                    net figure hid a size discount inside the add-on income (S759).
+//   group kind       from the option catalog as it is TODAY (`kindByOptionId`); a snapshot whose
+//                    option has since been deleted, or written by a bundle that stored no option
+//                    id, is 'unknown'. `listPriceDelta` is the option's list price the same way —
+//                    null when unknown — so the Margin tab can tell a free-by-design choice from
+//                    a paid one that lost money.
 //   cost per plate   the choice's frozen stock lines valued at TODAY's item rate. The lines are what
 //                    was on the plate; the rate is the only one available and moves with purchases,
 //                    which the page says.
@@ -17,12 +25,14 @@
 const num = v => Number(v) || 0
 
 /**
- * @param {{ lines, snapshots, attachedRecipeIds }} input
+ * @param {{ lines, snapshots, attachedRecipeIds, kindByOptionId?, listPriceByOptionId? }} input
  *   lines      [{ id, recipe_id, name, qty, comped, selection_key }] — paid bills in range
  *   snapshots  [{ order_item_id, option_id, group_name, option_name, is_removal, price_delta }]
  *   attachedRecipeIds  Set of recipe ids with a group attached today
+ *   kindByOptionId     { [option_id]: 'size' | 'addon' | 'choice' } from today's catalog
+ *   listPriceByOptionId { [option_id]: number } today's list price_delta per option
  */
-export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds }) {
+export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, kindByOptionId = {}, listPriceByOptionId = {} }) {
   const byLine = new Map()
   for (const s of snapshots || []) {
     if (!byLine.has(s.order_item_id)) byLine.set(s.order_item_id, [])
@@ -34,7 +44,8 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds }
   const removalsByDish = new Map() // `${recipe}|${optionKey}` -> row
   let customizablePlates = 0
   let customizedPlates = 0
-  let extraCharged = 0
+  let extrasEarned = 0
+  let sizeAdjustments = 0
 
   const attached = attachedRecipeIds || new Set()
   const soldCustomized = new Set((lines || []).filter(l => l.selection_key).map(l => l.recipe_id))
@@ -67,7 +78,8 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds }
       o.dishes.add(l.name)
       if (!o.sampleDeltas && p.ingredient_deltas) o.sampleDeltas = p.ingredient_deltas
       options.set(key, o)
-      extraCharged += charged
+      if (charged > 0) extrasEarned += charged
+      else sizeAdjustments += charged
       if (p.is_removal) {
         const rk = `${l.recipe_id}|${key}`
         const r = removalsByDish.get(rk) || { dish: l.name, option_name: p.option_name, picks: 0, dishPlates: 0, recipe_id: l.recipe_id }
@@ -80,14 +92,25 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds }
   for (const r of removalsByDish.values()) r.dishPlates = dishes.get(r.recipe_id)?.plates || 0
 
   const optionRows = [...options.values()]
-    .map(o => ({ ...o, dishes: [...o.dishes].sort(), chargedPerPick: o.picks ? o.charged / o.picks : 0 }))
+    .map(o => {
+      const known = o.option_id != null && Object.prototype.hasOwnProperty.call(listPriceByOptionId || {}, o.option_id)
+      return {
+        ...o,
+        dishes: [...o.dishes].sort(),
+        chargedPerPick: o.picks ? o.charged / o.picks : 0,
+        group_kind: (o.option_id != null && kindByOptionId?.[o.option_id]) || 'unknown',
+        listPriceDelta: known ? num(listPriceByOptionId[o.option_id]) : null,
+      }
+    })
     .sort((a, b) => b.picks - a.picks || String(a.option_name).localeCompare(String(b.option_name)))
 
   return {
     customizablePlates,
     customizedPlates,
     customizedShare: customizablePlates > 0 ? customizedPlates / customizablePlates : null,
-    extraCharged,
+    extraCharged: extrasEarned + sizeAdjustments,
+    extrasEarned,
+    sizeAdjustments,
     options: optionRows,
     removals: optionRows.filter(o => o.is_removal),
     removalsByDish: [...removalsByDish.values()].sort((a, b) => b.picks - a.picks),
@@ -95,6 +118,16 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds }
       .map(d => ({ ...d, share: d.plates ? d.customizedPlates / d.plates : 0 }))
       .sort((a, b) => b.plates - a.plates || String(a.name).localeCompare(String(b.name))),
   }
+}
+
+/**
+ * The "Most added" tile: the most-picked option that is neither a removal nor a size. A size is
+ * picked on every plate of a dish that has one — it is a question the guest must answer, not a
+ * thing they asked for — so it would win the tile on every menu with a Half/Full. Rows arrive
+ * sorted by picks desc, so the first survivor is the answer. Null when nothing qualifies.
+ */
+export function mostAddedOf(optionRows) {
+  return (optionRows || []).find(o => !o.is_removal && o.group_kind !== 'size') || null
 }
 
 /**

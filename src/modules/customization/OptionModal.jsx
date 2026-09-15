@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
 import SearchableSelect from '../../components/SearchableSelect'
+import QtyInput from '../../components/QtyInput'
 import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
@@ -74,7 +75,7 @@ export default function OptionModal({
     parseAllergens(form.allergens).length ? 'allergens' : null,
     form.is_default ? 'pre-selected' : null,
     form.kitchen_name.trim() ? 'ticket name' : null,
-    form.is_active ? null : 'not offered',
+    form.is_active ? null : 'hidden',
   ].filter(Boolean).join(' · ')
 
   function validate() {
@@ -223,15 +224,29 @@ export default function OptionModal({
               {fullPriceMode
                 ? <>Dish price {npr(basePrice)} → this size {npr(Math.max(0, basePrice + deltaIncl))} ({signedPrice(deltaIncl) || 'same price'}).</>
                 : isSize && attachedDishes.length > 0
-                  ? attachedDishes.slice(0, 6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${npr(Math.max(0, d.inclPrice + deltaIncl))}`).join(' · ')
+                  ? <>
+                      {attachedDishes.slice(0, 6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${npr(Math.max(0, d.inclPrice + deltaIncl))}`).join(' · ')}
+                      {attachedDishes.length > 6 && (
+                        <Tip width={300} text={attachedDishes.slice(6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${npr(Math.max(0, d.inclPrice + deltaIncl))}`).join(' · ')}>
+                          <span> · +{attachedDishes.length - 6} more</span>
+                        </Tip>
+                      )}
+                    </>
                   : isSize
-                    ? 'Attach this group to a dish to enter the full price of each size instead.'
+                    ? 'Put this group on a dish to enter the full price of each size instead.'
                     : deltaIncl ? `Guests see ${signedPrice(deltaIncl)} beside this option.` : 'Guests see no price — it is free.'}
             </p>
-            {vat > 0 && (
+            {option && (
               <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text3)' }}>
-                Stored before VAT ({npr(exFromIncl(deltaIncl, vat))}). On a dish with no VAT the difference charged is that before-VAT amount.
+                A new price applies to the next dish ordered. Dishes already on a table keep the price they were ordered at.
               </p>
+            )}
+            {vat > 0 && (
+              <Tip width={300} text={`Saved as ${npr(exFromIncl(deltaIncl, vat))} before VAT, so the guest pays this on a 13% dish. A dish sold without VAT charges the before-VAT amount instead.`}>
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text3)' }}>
+                  Includes VAT · how a no-VAT dish charges it
+                </p>
+              </Tip>
             )}
           </div>
         )}
@@ -279,7 +294,7 @@ export default function OptionModal({
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <input type="checkbox" checked={form.is_active} onChange={e => set({ is_active: e.target.checked })} />
-            <Tip width={260} text="Untick to stop offering it (e.g. out of stock) without deleting it.">Offer this option</Tip>
+            <Tip width={260} text="Untick to hide it (e.g. out of stock) without deleting it — the same as Hide on the Groups page.">Shown on the till and guest menu</Tip>
           </label>
         </div>
         </div>
@@ -317,16 +332,19 @@ export default function OptionModal({
                         <option value="add">Adds</option>
                         <option value="remove">Takes off</option>
                       </select>
-                      <input aria-label={`Line ${i + 1}: amount`} type="number" min="0" step="any" className="form-input form-input--auto"
-                        value={l.qty} onChange={e => setLines(ls => ls.map(x => x.key === l.key ? { ...x, qty: e.target.value } : x))}
-                        style={{ width: 90 }} />
-                      <span style={{ fontSize: 12, color: 'var(--theme-text2)', minWidth: 32 }}>{choice?.unit || ''}</span>
+                      {/* Item first, then the amount in ITS unit — the unit was blank until an item was chosen. */}
                       <div style={{ flex: '1 1 200px', minWidth: 180 }}>
                         <SearchableSelect id={`opt-line-${l.key}`} value={l.ref} options={itemChoices}
                           placeholder="— Choose a stock item or sub-recipe —"
                           onChange={v => setLines(ls => ls.map(x => x.key === l.key ? { ...x, ref: v } : x))}
                           invalid={errors[`line${i}`] || ''} />
                       </div>
+                      <QtyInput aria-label={`Line ${i + 1}: amount${choice?.unit ? ` in ${choice.unit}` : ''}`} className="form-input form-input--auto"
+                        value={l.qty} placeholder="0"
+                        onChange={v => setLines(ls => ls.map(x => x.key === l.key ? { ...x, qty: v === '' ? '' : String(v) } : x))}
+                        onCommit={v => setLines(ls => ls.map(x => x.key === l.key ? { ...x, qty: v === '' ? '' : String(v) } : x))}
+                        style={{ width: 90 }} />
+                      <span style={{ fontSize: 12, color: 'var(--theme-text2)', minWidth: 32 }}>{choice?.unit || <span style={{ color: 'var(--theme-text3)' }}>unit</span>}</span>
                       <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove line ${i + 1}`}
                         onClick={() => setLines(ls => ls.filter(x => x.key !== l.key))}>Remove</button>
                     </div>

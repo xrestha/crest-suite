@@ -83,14 +83,38 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
     return null
   }
 
+  // The order the picker and the guest sheet show the groups in. Chosen groups are listed by
+  // their draft sort; a move swaps two of them and renumbers densely so a save writes what is on
+  // screen (S759).
+  const ordered = useMemo(
+    () => chosen.slice().sort((a, b) => (draft[a.id]?.sort ?? 0) - (draft[b.id]?.sort ?? 0)),
+    [chosen, draft],
+  )
+  function moveGroup(idx, dir) {
+    const other = idx + dir
+    if (other < 0 || other >= ordered.length) return
+    const seq = ordered.slice()
+    ;[seq[idx], seq[other]] = [seq[other], seq[idx]]
+    setDraft(d => {
+      const n = { ...d }
+      seq.forEach((g, i) => { n[g.id] = { ...n[g.id], sort: i } })
+      return n
+    })
+  }
+
   async function save() {
     if (saving) return
-    const bad = chosen.map(overrideError).find(Boolean)
-    if (bad) { setActionError(bad); return }
+    // The rule error is already under its own fields (inline, role="alert"); a second copy at the
+    // bottom was two channels for one message. Take the reader to the field instead.
+    const badGroup = chosen.find(g => overrideError(g))
+    if (badGroup) {
+      document.getElementById(`att-min-${badGroup.id}`)?.focus()
+      return
+    }
     setSaving(true)
     setActionError(null)
 
-    const rows = chosen.map(g => {
+    const rows = ordered.map((g, i) => {
       const d = draft[g.id]
       return {
         recipe_id: recipe.id,
@@ -98,7 +122,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
         min_override: g.kind === 'size' ? null : toInt(d.min),
         max_override: g.kind === 'size' ? null : toInt(d.max),
         default_option_id: d.def || null,
-        sort: d.sort || 0,
+        sort: i,
       }
     })
     if (rows.length) {
@@ -116,20 +140,20 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
         setSaving(false)
         const a = asActionError(error)
         setActionError({ text: `The groups you ticked were saved, but the ones you unticked are still on ${recipe.name}. ${a.text}`, detail: a.detail })
-        onSaved?.()
+        onSaved?.(rows.length)
         return
       }
     }
     setSaving(false)
-    onSaved?.()
+    onSaved?.(rows.length)
     onClose()
   }
 
   return (
-    <Modal onClose={onClose} title={`Customize — ${recipe.name}`} maxWidth={620}
+    <Modal onClose={onClose} title={`Choices — ${recipe.name}`} maxWidth={620}
       panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
       <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>
-        Tick the option groups this dish offers. A dish with none ticked is ordered exactly as today — one tap, no choices.
+        Tick the option groups this dish offers, in the order guests should see them. A dish with none ticked is ordered exactly as today — one tap, no choices.
       </p>
       <div style={{ overflowY: 'auto', flex: 1 }}>
         {loading ? (
@@ -140,21 +164,31 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
           <div className="empty-state">No option groups yet. Create one on the Option Groups page first — for example “Size” or “Extras”.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {visibleGroups.map(g => {
+            {[...ordered, ...visibleGroups.filter(g => !draft[g.id]?.on)].map(g => {
               const d = draft[g.id]
               const on = !!d?.on
+              const pos = on ? ordered.indexOf(g) : -1
               const opts = optionsByGroup[g.id] || []
               const rule = effectiveRule(g, on ? { min_override: toInt(d.min), max_override: toInt(d.max) } : null)
               const err = overrideError(g)
               return (
                 <div key={g.id} className="card card--compact" style={{ margin: 0, borderColor: on ? 'var(--theme-accent)' : undefined }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={on} onChange={() => toggle(g)} />
-                    <span style={{ fontWeight: 600 }}>{g.name}</span>
-                    <span className="badge-yellow">{KIND_LABEL[g.kind]}</span>
-                    {g.is_active === false && <span className="badge-gray">Hidden</span>}
-                    <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--theme-text2)' }}>{ruleText(rule)}</span>
-                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flex: 1, minWidth: 0 }}>
+                      <input type="checkbox" checked={on} onChange={() => toggle(g)} />
+                      {on && <span style={{ fontSize: 11, color: 'var(--theme-text3)', minWidth: 14 }}>{pos + 1}.</span>}
+                      <span style={{ fontWeight: 600 }}>{g.name}</span>
+                      <span className="badge-yellow">{KIND_LABEL[g.kind]}</span>
+                      {g.is_active === false && <span className="badge-gray">Hidden</span>}
+                      <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--theme-text2)' }}>{ruleText(rule)}</span>
+                    </label>
+                    {on && ordered.length > 1 && (
+                      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                        <button type="button" className="btn btn-ghost btn-icon" aria-label={`Show ${g.name} earlier`} disabled={pos === 0} onClick={() => moveGroup(pos, -1)}>↑</button>
+                        <button type="button" className="btn btn-ghost btn-icon" aria-label={`Show ${g.name} later`} disabled={pos === ordered.length - 1} onClick={() => moveGroup(pos, 1)}>↓</button>
+                      </div>
+                    )}
+                  </div>
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '4px 0 0 26px' }}>
                     {opts.length ? opts.map(o => o.name).join(' · ') : 'No options in this group yet'}
                   </div>

@@ -125,6 +125,24 @@
         "value": "26px",
         "createdAt": "2026-09-14T13:49:33.162Z",
         "reason": "80mm thermal parking-slip print template (parkingSlipHtml.js) - vehicle number sized for a printed token; print templates are the documented allowed class, value predates S754"
+      },
+      {
+        "rule": "design-system-radius",
+        "value": "8px",
+        "files": [
+          "src/modules/pos/guestmenu/guestMenu.css"
+        ],
+        "createdAt": "2026-09-15T13:24:09.467Z",
+        "reason": "DESIGN.md Shapes: scoped guest surface keeps its own shape language; value moved from GuestOptionSheet.jsx inline style into CSS (S759)"
+      },
+      {
+        "rule": "design-system-radius",
+        "value": "4px",
+        "files": [
+          "src/modules/pos/guestmenu/guestMenu.css"
+        ],
+        "createdAt": "2026-09-15T13:24:09.707Z",
+        "reason": "DESIGN.md Shapes: scoped guest surface keeps its own shape language; value moved from GuestOptionSheet.jsx inline style into CSS (S759)"
       }
     ]
   }

@@ -46,7 +46,7 @@ const modalStack = []
 // inline style, or `prefers-reduced-motion` could never switch it off.
 export default function Modal({
   onClose, title, headerExtra, children, maxWidth = 960,
-  zIndex = 100, unstyled = false, panelStyle, variant, printable = false,
+  zIndex = 100, unstyled = false, panelStyle, variant, printable = false, dirty,
 }) {
   const sheet = variant === 'sheet'
   // A sheet renders its OWN header — a 44px close target and usually a subtitle, neither of which
@@ -67,7 +67,9 @@ export default function Modal({
   // been typed or picked, a backdrop tap is ignored; Escape and the sheet's own Close button
   // still work, and nothing is trapped. A read-only sheet never fires these events, so it keeps
   // closing on backdrop exactly as a dialog does.
-  const onBackdrop = () => { if (!(sheet && dirtyRef.current)) onClose() }
+  // `dirty` lets a caller state it outright: a chip <button> click fires neither onInput nor
+  // onChange, so a sheet made of picks (GuestOptionSheet) passes `dirty` from its own state.
+  const onBackdrop = () => { if (!(sheet && (dirty || dirtyRef.current))) onClose() }
   const markDirty = () => { dirtyRef.current = true }
 
   useEffect(() => {

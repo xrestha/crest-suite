@@ -16,6 +16,7 @@ import { calcSubRecipeCostPerUnit } from './recipeCostCalc'
 import { nextProductCode, productCodePrefix } from '../../../shared/productCode'
 import Modal from '../../../components/Modal'
 import AttachGroupsModal from '../../customization/AttachGroupsModal'
+import { loadOptionCatalog } from '../../customization/customizationData'
 
 
 function vatOf(r) {
@@ -58,6 +59,25 @@ export default function MenuPricing() {
 
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  // Which groups each dish offers, by name, so the row says "Size · Extras" the way it says
+  // "2 pairings" — an 11px grey "Customize" with no count gave no way to tell from the menu which
+  // dishes were customized (S759). Its own small load, so a failed read here costs only the labels.
+  const [choiceNames, setChoiceNames] = useState({}) // recipe_id -> [group name]
+  const loadChoiceNames = useCallback(async () => {
+    if (!customizationOn || !effectiveClientId) return
+    const cat = await loadOptionCatalog(scopedFrom)
+    if (cat.error) return
+    const nameById = new Map(cat.groups.map(g => [g.id, g.name]))
+    const map = {}
+    cat.attachments.slice().sort((a, b) => (a.sort || 0) - (b.sort || 0)).forEach(a => {
+      const n = nameById.get(a.group_id)
+      if (n) (map[a.recipe_id] = map[a.recipe_id] || []).push(n)
+    })
+    setChoiceNames(map)
+  }, [customizationOn, effectiveClientId, scopedFrom])
+  useEffect(() => { loadChoiceNames() }, [loadChoiceNames])
+  const choicesLabel = r => (choiceNames[r.id]?.length ? choiceNames[r.id].join(' · ') : 'Add choices')
+  const choicesColor = r => (choiceNames[r.id]?.length ? 'var(--theme-accent-ink)' : 'var(--theme-text3)')
   const [recipes, setRecipes]   = useState([])
   const [loading, setLoading]   = useState(true)
   const [loadError, setLoadError] = useState(null) // a failed read, never rendered as an empty menu
@@ -562,9 +582,9 @@ export default function MenuPricing() {
                       {customizationOn && (
                         <>
                           {' · '}
-                          <Tip text="Choose which option groups (size, extras, spice…) this item offers. Groups are built on Customization → Option Groups." width={260}>
-                            <button onClick={() => setCustomizeFor(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'underline' }}>
-                              Customize
+                          <Tip text="The option groups (size, extras, spice…) this item offers, in order. Groups are built on Customization → Option Groups." width={260}>
+                            <button onClick={() => setCustomizeFor(r)} aria-label={`Choices for ${r.name}`} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: choicesColor(r), textDecoration: 'underline' }}>
+                              {choicesLabel(r)}
                             </button>
                           </Tip>
                         </>
@@ -626,7 +646,7 @@ export default function MenuPricing() {
         </Modal>
       )}
 
-      {customizeFor && <AttachGroupsModal recipe={customizeFor} onClose={() => setCustomizeFor(null)} />}
+      {customizeFor && <AttachGroupsModal recipe={customizeFor} onClose={() => setCustomizeFor(null)} onSaved={loadChoiceNames} />}
 
       {addModal && (
         <Modal onClose={() => { setAddModal(false); setEditingId(null) }} title={editingId ? 'Edit Menu Item' : 'Add Menu Item'} maxWidth={440}>
@@ -943,9 +963,9 @@ export default function MenuPricing() {
                         {customizationOn && (
                           <>
                             {' · '}
-                            <Tip text="Choose which option groups (size, extras, spice…) this dish offers. Groups are built on Customization → Option Groups." width={260}>
-                              <button className="no-print" onClick={() => setCustomizeFor(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'underline' }}>
-                                Customize
+                            <Tip text="The option groups (size, extras, spice…) this dish offers, in order. Groups are built on Customization → Option Groups." width={260}>
+                              <button className="no-print" onClick={() => setCustomizeFor(r)} aria-label={`Choices for ${r.name}`} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: choicesColor(r), textDecoration: 'underline' }}>
+                                {choicesLabel(r)}
                               </button>
                             </Tip>
                           </>
@@ -1024,7 +1044,7 @@ export default function MenuPricing() {
       )}
 
       {/* Rendered in BOTH returns — this page has two (component-library.md). */}
-      {customizeFor && <AttachGroupsModal recipe={customizeFor} onClose={() => setCustomizeFor(null)} />}
+      {customizeFor && <AttachGroupsModal recipe={customizeFor} onClose={() => setCustomizeFor(null)} onSaved={loadChoiceNames} />}
 
       {/* No Pair With modal here. The IMS branch renders no Pair control — `openSuggestModal`
           is called only from the POS-only table above — so the copy that used to sit here was

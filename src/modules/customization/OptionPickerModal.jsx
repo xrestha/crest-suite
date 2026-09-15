@@ -1,34 +1,60 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Modal from '../../components/Modal'
 import { nprInt } from '../../shared/nepalMoney'
 import {
   ruleText, describeSelection, selectionProblems, defaultSelection, inclFromEx, signedPrice,
 } from '../../shared/optionPricing'
+import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import { DIET_LABEL } from './customizationData'
 
-// Crest Customization (S758 stage 5): the choice window a waiter sees when tapping a dish that has
-// option groups. Owner decision: it opens on EVERY tap of such a dish, so nobody forgets to ask.
+// Crest Customization (S758 stage 5, reshaped S759): the choice window a waiter sees for a dish
+// that has option groups. It no longer opens on every tap of such a dish (owner decision, S759):
+// when the dish's defaults already satisfy every group's rule the tap adds the default line at
+// once, and the window opens only when a required group has no default — or from the cart's
+// Choices / Change button, where the line's current picks are the starting selection.
 //
 // The price shown is the till's twin of the server's (describeSelection); the bill is priced by
 // save_pos_order_items from the option ids alone, so nothing here can set what a guest pays.
 //
 // A group with max 1 behaves as a radio (a new pick replaces the old one); any other group as
-// checkboxes that stop at the maximum. Add stays disabled until every group's rule is met, with the
-// group that is short named on screen rather than a dead button.
+// checkboxes that stop at the maximum. Add stays pressable while a rule is unmet — the press
+// names the group that is short, scrolls to it and focuses its first chip, rather than a dead
+// button that explains nothing.
+//
+// `lastIds` is the selection this recipe was last added with on this till; when it differs from
+// the starting selection a one-tap "Same as last" restores it. `initialQty` seeds the quantity
+// stepper (a Change call passes the line's qty). `onConfirm(selected, qty)`.
+
+const SAME_AS_LAST_MAX = 60
+
+function sameIds(a, b) {
+  if (!a || !b || a.length !== b.length) return false
+  const sa = [...a].map(String).sort().join('+')
+  const sb = [...b].map(String).sort().join('+')
+  return sa === sb
+}
 
 export default function OptionPickerModal({
-  recipe, dishGroups, catalog, vatRate = 0, initialIds, confirmLabel = 'Add to order', onConfirm, onClose, zIndex = 1100,
+  recipe, dishGroups, catalog, vatRate = 0, initialIds, initialQty, lastIds = null,
+  confirmLabel = 'Add to order', onConfirm, onClose, zIndex = 1100,
 }) {
   const [selected, setSelected] = useState(() => initialIds ?? defaultSelection(dishGroups))
+  const [qty, setQty] = useState(() => Math.max(1, Number(initialQty) || 1))
   const [tried, setTried] = useState(false)
+  const fieldsetRefs = useRef({})
 
   const attachByGroup = useMemo(
     () => Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment])), [dishGroups])
-  const desc = useMemo(
-    () => describeSelection(selected, { ...catalog, attachByGroup }), [selected, catalog, attachByGroup])
+  const fullCatalog = useMemo(() => ({ ...catalog, attachByGroup }), [catalog, attachByGroup])
+  const desc = useMemo(() => describeSelection(selected, fullCatalog), [selected, fullCatalog])
+  const lastDesc = useMemo(
+    () => (lastIds && lastIds.length ? describeSelection(lastIds, fullCatalog) : null), [lastIds, fullCatalog])
   const problems = selectionProblems(dishGroups, selected)
   const unit = (Number(recipe.selling_price) || 0) + desc.delta
   const incl = n => Math.round(inclFromEx(n, vatRate))
+  // The picks that fall under a group's first-N-free allowance, as the server would price them.
+  const freeIds = useMemo(() => new Set(desc.options.filter(o => o.included).map(o => String(o.option_id))), [desc])
+  const showSameAsLast = lastDesc && !sameIds(lastIds, selected)
 
   function toggle(group, rule, optionId) {
     setSelected(prev => {
@@ -48,54 +74,105 @@ export default function OptionPickerModal({
   }
 
   function confirm() {
-    if (problems.length) { setTried(true); return }
-    onConfirm(selected)
+    if (problems.length) {
+      setTried(true)
+      // Take the reader to the group that is short — on a phone it may be two screens up.
+      const el = fieldsetRefs.current[problems[0].group.id]
+      if (el) {
+        el.scrollIntoView?.({ block: 'center' })
+        const chip = el.querySelector('[role="radio"], [role="checkbox"]')
+        ;(chip || el).focus?.()
+      }
+      return
+    }
+    onConfirm(selected, qty)
   }
 
+  const summaryOfLast = lastDesc
+    ? (lastDesc.summary.length > SAME_AS_LAST_MAX ? `${lastDesc.summary.slice(0, SAME_AS_LAST_MAX - 1)}…` : lastDesc.summary)
+    : ''
+
   return (
-    <Modal onClose={onClose} title={recipe.name} maxWidth={520} zIndex={zIndex}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <Modal onClose={onClose} title={recipe.name} maxWidth={520} zIndex={zIndex}
+      panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 18, paddingRight: 2 }}>
+        {showSameAsLast && (
+          <div>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected([...lastIds])}
+              title={lastDesc.summary}>
+              Same as last: {summaryOfLast}
+            </button>
+          </div>
+        )}
+
         {dishGroups.map(({ group, rule, options }) => {
           const count = options.filter(o => selected.includes(o.id)).length
           const short = tried && problems.some(p => p.group.id === group.id)
           const labelId = `opt-group-${group.id}`
+          const isRadio = rule.max === 1
+          const usedFree = rule.included > 0
+            ? desc.options.filter(o => o.group_id === group.id && o.included).length
+            : 0
+          const baseRule = ruleText({ ...rule, included: 0 })
+          const anyChecked = count > 0
           return (
-            <fieldset key={group.id} style={{ border: 'none', margin: 0, padding: 0 }}
-              role={rule.max === 1 ? 'radiogroup' : 'group'} aria-labelledby={labelId}>
+            <fieldset key={group.id}
+              ref={el => { fieldsetRefs.current[group.id] = el }}
+              tabIndex={-1}
+              style={{ border: 'none', margin: 0, padding: 0, outline: 'none' }}
+              role={isRadio ? 'radiogroup' : 'group'} aria-labelledby={labelId}
+              onKeyDown={e => moveRovingFocus(e, isRadio ? '[role="radio"]' : '[role="checkbox"]')}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span id={labelId} style={{ fontWeight: 700, fontSize: 14, color: 'var(--theme-text1)' }}>{group.name}</span>
                 <span style={{ fontSize: 12, color: short ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>
-                  {ruleText(rule)}{rule.max !== 1 && count > 0 ? ` · ${count} picked` : ''}
+                  {baseRule}{!isRadio && count > 0 ? ` · ${count} picked` : ''}
                 </span>
+                {rule.included > 0 && (
+                  <span style={{ fontSize: 12, color: usedFree >= 1 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>
+                    {usedFree} of {rule.included} free picks used
+                  </span>
+                )}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
-                {options.map(o => {
+                {options.map((o, i) => {
                   const on = selected.includes(o.id)
-                  const full = !on && rule.max != null && rule.max !== 1 && count >= rule.max
-                  const price = o.is_removal ? '' : signedPrice(incl(o.price_delta))
+                  const full = !on && rule.max != null && !isRadio && count >= rule.max
+                  const listPrice = incl(o.price_delta)
+                  const isFree = on && freeIds.has(String(o.id)) && listPrice !== 0
+                  const priceNode = o.is_removal
+                    ? null
+                    : isFree
+                      ? <><span style={{ color: 'var(--theme-text2)' }}>Included</span> <s style={{ color: 'var(--theme-text3)' }}>{signedPrice(listPrice)}</s></>
+                      : (signedPrice(listPrice) || null)
+                  const metaParts = [
+                    priceNode,
+                    full ? `Max ${rule.max}` : null,
+                    o.diet ? DIET_LABEL[o.diet] : null,
+                  ].filter(Boolean)
+                  // The mark for a removal: a quiet "No" prefix, only when the name does not already
+                  // say it. The red ✕ this replaced shared the danger hue with Void and was read
+                  // aloud literally.
+                  const showNo = o.is_removal && !/^no\s/i.test(String(o.name || ''))
                   return (
                     <button
                       key={o.id}
                       type="button"
-                      role={rule.max === 1 ? 'radio' : 'checkbox'}
+                      className="choice-chip"
+                      role={isRadio ? 'radio' : 'checkbox'}
                       aria-checked={on}
                       disabled={full}
+                      tabIndex={isRadio ? rovingTabIndex(on || (!anyChecked && i === 0)) : 0}
                       onClick={() => toggle(group, rule, o.id)}
-                      style={{
-                        minHeight: 48, padding: '8px 10px', textAlign: 'left', cursor: full ? 'not-allowed' : 'pointer',
-                        display: 'flex', flexDirection: 'column', gap: 2, fontFamily: 'inherit',
-                        background: on ? 'color-mix(in srgb, var(--theme-accent) 14%, var(--theme-card))' : 'var(--theme-input-bg)',
-                        border: `${on ? 2 : 1}px solid ${on ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                        color: 'var(--theme-text1)', opacity: full ? 0.5 : 1,
-                      }}
                     >
-                      <span style={{ fontSize: 13, fontWeight: on ? 700 : 500 }}>
-                        {o.is_removal && <span style={{ color: 'var(--theme-red-text)', fontWeight: 700 }}>✕ </span>}
+                      <span className="choice-chip__name">
+                        {showNo && <span className="badge badge-gray" style={{ marginRight: 5, verticalAlign: 'middle' }}>No</span>}
                         {o.name}
                       </span>
-                      <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
-                        {[price, o.diet ? DIET_LABEL[o.diet] : ''].filter(Boolean).join(' · ')}
-                      </span>
+                      {metaParts.length > 0 && (
+                        <span className="choice-chip__meta">
+                          {metaParts.map((p, n) => <span key={n}>{n > 0 ? ' · ' : ''}{p}</span>)}
+                        </span>
+                      )}
                     </button>
                   )
                 })}
@@ -108,17 +185,31 @@ export default function OptionPickerModal({
             </fieldset>
           )
         })}
+      </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid var(--theme-border)', paddingTop: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 160 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {nprInt(incl(unit))}</div>
-            {desc.summary && <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{desc.summary}</div>}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid var(--theme-border)', paddingTop: 12, marginTop: 12, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>
+            NPR {nprInt(incl(unit) * qty)}
+            {qty > 1 && (
+              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--theme-text3)', marginLeft: 6 }}>
+                NPR {nprInt(incl(unit))} × {qty}
+              </span>
+            )}
           </div>
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={confirm} aria-disabled={problems.length > 0}>
-            {confirmLabel}
-          </button>
+          {desc.summary && <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{desc.summary}</div>}
         </div>
+        <div role="group" aria-label="Quantity" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button type="button" className="btn btn-ghost" style={{ minWidth: 48, minHeight: 48, justifyContent: 'center' }}
+            onClick={() => setQty(q => Math.max(1, q - 1))} disabled={qty <= 1} aria-label="One fewer">−</button>
+          <span aria-live="polite" style={{ minWidth: 28, textAlign: 'center', fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{qty}</span>
+          <button type="button" className="btn btn-ghost" style={{ minWidth: 48, minHeight: 48, justifyContent: 'center' }}
+            onClick={() => setQty(q => q + 1)} aria-label="One more">+</button>
+        </div>
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={confirm} aria-disabled={problems.length > 0}>
+          {confirmLabel}
+        </button>
       </div>
     </Modal>
   )

@@ -6,6 +6,7 @@ import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { GROUP_COLS } from './customizationData'
 import { ruleText } from '../../shared/optionPricing'
+import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 
 // Create or edit one option group — written for a restaurant owner, not a form designer (S758).
 //
@@ -22,10 +23,12 @@ import { ruleText } from '../../shared/optionPricing'
 // The database holds every rule checked here (a size is pick-exactly-one, min <= max, free picks <=
 // max), so the checks exist to put the sentence in the right place, not to be the guard.
 
+// The three kinds differ in what they DO, and the hint says that rather than repeating the pick
+// rule twice: a size sets the dish's price, an add-on can add to it, a choice is usually free.
 const KINDS = [
-  { key: 'size',   title: 'Size',    example: 'Half / Full · Small / Large', hint: 'Guest picks one',     rule: { min: 1, max: 1 } },
-  { key: 'addon',  title: 'Add-ons', example: 'Extra cheese · No onion',     hint: 'Guest picks several', rule: { min: 0, max: null } },
-  { key: 'choice', title: 'Choice',  example: 'Mild / Medium / Hot',         hint: 'Guest picks one',     rule: { min: 1, max: 1 } },
+  { key: 'size',   title: 'Size',    example: 'Half / Full · Small / Large', hint: 'Picks one · each size sets the dish price', rule: { min: 1, max: 1 } },
+  { key: 'addon',  title: 'Add-ons', example: 'Extra cheese · Add egg · No onion', hint: 'Picks several · each can add to the price', rule: { min: 0, max: null } },
+  { key: 'choice', title: 'Choice',  example: 'Mild / Medium / Hot',         hint: 'Picks one · usually free',                   rule: { min: 1, max: 1 } },
 ]
 
 const MIN_CHOICES = [0, 1, 2, 3, 4, 5]
@@ -38,7 +41,7 @@ const maxLabel = n => (n == null ? 'any number' : n === 1 ? 'only 1' : `up to ${
 // silently snapping it to the nearest one on open.
 const withCurrent = (list, v) => (v == null || list.includes(v) ? list : [...list, v].sort((a, b) => a - b))
 
-export default function OptionGroupModal({ group, nextSort, onClose, onSaved }) {
+export default function OptionGroupModal({ group, attachedCount = 0, nextSort, onClose, onSaved }) {
   const { scopedInsert, scopedUpdate } = useScopedDb()
   const [name, setName] = useState(group?.name || '')
   const [kind, setKind] = useState(group?.kind || 'addon')
@@ -107,6 +110,9 @@ export default function OptionGroupModal({ group, nextSort, onClose, onSaved }) 
   }
 
   const summary = ruleText({ min: effMin, max: effMax, included: effIncluded })
+  // Changing a live group's kind resets its pick rule for every dish it is on. Said before Save,
+  // not discovered on the till.
+  const kindChangedLive = !!group && kind !== group.kind && attachedCount > 0
 
   return (
     <Modal onClose={onClose} title={group ? `Edit group — ${group.name}` : 'New option group'} maxWidth={560}>
@@ -122,25 +128,25 @@ export default function OptionGroupModal({ group, nextSort, onClose, onSaved }) 
         <div>
           <span className="field-label" id="og-kind-label" style={{ display: 'block', marginBottom: 8 }}>What is it?</span>
           <div role="radiogroup" aria-labelledby="og-kind-label"
-            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+            onKeyDown={e => moveRovingFocus(e, '[role="radio"]')?.click()}
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
             {KINDS.map(k => {
               const on = kind === k.key
               return (
-                <button key={k.key} type="button" role="radio" aria-checked={on} onClick={() => pickKind(k.key)}
-                  style={{
-                    textAlign: 'left', padding: '12px 14px', cursor: 'pointer', fontFamily: 'inherit',
-                    borderRadius: 'var(--radius-sm)',
-                    border: `${on ? 2 : 1}px solid ${on ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
-                    background: on ? 'color-mix(in srgb, var(--theme-accent) 10%, transparent)' : 'var(--theme-input-bg)',
-                    color: 'var(--theme-text1)',
-                  }}>
-                  <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: on ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>{k.title}</span>
-                  <span style={{ display: 'block', fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>{k.example}</span>
-                  <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginTop: 2 }}>{k.hint}</span>
+                <button key={k.key} type="button" role="radio" aria-checked={on} className="kind-card"
+                  tabIndex={rovingTabIndex(on)} onClick={() => pickKind(k.key)}>
+                  <span className="kind-card__title">{k.title}</span>
+                  <span className="kind-card__example">{k.example}</span>
+                  <span className="kind-card__hint">{k.hint}</span>
                 </button>
               )
             })}
           </div>
+          {kindChangedLive && (
+            <p role="alert" style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+              This group is on {attachedCount} dish{attachedCount === 1 ? '' : 'es'}. Changing its kind resets the pick rule to “{summary}” for all of them the moment you save; bills already rung are not affected.
+            </p>
+          )}
         </div>
 
         {isSize ? (
@@ -183,7 +189,7 @@ export default function OptionGroupModal({ group, nextSort, onClose, onSaved }) 
               {kind === 'addon' && (
                 <div className="form-field" style={{ margin: 0 }}>
                   <label htmlFor="og-incl">
-                    <Tip width={280} text="For a deal like “2 toppings included, pay for each extra”. The free ones are the first in this group's list, not the cheapest.">Free picks before charging</Tip>
+                    <Tip width={300} text="For a deal like “2 toppings included, pay for each extra”. Of what the guest picks, the ones listed EARLIEST in this group are the free ones — not the cheapest — so put the options you are happy to give away at the top of the list (Move up on the Groups page). The till and guest menu show a pick as Included once it is free.">Free picks before charging</Tip>
                   </label>
                   <select id="og-incl" className="form-select" value={effIncluded} onChange={e => setIncluded(Number(e.target.value))} style={{ width: 'auto' }}>
                     {Array.from({ length: (effMax ?? 10) + 1 }, (_, n) => n).map(n => (
@@ -194,7 +200,7 @@ export default function OptionGroupModal({ group, nextSort, onClose, onSaved }) 
               )}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} />
-                <Tip width={260} text="Untick to stop offering this group without deleting it. It stays attached to its dishes; old bills are not affected.">Offer this group on the till and guest menu</Tip>
+                <Tip width={260} text="Untick to hide this group without deleting it — the same as Hide on the Groups page. It stays on its dishes; old bills are not affected.">Shown on the till and guest menu</Tip>
               </label>
             </div>
           )}

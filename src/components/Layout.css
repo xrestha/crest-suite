@@ -1549,6 +1549,99 @@ tr.interactive-row:focus-visible {
   cursor: not-allowed;
 }
 
+/* A button that must STAY PRESSABLE so the press can show what is short — the till choice
+   window's Add, the guest sheet's Add — wears this instead of `disabled`. Pressing it names the
+   group that is unmet and takes the reader there; a `disabled` button would explain nothing.
+   Deliberately lighter than `:disabled`'s .55 so it does not read as dead (S759). */
+.btn[aria-disabled="true"] {
+  opacity: 0.6;
+}
+
+/* ── Choice chip (S759) ─────────────────────────────────────────────────────────────────────
+   The option chips on the till choice window and the guest sheet were unclassed inline
+   `<button>`s: no `:focus-visible` at all (so a keyboard user arrowing a radiogroup saw the UA
+   outline or nothing), a border that changed WIDTH when checked (so the grid reflowed by 2px on
+   every tap), and a hand-rolled disabled opacity. The class carries all three states and keeps
+   the box the same size checked or not: the border stays 1px and the second accent pixel is an
+   inset box-shadow. 48px min-height already clears the coarse-pointer floor, so the
+   `@media (pointer: coarse)` block needs nothing for it. */
+.choice-chip {
+  min-height: 48px;
+  padding: 8px 10px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--theme-input-bg);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-sm);
+  color: var(--theme-text1);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+.choice-chip[aria-checked="true"] {
+  border-color: var(--theme-accent);
+  box-shadow: inset 0 0 0 1px var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 14%, var(--theme-card));
+}
+.choice-chip:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+.choice-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+.choice-chip[aria-checked="true"]:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--theme-accent), 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+.choice-chip__name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.choice-chip[aria-checked="true"] .choice-chip__name {
+  font-weight: 700;
+}
+.choice-chip__meta {
+  font-size: 11px;
+  color: var(--theme-text3);
+}
+
+/* The three "what is it?" cards in the option-group dialog (S759) — same reasoning as
+   .choice-chip: they were role="radio" buttons styled inline, with no focus ring and a border
+   that changed width when picked. Class keeps the box stable and gives the ring. */
+.kind-card {
+  text-align: left;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--theme-input-bg);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-sm);
+  color: var(--theme-text1);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+.kind-card[aria-checked="true"] {
+  border-color: var(--theme-accent);
+  box-shadow: inset 0 0 0 1px var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 10%, transparent);
+}
+.kind-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+.kind-card[aria-checked="true"]:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--theme-accent), 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+.kind-card__title { font-size: 14px; font-weight: 700; }
+.kind-card[aria-checked="true"] .kind-card__title { color: var(--theme-accent-ink); }
+.kind-card__example { font-size: 12px; color: var(--theme-text2); margin-top: 2px; }
+.kind-card__hint { font-size: 11px; color: var(--theme-text3); }
+
 /* `.btn` and `.tab-btn` are the two classes nearly every page in the product is built from, and
    until S551 neither had a focus ring — 11 of 16 focusable elements on a measured IMS page fell
    back to the browser's own default outline, which on a dark card is close to invisible. Same

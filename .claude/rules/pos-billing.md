@@ -193,9 +193,13 @@ floor-view check.
 - **`OPEN_ORDER_SELECT` reads the selection and the `pos_order_item_options` embed** (since stage 5,
   after `20260919130000` went live); `cartLineFromStored` turns the embed into `options` and the key
   into `option_ids`, so a reopened line has the shape the choice window builds.
-- **A dish with option groups always opens the choice window** (owner decision), and a failed option
-  catalog read is a failed menu read — without it a dish that must have a size could go on plain,
-  which `save_pos_order_items` accepts because it validates only rows that send options.
+- **A dish with option groups adds in ONE TAP when its defaults satisfy every group's rule, and
+  opens the choice window only when a required group has no default** (owner decision, S759 —
+  reversing S758's "always opens"). The one-tap path still goes through `addCustomLine` with
+  `defaultSelection(dishGroups)`, so a defaulted size is priced and snapshotted like any pick; the
+  cart's Choices / Change button opens the window for any unsent line whose dish has groups. A failed
+  option catalog read is still a failed menu read — without it a dish that must have a size could go
+  on plain, which `save_pos_order_items` accepts because it validates only rows that send options.
 - **A sent line's choices are never edited in place** (owner decision): remove it with a pull reason
   and add it again, so the kitchen gets a fresh ticket. Change exists only on an unsent line.
 - **Stock at close reads the SERVER snapshot, never the cart.** The cart's choices are built by the

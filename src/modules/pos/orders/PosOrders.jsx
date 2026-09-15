@@ -28,7 +28,7 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
 import OptionPickerModal from '../../customization/OptionPickerModal'
 import { loadOptionCatalog } from '../../customization/customizationData'
-import { groupsForDish, describeSelection } from '../../../shared/optionPricing'
+import { groupsForDish, describeSelection, defaultSelection, selectionProblems } from '../../../shared/optionPricing'
 import {
   cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
   cachePosSettings, getCachedPosSettings, cachePosOrderForTable, getCachedPosOrderForTable,
@@ -748,6 +748,8 @@ export default function PosOrders() {
   // ever felt on a value still in flight.
   const [previewSrc, setPreviewSrc] = useState(null)
   const previewTabRef = useRef(billingTab)
+  // Recipe id → the option ids it was last added with on this till (S759, "Same as last").
+  const lastPicksRef = useRef({})
   useEffect(() => {
     // Opening the modal, closing it, and switching tabs all paint immediately — the delay exists
     // for a field being typed into, and a pane showing the previous tab's document (or nothing at
@@ -1683,9 +1685,13 @@ export default function PosOrders() {
 
 
   function addItem(recipe) {
-    // A dish with option groups always opens the choice window (owner decision, S758).
+    // A dish with option groups (S758, revised S759 — owner decision): when its defaults already
+    // satisfy every group's rule, one tap adds the default line and the cart's Choices button is
+    // where it gets customized; the choice window opens only when a required group has no default.
     const dishGroups = dishGroupsByRecipe[recipe.id]
     if (dishGroups) {
+      const ids = defaultSelection(dishGroups)
+      if (selectionProblems(dishGroups, ids).length === 0) { addCustomLine(recipe, ids); return }
       setOptionPicker({ recipe, dishGroups })
       return
     }
@@ -1720,10 +1726,11 @@ export default function PosOrders() {
     computeSuggestions(recipe)
   }
 
-  // A dish with its choices, from the choice window. The same choices tapped again add to the same
-  // line; different choices are a new line. `replaceIdx` is the Change button on an unsent line:
-  // that line is replaced (or folded into an identical one already on the order).
-  function addCustomLine(recipe, optionIds, replaceIdx = null) {
+  // A dish with its choices, from the choice window or a one-tap default. The same choices tapped
+  // again add to the same line; different choices are a new line. `replaceIdx` is the Change button
+  // on an unsent line: that line is replaced (or folded into an identical one already on the order).
+  // `qty` is the choice window's stepper — how many to add, or the replaced line's new quantity.
+  function addCustomLine(recipe, optionIds, replaceIdx = null, qty = null) {
     const vat = vatReg ? vatOf(recipe) : 0
     const dishGroups = dishGroupsByRecipe[recipe.id] || []
     const attachByGroup = Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment]))
@@ -1735,10 +1742,13 @@ export default function PosOrders() {
       base_unit_price: base, options_delta: desc.delta, option_summary: desc.summary, options: desc.options,
     } : {}
     const key = lineKeyOf({ recipe_id: recipe.id, selection_key })
+    // Remembered per recipe so the choice window can offer "Same as last" on the next tap.
+    if (selection_key) lastPicksRef.current[recipe.id] = [...optionIds].map(String)
+    const wanted = qty == null ? null : Math.max(1, Number(qty) || 1)
     setOrderItems(prev => {
       const replaced = replaceIdx != null ? prev[replaceIdx] : null
       const rest = replaced ? prev.filter((_, n) => n !== replaceIdx) : prev
-      const addQty = replaced ? replaced.qty : 1
+      const addQty = replaced ? (wanted ?? replaced.qty) : (wanted ?? 1)
       const idx = rest.findIndex(i => lineKeyOf(i) === key)
       if (idx >= 0) {
         return rest.map((item, n) => n === idx
@@ -3739,7 +3749,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                         NPR {price}
                       </span>
                       {hasOptions && (
-                        <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>Has choices ›</span>
+                        <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>Choices</span>
                       )}
                       {kotTimer && (
                         <span style={{ fontSize: 10, fontWeight: 600, color: kotTimer.color }}>
@@ -3781,19 +3791,6 @@ The tables were left occupied rather than freed with their orders still open.`)
                       <span style={{ fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.3 }}>
                         {item.name}
                       </span>
-                      {item.selection_key && !item.sent_to_kot && !(item.sent_qty > 0) && dishGroupsByRecipe[item.recipe_id] && (
-                        <Tip text="Change this dish's choices. Once it has gone to the kitchen it can't be changed — remove it and add it again.">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const recipe = menu.find(m => m.id === item.recipe_id)
-                              if (!recipe) { setMsg('error:This dish is not on the till menu any more.'); return }
-                              setOptionPicker({ recipe, dishGroups: dishGroupsByRecipe[item.recipe_id], replaceIdx: idx, initialIds: item.option_ids || String(item.selection_key).split('+') })
-                            }}
-                            style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: 'pointer', fontFamily: 'inherit' }}
-                          >Change</button>
-                        </Tip>
-                      )}
                       {item.sent_to_kot && (
                         <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
                           <span style={{
@@ -3825,11 +3822,6 @@ The tables were left occupied rather than freed with their orders still open.`)
                         </Tip>
                       )}
                     </div>
-                    {item.option_summary && (
-                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.35, marginTop: 2 }}>
-                        {item.option_summary}
-                      </div>
-                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
                     <button onClick={() => setQty(idx, item.qty - 1)} style={btnSm} aria-label={`One fewer ${item.name}`}>−</button>
@@ -3844,9 +3836,41 @@ The tables were left occupied rather than freed with their orders still open.`)
                   <button
                     onClick={() => setQty(idx, 0)}
                     title="Remove"
+                    aria-label={`Remove ${item.name}`}
                     style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 18, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}
                   >×</button>
                   </div>
+                  {/* Choices line (S759): the summary and the Choices/Change button sit together under
+                      the name row, for ANY unsent line whose dish has option groups — a one-tap default
+                      line must still be customizable from the cart. */}
+                  {(() => {
+                    const lineGroups = dishGroupsByRecipe[item.recipe_id]
+                    if (!lineGroups && !item.option_summary) return null
+                    const canChange = !!lineGroups && !item.sent_to_kot && !(item.sent_qty > 0)
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.35 }}>
+                          {item.option_summary || 'No choices picked'}
+                        </span>
+                        {canChange && (
+                          <Tip text="Change this dish's choices. Once it has gone to the kitchen it can't be changed — remove it and add it again.">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              aria-label={`Change choices for ${item.name}`}
+                              onClick={() => {
+                                const recipe = menu.find(m => m.id === item.recipe_id)
+                                if (!recipe) { setMsg('error:This dish is not on the till menu any more.'); return }
+                                const initialIds = item.option_ids
+                                  || (item.selection_key ? String(item.selection_key).split('+') : defaultSelection(lineGroups))
+                                setOptionPicker({ recipe, dishGroups: lineGroups, replaceIdx: idx, initialIds })
+                              }}
+                            >{item.selection_key ? 'Change' : 'Choices'}</button>
+                          </Tip>
+                        )}
+                      </div>
+                    )
+                  })()}
                   <input
                     type="text"
                     aria-label={`Note for ${item.name}`}
@@ -3854,7 +3878,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     onChange={e => updateItemNote(idx, e.target.value)}
                     onFocus={() => setNoteFocusIdx(idx)}
                     onBlur={() => setNoteFocusIdx(null)}
-                    placeholder="+ Add note (e.g. no onion)"
+                    placeholder="+ Kitchen note (e.g. serve after starters)"
                     style={{
                       background: 'none', border: 'none', outline: 'none',
                       fontSize: 11, fontStyle: 'italic', color: 'var(--theme-text3)',
@@ -4554,10 +4578,12 @@ The tables were left occupied rather than freed with their orders still open.`)
           catalog={optionMaps}
           vatRate={vatReg ? vatOf(optionPicker.recipe) : 0}
           initialIds={optionPicker.initialIds}
+          initialQty={optionPicker.replaceIdx != null ? orderItems[optionPicker.replaceIdx]?.qty : undefined}
+          lastIds={lastPicksRef.current[optionPicker.recipe.id] || null}
           confirmLabel={optionPicker.replaceIdx != null ? 'Update dish' : 'Add to order'}
           onClose={() => setOptionPicker(null)}
-          onConfirm={ids => {
-            addCustomLine(optionPicker.recipe, ids, optionPicker.replaceIdx ?? null)
+          onConfirm={(ids, qty) => {
+            addCustomLine(optionPicker.recipe, ids, optionPicker.replaceIdx ?? null, qty)
             setOptionPicker(null)
           }}
         />

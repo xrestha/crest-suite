@@ -1,4 +1,4 @@
-import { adToBsSafe, formatAd } from '../../../utils/bsCalendar'
+import { adToBs, adToBsSafe, bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { nepalCivilDate } from '../../../shared/nepalTime'
 
 /**
@@ -29,6 +29,39 @@ export function nepalDayEndTs(adIso) {
  */
 export function todayNepalAdIso() {
   return formatAd(nepalCivilDate(new Date()))
+}
+
+/** Today as Nepal reads it, in BS — the anchor every month preset counts from. */
+export function todayNepalBs() {
+  return adToBs(nepalCivilDate(new Date()))
+}
+
+/** The BS { year, month } `offset` months away from a BS date (offset 0 = its own month). */
+export function shiftBsMonth(bsYear, bsMonth, offset) {
+  const idx = bsYear * 12 + (bsMonth - 1) + offset
+  return { year: Math.floor(idx / 12), month: (idx % 12) + 1 }
+}
+
+/**
+ * A range of whole BS months as AD `YYYY-MM-DD` strings, for a report's range presets (S759).
+ *
+ *   bsMonthRangeIso(0)      this month     — 1st of this BS month → today
+ *   bsMonthRangeIso(-1)     last month     — 1st → last day of last BS month
+ *   bsMonthRangeIso(-2, 0)  last 3 months  — 1st of two months ago → today
+ *
+ * `from` is day 1 of the month `fromOffset` months from today's; `to` is the last day of the month
+ * `toOffset` months from today's, capped at today so a range never runs into the future. Both go
+ * through `formatAd(bsToAd(...))` — never `.toISOString()`, which at +05:45 lands a day early.
+ * `todayBs` is injectable for tests.
+ */
+export function bsMonthRangeIso(fromOffset, toOffset = fromOffset, todayBs = todayNepalBs()) {
+  const start = shiftBsMonth(todayBs.year, todayBs.month, fromOffset)
+  const end = shiftBsMonth(todayBs.year, todayBs.month, toOffset)
+  const from = formatAd(bsToAd(start.year, start.month, 1))
+  const to = toOffset >= 0
+    ? formatAd(bsToAd(todayBs.year, todayBs.month, todayBs.day))
+    : formatAd(bsToAd(end.year, end.month, daysInBsMonth(end.year, end.month)))
+  return { from, to }
 }
 
 /**

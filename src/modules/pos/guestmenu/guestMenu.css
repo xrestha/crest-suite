@@ -221,3 +221,77 @@ body:has(.guest-menu) {
   outline: none;
   box-shadow: 0 0 0 2px var(--gm-pine), 0 0 0 5px rgba(0,70,67,0.16);
 }
+
+/* ── The choice sheet (GuestOptionSheet) ──────────────────────────────────────────────────────
+   An option chip is a radio or checkbox drawn as a 48px row. Both states live here, not inline,
+   so the checked state is a class rule the focus ring above composes with, and so that
+   `[aria-checked="true"]` is the one place "chosen" is painted. `.gm-option` is a modifier on
+   `.gm-chip` rather than a base rule on it, because the allergen toggles on the menu wear
+   `.gm-chip` too, with their own pill shape. */
+.guest-menu .gm-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--theme-border);
+  background: var(--theme-input-bg);
+  color: var(--theme-text1);
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+.guest-menu .gm-option[aria-checked="true"] {
+  border: 2px solid var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card));
+}
+/* A chip the group's maximum has shut is told why in its price slot ("Max 3"), so it keeps most
+   of its opacity — dimming to half was the only signal and read as a rendering fault. */
+.guest-menu .gm-option:disabled,
+.guest-menu .gm-option[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.guest-menu .gm-option-mark {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 2px solid var(--theme-border-lt);
+  background: transparent;
+}
+.guest-menu .gm-option[aria-checked="true"] .gm-option-mark {
+  border-color: var(--theme-accent);
+  background: var(--theme-accent);
+}
+/* "Required" beside a group's rule: a categorical tag in the page's own pine tint, sized to sit
+   on the 12px rule text. */
+.guest-menu .gm-required {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--gm-pine);
+  background: rgba(0,70,67,0.10);
+}
+/* The dish name and ✕ stay pinned while a long sheet scrolls. `.modal-sheet` pads 18px 16px, so
+   the header pulls itself back over that padding and re-pads, or the content would scroll past
+   in the gap above it. */
+.guest-menu .gm-sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin: -18px -16px 14px;
+  padding: 18px 16px 10px;
+  background: var(--theme-card);
+  border-bottom: 1px solid var(--theme-border);
+}
