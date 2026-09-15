@@ -29,8 +29,8 @@ In this order. Service charge was offered and **not** chosen.
   `save_pos_order_items` v5 prices and snapshots options server-side, `pos_order_item_options`,
   comps by line) — applied live 2026-09-15 and read back. Stages 5–8 built and pushed 2026-09-15:
   till choice window, KOT/KDS/bill, guest sheet, stock deduction through `orderLineIngredients.js` on
-  every IMS usage reader, Customization Report. **`20260919140000` (guest RPCs) is dry-run clean and
-  NOT yet applied** — until it is, guests see no choices.
+  every IMS usage reader, Customization Report. `20260919140000` (guest RPCs) applied live 2026-09-15
+  and read back; `admin-user-ops` and `billing-export` deployed the same day.
   Plan: `C:\Users\xrest\.claude\plans\i-want-to-add-hashed-ladybug.md`.
   Known follow-ups:
   - The Complimentary slip costs a comped dish at its recipe cost only; a customized dish's choice
@@ -40,12 +40,17 @@ In this order. Service charge was offered and **not** chosen.
   - `computeInventoryVariance` / `computeInventoryShrinkageTrend` (owner report) still sum sales
     without the POS-supersedes-manual rule the live pages apply (pre-existing), so a dish entered
     both ways counts its choices twice there, as it already did its recipe.
+  - **Smoke-tested end to end in a browser on BHATTI CHOILA (2026-09-15)** — all steps passed;
+    the SMK items, groups, open shift, paid Table 3 bill and open Table 4 order were left there on
+    purpose. Two cosmetic findings from it:
+    - The till cart row squeezes `option_summary` beside the qty buttons (a word or two per line,
+      and the dish name wraps too) — render it full-width under the row.
+    - The Customization Report footnote sits flush under its table, and the Choice margin tab
+      shows "—" for a choice with no stock lines without saying why.
   - Release 2: combos / build-your-own bundles.
   - Deleting a **sub-recipe** that an option's stock line uses is refused by the plain FK
     `pos_option_ingredients.sub_recipe_id` with a generic message — `deleteRecipe`'s pre-check only
     looks at `recipe_ingredients.sub_recipe_id`. Safe direction (nothing is lost); needs the wording.
-  - `billing-export` needs pasting into the dashboard and `admin-user-ops` redeploying for trials
-    and the Danger Zone to know about the module and its tables.
 - [ ] 🔴 **Kitchen and bar printers.** Routing KOT/BOT to a network printer per station instead of
   the till's own print dialog. `pos_bot_categories` already decides the station.
 
