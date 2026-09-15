@@ -12,7 +12,7 @@ import { nepalCivilDate, nepalTime, nepalTime24 } from '../../../shared/nepalTim
 import { normalizePhone } from '../../../utils/phone'
 import { SOURCES, OCCASIONS, LIVE_STATUSES, tableIdsOf } from './reservationStatus'
 import { durationFor } from './reservationSettings'
-import { findTableConflicts, MAX_DURATION_MINUTES } from './reservationConflicts'
+import { findTableConflicts, describeHoldRefusal, MAX_DURATION_MINUTES } from './reservationConflicts'
 
 const fmtNpr = npr
 
@@ -130,8 +130,10 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
     // time — the page's list can be minutes old and another device may have just booked the table —
     // and a failed read refuses rather than saving blind. The read reaches back the longest
     // duration a booking can have, so a long booking already running at the new start is seen.
-    // Not atomic: two devices saving the same table in the same second can both pass. There is no
-    // database constraint behind this (none was in scope), so it narrows the race, not closes it.
+    // Not atomic on its own: two devices saving the same table in the same second can both pass
+    // here. Since S755 the database closes that race (guard_pos_reservation_table_hold, under a
+    // per-table lock), and its refusal is worded by describeHoldRefusal below. This check stays
+    // because it names every clashing table before anything is written.
     if (tableIds.size > 0) {
       const start = new Date(payload.reserved_for).getTime()
       const end = start + payload.duration_minutes * 60000
@@ -157,10 +159,39 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
       }
     }
 
+    // S755: the database now checks a booking's EXISTING table links whenever its time moves. So an
+    // edit that moves the time AND gives up a table which clashes at the new time must release that
+    // table BEFORE the time moves, or the move is refused over a table the host is removing. Order:
+    // release every link not in the chosen set (by the SET, not by the row as loaded — another device
+    // may have changed the tables since), move the booking, then add whichever chosen tables the
+    // booking does not already hold, read fresh. Unchanged links are never deleted and re-inserted.
+    const chosen = [...tableIds]
+    const heldBefore = row ? tableIdsOf(row) : []
+    const releasing = row && heldBefore.some(tid => !tableIds.has(tid))
+    const plainDetail = err => `${err.code || ''} · ${err.message || ''}`.replace(/^ · /, '')
+
     let id = row?.id
     if (row) {
+      let rel = scopedDelete('pos_reservation_tables').eq('reservation_id', row.id)
+      if (chosen.length > 0) rel = rel.not('table_id', 'in', `(${chosen.join(',')})`)
+      const { error: relErr } = await rel
+      if (relErr) {
+        setSaving(false)
+        setSaveError({
+          text: `The booking for ${payload.customer_name} was not changed — the tables being taken off it could not be released. Try again.`,
+          detail: plainDetail(relErr),
+        })
+        return
+      }
       const { data, error } = await scopedUpdate('pos_reservations', payload).eq('id', row.id).select('id')
-      if (error) { setSaving(false); setSaveError(asActionError(error, 'staff')); return }
+      if (error) {
+        setSaving(false)
+        const hold = describeHoldRefusal(error)
+        const released = releasing ? ' Any table you removed has already been taken off it; nothing else changed.' : ' Nothing was changed.'
+        setSaveError(hold ? { text: hold.text + released, detail: hold.detail } : asActionError(error, 'staff'))
+        if (releasing) onSaved({ partial: true })
+        return
+      }
       if (!data || data.length === 0) {
         setSaving(false)
         setSaveError({ text: 'This booking no longer exists — it may have been removed on another device. Close and refresh the list.' })
@@ -174,22 +205,32 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
       id = data.id
     }
 
-    // Table assignment: replace the join rows. Two writes rather than one RPC on purpose — a
-    // half-applied assignment is visible on the row and re-editable, unlike order lines, where
-    // the same shape cost real data (S573). The sentence below names the consequence, not the
-    // constraint, because the booking itself has already been saved.
-    const { error: delErr } = await scopedDelete('pos_reservation_tables').eq('reservation_id', id)
+    // Table assignment: add the chosen tables the booking does not hold yet. Separate writes rather
+    // than one RPC on purpose — a half-applied assignment is visible on the row and re-editable,
+    // unlike order lines, where the same shape cost real data (S573). The sentences below name the
+    // consequence, not the constraint, because the booking itself has already been saved.
     let insErr = null
-    if (!delErr && tableIds.size > 0) {
-      ;({ error: insErr } = await scopedInsert('pos_reservation_tables', [...tableIds].map(table_id => ({ reservation_id: id, table_id }))))
+    let added = chosen
+    if (row && chosen.length > 0) {
+      const { data: nowHeld, error: heldErr } = await scopedFrom('pos_reservation_tables', 'table_id').eq('reservation_id', id)
+      if (heldErr) insErr = heldErr
+      else {
+        const have = new Set((nowHeld || []).map(r => r.table_id))
+        added = chosen.filter(tid => !have.has(tid))
+      }
+    }
+    if (!insErr && added.length > 0) {
+      ;({ error: insErr } = await scopedInsert('pos_reservation_tables', added.map(table_id => ({ reservation_id: id, table_id }))))
     }
     setSaving(false)
-    if (delErr || insErr) {
-      const err = delErr || insErr
-      setSaveError({
-        text: `The booking for ${payload.customer_name} was saved, but its table assignment was not — open it again and set the tables.`,
-        detail: `${err.code || ''} · ${err.message || ''}`.replace(/^ · /, ''),
-      })
+    if (insErr) {
+      const hold = describeHoldRefusal(insErr)
+      setSaveError(hold
+        ? { text: `The booking for ${payload.customer_name} was saved without ${added.length === 1 ? 'that table' : 'its new tables'}. ${hold.text}`, detail: hold.detail }
+        : {
+            text: `The booking for ${payload.customer_name} was saved, but its table assignment was not — open it again and set the tables.`,
+            detail: plainDetail(insErr),
+          })
       onSaved({ partial: true })
       return
     }

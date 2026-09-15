@@ -1,4 +1,7 @@
-import { windowsOverlap, findTableConflicts } from './reservationConflicts'
+import fs from 'fs'
+import path from 'path'
+import { windowsOverlap, findTableConflicts, describeHoldRefusal } from './reservationConflicts'
+import { LIVE_STATUSES } from './reservationStatus'
 
 const at = hm => `2026-09-14T${hm}:00+05:45`
 const booking = (id, hm, minutes, tables, status = 'booked', extra = {}) => ({
@@ -85,5 +88,51 @@ describe('findTableConflicts', () => {
   test('a missing duration falls back to windowOf\'s 90 minutes', () => {
     const existing = booking('a', '18:00', null, ['t4']) // 18:00–19:30 by fallback
     expect(findTableConflicts({ reserved_for: at('19:15'), duration_minutes: 30 }, ['t4'], [existing])).toHaveLength(1)
+  })
+})
+
+// S755. The same rule is enforced twice — here, and by guard_pos_reservation_table_hold in the
+// database — and the two must mean the same "live". The server cannot import this file, so the
+// test reads the migration: the S707 itemRefTables technique.
+describe('the database half of the table-hold rule', () => {
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', '..', '..', '..', 'supabase', 'migrations', '20260917100000_pos_open_gaps_s755.sql'), 'utf8')
+
+  test('pos_reservation_is_live() lists exactly LIVE_STATUSES', () => {
+    const body = sql.match(/FUNCTION public\.pos_reservation_is_live[\s\S]*?ARRAY\[([^\]]*)\]/)
+    expect(body).not.toBeNull()
+    const statuses = body[1].split(',').map(s => s.trim().replace(/'/g, ''))
+    expect([...statuses].sort()).toEqual([...LIVE_STATUSES].sort())
+  })
+
+  test('the window is half-open, exactly as windowsOverlap reads it', () => {
+    // strict < on both sides: touching ends do not clash
+    expect(sql).toMatch(/me\.reserved_for < o\.reserved_for\s+\+ make_interval\(mins => o\.duration_minutes\)/)
+    expect(sql).toMatch(/o\.reserved_for\s+< me\.reserved_for \+ make_interval\(mins => me\.duration_minutes\)/)
+  })
+})
+
+describe('describeHoldRefusal', () => {
+  const details = JSON.stringify({
+    table_id: 't1', table_name: 'Table 4', reservation_id: 'r9', customer_name: 'Sharma',
+    party_size: 4, reserved_for: '2026-09-18T13:45:00+00:00', duration_minutes: 90,
+  })
+
+  test('words the refusal from the structured detail, in Nepal time', () => {
+    const out = describeHoldRefusal({ code: '23P01', hint: 'table_hold_overlap', message: 'table_hold_overlap: Table 4 is already held…', details })
+    expect(out.text).toMatch(/^Table 4 is already held for Sharma ×4 at 0?7:30 PM on 2 Ashwin/)
+    expect(out.text).toMatch(/another device/)
+    expect(out.detail).toMatch(/^23P01 · table_hold_overlap/)
+  })
+
+  test('matches on the message code when the hint was lost, and still says something without a detail', () => {
+    const out = describeHoldRefusal({ message: 'table_hold_overlap: Table 4 is already held…' })
+    expect(out.text).toMatch(/another device/)
+  })
+
+  test('is null for any other failure', () => {
+    expect(describeHoldRefusal(null)).toBeNull()
+    expect(describeHoldRefusal({ code: '42501', message: 'permission denied' })).toBeNull()
+    expect(describeHoldRefusal({ message: 'no_table_hold_overlap_here' })).toBeNull()
   })
 })

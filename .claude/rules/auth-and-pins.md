@@ -106,7 +106,11 @@ its own key revokes that key, not just the localStorage copy.
 not in the schema cache, i.e. the function deployed ahead of the migration), so a deploy-order slip
 does not lock out every tablet already on a floor. Any other error refuses. **When every client has
 switched the shared key off, delete the legacy branch, its fallback and `get_pos_staff`'s secret
-comparison** (`POS_TODO.md` A2). **Archiving a client does not revoke its tablet keys yet.**
+comparison** (`POS_TODO.md` A2). **Archive, Clear Client Data, Delete Client and the trial purge revoke every
+tablet key and rotate/retire the shared key (S755)**. `revokeClientTablets` runs first inside
+`deleteClientDataFor`, with the service role, because `revoke_pos_device` and
+`retire_pos_legacy_device_key` refuse a caller with no session. The caller is recorded as
+`revoked_by`. A restore brings neither back, so each tablet is re-activated from POS Setup.
 
 ### Login/auth pages: seven things that were wrong once and are easy to reintroduce
 

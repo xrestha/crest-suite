@@ -195,6 +195,23 @@ const rules = [
     staff: 'That table still has an open bill, so it cannot be deleted. Nothing was removed.',
     operator: 'That table still has an open bill (its order number is in the detail below), so it was not deleted — the bill would vanish from the floor with nobody able to reach it. Bill or void that order first.',
   },
+  // S755 (migration 20260917100000). Both are raised by a trigger in the statement that wrote, so
+  // the statement rolled back and each may say this write did not land.
+  {
+    // guard_pos_reservation_table_hold. ReservationModal and PosReservations word it themselves
+    // from the structured DETAIL (reservationConflicts.describeHoldRefusal); this is the fallback.
+    test: e => hasCode(e, 'table_hold_overlap'),
+    staff: 'That table is already booked for an overlapping time — probably on another device a moment ago. This change was not saved; refresh the list, then pick another table or change the time.',
+    operator: 'Another live booking holds one of these tables at an overlapping time (named in the detail below), so this change was refused rather than double-book the table. Refresh the list, then pick another table or move one of the bookings.',
+  },
+  {
+    // guard_pos_credit_note's amount check. The modal computes the note from the bill's lines; a
+    // mismatch means the lines, the discount or the VAT setting it read are not what the bill was
+    // charged with — never something a retry fixes.
+    test: e => hasCode(e, 'credit_note_amounts'),
+    staff: 'The amounts on this Credit Note do not match the bill, so no note was issued. Close this, reload the bill and try again — tell your manager if it happens again.',
+    operator: 'The Credit Note’s amounts do not match the bill it credits (both sets are in the detail below), so no note was issued and nothing was numbered. A note credits exactly what the bill charged: reload the bill and issue it again. If the outlet’s VAT registration changed since the bill was printed, the note cannot be issued from the till — contact support.',
+  },
   {
     test: e => hasCode(e, 'pos_tables_rank'),
     staff: 'Only the owner or a POS manager can add, rename, move or delete tables. Nothing was changed.',

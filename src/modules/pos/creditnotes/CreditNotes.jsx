@@ -16,6 +16,9 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const fmtNpr = npr
 
+// pos_credit_notes.refund_method (S755). NULL on notes issued before it existed.
+const REFUND_LABEL = { cash: 'Cash', other: 'Card / QR / bank', none: 'None' }
+
 export default function CreditNotes() {
   const { clientId, hasPosAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
@@ -168,6 +171,7 @@ export default function CreditNotes() {
         'Date (BS)': bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${String(n.created_at).slice(0, 10)} (AD)`,
         'Buyer': n.buyer_name || 'CASH SALES',
         'Reason': n.reason,
+        'Money Back': REFUND_LABEL[n.refund_method] || 'Not recorded',
         'Gross (NPR)': Math.round(n.gross_amount * 100) / 100,
         'VAT (NPR)': Math.round(n.vat_amount * 100) / 100,
         'Net (NPR)': Math.round(n.net_amount * 100) / 100,
@@ -285,6 +289,11 @@ export default function CreditNotes() {
                 <thead>
                   <tr>
                     <th>CN No</th><th>Ref Invoice No</th><th>Date</th><th>Buyer</th><th>Reason</th>
+                    <th>
+                      <Tip width={300} text="How money went back to the customer when the note was issued. Cash was paid out of the till and recorded as a Refund on the shift; Card / QR / bank and None took nothing off the drawer. Kept with the note, never printed on it. Notes issued before this was recorded show Not recorded.">
+                        Money Back
+                      </Tip>
+                    </th>
                     <th style={{ textAlign: 'right' }}>Gross</th><th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>Net</th>
                     <th>Issued By</th><th></th>
                   </tr>
@@ -310,6 +319,12 @@ export default function CreditNotes() {
                         <td>{bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]}` : `${String(n.created_at).slice(0, 10)} (AD)`}</td>
                         <td>{n.buyer_name || 'CASH SALES'}</td>
                         <td>{n.reason}</td>
+                        <td>
+                          {/* S755: its own column, off the printed note (it used to be appended to the reason). */}
+                          {REFUND_LABEL[n.refund_method]
+                            ? <span className="badge-gray" style={{ whiteSpace: 'nowrap' }}>{REFUND_LABEL[n.refund_method]}</span>
+                            : <span style={{ color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>Not recorded</span>}
+                        </td>
                         <td style={{ textAlign: 'right' }}>{fmtNpr(n.gross_amount)}</td>
                         <td style={{ textAlign: 'right' }}>{fmtNpr(n.vat_amount)}</td>
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(n.net_amount)}</td>
@@ -323,7 +338,7 @@ export default function CreditNotes() {
                 </tbody>
                 <tfoot>
                   <tr style={{ fontWeight: 700 }}>
-                    <td colSpan={5}>TOTAL</td>
+                    <td colSpan={6}>TOTAL</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(totals.gross)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(totals.vat)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNpr(totals.net)}</td>

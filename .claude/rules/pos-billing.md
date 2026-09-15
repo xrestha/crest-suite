@@ -248,6 +248,14 @@ name against it.
   non-atomic-save risk besides.
 - Surfaced on **KOT Log → Pulled Items**. Keep Reconciliation too: it *infers* a pull from the
   order's current state, so it still catches one made by a path that predates the record.
+- **A delete outside the RPC records too (S755, `20260917100000`).** Clear Occupied and any REST
+  delete of an open order's lines used to take fired food with no record. An AFTER STATEMENT trigger
+  on `pos_order_items` (and a BEFORE DELETE on `pos_orders`) writes the removal with reason
+  "Table cleared", using the RPC's own definition of sent, skipped inside the RPC
+  (`crest.pos_items_rpc`), for a non-browser request (the JWT role claim, since a cascade changes
+  `current_user`) and when the client itself is being deleted. **`pos_kot_removals.order_id` is now
+  nullable and SET NULL**, with `order_no`/`table_name` snapshotted, because the record has to
+  outlive the order it was pulled from — under CASCADE, Clear Occupied's second statement destroyed it.
 - The 2-arg `save_pos_order_items` signature was **dropped**, against the standing keep-the-old-
   arity rule in `.claude/rules/supabase-sql.md`. PostgREST resolves by argument name, so keeping
   both would make every 2-arg call ambiguous (`function is not unique`) — dropping it is what lets
@@ -383,6 +391,12 @@ and `closed_at := now()`, because a tablet's clock could backdate a bill into a 
 `credit_settled_by` and `pos_credit_notes.issued_by` are stamped the same way. A foreign-key
 cascade runs as the table owner and passes the `current_user` seam, which was measured live: deleting a profile or
 shift that a billed order names is Postgres's write, not the browser's, and is not refused.
+**That was measured on a BEFORE row trigger (`guard_pos_order_close`); an AFTER STATEMENT trigger on
+the child does not see it (measured S755).** It fires once the outer statement ends, as the caller. So a
+browser's DELETE of an open order that still has lines is refused by `guard_pos_order_items_closed`
+as "closed and printed": its LEFT JOIN reads the just-deleted parent as not open. It is fail-closed
+and no app path reaches it (`POS_TODO.md` A2). A guard that must tell who asked through a cascade
+keys on `auth.jwt() ->> 'role'`, not `current_user`.
 
 ## A rank the screen requires must be enforced by the table (S754)
 
@@ -431,8 +445,10 @@ Recorded so they aren't rediscovered from scratch:
 - **The close-time guards (discount cap, void, item comp) are closed**, applied and smoke-tested
   (S577–S579). **S754 found what they left open: the closed bill itself, and every other POS table
   a rank gated only on screen** (both sections above). Its migrations were applied live on
-  2026-09-14. Its known gaps are in `POS_TODO.md` A2: a same-second double table hold, Clear
-  Occupied skipping the pulled-item record, and credit-note amounts computed in the browser. The
+  2026-09-14. S755 (`20260917100000`, live 2026-09-15) closed its known gaps: a
+  same-second double table hold, Clear Occupied skipping the pulled-item record, credit-note amounts
+  trusted as sent, archived outlets keeping their tablet keys, and the refund method printed on the
+  note. What remains open is in `POS_TODO.md` A2. The
   payment-QR work stays blocked on FonePay/eSewa merchant onboarding, which is a business
   relationship rather than engineering.
 - ~~**The mechanical sweep.**~~ **Closed across S576–S578**, with a fourth pass in S603. Labels: 0
@@ -844,9 +860,16 @@ are load-bearing, each with the reason it exists:
   request blocked the slot for every other guest on the public page.
 - **One table cannot be held by two bookings whose windows overlap (S754, owner decision)** —
   `reservationConflicts.js`, over the same half-open `windowOf()` the floor reads, so a 6:00–7:30
-  booking and a 7:30 booking on one table do not clash. **It is a browser check only.** Two
-  devices saving in the same second both land, and no database constraint exists yet
-  (`POS_TODO.md` A2).
+  booking and a 7:30 booking on one table do not clash. **The database enforces it too (S755,
+  `guard_pos_reservation_table_hold`)**, so two devices saving in the same second cannot both land.
+  It is a statement trigger on `pos_reservation_tables` insert/update and on a `pos_reservations`
+  update that moves a live booking's window or revives it. It takes `pg_advisory_xact_lock` per table
+  in id order, then re-reads with a fresh snapshot, so the second saver is the one refused
+  (`table_hold_overlap`, other booking as JSON in DETAIL, worded by `describeHoldRefusal`). The
+  live-status list is written once in `pos_reservation_is_live()`, and `reservationConflicts.test.js`
+  asserts it equals `LIVE_STATUSES`. The operator's restore insert is exempt. **An edit that moves
+  the time releases dropped tables BEFORE the update**, or the move is refused over a table being
+  removed (`ReservationModal.save`).
 - **Nothing self-confirms.** A public request lands as `requested` and waits for a staff Accept;
   there is no phone verification because there is no SMS rail (POS_TODO C). The staff WhatsApp or
   call is the verification.
@@ -926,8 +949,10 @@ happens" rule** (owner decisions).
   record read as a shortfall at the shift close. **Cash** writes a `pos_cash_movements` refund on
   the open shift. It is checked BEFORE the note is issued, twice (when Cash is picked, and again on
   Issue), because refusing after a permanent numbered note exists is not available. **Other** and
-  **None** store nothing in cash and append a suffix to the note's reason line. That suffix prints
-  on the tax document, which is a known gap (`POS_TODO.md` A2).
+  **None** store nothing in cash. **The answer is `pos_credit_notes.refund_method` (S755)**, shown
+  in the Credit Note Book and never printed. It was appended to the reason, which printed on the tax
+  document as if it were the reason. Notes issued before S755 keep that text: a printed note is not
+  rewritten.
 - **The bill's loyalty is reversed** through `reverse_loyalty_for_credit_note`.
 
 Both run whether or not the bill link landed, because the money and the points follow the NOTE. A
@@ -935,7 +960,12 @@ failure of either is a warning naming what now reads wrong, never a reason to wi
 
 **Issuing is manager-only in the table too** (`guard_pos_credit_note`): `issued_by` is stamped,
 a note is never edited except its print count and Inventory stamp, never deleted, and a bill is
-credited once. **The amounts are still computed in the browser**, and nothing checks them against
-the bill (`POS_TODO.md` A2). **A Credit bill with a credit note against it is no longer owed**, so
+credited once. **The amounts are checked against the bill (S755, HINT `credit_note_amounts`)**
+without a second copy of the VAT formula. The note's gross must equal the bill's non-comped lines,
+its discount the bill's discount, taxable + non-taxable must equal gross − discount, and net must
+equal taxable + non-taxable + VAT within the rupee rounding and `paid_amount` within NPR 1. VAT needs
+a taxable base. `paid_amount` is `payTotal`, the same expression as `computeOrderAmounts().net`,
+which is why pinning net to it pins VAT too. A client whose VAT registration changed between the
+bill and the note is refused, correctly. **A Credit bill with a credit note against it is no longer owed**, so
 it leaves Customers → Outstanding. A bill settled before it was credited stays in Collected,
 because that money really changed hands.

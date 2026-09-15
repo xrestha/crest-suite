@@ -9,6 +9,77 @@ const CORS = {
 }
 
 /**
+ * Revokes every live tablet key a client holds and switches its legacy shared key off (S755).
+ *
+ * Archive, Clear Client Data, Delete Client and the trial purge all run deleteClientDataFor, and
+ * none of them touched `pos_devices` (migration 20260916120000): an archived outlet's tablets kept
+ * keys that pos-staff-login still accepted, and Archive keeps every staff login, so a tablet on the
+ * counter of a client who had left could still sign a waiter in. Delete Client cascades the rows
+ * away eventually; Archive and Clear never did.
+ *
+ * The same two writes as `revoke_pos_device` and `retire_pos_legacy_device_key`, done here with the
+ * service role because both functions refuse a caller with no session (`pos_device_caller_may_manage`
+ * keys on auth.uid(), which is NULL under the service role). The legacy key is ROTATED, not just
+ * stamped, exactly as the SQL function does, so every comparison against the old value — a tablet
+ * on a pre-S754 bundle included — stops matching. Both are idempotent: an already-revoked tablet
+ * and an already-retired key are left alone, so a retried Archive changes nothing twice.
+ *
+ * A restore brings the data back but NOT the keys (pos_devices is never exported), so a restored
+ * client re-activates each tablet from POS Setup — the confirm copy in ClientDrawer says so.
+ *
+ * Audit rows mirror `pos_devices_audit` (never the hash) and the retire function's timestamp-only
+ * row; `client_secrets` is deliberately unaudited because its snapshot would carry both secrets.
+ * An audit insert that fails is logged, not thrown — the revocation it describes has already landed.
+ */
+async function revokeClientTablets(admin: ReturnType<typeof createClient>, clientId: string, actorId: string | null) {
+  const now = new Date().toISOString()
+
+  const { data: revoked, error: devErr } = await admin
+    .from('pos_devices')
+    .update({ revoked_at: now, revoked_by: actorId })
+    .eq('client_id', clientId)
+    .is('revoked_at', null)
+    .select('id, client_id, name, created_by, created_at, last_used_at, revoked_at, revoked_by')
+  if (devErr) throw new Error(`Failed to revoke this client's POS tablet keys: ${devErr.message}`)
+
+  const { data: retired, error: keyErr } = await admin
+    .from('client_secrets')
+    .update({ pos_device_secret: crypto.randomUUID(), pos_legacy_key_retired_at: now, updated_at: now })
+    .eq('client_id', clientId)
+    .is('pos_legacy_key_retired_at', null)
+    .select('client_id, pos_legacy_key_retired_at')
+  if (keyErr) throw new Error(`Failed to switch off this client's shared POS key: ${keyErr.message}`)
+
+  const devices = (revoked || []) as Array<Record<string, unknown>>
+  const legacyRetired = (retired || []).length > 0
+  if (devices.length > 0 || legacyRetired) {
+    const { data: cl } = await admin.from('clients').select('name').eq('id', clientId).maybeSingle()
+    let userName: string | null = null
+    if (actorId) {
+      const { data: pr } = await admin.from('profiles').select('full_name').eq('id', actorId).maybeSingle()
+      userName = pr?.full_name ?? null
+    }
+    const base = { client_id: clientId, client_name: cl?.name ?? null, user_id: actorId, user_name: userName }
+    const rows = [
+      ...devices.map((d) => ({
+        ...base, table_name: 'pos_devices', action: 'UPDATE', record_id: d.id,
+        old_data: { ...d, revoked_at: null, revoked_by: null },
+        new_data: d,
+      })),
+      ...(legacyRetired ? [{
+        ...base, table_name: 'client_secrets', action: 'UPDATE', record_id: clientId,
+        old_data: { pos_legacy_key_retired_at: null },
+        new_data: { pos_legacy_key_retired_at: now },
+      }] : []),
+    ]
+    const { error: auditErr } = await admin.from('audit_logs').insert(rows)
+    if (auditErr) console.error('[admin-user-ops] tablet revocation audit insert failed:', auditErr.message)
+  }
+
+  return { tablets_revoked: devices.length, legacy_key_retired: legacyRetired }
+}
+
+/**
  * Deletes every business row belonging to one client, in FK-safe order.
  *
  * Extracted from the `deleteClientData` action (S672) so the automatic trial purge can reuse the
@@ -24,8 +95,13 @@ const CORS = {
  *   those user ids, so deleting them would irreversibly lose every staff PIN on a path the product
  *   calls fully reversible (S574).
  */
-async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clientId: string, keepStaffVault = false) {
+async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clientId: string, keepStaffVault = false, actorId: string | null = null) {
   const keep_staff_vault = keepStaffVault
+
+  // S755: tablets first. If a delete below throws, the client is half-cleared and the operator
+  // retries — but no tablet of a client being archived or wiped stays able to sign a waiter in
+  // meanwhile. Idempotent, so the retry is safe.
+  const tablets = await revokeClientTablets(admin, clientId, actorId)
   // keep_staff_vault: passed by Archive. Archive keeps every auth login, and the vault rows
   // key on those user ids — deleting them made the product's "fully reversible" path
   // irreversibly lose every staff PIN: the restore's vault-rebuild branch only runs when the
@@ -169,6 +245,8 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   if (!keep_staff_vault) {
     await del(admin.from('staff_pin_vault').delete().eq('client_id', clientId), 'staff_pin_vault')
   }
+
+  return tablets
 }
 
 Deno.serve(async (req) => {
@@ -2002,8 +2080,9 @@ Deno.serve(async (req) => {
     if (action === 'deleteClientData') {
       const { clientId, keep_staff_vault } = params
       if (!clientId) return json({ error: 'clientId is required' }, 400)
-      await deleteClientDataFor(admin, clientId, keep_staff_vault === true)
-      return json({ success: true })
+      // S755: the caller is recorded as the revoker of every tablet key this clears.
+      const tablets = await deleteClientDataFor(admin, clientId, keep_staff_vault === true, user.id)
+      return json({ success: true, ...tablets })
     }
 
     return json({ error: `Unknown action: ${action}` }, 400)

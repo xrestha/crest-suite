@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-14 (S754 — the POS re-analysis: owner-ranked next builds, its known gaps, and B4's two items moved to `POS_DECISIONS.md`)
+Last updated: 2026-09-15 (S755 — five of the S754 known gaps closed in migration `20260917100000` and `admin-user-ops`; one new gap filed in A2)
 
 ---
 
@@ -33,17 +33,15 @@ The S754 migrations (`20260916100000`, `20260916110000`, `20260916120000`) and E
 (`pos-staff-login`, `admin-user-ops`) were written and tested but **not applied or deployed live**
 when these were filed. Every item below assumes they are.
 
-- [ ] 🟡 **Two bookings saved in the same second can hold the same table.** The overlap refusal
-  (`reservationConflicts.js`) runs in the browser against the bookings on screen. No database
-  constraint backs it, so two devices saving at once both land. The fix is an exclusion constraint
-  (or a check inside a save function) over `pos_reservation_tables` × the booking window.
-- [ ] 🟡 **Clear Occupied deletes open orders directly**, so the pulled-item record
-  (`pos_kot_removals`, written inside `save_pos_order_items`) is never written for food already
-  fired on them. The Kitchen Display's struck-through "cancelled" lines and KOT Log → Pulled Items
-  both miss those. Route the clear through the RPC, or record the removal first.
-- [ ] 🟡 **Credit-note amounts are computed in the browser** (`IssueCreditNoteModal`) and stored as
-  sent. `guard_pos_credit_note` fixes who issues it and that it is never edited. It does not check
-  that the note's gross, VAT and net match the bill it credits.
+- [x] **Two bookings saved in the same second can hold the same table** — closed S755:
+  `guard_pos_reservation_table_hold` refuses an overlapping live hold under a per-table advisory lock
+  (`table_hold_overlap`), on a table link, a window move and a revival.
+- [x] **Clear Occupied left no pulled-item record** — closed S755: deleting a fired open line outside
+  `save_pos_order_items` writes `pos_kot_removals` ("Table cleared"), and the row now outlives its
+  order (`order_id` SET NULL, `order_no`/`table_name` snapshotted).
+- [x] **Credit-note amounts were trusted as sent** — closed S755: `guard_pos_credit_note` checks gross
+  against the charged lines, discount and net against the bill, and the VAT split, with no second
+  copy of the VAT formula (`credit_note_amounts`).
 - [ ] 🟡 **The public booking rate limit trusts the first hop of `x-forwarded-for`**
   (`submit_reservation_request`), which a caller can set. S754 deliberately left it alone, because
   nobody has confirmed which hop Supabase's proxy chain appends as trusted. Confirm that first, then
@@ -51,14 +49,19 @@ when these were filed. Every item below assumes they are.
 - [ ] 🔵 **Remove the legacy shared device key once every client has switched it off.** Code to
   remove: the `verify_pos_legacy_device` branch in `pos-staff-login`, its `PGRST202` fallback, and
   `get_pos_staff`'s secret comparison. POS Setup shows when each client's shared key was last used.
-- [ ] 🟡 **Archiving a client does not revoke its tablet keys** (`pos_devices`). Deleting a client
-  cascades them away. Archive keeps the client restorable, so an archived outlet's tablets keep keys
-  that `pos_devices` still counts as live. Archive should revoke them, and a restore should mean
-  re-activating each tablet.
-- [ ] 🟡 **A credit note's reason line prints "(no money returned)".** When the manager picks
-  Other or None for how money went back, that choice is appended to the stored reason, because the
-  note has no remarks column. It then prints on the tax document as if it were the reason. It needs
-  its own column, or it should stay off the print.
+- [x] **Archiving a client did not revoke its tablet keys** — closed S755: `deleteClientDataFor` in
+  `admin-user-ops` (Archive, Clear Client Data, Delete Client, the trial purge) revokes every live
+  `pos_devices` key and rotates/retires the shared key first; a restored client re-activates tablets.
+- [x] **A credit note's reason line printed "(no money returned)"** — closed S755: the answer is
+  `pos_credit_notes.refund_method`, shown in the Credit Note Book, never printed. Notes issued before
+  S755 keep their reason text as printed.
+- [ ] 🟡 **Deleting an open order that still has lines is refused as "this bill is closed and
+  printed"** (found S755, measured rolled back on live). `guard_pos_order_items_closed_del` is an
+  AFTER STATEMENT trigger, so inside the `pos_orders` cascade it fires as `authenticated` and its
+  LEFT JOIN reads the just-deleted parent as not open. Fail-closed and reached by no app path (Clear
+  Occupied deletes the lines first), but the message is wrong and a direct REST delete of an open
+  order cannot succeed. Fix: tell a deleted parent from a closed one inside a SECURITY DEFINER lookup
+  (the S749 pattern). `record_pos_kot_removals_on_order_delete` already records that path once it can.
 
 ## B. Reports — compliance-adjacent
 

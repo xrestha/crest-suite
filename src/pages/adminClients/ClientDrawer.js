@@ -2156,7 +2156,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
             verb: 'Archive Client',
             body: <>A backup is taken first, then all operational data is cleared and the account is locked.
               Their user accounts, logins, settings and the client record are <strong>kept</strong>, so
-              restoring the backup reverses this. Use this rather than Delete for a client who is leaving.</>,
+              restoring the backup reverses this. Use this rather than Delete for a client who is leaving.
+              Every POS tablet is signed out for good and the shared till key is switched off; a restore does not
+              bring them back, so each tablet is activated again from POS Setup.</>,
             run: handleArchiveClient,
           },
           clientData: {
@@ -2165,7 +2167,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
             body: <>Removes everything across all modules — IMS (items, vendors, recipes, purchases, stock,
               sales, payables, periods), HR (employees, attendance, payroll, leave, roster) and POS (tables,
               orders, shifts, customers). The client record, user accounts, feature flags and settings are
-              kept. <strong>This cannot be undone.</strong></>,
+              kept. Every POS tablet key is revoked and the shared till key is switched off, so each tablet has to be
+              activated again from POS Setup. <strong>This cannot be undone.</strong></>,
             run: handleDeleteClientData,
           },
           deleteClient: {

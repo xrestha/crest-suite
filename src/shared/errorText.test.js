@@ -159,7 +159,9 @@ describe('errorText', () => {
         'credit_note_exists', 'award_window_closed', 'redeem_exceeds_bill', 'pos_shift_rank', 'pos_cash_movement_rank',
         'pos_cash_refund_rank', 'pos_setup_rank', 'invoice_settings_rank', 'pos_tables_rank', 'loyalty_rank',
         'loyalty_enrol_rank', 'pos_shift_closed', 'pos_shift_locked', 'pos_cash_movement_locked',
-        'pos_cash_movement_shift_closed', 'pos_cash_refund_over', 'pos_table_has_open_order']
+        'pos_cash_movement_shift_closed', 'pos_cash_refund_over', 'pos_table_has_open_order',
+        // S755
+        'table_hold_overlap', 'credit_note_amounts']
       for (const c of codes) {
         for (const aud of ['staff', 'operator']) {
           const text = errorText({ code: '42501', hint: c, message: 'refused' }, aud)
@@ -167,6 +169,24 @@ describe('errorText', () => {
           expect([c, text]).not.toEqual([c, fallback[aud]])
         }
       }
+    })
+  })
+
+  // S755. A same-second double booking and a credit note whose amounts are not the bill's.
+  describe('the S755 table-hold and credit-note amount refusals', () => {
+    it('a table-hold refusal says the table is taken and sends the reader to refresh, ahead of the generic sentences', () => {
+      const err = { code: '23P01', hint: 'table_hold_overlap', message: 'table_hold_overlap: Table 4 is already held for Sharma ×4 at 7:30 PM on 2026-09-18 (Nepal time) — pick another table or change the time' }
+      expect(errorText(err, 'staff')).toMatch(/already booked/i)
+      expect(errorText(err, 'operator')).toMatch(/refresh the list/i)
+      expect(errorText({ message: err.message }, 'operator')).toBe(errorText(err, 'operator'))
+    })
+
+    it('a credit-note amount refusal says no note was issued and that a retry of the same amounts will not help', () => {
+      const err = { code: '23514', hint: 'credit_note_amounts', message: 'pos_credit_notes: the amounts on this Credit Note do not match the bill it credits' }
+      expect(errorText(err, 'operator')).toMatch(/no note was issued/i)
+      expect(errorText(err, 'operator')).toMatch(/reload the bill/i)
+      // ahead of the generic CHECK sentence the 23514 code would otherwise get
+      expect(errorText(err, 'operator')).not.toBe(errorText({ code: '23514' }, 'operator'))
     })
   })
 

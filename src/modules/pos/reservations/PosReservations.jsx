@@ -25,6 +25,7 @@ import {
   STATUS_LABEL, LIVE_STATUSES, canTransition, canRevive, stampFor, isLate, waitingMinutes, tableIdsOf,
   RESERVATION_SELECT, SOURCE_LABEL, CANCEL_REASONS, DECLINE_REASONS,
 } from './reservationStatus'
+import { describeHoldRefusal } from './reservationConflicts'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from './reservationSettings'
 import { activityEvent, agoLabel, isNewSince, groupByDay } from './reservationActivity'
 import { readSeenStamp, writeSeenStamp } from '../../../shared/reservationSeen'
@@ -280,7 +281,9 @@ export default function PosReservations() {
     const { data, error } = await scopedUpdate('pos_reservations', { ...stampFor(to, undefined, row.status), ...extra })
       .eq('id', row.id).eq('status', row.status).select('id')
     setBusyId(null)
-    if (error) { setActionError(asActionError(error, 'staff')); return false }
+    // S755: reviving a no-show or a cancelled booking puts its tables back on hold, and the database
+    // refuses that when another live booking holds one of them at an overlapping time.
+    if (error) { setActionError(describeHoldRefusal(error) || asActionError(error, 'staff')); return false }
     if (!data || data.length === 0) {
       setActionError({ text: `${row.customer_name}'s booking was changed on another device — the list has been refreshed.` })
       await load({ quiet: true })

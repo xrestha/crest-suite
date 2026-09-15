@@ -16,14 +16,14 @@ import { postCreditNoteToIms } from './creditNotePosting'
 // Credit Note corrects the VAT register and says nothing about the drawer: a cash refund handed
 // over the counter with no record reads as a shortfall at the shift close, which is exactly the
 // variance the Z-report exists to explain. Cash writes a pos_cash_movements refund on the open
-// shift; Other and None store nothing in cash and say so on the note's own reason line (the note
-// has no separate remarks field).
+// shift; Other and None store nothing in cash. The answer is stored in pos_credit_notes.refund_method
+// (S755) and shown in the Credit Note Book — never on the printed note: it used to be appended to
+// the reason, which printed on the statutory document as if it were the reason.
 const REFUND_OPTIONS = [
   { value: 'cash',  label: 'Cash',  hint: 'Paid out of the till — recorded as a Refund on the open shift, so the drawer count expects it.' },
   { value: 'other', label: 'Other (card, QR, bank)', hint: 'Returned outside the till. Nothing is taken off the drawer count.' },
   { value: 'none',  label: 'None',  hint: 'No money went back — e.g. the bill was re-issued to the right customer.' },
 ]
-const REFUND_REASON_SUFFIX = { other: ' (money returned by card, QR or bank)', none: ' (no money returned)' }
 
 // A credit note here always credits the WHOLE bill (decision 2026-08-18 — partial credits are not
 // supported). 'Price correction' and 'Billing error' were removed from these chips because both
@@ -254,9 +254,10 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
       original_invoice_no: order.invoice_no,
       original_invoice_label,
       original_invoice_date_bs,
-      // Other / None are recorded here and nowhere else — the note has no remarks column, and
-      // "no cash left the till" is exactly what a reader of the note later needs to know (S754).
-      reason: reason.trim() + (REFUND_REASON_SUFFIX[refundMode] || ''),
+      reason: reason.trim(),
+      // S755: its own column, off the printed note. The database checks the amounts below against
+      // the bill (guard_pos_credit_note, HINT credit_note_amounts) — they are not trusted as sent.
+      refund_method: refundMode,
       gross_amount: amounts.grossAmt,
       discount_amount: amounts.discount,
       taxable_amount: amounts.taxableBase,
@@ -438,7 +439,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
                 answer, and it has to be readable back as the answer given. */}
             <fieldset style={{ border: 'none', padding: 0, margin: '0 0 12px' }}>
               <legend style={{ ...labelStyle, padding: 0 }}>
-                <Tip text="A Credit Note corrects the VAT register; it does not move money by itself. Cash is recorded as a Refund on the open shift so the drawer count expects it. Other and None are written on the note's reason line and take nothing off the drawer." width={320}>
+                <Tip text="A Credit Note corrects the VAT register; it does not move money by itself. Cash is recorded as a Refund on the open shift so the drawer count expects it. Other and None take nothing off the drawer. The answer is kept with the note in the Credit Note Book and is not printed on it." width={320}>
                   Was money returned to the customer?
                 </Tip>{' '}<span style={{ color: 'var(--theme-red-text)' }}>*</span>
               </legend>

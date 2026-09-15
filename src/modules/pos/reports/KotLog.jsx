@@ -297,7 +297,9 @@ export default function KotLog() {
      Reconciliation INFERS a pulled line by comparing tickets against the order as it stands now,
      which is why it can say "this was cooked and is no longer on the bill" but never who did it or
      why. pos_kot_removals is the record itself, written inside save_pos_order_items (migration
-     20260819130000) at the moment the line is replaced. The two tabs answer different questions
+     20260819130000) at the moment the line is replaced — and, since S755 (20260917100000), by the
+     delete triggers when an open order's fired lines are deleted outside it (Clear Occupied), with
+     reason "Table cleared" and a row that outlives the order. The two tabs answer different questions
      and are both worth having: this one is attributable, that one still catches a removal made by
      a path that predates the record. */
   const [pulledRows, setPulledRows] = useState([])
@@ -316,7 +318,7 @@ export default function KotLog() {
       // Paged like every other tab here: one row per pulled line, so a busy month crosses 1000
       // sooner than the ticket log does on a client that edits orders a lot.
       fetchAllRows(() => scopedFrom('pos_kot_removals',
-        'id, order_id, item_name, qty_removed, reason, removed_by, removed_at, pos_orders(order_no, table_name, invoice_no, close_type)')
+        'id, order_id, order_no, table_name, item_name, qty_removed, reason, removed_by, removed_at, pos_orders(order_no, table_name, invoice_no, close_type)')
         .gte('removed_at', fromTs).lte('removed_at', toTs)
         .order('removed_at', { ascending: false }).order('id')),
       supabase.rpc('get_client_profile_names', { p_client_id: clientId }),
@@ -367,9 +369,11 @@ export default function KotLog() {
         return {
           'Date (BS)': nepalDayLabel(r.removed_at, true),
           'Time': nepalTime24(r.removed_at),
-          'Order#': r.pos_orders?.order_no ?? '',
-          'Invoice#': r.pos_orders?.invoice_no || '',
-          'Table': r.pos_orders?.table_name || 'Takeaway',
+          // S755: an order deleted with fired food on it (Clear Occupied) keeps its removals, with
+          // the order number and table snapshotted onto the row, because the join returns nothing.
+          'Order#': r.pos_orders?.order_no ?? r.order_no ?? '',
+          'Invoice#': r.pos_orders?.invoice_no || (r.order_id ? '' : 'order deleted'),
+          'Table': r.pos_orders?.table_name || r.table_name || 'Takeaway',
           'Item': r.item_name,
           'Qty Pulled': r.qty_removed,
           'Reason': r.reason || '(none given)',
@@ -528,10 +532,17 @@ export default function KotLog() {
                         {nepalTime(r.removed_at)}
                       </span>
                     </td>
-                    <td>{o?.table_name || 'Takeaway'}</td>
+                    <td>{o?.table_name || r.table_name || 'Takeaway'}</td>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
-                      #{o?.order_no ?? '—'}
+                      #{o?.order_no ?? r.order_no ?? '—'}
                       {o?.invoice_no && <span style={{ color: 'var(--theme-text3)', fontSize: 11, marginLeft: 6 }}>{o.invoice_no}</span>}
+                      {/* S755: the order was deleted unbilled (Clear Occupied); the record outlives it. */}
+                      {!r.order_id && (
+                        <Tip width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}
+                          text="This order was deleted without being billed (Clear Occupied), after this food had already been sent to the kitchen or bar. The removal is kept so the pull stays on record; the order itself no longer exists.">
+                          <span className="badge-gray">order deleted</span>
+                        </Tip>
+                      )}
                     </td>
                     <td>{r.item_name}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)' }}>{r.qty_removed}</td>

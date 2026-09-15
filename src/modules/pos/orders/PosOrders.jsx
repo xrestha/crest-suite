@@ -3273,7 +3273,9 @@ export default function PosOrders() {
           <p style={{ margin: '0 0 8px' }}>
             Every open order for this client is <strong>permanently deleted</strong> along with its items —
             {occupied > 0 ? ` ${occupied} table${occupied === 1 ? '' : 's'} currently occupied` : ' no tables are occupied right now'}.
-            Nothing is billed, so no revenue, KOT or stock movement is recorded for what those orders held.
+            Nothing is billed, so no revenue or stock movement is recorded for what those orders held, and their
+            tickets leave the Kitchen Display. Food already sent to the kitchen or bar is recorded under
+            KOT Log → Pulled Items as “Table cleared”.
           </p>
           <p style={{ margin: 0 }}>This is a testing tool. If a single table is stuck, open it and void the order instead.</p>
         </>
