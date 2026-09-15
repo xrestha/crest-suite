@@ -79,6 +79,59 @@ export function resolveLabour({ labourBucket, payroll, hrOn, fenced, readFailed 
   return { source: bucket > 0 ? 'overheads' : 'none', amount: bucket, ignoredBucket: 0, verdictWithheld: false }
 }
 
+/**
+ * The Owner Dashboard's labour figure (S756, owner decision 2026-09-15).
+ *
+ * That page never reads the Overheads Labor bucket (it takes bucket='overhead' only, because it
+ * subtracts labour separately), so its choice is not payroll XOR bucket but payroll XOR ESTIMATE:
+ * a finalized run for the open period supersedes the prorated HR estimate, and the two are never
+ * added. The Labor bucket stays out of it entirely, which is what keeps the three-bucket XOR true.
+ *
+ * WHY A SECOND TOTAL: `finalizedPayrollCost` is gross + OVERTIME + employer SSF, the Monthly Owner
+ * Report's finalized-run figure (computeMonthlyReport.js), not `payrollLabourTotal`'s gross + SSF.
+ * `hr_payslips.gross` excludes `ot_amount`, and this page's estimate INCLUDES overtime — so reusing
+ * `payrollLabourTotal` would make Labor Cost % DROP by the month's OT the moment payroll is
+ * finalized, and disagree with the frozen report the same month becomes. The page's own trend chart
+ * reads those frozen reports, so the tile follows their definition.
+ */
+export function finalizedPayrollCost(slips) {
+  if (slips == null) return null
+  return slips.reduce((s, ps) =>
+    s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ot_amount) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
+}
+
+/**
+ * @param {object}  a
+ * @param {?number} a.payroll             finalizedPayrollCost() of the period's finalized run(s), or
+ *                                        null when none exists.
+ * @param {boolean} [a.payrollReadFailed] The run or payslip read errored. We then do not know
+ *                                        whether a run exists, so the estimate must NOT stand in.
+ * @param {?number} a.estimate            The prorated estimate, or null when not computed.
+ * @param {boolean} [a.estimateReadFailed] An input to the estimate errored.
+ * @returns {{ source: 'payroll'|'estimate'|'failed', amount: ?number, verdictWithheld: boolean }}
+ *
+ * `failed` carries amount null, so every ratio built on it is null and `bandFigure` renders a dash
+ * with no colour and no mark — a labour cost of 0 painted ✓ green is the most flattering possible
+ * reading of "we could not read payroll".
+ */
+export function resolveOwnerLabour({ payroll, payrollReadFailed = false, estimate, estimateReadFailed = false }) {
+  const failed = { source: 'failed', amount: null, verdictWithheld: true }
+  if (payrollReadFailed) return failed
+  if (payroll != null) return { source: 'payroll', amount: payroll, verdictWithheld: false }
+  if (estimateReadFailed || estimate == null || !Number.isFinite(estimate)) return failed
+  return { source: 'estimate', amount: estimate, verdictWithheld: false }
+}
+
+/** The Owner Dashboard's inline basis note, worded to match the Monthly Owner Report's HR header. */
+export function ownerLabourNote(source) {
+  switch (source) {
+    case 'payroll':  return 'from finalized payroll'
+    case 'estimate': return 'estimate — payroll not finalized'
+    case 'failed':   return 'could not be loaded'
+    default:         return ''
+  }
+}
+
 /** A short on-tile label for the source, or '' when there is nothing useful to say. */
 export function labourSourceLabel({ source }, hrOn) {
   switch (source) {

@@ -4,8 +4,9 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { calcBillTotals, methodOf } from '../purchases/purchasesHelpers'
-import { allocateBillDiscounts } from './supplierAttribution'
-import { netFactors, returnBase } from './purchaseTaxSplit'
+import { allocateBillDiscounts, mergeFactors } from './supplierAttribution'
+import { netFactors, returnBase, returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
+import { readPriorBillLines } from './readPriorBillLines'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import RowDisclosure from '../../../components/RowDisclosure'
@@ -50,6 +51,7 @@ export default function VendorReport() {
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [purchases, setPurchases] = useState([])
   const [returns, setReturns] = useState([])
+  const [priorBillLines, setPriorBillLines] = useState([])   // earlier-month bills a return points at (S756, D10)
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -119,10 +121,25 @@ export default function VendorReport() {
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 vendor
     // ledger (S612 silent-zero rule).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); setPaymentsMap({}); return }
+    if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); return }
     const [{ data: p }, { data: r }] = results
+
+    // S756 (owner decision D10): a return sits in the month the goods went back and may be against a
+    // bill from an EARLIER month, whose lines are not in `p`. Without them `retValueOf` has no discount
+    // factor and credits the list rate, so this vendor's Net Spend disagreed with VAT Report's for the
+    // same return. Read those bills whole (readPriorBillLines, shared with VAT/Non-VAT). A failed read
+    // is a failed report: falling back to the list rate on a READ failure would be the silent version.
+    const outsideIds = returnLinesOutsidePeriod(p, r)
+    let priorLines = []
+    if (outsideIds.length > 0) {
+      const prior = await readPriorBillLines(outsideIds)
+      if (!periodReq.isCurrent(periodId)) return
+      if (prior.error) { setLoadError(prior.error); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); return }
+      priorLines = prior.data
+    }
     setPurchases(p || [])
     setReturns(r || [])
+    setPriorBillLines(priorLines)
 
     const creditIds = (p || []).filter(e => methodOf(e) === 'Credit').map(e => e.id)
     if (creditIds.length > 0) {
@@ -136,7 +153,7 @@ export default function VendorReport() {
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       // Cash/Credit splits and the payment-status column derive from this map — refuse rather
       // than render every credit bill as unpaid (S612).
-      if (pmtErr) { setLoadError(pmtErr.message); setPurchases([]); setReturns([]); setPaymentsMap({}); return }
+      if (pmtErr) { setLoadError(pmtErr.message); setPurchases([]); setReturns([]); setPriorBillLines([]); setPaymentsMap({}); return }
       const map = {}
       ;(pmts || []).forEach(pm => {
         if (!map[pm.purchase_entry_id]) map[pm.purchase_entry_id] = []
@@ -172,7 +189,10 @@ export default function VendorReport() {
     // discounted bill negative by exactly that discount. Returning all of the 10,000 bill above
     // used to leave this vendor at Net Spend −1,000; it nets to 0.
     const allocated = allocateBillDiscounts(purchases)
-    const factors = netFactors(allocated)
+    // S756 (D10): plus the factors of earlier-month bills this month's returns point at, so a return
+    // against last month's discounted bill is credited at that bill's price — the same Map Supplier
+    // Contribution merges (supplierAttribution.test.js pins the tie-out) and VAT Report uses.
+    const factors = mergeFactors(netFactors(allocated), priorBillFactors(priorBillLines))
     const netById = new Map(allocated.map(r => [r.id, r.lineNet]))
     const lineNetOf = p => {
       const v = netById.get(p.id)
@@ -217,8 +237,10 @@ export default function VendorReport() {
       }
       addNet(vid, r.bs_day, -retValueOf(r))
     })
-    return { billKey, lineNetOf, retValueOf, purByVendor, retByVendor, retByEntry, billMap, netByVendorDay, netByDay, netByVendor }
-  }, [purchases, returns])
+    // Earlier-month bill lines by id, for the drilldown to name the bill a late return belongs to.
+    const priorLineById = new Map((priorBillLines || []).map(l => [l.id, l]))
+    return { billKey, lineNetOf, retValueOf, purByVendor, retByVendor, retByEntry, billMap, netByVendorDay, netByDay, netByVendor, priorLineById }
+  }, [purchases, returns, priorBillLines])
 
   // (`vendorDiscountMap` lived here — a second, independent per-vendor discount rollup. Every
   // consumer now derives its discount as `gross - allocatedNet`, so the Discount column, the Net
@@ -407,8 +429,52 @@ export default function VendorReport() {
         entries: billEntries, billReturns, payments,
       })
     })
+
+    // Returns with no bill among THIS month's — S756 (owner decision D10). A return may sit here
+    // against a bill from an earlier month; it is in the vendor's Returns and Net Spend (retValueOf,
+    // at that bill's own discount) but `retByEntry` above only ever looked it up against this month's
+    // lines, so it landed on no row and the drilldown stopped adding up to the row that opened it.
+    // It gets a row of its own, dated to the day the goods went back and naming the bill it came off.
+    // An UNLINKED return (its bill deleted or re-saved since) had the same gap and gets the same row.
+    // Grouped per bill, day and method so the day filter and the method columns still reconcile.
+    const periodLineIds = new Set(purchases.map(p => p.id))
+    const lateRows = new Map()
+    returns.forEach(r => {
+      if (r.purchase_entry_id != null && periodLineIds.has(r.purchase_entry_id)) return
+      const line = r.purchase_entry_id != null ? ix.priorLineById.get(r.purchase_entry_id) : null
+      const billRef = line
+        ? (line.purchase_group_id || `legacy|${line.period_id}|${line.vendor_id || ''}|${line.invoice_ref || ''}|${line.bs_day}`)
+        : 'unlinked'
+      const method = methodOf(r)
+      const key = `ret|${billRef}|${r.vendor_id || ''}|${r.bs_day}|${method}`
+      let row = lateRows.get(key)
+      if (!row) {
+        const p = line ? periods.find(x => x.id === line.period_id) : null
+        lateRows.set(key, row = {
+          key, kind: line ? 'priorBill' : 'unlinked',
+          vendor_id: r.vendor_id, vendorName: r.vendors?.name || 'Unassigned',
+          day: r.bs_day, invoice: line?.invoice_ref || null,
+          // "5th Bhadra 2082" — the bill's own day and month, since this page's header names a
+          // different month. Degrades to the month alone, then to a phrase, never to a wrong month.
+          priorWhen: !p ? 'an earlier month'
+            : line.bs_day ? `${formatBsDay(line.bs_day, p.bs_month)} ${p.bs_year}`
+            : `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`,
+          itemCount: 0, total: 0, discount: 0, returned: 0, net: 0, owed: null,
+          paymentMethod: method,
+          status: line
+            ? { label: 'Earlier bill', color: 'var(--theme-text2)' }
+            : { label: 'No bill', color: 'var(--theme-amber-text)' },
+          remaining: 0, entries: [], billReturns: [], payments: [],
+        })
+      }
+      const v = ix.retValueOf(r)
+      row.returned += v
+      row.net -= v
+      row.billReturns.push(r)
+    })
+    lateRows.forEach(row => bills.push(row))
     return bills.sort((a, b) => a.day - b.day)
-  }, [ix, paymentsMap, selectedPeriod])
+  }, [ix, paymentsMap, selectedPeriod, purchases, returns, periods])
 
   const drilldownBills = drilldownVendor
     ? allBills.filter(b => b.vendor_id === drilldownVendor.id && (drilldownDay == null || b.day === drilldownDay))
@@ -595,7 +661,7 @@ export default function VendorReport() {
   const scopeLine = `Period : ${periodLabel}${selectedPeriod?.status === 'open'
     ? ' (PROVISIONAL — period still open, figures can change)'
     : ' (period closed)'}`
-  const BASIS_NOTE = 'Figures are ex-VAT and net of bill discounts, apportioned across each bill’s own lines. Returns are credited at the price actually paid, i.e. net of that bill’s discount. Bill totals including VAT are on the Discounts Received sheet and in Outstanding Payables.'
+  const BASIS_NOTE = 'Figures are ex-VAT and net of bill discounts, apportioned across each bill’s own lines. Returns are credited at the price actually paid, i.e. net of that bill’s discount — including a return against a bill from an earlier month, at that bill’s own discount. Bill totals including VAT are on the Discounts Received sheet and in Outstanding Payables.'
 
   if (!hasImsAccess('manager')) return <Navigate to="/dashboard" replace />
   // !loadError: a failed periods read leaves periods empty, and NoPeriodState would wear the
@@ -798,7 +864,7 @@ export default function VendorReport() {
                   <th style={{ textAlign: 'right' }}><Tip text="Number of BILLS from this vendor in the period — the same count the drill-down shows when you click the vendor name. Not the number of line items." width={250}>Bills</Tip></th>
                   <th style={{ textAlign: 'right' }}>Gross Purchases</th>
                   <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}><Tip text="Trade/promo discount received from this vendor — deducted from net spend." width={230}>Discount</Tip></th>
-                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Value of goods returned to this vendor this period, credited at the price actually paid — if the original bill carried a trade discount, the return is credited net of its share. Return a whole discounted bill and net spend comes back to zero, not to minus the discount." width={280}>Returns</Tip></th>
+                  <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Value of goods returned to this vendor this period, credited at the price actually paid — if the original bill carried a trade discount, the return is credited net of its share. Return a whole discounted bill and net spend comes back to zero, not to minus the discount. A return this month against a bill from an earlier month is credited at that bill's own discount, and shows in the drill-down as its own row naming that bill." width={280}>Returns</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Net spend = Gross − Discount − Returns (ex-VAT). Your true cost obligation to this vendor." width={250}>Net Spend</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="This vendor's share of total net purchase spend for the period." width={220}>% of Net Total</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Average daily spend (net) across days this vendor had deliveries.">Avg/Day</Tip></th>
@@ -1143,7 +1209,12 @@ export default function VendorReport() {
           ) : (
             <>
               <div style={{ display: 'flex', gap: 20, marginBottom: 14, fontSize: 12, color: 'var(--theme-text2)' }}>
-                <span>{drilldownBills.length} bill{drilldownBills.length !== 1 ? 's' : ''}</span>
+                {/* Bills and return-only rows counted apart (S756): a return against an earlier
+                    month's bill is a row here, not a bill of this month. */}
+                <span>
+                  {drilldownBills.filter(b => !b.kind).length} bill{drilldownBills.filter(b => !b.kind).length !== 1 ? 's' : ''}
+                  {drilldownBills.some(b => b.kind) && ` · ${drilldownBills.filter(b => b.kind).length} return row${drilldownBills.filter(b => b.kind).length !== 1 ? 's' : ''} against other bills`}
+                </span>
                 <span>Net: <strong style={{ color: 'var(--theme-accent-ink)' }}>NPR {drilldownBills.reduce((s, b) => s + b.net, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
                 {drilldownOutstanding > 0 && (
                   <span>Outstanding: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {drilldownOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
@@ -1177,15 +1248,33 @@ export default function VendorReport() {
                           <tr style={{ cursor: 'pointer' }}
                             onClick={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}>
                             <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(b.day, selectedPeriod?.bs_month)}</td>
-                            <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{b.invoice || '—'}</td>
-                            <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.itemCount}</td>
+                            <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
+                              {/* S756 (D10): a return row carries no invoice of its own — it names
+                                  the bill it came off, since that bill is in another month's report. */}
+                              {b.kind === 'priorBill' ? (
+                                <>
+                                  Return against an earlier month&apos;s bill
+                                  <span className="cell-sub" style={{ display: 'block' }}>
+                                    {b.priorWhen} · {b.invoice ? `invoice ${b.invoice}` : 'no invoice no.'}
+                                  </span>
+                                </>
+                              ) : b.kind === 'unlinked' ? (
+                                <>
+                                  Return — its bill is no longer on record
+                                  <span className="cell-sub" style={{ display: 'block' }}>deleted or re-saved after the return; credited at the price on the return</span>
+                                </>
+                              ) : (b.invoice || '—')}
+                            </td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.kind ? '—' : b.itemCount}</td>
                             <td><span className={`badge ${b.paymentMethod === 'Cash' ? 'badge-green' : b.paymentMethod === 'Credit' ? 'badge-red' : 'badge-gray'}`}>{b.paymentMethod}</span></td>
-                            <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>NPR {b.total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{b.kind ? '—' : `NPR ${b.total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{b.discount > 0 ? `−NPR ${b.discount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{b.returned > 0 ? `−NPR ${b.returned.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}</td>
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {b.net.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-                              NPR {b.owed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                              {/* A return row has no payable of its own here: what is owed is
+                                  measured on its bill, in that bill's month (S756). */}
+                              {b.owed == null ? '—' : `NPR ${b.owed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
                               {b.paymentMethod === 'Credit' && Math.abs(b.remaining) > EPS && (
                                 <div style={{ fontSize: 11, color: b.remaining < 0 ? 'var(--theme-purple-text)' : 'var(--theme-red-text)' }}>
                                   {b.remaining < 0 ? 'credit ' : 'due '}NPR {Math.abs(b.remaining).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
@@ -1200,7 +1289,9 @@ export default function VendorReport() {
                                 expanded={isExpanded}
                                 onToggle={() => setExpandedBillKey(prev => prev === b.key ? null : b.key)}
                                 controls={`vendor-bill-detail-${b.key}`}
-                                label={`Bill ${b.invoice || b.day} — ${isExpanded ? 'hide' : 'show'} line items, returns and payment history`}
+                                label={b.kind
+                                  ? `Return on ${formatBsDay(b.day, selectedPeriod?.bs_month) || 'this period'} — ${isExpanded ? 'hide' : 'show'} returned items`
+                                  : `Bill ${b.invoice || b.day} — ${isExpanded ? 'hide' : 'show'} line items, returns and payment history`}
                               >
                                 <span aria-hidden="true">{isExpanded ? '▲ Hide' : '▼ Details'}</span>
                               </RowDisclosure>
@@ -1214,6 +1305,7 @@ export default function VendorReport() {
                                   it — the row it belongs to did not span its own table. */}
                               <td id={`vendor-bill-detail-${b.key}`} colSpan={11} style={{ padding: 0, background: 'var(--theme-bg)' }}>
                                 <div style={{ padding: '16px 20px' }}>
+                                  {b.entries.length > 0 && <>
                                   <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Items in this bill ({b.entries.length})</div>
                                   <table style={{ borderCollapse: 'collapse', fontSize: 13, width: '100%', maxWidth: 620, marginBottom: b.payments.length > 0 || b.billReturns.length > 0 ? 20 : 0 }}>
                                     <thead>
@@ -1245,17 +1337,25 @@ export default function VendorReport() {
                                       ))}
                                     </tbody>
                                   </table>
+                                  </>}
 
                                   {b.billReturns.length > 0 && (
                                     <div style={{ marginBottom: b.payments.length > 0 ? 20 : 0 }}>
-                                      <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Returns Against This Bill</div>
+                                      <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                                        {b.kind === 'priorBill' ? `Returned against the bill of ${b.priorWhen}`
+                                          : b.kind === 'unlinked' ? 'Returned — bill no longer on record'
+                                          : 'Returns Against This Bill'}
+                                      </div>
                                       <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 400 }}>
                                         <tbody>
                                           {b.billReturns.map(r => (
                                             <tr key={r.id}>
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text1)' }}>{r.items?.name}</td>
                                               <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text2)' }}>{parseFloat(r.qty).toLocaleString('en-IN')}</td>
-                                              <td style={{ padding: '5px 0 5px 16px', textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>−NPR {(r.qty * r.rate).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                                              {/* retValueOf, not qty × rate (S756): the Returns cell on the
+                                                  row above is net of the bill's discount, so its lines
+                                                  must be too or they cannot be added up to it. */}
+                                              <td style={{ padding: '5px 0 5px 16px', textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 600 }}>−NPR {ix.retValueOf(r).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                                             </tr>
                                           ))}
                                         </tbody>

@@ -1,7 +1,8 @@
 import {
   allocateBillDiscounts, vendorNetByItem, vendorShares, attributeConsumption, vendorNetTotals,
-  netFactors, returnBase, NO_VENDOR, UNATTRIBUTED,
+  netFactors, returnBase, mergeFactors, applyPriorBillFactors, NO_VENDOR, UNATTRIBUTED,
 } from './supplierAttribution'
+import { priorBillFactors, returnLinesOutsidePeriod, splitPurchaseVat, billPayables } from './purchaseTaxSplit'
 
 // A bill's discount_amount is repeated on every one of its lines, so summing it is the obvious
 // wrong answer — Vendor Report dedupes by purchase_group_id and this must agree with it.
@@ -171,5 +172,71 @@ describe('a return is credited at the price actually paid', () => {
     const noId = [{ purchase_group_id: 'g1', item_id: 'i1', vendor_id: 'v1', qty: 10, rate: 1000, discount_amount: 1000 }]
     const factors = netFactors(allocateBillDiscounts(noId))
     expect(returnBase(fullReturn[0], factors)).toBeCloseTo(10000, 6)  // list rate, silently
+  })
+})
+
+// S756, owner decision D10. A return sits in the month the goods went back; its bill may be from an
+// earlier month, so the bill's lines are not among this period's purchases. VAT Report values it at
+// that bill's own discount (readPriorBillLines -> priorBillFactors); these pin the other three pages
+// to the same answer and keep the S727 tie-out holding across the month boundary.
+describe('a return against an earlier month\'s bill', () => {
+  // Last month: 10,000 gross, 1,000 discount (factor 0.9). This month: a clean 2,000 bill.
+  const LAST_MONTH = [
+    { id: 'old1', period_id: 'bhadra', purchase_group_id: 'gOld', item_id: 'i1', vendor_id: 'v1', qty: 10, rate: 1000, discount_amount: 1000, vat_inclusive: true },
+  ]
+  const THIS_MONTH = [
+    { id: 'new1', period_id: 'ashwin', purchase_group_id: 'gNew', item_id: 'i1', vendor_id: 'v1', qty: 2, rate: 1000, discount_amount: 0, vat_inclusive: true },
+  ]
+  const late = { id: 'r1', item_id: 'i1', vendor_id: 'v1', qty: 4, rate: 1000, purchase_entry_id: 'old1', payment_method: 'Credit', bs_day: 3, purchase_entries: { vat_inclusive: true } }
+  const priorFactors = priorBillFactors(LAST_MONTH)
+
+  test('the page reads exactly the line the return points at', () => {
+    expect(returnLinesOutsidePeriod(THIS_MONTH, [late])).toEqual(['old1'])
+  })
+
+  test("Supplier Contribution credits it at its own bill's discounted rate", () => {
+    const net = vendorNetByItem(THIS_MONTH, [late], { priorFactors })
+    expect(net.i1.byVendor.v1).toBeCloseTo(2000 - 3600, 6)
+    // THE GAP it closes: without the prior bill, the list rate — 400 more credit than was paid for.
+    expect(vendorNetByItem(THIS_MONTH, [late]).i1.byVendor.v1).toBeCloseTo(2000 - 4000, 6)
+  })
+
+  test('Vendor Report and Supplier Contribution still tie out (the S727 invariant)', () => {
+    // Vendor Report's `ix` memo: lineNetOf - retValueOf, over mergeFactors(own, prior).
+    const allocated = allocateBillDiscounts(THIS_MONTH)
+    const factors = mergeFactors(netFactors(allocated), priorFactors)
+    const vendorReportNet =
+      allocated.reduce((s, p) => s + p.lineNet, 0) - returnBase(late, factors)
+    expect(vendorNetTotals(vendorNetByItem(THIS_MONTH, [late], { priorFactors })).v1).toBeCloseTo(vendorReportNet, 6)
+  })
+
+  test('agrees with VAT Report for the same return', () => {
+    const s = splitPurchaseVat(THIS_MONTH, [late], { priorBillLines: LAST_MONTH })
+    const factors = mergeFactors(netFactors(allocateBillDiscounts(THIS_MONTH)), priorFactors)
+    expect(returnBase(late, factors)).toBeCloseTo(s.vatReturnBase, 6)
+  })
+
+  test("the period's own factor wins over a prior one for the same id", () => {
+    const own = new Map([['x', 0.5]])
+    const merged = mergeFactors(own, new Map([['x', 0.9], ['y', 0.8]]))
+    expect(merged.get('x')).toBe(0.5)
+    expect(merged.get('y')).toBe(0.8)
+    expect(mergeFactors(own, new Map())).toBe(own)
+    expect(mergeFactors(own, undefined)).toBe(own)
+  })
+
+  test("Payment Summary's payable is scaled by the prior bill's discount, VAT included", () => {
+    const { returns: priced } = billPayables(THIS_MONTH, [late], { bs_year: 2082, bs_month: 6 })
+    expect(priced[0].value).toBeCloseTo(4000 * 1.13, 6)          // billPayables alone: list rate
+    const moved = applyPriorBillFactors(priced, THIS_MONTH, priorFactors)
+    expect(moved[0].value).toBeCloseTo(3600 * 1.13, 6)
+    expect(moved[0].priorBill).toBe(true)
+  })
+
+  test('applyPriorBillFactors leaves same-month and unlinked returns alone', () => {
+    const same = { ...late, id: 'r2', purchase_entry_id: 'new1', value: 100 }
+    const orphan = { ...late, id: 'r3', purchase_entry_id: null, value: 50 }
+    const out = applyPriorBillFactors([same, orphan], THIS_MONTH, new Map([['new1', 0.1]]))
+    expect(out.map(r => r.value)).toEqual([100, 50])
   })
 })

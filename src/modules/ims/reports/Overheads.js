@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { isPayrollFenced, payrollLabourTotal, resolveLabour } from '../../dashboard/labourSource'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -95,7 +96,8 @@ export default function Overheads() {
   // error. That used to render "No finalized payroll run", drop wages from the P&L and paint Net
   // Profit green while the Owner, reading the same month, saw a loss (S756). On such a login the
   // page no longer asks — it says labour could not be read here and withholds the verdict.
-  const payrollFenced = hrOn && !isAdmin && !isOwner && !!profile?.ims_role
+  // S756: the rule lives in labourSource.js, shared with ClientDashboard, so the two cannot drift.
+  const payrollFenced = isPayrollFenced({ hrOn, isAdmin, isOwner, imsRole: profile?.ims_role })
   // D23: the depreciation memo is only offered where Fixed Assets is (SuiteGate's own test).
   const assetsOn = !!(isAdmin || suitePlan === 'pro' || hasFeature?.('fixed_asset_register'))
 
@@ -305,10 +307,14 @@ export default function Overheads() {
     let labourPayroll = null
     const runIds = (runs || []).map(r => r.id)
     if (runIds.length > 0) {
-      const { data: slips, error: slipErr } = await scopedFrom('hr_payslips', 'gross, ssf_employer').in('run_id', runIds)
+      // Paged with a unique tiebreaker (S756): one row per employee per run, so a bare read is a
+      // silent truncation past 1000 payslips — a wage bill short by the rows past the cut, under a
+      // label that says it came from payroll.
+      const { data: slips, error: slipErr } = await fetchAllRowsChunked(runIds, chunk =>
+        scopedFrom('hr_payslips', 'gross, ssf_employer').in('run_id', chunk).order('id'))
       if (!periodReq.isCurrent(pid)) return
       if (slipErr) { setLoadError(slipErr.message); setPeriodData(null); return }
-      labourPayroll = (slips || []).reduce((s, ps) => s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
+      labourPayroll = payrollLabourTotal(slips || [])
     }
 
     const gross  = allocateBillDiscounts(purchases || []).reduce((s, p) => s + p.lineNet, 0)
@@ -479,15 +485,20 @@ export default function Overheads() {
   // Before this, the page could see neither: an HR client who runs payroll properly and leaves
   // the Labor tab blank had a Net Profit overstated by their entire wage bill, painted green,
   // under the words "✓ Profitable this period".
-  const labourPayroll  = periodData?.labourPayroll ?? null
-  const labourEffective = labourPayroll != null ? labourPayroll : totals.labor
+  // The precedence is resolveLabour() in labourSource.js (S756) — this page carried its own inline
+  // copy, and a second copy is how it and the Dashboard would come to disagree again.
   // 'unreadable': payroll is fenced from this login (payrollFenced above). Not 'none' — the page
-  // does not know that no run exists, only that it cannot see one.
-  const labourSource   = labourPayroll != null ? 'payroll' : payrollFenced ? 'unreadable' : totals.labor > 0 ? 'overheads' : 'none'
-  const verdictWithheld = labourSource === 'unreadable'
-  // Named on screen with its amount rather than silently dropped, so the two figures can be
-  // reconciled by whoever notices they differ.
-  const ignoredLabourBucket = labourPayroll != null && totals.labor > 0 ? totals.labor : 0
+  // does not know that no run exists, only that it cannot see one. A failed payroll READ never
+  // reaches here: it blocks the whole page through loadError instead.
+  const labourPayroll  = periodData?.labourPayroll ?? null
+  const {
+    amount: labourEffective,
+    source: labourSource,
+    verdictWithheld,
+    // Named on screen with its amount rather than silently dropped, so the two figures can be
+    // reconciled by whoever notices they differ.
+    ignoredBucket: ignoredLabourBucket,
+  } = resolveLabour({ labourBucket: totals.labor, payroll: labourPayroll, hrOn, fenced: payrollFenced })
 
   const totalFixed = totals.overhead + labourEffective + totals.tax_fees
   const netProfit = revenue > 0 ? revenue - foodCost - totalFixed : null

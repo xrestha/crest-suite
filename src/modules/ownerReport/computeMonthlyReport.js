@@ -536,7 +536,21 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // finalized branch was always right, since it sums stored payslips. Snapshots already generated
 // stay frozen — a v5 row and a v6 row are not computed the same way, and a Trend delta across
 // that boundary includes the change of basis.
-export const CURRENT_SCHEMA_VERSION = 6
+// 7 (S756, D20): `inventoryDepth.deadSlowStock` classifies through the shared
+// `ims/stockcount/deadStockCalc.js`, the rule the live Dead Stock page uses. v1–v6 called an item
+// Dead after ONE month with no use; v7 calls it Dead only after 3 consecutive counted months with
+// no use (1–2 still months, or under 20% used, is Slow), reading up to 12 periods ending at the
+// report's own. An uncounted month, a count above what was available, no stock or a calendar gap
+// breaks the streak; staff meals count as use; sub-recipe mirrors are excluded, as on the page.
+// The section gains `rule: 'streak'`, `deadAfterMonths`, `historyMonths`, the S717 counts
+// (`assessedCount`/`uncountedCount`/`inconsistentCount`), and per item `stillMonths`/`atLeast`/
+// `suggestion`/`lastBought`/`supplier`. A v6 dead-stock count and a v7 one are not the same
+// measurement — the v7 count is lower by every item that was still for only one or two months.
+// v7 also changes the VENDOR section (same S756 release, one bump for both): returns are credited at
+// their bill's discounted rate — including returns against an earlier month's bill — rather than list
+// price, returns carry their own payment_method in the cash/credit split (every return had read as
+// Cash), and the returns read is paged. A v6 and a v7 vendor section for one month can differ.
+export const CURRENT_SCHEMA_VERSION = 7
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

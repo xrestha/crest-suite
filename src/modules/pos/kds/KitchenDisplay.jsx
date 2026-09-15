@@ -8,8 +8,7 @@ import Tip from '../../../components/Tip'
 import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor } from '../posSignals'
 import { errorText, errorLine } from '../../../shared/errorText'
-import { nepalBs, nepalCivilDate, nepalTime } from '../../../shared/nepalTime'
-import { bsDayBoundaryIso, formatAd } from '../../../utils/bsCalendar'
+import { nepalTime, serviceDayStartIso } from '../../../shared/nepalTime'
 
 const STATIONS = ['KOT', 'BOT']
 const POLL_MS = 4000
@@ -17,18 +16,8 @@ const POLL_MS = 4000
 // device's local midnight, recomputed every poll, so a ticket sent at 11:52 PM vanished at 00:00
 // while the kitchen was still cooking it and could no longer be marked Ready. Same six hours past
 // midnight the floor's reservation window uses (PosOrders.jsx), pinned to Nepal rather than to the
-// runtime's timezone.
-const SERVICE_DAY_ROLLOVER_MS = 6 * 60 * 60 * 1000
-
-function serviceDayStartIso() {
-  const anchor = Date.now() - SERVICE_DAY_ROLLOVER_MS
-  const bs = nepalBs(anchor)
-  const iso = bs ? bsDayBoundaryIso(bs.year, bs.month, bs.day) : null
-  if (iso) return iso
-  // Outside the verified BS table: the same Nepal civil day, built from the AD date directly.
-  const civil = nepalCivilDate(anchor)
-  return `${formatAd(civil)}T00:00:00.000+05:45`
-}
+// runtime's timezone. The helper lives in shared/nepalTime.js since S756, shared with POS parking and
+// gate passes — this file carried its own copy until then.
 
 // Kitchen notes typed on the order line ("no onion"). Tickets written before notes were copied
 // onto pos_kot_log.items carry no key at all, and render nothing (S754).

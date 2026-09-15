@@ -656,31 +656,67 @@ export default function MonthlyOwnerReport() {
                     </div>
                   )}
 
-                  {inv.deadSlowStock && (
+                  {inv.deadSlowStock && (() => {
+                    const ds = inv.deadSlowStock
+                    // S756 (D20): a v7+ section carries `rule: 'streak'` (Dead = 3 counted months with
+                    // no use). A v1–v6 snapshot was frozen under the one-month rule and has none of
+                    // the new fields — say which rule it used, and never render its missing
+                    // streak/next-step as 0 or blank.
+                    const streak = ds.rule === 'streak'
+                    const deadAfter = ds.deadAfterMonths || 3
+                    const stillText = i => (i.stillMonths > 0
+                      ? `${i.stillMonths}${i.atLeast ? '+' : ''} month${i.stillMonths === 1 && !i.atLeast ? '' : 's'}`
+                      : 'Moving slowly')
+                    return (
                     <>
+                      <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                        {streak
+                          ? <>Dead = nothing used for {deadAfter} or more counted months in a row. Slow = nothing used for 1–2 months, or less than 20% of what was available used. A month without a stock count for an item is not judged and restarts the run.
+                            {ds.historyMonths != null && ds.historyMonths < deadAfter && <> Only {ds.historyMonths} month{ds.historyMonths === 1 ? '' : 's'} of records existed at generation, so nothing could be called Dead yet.</>}</>
+                          : <>This snapshot was generated under the earlier one-month rule (Dead = no use in this month alone). Regenerate Snapshot to apply the current rule: Dead = {deadAfter} counted months in a row with no use.</>}
+                      </p>
+                      {streak && (ds.uncountedCount > 0 || ds.inconsistentCount > 0) && (
+                        <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                          △ {num(ds.assessedCount)} of {num(ds.assessedCount + ds.uncountedCount + ds.inconsistentCount)} items with stock could be judged
+                          {ds.uncountedCount > 0 && <> — {num(ds.uncountedCount)} had no closing count this month</>}
+                          {ds.inconsistentCount > 0 && <>{ds.uncountedCount > 0 ? ', and' : ' —'} {num(ds.inconsistentCount)} {ds.inconsistentCount === 1 ? 'was' : 'were'} counted higher than the stock available (usually a missing purchase bill)</>}.
+                        </p>
+                      )}
                       <div className="table-wrap" style={{ marginBottom: 8 }}>
                         <table className="data-table owner-report-table"><tbody>
-                          <Row label="Dead Stock Items" value={num(inv.deadSlowStock.deadCount)} color={inv.deadSlowStock.deadCount > 0 ? 'var(--theme-red-text)' : undefined}
-                            tip="Zero usage this period despite stock on hand." />
-                          <Row label="Slow Stock Items" value={num(inv.deadSlowStock.slowCount)} color={inv.deadSlowStock.slowCount > 0 ? 'var(--theme-amber-text)' : undefined}
-                            tip="Used less than 20% of available stock this period." />
-                          <Row label="Total Value at Risk" value={fmt(inv.deadSlowStock.totalValueAtRisk)} color={inv.deadSlowStock.totalValueAtRisk > 0 ? 'var(--theme-red-text)' : undefined} />
+                          <Row label="Dead Stock Items" value={num(ds.deadCount)} color={ds.deadCount > 0 ? 'var(--theme-red-text)' : undefined}
+                            tip={streak ? `Nothing used for ${deadAfter} or more counted months in a row, ending with this period.` : 'Zero usage this period despite stock on hand (the one-month rule this snapshot was generated under).'} />
+                          <Row label="Slow Stock Items" value={num(ds.slowCount)} color={ds.slowCount > 0 ? 'var(--theme-amber-text)' : undefined}
+                            tip={streak ? 'Nothing used for one or two counted months, or less than 20% of available stock used this period.' : 'Used less than 20% of available stock this period.'} />
+                          <Row label="Total Value at Risk" value={fmt(ds.totalValueAtRisk)} color={ds.totalValueAtRisk > 0 ? 'var(--theme-red-text)' : undefined} />
                         </tbody></table>
                       </div>
-                      {inv.deadSlowStock.items?.length > 0 && (
+                      {ds.items?.length > 0 && (
                         <div className="table-wrap" style={{ marginBottom: 8 }}>
                           <table className="data-table owner-report-table">
-                            <thead><tr><th>Dead/Slow Item</th><th style={{ textAlign: 'right' }}>Status</th><th style={{ textAlign: 'right' }}>Value at Risk</th></tr></thead>
+                            <thead><tr>
+                              <th>Dead/Slow Item</th><th style={{ textAlign: 'right' }}>Status</th>
+                              {streak && <th>Still For</th>}
+                              <th style={{ textAlign: 'right' }}>Value at Risk</th>
+                              {streak && <th>Suggested Next Step</th>}
+                            </tr></thead>
                             <tbody>
-                              {inv.deadSlowStock.items.slice(0, 10).map(i => (
-                                <tr key={i.itemId}><td>{i.name}</td><td style={{ textAlign: 'right', color: i.status === 'Dead' ? 'var(--theme-red-text)' : 'var(--theme-amber-text)' }}>{i.status}</td><td style={{ textAlign: 'right' }}>{fmt(i.valueAtRisk)}</td></tr>
+                              {ds.items.slice(0, 10).map(i => (
+                                <tr key={i.itemId}>
+                                  <td>{i.name}</td>
+                                  <td style={{ textAlign: 'right', color: i.status === 'Dead' ? 'var(--theme-red-text)' : 'var(--theme-amber-text)' }}>{i.status}</td>
+                                  {streak && <td style={{ whiteSpace: 'nowrap' }}>{stillText(i)}</td>}
+                                  <td style={{ textAlign: 'right' }}>{fmt(i.valueAtRisk)}</td>
+                                  {streak && <td style={{ fontSize: 12 }}>{i.suggestion || '—'}</td>}
+                                </tr>
                               ))}
                             </tbody>
                           </table>
                         </div>
                       )}
                     </>
-                  )}
+                    )
+                  })()}
 
                   {inv.variance && (
                     <>

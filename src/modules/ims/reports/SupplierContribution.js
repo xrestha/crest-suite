@@ -33,6 +33,8 @@ import { selectDepletingSales } from '../sales/salesDepletion'
 import {
   vendorNetByItem, vendorNetTotals, attributeConsumption, NO_VENDOR, UNATTRIBUTED,
 } from './supplierAttribution'
+import { returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
+import { readPriorBillLines } from './readPriorBillLines'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
@@ -161,6 +163,20 @@ export default function SupplierContribution() {
       { data: items }, { data: vendors }, { data: recipes },
     ] = results
 
+    // S756 (owner decision D10): a return may sit in this month against a bill from an EARLIER month.
+    // Its line is not in `purchases`, so it has no discount factor and `returnBase` would credit the
+    // list rate — and Vendor Report, which now reads that bill, would stop agreeing with this page's
+    // Net Purchases (the S727 tie-out). Read the bills whole through the shared reader; a failed read
+    // is a failed report, not a silent fall-back to list price.
+    const outsideIds = returnLinesOutsidePeriod(purchases, returns)
+    let priorFactors = new Map()
+    if (outsideIds.length > 0) {
+      const prior = await readPriorBillLines(outsideIds)
+      if (!periodReq.isCurrent(periodId)) return
+      if (prior.error) { setLoadError(prior.error); setRows([]); setUnvalued({ items: 0, recipes: [] }); setTotals({ attributed: 0, consumed: 0, unattributed: 0 }); return }
+      priorFactors = priorBillFactors(prior.data)
+    }
+
     const itemById = Object.fromEntries((items || []).map(i => [i.id, i]))
     setNames({
       items: Object.fromEntries((items || []).map(i => [i.id, i.name])),
@@ -216,7 +232,7 @@ export default function SupplierContribution() {
       }
     }
 
-    const netByItem = vendorNetByItem(purchases || [], returns || [])
+    const netByItem = vendorNetByItem(purchases || [], returns || [], { priorFactors })
     const netTotals = vendorNetTotals(netByItem)
     const { total, byVendor } = attributeConsumption(consumedByItem, netByItem)
 
@@ -467,7 +483,7 @@ export default function SupplierContribution() {
               </th>
               <th style={{ textAlign: 'right' }}>% of Sales Cost</th>
               <th style={{ textAlign: 'right' }}>
-                <Tip width={280} text="Net purchases from this supplier this period — gross less bill discounts and returns. The same figure Vendor Report calls Net Spend.">Net Purchases</Tip>
+                <Tip width={280} text="Net purchases from this supplier this period — gross less bill discounts and returns, each return credited at the price its own bill was paid at (including a bill from an earlier month). The same figure Vendor Report calls Net Spend.">Net Purchases</Tip>
               </th>
               <th style={{ textAlign: 'right' }}>% of Purchases</th>
               <th style={{ textAlign: 'right' }}>

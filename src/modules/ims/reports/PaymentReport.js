@@ -14,7 +14,9 @@ import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { PURCHASE_PAYMENT_METHODS } from '../purchases/purchasesHelpers'
-import { billPayables, summariseUnlinkedReturns } from './purchaseTaxSplit'
+import { billPayables, summariseUnlinkedReturns, returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
+import { applyPriorBillFactors } from './supplierAttribution'
+import { readPriorBillLines } from './readPriorBillLines'
 
 const METHODS = PURCHASE_PAYMENT_METHODS
 // Two roles, two values: the base token is the FILL (split bar, legend swatch), the -text variant
@@ -39,6 +41,7 @@ export default function PaymentReport() {
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [purchases, setPurchases] = useState([])
   const [returns, setReturns] = useState([])
+  const [priorBillLines, setPriorBillLines] = useState([])   // earlier-month bills a return points at (S756, D10)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [viewMode, setViewMode] = useState('summary')
@@ -85,17 +88,36 @@ export default function PaymentReport() {
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must not render as a quiet period of NPR 0 (S612 silent-zero rule).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); return }
+    if (failed) { setLoadError(failed); setPurchases([]); setReturns([]); setPriorBillLines([]); return }
     const [{ data: p }, { data: r }] = results
+
+    // S756 (owner decision D10): a return sits in the month the goods went back and may be against a
+    // bill from an EARLIER month. That bill is not among this month's purchases, so billPayables has
+    // no discount for it and credits the list rate — more money back than was ever paid, and a Net
+    // that disagrees with VAT Report for the same month. Read those bills whole, the way VAT and
+    // Non-VAT Report do. A failed read is a failed report, never a quiet fall-back to list price.
+    const outsideIds = returnLinesOutsidePeriod(p, r)
+    let priorLines = []
+    if (outsideIds.length > 0) {
+      const prior = await readPriorBillLines(outsideIds)
+      if (!periodReq.isCurrent(periodId)) return
+      if (prior.error) { setLoadError(prior.error); setPurchases([]); setReturns([]); setPriorBillLines([]); return }
+      priorLines = prior.data
+    }
     setPurchases(p || [])
     setReturns(r || [])
+    setPriorBillLines(priorLines)
   }
 
   // Everything here is BILL-level and is the money owed: net of the bill discount, plus VAT where
   // the line carried it. The old shape summed `qty x rate` per line — ex-VAT AND pre-discount —
   // which is neither the cost basis nor the amount payable, so the Credit column never agreed with
   // Outstanding Payables and no column agreed with the Purchases register. See purchaseTaxSplit.js.
-  const { bills, returns: pricedReturns } = billPayables(purchases, returns, selectedPeriod)
+  const { bills, returns: periodPricedReturns } = billPayables(purchases, returns, selectedPeriod)
+  // billPayables priced every return against an earlier month's bill at factor 1; scale each by its
+  // own bill's discount (VAT rides through the multiplication). Same-month and unlinked returns are
+  // untouched. See loadData (S756, D10).
+  const pricedReturns = applyPriorBillFactors(periodPricedReturns, purchases, priorBillFactors(priorBillLines))
 
   // S756 stage 3 — returns whose purchase line is gone (the bill was deleted or re-saved after the
   // return). billPayables still subtracts them from their method, but with no line behind them there
@@ -225,7 +247,7 @@ export default function PaymentReport() {
         </div>
         <div className="stat-card">
           <div className="stat-label">
-            <Tip text="Value of goods returned to suppliers, subtracted from gross to get net spend." width={250}>Total Returns</Tip>
+            <Tip text="Value of goods returned to suppliers, subtracted from gross to get net spend — credited at the price actually paid: net of the bill's discount, plus VAT where charged. A return against a bill from an earlier month is credited at that bill's own discount." width={270}>Total Returns</Tip>
           </div>
           <div className="stat-value" style={{ fontSize: 17, color: 'var(--theme-red-text)' }}>
             {grandReturn > 0 ? `−NPR ${grandReturn.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}

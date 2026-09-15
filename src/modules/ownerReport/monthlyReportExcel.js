@@ -136,7 +136,21 @@ export function exportMonthlyReportExcel(report, bizInfo) {
     }]
     XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - Inventory Depth', bizInfo, periodLabel, invSummaryRows), 'Inventory Summary')
 
-    const deadSlowRows = (inv.deadSlowStock?.items || []).map(i => ({ Item: i.name, Status: i.status, 'Value at Risk (NPR)': round2(i.valueAtRisk), Used: round2(i.used), Closing: round2(i.closing) }))
+    // S756 (D20): a v7+ section (`rule: 'streak'`) adds the streak and the next step, plus a Rule
+    // column so the sheet says what "Dead" meant. A v1–v6 section keeps its old columns — it has no
+    // streak, and a blank or 0 there would read as a finding.
+    const dsStreak = inv.deadSlowStock?.rule === 'streak'
+    const deadAfter = inv.deadSlowStock?.deadAfterMonths || 3
+    const dsRule = dsStreak
+      ? `Dead = ${deadAfter}+ counted months in a row with no use; Slow = 1–2 months, or <20% used`
+      : 'Dead = no use in this month alone (one-month rule, before S756)'
+    const deadSlowRows = (inv.deadSlowStock?.items || []).map(i => ({
+      Item: i.name, Status: i.status,
+      ...(dsStreak ? { 'Months Without Use': `${i.stillMonths || 0}${i.atLeast ? '+' : ''}` } : {}),
+      'Value at Risk (NPR)': round2(i.valueAtRisk), Used: round2(i.used), Closing: round2(i.closing),
+      ...(dsStreak ? { 'Suggested Next Step': i.suggestion || '', 'Last Bought': i.lastBought || '', Supplier: i.supplier || '' } : {}),
+      Rule: dsRule,
+    }))
     if (deadSlowRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(deadSlowRows), 'Inventory - Dead-Slow')
 
     const varianceRows = (inv.variance?.items || []).filter(i => i.flag !== 'ok').map(i => ({ Item: i.name, 'Actual Used': round2(i.actualUsed), 'Theoretical Used': round2(i.theoreticalUsed), 'Variance %': pct(i.variancePct), 'Value (NPR)': round2(i.value), Flag: i.flag }))

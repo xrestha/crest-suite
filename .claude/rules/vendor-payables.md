@@ -26,9 +26,12 @@ valuation.
 
 **Owner decision D10.** A return may pick a bill from up to 12 earlier months and sits in the month on
 screen (its own `period_id`/`bs_day`). The over-return cap reads every return against the line in any
-month. VAT and Non-VAT value such a return at its own bill's discount through `readPriorBillLines.js`;
-Payment Report, Vendor Report, Supplier Contribution and `computeVendorPurchasingSection` still fall
-back to the list rate for it, and Vendor Report's drilldown shows it on no row — open in `IMS_TODO.md`.
+month. Every reader values such a return at its own bill's discount through `readPriorBillLines.js`:
+VAT and Non-VAT directly, and Payment Report, Vendor Report, Supplier Contribution and
+`computeVendorPurchasingSection` through `applyPriorBillFactors` / `mergeFactors` in
+`supplierAttribution.js` (`vendorNetByItem({ priorFactors })`). A reader that only looks at this
+month's bills falls back to the list rate, which is the defect to watch for in a fifth reader. Vendor
+Report's drilldown lists earlier-bill and unlinked return rows.
 
 **Also S756:** editing a bill with returns against it is refused (`purchase_bill_has_returns`, D26);
 `discount_amount >= 0` is a CHECK; the Purchases register values every bill over ALL its lines under

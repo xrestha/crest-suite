@@ -124,8 +124,8 @@ items with stock, or their opening + purchases value at least 5% of COGS (`isMat
 judge per month. Monthly Summary and Budget vs Actual keep opening on the open month but are
 provisional with no verdict until it closes. Stock Ageing and FIFO now follow closed-month counts over
 a rolling 12 months (`anchorToCounts` in `stockAgeingCalc.js`), and Dead Stock needs 3 consecutive
-counted still months (`deadStockCalc.js`); the frozen Owner Report's dead-stock section still uses the
-one-month rule (open in `IMS_TODO.md`).
+counted still months (`deadStockCalc.js`), which the frozen Owner Report's dead-stock section uses too
+(schema version 7; older snapshots keep the one-month figure they were frozen with).
 
 ### Stock Count and Stock Report: what a 0 means, what a requisition is, and what a failed read does (S695)
 

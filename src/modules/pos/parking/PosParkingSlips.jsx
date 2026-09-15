@@ -9,7 +9,7 @@ import Tip from '../../../components/Tip'
 import { printParkingSlip } from './parkingSlipHtml'
 import NewParkingSlipModal from './NewParkingSlipModal'
 import { viewPosBill } from '../../../utils/viewPosBill'
-import { nepalTime, serviceDayStartIso } from '../../../shared/nepalTime'
+import { nepalTime, serviceDayStartIso, SERVICE_DAY_ROLLOVER_MS } from '../../../shared/nepalTime'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 
@@ -56,7 +56,10 @@ export default function PosParkingSlips() {
     // auto_closed so it stays distinguishable from a real confirmed exit.
     // S754 (owner decision): a slip rolls over at 6 AM Nepal time, not at the device's midnight — a
     // car parked at 11:30 PM during a late service must still be on the Open tab at 12:30 AM.
-    const startOfDay = new Date(serviceDayStartIso())
+    // S756 (owner decision): the cut-off is the actual 6 AM that starts today's service day, the same
+    // boundary gate passes use. serviceDayStartIso() is that day's MIDNIGHT, so a car parked at 3 AM
+    // (still yesterday's service) stayed open until the NEXT morning's sweep.
+    const startOfDay = new Date(Date.parse(serviceDayStartIso()) + SERVICE_DAY_ROLLOVER_MS)
     const stale = (rows || []).filter(s => s.status === 'open' && new Date(s.time_in) < startOfDay)
     setSweepFailed(false)
     if (stale.length > 0) {

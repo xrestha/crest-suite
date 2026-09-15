@@ -26,6 +26,7 @@ import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
+import { finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote } from '../../modules/dashboard/labourSource'
 
 // Cost & Margin trend series. Fixed hex, for the reason DESIGN.md states by name: the semantic
 // token set is five ROLES, not five distinguishable hues. These four lines were
@@ -74,7 +75,10 @@ export default function OwnerDashboard() {
   const [stats, setStats] = useState(null)
   const [reorderStats, setReorderStats] = useState(null)
   const [payablesStats, setPayablesStats] = useState(null)
-  const [laborCostTotal, setLaborCostTotal] = useState(null)
+  // resolveOwnerLabour()'s { source, amount, verdictWithheld }, or null before a load / with no
+  // open period (S756). `source` is what the three labour-bearing tiles name under their figure.
+  const [labour, setLabour] = useState(null)
+  const laborCostTotal = labour?.amount ?? null
   // Historical trend, sourced from the already-frozen monthly_owner_reports snapshots (one per
   // closed period) rather than re-deriving figures live — cheap (no new queries beyond this one),
   // and matches how the report page's own Trend section already reads prior snapshots directly.
@@ -144,7 +148,7 @@ export default function OwnerDashboard() {
       loadImsFigures(period, myId),
       loadReorderStats(period, myId),
       loadOverduePayables(myId),
-      period ? loadLaborCost(period, myId) : Promise.resolve(setLaborCostTotal(null)),
+      period ? loadLaborCost(period, myId) : Promise.resolve(setLabour(null)),
     ])
     if (loadIdRef.current !== myId) return
     setLoading(false)
@@ -338,6 +342,13 @@ export default function OwnerDashboard() {
   // prorated employer SSF. Deliberately a simplification for daily/hourly staff — assumes a
   // standard day/hours every elapsed calendar day rather than looking up real attendance; refined
   // once Payroll Run is finalized for the month. ──
+  //
+  // S756 (owner decision 2026-09-15): once that run IS finalized, it is the figure — gross + OT +
+  // employer SSF from its payslips, the Monthly Owner Report's own finalized-run definition — and
+  // the estimate below is not used. Never both, and never the Overheads Labor bucket (see
+  // loadImsFigures). A failed run or payslip read does NOT fall back to the estimate: we would not
+  // know whether a run exists, and an estimate standing in for an unread payroll is a different
+  // labour source wearing the page's label. It withholds all three labour-bearing verdicts instead.
   async function loadLaborCost(period, myId) {
     const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
     const bsToday = getBsToday()
@@ -346,15 +357,47 @@ export default function OwnerDashboard() {
 
     const results = await Promise.all([
       // `ssf_no` is load-bearing: isSsfContributor() needs it as well as the enrolment flag.
-      scopedFrom('hr_employees', 'id, status, basic_salary, pay_basis, ssf_enrolled, ssf_no, join_date, end_date'),
-      scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value'),
+      // Paged (S756): master data read as a MAP — an employee past a truncated read accrues nothing.
+      fetchAllRows(() => scopedFrom('hr_employees', 'id, status, basic_salary, pay_basis, ssf_enrolled, ssf_no, join_date, end_date').order('id')),
+      fetchAllRows(() => scopedFrom('hr_salary_components', 'employee_id, type, calc_type, value').order('id')),
       scopedFrom('hr_overtime_entries', 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
         .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
+      scopedFrom('hr_payroll_runs', 'id').eq('period_id', period.id).eq('status', 'finalized'),
     ])
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
-    setLoadErrors(prev => ({ ...prev, labor: results.some(r => r.error) ? 'Labor cost failed to load — may be incomplete or stale.' : '' }))
-    const [{ data: employees }, { data: components }, { data: otEntries }] = results
+    const [{ data: employees }, { data: components }, { data: otEntries }, runsRes] = results
+    const estimateReadFailed = results.slice(0, 3).some(r => r.error)
 
+    let payroll = null
+    let payrollReadFailed = !!runsRes.error
+    const runIds = (runsRes.data || []).map(r => r.id)
+    if (!payrollReadFailed && runIds.length > 0) {
+      // One row per employee per run — paged and chunked, with a unique tiebreaker.
+      const slipRes = await fetchAllRowsChunked(runIds, chunk =>
+        scopedFrom('hr_payslips', 'gross, ot_amount, ssf_employer').in('run_id', chunk).order('id'))
+      if (loadIdRef.current !== myId) return // superseded again after the payslip read
+      if (slipRes.error) payrollReadFailed = true
+      else payroll = finalizedPayrollCost(slipRes.data || [])
+    }
+
+    const resolved = resolveOwnerLabour({
+      payroll,
+      payrollReadFailed,
+      estimate: estimateReadFailed ? null : estimateLaborCost({ employees, components, otEntries, period, monthDays, elapsedDays }),
+      estimateReadFailed,
+    })
+    setLoadErrors(prev => ({
+      ...prev,
+      labor: resolved.source !== 'failed' ? ''
+        : payrollReadFailed ? 'Payroll could not be loaded — Labor Cost %, Prime Cost % and True Net Margin % are not shown.'
+        : 'Labor cost could not be loaded — Labor Cost %, Prime Cost % and True Net Margin % are not shown.',
+    }))
+    setLabour(resolved)
+  }
+
+  // The prorated estimate, used only while the period has no finalized payroll run. Pure over the
+  // rows loadLaborCost read.
+  function estimateLaborCost({ employees, components, otEntries, period, monthDays, elapsedDays }) {
     const empMap = Object.fromEntries((employees || []).map(e => [e.id, e]))
 
     // Period boundaries in AD, for comparing against join_date/end_date (both plain AD dates).
@@ -418,7 +461,7 @@ export default function OwnerDashboard() {
       otTotal += (parseFloat(e.ot_hours) || 0) * hr * mult
     })
 
-    setLaborCostTotal(accruedGross + otTotal + accruedSsfEmployer)
+    return accruedGross + otTotal + accruedSsfEmployer
   }
 
   const revenueTotal = stats?.revenueTotal || 0
@@ -459,14 +502,27 @@ export default function OwnerDashboard() {
   const SETTLE_DAY = 10 // matches ClientDashboard's own threshold, deliberately
   const periodTooEarly = isCurrentPeriod && dayOfPeriod < SETTLE_DAY
   const partialNote = periodTooEarly ? `Day ${dayOfPeriod} of ${periodDays} · settles at month end` : null
+  // S756: that clock argument holds for the ESTIMATE only. A finalized run is the WHOLE month's
+  // wage bill, so while the month is still running it sits over revenue for part of it and Labor
+  // Cost % reads high by exactly the days left — the lumpy-numerator case above, on labour. Rare
+  // (payroll is normally finalized after the month ends), but then the verdict is withheld on all
+  // three labour-bearing tiles until the month is complete.
+  const payrollAheadOfRevenue = labour?.source === 'payroll' && isCurrentPeriod && dayOfPeriod < periodDays
+  const labourNote = ownerLabourNote(labour?.source)
+  // '' before a load or with no open period, so no tile prints a dangling "· labour".
+  const labourSuffix = labourNote ? ` · labour ${labourNote}` : ''
   // The banded figure, with both the colour AND the ✓/△/▲ withheld before SETTLE_DAY — a mark
-  // on a day-4 food cost is the same claim in a quieter voice.
-  const settledFigure = (pct, bander) => {
+  // on a day-4 food cost is the same claim in a quieter voice. `withhold` extends the same
+  // treatment to any other reason the figure has not earned its verdict.
+  const settledFigure = (pct, bander, withhold = periodTooEarly) => {
     const f = bandFigure(pct, bander)
     if (pct == null) return { color: 'var(--theme-text2)', title: undefined, text: f.text }
-    if (periodTooEarly) return { color: 'var(--theme-text1)', title: undefined, text: `${pct.toFixed(1)}%` }
+    if (withhold) return { color: 'var(--theme-text1)', title: undefined, text: `${pct.toFixed(1)}%` }
     return { color: f.style.color, title: f.title, text: f.text }
   }
+  const labourFigure = settledFigure(laborPct, lcBand, payrollAheadOfRevenue)
+  const primeFigure = settledFigure(primeCostPct, pcBand, periodTooEarly || payrollAheadOfRevenue)
+  const marginFigure = settledFigure(netMarginPct, nmBand, periodTooEarly || payrollAheadOfRevenue)
 
   const trendChartData = trendReports.map(r => {
     const c = r.snapshot?.combined || {}
@@ -615,25 +671,31 @@ export default function OwnerDashboard() {
 
           <div {...kpiCard(() => navigate('/hr/payroll'))}>
             <div style={kpiLabelStyle}>
-              <Tip text="Prorated estimate: gross + overtime + employer SSF (staff enrolled in SSF with an SSF number, as payroll does), scaled to days elapsed this month. This tile always shows that estimate — the exact figure is the finalized Payroll Run, which the Monthly Owner Report uses once the month is closed. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
+              <Tip text="Gross pay + overtime + employer SSF, as a % of revenue. When this month's Payroll Run is finalized, it is that run's figure — the same one the Monthly Owner Report uses. Until then it is an estimate: each employee's pay (and employer SSF for staff enrolled with an SSF number) scaled to the days elapsed, plus approved overtime. Never both, and never the Labor tab on Overheads. Healthy range for Nepal F&B: 25-30% of revenue." width={280}>Labor Cost % (MTD)</Tip>
             </div>
             {/* Banded through `lcBand`, not an inline ternary. The thresholds were already the
                 Monthly Owner Report's 30/37 — but written out a second time here, and WITHOUT the
                 ✓/△/▲ mark, so this tile carried its verdict in hue alone while the Food Cost tile
                 immediately to its left carried `fcBand`'s mark. Same for Prime Cost and Net Margin
-                below (S660). */}
-            <div style={{ ...kpiValueStyle(24), color: lcBand(laborPct).color }} title={laborPct != null ? lcBand(laborPct).label : undefined}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : bandFigure(laborPct, lcBand).text}
+                below (S660). S756: through settledFigure, so a failed labour read is a grey dash and
+                a full-month payroll over a part-month of revenue carries no verdict. */}
+            <div style={{ ...kpiValueStyle(24), color: labourFigure.color }} title={labourFigure.title}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : labourFigure.text}
             </div>
-            <div style={kpiSubtextStyle}>Target 25-30% · estimate →</div>
+            {/* The source is named where the figure is read (S756), not in the hover. */}
+            <div style={kpiSubtextStyle}>
+              {loading ? 'Target 25-30%'
+                : payrollAheadOfRevenue ? `Full month's payroll · Day ${dayOfPeriod} of ${periodDays} of revenue`
+                : `Target 25-30%${labourNote ? ` · ${labourNote}` : ''} →`}
+            </div>
           </div>
 
           <div {...kpiCard()}>
             <div style={kpiLabelStyle}>
               <Tip text="Food Cost % + Labor Cost % — the two controllable costs combined, the number operators actually benchmark against. Industry standard: 60-65% of revenue." width={280}>Prime Cost % (MTD)</Tip>
             </div>
-            <div style={{ ...kpiValueStyle(24), color: settledFigure(primeCostPct, pcBand).color }} title={settledFigure(primeCostPct, pcBand).title}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : settledFigure(primeCostPct, pcBand).text}
+            <div style={{ ...kpiValueStyle(24), color: primeFigure.color }} title={primeFigure.title}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : primeFigure.text}
             </div>
             {/* Prime and True Net Margin both CONTAIN the prorated labour estimate, and both used
                 to present themselves as exact — only the Labor card said "Estimate", and only in
@@ -642,8 +704,9 @@ export default function OwnerDashboard() {
                 the Monthly Owner Report prints "· estimated — no payroll finalized for this
                 period" inline. */}
             {/* The labour-estimate disclosure is load-bearing (S660) and must survive the
-                partial-period note rather than being replaced by it. */}
-            <div style={kpiSubtextStyle}>{partialNote ? `Day ${dayOfPeriod} of ${periodDays} · includes labour estimate` : 'Target ≤60-65% · includes labour estimate'}</div>
+                partial-period note rather than being replaced by it. S756: it names whichever
+                labour source was actually used. */}
+            <div style={kpiSubtextStyle}>{partialNote ? `Day ${dayOfPeriod} of ${periodDays}${labourSuffix}` : `Target ≤60-65%${labourSuffix}`}</div>
           </div>
 
           {/* The ternary was inverted: a client who HAS Overheads got the non-clickable card (the
@@ -656,16 +719,17 @@ export default function OwnerDashboard() {
             {/* `canOverheads` gates the FIGURE, not just its colour: without Overheads this is not
                 a margin at all, so it must stay unbanded and unmarked rather than being painted a
                 verdict on a number the page cannot compute. */}
-            <div style={{ ...kpiValueStyle(24), color: canOverheads ? settledFigure(netMarginPct, nmBand).color : 'var(--theme-text2)' }}
-              title={canOverheads ? settledFigure(netMarginPct, nmBand).title : undefined}>
-              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : settledFigure(netMarginPct, nmBand).text}
+            <div style={{ ...kpiValueStyle(24), color: canOverheads ? marginFigure.color : 'var(--theme-text2)' }}
+              title={canOverheads ? marginFigure.title : undefined}>
+              {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : !canOverheads ? '—' : marginFigure.text}
             </div>
             <div style={kpiSubtextStyle}>
               {/* Tier read from the catalog: this said "(Pro)" while Overheads is a Growth feature. */}
               {!canOverheads ? `Requires Overheads (${overheadsTier}) →`
-                : !loading && overheadTotal === 0 ? 'Excludes overhead — not entered'
-                : partialNote ? `Day ${dayOfPeriod} of ${periodDays} · includes labour estimate`
-                : 'After food, labour & overhead · includes labour estimate'}
+                : !loading && labour?.source === 'failed' ? 'Not shown — labour could not be loaded'
+                : !loading && overheadTotal === 0 ? `Excludes overhead — not entered${labourSuffix}`
+                : partialNote ? `Day ${dayOfPeriod} of ${periodDays}${labourSuffix}`
+                : `After food, labour & overhead${labourSuffix}`}
             </div>
           </div>
         </div>

@@ -9,6 +9,8 @@ import { fetchAllRows, runChunkedByIds } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import SupportContactLine from '../../../components/SupportContactLine'
 import { COGS_FORMULA, computeUsed } from '../../../shared/imsFormulas'
 import { allocateBillDiscounts } from '../reports/supplierAttribution'
@@ -69,6 +71,8 @@ const fieldKeyOf = tab => FIELD_TAB[tab] || null
 
 export default function Stock() {
   const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, hasFeature, hasImsAccess } = useAuth()
+  // The export's letterhead (S756, owner decision): the one extra read this page makes for it.
+  const biz = useBizInfo()
   const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
@@ -1212,16 +1216,16 @@ export default function Stock() {
         'Requisitioned Qty': requisitioned[item.id] || '',
       }
     })
-    // The warning travels with the sheet (S756 D6). Scope and note lines above the table rather than
-    // the shared letterhead: that needs the client-name read, a round trip this counting page does
-    // not otherwise make, for a register that has never carried one.
+    // The warning travels with the sheet (S756 D6), under the same letterhead every other report
+    // export carries (owner decision, S756 stage 4).
     const note = gapNote(gap, periodLabel)
-    const ws = XLSX.utils.aoa_to_sheet([
-      [`Stock Register — ${periodLabel}${selectedPeriod?.status === 'open' ? ' (open)' : ''}`],
-      ...(note ? [[note]] : []),
-      [],
-    ])
-    XLSX.utils.sheet_add_json(ws, rows, { origin: -1 })
+    const ws = sheetWithLetterhead(XLSX, {
+      title: 'Stock Register',
+      biz,
+      scopeLine: `Period : ${periodLabel}${selectedPeriod?.status === 'open' ? ' (PROVISIONAL — period still open, figures can change)' : ' (period closed)'}`,
+      rows,
+      notes: note ? [note] : [],
+    })
     XLSX.utils.book_append_sheet(wb, ws, 'Stock Register')
     XLSX.writeFile(wb, `Stock-Register-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
@@ -1475,7 +1479,11 @@ export default function Stock() {
             })()}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-            <button className="btn btn-ghost" onClick={exportExcel}>Export Excel</button>
+            {/* A failed client-name read would ship the register with a blank CompanyName line (S754 rule). */}
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={!!biz.error}
+              title={biz.error ? 'Your business name could not be loaded, so the export is paused — reload the page and try again.' : undefined}>
+              Export Excel
+            </button>
           </div>
 
           <div className="card">

@@ -88,15 +88,54 @@ export function returnBase(r, factors) {
   return gross * (f === undefined ? 1 : f)
 }
 
+/**
+ * The period's own discount factors plus those of EARLIER-month bills a return points at (S756,
+ * owner decision D10). A return sits in the month the goods went back and may be against a bill from
+ * up to 12 months before, so its line is not among the period's purchases and `returnBase` would fall
+ * back to the list rate — no discount — while VAT Report credits it at its own bill's discounted rate.
+ *
+ * `prior` is `priorBillFactors(readPriorBillLines(...).data)` from purchaseTaxSplit.js; it is taken as
+ * a finished Map rather than as lines because that function lives in the file that imports this one.
+ * The period's own factors win on a collision. Every page that values returns (Vendor Report, Supplier
+ * Contribution, Payment Summary, the Owner Report's vendor section) merges through here, so none of
+ * them can each decide the precedence differently.
+ */
+export function mergeFactors(own, prior) {
+  if (!prior || prior.size === 0) return own
+  const out = new Map(prior)
+  for (const [k, v] of own) out.set(k, v)
+  return out
+}
+
+/**
+ * For a caller that already priced returns at factor 1 for anything outside its own lines — Payment
+ * Summary goes through `billPayables`, which knows only the period's bills — scale each return against
+ * an earlier-month bill by that bill's factor (S756, D10). `field` is the priced value (VAT and all:
+ * the factor multiplies through it). Rows keep every other field; `priorBill` marks the ones moved.
+ */
+export function applyPriorBillFactors(rows, periodEntries, priorFactors, field = 'value') {
+  if (!priorFactors || priorFactors.size === 0) return rows || []
+  const here = new Set((periodEntries || []).map(e => e.id))
+  return (rows || []).map(r => {
+    const id = r.purchase_entry_id
+    if (id == null || here.has(id) || !priorFactors.has(id)) return r
+    return { ...r, [field]: (r[field] || 0) * priorFactors.get(id), priorBill: true }
+  })
+}
+
 // → { [item_id]: { total, byVendor: { [vendor_id]: net } } }
 // Values are the true net and may be negative (a return larger than the period's purchases);
 // that is preserved here so the displayed column ties to Vendor Report, and clamped only where a
 // proportional SHARE is taken, since a negative share is meaningless.
-export function vendorNetByItem(purchases, returns) {
+//
+// `priorFactors` (S756, D10): discount factors of earlier-month bills this period's returns point at,
+// merged under the period's own. Vendor Report merges the same Map, which is what keeps the S727
+// tie-out holding for a cross-month return.
+export function vendorNetByItem(purchases, returns, { priorFactors } = {}) {
   const byItem = {}
   const ensure = itemId => byItem[itemId] = byItem[itemId] || { total: 0, byVendor: {} }
   const allocated = allocateBillDiscounts(purchases)
-  const factors = netFactors(allocated)
+  const factors = mergeFactors(netFactors(allocated), priorFactors)
   for (const p of allocated) {
     if (!p.item_id) continue
     const b = ensure(p.item_id)

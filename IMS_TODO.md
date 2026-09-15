@@ -55,16 +55,21 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 
 **Stage 3 (owner decisions) shipped in S756** — migrations `20260918120000` (supplier credit pairs), `20260918130000` (invoice VAT/total columns), `20260918140000` (requisition attribution + Rejected, and the staff-adds-lines-to-an-issued-slip gap closed), `20260918150000` (dish-photos bucket), `20260918160000` (Logos SELECT policy — logo replace/remove had been failing since 20260914140100). All eleven remaining decisions are built.
 
-**Open after stage 3:**
-- 🔴 A return against an EARLIER month's bill is valued at list price (no discount) on PaymentReport, VendorReport, SupplierContribution and computeVendorPurchasingSection — VAT and Non-VAT now read the prior bill via `readPriorBillLines.js`. VendorReport's bill drilldown shows such a return on no row.
-- 🔴 Monthly Owner Report's `computeInventoryDeadStock.js` still uses the one-month Dead rule; move it onto `deadStockCalc.js` and bump `CURRENT_SCHEMA_VERSION`.
-- 🔴 Overheads.js should adopt `src/modules/dashboard/labourSource.js` (same rule, one copy); its payslips read is unpaged.
-- 🔴 OwnerDashboard's Labor/Prime/True Net Margin use a prorated HR estimate even after payroll is finalized, and its overheads read ignores the Labor bucket — decide whether it should prefer the finalized run (owner decision).
-- 🔴 KitchenDisplay.jsx keeps its own copy of `serviceDayStartIso`; import the shared one from nepalTime.js.
-- ⚪ POS parking auto-close cuts off at the service day's midnight while gate passes use the actual 6 AM — align? (one line in PosParkingSlips.jsx).
-- ⚪ D6 choices to confirm: Stock Count Summary export has a scope line and warning but no letterhead; Annual Summary's YEAR-total FC% also loses its verdict when the year's gap is material; Budget vs Actual's provisional line talks about spend rather than food cost.
-- ⚪ Stock Ageing: count surpluses (count above theoretical usage — common) are unknown-age stock and will often hold back the ✓ on the 90+ card.
+**Stage 4 (follow-ups and judgment calls) shipped in S756** — frontend only, no migration. Owner answers: Owner Dashboard uses finalized payroll when it exists; parking closes at 6 AM too; the Annual Summary year-total verdict stays withheld when the year's gap is material; Stock Ageing stays cautious about count surpluses; the Stock Count export gets the letterhead; the One Lakh report keeps deducting unlinked returns and says so; disposals recorded before S756 are left as recorded.
+
+- ✅ S756 stage 4 — A return against an EARLIER month's bill is valued at that bill's discount on PaymentReport, VendorReport, SupplierContribution and computeVendorPurchasingSection (`applyPriorBillFactors` / `mergeFactors` in `supplierAttribution.js`). VendorReport's drilldown lists earlier-bill and unlinked return rows.
+- ✅ S756 stage 4 — Monthly Owner Report dead stock uses `deadStockCalc.js` (3 counted still months); `CURRENT_SCHEMA_VERSION` 7, which also covers the vendor section's discounted returns, returns' own payment method and paged read.
+- ✅ S756 stage 4 — Overheads.js adopts `labourSource.js` and pages its payslips read.
+- ✅ S756 stage 4 — OwnerDashboard Labor/Prime/True Net Margin use the finalized payroll run when one exists (gross + OT + employer SSF, the Owner Report's figure), name the source, show dashes on a failed read, and withhold the verdict when a full month's payroll sits against part of a month's revenue.
+- ✅ S756 stage 4 — KitchenDisplay.jsx imports `serviceDayStartIso` from nepalTime.js.
+- ✅ S756 stage 4 — POS parking auto-close cuts off at the actual 6 AM, like gate passes (owner decision).
+- ✅ S756 stage 4 — Stock Count export carries the letterhead (owner decision). Annual Summary year-total verdict: kept as built (owner decision).
+- ✅ S756 stage 4 — Stock Ageing count surpluses: kept cautious (owner decision, no change).
+- ⚪ Budget vs Actual's provisional line talks about spend rather than food cost — wording only.
 - ⚪ Dish photos uploaded to a NEW recipe that is then cancelled leave an unused file in storage.
+- ⚪ Three payroll-cost definitions exist: gross + employer SSF (Overheads, ClientDashboard, ConsolidatedPnl, `get_group_summary`), gross + OT + employer SSF (Monthly Owner Report, Owner Dashboard), gross − absence + OT + employer SSF (`payrollCashCost`). The first group likely understates labour by the overtime — owner decision.
+- ⚪ `purchaseTaxSplit.js` keeps a private `mergeFactors`; `billPayables` could take prior bill lines directly (tidy-up).
+- ⚪ Owner Report vendor section: cash/credit split is pre-discount, and its aging total is compared against payments that include VAT.
 
 - ✅ S756 stage 3 — D22 — ClientDashboard Fixed Costs % / Est. Net Margin use finalized payroll, and say "labour unreadable on this login" for an IMS staff login (Overheads does both now).
 - ✅ S756 stage 3 — VendorReport: `provisionalWhenOpen` on PeriodScope; SupplierContribution + VendorReport export gating on loading/biz.error.
@@ -75,8 +80,8 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 stage 3 — TheoreticalVariance's Over/Under-consumed filter buttons test raw `variance > 0.01`, not the tolerance band.
 - ✅ S756 stage 3 — `findSupersededRows` / `persistSalesDay` rethrow `new Error(error.message)`, losing the error code.
 - ✅ S756 stage 3 — Move `serviceDayStartIso` (POS parking) into `src/shared/nepalTime.js`; GatePasses imports it from the POS modal. Decide whether POS parking's auto-close should use the actual 6 AM like gate passes (it cuts off at the service day's midnight).
-- ⚪ Disposals recorded before S756 keep a gain/loss measured at the last posted run (no backfill) — owner decision if wanted.
-- ⚪ 1L report: an UNLINKED return is still deducted from its supplier's total (at list rate, no VAT reversed) — agent's choice, to confirm.
+- ✅ S756 stage 4 — Disposals recorded before S756 keep a gain/loss measured at the last posted run — left as recorded (owner decision).
+- ✅ S756 stage 4 — 1L report: an UNLINKED return is still deducted from its supplier's total — kept, and the page says so (owner decision).
 - ⚪ Demand Forecast Recompute now skips past holidays, which changes what Roster's Labor Forecast reads.
 
 **Stage 1 (security + closed months) shipped in S756** — migration `20260918100000`, `admin-user-ops`, `ims-staff-login`. Assets were fenced to match the page (register/categories/repairs supervisor; disposal and posting manager), not all-manager. Known gaps it left: a staff login can add lines to an issued requisition over REST; Sales, Stock Count, Overheads and Requisitions show no amber "editing a closed month" banner to the Owner; Roster's labour-actuals reads still hit tables fenced from HR logins (`recipes`, `sales_entries`, `pos_orders`).

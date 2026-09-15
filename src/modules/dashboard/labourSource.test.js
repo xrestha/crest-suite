@@ -1,6 +1,49 @@
 import fs from 'fs'
 import path from 'path'
-import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel } from './labourSource'
+import {
+  isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel,
+  finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote,
+} from './labourSource'
+
+const readSource = (...parts) => fs.readFileSync(path.join(__dirname, '..', '..', ...parts), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+
+// S756: Overheads carried the rule inline; one definition is the whole point of the helper.
+describe('Overheads adopts the shared labour rule', () => {
+  const src = readSource('modules', 'ims', 'reports', 'Overheads.js')
+  test('imports and calls resolveLabour, isPayrollFenced and payrollLabourTotal', () => {
+    expect(src).toMatch(/import \{[^}]*resolveLabour[^}]*\} from '\.\.\/\.\.\/dashboard\/labourSource'/)
+    expect(src).toMatch(/resolveLabour\(\{/)
+    expect(src).toMatch(/isPayrollFenced\(\{/)
+    expect(src).toMatch(/payrollLabourTotal\(/)
+  })
+  test('no longer carries the inline precedence, fence or payslip sum', () => {
+    expect(src).not.toMatch(/labourPayroll != null \? labourPayroll : totals\.labor/)
+    expect(src).not.toMatch(/payrollFenced \? 'unreadable'/)
+    expect(src).not.toMatch(/hrOn && !isAdmin && !isOwner && !!profile\?\.ims_role/)
+    expect(src).not.toMatch(/parseFloat\(ps\.gross\)/)
+  })
+  test('pages the payslip read with a unique tiebreaker', () => {
+    expect(src).toMatch(/fetchAllRowsChunked\(runIds,[\s\S]{0,120}[Ff]rom\('hr_payslips'[^)]*\)\.in\('run_id', chunk\)\.order\('id'\)/)
+  })
+})
+
+describe('OwnerDashboard uses finalized payroll when it exists', () => {
+  const src = readSource('pages', 'dashboard', 'OwnerDashboard.jsx')
+  test('reads the finalized run and pages its payslips, OT included', () => {
+    expect(src).toMatch(/scopedFrom\('hr_payroll_runs', 'id'\)\.eq\('period_id', period\.id\)\.eq\('status', 'finalized'\)/)
+    expect(src).toMatch(/fetchAllRowsChunked\(runIds,[\s\S]{0,120}'gross, ot_amount, ssf_employer'\)\.in\('run_id', chunk\)\.order\('id'\)/)
+    expect(src).toMatch(/resolveOwnerLabour\(\{/)
+  })
+  test('keeps the XOR: overheads read is the overhead bucket only', () => {
+    expect(src).toMatch(/from\('overheads'\)\.select\('amount'\)\.eq\('period_id', period\.id\)\.eq\('bucket', 'overhead'\)/)
+    expect(src).not.toMatch(/'bucket', 'labor'/)
+  })
+  test('the labour tile goes through settledFigure, not a bare band colour', () => {
+    expect(src).not.toMatch(/lcBand\(laborPct\)\.color/)
+    expect(src).toMatch(/settledFigure\(laborPct, lcBand/)
+  })
+})
 
 // D22 is silent when it regresses — a margin a little too healthy — so pin the Dashboard's wiring.
 describe('ClientDashboard counts labour through resolveLabour', () => {
@@ -80,6 +123,45 @@ describe('resolveLabour — payroll XOR the Labor bucket, never the sum', () => 
     const ignored = payroll != null && bucket > 0 ? bucket : 0
     const r = resolveLabour({ labourBucket: bucket, payroll, hrOn: true, fenced })
     expect([r.source, r.amount, r.ignoredBucket, r.verdictWithheld]).toEqual([source, labourEffective, ignored, source === 'unreadable'])
+  })
+})
+
+describe('finalizedPayrollCost — the Monthly Owner Report\'s finalized-run figure', () => {
+  test('gross + overtime + employer SSF; payslip gross excludes OT', () => {
+    expect(finalizedPayrollCost([{ gross: '30000', ot_amount: '1500', ssf_employer: '2000' }, { gross: 10000, ot_amount: null, ssf_employer: null }])).toBe(43500)
+  })
+  test('null means no run; [] is a real zero', () => {
+    expect(finalizedPayrollCost(null)).toBeNull()
+    expect(finalizedPayrollCost([])).toBe(0)
+  })
+})
+
+describe('resolveOwnerLabour — payroll XOR estimate, never a fallback over a failed read', () => {
+  test('a finalized run supersedes the estimate', () => {
+    expect(resolveOwnerLabour({ payroll: 400000, estimate: 380000 }))
+      .toEqual({ source: 'payroll', amount: 400000, verdictWithheld: false })
+  })
+  test('no run: the estimate', () => {
+    expect(resolveOwnerLabour({ payroll: null, estimate: 380000 }))
+      .toEqual({ source: 'estimate', amount: 380000, verdictWithheld: false })
+  })
+  test('a failed payroll read does NOT fall back to the estimate', () => {
+    expect(resolveOwnerLabour({ payroll: null, payrollReadFailed: true, estimate: 380000 }))
+      .toEqual({ source: 'failed', amount: null, verdictWithheld: true })
+  })
+  test('a run that was read stands even when the estimate inputs failed', () => {
+    expect(resolveOwnerLabour({ payroll: 400000, estimate: null, estimateReadFailed: true }).source).toBe('payroll')
+  })
+  test('no run and a failed estimate read is failed, not a zero-labour month', () => {
+    const r = resolveOwnerLabour({ payroll: null, estimate: 0, estimateReadFailed: true })
+    expect(r.source).toBe('failed')
+    expect(r.amount).toBeNull()
+  })
+  test('each source has a note, matching the Owner Report\'s wording', () => {
+    expect(ownerLabourNote('payroll')).toBe('from finalized payroll')
+    expect(ownerLabourNote('estimate')).toBe('estimate — payroll not finalized')
+    expect(ownerLabourNote('failed')).toBeTruthy()
+    expect(ownerLabourNote(undefined)).toBe('')
   })
 })
 

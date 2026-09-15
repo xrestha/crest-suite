@@ -8,8 +8,11 @@
 import { supabase } from '../../supabaseClient'
 import { throwFirstError } from '../../shared/queryError'
 import { scopedFrom } from '../../shared/scopedDb'
-import { fetchAllRows } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { bsToAd } from '../../utils/bsCalendar'
+import { allocateBillDiscounts, netFactors, returnBase, mergeFactors } from '../ims/reports/supplierAttribution'
+import { returnLinesOutsidePeriod, priorBillFactors } from '../ims/reports/purchaseTaxSplit'
+import { readPriorBillLines } from '../ims/reports/readPriorBillLines'
 
 const EPS = 0.001
 
@@ -27,7 +30,12 @@ export async function computeVendorPurchasingSection(clientId, period, generated
       .select('id, vendor_id, qty, rate, payment_method, discount_amount, purchase_group_id, invoice_ref, bs_day')
       .eq('period_id', period.id)
       .order('id')),
-    supabase.from('vendor_returns').select('vendor_id, qty, rate, purchase_entry_id').eq('period_id', period.id),
+    // Paged with a unique tiebreaker (S756): it was the one bare read beside a paged one, and a
+    // return that falls past the 1000-row cap is frozen out of the snapshot for good (S722's shape).
+    fetchAllRows(() => supabase.from('vendor_returns')
+      .select('id, vendor_id, qty, rate, purchase_entry_id, payment_method')
+      .eq('period_id', period.id)
+      .order('id')),
     scopedFrom('vendors', clientId, 'id, name').eq('is_active', true),
   ])
   // Throw on a failed read so runSection() names this section as failed instead of freezing a
@@ -35,12 +43,32 @@ export async function computeVendorPurchasingSection(clientId, period, generated
   throwFirstError(results)
   const [{ data: purchases }, { data: returns }, { data: vendors }] = results
 
+  // S756 (owner decision D10): a return may sit in this month against a bill from an EARLIER month.
+  // Read those bills whole — the shared reader VAT/Non-VAT/Vendor Report use — so the return is
+  // credited at its own bill's discount. A failed read throws: a frozen section valued at list price
+  // because a read dropped would be permanent and silent.
+  const outsideIds = returnLinesOutsidePeriod(purchases, returns)
+  const priorRes = outsideIds.length > 0 ? await readPriorBillLines(outsideIds) : { data: [], error: null }
+  throwFirstError([priorRes])
+
   const creditIds = (purchases || []).filter(p => p.payment_method === 'Credit').map(p => p.id)
+  // Chunked and paged (S723/S629): one row per LINE per settlement, and the id list rides in the URL.
   const paymentsRes = creditIds.length > 0
-    ? await scopedFrom('payable_payments', clientId, 'purchase_entry_id, amount').in('purchase_entry_id', creditIds)
-    : { data: [] }
+    ? await fetchAllRowsChunked(creditIds, ids =>
+      scopedFrom('payable_payments', clientId, 'id, purchase_entry_id, amount').in('purchase_entry_id', ids).order('id'))
+    : { data: [], error: null }
   throwFirstError([paymentsRes])
   const { data: payments } = paymentsRes
+
+  // Returns are credited at the price actually paid — net of their own bill's discount — as
+  // VendorReport.js has since S725 (`retValueOf`). This section kept the LIST rate for every return,
+  // same-month ones included, so a fully returned discounted bill froze a net spend of minus the
+  // discount. The period's own factors, plus the earlier-month bills read above (own wins).
+  // `returnBase` still falls back to the list rate for an UNLINKED return, which has no bill left.
+  // This uses allocateBillDiscounts only for the return FACTORS; the local billKey / discount dedup
+  // below stay single-period by design (vendor-payables.md).
+  const factors = mergeFactors(netFactors(allocateBillDiscounts(purchases || [])), priorBillFactors(priorRes.data))
+  const returnValue = r => returnBase(r, factors)
   const paidByEntry = {}
   ;(payments || []).forEach(p => { paidByEntry[p.purchase_entry_id] = (paidByEntry[p.purchase_entry_id] || 0) + parseFloat(p.amount || 0) })
 
@@ -62,6 +90,7 @@ export async function computeVendorPurchasingSection(clientId, period, generated
 
   const vendorNameMap = Object.fromEntries((vendors || []).map(v => [v.id, v.name]))
   const byMethod = (rows, method) => rows.filter(r => (r.payment_method || 'Cash') === method).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+  const returnsByMethod = (rows, method) => rows.filter(r => (r.payment_method || 'Cash') === method).reduce((s, r) => s + returnValue(r), 0)
 
   const vendorIdsWithActivity = [...new Set((purchases || []).map(p => p.vendor_id).filter(Boolean))]
   const vendorRows = vendorIdsWithActivity.map(vendorId => {
@@ -69,21 +98,21 @@ export async function computeVendorPurchasingSection(clientId, period, generated
     const vReturns = (returns || []).filter(r => r.vendor_id === vendorId)
     const gross = vPurchases.reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
     const discount = vendorDiscountMap[vendorId] || 0
-    const returned = vReturns.reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+    const returned = vReturns.reduce((s, r) => s + returnValue(r), 0)
     return {
       vendorId, name: vendorNameMap[vendorId] || 'Unknown Vendor',
       gross, discount, returned, net: gross - discount - returned,
       billCount: new Set(vPurchases.map(billKey)).size,
-      cash: byMethod(vPurchases, 'Cash') - byMethod(vReturns, 'Cash'),
-      credit: byMethod(vPurchases, 'Credit') - byMethod(vReturns, 'Credit'),
-      fonepay: byMethod(vPurchases, 'FonePay') - byMethod(vReturns, 'FonePay'),
+      cash: byMethod(vPurchases, 'Cash') - returnsByMethod(vReturns, 'Cash'),
+      credit: byMethod(vPurchases, 'Credit') - returnsByMethod(vReturns, 'Credit'),
+      fonepay: byMethod(vPurchases, 'FonePay') - returnsByMethod(vReturns, 'FonePay'),
     }
   }).sort((a, b) => b.net - a.net)
 
   const unassignedTotal = (purchases || []).filter(p => !p.vendor_id).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
   const grandGross = (purchases || []).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
   const grandDiscount = Object.values(vendorDiscountMap).reduce((s, d) => s + d, 0)
-  const grandReturn = (returns || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
+  const grandReturn = (returns || []).reduce((s, r) => s + returnValue(r), 0)
 
   // Bill-level aging for unpaid Credit bills — pinned to `generatedAt`, not live `new Date()`.
   const billAging = { current: 0, d31_60: 0, d61_90: 0, d90plus: 0 }
