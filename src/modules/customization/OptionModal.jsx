@@ -21,6 +21,11 @@ import { npr } from '../../shared/nepalMoney'
 // INGREDIENTS (IMS only). Each line ADDS to or TAKES OFF the plate, per ONE plate, in the item's
 // own unit. Stored signed. An option with no lines changes nothing in stock, and the list on the
 // Groups page says so, so that is a choice rather than an accident.
+//
+// PORTION (S760, size options only). How big a plate this size is against a regular one — Small
+// 0.75, Large 1.5. Groups set to scale with the size multiply their stock (and price, if chosen) by
+// it. Blank means 1×, and the column is written only when it changes, so an ordinary edit still
+// saves on a database the S760 migration has not reached.
 
 const newKey = () => Math.random().toString(36).slice(2)
 
@@ -48,6 +53,7 @@ export default function OptionModal({
     diet: option?.diet || '',
     allergens: (option?.allergens || []).join(', '),
     is_active: option ? option.is_active !== false : true,
+    portion: option?.portion_factor != null ? String(Number(option.portion_factor)) : '',
   }))
   const [lines, setLines] = useState(() => (ingredients || []).map(i => ({
     key: newKey(),
@@ -83,6 +89,9 @@ export default function OptionModal({
     if (!form.name.trim()) e.name = 'Give the option a name, e.g. “Extra cheese”.'
     if (!form.is_removal && form.price !== '' && !Number.isFinite(Number(form.price))) e.price = 'Enter a number.'
     if (fullPriceMode && form.price !== '' && Number(form.price) < 0) e.price = 'A price cannot be below zero.'
+    if (isSize && form.portion !== '' && !(Number(form.portion) > 0 && Number(form.portion) <= 10)) {
+      e.portion = 'Enter a portion above 0 and up to 10 — 1 is a regular plate, 1.5 is half as much again.'
+    }
     lines.forEach((l, i) => {
       if (!l.ref) e[`line${i}`] = 'Choose an item.'
       else if (!(Number(l.qty) > 0)) e[`line${i}`] = 'Enter an amount above zero.'
@@ -108,6 +117,11 @@ export default function OptionModal({
       diet: form.is_removal ? null : (form.diet || null),
       allergens: form.is_removal ? [] : parseAllergens(form.allergens),
       is_active: form.is_active,
+    }
+    if (isSize) {
+      const nextPortion = form.portion === '' || Number(form.portion) === 1 ? null : Math.round(Number(form.portion) * 1000) / 1000
+      const savedPortion = option?.portion_factor == null ? null : Number(option.portion_factor)
+      if (nextPortion !== savedPortion) row.portion_factor = nextPortion
     }
 
     let saved
@@ -248,6 +262,26 @@ export default function OptionModal({
                 </p>
               </Tip>
             )}
+          </div>
+        )}
+
+        {isSize && (
+          <div className="form-field" style={{ margin: 0 }}>
+            <label htmlFor="opt-portion">
+              <Tip width={320} text="How big this size is against a regular plate. Small 0.75, Medium 1, Large 1.5. Groups on the dish that scale with size (toppings, a base) use this to work out stock and, if chosen, price — chicken popcorn on a Large bowl uses 1.5× the chicken. Leave blank for a regular plate.">Portion</Tip>
+            </label>
+            <QtyInput id="opt-portion" value={form.portion} placeholder="1"
+              onChange={v => set({ portion: v === '' || v == null ? '' : String(v) })}
+              onCommit={v => set({ portion: v === '' || v == null ? '' : String(v) })}
+              wrapperStyle={{ maxWidth: 140 }} {...fieldAria('opt-portion', errors.portion)} />
+            <FieldError id="opt-portion" message={errors.portion} />
+            <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+              {form.portion === '' || Number(form.portion) === 1
+                ? 'A regular plate: toppings and bases use their normal amount.'
+                : Number(form.portion) > 0
+                  ? `${Number(form.portion)}× a regular plate: a topping that uses 30 g uses ${Math.round(30 * Number(form.portion) * 10) / 10} g at this size.`
+                  : ''}
+            </p>
           </div>
         )}
 

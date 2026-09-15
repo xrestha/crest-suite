@@ -18,6 +18,7 @@ import OptionGroupModal from './OptionGroupModal'
 import OptionModal from './OptionModal'
 import AttachGroupsModal from './AttachGroupsModal'
 import AttachToDishesModal from './AttachToDishesModal'
+import BuildYourOwnTemplateModal from './BuildYourOwnTemplateModal'
 
 // Crest Customization (S758) — Option Groups.
 //
@@ -36,6 +37,11 @@ import AttachToDishesModal from './AttachToDishesModal'
 // order and the guest sees options in it. Each row shows ONE next step and keeps the rest under ⋯;
 // a group can be put on many dishes at once from its own card; and the page says "now attach it"
 // the moment a group has an option and no dish, because that is the step that went unnoticed.
+//
+// S760: build-your-own dishes. The Groups tab offers a template that builds Size / Base / Sauces /
+// Toppings for one dish in one transaction; the Dishes tab marks a dish build-your-own (or clears
+// it), badges it, and warns when a marked dish offers nothing to build. The mark is read from the
+// catalog loader, which tolerates a database the S760 migration has not reached.
 
 const vatOf = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : Number(r.vat_rate)
 
@@ -68,6 +74,8 @@ export default function OptionGroups() {
   const [optionModal, setOptionModal] = useState(null) // { groupId, optionId? }
   const [attachFor, setAttachFor] = useState(null)     // dish
   const [attachGroup, setAttachGroup] = useState(null) // group → dishes
+  const [templateOpen, setTemplateOpen] = useState(false)
+  const [markBusy, setMarkBusy] = useState(null)       // dish id being marked / cleared
 
   // An admin switching client mid-load must not let the previous tenant's catalog land.
   const loadSeq = useRef(0)
@@ -260,6 +268,22 @@ export default function OptionGroups() {
     return signedPrice(deltaIncl) || <span style={{ color: 'var(--theme-text3)' }}>No charge</span>
   }
 
+  async function toggleBuildYourOwn(d, on) {
+    if (markBusy) return
+    setMarkBusy(d.id)
+    setPageError(null)
+    const { data, error } = await scopedUpdate('recipes', { is_build_your_own: on }).eq('id', d.id).select('id')
+    setMarkBusy(null)
+    if (error) { setPageError(asActionError(error)); return }
+    if (!data?.length) { setPageError(`${d.name} could not be changed — it may have been removed. Reload the page.`); return }
+    flash(on
+      ? `${d.name} is build-your-own: the till always opens its choices and the guest menu walks them step by step.`
+      : `${d.name} is an ordinary dish again.`)
+    load({ quiet: true })
+  }
+
+  const byoSet = new Set(catalog.buildYourOwn || [])
+
   const openGroup = optionModal ? groupRows.find(g => g.id === optionModal.groupId) : null
   const openOption = openGroup && optionModal.optionId ? openGroup.options.find(o => o.id === optionModal.optionId) : null
 
@@ -275,7 +299,12 @@ export default function OptionGroups() {
           </p>
         </div>
         {tab === 'groups' && !loading && !loadError && (
-          <button className="btn btn-primary" onClick={() => setGroupModal({})}>+ New Group</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Tip width={300} text="For a dish guests build in steps, like an acai bowl, pizza or salad. Creates Size, Base, Sauces and Toppings groups on that dish in one go.">
+              <button className="btn btn-ghost" onClick={() => setTemplateOpen(true)} disabled={dishes.length === 0}>Build-your-own template</button>
+            </Tip>
+            <button className="btn btn-primary" onClick={() => setGroupModal({})}>+ New Group</button>
+          </div>
         )}
       </div>
 
@@ -474,6 +503,11 @@ export default function OptionGroups() {
                       <tr key={d.id}>
                         <td>
                           <span style={{ whiteSpace: 'nowrap', fontWeight: 500 }}>{d.name}</span>
+                          {byoSet.has(d.id) && (
+                            <Tip width={260} text="Build-your-own: the till always opens this dish's choices, and the QR menu walks them one step at a time." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}>
+                              <span className="badge-yellow">Build-your-own</span>
+                            </Tip>
+                          )}
                           <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
                             {d.category || 'No category'}{d.pos_enabled ? '' : ' · not on POS'}
                           </div>
@@ -484,14 +518,24 @@ export default function OptionGroups() {
                             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                               {attached.map(a => <span key={a.id} className="badge-yellow">{groupNameById.get(a.group_id) || '—'}</span>)}
                             </div>
+                          ) : byoSet.has(d.id) ? (
+                            <span style={{ fontSize: 12, color: 'var(--theme-amber-text)' }}>△ Build-your-own, but it offers nothing to build. Add choices or use the template.</span>
                           ) : <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No choices</span>}
                         </td>
                         <td>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setAttachFor(d)} disabled={catalog.groups.length === 0}
-                            aria-label={`Choices for ${d.name}`}
-                            title={catalog.groups.length === 0 ? 'Create an option group first' : undefined}>
-                            {attached.length ? 'Choices…' : 'Add choices'}
-                          </button>
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setAttachFor(d)} disabled={catalog.groups.length === 0}
+                              aria-label={`Choices for ${d.name}`}
+                              title={catalog.groups.length === 0 ? 'Create an option group first' : undefined}>
+                              {attached.length ? 'Choices…' : 'Add choices'}
+                            </button>
+                            <RowMenu label={`More for ${d.name}`} busy={markBusy === d.id} items={[
+                              byoSet.has(d.id)
+                                ? { key: 'byo-off', label: 'Make it an ordinary dish', onSelect: () => toggleBuildYourOwn(d, false) }
+                                : { key: 'byo-on', label: 'Mark as build-your-own', onSelect: () => toggleBuildYourOwn(d, true),
+                                    hint: 'The till always opens its choices; the QR menu walks them step by step' },
+                            ]} />
+                          </div>
                         </td>
                       </tr>
                     )
@@ -546,6 +590,20 @@ export default function OptionGroups() {
       {attachFor && (
         <AttachGroupsModal recipe={attachFor} onClose={() => setAttachFor(null)}
           onSaved={n => { load({ quiet: true }); flash(n ? `${attachFor.name} now offers ${n} group${n === 1 ? '' : 's'}.` : `${attachFor.name} now orders with no choices.`) }} />
+      )}
+
+      {templateOpen && (
+        <BuildYourOwnTemplateModal
+          dishes={dishes}
+          buildYourOwn={catalog.buildYourOwn || []}
+          groupNames={catalog.groups.map(g => g.name)}
+          onClose={() => setTemplateOpen(false)}
+          onSaved={({ dish }) => {
+            setTemplateOpen(false)
+            load({ quiet: true })
+            flash(`${dish?.name || 'The dish'} now has Size, Base, Sauces and Toppings. Add the bases, sauces and toppings with + Option, then set the prices.`)
+          }}
+        />
       )}
 
       {attachGroup && (

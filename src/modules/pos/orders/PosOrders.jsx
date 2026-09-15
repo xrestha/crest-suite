@@ -1421,7 +1421,7 @@ export default function PosOrders() {
       scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'),
       customizationEnabled
         ? loadOptionCatalog(scopedFrom)
-        : Promise.resolve({ error: null, groups: [], options: [], attachments: [] }),
+        : Promise.resolve({ error: null, groups: [], options: [], attachments: [], buildYourOwn: [] }),
     ])
     // S754: a dropped error here rendered "No POS-enabled items" over a menu the client has, AND
     // cached that empty menu as the offline fallback. Keep last-good, leave menuLoaded false so a
@@ -1439,7 +1439,7 @@ export default function PosOrders() {
       return
     }
     setMenuLoadError('')
-    const nextCatalog = { groups: catalog.groups, options: catalog.options, attachments: catalog.attachments }
+    const nextCatalog = { groups: catalog.groups, options: catalog.options, attachments: catalog.attachments, buildYourOwn: catalog.buildYourOwn || [] }
     setOptionCatalog(nextCatalog)
     setMenu(data || [])
     let suggMap = {}
@@ -1688,10 +1688,13 @@ export default function PosOrders() {
     // A dish with option groups (S758, revised S759 — owner decision): when its defaults already
     // satisfy every group's rule, one tap adds the default line and the cart's Choices button is
     // where it gets customized; the choice window opens only when a required group has no default.
+    // S760: a build-your-own dish always opens the window — building it IS the order, so a one-tap
+    // default bowl would be the wrong dish nine times in ten.
     const dishGroups = dishGroupsByRecipe[recipe.id]
     if (dishGroups) {
       const ids = defaultSelection(dishGroups)
-      if (selectionProblems(dishGroups, ids).length === 0) { addCustomLine(recipe, ids); return }
+      const buildYourOwn = (optionCatalog?.buildYourOwn || []).includes(recipe.id)
+      if (!buildYourOwn && selectionProblems(dishGroups, ids).length === 0) { addCustomLine(recipe, ids); return }
       setOptionPicker({ recipe, dishGroups })
       return
     }

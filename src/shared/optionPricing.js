@@ -13,6 +13,51 @@ export const STANDARD_VAT = 0.13
 
 const round2 = n => Math.round((Number(n) || 0) * 100) / 100
 
+// Postgres round(numeric, 2) rounds half AWAY from zero; Math.round rounds half up. A scaled price
+// is rounded here the way the server rounds it, so a negative half-paisa lands on the same figure.
+const roundMoney = n => { const v = Number(n) || 0; return Math.sign(v) * Math.round(Math.abs(v) * 100) / 100 }
+
+/**
+ * S760: how big a plate the chosen size is — the product of the chosen SIZE options'
+ * portion_factor (null = 1), to 6 places. Twin of pos_selection_portion_factor.
+ * @param {Array<{group_id, portion_factor?}>} chosen
+ * @param {Record<string, {kind?: string}>} groupsById
+ */
+export function sizeFactor(chosen, groupsById) {
+  let f = 1
+  const seen = new Set()
+  for (const o of chosen || []) {
+    if (!o || seen.has(o.id)) continue
+    seen.add(o.id)
+    if (groupsById?.[o.group_id]?.kind !== 'size') continue
+    const pf = o.portion_factor == null ? 1 : Number(o.portion_factor)
+    if (pf > 0) f *= pf
+  }
+  return Math.round(f * 1e6) / 1e6
+}
+
+/**
+ * S760: an option's price at a size — its price × the factor when its group scales price, as is
+ * otherwise. A size option itself is never scaled (a size group's size_scaling is always 'none').
+ */
+export function scaledDelta(option, group, factor = 1) {
+  const p = Number(option?.price_delta) || 0
+  return group?.size_scaling === 'stock_and_price' ? roundMoney(p * (Number(factor) || 1)) : roundMoney(p)
+}
+
+/** S760: a stock line's quantity at a size, scaled when the group scales stock. */
+export function scaledQty(qty, group, factor = 1) {
+  const q = Number(qty) || 0
+  const scales = group?.size_scaling === 'stock' || group?.size_scaling === 'stock_and_price'
+  return scales ? Math.round(q * (Number(factor) || 1) * 1e4) / 1e4 : q
+}
+
+export const SIZE_SCALING_LABEL = {
+  none: 'Same at every size',
+  stock: 'Scale stock only',
+  stock_and_price: 'Scale stock and price',
+}
+
 /** Ex-VAT amount from what the guest pays. */
 export function exFromIncl(incl, vat) {
   return round2((Number(incl) || 0) / (1 + (Number(vat) || 0)))
@@ -58,6 +103,7 @@ export function countAllowed(count, { min, max }) {
  * @param {Record<string, {included_count?: number}>} groupsById
  */
 export function optionsPriceDelta(chosen, groupsById) {
+  const factor = sizeFactor(chosen, groupsById)
   const byGroup = new Map()
   for (const o of chosen || []) {
     if (!byGroup.has(o.group_id)) byGroup.set(o.group_id, [])
@@ -68,7 +114,7 @@ export function optionsPriceDelta(chosen, groupsById) {
     const included = groupsById?.[groupId]?.included_count || 0
     const ordered = [...opts].sort((a, b) =>
       (a.sort ?? 0) - (b.sort ?? 0) || String(a.name || '').localeCompare(String(b.name || '')) || String(a.id).localeCompare(String(b.id)))
-    for (let i = included; i < ordered.length; i++) total += Number(ordered[i].price_delta) || 0
+    for (let i = included; i < ordered.length; i++) total += scaledDelta(ordered[i], groupsById?.[groupId], factor)
   }
   return round2(total)
 }
@@ -87,6 +133,7 @@ const byDisplayOrder = (a, b) =>
  */
 export function describeSelection(optionIds, { optionsById, groupsById, attachByGroup = {} }) {
   const chosen = (optionIds || []).map(id => optionsById?.[id]).filter(Boolean)
+  const factor = sizeFactor(chosen, groupsById)
   const byGroup = new Map()
   for (const o of chosen) {
     if (!byGroup.has(o.group_id)) byGroup.set(o.group_id, [])
@@ -98,11 +145,12 @@ export function describeSelection(optionIds, { optionsById, groupsById, attachBy
     const included = g.included_count || 0
     ;[...opts].sort(byDisplayOrder).forEach((o, i) => {
       const free = i < included
+      const list = scaledDelta(o, g, factor)
       rows.push({
         groupSort: attachByGroup[groupId]?.sort ?? 0, gSort: g.sort ?? 0, oSort: o.sort ?? 0,
         option_id: o.id, group_id: groupId, group_name: g.name || '', group_kind: g.kind || '',
         option_name: o.name, kitchen_name: o.kitchen_name || null, is_removal: !!o.is_removal,
-        price_delta: free ? 0 : round2(o.price_delta), list_price_delta: round2(o.price_delta), included: free,
+        price_delta: free ? 0 : list, list_price_delta: list, included: free,
       })
     })
   }
@@ -110,6 +158,7 @@ export function describeSelection(optionIds, { optionsById, groupsById, attachBy
     || String(a.option_name).localeCompare(String(b.option_name)))
   const options = rows.map(({ groupSort, gSort, oSort, ...r }) => ({ ...r, sort: groupSort * 1000 + oSort }))
   return {
+    portion_factor: factor,
     delta: round2(options.reduce((s, o) => s + o.price_delta, 0)),
     summary: options.map(o => o.option_name + (o.included && o.list_price_delta !== 0 ? ' (incl.)' : '')).join(' · '),
     options,
@@ -167,19 +216,38 @@ export function selectionProblems(dishGroups, optionIds) {
     .filter(x => !countAllowed(x.count, x.rule))
 }
 
-/** The lowest price a dish can be ordered at — its cheapest valid size — for a "From NPR x" label. */
+/**
+ * The lowest price a dish can be ordered at, for a "From NPR x" label. Since S760 a size can scale
+ * the other groups' prices, so every combination of the REQUIRED sizes is tried and the cheapest
+ * wins: a Small that is 50 cheaper can still cost more once a required topping is priced at it.
+ */
 export function lowestDishPrice(basePrice, dishGroups) {
-  let price = Number(basePrice) || 0
-  for (const { rule, options } of dishGroups || []) {
-    if (!(rule.min > 0)) continue
-    const deltas = options.map(o => Number(o.price_delta) || 0).sort((a, b) => a - b)
-    const need = deltas.slice(0, rule.min)
-    // Free picks only lower a price when the prices they waive are positive; a size group carries
-    // no free picks in practice, so the approximation errs to showing the plain sum.
-    const free = need.every(d => d >= 0) ? (rule.included || 0) : 0
-    price += need.slice(free).reduce((s, d) => s + d, 0)
+  const groupsList = dishGroups || []
+  const sizeRequired = groupsList.filter(d => d.group?.kind === 'size' && d.rule.min > 0 && d.options.length)
+  const rest = groupsList.filter(d => !sizeRequired.includes(d))
+  let combos = [[]]
+  for (const d of sizeRequired) {
+    const next = []
+    for (const c of combos) for (const o of d.options) next.push([...c, o])
+    combos = next.length ? next : combos
+    if (combos.length > 256) break // a guard, not a real menu
   }
-  return round2(price)
+  const groupsById = Object.fromEntries(groupsList.map(d => [d.group?.id, d.group]))
+  let best = null
+  for (const sizes of combos) {
+    const factor = sizeFactor(sizes, groupsById)
+    let price = (Number(basePrice) || 0) + sizes.reduce((s, o) => s + (Number(o.price_delta) || 0), 0)
+    for (const { group, rule, options } of rest) {
+      if (!(rule.min > 0)) continue
+      const deltas = options.map(o => scaledDelta(o, group, factor)).sort((a, b) => a - b)
+      const need = deltas.slice(0, rule.min)
+      // Free picks only lower a price when the prices they waive are positive.
+      const free = need.every(d => d >= 0) ? (rule.included || 0) : 0
+      price += need.slice(free).reduce((s, d) => s + d, 0)
+    }
+    if (best == null || price < best) best = price
+  }
+  return round2(best ?? (Number(basePrice) || 0))
 }
 
 /** "+NPR 50", "−NPR 100", "" for zero — what a guest reads beside an option. */

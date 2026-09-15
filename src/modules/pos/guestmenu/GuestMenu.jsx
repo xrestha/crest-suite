@@ -245,7 +245,12 @@ export default function GuestMenu() {
       if (err?.code === 'PGRST202') { setOptionsFailed(false); return null }
       if (err) { console.error('get_guest_menu_options failed', err); setOptionsFailed(true); return null }
       setOptionsFailed(false)
-      const next = { groups: data?.groups || [], options: data?.options || [], attachments: data?.attachments || [] }
+      // S760: build_your_own is absent before migration 20260920100000, which reads as "no dish is
+      // build-your-own" — every dish keeps the one-screen sheet.
+      const next = {
+        groups: data?.groups || [], options: data?.options || [], attachments: data?.attachments || [],
+        buildYourOwn: Array.isArray(data?.build_your_own) ? data.build_your_own : [],
+      }
       setOptionCatalog(next)
       return next
     })
@@ -926,6 +931,7 @@ export default function GuestMenu() {
           vatRegistered={vatRegistered}
           initialIds={optionSheet.initialIds}
           editing={!!optionSheet.editKey}
+          stepped={(optionCatalog.buildYourOwn || []).includes(optionSheet.item.recipe_id)}
           onClose={() => setOptionSheet(null)}
           onConfirm={ids => { addCustom(optionSheet.item, ids, optionSheet.editKey); setOptionSheet(null) }}
         />

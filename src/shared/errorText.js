@@ -141,6 +141,26 @@ const rules = [
     operator: 'That ingredient is not one of this outlet\'s stock items or sub-recipes (a prep item is added as its sub-recipe, not as its stock item), so it was not added. Nothing was changed.',
   },
   {
+    test: e => hasCode(e, 'byo_template_name_taken'),
+    staff: 'The template could not be created. Nothing was changed.',
+    operator: 'Groups with the template names already exist for this dish, so the template was not created and nothing was changed. Use a different name, or open the existing groups on the Groups tab.',
+  },
+  {
+    test: e => hasCode(e, 'byo_dish_not_found'),
+    staff: 'That dish could not be found. Nothing was changed.',
+    operator: 'That dish could not be found or marked, so no groups were created. Reload the page and try again.',
+  },
+  {
+    test: e => hasCode(e, 'option_factor_not_size'),
+    staff: 'That portion could not be saved. Nothing was changed.',
+    operator: 'A portion (Small 0.75, Large 1.5) can only be set on an option in a Size group, so this option was not saved. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'group_kind_has_factors'),
+    staff: 'That group could not be changed. Nothing was changed.',
+    operator: 'This Size group still has sizes with a portion set, so it cannot become an Add-ons or Choice group yet. Nothing was changed — clear the Portion on each size first, then change the kind.',
+  },
+  {
     test: e => hasCode(e, 'option_attach_foreign', 'option_default_foreign'),
     staff: 'That option group could not be attached. Nothing was changed.',
     operator: 'That group could not be attached to this dish — the dish or the default option belongs somewhere else. Nothing was changed; reload the page and try again.',

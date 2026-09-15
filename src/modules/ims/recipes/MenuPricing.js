@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { Fragment, useEffect, useMemo, useState, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -17,6 +17,9 @@ import { nextProductCode, productCodePrefix } from '../../../shared/productCode'
 import Modal from '../../../components/Modal'
 import AttachGroupsModal from '../../customization/AttachGroupsModal'
 import { loadOptionCatalog } from '../../customization/customizationData'
+import RowDisclosure from '../../../components/RowDisclosure'
+import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
+import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
 
 
 function vatOf(r) {
@@ -225,7 +228,8 @@ export default function MenuPricing() {
       // New FC % sort already treated a zero cost as unknown; the cells and the FC % sort did not.
       const fcPct   = exVat > 0 && cost > 0 ? (cost / exVat) * 100 : null
       // pos_enabled defaults to true if null (column newly added)
-      return { ...r, cost, vat, exVat, inclVat, fcPct, pos_enabled: r.pos_enabled !== false }
+      // ingCost (S760): the ingredient-only cost, the fixed part of a build-your-own dish's range.
+      return { ...r, cost, ingCost: costMap[r.id] || 0, vat, exVat, inclVat, fcPct, pos_enabled: r.pos_enabled !== false }
     })
 
     setRecipes(processed)
@@ -460,6 +464,13 @@ export default function MenuPricing() {
       </th>
     )
   }
+
+  // S760: build-your-own dishes are costed as a range from their choices — IMS branch only, since the
+  // POS-only branch has no costs to show. The hook reads the mark itself, so this page's recipe query
+  // is unchanged. Above the guard and both returns, like every hook here.
+  const byoFixedCost = useCallback(r => r.ingCost || 0, [])
+  const byoCost = useBuildCostRanges({ enabled: customizationOn && !!clientModules?.ims, recipes, fixedCostOf: byoFixedCost })
+  const [expandedByo, setExpandedByo] = useState(() => new Set())
 
   const posOnCount  = recipes.filter(r => r.pos_enabled).length
   const posOffCount = recipes.filter(r => !r.pos_enabled).length
@@ -932,7 +943,13 @@ export default function MenuPricing() {
                 const hasDraft   = draft !== undefined && draft !== ''
                 const draftNum   = hasDraft ? parseFloat(draft) : null
                 const draftExVat = draftNum > 0 ? draftNum / (1 + r.vat) : null
-                const newFcPct   = draftExVat > 0 && r.cost > 0 ? (r.cost / draftExVat) * 100 : null
+                // S760: a build-your-own dish's FC % is a range from its choices, so a single new FC %
+                // off its fixed ingredients would be the near-zero figure the range replaces.
+                const isByo      = byoCost.buildYourOwn.has(r.id)
+                const byo        = isByo ? byoCost.byRecipe[r.id] : null
+                const byoOpen    = expandedByo.has(r.id)
+                const toggleByo  = () => setExpandedByo(prev => { const n = new Set(prev); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n })
+                const newFcPct   = !isByo && draftExVat > 0 && r.cost > 0 ? (r.cost / draftExVat) * 100 : null
                 const diff       = draftNum !== null && r.inclVat > 0 ? draftNum - r.inclVat : null
                 const changed    = hasDraft && draftNum !== r.inclVat
                 const dimmed     = !r.pos_enabled
@@ -940,7 +957,8 @@ export default function MenuPricing() {
                 const newFcFig   = fcFigure(newFcPct, settings)
 
                 return (
-                  <tr key={r.id} style={{ opacity: dimmed ? 0.45 : 1, background: changed ? 'rgba(245,158,11,0.05)' : undefined }}>
+                  <Fragment key={r.id}>
+                  <tr style={{ opacity: dimmed ? 0.45 : 1, background: changed ? 'rgba(245,158,11,0.05)' : undefined }}>
                     <td style={{ color: 'var(--theme-text2)' }}>{i + 1}</td>
                     <td style={{ textAlign: 'center' }}>
                       <input
@@ -953,7 +971,11 @@ export default function MenuPricing() {
                       />
                     </td>
                     <td>
+                      {byo && !byo.empty && (
+                        <RowDisclosure expanded={byoOpen} onToggle={toggleByo} controls={`mp-byo-${r.id}`} label={`Cost by size for ${r.name}`} />
+                      )}
                       <strong>{r.name}</strong>
+                      {isByo && <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: 10 }}>Build-your-own</span>}
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                         {r.category}
                         {r.vat > 0
@@ -972,18 +994,32 @@ export default function MenuPricing() {
                         )}
                       </div>
                     </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {r.cost > 0 ? `NPR ${r.cost.toFixed(2)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                    <td style={{ textAlign: 'right', whiteSpace: isByo ? 'nowrap' : undefined }}>
+                      {!isByo ? (
+                        r.cost > 0 ? `NPR ${r.cost.toFixed(2)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>
+                      ) : byoCost.error ? (
+                        <Tip width={260} text="The choices and their stock could not be read, so this dish's cost was not worked out.">not checked</Tip>
+                      ) : !byo ? (
+                        <span style={{ color: 'var(--theme-text3)' }}>…</span>
+                      ) : byo.empty ? (
+                        <Tip width={240} text="Build-your-own, but it offers no choices yet, so there is nothing to cost.">no choices yet</Tip>
+                      ) : (
+                        <Tip width={280} text="From the cheapest build of the smallest size to the typical build of the biggest. Open the row for each size.">{costRangeText(byo)}</Tip>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {r.inclVat > 0 ? `NPR ${r.inclVat.toFixed(0)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                     </td>
                     {/* "—" covers two different absences now: no price to divide by, and no cost
                         to divide. The second used to print 0.0% ✓ in green. */}
+                    {isByo ? (
+                      <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{byoCost.error ? '—' : fcRangeNode(byo, settings)}</td>
+                    ) : (
                     <td style={{ textAlign: 'right', fontWeight: r.fcPct !== null ? 700 : 400, color: r.fcPct !== null ? fcFig.style.color : 'var(--theme-text3)' }}
                       title={fcFig.title || (r.exVat > 0 ? NO_COST_TITLE : undefined)}>
                       {fcFig.text}
                     </td>
+                    )}
                     <td style={{ textAlign: 'right' }}>
                       {/* Focusing this box freezes the row order (see DRAFT_SORT_KEYS) and nothing
                           releases it on blur on purpose: the Save button sits in this same row, and
@@ -1017,7 +1053,7 @@ export default function MenuPricing() {
                       <FieldError id={`menuprice-${r.id}`} message={errors[r.id]} />
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: newFcPct !== null ? 700 : 400, color: newFcPct !== null ? newFcFig.style.color : 'var(--theme-text3)' }}
-                      title={newFcFig.title || (r.cost > 0 ? undefined : NO_COST_TITLE)}>
+                      title={isByo ? 'A build-your-own dish is costed by size: open its row. The range moves with the new price once it is saved.' : (newFcFig.title || (r.cost > 0 ? undefined : NO_COST_TITLE))}>
                       {newFcFig.text}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: diff !== null ? 600 : 400, color: diff === null ? 'var(--theme-text3)' : diff > 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
@@ -1036,6 +1072,12 @@ export default function MenuPricing() {
                       )}
                     </td>
                   </tr>
+                  {byo && !byo.empty && byoOpen && (
+                    <tr id={`mp-byo-${r.id}`}>
+                      <td colSpan={10}><BuildCostDetail range={byo} settings={settings} /></td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>

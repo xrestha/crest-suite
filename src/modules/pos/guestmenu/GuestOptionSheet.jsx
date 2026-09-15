@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../../../components/Modal'
 import { npr } from '../../../shared/nepalMoney'
 import {
-  describeSelection, selectionProblems, defaultSelection, inclFromEx,
+  describeSelection, selectionProblems, defaultSelection, inclFromEx, scaledDelta,
 } from '../../../shared/optionPricing'
 import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
 
@@ -21,6 +21,12 @@ import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
 // heading says how many free picks are used; the chip states live in guestMenu.css (`.gm-option`)
 // rather than inline; a radiogroup is one Tab stop with arrow keys between chips; and the dish
 // name stays pinned while a long sheet scrolls.
+//
+// S760, build-your-own dishes (`stepped`): the same groups, one per step — the Size step first, so
+// every later price is already the price at that size — then a Review step with the whole bowl and
+// Add. Next stays pressable while the step is short and says what is missing; an optional step with
+// nothing picked reads Skip. Going back and changing the size re-prices everything already picked,
+// because every price on the sheet is read through scaledDelta at the current size.
 
 // The same mark the menu card draws beside a dish (GuestMenu.jsx's is_veg square): a 12px outlined
 // square with a dot, green for veg, red for non-veg. Egg is the market's third convention and takes
@@ -67,7 +73,7 @@ const sameIds = (a, b) => {
 
 const FOCUSABLE_CHIP = '[role="radio"]:not([disabled]), [role="checkbox"]:not([disabled])'
 
-export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegistered, initialIds, editing, onConfirm, onClose }) {
+export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegistered, initialIds, editing, stepped = false, onConfirm, onClose }) {
   // Captured once: what the sheet opened with, so a backdrop tap can tell "looked" from "picked".
   const [initial] = useState(() => initialIds ?? defaultSelection(dishGroups))
   const [selected, setSelected] = useState(initial)
@@ -81,6 +87,49 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
   const problems = selectionProblems(dishGroups, selected)
   const price = Math.round(inclFromEx((parseFloat(item.selling_price) || 0) + desc.delta, vat))
   const dirty = !sameIds(selected, initial)
+
+  // S760: the walk. Size groups first (their pick decides every later price), the rest in dish order.
+  const steps = useMemo(() => (stepped
+    ? [...dishGroups.filter(d => d.group.kind === 'size'), ...dishGroups.filter(d => d.group.kind !== 'size')]
+    : dishGroups), [stepped, dishGroups])
+  // An edit opens on Review: the guest already built this bowl and is here to change one thing.
+  const [step, setStep] = useState(() => (stepped && editing ? steps.length : 0))
+  const onReview = stepped && step >= steps.length
+  const stepHeadRef = useRef(null)
+  useEffect(() => {
+    if (!stepped) return
+    const el = stepHeadRef.current
+    if (!el) return
+    el.scrollIntoView({ block: 'nearest' })
+    el.focus({ preventScroll: true })
+  }, [stepped, step])
+  const visibleGroups = stepped ? (onReview ? [] : [steps[step]]) : dishGroups
+  const stepProblem = stepped && !onReview ? problems.find(p => p.group.id === steps[step].group.id) : null
+  const priceAt = (o, group) => Math.round(inclFromEx(scaledDelta(o, group, desc.portion_factor), vat))
+
+  function goNext() {
+    if (stepProblem) {
+      setTried(true)
+      const el = groupRefs.current[stepProblem.group.id]
+      const chip = el?.querySelector(FOCUSABLE_CHIP)
+      ;(chip || el)?.focus({ preventScroll: true })
+      return
+    }
+    setTried(false)
+    setStep(s => Math.min(s + 1, steps.length))
+  }
+
+  function confirmFromReview() {
+    if (problems.length) {
+      // A pick went stale since its step (a size change cannot do this, but an edit opened on
+      // Review can start short) — go to the first step that is short and say so there.
+      const idx = steps.findIndex(d => d.group.id === problems[0].group.id)
+      setTried(true)
+      setStep(idx < 0 ? 0 : idx)
+      return
+    }
+    onConfirm(selected)
+  }
 
   function toggle(groupId, rule, optionId) {
     setSelected(prev => {
@@ -119,15 +168,61 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
           style={{ width: 44, minWidth: 44, minHeight: 44, padding: 0, justifyContent: 'center' }}>✕</button>
       </div>
 
+      {stepped && (
+        <div className="gm-steps">
+          <p ref={stepHeadRef} tabIndex={-1} className="gm-steps-label" aria-live="polite">
+            {onReview
+              ? `Review · step ${steps.length + 1} of ${steps.length + 1}`
+              : `Step ${step + 1} of ${steps.length + 1} · ${steps[step].group.name}`}
+          </p>
+          <div className="gm-steps-bar" role="progressbar" aria-label="Your progress"
+            aria-valuemin={1} aria-valuemax={steps.length + 1} aria-valuenow={Math.min(step, steps.length) + 1}>
+            <span style={{ width: `${((Math.min(step, steps.length) + 1) / (steps.length + 1)) * 100}%` }} />
+          </div>
+        </div>
+      )}
+
+      {onReview && (
+        <ul className="gm-review" aria-label={`Your ${item.name}`}>
+          {steps.map(({ group, options }, i) => {
+            const picked = options.filter(o => selected.includes(o.id))
+            return (
+              <li key={group.id} className="gm-review-row">
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <span className="gm-review-group">{group.name}</span>
+                  {picked.length === 0 ? (
+                    <span style={{ display: 'block', fontSize: 14, color: 'var(--theme-text3)' }}>None</span>
+                  ) : picked.map(o => {
+                    const d = priceAt(o, group)
+                    const free = freeIds.has(o.id) && d !== 0
+                    return (
+                      <span key={o.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 14, color: 'var(--theme-text1)' }}>
+                        <span style={{ minWidth: 0 }}>{o.name}</span>
+                        <span style={{ whiteSpace: 'nowrap', color: 'var(--theme-text2)', fontSize: 13 }}>
+                          {o.is_removal || d === 0 ? '' : free ? 'Included' : `${d > 0 ? '+' : '−'}${npr(Math.abs(d))}`}
+                        </span>
+                      </span>
+                    )
+                  })}
+                </div>
+                <button type="button" className="btn btn-ghost" style={{ minHeight: 44, flexShrink: 0 }}
+                  aria-label={`Change ${group.name}`}
+                  onClick={() => { setTried(false); setStep(i) }}>Change</button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 8 }}>
-        {dishGroups.map(({ group, rule, options }) => {
+        {visibleGroups.map(({ group, rule, options }) => {
           const single = rule.max === 1
           const picked = options.filter(o => selected.includes(o.id))
           const count = picked.length
           const short = tried && problems.some(p => p.group.id === group.id)
           const labelId = `g-opt-${group.id}`
           const usedFree = picked.filter(o => freeIds.has(o.id)).length
-          const pricedLeft = options.some(o => !selected.includes(o.id) && !o.is_removal && Math.round(inclFromEx(o.price_delta, vat)) !== 0)
+          const pricedLeft = options.some(o => !selected.includes(o.id) && !o.is_removal && priceAt(o, group) !== 0)
           const anyChecked = count > 0
           return (
             <div
@@ -157,7 +252,8 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
                 {options.map((o, i) => {
                   const on = selected.includes(o.id)
                   const full = !on && rule.max != null && !single && count >= rule.max
-                  const d = Math.round(inclFromEx(o.price_delta, vat))
+                  // S760: at the size picked so far.
+                  const d = priceAt(o, group)
                   const free = on && freeIds.has(o.id) && d !== 0
                   const allergens = Array.isArray(o.allergens) ? o.allergens : []
                   const priceText = `${d > 0 ? '+' : '−'}${npr(Math.abs(d))}`
@@ -202,20 +298,43 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
         position: 'sticky', bottom: 0, background: 'var(--theme-card)', paddingTop: 12, marginTop: 8,
         borderTop: '1px solid var(--theme-border)', display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        {tried && shortGroup && (
-          <p role="alert" style={{ margin: 0, fontSize: 12.5, color: 'var(--theme-red-text)' }}>
-            {shortGroup.rule.min > shortGroup.count
-              ? `Please choose ${shortGroup.rule.min - shortGroup.count} more from ${shortGroup.group.name} to continue.`
-              : `Too many chosen in ${shortGroup.group.name} — remove ${shortGroup.count - shortGroup.rule.max}.`}
-          </p>
+        {tried && (stepped ? stepProblem : shortGroup) && (() => {
+          const p = stepped ? stepProblem : shortGroup
+          return (
+            <p role="alert" style={{ margin: 0, fontSize: 12.5, color: 'var(--theme-red-text)' }}>
+              {p.rule.min > p.count
+                ? `Please choose ${p.rule.min - p.count} more from ${p.group.name} to continue.`
+                : `Too many chosen in ${p.group.name} — remove ${p.count - p.rule.max}.`}
+            </p>
+          )
+        })()}
+        {!stepped ? (
+          <button
+            type="button" className="btn btn-primary" style={{ minHeight: 48, fontSize: 15 }}
+            aria-disabled={problems.length > 0}
+            onClick={() => { if (problems.length) { refuseAdd(); return } onConfirm(selected) }}
+          >
+            {editing ? 'Update' : 'Add to order'} · {npr(price)}
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {step > 0 && (
+              <button type="button" className="btn btn-ghost" style={{ minHeight: 48, fontSize: 15 }}
+                onClick={() => { setTried(false); setStep(s => Math.max(0, s - 1)) }}>Back</button>
+            )}
+            {onReview ? (
+              <button type="button" className="btn btn-primary" style={{ minHeight: 48, fontSize: 15, flex: 1 }}
+                aria-disabled={problems.length > 0} onClick={confirmFromReview}>
+                {editing ? 'Update' : 'Add to order'} · {npr(price)}
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary" style={{ minHeight: 48, fontSize: 15, flex: 1 }}
+                aria-disabled={!!stepProblem} onClick={goNext}>
+                {steps[step].rule.min === 0 && !steps[step].options.some(o => selected.includes(o.id)) ? 'Skip' : 'Next'} · {npr(price)}
+              </button>
+            )}
+          </div>
         )}
-        <button
-          type="button" className="btn btn-primary" style={{ minHeight: 48, fontSize: 15 }}
-          aria-disabled={problems.length > 0}
-          onClick={() => { if (problems.length) { refuseAdd(); return } onConfirm(selected) }}
-        >
-          {editing ? 'Update' : 'Add to order'} · {npr(price)}
-        </button>
       </div>
     </Modal>
   )

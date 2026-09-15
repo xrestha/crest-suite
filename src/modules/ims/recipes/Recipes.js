@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -25,11 +25,14 @@ import RecipeCostCardPrint from './RecipeCostCardPrint'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
 import DishPhotoField from './DishPhotoField'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fcBand, fcThresholds, fcFigure, recipeCostOf, menuFcPct, unratedReason } from '../../../shared/imsFormulas'
 import { bandFigure, nmBand } from '../../../shared/operatingBands'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import RowDisclosure from '../../../components/RowDisclosure'
+import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
+import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
 
 // How long any single save request may hang before the button gives up and re-enables itself.
 // Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
@@ -63,7 +66,7 @@ class SaveRefusal extends Error {
 const errorDetail = e => [e?.code, e?.message].filter(Boolean).join(' · ')
 
 export default function Recipes() {
-  const { clientId, hasFeature, isAdmin, isOwner, profile, posEnabled, hasImsAccess } = useAuth()
+  const { clientId, hasFeature, isAdmin, isOwner, profile, posEnabled, hasImsAccess, customizationEnabled } = useAuth()
   // Who may put a price on the menu (S754, owner decision). Mirrors caller_can_set_menu_price() in
   // migration 20260916100000 EXACTLY — admin, the Owner, or a login whose RAW pos_role or ims_role
   // is 'manager' — because guard_recipe_menu_price refuses anyone else a change to selling_price,
@@ -359,7 +362,8 @@ export default function Recipes() {
       target_fc_pct: fcVal,
       description: recipe.description || '',
       image_url: recipe.image_url || '',
-      is_veg: recipe.is_veg === true ? 'veg' : recipe.is_veg === false ? 'non_veg' : ''
+      is_veg: recipe.is_veg === true ? 'veg' : recipe.is_veg === false ? 'non_veg' : '',
+      is_build_your_own: !!recipe.is_build_your_own,
     })
     setFcPctSaved(fcVal)
     const ings = (recipe.recipe_ingredients || []).map(ri => ({
@@ -620,7 +624,10 @@ export default function Recipes() {
     const validIngs = ingredients.filter(i =>
       (i.type === 'item' ? i.item_id : i.sub_recipe_id) && parseFloat(i.qty_per_portion) > 0
     )
-    if (validIngs.length === 0) { setError('Add at least one ingredient with qty.'); return }
+    // S760: a build-your-own dish may have no fixed ingredients — its plate is made of the guest's
+    // choices, whose stock lines live on the options (Option Groups).
+    const byoForm = !!recipeForm.is_build_your_own && recipeForm.category !== SUB_RECIPE_CATEGORY
+    if (validIngs.length === 0 && !byoForm) { setError('Add at least one ingredient with qty.'); return }
 
     // The same ingredient twice is refused HERE because Postgres refuses it anyway, in a sentence
     // nobody can act on (S711). `recipe_ingredients` has a UNIQUE (recipe_id, item_id), and the
@@ -758,6 +765,13 @@ export default function Recipes() {
       // the Edit button beside it, with nothing on the form saying so. Show/Hide is the one control
       // that changes it.
       if (!selectedRecipe) payload.is_active = true
+
+      // S760: the build-your-own mark, written only when it is set or changes, so saving an
+      // ordinary dish never names a column the database may not have yet. A sub-recipe is never one.
+      {
+        const nextByo = !isSubRecipe && !!recipeForm.is_build_your_own
+        if (nextByo !== !!selectedRecipe?.is_build_your_own) payload.is_build_your_own = nextByo
+      }
 
       // S754: below manager the price and VAT fields of an EXISTING dish are read-only, and they are
       // left out of the update entirely rather than re-sent. Re-sending is what the trigger was
@@ -1004,6 +1018,10 @@ export default function Recipes() {
 
       await init()
       setView('list')
+      // S760: a newly marked build-your-own dish has nothing to build until it offers choices.
+      if (!isSubRecipe && recipeForm.is_build_your_own && !selectedRecipe?.is_build_your_own) {
+        setByoNotice(recipeForm.name.trim())
+      }
     } catch (err) {
       console.error('Recipe save error:', err)
       // See `committed` above: the row exists now, so the form edits it from here on and the list
@@ -1239,6 +1257,14 @@ Check the recipe list before saving again — if it timed out after the recipe w
   // the manual cost, else null, and the null is carried to every cell, pill, share text and print.
   const dishCostOf = (r) => recipeCostOf({ [r.id]: costOf(r) }, r)
 
+  // S760: build-your-own dishes are costed as a range (cheapest and typical build per size), not
+  // from their few fixed ingredients. The fixed part is the recipe's own ingredient cost; a manual
+  // cost is ignored here, because the choices are the plate.
+  const byoFixedCost = useCallback(r => recipeCostById[r.id] || 0, [recipeCostById])
+  const byoCost = useBuildCostRanges({ enabled: !!customizationEnabled, recipes, fixedCostOf: byoFixedCost })
+  const [expandedByo, setExpandedByo] = useState(() => new Set())
+  const [byoNotice, setByoNotice] = useState('')
+
   const { filtered, regularRecipes, subRecipeList, tabs } = useMemo(() => {
     const q = search.toLowerCase()
     const filtered = recipes.filter(r => {
@@ -1275,9 +1301,12 @@ Check the recipe list before saving again — if it timed out after the recipe w
       ...recipeCategories.filter(c => usedCats.includes(c)),
       ...usedCats.filter(c => !recipeCategories.includes(c)),
     ]
+    const byoCount = regularRecipes.filter(r => r.is_build_your_own).length
     const tabs = [
       { key: 'all', label: 'All Recipes', count: regularRecipes.length },
       ...presentCats.map(c => ({ key: c, label: c, count: countByCat[c] || 0 })),
+      // S760: a mark, not a category — the dish is still in its own category's tab too.
+      ...(byoCount > 0 ? [{ key: 'byo', label: 'Build-your-own', count: byoCount }] : []),
       { key: 'sub-recipes', label: '⚙ Sub-Recipes', count: subRecipeList.length },
     ]
     return { filtered, regularRecipes, subRecipeList, tabs }
@@ -1288,6 +1317,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
 
   const tabFiltered = activeTab === 'all'
     ? regularRecipes
+    : activeTab === 'byo'
+      ? regularRecipes.filter(r => r.is_build_your_own)
     : activeTab === 'sub-recipes'
       ? subRecipeList
       : filtered.filter(r => r.category === activeTab)
@@ -1358,6 +1389,16 @@ Check the recipe list before saving again — if it timed out after the recipe w
       {/* ── LIST VIEW ── */}
       {!loadError && view === 'list' && (
         <div className={printRecipe ? 'no-print' : ''}>
+          {byoNotice && (
+            <p role="status" className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
+              <span><strong style={{ color: 'var(--theme-text1)' }}>{byoNotice}</strong> is build-your-own. Guests have nothing to build until it offers choices: a size, a base, sauces, toppings.</span>
+              <Link className="btn btn-primary btn-sm" to="/customization/groups">Set up choices →</Link>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setByoNotice('')}>Dismiss</button>
+            </p>
+          )}
+          {customizationEnabled && byoCost.error && (
+            <ReportLoadError error={`The build-your-own cost ranges could not be worked out (${byoCost.error}). Those dishes show “not checked” until the page is reloaded.`} />
+          )}
           <ActionError error={error} className="action-error--top" />
           {/* Search bar */}
           <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 16, alignItems: 'center' }}>
@@ -1588,15 +1629,26 @@ Check the recipe list before saving again — if it timed out after the recipe w
                       const fcColor = fcB.color
                       const subIngCount = (recipe.recipe_ingredients || []).filter(ri => ri.sub_recipe_id).length
                       const rowHidden = selectedIds.size > 0 && !selectedIds.has(recipe.id)
+                      // S760: a build-your-own dish shows its range instead of the fixed-ingredient figure.
+                      const isByo = !!customizationEnabled && !!recipe.is_build_your_own
+                      const byo = isByo ? byoCost.byRecipe[recipe.id] : null
+                      const byoOpen = expandedByo.has(recipe.id)
+                      const toggleByo = () => setExpandedByo(prev => { const n = new Set(prev); n.has(recipe.id) ? n.delete(recipe.id) : n.add(recipe.id); return n })
                       return (
-                        <tr key={recipe.id} className={rowHidden ? 'print-hide-row' : ''}>
+                        <Fragment key={recipe.id}>
+                        <tr className={rowHidden ? 'print-hide-row' : ''}>
                           <td className="no-print">
                             <input type="checkbox" checked={selectedIds.has(recipe.id)} onChange={() => toggleSelectRecipe(recipe.id)}
                               aria-label={`Select ${recipe.name}`} />
                           </td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)', cursor: 'pointer' }} onClick={() => openDetail(recipe)}>
+                            {byo && !byo.empty && (
+                              <RowDisclosure expanded={byoOpen} onToggle={toggleByo} controls={`byo-cost-${recipe.id}`}
+                                label={`Cost by size for ${recipe.name}`} />
+                            )}
                             {recipe.name}
                             {subIngCount > 0 && <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
+                            {recipe.is_build_your_own && <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: 10 }}>Build-your-own</span>}
                           </td>
                           {activeTab === 'all' && <td><span className="badge badge-yellow">{recipe.category}</span></td>}
                           <td style={{ color: 'var(--theme-text2)' }}>
@@ -1605,22 +1657,39 @@ Check the recipe list before saving again — if it timed out after the recipe w
                                 arrives OFF the POS menu (guard_recipe_menu_price), so that test hid the
                                 badge on exactly the new, ingredient-less dishes — and manual Sales Entry
                                 depletes through the recipe too, so a dish off the till still needs one. */}
-                            {(recipe.recipe_ingredients || []).length === 0 && recipe.category !== 'Sub-Recipe' && (
+                            {(recipe.recipe_ingredients || []).length === 0 && recipe.category !== 'Sub-Recipe' && !isByo && (
                               <Tip text="No ingredients linked to this recipe. Its sales — from the POS or from Sales Entry — won't deplete Item Master stock or show up in Stock Movements. Add at least one ingredient here to fix that." width={280}>
                                 <span className="badge badge-amber" style={{ marginLeft: 6, fontSize: 10 }}>No BOM</span>
                               </Tip>
                             )}
                           </td>
+                          {isByo ? (
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: byo && !byo.empty ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
+                              {byoCost.error ? (
+                                <Tip width={260} text="The choices and their stock could not be read, so this dish's cost was not worked out. The fixed-ingredient figure would read as a near-zero food cost, so it is not shown.">not checked</Tip>
+                              ) : byoCost.loading && !byo ? '…'
+                                : !byo || byo.empty ? (
+                                  <Tip width={260} text="Build-your-own, but it offers no choices yet, so there is nothing to cost. Add them in Option Groups.">no choices yet</Tip>
+                                ) : (
+                                  <Tip width={280} text="From the cheapest build of the smallest size to the typical build of the biggest. Open the row for each size.">{costRangeText(byo)}</Tip>
+                                )}
+                            </td>
+                          ) : (
                           <td style={{ textAlign: 'right', color: cost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}
                             title={cost == null ? 'Not costed — add ingredients, or a manual cost in Menu Pricing' : manualCost ? 'Manual cost entered in Menu Pricing — this dish has no costed ingredients' : undefined}>
                             {cost != null ? `NPR ${cost.toFixed(2)}${manualCost ? ' (manual)' : ''}` : '—'}
                           </td>
+                          )}
                           <td style={{ textAlign: 'right' }}>
                             {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toFixed(2)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                           </td>
+                          {isByo ? (
+                            <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{byoCost.error ? '—' : fcRangeNode(byo, settings)}</td>
+                          ) : (
                           <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor }} title={fcPct != null ? fcB.label : (unratedReason(cost, price) || undefined)}>
                             {fcPct != null ? `${fcPct.toFixed(1)}% ${fcB.mark}` : '—'}
                           </td>
+                          )}
                           <td>
                             <span className={`badge ${recipe.is_active ? 'badge-green' : 'badge-gray'}`}>
                               {recipe.is_active ? 'Active' : 'Inactive'}
@@ -1637,6 +1706,15 @@ Check the recipe list before saving again — if it timed out after the recipe w
                             </div>
                           </td>
                         </tr>
+                        {byo && !byo.empty && byoOpen && (
+                          <tr id={`byo-cost-${recipe.id}`} className={rowHidden ? 'print-hide-row' : ''}>
+                            <td className="no-print" />
+                            <td colSpan={activeTab === 'all' ? 8 : 7}>
+                              <BuildCostDetail range={byo} settings={settings} />
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       )
                     })}
                   </tbody>
@@ -1670,6 +1748,13 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     <option value={recipeForm.category}>{recipeForm.category} (no longer in Settings)</option>
                   )}
                 </select>
+                {customizationEnabled && !isSubRecipeForm && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8 }}>
+                    <input type="checkbox" checked={!!recipeForm.is_build_your_own}
+                      onChange={e => setRecipeForm(f => ({ ...f, is_build_your_own: e.target.checked }))} />
+                    <Tip width={320} text="For a dish guests build in steps, like an acai bowl, pizza or salad. It keeps this category. The till always opens its choices, the QR menu walks them one step at a time, and its food cost is shown as a range built from the choices. Fixed ingredients (the bowl, a spoon) are optional.">Build-your-own</Tip>
+                  </label>
+                )}
               </div>
               {isSubRecipeForm ? (
                 <>

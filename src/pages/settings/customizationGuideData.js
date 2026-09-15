@@ -68,6 +68,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           '+ Option on the card → name, whether it adds something or takes something off, the price, then More details (kitchen ticket name, veg/egg/non-veg, allergens, pre-selected, shown) and — with IMS — Stock per plate: item first, then the amount in THAT item\'s unit.',
           'Put it on dishes → tick every dish that offers the group, with a select-all per category and a search box. One save. The card\'s "On N dishes" updates; the amber "Not on any dish" disappears.',
           'Move up / Move down (groups, under ⋯) and ↑↓ (options, first column) set the order guests see. Under any first-N-free group the card says which picks are the free ones and why the order matters.',
+          'Build-your-own template (S760) → pick the dish and, if you like, a shorter name for its groups. One save creates "<dish> · Size" (Small 0.75, Medium, Large 1.5), "· Base" (pick 1, uses more at a bigger size), "· Sauces" (up to 2, uses more) and "· Toppings" (any number, uses more and costs more), puts them on the dish in that order and marks it build-your-own. Nothing is priced: add the bases, sauces and toppings with + Option and set every price. If groups with those names already exist, nothing is created.',
         ],
         fields: [
           { label: 'Price (Size on same-priced dishes)', desc: 'Typed as the full menu price of that size — "Half 150, Full 250" — because every dish this group is on currently costs the same, so the difference from the dish is worked out for you. The moment the group is on two dishes with different prices the field flips to a DIFFERENCE from the dish price and shows each dish\'s result underneath.' },
@@ -76,6 +77,8 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           { label: 'Pre-selected', desc: 'Ticked when the choice window or guest sheet opens, on every dish this group is on (a dish can override it with its own default in its Choices dialog). A dish whose required groups all have a pre-selected option adds in ONE TAP on the till — the window never opens unless something still has to be chosen.' },
           { label: 'Shown on the till and guest menu', desc: 'Unticked = Hidden: kept, on its dishes, offered nowhere. The same switch as Hide on the card. Use it for "out of cheese today".' },
           { label: 'Stock per plate (IMS)', desc: 'Signed lines: "Extra cheese" ADDS 30 g of SMK Cheese; "No onion" TAKES OFF 20 g of onion; a Half size TAKES OFF 5 pcs of momo. Per one plate, in the item\'s own unit, and a sub-recipe can be a line. These are frozen onto every bill line as ingredient_deltas and consumed by every IMS usage reader.' },
+          { label: 'Portion (Size options)', desc: 'How big this size is against a regular plate: Small 0.75, Medium blank (1), Large 1.5. It does nothing on its own; groups set to scale with the size use it. A Size group whose sizes carry a portion cannot be changed to another kind until the portions are cleared.' },
+          { label: 'When a bigger size is picked (other groups)', desc: 'Same at every size (a spice level, a free sauce) · Scale stock only (a base: a Large bowl gets more acai puree at the same price) · Scale stock and price (paid toppings: chicken popcorn on a Large bowl uses 1.5× and charges 1.5×). The scaled amount is what the bill line freezes and IMS deducts.' },
           { label: 'Changing a live group\'s kind', desc: 'Resets the pick rule for every dish the group is on the moment you save — the dialog says so in amber before you do. Bills already rung are not affected.' },
           { label: 'A price edit and open orders', desc: 'A new price applies to the next dish ordered. Dishes already on a table keep the price they were ordered at — the field says so.' },
         ],
@@ -115,6 +118,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'A hidden group that is still on a dish stays listed in the dialog, ticked and badged Hidden, so it can be unticked; it is offered nowhere until shown again.',
           'A group with no options in it can be ticked but offers nothing — the till and guest menu skip any group with nothing to pick, so it can never make a dish unorderable.',
           'The Dishes tab search matches name or category; the count above it is of ALL dishes, not the filtered list.',
+          'Build-your-own (S760): ⋯ on a dish → Mark as build-your-own / Make it an ordinary dish. A marked dish wears a Build-your-own badge, always opens its choices on the till, walks the guest through steps on the QR menu, and is costed as a range. A marked dish with no groups says so in amber, because guests would have nothing to build.',
         ],
         connections: 'Writes pos_recipe_option_groups (recipe_id, group_id, min_override, max_override, default_option_id, sort). Menu Pricing reads the attachments only for its row labels; the till and guest RPCs read them to decide what a dish offers.',
       },
@@ -167,6 +171,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'A dish with sizes shows "From NPR x" on its card. Tapping a dish with choices opens a phone sheet: the dish name pinned at the top, one group per section with a Required pill and a plain rule ("Pick 1", "Pick up to 3"), 48px chips with the same veg / non-veg square the menu card uses and any allergens, and the running price on the Add button pinned at the bottom.',
         workflow: [
           'Guest taps the dish, picks, presses "Add to order · NPR 260". A short group is named beside the button, scrolled to and focused; the button stays pressable so the tap can explain itself.',
+          'A build-your-own dish (S760) is a stepper instead: "Step 1 of 5 · Size" with a progress bar, one group per step with the size first, Next (which names what is short) or Skip on an optional step with nothing picked, then Review — every group with its picks and a Change button — and Add to order. Changing the size re-prices every pick already made.',
           'Edit choices on a line in the order before sending it reopens the sheet with the line\'s picks.',
           'Send → the request lands on the floor tile as a guest order; Accept → Send on the till re-prices it on the server (pos_price_selection) and writes the snapshot, so a guest\'s phone can never set what they pay.',
         ],

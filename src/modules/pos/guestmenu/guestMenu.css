@@ -295,3 +295,54 @@ body:has(.guest-menu) {
   background: var(--theme-card);
   border-bottom: 1px solid var(--theme-border);
 }
+
+/* S760: a build-your-own dish walks its groups one per step. The label is the step's accessible
+   heading (focused on each step change so a screen reader hears where it is); the bar is a plain
+   pine fill on the border tint — progress, not a signal. */
+.guest-menu .gm-steps {
+  margin: 0 0 16px;
+}
+.guest-menu .gm-steps-label {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--theme-text2);
+  outline: none;
+}
+.guest-menu .gm-steps-bar {
+  height: 4px;
+  background: var(--theme-border);
+  overflow: hidden;
+}
+.guest-menu .gm-steps-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--gm-pine);
+  transition: width var(--motion-fast, 160ms) var(--ease-standard, ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .guest-menu .gm-steps-bar > span { transition: none; }
+}
+.guest-menu .gm-review {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.guest-menu .gm-review-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--theme-border);
+}
+.guest-menu .gm-review-group {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--theme-text3);
+}

@@ -4,8 +4,8 @@ import Tip from '../../components/Tip'
 import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { GROUP_COLS } from './customizationData'
-import { ruleText } from '../../shared/optionPricing'
+import { GROUP_COLS, SIZE_SCALING_HELP } from './customizationData'
+import { ruleText, SIZE_SCALING_LABEL } from '../../shared/optionPricing'
 import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 
 // Create or edit one option group — written for a restaurant owner, not a form designer (S758).
@@ -22,6 +22,11 @@ import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 //
 // The database holds every rule checked here (a size is pick-exactly-one, min <= max, free picks <=
 // max), so the checks exist to put the sentence in the right place, not to be the guard.
+//
+// S760: a non-size group also says what a bigger SIZE does to its picks — nothing, more stock, or
+// more stock and a higher price. A size group is always "nothing" (the database holds that too).
+// The column is written only when it differs from what is saved, so an ordinary edit still saves on
+// a database the S760 migration has not reached.
 
 // The three kinds differ in what they DO, and the hint says that rather than repeating the pick
 // rule twice: a size sets the dish's price, an add-on can add to it, a choice is usually free.
@@ -50,6 +55,7 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
   const [included, setIncluded] = useState(group?.included_count || 0)
   const [kitchenName, setKitchenName] = useState(group?.kitchen_name || '')
   const [active, setActive] = useState(group ? group.is_active !== false : true)
+  const [scaling, setScaling] = useState(group?.size_scaling || 'none')
   const [moreOpen, setMoreOpen] = useState(() => !!(group && (group.kitchen_name || group.included_count || group.is_active === false)))
   const [nameError, setNameError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -96,6 +102,8 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
       included_count: effIncluded,
       is_active: active,
     }
+    const nextScaling = isSize ? 'none' : scaling
+    if (nextScaling !== (group?.size_scaling || 'none')) row.size_scaling = nextScaling
     const { data, error } = group
       ? await scopedUpdate('pos_option_groups', row).eq('id', group.id).select(GROUP_COLS)
       : await scopedInsert('pos_option_groups', { ...row, sort: nextSort || 0 })
@@ -166,6 +174,28 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
               {withCurrent(MAX_CHOICES, max).filter(n => n >= Math.max(1, min)).map(n => <option key={n} value={n}>{maxLabel(n)}</option>)}
               <option value="any">{maxLabel(null)}</option>
             </select>
+          </div>
+        )}
+
+        {!isSize && (
+          <div>
+            <span className="field-label" id="og-scaling-label" style={{ display: 'block', marginBottom: 8 }}>
+              <Tip width={320} text="For build-your-own dishes. A Size option carries a portion — Small 0.75, Large 1.5 — and this decides what that portion does to the picks in this group. Example: toppings on an acai bowl scale stock and price, so chicken popcorn on a Large bowl uses 1.5× the chicken and costs 1.5× as much.">When a bigger size is picked</Tip>
+            </span>
+            <div role="radiogroup" aria-labelledby="og-scaling-label"
+              onKeyDown={e => moveRovingFocus(e, '[role="radio"]')?.click()}
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+              {Object.keys(SIZE_SCALING_LABEL).map(k => {
+                const on = scaling === k
+                return (
+                  <button key={k} type="button" role="radio" aria-checked={on} className="choice-chip"
+                    tabIndex={rovingTabIndex(on)} onClick={() => setScaling(k)}>
+                    <span className="choice-chip__name">{SIZE_SCALING_LABEL[k]}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>{SIZE_SCALING_HELP[scaling]}</p>
           </div>
         )}
 

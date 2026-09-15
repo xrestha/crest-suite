@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import Modal from '../../components/Modal'
 import { nprInt } from '../../shared/nepalMoney'
 import {
-  ruleText, describeSelection, selectionProblems, defaultSelection, inclFromEx, signedPrice,
+  ruleText, describeSelection, selectionProblems, defaultSelection, inclFromEx, signedPrice, scaledDelta,
 } from '../../shared/optionPricing'
 import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import { DIET_LABEL } from './customizationData'
@@ -137,7 +137,8 @@ export default function OptionPickerModal({
                 {options.map((o, i) => {
                   const on = selected.includes(o.id)
                   const full = !on && rule.max != null && !isRadio && count >= rule.max
-                  const listPrice = incl(o.price_delta)
+                  // S760: at the size picked so far — a topping on a Large bowl reads its Large price.
+                  const listPrice = incl(scaledDelta(o, group, desc.portion_factor))
                   const isFree = on && freeIds.has(String(o.id)) && listPrice !== 0
                   const priceNode = o.is_removal
                     ? null
