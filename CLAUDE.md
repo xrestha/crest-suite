@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Where a new rule goes
 
 **Default to `.claude/rules/`, not this file.** Everything here loads on *every* request, so a rule
-that only matters while one module is open is paid for by every session that never opens it. Six
-`/doctor` passes have now had to migrate sections out (2026-08-18, S605, S615, S663, S678, S712 —
+that only matters while one module is open is paid for by every session that never opens it. Seven
+`/doctor` passes have now had to migrate sections out (2026-08-18, S605, S615, S663, S678, S712, S757 —
 the S663 one halved the file, 110k → 51k chars), and between the second and third the root file regrew
 7,052 chars in three days — not through carelessness, but because a new
 rule has one obvious home and no single session can see that it is the fortieth to pick it.
@@ -101,14 +101,8 @@ and `computeUsed()` wherever it is COMPUTED (staff meals are in COGS); food-cost
 `fcBand(pct, settings)` and variance banding through `varianceBand(pct, value, settings)`, never a
 hardcoded copy — and the OTHER three operating ratios (labour, prime, net margin) band in
 `src/shared/operatingBands.js`, whose `bandFigure()` is what stops a call site taking the colour and
-dropping the ✓/△/▲; a settings field with no reader is worse than no field — and "it is wired now" is a
-claim worth re-checking, since `variance_flag_pct` was declared wired while reaching one of its three
-consumers; Stock Count's Summary holds two tables built from different loops that must be kept tying
-out; a variance-style report must default to a CLOSED period, and must STATE which period it is on
-(`PeriodScope`) rather than trailing it off the end of a sentence; a Closing Stock of 0 is a
-COUNT (a row), blank is not, a requisition is NOT a stock deduction, and a failed read on Stock
-Count renders nothing below the error card (S695); **on-hand/"below par" is `buildStockRows()`
-everywhere** — staff meals deducted, AT par is fine, never a local copy (S696).
+dropping the ✓/△/▲; **on-hand/"below par" is `buildStockRows()` everywhere** — staff meals deducted,
+AT par is fine, never a local copy (S696).
 
 ### Multi-outlet: one login, several clients (S548)
 
@@ -162,24 +156,11 @@ Every Supabase table is client-scoped. **Use the scoped data-access layer, not h
 
 `src/shared/scopedDb.js` fails closed (a sentinel UUID on reads/updates/deletes, an error object on inserts/upserts) when `clientId` is missing, instead of silently running unfiltered or leaking a NULL row — this matters most on **reads**, since an admin's RLS policy (`role='admin' OR client_id=own`) allows every tenant's rows and only the per-query filter narrows an admin "viewing as" session down to one client. Only tables in the `CLIENT_SCOPED_TABLES` allowlist (mirrors the DB's `client_id NOT NULL` constraints) can go through it — `scopedDb` throws for anything else. Tables scoped by `period_id`/parent-id instead of `client_id` (`purchase_entries`, `sales_entries`, `recipe_ingredients`, `opening_stock`, `closing_stock`, `wastages`, `staff_meals`, etc.), tables with a nullable `client_id` (`settings`, `budgets`), and the `clients` table itself stay on raw `supabase.from()`.
 
-`clientId` in `AuthContext` (and thus in `useScopedDb()`) resolves as:
-
-- Admin: `adminViewClientId` (from `localStorage`; set when admin "views as" a client)
-- Client user: `profile.client_id`
-
-Admin switches clients via the top-bar dropdown → `switchAdminClient(id, name)` → all pages re-fetch via `useEffect([clientId, ...])`.
-
-Every IMS, HR and POS page, plus `Dashboard.js`, `Periods.js` and `Settings.js`, goes through `scopedDb`. Two pages are **correctly exempt, not pending**: `AuditLog.js` (a cross-client admin viewer — `audit_logs.client_id` is nullable and its "All Clients" filter is incompatible with auto-scoping to one client) and `AdminClients.js` (has no `clientId` of its own — it loops over an explicit client list and acts on whichever `client.id` a row targets, so it calls the raw `scopedFrom`/`scopedInsert`/`scopedUpdate`/`scopedDelete` functions from `scopedDb.js` directly with that `client.id`, instead of the `useScopedDb()` hook). `Periods.js`'s admin "all clients" view and `Dashboard.js`'s `loadAdminStats()` use that same raw-function-with-explicit-id pattern, while their genuinely cross-tenant reads stay on plain `supabase.from()`.
+Two pages are **correctly exempt, not pending**: `AuditLog.js` (a cross-client admin viewer — `audit_logs.client_id` is nullable and its "All Clients" filter is incompatible with auto-scoping to one client) and `AdminClients.js` (has no `clientId` of its own — it loops over an explicit client list and acts on whichever `client.id` a row targets, so it calls the raw `scopedFrom`/`scopedInsert`/`scopedUpdate`/`scopedDelete` functions from `scopedDb.js` directly with that `client.id`, instead of the `useScopedDb()` hook). `Periods.js`'s admin "all clients" view and `Dashboard.js`'s `loadAdminStats()` use that same raw-function-with-explicit-id pattern, while their genuinely cross-tenant reads stay on plain `supabase.from()`.
 
 ### Modules
 
-The app is one React app / one Supabase project with three modules toggled by per-client flags on the `clients` table:
-
-| Flag | Column | Default |
-| --- | --- | --- |
-| Crest IMS | `ims_enabled` | `true` |
-| Crest HR | `hr_enabled` | `false` |
-| Crest POS | `pos_enabled` | `false` (real column, added S193) |
+The app is one React app / one Supabase project with three modules toggled by per-client flags on the `clients` table (`ims_enabled`, `hr_enabled`, `pos_enabled`).
 
 `clientModules` in `AuthContext` drives **display** (nav + dashboard sections). `imsEnabled` / `hrEnabled` drive **route access** (admin bypasses both).
 
@@ -239,7 +220,7 @@ adopt it** — a stale cached number can be written back over a real figure, and
 
 ### Design context (PRODUCT.md / DESIGN.md)
 
-`PRODUCT.md` (strategic: users, positioning, brand personality, anti-references) and `DESIGN.md` (visual: colors, typography, components, extracted from the actual `Layout.css`/`ThemeContext.js` tokens) exist at the project root, written by the `impeccable` skill's `init`/`document` commands. Read them before any design-focused work — `DESIGN.md` in particular documents named rules (the Accent-Text Pairing Rule, the One Accent Rule, the One Signal Meaning Rule, the Chart Palette Rule) that are already enforced in code but weren't written down anywhere before this. `.impeccable/design.json` is the machine-readable sidecar; don't hand-edit it, regenerate via `/impeccable document` — which **defaults to sidecar-only here**; the usual right answer is the middle path, sidecar plus surgical `DESIGN.md` edits where the code has moved past it (S668), and a full `DESIGN.md` rewrite is a deliberate, user-approved call (S645, revised S662). See `.claude/rules/design-system.md`. (This line previously cited "flat-by-default elevation", a rule retired on 2026-07-12 when every preset gained a real `--theme-card-shadow`; card elevation is now uniform policy.) The visual system is **Modernist** as of S689; `node scripts/check-design-layers.mjs` asserts the four token layers still agree.
+`PRODUCT.md` (strategic: users, positioning, brand personality, anti-references) and `DESIGN.md` (visual: colors, typography, components, extracted from the actual `Layout.css`/`ThemeContext.js` tokens) exist at the project root, written by the `impeccable` skill's `init`/`document` commands. Read them before any design-focused work — `DESIGN.md` in particular documents named rules (the Accent-Text Pairing Rule, the One Accent Rule, the One Signal Meaning Rule, the Chart Palette Rule) that are already enforced in code but weren't written down anywhere before this. `.impeccable/design.json` is the machine-readable sidecar; don't hand-edit it, regenerate via `/impeccable document` — which **defaults to sidecar-only here**; the usual right answer is the middle path, sidecar plus surgical `DESIGN.md` edits where the code has moved past it (S668), and a full `DESIGN.md` rewrite is a deliberate, user-approved call (S645, revised S662). See `.claude/rules/design-system.md`. The visual system is **Modernist** as of S689; `node scripts/check-design-layers.mjs` asserts the four token layers still agree.
 
 ### Design system — tokens, motion, class names, field states
 
@@ -284,9 +265,7 @@ A closed native `<select>` fires `change` on every arrow keypress, so arrowing a
 
 This matters more than a plain leak, because the staff-isolation policies are **RESTRICTIVE SELECT filters**: a fenced table returns `{ data: [], error: null }`, indistinguishable from an empty period and invisible to `firstError()`. A POS PIN account reaching `/pnl` therefore rendered a complete, confident statement at **Net Profit = Revenue, 100% margin, in green** — not an error.
 
-**Audit by grepping `Layout.js` for `minPosRole`/`minImsRole`/`minHrRole` and the `isAdmin || isOwner` render conditions, then checking each named route has a matching early return in its own component.** **A SUB-route has no nav item to audit and inherits nothing from its parent page (S647)** — `/purchases/new` and `/purchases/:groupId/edit` are typeable but appear in no nav, and turning a modal into a route makes its record id a URL parameter, so a filter the parent page did in memory has to become a real check. **A team allowlist in the nav was the sixth (S683)** — `KITCHEN_TEAM_ALLOWED_PATHS` fail-closed the sidebar and nothing else; `canReachPosPath()` now runs inside `ModuleGate` on every POS route, and `App.js` finally has a `path="*"`. Detail in `.claude/rules/access-control.md`.
-
-The pages this has recurred on, and what each one did or didn't leak, are in `.claude/rules/access-control.md`.
+**Audit by grepping `Layout.js` for `minPosRole`/`minImsRole`/`minHrRole` and the `isAdmin || isOwner` render conditions, then checking each named route has a matching early return in its own component.** **A SUB-route has no nav item to audit and inherits nothing from its parent page (S647)** — a modal turned into a route makes its record id a URL parameter, so a filter the parent did in memory must become a real check. **A nav allowlist is not a guard either (S683).** The pages this has recurred on, and what each leaked, are in `.claude/rules/access-control.md`.
 
 ### A report page must not show a number it has not computed (S594)
 
@@ -307,7 +286,7 @@ The full table, the `ActionError`/`FieldError`/`ReportLoadError` family, and the
 
 ### Every `type="password"` input needs an explicit `autoComplete`
 
-Without one, Chrome guesses from `type` + surrounding context — and any `type="password"` field anywhere on the page makes it treat the nearest preceding text input as a login username, which has bled a saved login into unrelated fields (a `SearchableSelect` search box, a signup form) more than once (S329). Use `autoComplete="new-password"` on every PIN/account-creation field (POS Staff Add/Reset PIN, Enable Self-Service, trial signup), and `autoComplete="username"` / `"current-password"` on an actual sign-in form's email/password. PIN-pad login screens (POS/HR Self-Service) build their own keypad UI rather than a text input, so they're unaffected.
+`new-password` on PIN/account-creation fields, `username`/`current-password` on a real sign-in form — or Chrome bleeds a saved login into unrelated inputs (S329). Detail in `.claude/rules/auth-and-pins.md`.
 
 ### Crest Staff — the employee app
 
@@ -326,9 +305,7 @@ See `.claude/rules/auth-and-pins.md` (auto-loads when editing Login/ResetPasswor
 
 ### Arithmetic in input fields
 
-`src/utils/evalMath.js` is the single evaluator behind both `QtyInput` and the Quick Calculator. It is a hand-written recursive-descent parser, **never `eval()` / `new Function()`** — these are inputs where a pasted string reaches the evaluator directly, and it must keep working under a strict CSP. `evaluate()` returns `null` for anything malformed, including division by zero, so `Infinity` can never reach a saved quantity.
-
-The three invariants from S623 (detection must cover everything `tokenize()` normalises; `QtyInput` never hands a raw unparseable string up; Escape's cancel is a ref, not state) are in `.claude/rules/input-arithmetic.md`, each with the live bug it came from.
+`src/utils/evalMath.js` is the single evaluator behind `QtyInput` and the Quick Calculator — a hand-written parser, **never `eval()` / `new Function()`** (pasted strings reach it; strict CSP). Its invariants are in `.claude/rules/input-arithmetic.md`.
 
 ### Every item is stored in its SMALLEST unit — `purchase_qty` is always 1 (S597)
 
@@ -343,7 +320,7 @@ that is only arithmetic must not look like a field that is stored. That file als
 
 See `.claude/rules/vendor-payables.md` (auto-loads when editing IMS report, purchases or vendors files). Headline rules: `VendorReport.js` and `computeVendorPurchasingSection.js` deliberately keep local single-period copies; a phantom sub-paisa balance can come from three different layers (S502/S505/S510) — check all three. As of S580 it also covers **Supplier Contribution** (`/supplier-contribution`, Pro): `items` has no vendor column, so a supplier is only ever DERIVED, and its net-spend figure must keep meaning exactly what `VendorReport.js` means by it. As of S671 it also carries the vendor LIFECYCLE: the `vendors` row is the only copy of the supplier's name, so a vendor with history is archived (`archived_at`), never deleted. As of S698 a bill with vendor payments against it can be neither edited nor deleted — `payable_payments` cascades. As of S723 a tab filter is not a valuation boundary: value a bill over ALL its lines, never the half a per-line filter returned.
 
-**A foreign key is a guard on some tables and not others, and the calling code cannot see which.** The four tables referencing `vendors` split two/two — plain FK (Postgres refuses the delete) vs `ON DELETE SET NULL` (the delete **succeeds** and those rows silently lose their parent). So a delete guard trusting "the database will stop me" is right about half its tables and wrong about the rest, with no error on the wrong half. **Check `confdeltype` before treating any FK as protection**, and enumerate the referencing tables in the app. `items` split the same way (S706): 11 referencing tables, 3 of them `ON DELETE CASCADE`, so a missed reference was destroyed rather than refused — `src/modules/ims/items/itemRefTables.js` holds that list and a test asserts it against the migrations. **S707 moved that guard into the database** (`items_guard_referenced_delete`, a BEFORE DELETE trigger, with `force_delete_item()` as the one atomic way through), because the browser copy protected only the page: `items` is deliberately absent from the `no_ims_staff` restrictive list, so any IMS account — including a `staff` rank that cannot open Item Master — could delete an item over the REST API and take three tables' history with it. **A delete guard that lives only in the page is a guard on the page, not on the table.** `recipes` added the ORDER half (S711): put the step the FK can refuse FIRST and let the cascade take the children, or a refusal lands after you have already destroyed them.
+**A foreign key is a guard on some tables and not others, and the calling code cannot see which.** The four tables referencing `vendors` split two/two — plain FK (Postgres refuses the delete) vs `ON DELETE SET NULL` (the delete **succeeds** and those rows silently lose their parent). So a delete guard trusting "the database will stop me" is right about half its tables and wrong about the rest, with no error on the wrong half. **Check `confdeltype` before treating any FK as protection**, and enumerate the referencing tables in the app. **A delete guard that lives only in the page is a guard on the page, not on the table**, and put the step the FK can refuse FIRST, or a refusal lands after the cascade has already destroyed the children. The `items` (S706/S707) and `recipes` (S711) instances are in `.claude/rules/item-master-rates.md` and `.claude/rules/recipes-and-subrecipes.md`.
 
 ### Sales Entry saves through one atomic RPC, not three round trips
 

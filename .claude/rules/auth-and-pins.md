@@ -7,6 +7,9 @@ paths:
   - "src/pages/ResetPassword.js"
   - "src/utils/weakPasswords.js"
   - "src/modules/pos/staff/**"
+  - "src/modules/ims/staff/**"
+  - "src/modules/hr/staff/**"
+  - "src/modules/hr/employees/EmployeeList.jsx"
   - "src/modules/pos/devices/**"
   - "src/modules/pos/login/**"
   - "src/modules/pos/Pos.js"
@@ -18,6 +21,12 @@ paths:
 # Auth pages, password policy, leaked-password protection, PIN vault
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
+
+### Every `type="password"` input needs an explicit `autoComplete`
+
+> Moved out of the root CLAUDE.md (2026-09-15 /doctor pass); a one-line stub stays there.
+
+Without one, Chrome guesses from `type` + surrounding context — and any `type="password"` field anywhere on the page makes it treat the nearest preceding text input as a login username, which has bled a saved login into unrelated fields (a `SearchableSelect` search box, a signup form) more than once (S329). Use `autoComplete="new-password"` on every PIN/account-creation field (POS Staff Add/Reset PIN, Enable Self-Service, trial signup), and `autoComplete="username"` / `"current-password"` on an actual sign-in form's email/password. PIN-pad login screens (POS/HR Self-Service) build their own keypad UI rather than a text input, so they're unaffected.
 
 ### Password policy lives in one constant, and the server holds an independent copy
 

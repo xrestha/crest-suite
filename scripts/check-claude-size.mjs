@@ -42,8 +42,8 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
 // ---- The ratchet. Only ever lower this. --------------------------------------------------------
-const CEILING = 53000
-// Measured 2026-09-01 at 51,027 chars (LF-normalised). Margin: 1,973.
+const CEILING = 51500
+// Measured 2026-09-15 at 49,674 chars (LF-normalised), after a /doctor pass. Margin: 1,826.
 // ------------------------------------------------------------------------------------------------
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
