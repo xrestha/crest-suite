@@ -967,6 +967,20 @@ four of which live on the class and none of which announce their absence.
   `.tip-trigger`. Before this existed, 11 of 16 focusable elements on a measured page fell back to
   the browser's own outline, which on a dark card is close to invisible.
 
+### Choice chips (S759)
+
+An option a guest or waiter PICKS — a size, an extra, a spice level — is a `<button role="radio">`
+or `role="checkbox"` wearing `.choice-chip` (Layout.css; `.kind-card` for the three "what is it?"
+cards in the option-group dialog; `.gm-option` on the guest menu, which keeps its own palette and
+shape). The rule the class exists for: **a checked chip must not change size.** The checked state
+is a 1px accent border plus a 1px inset ring, never a 2px border, so a grid of chips does not
+reflow by 2px on every tap. Every chip carries the product's focus pair, and a group is ONE Tab
+stop with arrow keys between its members (`src/shared/rovingFocus.js`). A pick that is free under a
+first-N deal reads **Included** with its list price struck through — a price a guest will not pay
+is never printed as if they will. The Add button under a group that is still short stays pressable
+(`.btn[aria-disabled="true"]`, opacity 0.6): the press names the group, scrolls to it and focuses
+its first chip, which a dead button cannot do.
+
 ### Badges / Status Chips
 
 - **Shape:** square, `2px 8px`, 11px/500, capitalized.

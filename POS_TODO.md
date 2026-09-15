@@ -21,18 +21,9 @@ In this order. Service charge was offered and **not** chosen.
   tables onto one bill, and splitting one table's order across bills. S754 added a unique index
   allowing one open order per table (`pos_orders_one_open_per_table`), so a merge has to close or
   re-point the second order in the same transaction rather than leave two open.
-- [ ] 🟡 **Add-ons and sizes — being built as the Crest Customization module (S758).** Half/full
-  plates, extra cheese, large/small. A line's price now comes from `recipes.selling_price` inside
-  `save_pos_order_items` (S754), so a modifier's price has to come from the menu on the server too,
-  never from the tablet. Stages 1–3 done (line identity, the paid module, Option Groups page and its
-  tables — migrations `20260919100000`–`20260919120000`). Stage 4 written (`20260919130000`:
-  `save_pos_order_items` v5 prices and snapshots options server-side, `pos_order_item_options`,
-  comps by line) — applied live 2026-09-15 and read back. Stages 5–8 built and pushed 2026-09-15:
-  till choice window, KOT/KDS/bill, guest sheet, stock deduction through `orderLineIngredients.js` on
-  every IMS usage reader, Customization Report. `20260919140000` (guest RPCs) applied live 2026-09-15
-  and read back; `admin-user-ops` and `billing-export` deployed the same day.
-  Plan: `C:\Users\xrest\.claude\plans\i-want-to-add-hashed-ladybug.md`.
-  Known follow-ups:
+- [ ] 🟡 **Crest Customization — release 1 SHIPPED (S758, critique pass S759); open follow-ups
+  only.** The shipped entry, with its migrations and the browser smoke test, is in
+  [POS_DECISIONS.md](POS_DECISIONS.md) → Shipped. Still open:
   - The Complimentary slip costs a comped dish at its recipe cost only; a customized dish's choice
     stock lines are not added to that figure yet.
   - Stock Movements' Sub-Recipes tab does not walk a choice's sub-recipe stock line (release 1);
@@ -40,12 +31,8 @@ In this order. Service charge was offered and **not** chosen.
   - `computeInventoryVariance` / `computeInventoryShrinkageTrend` (owner report) still sum sales
     without the POS-supersedes-manual rule the live pages apply (pre-existing), so a dish entered
     both ways counts its choices twice there, as it already did its recipe.
-  - **Smoke-tested end to end in a browser on BHATTI CHOILA (2026-09-15)** — all steps passed;
-    the SMK items, groups, open shift, paid Table 3 bill and open Table 4 order were left there on
-    purpose. Its two cosmetic findings (the cart row squeezing `option_summary`, the report
-    footnote flush under its table) were closed by the S759 critique pass, which also made the
-    Choice margin tab say why a row has no cost. Still to press on a real till after S759: the
-    cart's choices line, the picker's scroll-to-short-group, and the guest sheet's sticky header.
+  - Not yet pressed on a real till after S759: the cart's choices line, the choice window's
+    scroll-to-short-group on a refused Add, and the guest sheet's sticky header.
   - Release 2: combos / build-your-own bundles.
   - Deleting a **sub-recipe** that an option's stock line uses is refused by the plain FK
     `pos_option_ingredients.sub_recipe_id` with a generic message — `deleteRecipe`'s pre-check only

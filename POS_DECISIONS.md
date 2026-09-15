@@ -180,6 +180,29 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~Add-ons and sizes~~ — **shipped as the Crest Customization module, S758 (2026-09-15), reshaped
+  by its critique pass S759 the same day.** Half/full plates, extra cheese, "No onion", spice — a
+  fourth PAID module (flat, one monthly price on Plan Pricing, exists only with POS; a trial gets it
+  on). Owner decisions from the build: a line's identity is recipe + selection (`lineKeyOf`), the
+  tablet sends option IDS and never a price — `save_pos_order_items` v5 prices the line from the
+  menu (`selling_price + Σ price_delta`, each group's first N picks free by list order) and snapshots
+  every choice into `pos_order_item_options`; comps are by line; a sent line's choices are never
+  edited in place (remove with a pull reason, re-add); stock at close reads the SERVER snapshot,
+  carried as `sales_entries.ingredient_deltas` and consumed by every IMS usage reader through
+  `orderLineIngredients.js`, with nothing clamped. Migrations `20260919100000`–`20260919140000`, all
+  applied live 2026-09-15 and read back; `admin-user-ops` and `billing-export` deployed the same day.
+  Smoke-tested end to end in a headed browser on BHATTI CHOILA (2026-09-15): groups built, till priced
+  Half + egg (free) + cheese + No onion at NPR 210, KOT/BOT split, KDS showed NO onion in red, bill
+  closed as invoice 18, IMS posted −30 g cheese / +20 g onion, guest sheet re-priced on the server.
+  **S759 reversed one S758 decision with Aashish: the choice window no longer opens on every tap** —
+  a dish whose required groups all have a pre-selected default adds in one tap, and the window opens
+  only when something still has to be chosen or from the cart's Choices / Change button. The same
+  pass gave the owner control of ORDER (options and groups move, which is what decides the free
+  picks), a group → dishes bulk attach, Included pricing on free picks, a quantity stepper and Same
+  as last in the window, a report that separates extras earned from size adjustments, and the
+  module's own Admin → Settings → Guides tab. Plan: `C:\Users\xrest\.claude\plans\i-want-to-add-hashed-ladybug.md`;
+  full narrative in `CHANGELOG/S754-S803.md` (S758, S759).
+
 - [x] ~~POS report range bounds were runtime-local~~ — closed S754, 2026-09-14 (frontend, pending
   push when written). All four POS report pages build their day boundaries through
   `src/modules/pos/reports/reportRange.js` (`nepalDayStartTs`/`nepalDayEndTs`, `+05:45`), and default
