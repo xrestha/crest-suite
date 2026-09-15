@@ -21,8 +21,9 @@ describe('pick rules', () => {
   })
   it('words the rule', () => {
     expect(ruleText({ min: 1, max: 1 })).toBe('Pick exactly 1')
-    expect(ruleText({ min: 0, max: 3, included: 2 })).toBe('Pick up to 3 · first 2 included')
-    expect(ruleText({ min: 0, max: null })).toBe('Pick any')
+    expect(ruleText({ min: 0, max: 3, included: 2 })).toBe('Optional · up to 3 · first 2 free')
+    expect(ruleText({ min: 0, max: null })).toBe('Optional · pick any number')
+    expect(ruleText({ min: 0, max: 1 })).toBe('Optional · pick 1')
     expect(ruleText({ min: 2, max: 4 })).toBe('Pick 2 to 4')
   })
   it('checks a count', () => {

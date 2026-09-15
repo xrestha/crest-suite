@@ -5,7 +5,7 @@
 // customizations of one recipe are two lines.
 import {
   lineKeyOf, selectionKeyOf, missingFromServer, mergeUnsentLines, storedLinesMatchPayload,
-  menuDrift, withServerLineFields, toItemPayload,
+  menuDrift, withServerLineFields, toItemPayload, lineOptionIds,
 } from './posOrdersConstants'
 
 const A = 'a1b2c3d4-0000-4000-8000-000000000001'
@@ -81,5 +81,26 @@ describe('the helpers key on lineKeyOf', () => {
 
   test('toItemPayload of a plain line is the old row shape — no options key', () => {
     expect(Object.keys(toItemPayload(plain))).not.toContain('options')
+    expect(Object.keys(toItemPayload({ ...plain, option_ids: [] }))).not.toContain('options')
+  })
+
+  test('toItemPayload sends a customized line its option ids, from the cart array or the stored key', () => {
+    expect(toItemPayload({ ...plain, option_ids: [B, A] }).options).toEqual([B, A])
+    expect(toItemPayload({ ...plain, selection_key: `${A}+${B}` }).options).toEqual([A, B])
+    expect(lineOptionIds({ ...plain, selection_key: `${A}+${B}` })).toEqual([A, B])
+  })
+
+  test('a customized save whose response was lost still matches its stored lines', () => {
+    const stored = [{ ...plain, selection_key: `${A}+${B}` }]
+    expect(storedLinesMatchPayload(stored, [toItemPayload({ ...plain, option_ids: [B, A] })])).toBe(true)
+    expect(storedLinesMatchPayload(stored, [toItemPayload({ ...plain, option_ids: [A] })])).toBe(false)
+  })
+
+  test('withServerLineFields takes the server summary for a customized line, and leaves a plain one alone', () => {
+    const server = [{ ...plain }, { ...custom, option_summary: 'Extra cheese', options: [{ option_name: 'Extra cheese' }] }]
+    const next = withServerLineFields([plain, custom], server)
+    expect(next[0]).toBe(plain)
+    expect(next[1].option_summary).toBe('Extra cheese')
+    expect(Object.keys(withServerLineFields([{ ...plain, unit_price: 90 }], [plain])[0])).not.toContain('option_summary')
   })
 })

@@ -173,6 +173,26 @@ writable, because the send path needs them.
 **One open order per table** is a unique index (`pos_orders_one_open_per_table`), not a
 floor-view check.
 
+### A line is its recipe PLUS its selection (S758, Crest Customization)
+
+- **`lineKeyOf` in `posOrdersConstants.js` is the one definition of a line's identity**: the recipe
+  id, or `recipe_id#selection_key` where `selection_key` is the chosen `pos_options` ids sorted and
+  joined with `+` (`selectionKeyOf`; SQL computes the same with `ORDER BY … COLLATE "C"`). Never key a
+  merge, diff, send or comp on `recipe_id` alone again — "Momo, extra cheese" and "Momo" are two
+  lines. A line with no options has `selection_key = ''` and keys exactly as before.
+- **The tablet sends option IDS, never option prices.** `save_pos_order_items` v5 validates a NEW
+  line's picks against the live menu and the dish's group rules, prices it as
+  `selling_price + Σ price_delta` with each group's first `included_count` picks free (by option
+  sort, name, id — `optionsPriceDelta` in `src/shared/optionPricing.js` is the JS twin for display
+  only), and writes `pos_order_item_options`. An existing line keeps its price AND its snapshot.
+- **The snapshot has no FK to the menu tables** and is written only inside the RPC (or by
+  `apply_pos_item_comps`, or an admin restore INSERT) — `guard_pos_item_option_write`.
+- **Comps are by line.** `p_full_recipe_ids` now matches only plain lines; a customized line goes in
+  `p_full_lines` / carries `selection_key` in `p_partial`. The frontend sends `p_full_lines` only
+  when it has one, so a plain comp keeps the old call shape.
+- **Order of deploys matters for reads**: `OPEN_ORDER_SELECT` gains `selection_key` and the
+  snapshot embed only in stage 5, after `20260919130000` is live.
+
 ## Closed in S575 (phase 8), for the record
 
 - **Short cash tender**: single-payment Cash now blocks Confirm Payment when tendered < bill

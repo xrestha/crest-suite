@@ -25,9 +25,14 @@ In this order. Service charge was offered and **not** chosen.
   plates, extra cheese, large/small. A line's price now comes from `recipes.selling_price` inside
   `save_pos_order_items` (S754), so a modifier's price has to come from the menu on the server too,
   never from the tablet. Stages 1–3 done (line identity, the paid module, Option Groups page and its
-  tables — migrations `20260919100000`–`20260919120000`); stages 4–8 (order lines saving options,
-  till picker, guest menu, stock deduction, reports) open. Plan: `C:\Users\xrest\.claude\plans\i-want-to-add-hashed-ladybug.md`.
+  tables — migrations `20260919100000`–`20260919120000`). Stage 4 written (`20260919130000`:
+  `save_pos_order_items` v5 prices and snapshots options server-side, `pos_order_item_options`,
+  comps by line) — applied live 2026-09-15 and read back. Stages 5–8 (till picker, guest menu, stock
+  deduction, reports) open. Plan: `C:\Users\xrest\.claude\plans\i-want-to-add-hashed-ladybug.md`.
   Known follow-ups:
+  - `OPEN_ORDER_SELECT` does not yet read `selection_key` / the options snapshot — deliberately
+    deferred to stage 5 (the first stage that can create a customized line), so no hot-path read
+    references a column before its migration is live.
   - Deleting a **sub-recipe** that an option's stock line uses is refused by the plain FK
     `pos_option_ingredients.sub_recipe_id` with a generic message — `deleteRecipe`'s pre-check only
     looks at `recipe_ingredients.sub_recipe_id`. Safe direction (nothing is lost); needs the wording.

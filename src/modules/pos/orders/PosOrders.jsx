@@ -2718,15 +2718,22 @@ export default function PosOrders() {
       let compedItemRows = []
       if (closeType === 'paid' && hasItemComp) {
         const compFy = getBsFiscalYear(today.year, today.month)
+        // A plain line is comped by recipe, exactly as before; a customized one (S758) by recipe AND
+        // selection, so comping "Momo, extra cheese" never comps the plain Momo beside it.
+        // p_full_lines is only sent when there is one, so a plain comp keeps the 7-key call shape.
         const fullCompRecipeIds = []
+        const fullCompLines = []
         const partialComps = []
         for (const i of orderItems) {
           const compQty = Math.min(compQtyByLine[lineKeyOf(i)] || 0, i.qty)
           if (compQty <= 0) continue
-          if (compQty === i.qty) fullCompRecipeIds.push(i.recipe_id)
-          else partialComps.push({
+          if (compQty === i.qty) {
+            if (i.selection_key) fullCompLines.push({ recipe_id: i.recipe_id, selection_key: i.selection_key })
+            else fullCompRecipeIds.push(i.recipe_id)
+          } else partialComps.push({
             recipe_id: i.recipe_id, comp_qty: compQty, name: i.name, category: i.category,
             unit_price: i.unit_price, vat_rate: i.vat_rate, sent_to_kot: i.sent_to_kot,
+            ...(i.selection_key ? { selection_key: i.selection_key } : {}),
           })
         }
         // p_comped_by is IGNORED by the server as of migration 20260819140000 — it derives
@@ -2738,6 +2745,7 @@ export default function PosOrders() {
           p_order_id: orderId, p_client_id: clientId, p_fy: compFy,
           p_comp_reason: itemCompReason, p_comped_by: profile?.id || null,
           p_full_recipe_ids: fullCompRecipeIds, p_partial: partialComps,
+          ...(fullCompLines.length ? { p_full_lines: fullCompLines } : {}),
         })
         if (compErr) {
           setCloseMsg('error:Could not apply the complimentary item(s) — ' + compErr.message)

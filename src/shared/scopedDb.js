@@ -45,6 +45,8 @@ export const CLIENT_SCOPED_TABLES = [
   // Crest Customization (S758) — every one carries client_id NOT NULL, and the child tables pin
   // it to their parent's with a composite (id, client_id) foreign key.
   'pos_option_groups', 'pos_options', 'pos_option_ingredients', 'pos_recipe_option_groups',
+  // The per-line options snapshot on an order (stage 4) — written only by save_pos_order_items.
+  'pos_order_item_options',
   // Cross-module
   'monthly_owner_reports',
 ]

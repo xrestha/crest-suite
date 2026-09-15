@@ -52,7 +52,8 @@ const RESTORE_ORDER = [
   // POS — tables/customers before orders; credit notes after orders (circular FK, see below)
   // pos_cash_movements after pos_shifts and pos_orders — it holds an FK to both.
   'pos_tables', 'pos_loyalty_schemes', 'pos_customers', 'pos_shifts', 'pos_parking_slips',
-  'pos_orders', 'pos_order_items', 'pos_order_payments', 'pos_kot_log', 'pos_kot_removals',
+  // pos_order_item_options (S758) right after the lines it snapshots — FKs to the order and the line.
+  'pos_orders', 'pos_order_items', 'pos_order_item_options', 'pos_order_payments', 'pos_kot_log', 'pos_kot_removals',
   'pos_loyalty_ledger',
   // Reservations reference pos_orders (order_id) and pos_tables (via the join table), both above.
   'pos_reservations', 'pos_reservation_tables',

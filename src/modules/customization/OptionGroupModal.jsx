@@ -4,62 +4,94 @@ import Tip from '../../components/Tip'
 import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { KIND_LABEL, KIND_HELP, GROUP_COLS } from './customizationData'
+import { GROUP_COLS } from './customizationData'
 import { ruleText } from '../../shared/optionPricing'
 
-// Create or edit one option group. The database holds every rule this form checks (a size group is
-// pick-exactly-one, min <= max, "first N included" cannot exceed max), so the checks here exist to
-// put the sentence under the right box, not to be the guard.
+// Create or edit one option group — written for a restaurant owner, not a form designer (S758).
+//
+// What the owner decides, in the order they think about it: a name, what KIND of choice it is
+// (three cards with an example each), and — for anything but a size — one sentence built from two
+// dropdowns ("Guests may skip this and can pick any number"). Everything else (the kitchen ticket
+// wording, "first picks free", offering it) sits under More options, closed unless it already holds
+// something.
+//
+// Picking a kind RESETS the pick rule to that kind's default. It used to keep whatever was in the
+// boxes, so tapping Size (1/1) and then Add-ons left an add-on group reading "Pick exactly 1" under
+// help text promising "the guest can pick several".
+//
+// The database holds every rule checked here (a size is pick-exactly-one, min <= max, free picks <=
+// max), so the checks exist to put the sentence in the right place, not to be the guard.
 
-const toInt = v => (v === '' || v == null ? null : Number.parseInt(v, 10))
+const KINDS = [
+  { key: 'size',   title: 'Size',    example: 'Half / Full · Small / Large', hint: 'Guest picks one',     rule: { min: 1, max: 1 } },
+  { key: 'addon',  title: 'Add-ons', example: 'Extra cheese · No onion',     hint: 'Guest picks several', rule: { min: 0, max: null } },
+  { key: 'choice', title: 'Choice',  example: 'Mild / Medium / Hot',         hint: 'Guest picks one',     rule: { min: 1, max: 1 } },
+]
+
+const MIN_CHOICES = [0, 1, 2, 3, 4, 5]
+const MAX_CHOICES = [1, 2, 3, 4, 5, 6, 8, 10]
+
+const minLabel = n => (n === 0 ? 'may skip this' : n === 1 ? 'must choose at least 1' : `must choose at least ${n}`)
+const maxLabel = n => (n == null ? 'any number' : n === 1 ? 'only 1' : `up to ${n}`)
+
+// A saved group can hold a value the dropdown does not list; keep it selectable rather than
+// silently snapping it to the nearest one on open.
+const withCurrent = (list, v) => (v == null || list.includes(v) ? list : [...list, v].sort((a, b) => a - b))
 
 export default function OptionGroupModal({ group, nextSort, onClose, onSaved }) {
   const { scopedInsert, scopedUpdate } = useScopedDb()
-  const [form, setForm] = useState(() => ({
-    name: group?.name || '',
-    kitchen_name: group?.kitchen_name || '',
-    kind: group?.kind || 'addon',
-    min_select: group ? String(group.min_select ?? 0) : '0',
-    max_select: group ? (group.max_select == null ? '' : String(group.max_select)) : '',
-    included_count: group ? String(group.included_count ?? 0) : '0',
-    is_active: group ? group.is_active !== false : true,
-  }))
-  const [errors, setErrors] = useState({})
+  const [name, setName] = useState(group?.name || '')
+  const [kind, setKind] = useState(group?.kind || 'addon')
+  const [min, setMin] = useState(group ? (group.min_select ?? 0) : 0)
+  const [max, setMax] = useState(group ? (group.max_select ?? null) : null)
+  const [included, setIncluded] = useState(group?.included_count || 0)
+  const [kitchenName, setKitchenName] = useState(group?.kitchen_name || '')
+  const [active, setActive] = useState(group ? group.is_active !== false : true)
+  const [moreOpen, setMoreOpen] = useState(() => !!(group && (group.kitchen_name || group.included_count || group.is_active === false)))
+  const [nameError, setNameError] = useState('')
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState(null)
 
-  const set = patch => setForm(f => ({ ...f, ...patch }))
-  const isSize = form.kind === 'size'
-  const min = isSize ? 1 : (toInt(form.min_select) ?? 0)
-  const max = isSize ? 1 : toInt(form.max_select)
-  const included = form.kind === 'addon' ? (toInt(form.included_count) ?? 0) : 0
+  const isSize = kind === 'size'
+  const effMin = isSize ? 1 : min
+  const effMax = isSize ? 1 : max
+  const effIncluded = kind === 'addon' ? Math.min(included, effMax ?? included) : 0
 
-  function validate() {
-    const e = {}
-    if (!form.name.trim()) e.name = 'Give the group a name — guests see it, e.g. "Choose your size".'
-    if (!isSize) {
-      if (!Number.isInteger(min) || min < 0) e.min = 'Minimum must be 0 or more.'
-      if (max != null && (!Number.isInteger(max) || max < 1)) e.max = 'Maximum must be 1 or more, or blank for no limit.'
-      if (max != null && Number.isInteger(min) && min > max) e.max = 'Maximum cannot be below the minimum.'
-      if (!Number.isInteger(included) || included < 0) e.included = 'Must be 0 or more.'
-      else if (max != null && included > max) e.included = `Cannot include more than the ${max} a guest may pick.`
-    }
-    setErrors(e)
-    return Object.keys(e).length === 0
+  function pickKind(k) {
+    if (k === kind) return
+    const def = KINDS.find(x => x.key === k).rule
+    setKind(k)
+    setMin(def.min)
+    setMax(def.max)
+    if (k !== 'addon') setIncluded(0)
+  }
+
+  function pickMin(v) {
+    setMin(v)
+    if (max != null && v > max) setMax(v) // "must choose 3, up to 2" is not a rule anyone means
+  }
+
+  function pickMax(raw) {
+    const v = raw === 'any' ? null : Number(raw)
+    setMax(v)
+    if (v != null && min > v) setMin(v)
+    if (v != null && included > v) setIncluded(v)
   }
 
   async function save() {
-    if (saving || !validate()) return
+    if (saving) return
+    if (!name.trim()) { setNameError('Give the group a name — guests see it, e.g. “Extras” or “Choose your size”.'); return }
+    setNameError('')
     setSaving(true)
     setActionError(null)
     const row = {
-      name: form.name.trim(),
-      kitchen_name: form.kitchen_name.trim() || null,
-      kind: form.kind,
-      min_select: min,
-      max_select: max,
-      included_count: included,
-      is_active: form.is_active,
+      name: name.trim(),
+      kitchen_name: kitchenName.trim() || null,
+      kind,
+      min_select: effMin,
+      max_select: effMax,
+      included_count: effIncluded,
+      is_active: active,
     }
     const { data, error } = group
       ? await scopedUpdate('pos_option_groups', row).eq('id', group.id).select(GROUP_COLS)
@@ -74,78 +106,99 @@ export default function OptionGroupModal({ group, nextSort, onClose, onSaved }) 
     onSaved(Array.isArray(data) ? data[0] : data)
   }
 
+  const summary = ruleText({ min: effMin, max: effMax, included: effIncluded })
+
   return (
-    <Modal onClose={onClose} title={group ? `Edit group — ${group.name}` : 'New option group'} maxWidth={520}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div className="form-field">
-          <label htmlFor="og-name">
-            <Tip width={260} text="What the guest and the waiter see above the choices, e.g. “Choose your size” or “Extras”.">Group name *</Tip>
-          </label>
-          <input id="og-name" autoFocus value={form.name} onChange={e => set({ name: e.target.value })}
-            placeholder="e.g. Extras" {...fieldAria('og-name', errors.name)} />
-          <FieldError id="og-name" message={errors.name} />
+    <Modal onClose={onClose} title={group ? `Edit group — ${group.name}` : 'New option group'} maxWidth={560}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div className="form-field" style={{ margin: 0 }}>
+          <label htmlFor="og-name">Name</label>
+          <input id="og-name" autoFocus value={name} onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && save()}
+            placeholder="e.g. Extras" {...fieldAria('og-name', nameError)} />
+          <FieldError id="og-name" message={nameError} />
         </div>
 
-        <div className="form-field">
-          <label htmlFor="og-kitchen">
-            <Tip width={260} text="Optional shorter name printed on the kitchen ticket instead of the group name. Leave blank to use the group name.">Kitchen ticket name</Tip>
-          </label>
-          <input id="og-kitchen" value={form.kitchen_name} onChange={e => set({ kitchen_name: e.target.value })} placeholder="e.g. EXTRA" />
-        </div>
-
-        <div className="form-field">
-          <span className="field-label" id="og-kind-label">What kind of choice is it?</span>
-          <div role="radiogroup" aria-labelledby="og-kind-label" className="tab-bar" style={{ marginBottom: 6 }}>
-            {['size', 'addon', 'choice'].map(k => (
-              <button key={k} type="button" role="radio" aria-checked={form.kind === k}
-                className={`tab-btn${form.kind === k ? ' tab-btn--active' : ''}`}
-                onClick={() => set({ kind: k, ...(k === 'size' ? { min_select: '1', max_select: '1' } : {}) })}>
-                {KIND_LABEL[k]}
-              </button>
-            ))}
+        <div>
+          <span className="field-label" id="og-kind-label" style={{ display: 'block', marginBottom: 8 }}>What is it?</span>
+          <div role="radiogroup" aria-labelledby="og-kind-label"
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+            {KINDS.map(k => {
+              const on = kind === k.key
+              return (
+                <button key={k.key} type="button" role="radio" aria-checked={on} onClick={() => pickKind(k.key)}
+                  style={{
+                    textAlign: 'left', padding: '12px 14px', cursor: 'pointer', fontFamily: 'inherit',
+                    borderRadius: 'var(--radius-sm)',
+                    border: `${on ? 2 : 1}px solid ${on ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+                    background: on ? 'color-mix(in srgb, var(--theme-accent) 10%, transparent)' : 'var(--theme-input-bg)',
+                    color: 'var(--theme-text1)',
+                  }}>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: on ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>{k.title}</span>
+                  <span style={{ display: 'block', fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>{k.example}</span>
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)', marginTop: 2 }}>{k.hint}</span>
+                </button>
+              )
+            })}
           </div>
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)' }}>{KIND_HELP[form.kind]}</p>
         </div>
 
-        {!isSize && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
-            <div className="form-field">
-              <label htmlFor="og-min">
-                <Tip width={240} text="How many the guest MUST pick. 0 means the whole group is optional; 1 means they cannot order the dish without choosing.">Must pick at least</Tip>
-              </label>
-              <input id="og-min" type="number" min="0" step="1" value={form.min_select}
-                onChange={e => set({ min_select: e.target.value })} {...fieldAria('og-min', errors.min)} />
-              <FieldError id="og-min" message={errors.min} />
-            </div>
-            <div className="form-field">
-              <label htmlFor="og-max">
-                <Tip width={240} text="The most the guest may pick. Leave blank for no limit. 1 turns the group into a single choice.">Can pick at most</Tip>
-              </label>
-              <input id="og-max" type="number" min="1" step="1" value={form.max_select} placeholder="No limit"
-                onChange={e => set({ max_select: e.target.value })} {...fieldAria('og-max', errors.max)} />
-              <FieldError id="og-max" message={errors.max} />
-            </div>
-            {form.kind === 'addon' && (
-              <div className="form-field">
-                <label htmlFor="og-incl">
-                  <Tip width={260} text="How many of the guest's picks are free before the add-on prices apply — e.g. 2 means “2 toppings included, then pay for each extra”. The free ones are the first in this group's order, not the cheapest.">First picks free</Tip>
-                </label>
-                <input id="og-incl" type="number" min="0" step="1" value={form.included_count}
-                  onChange={e => set({ included_count: e.target.value })} {...fieldAria('og-incl', errors.included)} />
-                <FieldError id="og-incl" message={errors.included} />
-              </div>
-            )}
+        {isSize ? (
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
+            Guests always pick exactly one size. You set each size's price when you add it.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 14 }}>
+            <span>Guests</span>
+            <select aria-label="How many the guest must choose" className="form-select" value={min}
+              onChange={e => pickMin(Number(e.target.value))} style={{ width: 'auto' }}>
+              {withCurrent(MIN_CHOICES, min).map(n => <option key={n} value={n}>{minLabel(n)}</option>)}
+            </select>
+            <span>and can pick</span>
+            <select aria-label="The most the guest can pick" className="form-select" value={max == null ? 'any' : max}
+              onChange={e => pickMax(e.target.value)} style={{ width: 'auto' }}>
+              {withCurrent(MAX_CHOICES, max).filter(n => n >= Math.max(1, min)).map(n => <option key={n} value={n}>{maxLabel(n)}</option>)}
+              <option value="any">{maxLabel(null)}</option>
+            </select>
           </div>
         )}
 
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text1)' }}>
-          Guests will see: <strong>{ruleText({ min, max, included })}</strong>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
+          Guests will see: <strong style={{ color: 'var(--theme-text1)' }}>{summary}</strong>
         </p>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-          <input type="checkbox" checked={form.is_active} onChange={e => set({ is_active: e.target.checked })} />
-          <Tip width={260} text="A hidden group stays attached to its dishes but is not offered on the till or the guest menu. Old bills are not affected either way.">Offer this group on the till and guest menu</Tip>
-        </label>
+        <div>
+          <button type="button" className="btn btn-ghost btn-sm" aria-expanded={moreOpen} aria-controls="og-more"
+            onClick={() => setMoreOpen(o => !o)}>
+            {moreOpen ? '▾' : '▸'} More options
+          </button>
+          {moreOpen && (
+            <div id="og-more" style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12, paddingLeft: 12, borderLeft: '1px solid var(--theme-border)' }}>
+              <div className="form-field" style={{ margin: 0 }}>
+                <label htmlFor="og-kitchen">
+                  <Tip width={260} text="Optional shorter wording printed on the kitchen ticket instead of the group name. Leave blank to print the name.">Kitchen ticket name</Tip>
+                </label>
+                <input id="og-kitchen" value={kitchenName} onChange={e => setKitchenName(e.target.value)} placeholder="Same as the name" />
+              </div>
+              {kind === 'addon' && (
+                <div className="form-field" style={{ margin: 0 }}>
+                  <label htmlFor="og-incl">
+                    <Tip width={280} text="For a deal like “2 toppings included, pay for each extra”. The free ones are the first in this group's list, not the cheapest.">Free picks before charging</Tip>
+                  </label>
+                  <select id="og-incl" className="form-select" value={effIncluded} onChange={e => setIncluded(Number(e.target.value))} style={{ width: 'auto' }}>
+                    {Array.from({ length: (effMax ?? 10) + 1 }, (_, n) => n).map(n => (
+                      <option key={n} value={n}>{n === 0 ? 'None — every pick is charged' : `First ${n} free`}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} />
+                <Tip width={260} text="Untick to stop offering this group without deleting it. It stays attached to its dishes; old bills are not affected.">Offer this group on the till and guest menu</Tip>
+              </label>
+            </div>
+          )}
+        </div>
 
         <ActionError error={actionError} />
       </div>

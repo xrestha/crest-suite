@@ -151,6 +151,21 @@ const rules = [
     operator: 'Crest Customization sits on top of Crest POS, so it cannot be switched on for a client whose POS is off. Nothing was changed — switch POS on first, then Customization.',
   },
   {
+    test: e => hasCode(e, 'order_options_off'),
+    staff: 'Dishes cannot be ordered with options at this outlet. Nothing was saved — ask a manager.',
+    operator: 'Crest Customization is not switched on for this outlet (or its POS is off), so a dish with options could not be added and the order was not saved. Remove the options, or ask Crest to switch Customization on.',
+  },
+  {
+    test: e => hasCode(e, 'option_not_on_menu'),
+    staff: 'One of the choices on a dish is no longer offered. Nothing was saved — change the choices and save again.',
+    operator: 'An option chosen for a dish (named in the detail below) is hidden, deleted, or no longer attached to that dish, so the order was not saved. Change the choices and save again — or turn the option back on in Customization → Option Groups.',
+  },
+  {
+    test: e => hasCode(e, 'option_count'),
+    staff: 'The choices on a dish do not fit what it allows. Nothing was saved — change the choices and save again.',
+    operator: 'The choices on a dish break its rule — too few picks in a group that must be chosen, or too many (named in the detail below) — so the order was not saved. Change the choices and save again.',
+  },
+  {
     test: e => hasCode(e, 'line_not_on_menu'),
     staff: 'Something on this order is no longer on the menu. Nothing was saved — remove it and save again.',
     operator: 'A dish on this order is no longer on the menu (named in the detail below), so the order was not saved. Remove it from the order and save again — or put the dish back on the POS menu in Menu Pricing first.',

@@ -33,17 +33,17 @@ export function effectiveRule(group, attachment) {
   return { min, max, included: group?.included_count || 0 }
 }
 
-/** "Pick exactly 1", "Pick up to 3 · first 2 included", "Optional". */
+/** "Pick exactly 1", "Optional · up to 3 · first 2 free", "Optional · pick any number". */
 export function ruleText({ min, max, included = 0 }) {
   let base
   if (max === 1 && min === 1) base = 'Pick exactly 1'
-  else if (max === 1) base = 'Pick 1 (optional)'
+  else if (max === 1) base = 'Optional · pick 1'
   else if (min > 0 && max != null && min === max) base = `Pick exactly ${min}`
   else if (min > 0 && max != null) base = `Pick ${min} to ${max}`
   else if (min > 0) base = `Pick at least ${min}`
-  else if (max != null) base = `Pick up to ${max}`
-  else base = 'Pick any'
-  return included > 0 ? `${base} · first ${included} included` : base
+  else if (max != null) base = `Optional · up to ${max}`
+  else base = 'Optional · pick any number'
+  return included > 0 ? `${base} · first ${included} free` : base
 }
 
 /** Whether a count of chosen options satisfies the rule. */

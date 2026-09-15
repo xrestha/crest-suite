@@ -27,7 +27,18 @@ export const toItemPayload = i => {
     sent_to_kot: i.sent_to_kot || false,
     sent_qty:    Math.max(0, Math.min(qty, Math.floor(kitchenQty))),
     notes:       i.notes || null,
+    // Crest Customization (S758): the chosen option ids, only when the line has any, so a plain line's
+    // payload is byte-identical to before. The server prices and snapshots them; nothing else about
+    // an option rides along, because nothing else would be trusted.
+    ...(lineOptionIds(i).length ? { options: lineOptionIds(i) } : {}),
   }
+}
+
+// A line's chosen option ids: the cart's own `option_ids`, else the ids in its selection key (a line
+// read back from the server carries the key and its snapshot, not the array).
+export const lineOptionIds = i => {
+  if (Array.isArray(i.option_ids) && i.option_ids.length) return i.option_ids.filter(Boolean).map(String)
+  return i.selection_key ? String(i.selection_key).split('+').filter(Boolean) : []
 }
 
 // Every read that puts an OPEN order on the order screen selects exactly this, so the three paths
@@ -108,7 +119,7 @@ export function mergeUnsentLines(base, incoming) {
 // success, not a conflict (S754).
 export function storedLinesMatchPayload(storedLines, payload) {
   const sig = rows => (rows || [])
-    .map(r => [r.recipe_id || '', r.selection_key || '', Number(r.qty) || 0, r.sent_to_kot ? 1 : 0, Number(r.sent_qty) || 0, (r.notes || '').trim()].join(''))
+    .map(r => [r.recipe_id || '', r.selection_key || selectionKeyOf(r.options), Number(r.qty) || 0, r.sent_to_kot ? 1 : 0, Number(r.sent_qty) || 0, (r.notes || '').trim()].join(''))
     .sort()
     .join('')
   return sig(storedLines) === sig(payload)
@@ -144,9 +155,18 @@ export function withServerLineFields(localLines, serverItems) {
     if (!s) return i
     const category = s.category || 'Other'
     if (SAME_NUMBER(s.unit_price, i.unit_price) && SAME_NUMBER(s.vat_rate, i.vat_rate)
-        && (s.name || '') === (i.name || '') && category === (i.category || 'Other')) return i
+        && (s.name || '') === (i.name || '') && category === (i.category || 'Other')
+        && (!s.selection_key || (s.option_summary || '') === (i.option_summary || ''))) return i
     changed = true
-    return { ...i, unit_price: Number(s.unit_price) || 0, vat_rate: Number(s.vat_rate) || 0, name: s.name, category }
+    return {
+      ...i, unit_price: Number(s.unit_price) || 0, vat_rate: Number(s.vat_rate) || 0, name: s.name, category,
+      // A customized line takes the server's resolved selection too — the summary and snapshot the
+      // bill, the ticket and the stock deduction read (S758).
+      ...(s.selection_key ? {
+        base_unit_price: s.base_unit_price, options_delta: s.options_delta,
+        option_summary: s.option_summary, options: s.options,
+      } : {}),
+    }
   })
   return changed ? next : localLines
 }

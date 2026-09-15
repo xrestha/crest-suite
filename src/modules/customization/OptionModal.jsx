@@ -55,6 +55,11 @@ export default function OptionModal({
     direction: Number(i.qty_per_portion) < 0 ? 'remove' : 'add',
     qty: String(Math.abs(Number(i.qty_per_portion))),
   })))
+  // The basics (name, add-or-take-off, price) are always on screen; the rest opens on demand, and
+  // opens by itself when it already holds something so an edit never hides a saved value.
+  const [detailsOpen, setDetailsOpen] = useState(() => !!(option && (option.kitchen_name || option.diet
+    || (option.allergens || []).length || option.is_default || option.is_active === false)))
+  const [stockOpen, setStockOpen] = useState(() => (ingredients || []).length > 0)
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState(null)
@@ -63,6 +68,14 @@ export default function OptionModal({
   const priceNum = form.price === '' ? 0 : Number(form.price)
   const deltaIncl = fullPriceMode ? priceNum - basePrice : priceNum
   const choiceByRef = useMemo(() => new Map(itemChoices.map(c => [c.value, c])), [itemChoices])
+  // What "More details" holds, said on the closed button so a folded section is not a hidden one.
+  const detailSummary = [
+    form.diet ? DIET_LABEL[form.diet] : null,
+    parseAllergens(form.allergens).length ? 'allergens' : null,
+    form.is_default ? 'pre-selected' : null,
+    form.kitchen_name.trim() ? 'ticket name' : null,
+    form.is_active ? null : 'not offered',
+  ].filter(Boolean).join(' · ')
 
   function validate() {
     const e = {}
@@ -75,6 +88,8 @@ export default function OptionModal({
     })
     const refs = lines.map(l => l.ref).filter(Boolean)
     if (new Set(refs).size !== refs.length) e.lines = 'The same item is listed twice — combine them into one line.'
+    // A message inside a folded section is a message nobody reads.
+    if (Object.keys(e).some(k => k.startsWith('line'))) setStockOpen(true)
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -165,28 +180,29 @@ export default function OptionModal({
     <Modal onClose={onClose} title={option ? `Edit option — ${option.name}` : `New option in ${group.name}`} maxWidth={620}
       panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
       <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16, paddingRight: 2 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-          <div className="form-field">
-            <label htmlFor="opt-name">
-              <Tip width={240} text="What the guest and the waiter tap, e.g. “Half”, “Extra cheese”, “No onion”, “Hot”.">Option name *</Tip>
-            </label>
-            <input id="opt-name" autoFocus value={form.name} onChange={e => set({ name: e.target.value })}
-              placeholder={isSize ? 'e.g. Half' : 'e.g. Extra cheese'} {...fieldAria('opt-name', errors.name)} />
-            <FieldError id="opt-name" message={errors.name} />
-          </div>
-          <div className="form-field">
-            <label htmlFor="opt-kitchen">
-              <Tip width={240} text="Optional shorter wording for the kitchen ticket — e.g. “XTRA CHZ”. Leave blank to print the option name.">Kitchen ticket name</Tip>
-            </label>
-            <input id="opt-kitchen" value={form.kitchen_name} onChange={e => set({ kitchen_name: e.target.value })} />
-          </div>
+        <div className="form-field" style={{ margin: 0 }}>
+          <label htmlFor="opt-name">Name</label>
+          <input id="opt-name" autoFocus value={form.name} onChange={e => set({ name: e.target.value })}
+            onKeyDown={e => e.key === 'Enter' && save()}
+            placeholder={isSize ? 'e.g. Half' : 'e.g. Extra cheese'} {...fieldAria('opt-name', errors.name)} />
+          <FieldError id="opt-name" message={errors.name} />
         </div>
 
         {!isSize && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-            <input type="checkbox" checked={form.is_removal} onChange={e => set({ is_removal: e.target.checked, ...(e.target.checked ? { price: '' } : {}) })} />
-            <Tip width={280} text="A removal takes something off the dish — “No onion”, “No coriander”. It is always free and prints in bold as NO on the kitchen ticket.">This takes something off the dish (a “No …” option)</Tip>
-          </label>
+          <div role="radiogroup" aria-label="Does this option add something or take something off?" className="tab-bar" style={{ margin: 0 }}>
+            {[[false, 'Adds or changes something'], [true, 'Takes something off (“No …”)']].map(([removal, label]) => (
+              <button key={String(removal)} type="button" role="radio" aria-checked={form.is_removal === removal}
+                className={`tab-btn${form.is_removal === removal ? ' tab-btn--active' : ''}`}
+                onClick={() => set({ is_removal: removal, ...(removal ? { price: '' } : {}) })}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {form.is_removal && (
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)' }}>
+            Always free. Prints in bold as <strong>NO {form.name.replace(/^no\s+/i, '') || '…'}</strong> on the kitchen ticket.
+          </p>
         )}
 
         {!form.is_removal && (
@@ -220,9 +236,23 @@ export default function OptionModal({
           </div>
         )}
 
+        <div>
+          <button type="button" className="btn btn-ghost btn-sm" aria-expanded={detailsOpen} aria-controls="opt-details"
+            onClick={() => setDetailsOpen(o => !o)}>
+            {detailsOpen ? '▾' : '▸'} More details
+            {!detailsOpen && detailSummary && <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--theme-text3)' }}>{detailSummary}</span>}
+          </button>
+          {detailsOpen && (
+        <div id="opt-details" style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12, paddingLeft: 12, borderLeft: '1px solid var(--theme-border)' }}>
+        <div className="form-field" style={{ margin: 0 }}>
+          <label htmlFor="opt-kitchen">
+            <Tip width={240} text="Optional shorter wording for the kitchen ticket — e.g. “XTRA CHZ”. Leave blank to print the option name.">Kitchen ticket name</Tip>
+          </label>
+          <input id="opt-kitchen" value={form.kitchen_name} onChange={e => set({ kitchen_name: e.target.value })} placeholder="Same as the name" />
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
           {!form.is_removal && (
-            <div className="form-field">
+            <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="opt-diet">
                 <Tip width={260} text="What this option adds to the plate. Choose Non-veg for “Add chicken” so the guest menu stops showing a veg dish as veg once it is picked.">Veg / Egg / Non-veg</Tip>
               </label>
@@ -233,7 +263,7 @@ export default function OptionModal({
             </div>
           )}
           {!form.is_removal && (
-            <div className="form-field">
+            <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="opt-allergens">
                 <Tip width={260} text="Comma-separated, the same tags as dishes use — e.g. dairy, gluten, nuts. Shown to guests beside the option.">Allergens</Tip>
               </label>
@@ -252,12 +282,24 @@ export default function OptionModal({
             <Tip width={260} text="Untick to stop offering it (e.g. out of stock) without deleting it.">Offer this option</Tip>
           </label>
         </div>
+        </div>
+          )}
+        </div>
 
         {imsEnabled && (
-          <fieldset style={{ border: '1px solid var(--theme-border)', padding: '12px 14px', margin: 0 }}>
-            <legend style={{ fontSize: 12, fontWeight: 700, padding: '0 6px' }}>
-              <Tip width={300} text="What this option does to your stock, per ONE plate. “Extra cheese” adds 30 GM of cheese; “No onion” takes off the onion the recipe would have used. Sold dishes deduct the recipe plus these lines.">Stock per plate</Tip>
-            </legend>
+          <div>
+          <button type="button" className="btn btn-ghost btn-sm" aria-expanded={stockOpen} aria-controls="opt-stock"
+            onClick={() => setStockOpen(o => !o)}>
+            {stockOpen ? '▾' : '▸'} Stock per plate
+            <span style={{ marginLeft: 8, fontWeight: 400, color: lines.length ? 'var(--theme-text3)' : 'var(--theme-amber-text)' }}>
+              {lines.length ? `${lines.length} ingredient line${lines.length === 1 ? '' : 's'}` : 'none — stock will not change'}
+            </span>
+          </button>
+          {stockOpen && (
+          <div id="opt-stock" style={{ marginTop: 12, paddingLeft: 12, borderLeft: '1px solid var(--theme-border)' }}>
+            <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text2)' }}>
+              What picking this does to stock, per plate — e.g. “Extra cheese” adds 30 GM of cheese, “No onion” takes off 20 GM of onion.
+            </p>
             {lines.length === 0 && (
               <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text2)' }}>
                 No ingredients — picking this option will not change stock or food cost.
@@ -298,7 +340,9 @@ export default function OptionModal({
               onClick={() => setLines(ls => [...ls, { key: newKey(), id: null, ref: '', direction: form.is_removal ? 'remove' : 'add', qty: '' }])}>
               + Add ingredient line
             </button>
-          </fieldset>
+          </div>
+          )}
+          </div>
         )}
 
         <ActionError error={actionError} />
