@@ -55,7 +55,7 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 
 **Stage 3 (owner decisions) shipped in S756** — migrations `20260918120000` (supplier credit pairs), `20260918130000` (invoice VAT/total columns), `20260918140000` (requisition attribution + Rejected, and the staff-adds-lines-to-an-issued-slip gap closed), `20260918150000` (dish-photos bucket), `20260918160000` (Logos SELECT policy — logo replace/remove had been failing since 20260914140100). All eleven remaining decisions are built.
 
-**Stage 4 (follow-ups and judgment calls) shipped in S756** — frontend only, no migration. Owner answers: Owner Dashboard uses finalized payroll when it exists; parking closes at 6 AM too; the Annual Summary year-total verdict stays withheld when the year's gap is material; Stock Ageing stays cautious about count surpluses; the Stock Count export gets the letterhead; the One Lakh report keeps deducting unlinked returns and says so; disposals recorded before S756 are left as recorded.
+**Stage 4 (follow-ups and judgment calls) shipped in S756** — frontend, plus migration `20260918170000` (group payroll figures include overtime, applied live after a rolled-back dry run). Owner answers: payroll labour includes overtime on every page; Owner Dashboard uses finalized payroll when it exists; parking closes at 6 AM too; the Annual Summary year-total verdict stays withheld when the year's gap is material; Stock Ageing stays cautious about count surpluses; the Stock Count export gets the letterhead; the One Lakh report keeps deducting unlinked returns and says so; disposals recorded before S756 are left as recorded.
 
 - ✅ S756 stage 4 — A return against an EARLIER month's bill is valued at that bill's discount on PaymentReport, VendorReport, SupplierContribution and computeVendorPurchasingSection (`applyPriorBillFactors` / `mergeFactors` in `supplierAttribution.js`). VendorReport's drilldown lists earlier-bill and unlinked return rows.
 - ✅ S756 stage 4 — Monthly Owner Report dead stock uses `deadStockCalc.js` (3 counted still months); `CURRENT_SCHEMA_VERSION` 7, which also covers the vendor section's discounted returns, returns' own payment method and paged read.
@@ -157,9 +157,9 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 — `Items.js:593,624`, `Vendors.js:181,230,294,306` zero-row writes report success.
 
 ### 2e. Frontend — report hygiene (S728/S616/S754 rules)
-- 🟡 S756 (IMS pages done; VendorReport/SupplierContribution open) — Export/print not gated on `loading || loadError`: ReorderReport (Export has no `disabled`), TheoreticalVariance, PeriodComparison, AnnualSummary, MonthlySummary, BudgetVsActual, VatReport, NonVatReport, 1L, SupplierContribution, StockAgeing Print.
-- 🟡 S756 (IMS pages done; VendorReport/SupplierContribution open) — Exports not gated on `biz.error`: VAT, Non-VAT, Vendor, SupplierContribution, 1L, DeadStock, FIFO, StockAgeing.
+- ✅ S756 (VendorReport/SupplierContribution finished in stage 3) — Export/print not gated on `loading || loadError`: ReorderReport (Export has no `disabled`), TheoreticalVariance, PeriodComparison, AnnualSummary, MonthlySummary, BudgetVsActual, VatReport, NonVatReport, 1L, SupplierContribution, StockAgeing Print.
+- ✅ S756 (VendorReport/SupplierContribution finished in stage 3) — Exports not gated on `biz.error`: VAT, Non-VAT, Vendor, SupplierContribution, 1L, DeadStock, FIFO, StockAgeing.
 - ✅ S756 — `ReorderReport.js:455` KPI strip visible during load; `:525` "Stock is healthy" with no pars.
 - ✅ S756 — Hand-built sheets without `sheetWithLetterhead`: Variance, TheoreticalVariance, AnnualSummary (money as text), DemandForecast, 1L.
-- 🟡 S756 (IMS pages done; VendorReport/SupplierContribution open) — `provisionalWhenOpen` missing on VatReport, NonVatReport, VendorReport; stale tooltips (# Bills, "Gross"); VAT export disabled on returns-only months.
+- ✅ S756 (VendorReport/SupplierContribution finished in stage 3) — `provisionalWhenOpen` missing on VatReport, NonVatReport, VendorReport; stale tooltips (# Bills, "Gross"); VAT export disabled on returns-only months.
 - ✅ S756 — `counted_by` shown nowhere; `Stock.js:885` retyped `computeUsed`; `Stock.js:1369` locale date.
