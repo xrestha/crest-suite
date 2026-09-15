@@ -10,7 +10,9 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import SupportContactLine from '../../../components/SupportContactLine'
-import { COGS_FORMULA } from '../../../shared/imsFormulas'
+import { COGS_FORMULA, computeUsed } from '../../../shared/imsFormulas'
+import { allocateBillDiscounts } from '../reports/supplierAttribution'
+import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import SearchableSelect from '../../../components/SearchableSelect'
 import ConfirmModal from '../../../components/ConfirmModal'
 import QtyInput from '../../../components/QtyInput'
@@ -49,6 +51,9 @@ function toQty(v) {
 }
 // Blank means "no row"; for every field but closing a 0 means the same thing.
 const isNoRow = (fieldKey, qty) => qty == null || (fieldKey !== 'closing' && qty <= 0)
+// Whether two quantities would be STORED as the same thing — the test "has this cell changed"
+// asks (S756). A blank and a 0 wastage are one fact; a blank and a 0 closing count are not.
+const sameStored = (fieldKey, a, b) => (isNoRow(fieldKey, a) && isNoRow(fieldKey, b)) || a === b
 
 // Which tabs are ENTRY grids, and which stored field each one writes.
 //
@@ -95,6 +100,17 @@ export default function Stock() {
   const [stockData, setStockData] = useState({})
   const [purchases, setPurchases] = useState({})
   const [returns, setReturns] = useState({}) // { item_id: total_returned_qty }
+  // What the period's purchases and returns COST, per item (S756): purchases at each bill line's
+  // own rate net of its share of the bill discount (allocateBillDiscounts), returns at the rate
+  // they went back at — the basis Monthly Summary and the frozen Monthly Report use. The Summary
+  // tab valued both at today's items.per_uom_rate, which moves on every purchase bill and ignores
+  // discounts, so the same month's purchases and COGS were two numbers on two pages. null means
+  // "not known" (an offline cache written before these existed) and falls back to the master rate.
+  const [purchaseValues, setPurchaseValues] = useState(null)
+  const [returnValues, setReturnValues] = useState(null)
+  // Who last counted each item, from closing_stock.counted_by_name (S737 wrote it; nothing showed
+  // it until S756). { item_id: name }.
+  const [countedBy, setCountedBy] = useState({})
   const [requisitioned, setRequisitioned] = useState({}) // { item_id: total_qty_issued }
   const [purchFreq, setPurchFreq] = useState({})
   const [dailyWastage, setDailyWastage] = useState({})   // { item_id: total dated wastage qty }
@@ -134,6 +150,43 @@ export default function Stock() {
   const [syncFailed, setSyncFailed] = useState(null)
   const [pendingItems, setPendingItems] = useState(new Set())
   const flushRef = useRef(null)
+
+  // What the server is known to hold for each cell, as of the last read or the last write that
+  // landed (or was queued): { periodId, cells: { [itemId]: { [fieldKey]: qty|null } } }.
+  //
+  // Save All used to write EVERY visible row from on-screen state, and a blank cell is a delete.
+  // So two tablets counting in parallel lost data: tablet A opens a blank sheet, tablet B saves
+  // its section, A presses Save All — and B's rows are deleted. It also re-stamped counted_by and
+  // counted_at on rows nobody touched, and with recount protection on, the guard trigger refused a
+  // staff counter's whole Save All over rows they had not changed (S756). A cell is now written
+  // only when it differs from this record; a cell deliberately blanked still differs, so it is
+  // still an explicit delete. It is a ref, not state: nothing renders from it, and the save
+  // handlers must read it live rather than through a render's closure.
+  const storedRef = useRef({ periodId: null, cells: {} })
+  function resetStored(periodId, data) {
+    const cells = {}
+    Object.entries(data || {}).forEach(([id, row]) => {
+      cells[id] = { opening: toQty(row.opening), closing: toQty(row.closing), wastage: toQty(row.wastage), staff_meal: toQty(row.staff_meal) }
+    })
+    storedRef.current = { periodId, cells }
+  }
+  // Records writes that landed. A late answer for a period no longer on screen is ignored — the
+  // record is of the period being shown. Closing counts also update the "counted by" line.
+  function markStored(periodId, fieldKey, entries, by) {
+    if (storedRef.current.periodId !== periodId) return
+    const cells = storedRef.current.cells
+    entries.forEach(e => { cells[e.itemId] = { ...cells[e.itemId], [fieldKey]: e.qty } })
+    if (fieldKey === 'closing') {
+      setCountedBy(prev => {
+        const next = { ...prev }
+        entries.forEach(e => { if (e.qty == null) delete next[e.itemId]; else next[e.itemId] = by?.counted_by_name || null })
+        return next
+      })
+    }
+  }
+  function isChanged(itemId, fieldKey, value) {
+    return !sameStored(fieldKey, toQty(value), storedRef.current.cells[itemId]?.[fieldKey] ?? null)
+  }
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768)
@@ -211,8 +264,12 @@ export default function Stock() {
               }
             })
             setStockData(sd)
+            // Queued figures count as recorded: the queue is what will write them.
+            resetStored(open.id, sd)
             setPurchases(cached.purchases    || {})
             setReturns(cached.returns        || {})
+            setPurchaseValues(cached.purchaseValues || null)
+            setReturnValues(cached.returnValues || null)
             setRequisitioned(cached.requisitioned || {})
             // The badge counts everything still waiting for THIS client, across every month —
             // the same set flushQueue() will attempt. It used to count only the open period's
@@ -221,6 +278,8 @@ export default function Stock() {
             // table on screen, which is a different question.
             setPendingSync(pending.filter(op => !op.clientId || op.clientId === effectiveClientId).length)
             setPendingItems(new Set(pending.filter(op => op.periodId === open.id).map(op => op.itemId)))
+          } else {
+            resetStored(open.id, {})
           }
         }
       }
@@ -239,7 +298,9 @@ export default function Stock() {
     const isCounter = !isAdmin && profile?.ims_role === 'staff'
     const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('items', '*, categories(name)').eq('is_active', true).order('name'),
+      // Paged (S756): past 1000 items the count sheet silently had no rows for the tail of the
+      // book, and every read below is keyed on this list. `id` is the unique tiebreaker.
+      fetchAllRows(() => scopedFrom('items', '*, categories(name)').eq('is_active', true).order('name').order('id')),
       scopedFrom('categories').order('sort_order'),
       isCounter
         ? scopedFrom('ims_count_assignments', 'category_id').eq('profile_id', profile.id)
@@ -288,8 +349,12 @@ export default function Stock() {
       // type='staff', so counting a 'comp' row here would show a figure this tab cannot edit and
       // would double it on the next save. Nothing writes 'comp' today; this keeps it that way.
       fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).eq('type', 'staff').order('id')),
-      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
+      // rate + discount_amount + the bill-key columns are what allocateBillDiscounts() needs to
+      // value each line net of its bill's discount (S756) — vendor-payables.md's `a || b` rule: a
+      // bill written before grouping has no purchase_group_id, and without the vendor_id/
+      // invoice_ref/bs_day fallback every such line would be treated as its own bill.
+      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId).order('id')),
       // Independent of the six reads above but previously awaited after them — one extra serial
       // round trip on every load of the heaviest page.
       fetchAllRows(() => supabase
@@ -309,7 +374,9 @@ export default function Stock() {
     if (failed) {
       setLoadError(failed)
       setStockData({}); setPurchases({}); setReturns({}); setRequisitioned({}); setPurchFreq({})
+      setPurchaseValues({}); setReturnValues({}); setCountedBy({})
       setDailyWastage({}); setDailyRows([])
+      resetStored(periodId, {})
       return
     }
     const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }, reqRes] = results
@@ -318,7 +385,12 @@ export default function Stock() {
     const items = itemList || []
     items.forEach(item => { data[item.id] = { opening: '', closing: '', wastage: '', staff_meal: '' } })
     ;(opening || []).forEach(r => { if (data[r.item_id]) data[r.item_id].opening = r.qty })
-    ;(closing || []).forEach(r => { if (data[r.item_id]) data[r.item_id].closing = r.physical_qty })
+    const countedMap = {}
+    ;(closing || []).forEach(r => {
+      if (data[r.item_id]) data[r.item_id].closing = r.physical_qty
+      if (r.physical_qty != null) countedMap[r.item_id] = r.counted_by_name || null
+    })
+    setCountedBy(countedMap)
 
     // Split wastage: undated rows (bs_day NULL) = the monthly catch-all edited in the Wastage tab;
     // dated rows = daily entries. Period total wastage = catch-all + daily (see getUsed/getSummary).
@@ -343,20 +415,32 @@ export default function Stock() {
     Object.keys(staffMealMap).forEach(id => { if (data[id]) data[id].staff_meal = staffMealMap[id] })
 
     setStockData(data)
+    resetStored(periodId, data)
 
     const purchMap = {}
     const freqMap = {}
-    ;(purch || []).forEach(r => {
+    const purchValMap = {}
+    // allocateBillDiscounts runs over EVERY line of the period, not just this page's items: a
+    // bill's discount is shared across all its lines, including lines for items outside the list.
+    ;allocateBillDiscounts(purch || []).forEach(r => {
       purchMap[r.item_id] = (purchMap[r.item_id] || 0) + parseFloat(r.qty)
+      purchValMap[r.item_id] = (purchValMap[r.item_id] || 0) + r.lineNet
       freqMap[r.item_id] = (freqMap[r.item_id] || 0) + 1
     })
     setPurchases(purchMap)
+    setPurchaseValues(purchValMap)
     setPurchFreq(freqMap)
 
-    // Returns map
+    // Returns map — quantity, and value at the rate each return was recorded at (list rate, as
+    // Monthly Summary and the frozen report take it).
     const retMap = {}
-    ;(rets || []).forEach(r => { retMap[r.item_id] = (retMap[r.item_id] || 0) + parseFloat(r.qty) })
+    const retValMap = {}
+    ;(rets || []).forEach(r => {
+      retMap[r.item_id] = (retMap[r.item_id] || 0) + parseFloat(r.qty)
+      retValMap[r.item_id] = (retValMap[r.item_id] || 0) + (parseFloat(r.qty) || 0) * (parseFloat(r.rate) || 0)
+    })
     setReturns(retMap)
+    setReturnValues(retValMap)
 
     // Requisitioned map — qty issued via store requisitions
     const reqMap = {}
@@ -364,7 +448,7 @@ export default function Stock() {
     setRequisitioned(reqMap)
 
     try {
-      await cacheStockData(periodId, { stockData: data, purchases: purchMap, returns: retMap, requisitioned: reqMap })
+      await cacheStockData(periodId, { stockData: data, purchases: purchMap, returns: retMap, purchaseValues: purchValMap, returnValues: retValMap, requisitioned: reqMap })
     } catch (_) {}
   }
 
@@ -377,10 +461,14 @@ export default function Stock() {
     if (!navigator.onLine) {
       const cached = await getCachedStockData(periodId).catch(() => null)
       if (!periodReq.isCurrent(periodId)) return
+      setCountedBy({})   // not cached; an empty line is better than the previous month's names
       if (cached) {
         setStockData(cached.stockData    || {})
+        resetStored(periodId, cached.stockData)
         setPurchases(cached.purchases    || {})
         setReturns(cached.returns        || {})
+        setPurchaseValues(cached.purchaseValues || null)
+        setReturnValues(cached.returnValues || null)
         setRequisitioned(cached.requisitioned || {})
       } else {
         // No offline copy of this month: show it EMPTY under its own label. Leaving the previous
@@ -389,7 +477,9 @@ export default function Stock() {
         const blank = {}
         items.forEach(item => { blank[item.id] = { opening: '', closing: '', wastage: '', staff_meal: '' } })
         setStockData(blank); setPurchases({}); setReturns({}); setRequisitioned({})
+        setPurchaseValues({}); setReturnValues({})
         setDailyWastage({}); setDailyRows([])
+        resetStored(periodId, blank)
         setPageNotice('This month has not been opened on this device while online, so its saved figures are not available offline. Anything you enter now is queued and will sync when you reconnect.')
       }
       return
@@ -501,11 +591,18 @@ export default function Stock() {
     }
     setPendingSync(prev => prev + entries.length)
     setPendingItems(prev => { const next = new Set(prev); entries.forEach(e => next.add(e.itemId)); return next })
+    markStored(selectedPeriod.id, fieldKey, entries, countedByFields())   // the queue is now the record
     setPageNotice(`The connection dropped before ${entries.length === 1 ? 'that figure' : 'those figures'} could be saved, so ${entries.length === 1 ? 'it has' : 'they have'} been held on this device instead. Press Sync Now once you are back on a working connection.`)
     return true
   }
 
   const persistLocks = useRef({})
+  // Writes started and not yet settled, per `${itemId}:${fieldKey}` — see saveRow (S756).
+  const inflight = useRef({})
+  const trackInflight = (keys, promise) => {
+    keys.forEach(k => { inflight.current[k] = (inflight.current[k] || 0) + 1 })
+    promise.finally(() => keys.forEach(k => { inflight.current[k] -= 1; if (inflight.current[k] <= 0) delete inflight.current[k] }))
+  }
   async function persistValue(itemId, fieldKey, qty) {
     const key = `${itemId}:${fieldKey}`
     const prior = persistLocks.current[key] || Promise.resolve()
@@ -516,9 +613,11 @@ export default function Stock() {
         await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId, fieldKey, qty, countedBy: countedByFields(), ...queueLabels(itemId) })
         setPendingSync(prev => prev + 1)
         setPendingItems(prev => new Set([...prev, itemId]))
+        markStored(selectedPeriod.id, fieldKey, [{ itemId, qty }], countedByFields())
         return true
       }
       await persistValueDirect(selectedPeriod.id, itemId, fieldKey, qty)
+      markStored(selectedPeriod.id, fieldKey, [{ itemId, qty }], countedByFields())
       return true
     }).catch(async err => {
       // A dropped connection is held, not lost — see queueOnNetworkFailure. Anything else is a
@@ -528,6 +627,7 @@ export default function Stock() {
       return false
     }) // recorded, and never wedges the chain for this key
     persistLocks.current[key] = run
+    trackInflight([key], run)
     return run
   }
 
@@ -626,18 +726,42 @@ export default function Stock() {
   async function saveRow(itemId, overrideQty) {
     const fieldKey = fieldKeyOf(activeTab)
     if (!fieldKey) return   // not an entry tab; nothing on screen writes a stored field
-    setSaving(prev => ({ ...prev, [itemId]: true }))
     const source = overrideQty !== undefined ? overrideQty : (stockData[itemId] || {})[fieldKey]
+    // QtyInput commits on EVERY blur, so tabbing through a cell nobody typed in used to write it —
+    // and a blank cell is a delete, which erased another tablet's count for that item (S756). Only
+    // a cell that differs from what the server holds is written, and never before this period's
+    // figures have loaded (the record still describes the previous period until then).
+    // (A write still in flight for this cell means the record is about to move, so the comparison
+    // cannot be trusted — typing a figure back to its old value mid-save must still be written.)
+    if (storedRef.current.periodId !== selectedPeriod?.id) return
+    if (!isChanged(itemId, fieldKey, source) && !inflight.current[`${itemId}:${fieldKey}`]) return
+    setSaving(prev => ({ ...prev, [itemId]: true }))
     await persistValue(itemId, fieldKey, toQty(source))
     setSaving(prev => ({ ...prev, [itemId]: false }))
   }
 
   async function saveAll() {
-    const visibleItems = filteredItems()
+    const fieldKey = fieldKeyOf(activeTab)
+    if (!fieldKey) return
+    setPageNotice(null)
+    // Not before this period's figures have loaded: until then the record of what the server
+    // holds still describes the previous period, and every comparison against it is meaningless.
+    if (storedRef.current.periodId !== selectedPeriod?.id) {
+      setPageNotice('This month’s figures are still loading. Wait for them to appear, then press Save All.')
+      return
+    }
+    // Only the cells changed since the figures were loaded or last saved (S756) — see storedRef.
+    const visibleItems = filteredItems().filter(item =>
+      isChanged(item.id, fieldKey, (stockData[item.id] || {})[fieldKey]) || inflight.current[`${item.id}:${fieldKey}`])
+    if (visibleItems.length === 0) {
+      setPageNotice('Nothing has changed since these figures were loaded or last saved, so there was nothing to save.')
+      return
+    }
 
     // Same "used" calculation already driving the red highlight in the Summary tab — if it's
     // negative, more was used/wasted/counted-out than was ever bought or on hand, which is a real
     // data problem, not just a display quirk. Gated behind a client-level setting (off by default).
+    // Tested over the rows this save WRITES: a figure already stored is not being recorded by it.
     if (settings.block_negative_stock) {
       const negativeItems = visibleItems.filter(item => {
         const row = stockData[item.id] || {}
@@ -724,6 +848,9 @@ export default function Stock() {
           positives.map(e => ({ period_id: periodId, item_id: e.itemId, qty: e.qty, type: 'staff' })))).error, true)
       }
       return true
+    }).then(ok => {
+      markStored(periodId, fieldKey, entries, countedByFields())
+      return ok
     }).catch(async err => {
       // Worth most here: this is the click at the end of a 300-item count.
       if (await queueOnNetworkFailure(err, fieldKey, entries)) return 'queued'
@@ -731,6 +858,7 @@ export default function Stock() {
       return false
     }) // recorded; never wedges the chains
     entries.forEach(e => { persistLocks.current[`${e.itemId}:${fieldKey}`] = run })
+    trackInflight(entries.map(e => `${e.itemId}:${fieldKey}`), run)
     return run
   }
 
@@ -840,8 +968,11 @@ export default function Stock() {
     if (!prevPeriod) { setPageNotice('This is the earliest period on record, so there is no previous month to carry a closing count forward from. Enter the opening stock directly.'); return }
     const prevLabel = `${BS_MONTHS[prevPeriod.bs_month - 1]} ${prevPeriod.bs_year}`
     setSaveAllLoading(true)
-    const { data: closingRows, error: readErr } = await supabase.from('closing_stock')
-      .select('item_id, physical_qty').eq('period_id', prevPeriod.id)
+    // Paged, exactly as carryForwardOpeningStock() pages the same read (S705, here S756): one row
+    // per item, so a bare select stopped at 1000 and the rest of the book opened on whatever was
+    // typed. item_id is unique per period, so it is the tiebreaker.
+    const { data: closingRows, error: readErr } = await fetchAllRows(() => supabase.from('closing_stock')
+      .select('item_id, physical_qty').eq('period_id', prevPeriod.id).order('item_id'))
     setSaveAllLoading(false)
     if (readErr) {
       // A failed read is not "never counted" — that sentence sent a reader off to recount a
@@ -891,6 +1022,10 @@ export default function Stock() {
       zeros.forEach(id => { next[id] = { ...next[id], opening: '' } })
       return next
     })
+    markStored(selectedPeriod.id, 'opening', [
+      ...positives.map(r => ({ itemId: r.item_id, qty: toQty(r.physical_qty) })),
+      ...zeros.map(id => ({ itemId: id, qty: null })),
+    ])
     flashSaved()
   }
 
@@ -914,16 +1049,44 @@ export default function Stock() {
     return filteredItems().filter(item => !isNoRow(fk, toQty(stockData[item.id]?.[fk]))).length
   }
 
-  // PATCHED: subtract returns from used calculation
+  // Quantity used, through the shared formula rather than a retyped copy of it (S756 — the S551
+  // rule: COGS_FORMULA where it is printed, computeUsed() where it is computed).
   function getUsed(itemId) {
     const row = stockData[itemId] || {}
-    const opening = parseFloat(row.opening) || 0
-    const purchased = parseFloat(purchases[itemId]) || 0
-    const returned = parseFloat(returns[itemId]) || 0
-    const closing = parseFloat(row.closing) || 0
-    const wastage    = (parseFloat(row.wastage) || 0) + (parseFloat(dailyWastage[itemId]) || 0)
-    const staffMeal  = parseFloat(row.staff_meal) || 0
-    return opening + purchased - returned - closing - wastage - staffMeal
+    return computeUsed({
+      opening:    parseFloat(row.opening) || 0,
+      purchases:  parseFloat(purchases[itemId]) || 0,
+      returns:    parseFloat(returns[itemId]) || 0,
+      wastage:    (parseFloat(row.wastage) || 0) + (parseFloat(dailyWastage[itemId]) || 0),
+      staffMeals: parseFloat(row.staff_meal) || 0,
+      closing:    parseFloat(row.closing) || 0,
+    })
+  }
+
+  // What this period's purchases and returns of an item cost, in NPR (S756): the bills' own rates
+  // net of their discounts, and returns at their own rate — not qty × today's master rate. Falls
+  // back to the master rate only when the values are not known (an older offline cache).
+  function purchaseValueOf(item) {
+    if (purchaseValues) return purchaseValues[item.id] || 0
+    return (parseFloat(purchases[item.id]) || 0) * parseFloat(item.per_uom_rate || 0)
+  }
+  function returnValueOf(item) {
+    if (returnValues) return returnValues[item.id] || 0
+    return (parseFloat(returns[item.id]) || 0) * parseFloat(item.per_uom_rate || 0)
+  }
+  // COGS in NPR, one item: stock on hand at the master rate, purchases and returns at what they
+  // cost. Both Summary tables and the export read this, so they cannot value one item two ways.
+  function getCogsValue(item) {
+    const row = stockData[item.id] || {}
+    const rate = parseFloat(item.per_uom_rate || 0)
+    return computeUsed({
+      opening:    (parseFloat(row.opening) || 0) * rate,
+      purchases:  purchaseValueOf(item),
+      returns:    returnValueOf(item),
+      wastage:    ((parseFloat(row.wastage) || 0) + (parseFloat(dailyWastage[item.id]) || 0)) * rate,
+      staffMeals: (parseFloat(row.staff_meal) || 0) * rate,
+      closing:    (parseFloat(row.closing) || 0) * rate,
+    })
   }
 
   // PATCHED: subtract returns from system ref qty
@@ -974,13 +1137,13 @@ export default function Stock() {
     groups.forEach(({ name, catItems }) => {
       const openingVal   = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.opening) || 0) * parseFloat(i.per_uom_rate || 0), 0)
       const closingVal   = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.closing) || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const purchasesVal = catItems.reduce((sum, i) => sum + (parseFloat(purchases[i.id]) || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      // getUsed() subtracts vendor returns, so COGS below already nets them off — without this
-      // column the row simply did not add up and an accountant could not reproduce the total.
-      const returnsVal   = catItems.reduce((sum, i) => sum + (parseFloat(returns[i.id]) || 0) * parseFloat(i.per_uom_rate || 0), 0)
+      const purchasesVal = catItems.reduce((sum, i) => sum + purchaseValueOf(i), 0)
+      // COGS below already nets returns off — without this column the row simply did not add up
+      // and an accountant could not reproduce the total.
+      const returnsVal   = catItems.reduce((sum, i) => sum + returnValueOf(i), 0)
       const wastageVal    = catItems.reduce((sum, i) => sum + ((parseFloat(stockData[i.id]?.wastage) || 0) + (parseFloat(dailyWastage[i.id]) || 0)) * parseFloat(i.per_uom_rate || 0), 0)
       const staffMealsVal = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.staff_meal) || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const cogsVal       = catItems.reduce((sum, i) => sum + getUsed(i.id) * parseFloat(i.per_uom_rate || 0), 0)
+      const cogsVal       = catItems.reduce((sum, i) => sum + getCogsValue(i), 0)
       byCategory[name] = { opening: openingVal, closing: closingVal, purchases: purchasesVal, returns: returnsVal, wastage: wastageVal, staffMeals: staffMealsVal, cogs: cogsVal }
     })
     return byCategory
@@ -1006,17 +1169,21 @@ export default function Stock() {
         'Opening Qty':       openQty   || '',
         'Opening Value':     rate > 0 ? Math.round(openQty  * rate) : '',
         'Purchased Qty':     purchQty  || '',
-        'Purchase Value':    rate > 0 ? Math.round(purchQty * rate) : '',
+        // What the bills charged, net of their discounts, and returns at their own rate (S756) —
+        // not qty × master rate, so this sheet ties to Monthly Summary rather than to today's price.
+        'Purchase Value':    purchQty ? Math.round(purchaseValueOf(item)) : '',
         'Returned Qty':      retQty    || '',
-        'Returns Value':     rate > 0 ? Math.round(retQty   * rate) : '',
+        'Returns Value':     retQty ? Math.round(returnValueOf(item)) : '',
         'Wastage Qty':       wastQty   || '',
         'Wastage Value':     rate > 0 ? Math.round(wastQty  * rate) : '',
         'Staff Meals Qty':   staffQty  || '',
         'Staff Meals Value': rate > 0 ? Math.round(staffQty * rate) : '',
         'Closing Qty':       closeQty  || '',
         'Closing Value':     rate > 0 ? Math.round(closeQty * rate) : '',
+        // Who last counted it — written since S737, carried out of the building since S756.
+        'Counted By':        row.closing !== '' && row.closing != null ? (countedBy[item.id] || '') : '',
         'Used Qty':          usedQty   || '',
-        'COGS (NPR)':        rate > 0 ? Math.round(usedQty  * rate) : '',
+        'COGS (NPR)':        Math.round(getCogsValue(item)) || '',
         'Requisitioned Qty': requisitioned[item.id] || '',
       }
     })
@@ -1191,13 +1358,18 @@ export default function Stock() {
               const tdStyle = (color) => ({ textAlign: 'right', color: color || 'var(--theme-text1)', whiteSpace: 'nowrap' })
               return (
                 <div className="card" style={{ marginBottom: 24 }}>
-                  {/* The sub-recipe disclosure exists for the accountant reconciling this page
-                      against Monthly Summary: the two COGS figures differ by exactly the
-                      sub-recipe amount, deliberately, and neither page said so before S575. */}
+                  {/* The disclosure exists for the accountant reconciling this page against Monthly
+                      Summary (S575). Until S756 it claimed the two differed by exactly the
+                      sub-recipe amount while this page valued purchases and returns at today's
+                      master rate with no bill discount — so they differed by that as well, and by a
+                      different amount every time a bill moved an item's rate. Both pages now value
+                      purchases and returns the same way, which is what makes the sentence true. */}
                   <p style={{ margin: '0 0 10px', fontSize: 11, color: 'var(--theme-text3)' }}>
-                    These figures <strong>include sub-recipes</strong> — prep counted as stock. Monthly
-                    Summary&apos;s COGS excludes them, so the two pages differ by exactly the sub-recipe
-                    amount; both are correct for what they count.
+                    Purchases are valued at what each bill charged, less its bill discount, and returns
+                    at the rate they went back at — the same basis as Monthly Summary. Opening, closing,
+                    wastage and staff meals are valued at the current Item Master rate. These figures
+                    also <strong>include sub-recipes</strong> (prep counted as stock), which Monthly
+                    Summary leaves out, so its COGS differs from this page by the value of that prep.
                   </p>
                   <div className="table-wrap">
                     <table className="data-table">
@@ -1206,8 +1378,8 @@ export default function Stock() {
                           <th style={{ width: 36, textAlign: 'center', color: 'var(--theme-text2)' }}>S.No</th>
                           <th><Tip text="All figures in NPR." width={140}>Category</Tip></th>
                           <th style={thStyle}>Opening Stock</th>
-                          <th style={thStyle}><Tip text="Value of goods received via purchases this period. 'Production' = sub-recipes processed in-house from existing stock." width={280}>Purchase</Tip></th>
-                          <th style={thStyle}><Tip text="Value of goods sent back to the vendor this period — a short delivery, a damaged crate, wrong item. Already netted off COGS." width={270}>Returns</Tip></th>
+                          <th style={thStyle}><Tip text="What this period's purchase bills charged for these goods, after each bill's discount and before VAT. 'Production' = sub-recipes processed in-house from existing stock." width={280}>Purchase</Tip></th>
+                          <th style={thStyle}><Tip text="Value of goods sent back to the vendor this period — a short delivery, a damaged crate, wrong item — at the rate each return was recorded at. Already netted off COGS." width={270}>Returns</Tip></th>
                           <th style={thStyle}>Closing Stock</th>
                           <th style={thStyle}>Wastage</th>
                           <th style={thStyle}>Staff Meals</th>
@@ -1289,11 +1461,11 @@ export default function Stock() {
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text={`${COGS_FORMULA}. What was actually consumed this period.`} width={250}>Used</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-text2)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Total qty issued from the store via requisition slips this period. Should align with Used quantity." width={240}>Requisitioned</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Opening quantity × per-unit rate. Value of stock carried forward from the previous period." width={240}>Open. Value</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Purchased quantity × per-unit purchase rate." width={220}>Purch. Value</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="What this period's bills charged for the item, after each bill's discount and before VAT — not quantity × today's Item Master rate." width={240}>Purch. Value</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red-text)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Wastage quantity × per-unit rate. NPR cost of goods recorded as waste." width={240}>Wastage Value</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-purple-text)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Staff meals quantity × per-unit rate. NPR cost of complimentary/staff consumption." width={260}>Staff Meals Value</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-green-text)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Closing (physical count) quantity × per-unit rate." width={220}>Close Value</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', top: 0, right: 0, zIndex: 4, background: 'var(--theme-card)' }}><Tip text={`Cost of Goods Sold = ${COGS_FORMULA}, in NPR.`} width={280}>COGS</Tip></th>
+                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', top: 0, right: 0, zIndex: 4, background: 'var(--theme-card)' }}><Tip text={`Cost of Goods Sold = ${COGS_FORMULA}, in NPR. Purchases and returns at what they cost; stock on hand, wastage and staff meals at the Item Master rate.`} width={280}>COGS</Tip></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1345,12 +1517,12 @@ export default function Stock() {
                           {requisitioned[item.id] ? Number(requisitioned[item.id]).toLocaleString('en-IN') : '—'}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)' }}>{fmtVal(openQty)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtVal(purchQty)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{purchQty > 0 ? npr(purchaseValueOf(item)) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>{fmtVal(wastQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>{fmtVal(staffQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{fmtVal(closeQty)}</td>
                         <td style={{ textAlign: 'right', fontWeight: hasData ? 700 : 400, color: used < 0 ? 'var(--theme-red-text)' : hasData ? 'var(--theme-accent-ink)' : 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', right: 0, zIndex: 1, background: stickyBg }}>
-                          {hasData ? fmtVal(used) : '—'}
+                          {hasData ? npr(getCogsValue(item)) : '—'}
                         </td>
                       </tr>
                     )
@@ -1400,7 +1572,12 @@ export default function Stock() {
             <div className="print-sheet-header">
               <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>Physical Stock Count Sheet</h2>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
-                Period: {periodLabel} &nbsp;·&nbsp; Printed: {new Date().toLocaleDateString('en-GB')}
+                {/* In BS, as the day is read in Nepal (S756). It printed the runtime's AD date,
+                    so a sheet on the store-room wall named a calendar no one here counts in. */}
+                Period: {periodLabel} &nbsp;·&nbsp; Printed: {(() => {
+                  const t = nepalBs(new Date())
+                  return t ? `${formatBsDay(t.day, t.month)} ${t.year}` : `${nepalDateAd(new Date())} (AD)`
+                })()}
               </p>
             </div>
 
@@ -1674,6 +1851,9 @@ export default function Stock() {
                       </div>
                       <div className="mobile-stock-card-meta">
                         <span className="mobile-stock-uom">{item.uom}</span>
+                        {fieldKey === 'closing' && countedBy[item.id] && (
+                          <span className="mobile-stock-ref">counted by {countedBy[item.id]}</span>
+                        )}
                         {!blindCount && purchases[item.id] > 0 && (
                           <span className="mobile-stock-ref">Purchased: {dispPurch(Number(purchases[item.id]), item)}</span>
                         )}
@@ -1745,7 +1925,15 @@ export default function Stock() {
                           const lineValue = rate > 0 && qty > 0 ? Math.round(qty * rate) : null
                           return (
                             <tr key={item.id}>
-                              <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.name}</td>
+                              <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                                {item.name}
+                                {/* Who counted it (S756) — closing_stock.counted_by_name had been
+                                    written since S737 and shown nowhere. A block child so it takes
+                                    its own line without widening the column. */}
+                                {fieldKey === 'closing' && countedBy[item.id] && (
+                                  <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)' }}>counted by {countedBy[item.id]}</span>
+                                )}
+                              </td>
                               <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
                               <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{item.uom}</td>
                               <td style={{ textAlign: 'right', width: 140 }}>

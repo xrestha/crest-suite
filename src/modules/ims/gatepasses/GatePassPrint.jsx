@@ -1,5 +1,5 @@
-import { BS_MONTHS, adToBsSafe } from '../../../utils/bsCalendar'
-import { nepalTime } from '../../../shared/nepalTime'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { nepalTime, nepalDateAd, nepalBs } from '../../../shared/nepalTime'
 
 const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'Maintenance', other: 'Other' }
 
@@ -9,9 +9,12 @@ const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'M
 // (IMS has no such concept) — anyone who can reach /gate-passes under ModuleGate can issue one.
 export default function GatePassPrint({ gatePass, bizInfo, issuedByName }) {
   const now = new Date(gatePass.time_in || Date.now())
-  const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  // S756: the date is pinned to Nepal like the time beside it. Both dates read the runtime's local
+  // getters, so a pass issued 00:15 Kathmandu printed the PREVIOUS day on any machine not set to
+  // Nepal time — under a clock time that was already pinned (the S670 rule: pin one, pin both).
+  const adDateStr = nepalDateAd(now)
   const nowStr    = nepalTime(now)
-  const bs        = adToBsSafe(now)
+  const bs        = nepalBs(now)
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
 
   return (

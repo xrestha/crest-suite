@@ -1,6 +1,7 @@
-import { bsToAd } from '../../../utils/bsCalendar'
+import { bsToAd, formatAd } from '../../../utils/bsCalendar'
 import {
   acquisitionProrationTier, computePoolMovement, computeRepairCapCheck, computeIntangibleAmortization,
+  parseAdDateLocal,
 } from './taxPoolCompute'
 
 const FY_START = 2082 // fiscal year 2082/83: Shrawan 2082 -> Ashadh 2083
@@ -32,6 +33,35 @@ describe('acquisitionProrationTier', () => {
 
   test('outside the fiscal year entirely -> null', () => {
     expect(acquisitionProrationTier({ acquisitionDate: bsToAd(2081, 5, 1), fiscalYearStartBs: FY_START })).toBeNull()
+  })
+
+  // TaxPoolTab passes the stored `assets_register.acquisition_date` STRING, not a Date. These are
+  // the two tier boundaries where a one-day slip changes the answer (S756).
+  test('a stored YYYY-MM-DD string lands in the same tier as the BS day it was picked on', () => {
+    expect(acquisitionProrationTier({ acquisitionDate: formatAd(bsToAd(2082, 9, 30)), fiscalYearStartBs: FY_START })).toBe('full')
+    expect(acquisitionProrationTier({ acquisitionDate: formatAd(bsToAd(2082, 10, 1)), fiscalYearStartBs: FY_START })).toBe('two_third')
+    expect(acquisitionProrationTier({ acquisitionDate: formatAd(bsToAd(2083, 1, 1)), fiscalYearStartBs: FY_START })).toBe('one_third')
+  })
+})
+
+describe('parseAdDateLocal', () => {
+  // Jest cannot switch the process timezone mid-run, so the regression is pinned on the property
+  // that matters rather than on a west-of-UTC clock: the parsed Date must be LOCAL midnight of the
+  // stated day. `new Date('2026-01-15')` fails this in every zone except UTC itself (05:45 here,
+  // 19:00 on the 14th in New York), and adToBs() reads exactly these local getters.
+  test('a date string becomes local midnight of that calendar day', () => {
+    const d = parseAdDateLocal('2026-01-15')
+    expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()]).toEqual([2026, 0, 15, 0, 0])
+  })
+
+  test('a timestamp string keeps its calendar day', () => {
+    const d = parseAdDateLocal('2026-01-15T23:59:00Z')
+    expect([d.getFullYear(), d.getMonth(), d.getDate()]).toEqual([2026, 0, 15])
+  })
+
+  test('a Date passes through untouched', () => {
+    const src = new Date(2026, 0, 15)
+    expect(parseAdDateLocal(src)).toBe(src)
   })
 })
 

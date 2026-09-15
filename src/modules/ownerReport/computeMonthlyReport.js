@@ -55,7 +55,12 @@ async function computeImsSection(clientId, period) {
   const results = await Promise.all([
     // discount_amount + the bill-key columns feed netPurchaseFigures() — see its comment.
     fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate, payment_method, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day').eq('period_id', period.id).order('id')),
-    supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id),
+    // Paged with a unique tiebreaker, like every per-item-per-period read below (S756). Six reads
+    // in this batch were bare while purchase_entries/wastages/sales_entries beside them were paged,
+    // so past PostgREST's silent 1000-row cap the FROZEN snapshot lost returns, items, pars and
+    // stock rows with no error for throwFirstError to see — and nothing ever recomputes it. A
+    // missing items row values its stock at rate 0; a missing closing row reads as a zero count.
+    fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate').eq('period_id', period.id).order('id')),
     // Two sales fetches, because one row set cannot answer both questions. REVENUE excludes comps
     // (a comped dish collected nothing), CONSUMPTION includes them (its ingredients were still
     // used). This was a single comp-excluding query feeding both, so theoretical usage — and the
@@ -74,14 +79,16 @@ async function computeImsSection(clientId, period) {
     // Sub-recipes are deliberately NOT excluded — Stock Count counts them too (its own "Sub-
     // Recipes" category row), unlike the is_sub_recipe exclusion CLAUDE.md documents for
     // Item Master/Purchases/POs/Requisitions/Reorder Report/Supplier Price Tracker.
-    scopedFrom('items', clientId, 'id, per_uom_rate, yield_pct, is_active, is_sub_recipe').eq('is_active', true),
-    scopedFrom('par_levels', clientId, 'item_id, par_qty'),
-    supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id),
-    supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id),
-    scopedFrom('payable_payments', clientId, 'purchase_entry_id, amount'),
+    fetchAllRows(() => scopedFrom('items', clientId, 'id, per_uom_rate, yield_pct, is_active, is_sub_recipe').eq('is_active', true).order('id')),
+    fetchAllRows(() => scopedFrom('par_levels', clientId, 'item_id, par_qty').order('id')),
+    fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', period.id).order('id')),
+    fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', period.id).order('id')),
+    // Every settlement the client has ever recorded, one row per line per payment — the fastest-
+    // growing read in this batch, and a truncated one reads a paid bill as unpaid (S723, S756).
+    fetchAllRows(() => scopedFrom('payable_payments', clientId, 'purchase_entry_id, amount').order('id')),
     // Staff meals come off the shelf in the shared on-hand calculation the reorder figure is
     // built from (S696).
-    supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id),
+    fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id).order('id')),
   ])
   // A failed read must THROW so runSection() records it as a section error the page names —
   // otherwise it flows through `|| []` and freezes zeros into the immutable snapshot (S612).

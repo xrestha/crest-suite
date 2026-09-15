@@ -8,7 +8,13 @@ import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
-import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
+import { BS_MONTHS, daysInBsMonth, bsToAd, formatAd } from '../../../utils/bsCalendar'
+import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { useSettings } from '../../../context/SettingsContext'
+import { fcFigure, fcThresholds } from '../../../shared/imsFormulas'
+import { bandFigure, lcBand, LABOR_WARN } from '../../../shared/operatingBands'
+import { allocateBillDiscounts } from './supplierAttribution'
+import { depreciationInWindow } from '../assets/depreciationCompute'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { disabledStyle } from '../../../shared/inlineFieldState'
@@ -63,20 +69,39 @@ const BUCKET_CONFIG = {
 }
 
 const emptyRow = (category = '') => ({ id: null, category, description: '', amount: '', _dirty: true })
+const emptyRows = () => ({ overhead: [], labor: [], tax_fees: [] })
+
+// Fill tokens for the shared bands (S756). fcFigure()/bandFigure() hand back the TEXT colour and
+// the ✓/△/▲ mark; the P&L bars need the base token of the same verdict. lcBand's middle step is
+// accent-ink by design (operatingBands.js), so its fill is the accent, not amber.
+const FC_FILL = { good: 'var(--theme-green)', watch: 'var(--theme-amber)', high: 'var(--theme-red)', none: 'var(--theme-text2)' }
+const LC_FILL = { good: 'var(--theme-green)', watch: 'var(--theme-accent)', high: 'var(--theme-red)', none: 'var(--theme-text2)' }
+
+// Same banner shape PayrollRun.jsx's stale-draft card uses (design-system.md, S741).
+const amberBanner = { background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }
 
 function seedBucket(key) {
   return BUCKET_CONFIG[key].presets.map(cat => emptyRow(cat))
 }
 
 export default function Overheads() {
-  const { profile, clientId, canEditClosedPeriods, hasImsAccess, clientModules } = useAuth()
+  const { profile, clientId, canEditClosedPeriods, hasImsAccess, clientModules, isAdmin, isOwner, suitePlan, hasFeature } = useAuth()
+  const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
   const hrOn = !!clientModules?.hr
+  // hr_payroll_runs and hr_payslips carry the RESTRICTIVE no_ims_staff policy, which is rank-blind:
+  // an IMS-manager STAFF login passes this page's guard and then reads both tables as `[]` with no
+  // error. That used to render "No finalized payroll run", drop wages from the P&L and paint Net
+  // Profit green while the Owner, reading the same month, saw a loss (S756). On such a login the
+  // page no longer asks — it says labour could not be read here and withholds the verdict.
+  const payrollFenced = hrOn && !isAdmin && !isOwner && !!profile?.ims_role
+  // D23: the depreciation memo is only offered where Fixed Assets is (SuiteGate's own test).
+  const assetsOn = !!(isAdmin || suitePlan === 'pro' || hasFeature?.('fixed_asset_register'))
 
   const [periods, setPeriods]       = useState([])
   const [periodId, setPeriodId]     = useState('')
-  const [rows, setRows]             = useState({ overhead: [], labor: [], tax_fees: [] })
+  const [rows, setRows]             = useState(emptyRows)
   const [activeBucket, setActiveBucket] = useState('overhead')
   const [periodData, setPeriodData] = useState(null)
   const [loading, setLoading]       = useState(true)
@@ -84,37 +109,69 @@ export default function Overheads() {
   const [saving, setSaving]         = useState(false)
   const [saved, setSaved]           = useState(false)
   const [saveError, setSaveError]   = useState(null)
+  // The label of the month an unsaved draft was copied from, or null when the rows on screen are
+  // this period's own saved rows (S756).
+  const [carriedFrom, setCarriedFrom] = useState(null)
+  // D23 memo: { amount, count, prorated } | { error } | null (not offered / not loaded).
+  const [deprMemo, setDeprMemo]     = useState(null)
 
-  useEffect(() => { if (effectiveClientId) loadPeriods() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Overlapping loads (S756). A closed <select> fires change per arrow keypress, and this is an
+  // ENTRY page: arrow Bhadra → Shrawan and press Save before Shrawan's read lands, and the save
+  // deleted Shrawan's rows and inserted Bhadra's under Shrawan's id. Rows are cleared on every
+  // period change, Save waits for `loading`, and a superseded load is not allowed to set anything.
+  // Keyed on the period id (and the client, for an admin switching client), never a counter.
+  const periodReq = useLatestRequest()
+  const clientReq = useLatestRequest()
+
+  useEffect(() => { if (effectiveClientId) loadPeriods(effectiveClientId) }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
   // `hrOn` is a dependency, not just an input: for an ADMIN viewing a client it comes from
   // `viewModules`, which resolves on its own schedule — so the first load can run with hrOn=false
   // and silently fall back to the Labor bucket on a client who does run payroll. Re-run when it
   // settles. It is memoized in AuthContext, so this cannot loop.
-  useEffect(() => { if (periodId) loadAll() }, [periodId, hrOn]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (periodId) loadAll(periodId) }, [periodId, hrOn, payrollFenced, assetsOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadPeriods() {
+  async function loadPeriods(cid) {
+    clientReq.begin(cid)
+    // An admin switching client: the previous client's period and rows leave the screen before
+    // anything else happens. Left up, Save would delete-and-insert that old period's figures under
+    // the NEW client's scope while the new client's period list was still loading.
+    setLoading(true); setLoadError(null); setSaveError(null)
+    setPeriodId(''); setPeriods([]); setRows(emptyRows()); setPeriodData(null); setCarriedFrom(null); setDeprMemo(null)
     const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
+    if (!clientReq.isCurrent(cid)) return
     // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
     if (error) { setLoadError(error.message); setLoading(false); return }
     const withLabel = (data || []).map(p => ({ ...p, label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` }))
     setPeriods(withLabel)
     const open = withLabel.find(p => p.status === 'open') || withLabel[0]
     if (open) setPeriodId(open.id)
+    else setLoading(false)
   }
 
-  async function loadAll() {
+  function handlePeriodChange(id) {
+    periodReq.begin(id)   // synchronous — before any await, so an in-flight load for the old month loses
+    setLoading(true); setLoadError(null); setSaveError(null)
+    setRows(emptyRows()); setPeriodData(null); setCarriedFrom(null); setDeprMemo(null)
+    setPeriodId(id)
+  }
+
+  async function loadAll(pid) {
+    periodReq.begin(pid)
     setLoading(true)
     setLoadError(null)
-    await Promise.all([loadOverheads(), loadPeriodData()])
+    setRows(emptyRows()); setCarriedFrom(null)
+    await Promise.all([loadOverheads(pid), loadPeriodData(pid)])
+    if (!periodReq.isCurrent(pid)) return
     setLoading(false)
   }
 
-  async function loadOverheads() {
+  async function loadOverheads(pid) {
     const { data, error } = await scopedFrom('overheads')
-      .eq('period_id', periodId)
+      .eq('period_id', pid)
       .order('created_at')
+    if (!periodReq.isCurrent(pid)) return
     // A failed read must NOT fall into the carry-forward branch below: it would seed an editable
     // draft over a period that may have real saved rows, and Save would replace them (S612 —
     // on a data-entry page the silent-zero class is a data-loss class).
@@ -131,6 +188,7 @@ export default function Overheads() {
         if (grouped[b].length === 0) grouped[b] = seedBucket(b)
       })
       setRows(grouped)
+      setCarriedFrom(null)
       return
     }
 
@@ -139,9 +197,10 @@ export default function Overheads() {
     // user to re-type the same numbers. Carry forward the nearest prior period's own saved rows
     // as an editable draft instead (_dirty: true, so nothing is written to the DB — and Save
     // stays disabled on a closed period — until the user actually hits Save).
-    const currentIdx = periods.findIndex(p => p.id === periodId)
+    const currentIdx = periods.findIndex(p => p.id === pid)
     const priorPeriods = currentIdx >= 0 ? periods.slice(currentIdx + 1) : []
     const prior = await findMostRecentOverheads(priorPeriods)
+    if (!periodReq.isCurrent(pid)) return
     if (prior.error) { setLoadError(prior.error); return }
     const priorRows = prior.rows
 
@@ -158,6 +217,9 @@ export default function Overheads() {
       if (grouped[b].length === 0) grouped[b] = seedBucket(b)
     })
     setRows(grouped)
+    // Named on screen (S756): these are another month's saved figures, and on a closed period that
+    // cannot be saved they stay the page's statement indefinitely with nothing else saying so.
+    setCarriedFrom(priorRows ? prior.period?.label || 'an earlier month' : null)
   }
 
   // Returns the chronologically nearest prior period's saved overhead rows, or null if none of
@@ -168,14 +230,14 @@ export default function Overheads() {
   // "those periods had nothing" — the caller would carry forward from an older period than the
   // truth, as an editable draft (S612).
   async function findMostRecentOverheads(candidatePeriods) {
-    if (candidatePeriods.length === 0) return { rows: null, error: null }
+    if (candidatePeriods.length === 0) return { rows: null, period: null, error: null }
     // Paged: rows-per-period × period count can cross the silent 1000-row cap on a long-lived
     // client, and a truncated read here could drop the nearest period's rows entirely (S529).
     // The id tiebreaker keeps created_at's paging stable.
     const { data, error } = await fetchAllRows(() => scopedFrom('overheads')
       .in('period_id', candidatePeriods.map(p => p.id))
       .order('created_at').order('id'))
-    if (error) return { rows: null, error: error.message }
+    if (error) return { rows: null, period: null, error: error.message }
     const byPeriod = new Map()
     ;(data || []).forEach(r => {
       const list = byPeriod.get(r.period_id)
@@ -185,15 +247,27 @@ export default function Overheads() {
     // candidatePeriods arrives nearest-first; the first with rows wins, same as the old walk.
     for (const p of candidatePeriods) {
       const rows = byPeriod.get(p.id)
-      if (rows && rows.length > 0) return { rows, error: null }
+      if (rows && rows.length > 0) return { rows, period: p, error: null }
     }
-    return { rows: null, error: null }
+    return { rows: null, period: null, error: null }
   }
 
-  async function loadPeriodData() {
+  async function loadPeriodData(pid) {
+    const periodObj = periods.find(p => p.id === pid)
+    // D23: a memo only. Its own promise, outside the batch below: a failed or fenced depreciation
+    // read must never block the statement, it only changes what the memo line says.
+    const deprPromise = assetsOn && periodObj ? loadDepreciationMemo(periodObj) : Promise.resolve(null)
     const results = await Promise.all([
-      fetchAllRows(() => supabase.from('purchase_entries').select('qty, rate').eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'qty, rate').eq('period_id', periodId),
+      // The bill discount belongs in food cost (S601/S720/S747): `discount_amount` is BILL-level and
+      // repeated per line, so it is spread across the bill's lines by allocateBillDiscounts(), which
+      // needs the grouping key and its vendor/invoice/day fallback trio. Raw qty × rate charged
+      // the undiscounted price, so this page's Food Cost disagreed with Monthly Summary's and the
+      // dashboards' for the same month (S756).
+      fetchAllRows(() => supabase.from('purchase_entries')
+        .select('qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
+        .eq('period_id', pid).order('id')),
+      // Returns stay at list rate, as on Monthly Summary and Consolidated P&L. Paged with a tiebreaker.
+      fetchAllRows(() => scopedFrom('vendor_returns', 'qty, rate').eq('period_id', pid).order('id')),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
       // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
       // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
@@ -203,12 +277,15 @@ export default function Overheads() {
       // and every "% of revenue" read HIGH, break-even read HIGH, and Net Profit read LOW, which
       // is the sign of the "✓ Profitable / ✗ Operating at a loss" verdict directly below it.
       // Pinned by salesReads.test.js, which is why `source` must stay in the column list.
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId).order('id')),
-      scopedFrom('recipes', 'id, selling_price'),
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', pid).order('id')),
+      // Master data read as a MAP: a recipe past a truncated read would price its sales at 0 (S734).
+      fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
       // Labour is payroll XOR the Overheads 'labor' bucket, never the sum (.claude/rules/
-      // dashboards.md). Only asked for when HR is on; `{ data: [] }` keeps the tuple shape.
-      hrOn ? scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', periodId).eq('status', 'finalized') : { data: [] },
+      // dashboards.md). Only asked for when HR is on AND this login can read payroll at all;
+      // `{ data: [] }` keeps the tuple shape.
+      hrOn && !payrollFenced ? scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', pid).eq('status', 'finalized') : { data: [] },
     ])
+    if (!periodReq.isCurrent(pid)) return
     // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S612).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setPeriodData(null); return }
@@ -229,11 +306,12 @@ export default function Overheads() {
     const runIds = (runs || []).map(r => r.id)
     if (runIds.length > 0) {
       const { data: slips, error: slipErr } = await scopedFrom('hr_payslips', 'gross, ssf_employer').in('run_id', runIds)
+      if (!periodReq.isCurrent(pid)) return
       if (slipErr) { setLoadError(slipErr.message); setPeriodData(null); return }
       labourPayroll = (slips || []).reduce((s, ps) => s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
     }
 
-    const gross  = (purchases || []).reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
+    const gross  = allocateBillDiscounts(purchases || []).reduce((s, p) => s + p.lineNet, 0)
     const ret    = (returns  || []).reduce((s, r) => s + parseFloat(r.qty || 0) * parseFloat(r.rate || 0), 0)
     const foodCost = gross - ret
 
@@ -261,6 +339,23 @@ export default function Overheads() {
     const dishes  = Object.values(soldMap).reduce((s, qty) => s + qty, 0)
 
     setPeriodData({ revenue, foodCost, dishes, labourPayroll })
+
+    const memo = await deprPromise
+    if (!periodReq.isCurrent(pid)) return
+    setDeprMemo(memo)
+  }
+
+  // D23 (owner decision, S756): depreciation for the month, from POSTED Fixed Asset runs whose
+  // dates overlap the month's AD dates, pro-rated by overlapping days. Returned, never thrown, and
+  // never subtracted from anything on this page.
+  async function loadDepreciationMemo(periodObj) {
+    const start = formatAd(bsToAd(periodObj.bs_year, periodObj.bs_month, 1))
+    const end = formatAd(bsToAd(periodObj.bs_year, periodObj.bs_month, daysInBsMonth(periodObj.bs_year, periodObj.bs_month)))
+    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, period_start, period_end, depreciation_amount, override_amount')
+      .eq('is_posted', true).lte('period_start', end).gte('period_end', start)
+      .order('period_end').order('id'))
+    if (error) return { error }
+    return depreciationInWindow(data || [], start, end)
   }
 
   function updateRow(bucket, idx, field, value) {
@@ -297,13 +392,36 @@ export default function Overheads() {
   // The read path above has carried a comment about exactly this class since S612 ("on a
   // data-entry page the silent-zero class is a data-loss class"); the write path had no guard.
   async function save() {
+    // The period this save is FOR, fixed before any await (S756): every write and the reload below
+    // use it, never whatever periodId the screen has moved on to.
+    const pid = periodId
     if (!effectiveClientId) { setSaveError('Nothing was saved — no client is selected. Pick one in the switcher at the top left, then save again.'); return }
+    if (!pid || loading) return
+
+    // A row with an amount and no category is counted in every total on screen and was silently
+    // dropped by the insert filter below — "✓ Saved", then gone on reload (S756). A negative
+    // amount had the same fate. Refuse, naming the row, before anything is deleted.
+    const problems = []
+    Object.entries(rows).forEach(([bucket, bucketRows]) => {
+      bucketRows.forEach((r, i) => {
+        const amt = parseFloat(r.amount)
+        if (!isFinite(amt) || amt === 0) return
+        const where = `row ${i + 1} on the ${BUCKET_CONFIG[bucket].label} tab`
+        if (amt < 0) problems.push(`${where} has a negative amount (${r.amount})`)
+        else if (!r.category?.trim()) problems.push(`${where} has NPR ${fmt(amt)} but no category`)
+      })
+    })
+    if (problems.length > 0) {
+      setSaveError(`Nothing was saved — ${problems.join('; ')}. Give each amount a category name, or clear it, then save again. As it stands that amount is in the totals on screen but would not be stored.`)
+      return
+    }
+
     setSaving(true)
     setSaveError(null)
 
     // Ordered so the half that can refuse comes FIRST: nothing has been destroyed yet, so this
     // failure is a clean no-op and the message can say so.
-    const { error: delErr } = await scopedDelete('overheads').eq('period_id', periodId)
+    const { error: delErr } = await scopedDelete('overheads').eq('period_id', pid)
     if (delErr) {
       const { text, detail } = asActionError(delErr)
       setSaveError({ text: `Nothing was saved and nothing was changed — this period's saved figures are still as they were. ${text}`, detail })
@@ -316,7 +434,7 @@ export default function Overheads() {
       bucketRows
         .filter(r => r.category?.trim() && parseFloat(r.amount) > 0)
         .forEach(r => inserts.push({
-          period_id:   periodId,
+          period_id:   pid,
           bucket,
           category:    r.category.trim(),
           description: r.description?.trim() || '',
@@ -342,7 +460,7 @@ export default function Overheads() {
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
-    await loadOverheads()
+    await loadOverheads(pid)
   }
 
   const totals = useMemo(() => ({
@@ -363,7 +481,10 @@ export default function Overheads() {
   // under the words "✓ Profitable this period".
   const labourPayroll  = periodData?.labourPayroll ?? null
   const labourEffective = labourPayroll != null ? labourPayroll : totals.labor
-  const labourSource   = labourPayroll != null ? 'payroll' : totals.labor > 0 ? 'overheads' : 'none'
+  // 'unreadable': payroll is fenced from this login (payrollFenced above). Not 'none' — the page
+  // does not know that no run exists, only that it cannot see one.
+  const labourSource   = labourPayroll != null ? 'payroll' : payrollFenced ? 'unreadable' : totals.labor > 0 ? 'overheads' : 'none'
+  const verdictWithheld = labourSource === 'unreadable'
   // Named on screen with its amount rather than silently dropped, so the two figures can be
   // reconciled by whoever notices they differ.
   const ignoredLabourBucket = labourPayroll != null && totals.labor > 0 ? totals.labor : 0
@@ -380,7 +501,7 @@ export default function Overheads() {
   // own examples.
   const entered = {
     food:  foodCost > 0,
-    labor: labourSource !== 'none',
+    labor: labourSource === 'payroll' || totals.labor > 0,
     oh:    totals.overhead > 0,
     tax:   totals.tax_fees > 0,
   }
@@ -402,7 +523,8 @@ export default function Overheads() {
     return p != null ? `${p.toFixed(1)}%` : null
   }
 
-  // Fill variant of trafficLight below — same bands, base tokens, for bars and dots.
+  // Fill variant of trafficLight below — same bands, base tokens, for bars and dots. Overhead and
+  // Tax & Fees only: Food Cost and Labor go through bandOf() and the shared bands.
   function trafficLightFill(actual, target) {
     if (actual == null) return 'var(--theme-text2)'
     const diff = actual - target
@@ -428,15 +550,34 @@ export default function Overheads() {
   // genuinely computed rather than entered, so it keeps its value; the note beneath the strip
   // says which lines are missing from it.
   const pnlRows = hasSales ? [
-    { key: 'food',   label: 'Food Cost',  amount: entered.food  ? foodCost         : null, target: 30, color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
-    { key: 'labor',  label: 'Labor',      amount: entered.labor ? labourEffective  : null, target: 30, color: 'var(--theme-text1)', textColor: 'var(--theme-text1)',
-      note: labourSource === 'payroll' ? 'from finalized payroll' : labourSource === 'overheads' ? 'from Overheads entry' : hrOn ? 'no finalized payroll run, and nothing on the Labor tab' : 'nothing on the Labor tab' },
+    { key: 'food',   label: 'Food Cost',  amount: entered.food  ? foodCost         : null, target: fcThresholds(settings).warn, color: 'var(--theme-accent)', textColor: 'var(--theme-accent-ink)' },
+    { key: 'labor',  label: 'Labor',      amount: entered.labor ? labourEffective  : null, target: LABOR_WARN, color: 'var(--theme-text1)', textColor: 'var(--theme-text1)',
+      note: labourSource === 'payroll' ? 'from finalized payroll'
+          : labourSource === 'unreadable' ? (totals.labor > 0 ? 'payroll cannot be read on this login — Labor tab only' : 'payroll cannot be read on this login')
+          : labourSource === 'overheads' ? 'from Overheads entry' : hrOn ? 'no finalized payroll run, and nothing on the Labor tab' : 'nothing on the Labor tab' },
     { key: 'oh',     label: 'Overhead',   amount: entered.oh    ? totals.overhead  : null, target: 25, color: 'var(--theme-green)', textColor: 'var(--theme-green-text)' },
     { key: 'tax',    label: 'Tax & Fees', amount: entered.tax   ? totals.tax_fees  : null, target: 5,  color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)' },
     { key: 'profit', label: 'Net Profit', amount: netProfit,       target: 10,
-      color:     netProfit != null && netProfit >= 0 ? 'var(--theme-green)'      : 'var(--theme-red)',
-      textColor: netProfit != null && netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' },
+      color:     verdictWithheld ? 'var(--theme-text2)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green)'      : 'var(--theme-red)',
+      textColor: verdictWithheld ? 'var(--theme-text1)' : netProfit != null && netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' },
   ] : null
+
+  // Food Cost and Labor band through the shared definitions (S756) — the client's own
+  // fc_warning_pct/fc_critical_pct via fcFigure(), and lcBand's 30/37 via bandFigure() — so this
+  // page and Monthly Summary, the dashboards and the Owner Report give one month one verdict, with
+  // the ✓/△/▲ mark carried beside the colour. Overhead and Tax & Fees have no shared band and keep
+  // this page's own target comparison.
+  function bandOf(row, pctVal) {
+    if (row.key === 'food') {
+      const f = fcFigure(pctVal, settings)
+      return { text: f.style.color, fill: FC_FILL[f.band.key] || FC_FILL.none, label: f.text, title: f.title }
+    }
+    if (row.key === 'labor') {
+      const f = bandFigure(pctVal, lcBand)
+      return { text: f.style.color, fill: LC_FILL[f.band.key] || LC_FILL.none, label: f.text, title: f.title }
+    }
+    return { text: trafficLight(pctVal, row.target), fill: trafficLightFill(pctVal, row.target), label: pctVal != null ? `${pctVal.toFixed(1)}%` : '—' }
+  }
 
   // Every cost line the statement is missing, for the caveat under Net Profit. A statement that
   // silently omits a cost overstates profit by exactly that much.
@@ -513,12 +654,13 @@ export default function Overheads() {
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <select aria-label="Period"
             value={periodId}
-            onChange={e => setPeriodId(e.target.value)}
+            onChange={e => handlePeriodChange(e.target.value)}
+            disabled={saving}
             style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
           >
             {periods.map(p => <option key={p.id} value={p.id}>{p.label}{p.status === 'open' ? ' (open)' : ''}</option>)}
           </select>
-          <button className="btn btn-primary" onClick={save} disabled={saving || isLocked || !!loadError}>
+          <button className="btn btn-primary" onClick={save} disabled={saving || loading || !periodId || isLocked || !!loadError}>
             {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
           </button>
         </div>
@@ -535,6 +677,18 @@ export default function Overheads() {
       {isLocked && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
+        </div>
+      )}
+
+      {/* The rows below are another month's saved figures copied as a starting point, and nothing
+          on the page said so — on a closed period that cannot be saved, permanently (S756). */}
+      {!loading && carriedFrom && (
+        <div role="status" style={amberBanner}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>Nothing is saved for {period?.label || 'this period'} yet.</strong>{' '}
+          The figures below are copied from <strong style={{ color: 'var(--theme-text1)' }}>{carriedFrom}</strong> as a starting point, and so is every total and the P&amp;L built from them.{' '}
+          {isLocked
+            ? 'This period is closed, so they cannot be saved here — they are not this month\'s records.'
+            : `They are not part of ${period?.label || 'this period'}'s records until you press Save.`}
         </div>
       )}
 
@@ -562,7 +716,8 @@ export default function Overheads() {
           },
           {
             label: 'Labor Costs', value: entered.labor ? fmt(labourEffective) : '—',
-            sub: !entered.labor ? (hrOn ? 'No finalized payroll run, nothing entered' : 'Not entered yet')
+            sub: labourSource === 'unreadable' && !entered.labor ? 'Payroll cannot be read on this login'
+               : !entered.labor ? (hrOn ? 'No finalized payroll run, nothing entered' : 'Not entered yet')
                : fmtPct(labourEffective, revenue) ? `${fmtPct(labourEffective, revenue)} of revenue${labourSource === 'payroll' ? ' · payroll' : ''}` : 'No sales data',
             color: 'var(--theme-text1)',
             tip: labourSource === 'payroll'
@@ -732,7 +887,7 @@ export default function Overheads() {
                 Revenue: {fmt(revenue)} &nbsp;·&nbsp; {Math.round(dishes).toLocaleString('en-IN')} dishes sold &nbsp;·&nbsp; {period?.label || '—'}
               </p>
             </div>
-            <Tip text="Food cost uses net purchases ÷ revenue (purchase-based). For COGS-based food cost, see Monthly Summary." width={240}>
+            <Tip text="Food cost uses net purchases ÷ revenue (purchase-based): purchases less bill discounts and vendor returns. For COGS-based food cost, see Monthly Summary." width={240}>
               <span style={{ fontSize: 11, color: 'var(--theme-text3)', cursor: 'help' }}>Purchase-based FC%</span>
             </Tip>
           </div>
@@ -746,14 +901,15 @@ export default function Overheads() {
               // used to produce, and the bar stays empty instead of drawing a full-width success.
               const isMissing  = row.amount == null
               const numPct     = actualPct == null ? null : actualPct
+              const band       = !isProfit && !isMissing ? bandOf(row, numPct) : null
               const barColor   = isMissing ? 'var(--theme-border)'
                 : isProfit
-                  ? (row.amount >= 0 ? 'var(--theme-green)' : 'var(--theme-red)')
-                  : trafficLightFill(numPct, row.target)
+                  ? (verdictWithheld ? 'var(--theme-text2)' : row.amount >= 0 ? 'var(--theme-green)' : 'var(--theme-red)')
+                  : band.fill
               const barText    = isMissing ? 'var(--theme-text3)'
                 : isProfit
-                  ? (row.amount >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)')
-                  : trafficLight(numPct, row.target)
+                  ? (verdictWithheld ? 'var(--theme-text1)' : row.amount >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)')
+                  : band.text
               const barWidth   = numPct == null ? 0 : Math.min(Math.abs(numPct), 100)
 
               return (
@@ -762,17 +918,17 @@ export default function Overheads() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                       <span style={{ width: 10, height: 10, borderRadius: 0, background: isMissing ? 'var(--theme-border)' : row.color, display: 'inline-block', flexShrink: 0 }} />
                       <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', minWidth: 90 }}>{row.label}</span>
-                      <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>target {row.target}%</span>
+                      <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>target {row.key === 'profit' ? '' : '≤'}{row.target}%</span>
                       {row.note && <span style={{ fontSize: 11, color: 'var(--theme-text3)', fontStyle: 'italic' }}>· {row.note}</span>}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
                       <span style={{ fontSize: 13, color: isMissing ? 'var(--theme-text3)' : 'var(--theme-text2)' }}>
                         {isMissing ? 'not entered' : fmt(row.amount)}
                       </span>
-                      <span style={{ fontSize: 14, fontWeight: 700, color: barText, minWidth: 54, textAlign: 'right' }}>
-                        {actualPct != null
-                          ? `${isProfit && row.amount >= 0 ? '+' : ''}${actualPct.toFixed(1)}%`
-                          : '—'}
+                      <span style={{ fontSize: 14, fontWeight: 700, color: barText, minWidth: 54, textAlign: 'right' }} title={band?.title}>
+                        {actualPct == null ? '—'
+                          : band ? band.label
+                          : `${isProfit && row.amount >= 0 ? '+' : ''}${actualPct.toFixed(1)}%`}
                       </span>
                     </div>
                   </div>
@@ -787,6 +943,28 @@ export default function Overheads() {
           {/* A statement that silently omits a cost overstates profit by exactly that much, and
               the Net Profit callout directly below prints a green ✓ on it. Say which lines are
               missing before the verdict, not after. */}
+          {/* D23 (S756): depreciation as a MEMO. Posted Fixed Asset runs overlapping this month,
+              pro-rated by days. It is never subtracted — Net Profit below is before depreciation —
+              and a read that failed says so instead of printing a figure. */}
+          {assetsOn && deprMemo && (
+            <p style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+              <Tip text="Book depreciation from the Depreciation Runs posted on Fixed Assets whose dates overlap this month. A run that covers more than this month counts only its share of days. Shown for reference: it is NOT subtracted from Net Profit on this page." width={300}>
+                <strong style={{ color: 'var(--theme-text1)' }}>Depreciation (not subtracted)</strong>
+              </Tip>{': '}
+              {deprMemo.error
+                ? 'could not be read on this login or connection, so no figure is shown. Net Profit below never includes depreciation either way.'
+                : deprMemo.count === 0
+                  ? `no posted depreciation run covers ${period?.label || 'this month'}.`
+                  : <>{fmt(deprMemo.amount)}{deprMemo.prorated ? ' (pro-rated from runs longer than this month)' : ''} — Net Profit below is before this.</>}
+            </p>
+          )}
+
+          {verdictWithheld && (
+            <p role="alert" style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
+              △ Payroll cannot be read on this login, so labour from any finalized payroll run is <strong>not</strong> in this statement{totals.labor > 0 ? ' (only the Labor tab is)' : ''}. Net Profit is shown without a verdict — the account owner sees the payroll figure.
+            </p>
+          )}
+
           {missingLines.length > 0 && (
             <p style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
               △ Net Profit below does <strong>not</strong> include {missingLines.join(', ')} — {missingLines.length === 1 ? 'that line has' : 'those lines have'} nothing recorded for this period, so profit is overstated by whatever {missingLines.length === 1 ? 'it costs' : 'they cost'}.
@@ -797,14 +975,14 @@ export default function Overheads() {
           {netProfit != null && (
             <div style={{
               marginTop: 20, padding: '12px 16px', borderRadius: 'var(--radius-sm)',
-              background: netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 8%, transparent)' : 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
-              border: `1px solid ${netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : 'color-mix(in srgb, var(--theme-red) 25%, transparent)'}`,
+              background: verdictWithheld ? 'color-mix(in srgb, var(--theme-text2) 6%, transparent)' : netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 8%, transparent)' : 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+              border: `1px solid ${verdictWithheld ? 'var(--theme-border)' : netProfit >= 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : 'color-mix(in srgb, var(--theme-red) 25%, transparent)'}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center'
             }}>
               <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
-                {netProfit >= 0 ? '✓ Profitable this period' : '✗ Operating at a loss this period'}
+                {verdictWithheld ? 'Net profit before payroll — not judged on this login' : netProfit >= 0 ? '✓ Profitable this period' : '✗ Operating at a loss this period'}
               </span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+              <span style={{ fontSize: 18, fontWeight: 800, color: verdictWithheld ? 'var(--theme-text1)' : netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                 {netProfit >= 0 ? '+' : ''}{fmt(netProfit)}
               </span>
             </div>
@@ -831,8 +1009,8 @@ export default function Overheads() {
             const tx  = { key: 'tax',      label: 'Tax & Fees',color: 'var(--theme-purple)', textColor: 'var(--theme-purple-text)', amount: totals.tax_fees, pct: pct(totals.tax_fees, revenue) || 0 }
             const prPct = netProfit != null ? pct(netProfit, revenue) : null
             const pr  = { key: 'profit',   label: prPct != null && prPct < 0 ? 'Loss' : 'Net Profit',
-                          color:     prPct != null && prPct < 0 ? 'var(--theme-red)'      : 'var(--theme-green)',
-                          textColor: prPct != null && prPct < 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
+                          color:     verdictWithheld ? 'var(--theme-text2)' : prPct != null && prPct < 0 ? 'var(--theme-red)'      : 'var(--theme-green)',
+                          textColor: verdictWithheld ? 'var(--theme-text1)' : prPct != null && prPct < 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
                           amount: netProfit, pct: prPct || 0 }
             const segments = [fc, lb, oh, tx, pr].filter(s => s.amount != null && s.pct > 0.2)
             return (
@@ -1001,7 +1179,7 @@ export default function Overheads() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
 
           {/* Break-even */}
-          <div className="card" style={{
+          <div className="card" style={verdictWithheld ? undefined : {
             background: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 4%, transparent)' : 'color-mix(in srgb, var(--theme-red) 4%, transparent)',
             borderColor: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'color-mix(in srgb, var(--theme-red) 20%, transparent)'
           }}>
@@ -1019,18 +1197,20 @@ export default function Overheads() {
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Revenue</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{fmt(revenue)}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: verdictWithheld ? 'var(--theme-text1)' : isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{fmt(revenue)}</div>
               </div>
               <div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Actual Dishes</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{Math.round(dishes).toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: verdictWithheld ? 'var(--theme-text1)' : isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{Math.round(dishes).toLocaleString('en-IN')}</div>
               </div>
             </div>
             <div style={{ padding: '10px 14px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700,
-              background: isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'color-mix(in srgb, var(--theme-red) 10%, transparent)',
-              color: isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
+              background: verdictWithheld ? 'color-mix(in srgb, var(--theme-text2) 8%, transparent)' : isAboveBreakEven ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)' : 'color-mix(in srgb, var(--theme-red) 10%, transparent)',
+              color: verdictWithheld ? 'var(--theme-text1)' : isAboveBreakEven ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
             }}>
-              {isAboveBreakEven && breakEvenRev
+              {verdictWithheld
+                ? 'Not judged on this login — payroll cannot be read here, so the real fixed costs may be higher'
+                : isAboveBreakEven && breakEvenRev
                 ? `✓ Above break-even by ${fmt(revenue - breakEvenRev)}`
                 : breakEvenRev
                   ? `✗ Below break-even by ${fmt(breakEvenRev - revenue)}`
@@ -1093,7 +1273,7 @@ export default function Overheads() {
         </p>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '10px 0 0', lineHeight: 1.7 }}>
           📐 <strong style={{ color: 'var(--theme-accent-ink)' }}>What the figures on this page mean:</strong>{' '}
-          <strong style={{ color: 'var(--theme-text1)' }}>Food Cost</strong> is purchase-based — net purchases (purchases less vendor returns) for the period, not COGS. It ignores opening and closing stock, so a month where you built stock reads worse than it was and a month where you ran it down reads better; Monthly Summary has the COGS-based figure.{' '}
+          <strong style={{ color: 'var(--theme-text1)' }}>Food Cost</strong> is purchase-based — net purchases (purchases less bill discounts and vendor returns) for the period, not COGS. It ignores opening and closing stock, so a month where you built stock reads worse than it was and a month where you ran it down reads better; Monthly Summary has the COGS-based figure.{' '}
           <strong style={{ color: 'var(--theme-text1)' }}>Dishes</strong> is portions sold, not guests — Crest counts guests as <em>covers</em>, from POS bills only, which this page does not read.{' '}
           <strong style={{ color: 'var(--theme-text1)' }}>Labor</strong> is your finalized payroll run when one exists for the period, otherwise whatever is on the Labor tab — never both added together.
         </p>

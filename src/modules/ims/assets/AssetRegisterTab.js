@@ -12,6 +12,8 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import AssetFormModal from './AssetFormModal'
 import AssetCategoryModal from './AssetCategoryModal'
 import AssetCard from './AssetCard'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { latestPostedByAsset } from './depreciationCompute'
 
 const fmt = nprInt
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -45,8 +47,12 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   // batch-save baseline like Stock.js's "Save All").
   async function loadNbv() {
     if (assets.length === 0) { setNbvByAssetId({}); return }
-    const { data, error } = await scopedFrom('assets_depreciation_schedule', 'asset_id, period_end, closing_nbv')
-      .eq('is_posted', true).order('period_end', { ascending: true })
+    // Paged (one row per asset per run crosses the 1000-row cap inside a year of monthly runs, and
+    // a truncated read shows the assets past the cut at full cost), and resolved through
+    // latestPostedByAsset so an adjustment run beats the run it reverses on a shared period_end
+    // instead of whichever row PostgREST returned last (S756).
+    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_end, created_at, closing_nbv')
+      .eq('is_posted', true).order('period_end', { ascending: true }).order('created_at', { ascending: true }).order('id'))
     if (error) {
       const a = asActionError(error)
       setNbvError({ text: 'Could not load the posted depreciation, so the Net Book Value column is not real — it shows the last figures this browser saw, or cost. Reload before relying on it. ' + a.text, detail: a.detail })
@@ -54,7 +60,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
     }
     setNbvError(null)
     const map = {}
-    ;(data || []).forEach(row => { map[row.asset_id] = row.closing_nbv }) // last write wins (ascending order)
+    Object.entries(latestPostedByAsset(data)).forEach(([assetId, row]) => { map[assetId] = row.closing_nbv })
     setNbvByAssetId(map)
     writePageCache('fixed-assets', 'nbv', clientId, map)
   }

@@ -2,11 +2,11 @@
 // plausible-looking number rather than an error — the danger with any forecast.
 import {
   buildDailyHistory, buildManualDailyHistory, periodsInLookback, weightedMean, forecastByWeekday,
-  platesOf, splitDishList, totalQtyByRecipe, aggregateIngredientDemand,
+  platesOf, splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList,
   SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD,
 } from './demandForecastMath'
 import { computeOrderAmounts } from './posBillingMath'
-import { bsToAd } from './bsCalendar'
+import { bsToAd, adToBs } from './bsCalendar'
 
 // Tuesday 8 September 2026, 08:11 local — the recompute in the screenshot that started this.
 const NOW = new Date(2026, 8, 8, 8, 11)
@@ -152,6 +152,17 @@ describe('forecastByWeekday', () => {
     expect(flagged.holiday.name).toBe('Teej')
   })
 
+  it('a past holiday is not a sample — the next ordinary same weekday takes its place (S756, D21)', () => {
+    const history = [sample(wed(0), 90), sample(wed(1), 4), sample(wed(2), 4)]
+    const tika = adToBs(wed(0))
+    const holidays = { [`${tika.year}:${tika.month}:${tika.day}`]: { name: 'Dashain Tika', demand_multiplier: null } }
+    const withHoliday = forecastByWeekday(history, 7, holidays, NOW).find(f => f.weekday === 3)
+    expect(withHoliday.sampleCount).toBe(2)
+    expect(withHoliday.forecastQtyByRecipe.r1).toBe(4) // not pulled toward the festival's 90
+    const without = forecastByWeekday(history, 7, {}, NOW).find(f => f.weekday === 3)
+    expect(without.sampleCount).toBe(3)
+  })
+
   it('starts tomorrow and produces exactly the horizon, with a weekday of no history left empty rather than zero', () => {
     const out = forecastByWeekday([sample(wed(0), 4)], 30, {}, NOW)
     expect(out).toHaveLength(30)
@@ -189,5 +200,25 @@ describe('presentation', () => {
       unknown: [{ item_id: 'x', qty: 99 }],
     })
     expect(byItem).toEqual({ avocado: 1.5, bread: 4 })
+  })
+})
+
+describe('ingredientBuyList (S756, D21)', () => {
+  it('to buy is forecast use less what is in store, never below zero', () => {
+    const rows = ingredientBuyList({ rice: 5000, oil: 200, salt: 10 }, { rice: 1200, oil: 900 })
+    expect(rows).toEqual([
+      { id: 'rice', use: 5000, inStore: 1200, toBuy: 3800 },
+      { id: 'oil', use: 200, inStore: 900, toBuy: 0 },
+      { id: 'salt', use: 10, inStore: 0, toBuy: 10 },
+    ])
+  })
+
+  it('an unreadable shelf is unknown, not empty — nothing is told to buy everything', () => {
+    expect(ingredientBuyList({ rice: 5000 }, null)).toEqual([{ id: 'rice', use: 5000, inStore: null, toBuy: null }])
+  })
+
+  it('negative theoretical stock counts as none in store, and float residue is not a purchase', () => {
+    expect(ingredientBuyList({ a: 3 }, { a: -2 })[0].toBuy).toBe(3)
+    expect(ingredientBuyList({ a: 0.1 + 0.2 }, { a: 0.3 })[0].toBuy).toBe(0)
   })
 })

@@ -14,6 +14,8 @@ import { useSettings } from '../../../context/SettingsContext'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 
 // Nepal fiscal year starts Shrawan (month 4)
 // bs_month >= 4 → fiscal year = bs_year; else fiscal year = bs_year - 1
@@ -27,6 +29,7 @@ export default function AnnualSummary() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const yearReq = useLatestRequest()
+  const biz = useBizInfo()
 
   const [allPeriods, setAllPeriods]     = useState([])
   const [fiscalMode, setFiscalMode]     = useState(false)
@@ -38,7 +41,10 @@ export default function AnnualSummary() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
   useEffect(() => { if (allPeriods.length) rebuildYearOptions() }, [allPeriods, fiscalMode]) // eslint-disable-line
-  useEffect(() => { if (selectedYear !== null && allPeriods.length) buildReport() }, [selectedYear, allPeriods]) // eslint-disable-line
+  // `fiscalMode` is a dependency too (S756): toggling Calendar ↔ Fiscal usually leaves selectedYear
+  // at the same NUMBER (2082 BS → FY 2082/83), so without it no rebuild ran and the calendar
+  // year's figures stayed on screen under the fiscal year's label.
+  useEffect(() => { if (selectedYear !== null && allPeriods.length) buildReport() }, [selectedYear, allPeriods, fiscalMode]) // eslint-disable-line
 
   async function init() {
     setLoading(true)
@@ -69,7 +75,10 @@ export default function AnnualSummary() {
 
   async function buildReport() {
     if (selectedYear === null) return
-    const key = yearReq.begin(selectedYear)   // claim the page before any await (S601)
+    // The key carries the MODE (S756). `begin(selectedYear)` made Calendar 2082 and FY 2082 the same
+    // key, so a calendar-year load still in flight when the reader switched to fiscal passed
+    // isCurrent and could land its figures under the FY label.
+    const key = yearReq.begin(`${fiscalMode ? 'fy' : 'cal'}:${selectedYear}`)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
 
@@ -105,8 +114,10 @@ export default function AnnualSummary() {
       // and every trend arrow off it) sat systematically below MonthlySummary's figure for the
       // exact same month, with nothing on either page saying so. See src/shared/imsFormulas.js.
       fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
-      // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
-      fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount').in('period_id', periodIds).neq('source', 'pos_comp').order('id')),
+      // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for. Filtered in
+      // JS below, not with .neq (S756): `source` is nullable and `NULL <> 'pos_comp'` is NULL, so
+      // the server-side form dropped every legacy row — Revenue short, FC% high, for twelve months.
+      fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source').in('period_id', periodIds).order('id')),
       scopedFrom('recipes', 'id, selling_price'),
     ])
     // A failed read must not render as a quiet year of NPR 0 (S612 silent-zero rule).
@@ -145,7 +156,7 @@ export default function AnnualSummary() {
     const retBy    = byPeriod(returns)
     const wasteBy  = byPeriod(wastages)
     const staffBy  = byPeriod(staffMeals)
-    const salesBy  = byPeriod(sales)
+    const salesBy  = byPeriod((sales || []).filter(r => r.source !== 'pos_comp'))
     const at = (m, pid) => m.get(pid) || []
 
     const rows = yearPeriods.map(period => {
@@ -204,31 +215,42 @@ export default function AnnualSummary() {
   async function exportExcel() {
     if (!report) return
     const XLSX = await import('xlsx')
+    // NUMBERS, not `.toFixed(0)` strings (S756): a string cell does not sum, sort or format in Excel,
+    // on the one sheet in IMS whose whole purpose is a year's arithmetic.
+    const n0 = v => Math.round(v || 0)
     const xlRows = report.rows.map(r => ({
-      'Month':           r.label,
-      'Revenue (NPR)':   r.revenue.toFixed(0),
-      'Gross Purchases': r.grossPurch.toFixed(0),
-      'Bill Discounts':  r.discVal.toFixed(0),
-      'Returns':         r.retVal.toFixed(0),
-      'Net Purchases':   r.netPurch.toFixed(0),
-      'Wastage':         r.wasteVal.toFixed(0),
-      'COGS':            r.cogs.toFixed(0),
-      'FC%':             r.fcPct != null ? r.fcPct.toFixed(1) : '',
+      'Month':           `${r.label}${r.period.status === 'open' ? ' (open)' : ''}`,
+      'Revenue (NPR)':   n0(r.revenue),
+      'Gross Purchases': n0(r.grossPurch),
+      'Bill Discounts':  n0(r.discVal),
+      'Returns':         n0(r.retVal),
+      'Net Purchases':   n0(r.netPurch),
+      'Wastage':         n0(r.wasteVal),
+      'COGS':            n0(r.cogs),
+      'FC%':             r.fcPct != null ? Number(r.fcPct.toFixed(1)) : '',
     }))
     xlRows.push({
       'Month':           'ANNUAL TOTAL',
-      'Revenue (NPR)':   report.totRevenue.toFixed(0),
-      'Gross Purchases': report.totPurch.toFixed(0),
-      'Bill Discounts':  report.totDisc.toFixed(0),
-      'Returns':         report.totRet.toFixed(0),
-      'Net Purchases':   report.totNetPurch.toFixed(0),
-      'Wastage':         report.totWaste.toFixed(0),
-      'COGS':            report.totCogs.toFixed(0),
-      'FC%':             report.totFcPct != null ? report.totFcPct.toFixed(1) : '',
+      'Revenue (NPR)':   n0(report.totRevenue),
+      'Gross Purchases': n0(report.totPurch),
+      'Bill Discounts':  n0(report.totDisc),
+      'Returns':         n0(report.totRet),
+      'Net Purchases':   n0(report.totNetPurch),
+      'Wastage':         n0(report.totWaste),
+      'COGS':            n0(report.totCogs),
+      'FC%':             report.totFcPct != null ? Number(report.totFcPct.toFixed(1)) : '',
     })
     const yearLabel = fiscalMode ? `FY${selectedYear}-${selectedYear + 1}` : `${selectedYear}BS`
+    const first = report.rows[0]?.label
+    const last  = report.rows[report.rows.length - 1]?.label
+    // Through the shared letterhead with a required scope line (S756) — the sheet was a bare
+    // json_to_sheet that named neither the client nor which year, or which months, it covered.
+    const scopeLine = `${selectedLabel}: ${first}${last && last !== first ? ` → ${last}` : ''} (${report.rows.length} period${report.rows.length === 1 ? '' : 's'})`
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(xlRows), 'Annual Summary')
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Annual Summary', biz, scopeLine, rows: xlRows,
+      notes: [`COGS = ${COGS_FORMULA} · Net Purchases = Gross − bill discounts − returns · Annual FC% = Total COGS ÷ Total Revenue`],
+    }), 'Annual Summary')
     XLSX.writeFile(wb, `Annual-Summary-${yearLabel}.xlsx`)
   }
 
@@ -266,8 +288,11 @@ export default function AnnualSummary() {
           </div>
           {report && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
-              <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={exportExcel}>Export Excel</button>
+              {/* Gated on the load (S728/S756): `report` is the previous year's for the whole of a
+                  year change, while the print title, scope line and filename already name the new one. */}
+              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={loading || !!loadError} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
+              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={loading || !!loadError || !!biz.error} onClick={exportExcel}
+                title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
             </div>
           )}
         </div>

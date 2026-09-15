@@ -316,6 +316,17 @@ const rules = [
     staff: 'This bill has payments recorded against it, so it cannot be changed or deleted. Ask your manager.',
     operator: 'This bill has vendor payments recorded against it, so it cannot be changed or deleted. Remove the payments in Outstanding Payables first, then try again.',
   },
+  // S756 (D26). Raised by save_purchase_bill before it touches a row, so the bill really is as it was.
+  {
+    test: e => /purchase_bill_has_returns/i.test(e.message || ''),
+    staff: 'This bill has goods returned against it, so it cannot be edited. The bill is unchanged — ask your manager.',
+    operator: 'This bill has goods returned against it, so it cannot be edited — editing would detach the return and put its amount back on what you owe the supplier. The bill is unchanged. Remove the return on the Returns tab first, edit the bill, then record the return again.',
+  },
+  {
+    test: e => /purchase_entries_discount_nonnegative/i.test(e.message || ''),
+    staff: 'A bill discount cannot be below zero. Fix the discount and save again.',
+    operator: 'A bill discount cannot be below zero, so the database refused this bill. Fix the discount and save again.',
+  },
 
   // save_purchase_bill found fewer lines to replace than the form was opened on — someone else
   // edited or deleted the bill in the meantime. Nothing was written.

@@ -5,12 +5,16 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
 import { firstError } from '../../../shared/queryError'
-import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { nepalBs, nepalBsLong } from '../../../shared/nepalTime'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { BS_MONTHS, bsToAd } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, getBsToday } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
-import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
+import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
+import { buildStockRows } from './stockReportCalc'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
 import { errorText } from '../../../shared/errorText'
@@ -31,6 +35,48 @@ function fmtQty(q) {
 
 const dayOf = f => bsToAd(f.bs.year, f.bs.month, f.bs.day).getDay()
 const bsLabel = f => `${f.bs.day} ${BS_MONTHS[f.bs.month - 1]} ${f.bs.year}`
+const bsKey = bs => bs.year * 10000 + bs.month * 100 + bs.day
+
+// What stands behind "In store": the one on-hand calculation (buildStockRows, S696), for the open
+// period or else the latest — never a local copy of opening + purchases − usage (S756, D21).
+// Throws on any failed read; the caller turns that into its own notice rather than an empty shelf.
+// Returns `{ onHandById: null, period: null }` when the client has no period at all.
+async function loadOnHand(scopedFrom, items) {
+  const { data: periods, error: pErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
+    .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+  if (pErr) throw pErr
+  const period = (periods || []).find(p => p.status === 'open') || (periods || [])[0]
+  if (!period) return { onHandById: null, period: null }
+  const itemIds = items.map(i => i.id)
+  if (itemIds.length === 0) return { onHandById: {}, period }
+  // Per-item tables narrowed to the forecast's ingredients (chunked: the id list is a URL, and
+  // each is one row per item per period or more). Sales stay whole-period and paged, because
+  // usage of these items can come from any dish sold, not only the forecast ones.
+  const byItems = (table, cols, scoped) => fetchAllRowsChunked(itemIds, ids =>
+    (scoped ? scopedFrom(table, cols) : supabase.from(table).select(cols))
+      .eq('period_id', period.id).in('item_id', ids).order('id'))
+  const results = await Promise.all([
+    byItems('opening_stock', 'item_id, qty'),
+    byItems('closing_stock', 'item_id, physical_qty'),
+    byItems('purchase_entries', 'item_id, qty'),
+    byItems('vendor_returns', 'item_id, qty', true),
+    byItems('wastages', 'item_id, qty'),
+    byItems('staff_meals', 'item_id, qty'),
+    // bs_day + source feed the POS-supersedes-manual rule inside buildStockRows.
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', period.id).order('id')),
+  ])
+  const failed = firstError(results)
+  if (failed) throw failed
+  const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns }, { data: wastages }, { data: staffMeals }, { data: sales }] = results
+  const soldIds = [...new Set((sales || []).map(s => s.recipe_id).filter(Boolean))]
+  const breakdown = soldIds.length > 0 ? await explodeRecipeIngredients(supabase, soldIds) : {}
+  const rows = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown })
+  return {
+    onHandById: Object.fromEntries(rows.map(r => [r.item.id, r.onHand])),
+    period,
+    countedIds: new Set(rows.filter(r => r.stockSource === 'closing').map(r => r.item.id)),
+  }
+}
 
 // What stood behind a day's numbers — shown under the weekday and on every dish's hover, so a
 // forecast averaged over one week and one over eight no longer look identical (S694).
@@ -54,30 +100,31 @@ export default function DemandForecast() {
   const [recomputing, setRecomputing] = useState(false)
   const [msg, setMsg] = useState('')
   const [lastRun, setLastRun] = useState(null)
-  const [bizInfo, setBizInfo] = useState({ name: '', address: '' })
+  // The letterhead (S756): the hand-rolled clients + settings read dropped both errors, so a failed
+  // read printed and exported a nameless sheet. useBizInfo carries `error`, and Print/Export wait on it.
+  const biz = useBizInfo()
+  // The recipe-name read's own error slot (S756). It dropped `error`, and every dish then rendered
+  // as its raw UUID on screen, on the printed sheet and in the workbook.
+  const [namesError, setNamesError] = useState(null)
+  // How many of the stored forecast's days had already passed when it was loaded (S756). The
+  // forecast only runs when someone presses Recompute, so coming back eleven days later showed
+  // "Next 7 Days" listing last week and an ingredient list for a week that was over.
+  const [stale, setStale] = useState({ dropped: 0, total: 0 })
   // Ingredient demand for the horizon — loads after the day table, independently, so a slow
   // recipe walk never holds the forecast itself hostage, and its failure is its own message.
-  const [ingredients, setIngredients] = useState({ loading: false, error: null, rows: [], totalValue: 0, unpriced: 0 })
+  // `stockError`/`stockPeriod` are the in-store half (S756, D21), which fails on its own too: a
+  // shelf that could not be read leaves forecast use on screen and blanks only In store / To buy.
+  const [ingredients, setIngredients] = useState({ loading: false, error: null, rows: [], totalValue: null, unpriced: 0, stockError: null, stockPeriod: null })
 
   // Covers exist only where POS does: manual Sales Entries carry none. Keyed on the viewed
   // client's real subscription, not the session's `posEnabled`, which is true for every admin
   // (the S693 Roster fix, applied here for the same reason).
   const hasPos = !!clientModules?.pos
 
-  useEffect(() => {
-    if (!clientId) return
-    Promise.all([
-      supabase.from('clients').select('name').eq('id', clientId).single(),
-      supabase.from('settings').select('property_address').eq('client_id', clientId).maybeSingle(),
-    ]).then(([{ data: client }, { data: settings }]) => {
-      setBizInfo({ name: client?.name || '', address: settings?.property_address || '' })
-    })
-  }, [clientId])
-
   const loadIngredients = useCallback(async (list, reqKey) => {
     const totals = totalQtyByRecipe(list)
     const recipeIds = Object.keys(totals).filter(id => totals[id] > 0)
-    if (recipeIds.length === 0) { setIngredients({ loading: false, error: null, rows: [], totalValue: 0, unpriced: 0 }); return }
+    if (recipeIds.length === 0) { setIngredients({ loading: false, error: null, rows: [], totalValue: null, unpriced: 0, stockError: null, stockPeriod: null }); return }
     setIngredients(s => ({ ...s, loading: true, error: null }))
     try {
       // Same walk the Reorder Report uses for theoretical usage: leaf items only, sub-recipes
@@ -93,22 +140,40 @@ export default function DemandForecast() {
         items = data || []
       }
       if (!horizonReq.isCurrent(reqKey)) return
+
+      // In store (S756, D21). Its own try: a failed stock read must not take forecast use with it,
+      // and must not read as an empty shelf either — ingredientBuyList carries it as unknown.
+      let stock = { onHandById: null, period: null, countedIds: new Set() }
+      let stockError = null
+      try {
+        stock = await loadOnHand(scopedFrom, items)
+      } catch (err) {
+        stockError = err
+      }
+      if (!horizonReq.isCurrent(reqKey)) return
+
       const itemById = Object.fromEntries(items.map(i => [i.id, i]))
+      const known = stock.onHandById != null
       let unpriced = 0
-      const rows = itemIds.map(id => {
-        const item = itemById[id]
+      const rows = ingredientBuyList(byItem, stock.onHandById).map(b => {
+        const item = itemById[b.id]
         const rate = parseFloat(item?.per_uom_rate) || 0
         if (!rate) unpriced += 1
         return {
-          id, name: item?.name || 'Unknown item', uom: item?.uom || '', category: item?.categories?.name || 'Uncategorised',
+          id: b.id, name: item?.name || 'Unknown item', uom: item?.uom || '', category: item?.categories?.name || 'Uncategorised',
           inactive: item ? item.is_active === false : false,
-          qty: byItem[id], rate, value: byItem[id] * rate,
+          qty: b.use, inStore: b.inStore, toBuy: b.toBuy, counted: stock.countedIds?.has(b.id) || false,
+          // Value of what there is TO BUY — the money the list asks for. Unknown when the shelf is.
+          rate, value: known && rate ? b.toBuy * rate : null,
         }
-      }).sort((a, b) => b.value - a.value || b.qty - a.qty || a.name.localeCompare(b.name))
-      setIngredients({ loading: false, error: null, rows, totalValue: rows.reduce((s, r) => s + r.value, 0), unpriced })
+      }).sort((a, b) => (b.value ?? 0) - (a.value ?? 0) || (b.toBuy ?? b.qty) - (a.toBuy ?? a.qty) || a.name.localeCompare(b.name))
+      setIngredients({
+        loading: false, error: null, rows, unpriced, stockError, stockPeriod: stock.period,
+        totalValue: known ? rows.reduce((s, r) => s + (r.value || 0), 0) : null,
+      })
     } catch (err) {
       if (!horizonReq.isCurrent(reqKey)) return
-      setIngredients({ loading: false, error: err, rows: [], totalValue: 0, unpriced: 0 })
+      setIngredients({ loading: false, error: err, rows: [], totalValue: null, unpriced: 0, stockError: null, stockPeriod: null })
     }
   }, [scopedFrom, horizonReq])
 
@@ -151,14 +216,21 @@ export default function DemandForecast() {
         day.sampleCount = r.sample_count ?? null; day.posSampleCount = r.pos_sample_count ?? null
       }
     }
-    const list = Object.values(byDay).sort((a, b) => a.bs.year - b.bs.year || a.bs.month - b.bs.month || a.bs.day - b.bs.day)
+    const all = Object.values(byDay).sort((a, b) => a.bs.year - b.bs.year || a.bs.month - b.bs.month || a.bs.day - b.bs.day)
+    // Only today onward, today being NEPAL's date (S756). A forecast day that has passed is not a
+    // forecast, and its dishes must not reach "Ingredients to buy" — those are for days to come.
+    const today = nepalBs(new Date()) || getBsToday()
+    const list = all.filter(d => bsKey(d.bs) >= bsKey(today))
+    setStale({ dropped: all.length - list.length, total: all.length })
     setForecast(list)
 
+    setNamesError(null)
     const recipeIds = [...new Set(list.flatMap(d => Object.keys(d.forecastQtyByRecipe)))]
     if (recipeIds.length > 0) {
-      const { data: recs } = await fetchAllRowsChunked(recipeIds, ids => scopedFrom('recipes', 'id, name').in('id', ids).order('id'))
+      const { data: recs, error: recErr } = await fetchAllRowsChunked(recipeIds, ids => scopedFrom('recipes', 'id, name').in('id', ids).order('id'))
       if (!horizonReq.isCurrent(reqKey)) return
-      setRecipeNames(Object.fromEntries((recs || []).map(r => [r.id, r.name])))
+      if (recErr) { setNamesError(recErr); setRecipeNames({}) }
+      else setRecipeNames(Object.fromEntries((recs || []).map(r => [r.id, r.name])))
     }
     setLoading(false)
     loadIngredients(list, reqKey)
@@ -169,9 +241,26 @@ export default function DemandForecast() {
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const horizonLabel = horizon === 7 ? 'Next 7 Days' : 'Next 30 Days'
+  // A dish id with no name is never shown as a UUID (S756): unavailable when the read failed,
+  // unnamed when it succeeded without it.
+  const dishName = id => recipeNames[id] || (namesError ? 'Dish name unavailable' : 'Unnamed dish')
+  const lastRunLabel = lastRun ? (nepalBsLong(lastRun.run_at) || new Date(lastRun.run_at).toLocaleString()) : null
+  const stockPeriodLabel = ingredients.stockPeriod
+    ? `${BS_MONTHS[ingredients.stockPeriod.bs_month - 1]} ${ingredients.stockPeriod.bs_year}${ingredients.stockPeriod.status === 'open' ? '' : ' (closed)'}`
+    : null
+  const inStoreKnown = !ingredients.stockError && !!ingredients.stockPeriod
+  // What a printed or exported copy covers, in one line (the S594 scope rule).
+  const scopeLine = forecast.length > 0
+    ? `${horizonLabel} · ${bsLabel(forecast[0])} – ${bsLabel(forecast[forecast.length - 1])} (${forecast.length} day${forecast.length === 1 ? '' : 's'})`
+      + (lastRunLabel ? ` · forecast run ${lastRunLabel}` : '')
+      + (inStoreKnown ? ` · in store as at ${stockPeriodLabel}` : ' · in store not available')
+    : horizonLabel
+  // Print and Export carry the figures, the dish names and the letterhead, so they wait on all
+  // three (the S728 rule: a control that emits a file is where a stale or partial render sticks).
+  const emitBlocked = loading || !!loadError || forecast.length === 0 || ingredients.loading || !!biz.error || !!namesError
 
   function handlePrint() {
-    printWithTitle(`${bizInfo.name ? bizInfo.name + ' - ' : ''}Demand Forecast - ${horizonLabel}`)
+    printWithTitle(`${biz.name ? biz.name + ' - ' : ''}Demand Forecast - ${horizonLabel}`)
   }
 
   async function handleRecompute() {
@@ -189,23 +278,34 @@ export default function DemandForecast() {
   async function handleExport() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
+    // Letterhead + scope line on both sheets (S756) — a bare json_to_sheet named no client, no date
+    // range and no run, so a mailed copy could not be matched to anything a week later.
     const ingRows = ingredients.rows.map(r => ({
       'Item': r.name, 'Category': r.category, 'Unit': r.uom,
       [`Forecast use (${horizonLabel.toLowerCase()})`]: parseFloat(r.qty.toFixed(3)),
+      'In store': r.inStore == null ? '' : parseFloat(r.inStore.toFixed(3)),
+      'To buy': r.toBuy == null ? '' : parseFloat(r.toBuy.toFixed(3)),
       'Unit Rate (NPR)': r.rate || '',
-      'Value (NPR)': r.rate ? Math.round(r.value) : '',
+      'To-buy value (NPR)': r.value == null ? '' : Math.round(r.value),
       'Status': r.inactive ? 'Inactive item' : '',
     }))
-    const wsIng = XLSX.utils.json_to_sheet(ingRows)
-    wsIng['!cols'] = [26, 16, 8, 18, 14, 12, 14].map(w => ({ wch: w }))
+    const wsIng = sheetWithLetterhead(XLSX, {
+      title: 'Demand Forecast — Ingredients to buy', biz, scopeLine, rows: ingRows,
+      notes: [
+        inStoreKnown
+          ? `In store is the Stock Report on-hand figure for ${stockPeriodLabel}: the closing count where entered, otherwise opening + net purchases − usage − wastage − staff meals. To buy = forecast use − in store, never below zero.`
+          : 'In store could not be worked out, so In store, To buy and the value are blank — this sheet is forecast use only.',
+      ],
+    })
+    wsIng['!cols'] = [26, 16, 8, 18, 12, 12, 14, 16, 14].map(w => ({ wch: w }))
     XLSX.utils.book_append_sheet(wb, wsIng, 'Ingredients')
     const dishRows = []
     for (const f of forecast) {
       const { plates, occasional } = splitDishList(Object.entries(f.forecastQtyByRecipe))
-      for (const p of plates) dishRows.push({ 'Date (BS)': bsLabel(f), 'Day': WEEKDAYS[dayOf(f)], 'Dish': recipeNames[p.recipeId] || p.recipeId, 'Plates': p.plates, 'Average / day': parseFloat(p.qty.toFixed(2)), 'Occasional': '' })
-      for (const o of occasional) dishRows.push({ 'Date (BS)': bsLabel(f), 'Day': WEEKDAYS[dayOf(f)], 'Dish': recipeNames[o.recipeId] || o.recipeId, 'Plates': '', 'Average / day': parseFloat(o.qty.toFixed(2)), 'Occasional': 'yes' })
+      for (const p of plates) dishRows.push({ 'Date (BS)': bsLabel(f), 'Day': WEEKDAYS[dayOf(f)], 'Dish': dishName(p.recipeId), 'Plates': p.plates, 'Average / day': parseFloat(p.qty.toFixed(2)), 'Occasional': '' })
+      for (const o of occasional) dishRows.push({ 'Date (BS)': bsLabel(f), 'Day': WEEKDAYS[dayOf(f)], 'Dish': dishName(o.recipeId), 'Plates': '', 'Average / day': parseFloat(o.qty.toFixed(2)), 'Occasional': 'yes' })
     }
-    const wsDish = XLSX.utils.json_to_sheet(dishRows)
+    const wsDish = sheetWithLetterhead(XLSX, { title: 'Demand Forecast — Dishes by day', biz, scopeLine, rows: dishRows })
     wsDish['!cols'] = [16, 6, 30, 8, 14, 10].map(w => ({ wch: w }))
     XLSX.utils.book_append_sheet(wb, wsDish, 'Dishes by Day')
     XLSX.writeFile(wb, `Demand_Forecast_${horizon}d.xlsx`)
@@ -226,9 +326,10 @@ export default function DemandForecast() {
 
       {/* Print-only letterhead — replaces the app-navigation header/subtitle on the printed sheet */}
       <div className="print-only" style={{ marginBottom: 16 }}>
-        <div style={{ fontWeight: 700, fontSize: 16 }}>{bizInfo.name}</div>
-        {bizInfo.address && <div style={{ fontSize: 12 }}>{bizInfo.address}</div>}
+        <div style={{ fontWeight: 700, fontSize: 16 }}>{biz.name}</div>
+        {biz.address && <div style={{ fontSize: 12 }}>{biz.address}</div>}
         <div style={{ fontWeight: 700, fontSize: 14, marginTop: 8 }}>Demand Forecast — {horizonLabel}</div>
+        <div style={{ fontSize: 11 }}>{scopeLine}</div>
         <div style={{ fontSize: 11 }}>Generated: {new Date().toLocaleString()}</div>
       </div>
 
@@ -243,8 +344,11 @@ export default function DemandForecast() {
 
       <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', marginBottom: 12 }}>
         <div className="tab-bar">
-          <button className={`tab-btn${horizon === 7 ? ' tab-btn--active' : ''}`} onClick={() => setHorizon(7)}>Next 7 Days</button>
-          <button className={`tab-btn${horizon === 30 ? ' tab-btn--active' : ''}`} onClick={() => setHorizon(30)}>Next 30 Days</button>
+          {/* Off while recomputing (S756): handleRecompute runs the horizon it started with and
+              then reloads through the NEW horizon's loader, so a switch mid-run showed the other
+              horizon's stored rows under a "Forecast rebuilt" message about this one. */}
+          <button className={`tab-btn${horizon === 7 ? ' tab-btn--active' : ''}`} disabled={recomputing} onClick={() => setHorizon(7)}>Next 7 Days</button>
+          <button className={`tab-btn${horizon === 30 ? ' tab-btn--active' : ''}`} disabled={recomputing} onClick={() => setHorizon(30)}>Next 30 Days</button>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Tip text="Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically.">
@@ -252,8 +356,8 @@ export default function DemandForecast() {
               {recomputing ? 'Recomputing…' : '↻ Recompute Forecast'}
             </button>
           </Tip>
-          <button className="btn btn-ghost" onClick={handleExport} disabled={forecast.length === 0 || ingredients.loading}>📊 Export Excel</button>
-          <button className="btn btn-ghost" onClick={handlePrint} disabled={forecast.length === 0}>🖨 Print</button>
+          <button className="btn btn-ghost" onClick={handleExport} disabled={emitBlocked || !!ingredients.error}>📊 Export Excel</button>
+          <button className="btn btn-ghost" onClick={handlePrint} disabled={emitBlocked}>🖨 Print</button>
         </div>
         {lastRun && (
           <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 'auto' }}>
@@ -272,13 +376,37 @@ export default function DemandForecast() {
 
       {msg && <p className="no-print" style={{ color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', fontSize: 13, marginBottom: 12 }}>{msg.replace(/^(error|ok):/, '')}</p>}
 
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Print and Excel are switched off rather than producing a sheet
+          with a blank letterhead. The forecast below is unaffected. Reload the page to try again.
+        </p>
+      )}
+      {!loading && !loadError && namesError && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          The dish names could not be loaded, so dishes below read "Dish name unavailable" and Print and Excel are
+          switched off. The quantities are unaffected. Reload the page to try again.
+        </p>
+      )}
+      {/* The stored forecast is older than the days it covers (S756). Nothing re-runs it on its own,
+          so say how much of it has gone by and what that does to the ingredient list. */}
+      {!loading && !loadError && stale.dropped > 0 && forecast.length > 0 && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          △ This forecast was last run{lastRunLabel ? ` on ${lastRunLabel}` : ''}, and {stale.dropped} of its {stale.total} days
+          have already passed. Only the {forecast.length} day{forecast.length === 1 ? '' : 's'} from today {forecast.length === 1 ? 'is' : 'are'} shown,
+          and Ingredients to buy covers only {forecast.length === 1 ? 'that day' : 'those'}. Click Recompute Forecast for a full {horizonLabel.toLowerCase()}.
+        </p>
+      )}
+
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
       ) : loadError ? (
         <ReportLoadError error={loadError} />
       ) : forecast.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-          No forecast yet for this horizon — click "Recompute Forecast" to generate one.
+          {stale.dropped > 0
+            ? `Every day in the last forecast for this horizon has already passed${lastRunLabel ? ` — it was run on ${lastRunLabel}` : ''}. Click "Recompute Forecast" to forecast the days ahead.`
+            : 'No forecast yet for this horizon — click "Recompute Forecast" to generate one.'}
         </div>
       ) : (
         <>
@@ -300,7 +428,7 @@ export default function DemandForecast() {
                 const visiblePlates = showingAll ? plates : plates.slice(0, PREVIEW_COUNT)
                 const hiddenPlates = plates.length - visiblePlates.length
                 const evidence = evidenceText(f)
-                const nameOf = id => recipeNames[id] || id
+                const nameOf = dishName
                 const avgTip = qty => `${qty.toFixed(1)} a day on average${evidence ? ', ' + evidence : ''}, recent weeks weighted more`
                 const colSpan = hasPos ? 5 : 4
                 return (
@@ -392,11 +520,19 @@ export default function DemandForecast() {
         <div style={{ marginTop: 32 }}>
           <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>
             Ingredients to buy — {horizonLabel.toLowerCase()}{' '}
-            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the whole horizon. This is what the forecast will consume — compare it against your last stock count or the Reorder Report before ordering; it does not know what is already on the shelf." width={340}>ⓘ</Tip>
+            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the days shown. In store is the same on-hand figure Stock Report and Reorder Report show; To buy is what the forecast will use beyond that." width={340}>ⓘ</Tip>
           </h2>
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
-            Demand only, in each item's base unit, valued at the Item Master rate. Occasional dishes are included at their average, so a rarely-sold dish still puts a little of its ingredients on the list.
+            In each item's base unit. To buy = forecast use − in store, never below zero, valued at the Item Master rate. Occasional dishes are included at their average, so a rarely-sold dish still puts a little of its ingredients on the list.
+            {!ingredients.loading && !ingredients.error && inStoreKnown && ` In store is as at ${stockPeriodLabel}.`}
           </p>
+          {!ingredients.loading && !ingredients.error && ingredients.rows.length > 0 && !inStoreKnown && (
+            <p role="alert" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+              {ingredients.stockError
+                ? 'What is in store could not be read, so In store and To buy are blank rather than assuming the shelf is empty. Forecast use below is unaffected. Reload the page to try again.'
+                : 'There is no stock period yet, so what is in store cannot be worked out — In store and To buy are blank. Forecast use below is unaffected.'}
+            </p>
+          )}
           {ingredients.loading ? (
             <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Working out ingredients…</p></div>
           ) : ingredients.error ? (
@@ -411,9 +547,11 @@ export default function DemandForecast() {
                 <thead>
                   <tr>
                     <th>Item</th><th>Category</th>
-                    <th style={{ textAlign: 'right' }}><Tip text={`Total the forecast will use over the ${horizonLabel.toLowerCase()}, in the item's base unit.`}>Forecast use</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text={`Total the forecast will use over the ${forecast.length} day${forecast.length === 1 ? '' : 's'} shown, in the item's base unit.`}>Forecast use</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text={`What is on the shelf now — the same figure as Stock Report's On-hand${stockPeriodLabel ? ` for ${stockPeriodLabel}` : ''}: the closing count where one is entered, otherwise opening + net purchases − usage − wastage − staff meals. A dash means it could not be worked out.`} width={300}>In store</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Forecast use − In store, never below zero. Zero means what is on the shelf already covers the forecast." width={240}>To buy</Tip></th>
                     <th>Unit</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Forecast use × the item's current per-unit rate from Item Master. A dash means the item has no rate yet." width={240}>≈ Value</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="To buy × the item's current per-unit rate from Item Master. A dash means the item has no rate yet, or what is in store is unknown." width={260}>≈ Value</Tip></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -424,19 +562,21 @@ export default function DemandForecast() {
                         {r.inactive && <Tip text="This item is inactive in Item Master but a forecast dish still uses it — reactivate it or update the recipe."><span className="badge badge-amber" style={{ marginLeft: 6 }}>inactive</span></Tip>}
                       </td>
                       <td style={{ color: 'var(--theme-text2)' }}>{r.category}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtQty(r.qty)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtQty(r.inStore)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtQty(r.toBuy)}</td>
                       <td style={{ color: 'var(--theme-text2)' }}>{r.uom}</td>
-                      <td style={{ textAlign: 'right' }}>{r.rate ? npr(r.value) : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{r.value != null ? npr(r.value) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={4} style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
+                    <td colSpan={6} style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {ingredients.rows.length} item{ingredients.rows.length === 1 ? '' : 's'}
                       {ingredients.unpriced > 0 && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · {ingredients.unpriced} without a rate, not in the total</span>}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{npr(ingredients.totalValue)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{ingredients.totalValue != null ? npr(ingredients.totalValue) : '—'}</td>
                   </tr>
                 </tfoot>
               </table>

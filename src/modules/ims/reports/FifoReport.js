@@ -13,13 +13,13 @@ import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
-import { allocateFifo, daysUntilExpiry } from './stockAgeingCalc'
+import { allocateFifo, daysUntilExpiry, asOfForWindow, splitReturns } from './stockAgeingCalc'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import {
-  BS_MONTHS, bsToAd, getBsToday, getBsFiscalYear, daysInBsMonth, formatBsDay,
+  BS_MONTHS, bsToAd, getBsFiscalYear, formatBsDay,
 } from '../../../utils/bsCalendar'
 
 const bsLabel = bs => (bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : '—')
@@ -34,22 +34,10 @@ const bsLabel = bs => (bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : 
 // no as-of date is not a document anyone can act on, and this one stated it nowhere — not in the
 // subtitle, not in a print header, not in the workbook.
 //
-// The current BS month measures to today; any other period to the last day of that period, which
-// is the only date that makes the answer mean anything ("what was expiring when that month
-// ended"). Twin of `asOfForFy` in StockAgeing.js, which does the same for a whole fiscal year.
-function asOfForPeriod(period) {
-  const today = getBsToday()
-  if (!period) return { date: new Date(), bs: today, isToday: true }
-  if (period.bs_year === today.year && period.bs_month === today.month) {
-    return { date: new Date(), bs: today, isToday: true }
-  }
-  const day = daysInBsMonth(period.bs_year, period.bs_month)
-  return {
-    date: bsToAd(period.bs_year, period.bs_month, day),
-    bs: { year: period.bs_year, month: period.bs_month, day },
-    isToday: false,
-  }
-}
+// S756 moved the rule into `asOfForWindow` (stockAgeingCalc.js, tested), shared with Stock Ageing:
+// the NEWEST period measures to today in Nepal, not only the current BS month. The default view is
+// the latest period, which early in a month is last month — and measuring that to its own month
+// end reported a batch that expired three days ago as "Expiring in 4d" under Expired 0 ✓.
 
 export default function FifoReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -171,15 +159,12 @@ export default function FifoReport() {
       { data: wastages }, { data: staffMeals }, { data: opening },
     ] = results
 
-    // Returns come off their own purchase line where one is named; an orphan return still left the
-    // building and is treated as consumption of that item (the same rule Stock Ageing applies).
-    const returnedByEntry = {}
-    const returnedByItem = {}
-    for (const r of returns || []) {
-      const q = parseFloat(r.qty) || 0
-      if (r.purchase_entry_id) returnedByEntry[r.purchase_entry_id] = (returnedByEntry[r.purchase_entry_id] || 0) + q
-      else if (r.item_id) returnedByItem[r.item_id] = (returnedByItem[r.item_id] || 0) + q
-    }
+    // Returns come off their own purchase line where that line is IN the window; an orphan return,
+    // or one against a bill from before the window (S756 — it used to match no batch and vanish),
+    // still left the building and is treated as consumption of that item (splitReturns, shared
+    // with Stock Ageing).
+    const { byEntry: returnedByEntry, byItem: returnedByItem } =
+      splitReturns(returns, new Set((purchases || []).map(p => p.id)))
 
     const periodById = Object.fromEntries(inWindow.map(p => [p.id, p]))
     const adDateOf = (pid, bsDay) => {
@@ -252,7 +237,8 @@ export default function FifoReport() {
 
     // ONE shared FIFO allocation, not a second copy — Stock Ageing solves the same problem the
     // same way and `allocateFifo` is where that arithmetic lives (see stockAgeingCalc.js).
-    const ref = asOfForPeriod(selected)
+    // `allPeriods` is newest-first (init's order), so [0] is the newest the client has.
+    const ref = asOfForWindow(selected, { isNewest: allPeriods?.[0]?.id === selected.id })
     const allocated = allocateFifo(batches, consumed)
 
     const reportRows = allocated
@@ -375,8 +361,8 @@ export default function FifoReport() {
             <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
             <span style={{ fontSize: 12, color: 'var(--theme-text2)', marginLeft: 8 }}>
               <Tip width={320} text={asOf?.isToday
-                ? 'Days Left is counted from today, because you are looking at the current month.'
-                : 'Days Left is counted to the END of the selected period, not to today — otherwise a month you closed a while ago would report all of its stock as long expired.'}>
+                ? 'Days Left is counted from today, because you are looking at your newest period — nothing recorded after it, so what it left on the shelf is what is on the shelf now.'
+                : 'Days Left is counted to the END of the selected period, not to today — a later period exists, and measuring this one to today would report all of its stock as long expired.'}>
                 Days left as at {asOfLabel}
               </Tip>
             </span>
@@ -388,10 +374,18 @@ export default function FifoReport() {
           </select>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
             onClick={() => printWithTitle(`FIFO / Expiry Report — ${scopeLine}`)}>🖨 Print</button>
+          {/* biz.error (S756): a failed client-name read shipped a blank CompanyName line. */}
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-            disabled={loading || !!loadError || filtered.length === 0}>↓ Export Excel</button>
+            disabled={loading || !!loadError || filtered.length === 0 || !!biz.error}>↓ Export Excel</button>
         </div>
       </div>
+
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
+          with a blank company name. The report below is unaffected. Reload the page to try again.
+        </p>
+      )}
 
       {/* A failed read renders as a failure — never as a quiet expiry report (S612). */}
       {loadError ? <ReportLoadError error={loadError} /> : <>

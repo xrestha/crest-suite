@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -11,7 +11,7 @@ import PeriodScope from '../../../components/PeriodScope'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import SalesImportButton from './SalesImportButton'
 import { printWithTitle } from '../../../utils/printTitle'
-import { persistSalesDay, findSupersededRows, depleteManualSales, SAVE_TIMEOUT_MS } from './persistSalesDay'
+import { persistSalesDay, findSupersededRows, depleteManualSales, repostSupersededMovements, SAVE_TIMEOUT_MS } from './persistSalesDay'
 import { isManualSource } from './salesDepletion'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -52,6 +52,40 @@ const isComp = row => row.source === 'pos_comp'
 // this page — a comped dish was never sold, and every figure here means real sales.
 const isPosRow = row => row.source === 'pos' || row.source === 'pos_credit'
 
+// The price snapshot each recipe's STORED manual rows already carry (S756, owner decision D8).
+//
+// Every Save used to write `unit_price: recipe.selling_price` for every row in the payload — and a
+// save re-sends every row that has a quantity, not only the ones typed into. So correcting one
+// dish's quantity restated the whole day (or the whole period, on Bulk) at today's menu price,
+// silently repricing revenue that had been recorded at the price it was sold at. Decision: a row
+// that already has a stored unit_price keeps it; only a recipe new to the save takes today's price.
+//
+// A recipe normally has one manual row per day, but a legacy day can hold several; they collapse
+// into one row on save, so the kept price is the qty-weighted average of the priced rows — the
+// figure that keeps the recipe's recorded revenue unchanged. A recipe whose stored rows carry NO
+// price (written before the S375 snapshot existed) keeps carrying null, which is what it was: the
+// reports go on pricing it at the current menu price exactly as they did, rather than this save
+// freezing a price nobody recorded. vat_rate travels with the price it was recorded beside.
+function storedPriceMap(rows) {
+  const acc = {}
+  for (const s of rows) {
+    const a = acc[s.recipe_id] || (acc[s.recipe_id] = { qty: 0, rev: 0, priced: false, first: null, vat_rate: s.vat_rate ?? null })
+    if (s.unit_price == null) continue
+    const qty = parseFloat(s.qty_sold) || 0
+    const price = parseFloat(s.unit_price) || 0
+    if (!a.priced) { a.priced = true; a.first = price; a.vat_rate = s.vat_rate ?? null }
+    a.qty += qty
+    a.rev += qty * price
+  }
+  const out = {}
+  for (const [id, a] of Object.entries(acc)) {
+    const unit_price = !a.priced ? null
+      : a.qty > 0 ? Math.round((a.rev / a.qty) * 1e6) / 1e6 : a.first
+    out[id] = { unit_price, vat_rate: a.vat_rate }
+  }
+  return out
+}
+
 export default function Sales() {
   const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, clientModules, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
@@ -85,7 +119,14 @@ export default function Sales() {
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [recipes, setRecipes]       = useState(() => readPageCache('sales', 'recipes', effectiveClientId) ?? [])
   const [sales, setSales]           = useState({}) // { recipe_id: qty } — bulk only, bs_day=0
+  const [salesPrices, setSalesPrices] = useState({}) // recipe_id -> stored { unit_price, vat_rate } of the Bulk rows (D8)
   const [loading, setLoading]       = useState(true)
+  // Which period / day the on-screen BASELINE (`sales`, `dailySales`) was actually loaded for (S756).
+  // A save merges typed figures over that baseline and writes the result under the selected
+  // period/day — so if the two differ (a › press or a period change whose load has not landed yet),
+  // Save would write one day's grid onto another day's bs_day. Save is refused until they agree.
+  const [bulkBaselineFor, setBulkBaselineFor]   = useState(null)  // periodId
+  const [dailyBaselineFor, setDailyBaselineFor] = useState(null)  // `${periodId}:${day}`
   // A failed sales read must not render as an empty grid: this page batch-saves what is on
   // screen, so a blank grid followed by Save writes zeros over real figures (S682).
   //
@@ -121,6 +162,12 @@ export default function Sales() {
   // hiding the tabs is not that job for the one caller who can still reach them.
   const [posDaySales, setPosDaySales]         = useState({})
   const [posDayDiscounts, setPosDayDiscounts] = useState({})
+  const [dailyPrices, setDailyPrices]         = useState({}) // recipe_id -> stored { unit_price, vat_rate } of this day's manual rows (D8)
+  // The till's revenue for the day, priced from its own rows (S756): POS folds a bill discount into
+  // unit_price and never writes `discount`, so qty × today's menu price overstated every discounted
+  // bill and restated the day whenever a price changed. Unpriced qty falls back to the menu price.
+  const [posDayPricedRev, setPosDayPricedRev]     = useState({})
+  const [posDayUnpricedQty, setPosDayUnpricedQty] = useState({})
   const [dailySaving, setDailySaving] = useState(false)
   const [dailySaved, setDailySaved]   = useState(false)
   const [dailySaveError, setDailySaveError] = useState('')
@@ -134,7 +181,8 @@ export default function Sales() {
   const [monthlyEntries, setMonthlyEntries] = useState([])
   const [monthlyLoading, setMonthlyLoading] = useState(false)
   // Set when a save is staged behind the typed-confirmation modal because it would delete the
-  // opposite mode's rows: { mode, rows, superseded }. See findSupersededRows() (S457).
+  // opposite mode's rows: { target, rows, superseded }. See findSupersededRows() (S457) and
+  // requestSave's note on `target` (S756).
   const [pendingSave, setPendingSave] = useState(null)
 
   // Only wraps setPeriods/setRecipes below — deliberately not used for anything a save merges
@@ -205,6 +253,10 @@ export default function Sales() {
   }
 
   async function loadSales(periodId) {
+    // Save is refused until this lands (see bulkBaselineFor) — but only if this load is for the
+    // period on screen; a post-save reload of a period the page has left must not disable the
+    // baseline of the one it is now on.
+    if (periodReq.isCurrent(periodId)) setBulkBaselineFor(null)
     const { data, error } = await supabase
       .from('sales_entries')
       .select('*')
@@ -219,17 +271,26 @@ export default function Sales() {
     })
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setSales(map)
+    setSalesPrices(storedPriceMap((data || []).filter(s => isManualSource(s.source))))
     setBulkForm({}) // reset form so it reads from DB
+    setBulkBaselineFor(periodId)
   }
 
   async function loadDailySales(periodId, day) {
     const key = `${periodId}:${day}`
     dayReq.begin(key)   // synchronous — claims the day before any await
+    setDailyBaselineFor(null)   // Save Day and Import wait for this day's own baseline
     // `source` is SELECTED and comps are filtered in JS. See isComp's note above: a server-side
     // .neq drops NULL-source rows too, and here that is destructive rather than merely wrong.
-    const { data, error } = await supabase
+    //
+    // PAGED with a unique tiebreaker (S756). POS writes one row per bill LINE, so a busy day
+    // crosses the 1000-row cap on its own — and the rows past the cut arrive in no set order, so a
+    // manual row could fall off. It would then be missing from `dailySales`, missing from the
+    // payload Save Day builds, and deleted by save_sales_day's replace-the-day: a figure nobody
+    // was shown, removed by a save nobody meant to touch it.
+    const { data, error } = await fetchAllRows(() => supabase
       .from('sales_entries').select('*')
-      .eq('period_id', periodId).eq('bs_day', day)
+      .eq('period_id', periodId).eq('bs_day', day).order('id'))
     if (!dayReq.isCurrent(key)) return   // superseded by a newer day/period selection
     if (error) { noteLoad('daily', error); return }
     noteLoad('daily', null)
@@ -237,6 +298,8 @@ export default function Sales() {
     const discMap = {}
     const posMap = {}
     const posDiscMap = {}
+    const posPriced = {}
+    const posUnpriced = {}
     // Accumulate, don't overwrite — loadAllDaySums below has always summed, and this must agree
     // with it. A day can legitimately hold more than one row per recipe: POS writes one row PER
     // BILL, so a day with five bills of the same item was showing only the last bill's qty here.
@@ -248,15 +311,24 @@ export default function Sales() {
       if (!manual && !isPosRow(s)) return   // comps, and any source added later, are drawn nowhere
       const qtyTarget = manual ? map : posMap
       const discTarget = manual ? discMap : posDiscMap
-      qtyTarget[s.recipe_id] = (qtyTarget[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
+      const qty = parseFloat(s.qty_sold) || 0
+      qtyTarget[s.recipe_id] = (qtyTarget[s.recipe_id] || 0) + qty
       discTarget[s.recipe_id] = (discTarget[s.recipe_id] || 0) + (parseFloat(s.discount) || 0)
+      if (!manual) {
+        if (s.unit_price != null) posPriced[s.recipe_id] = (posPriced[s.recipe_id] || 0) + qty * (parseFloat(s.unit_price) || 0)
+        else posUnpriced[s.recipe_id] = (posUnpriced[s.recipe_id] || 0) + qty
+      }
     })
     setDailySales(map)
+    setDailyPrices(storedPriceMap((data || []).filter(s => isManualSource(s.source))))
     setDailyForm({})
     setDailyDiscounts(discMap)
     setDiscountForm({})
     setPosDaySales(posMap)
     setPosDayDiscounts(posDiscMap)
+    setPosDayPricedRev(posPriced)
+    setPosDayUnpricedQty(posUnpriced)
+    setDailyBaselineFor(key)
   }
 
   async function loadAllDaySums(periodId) {
@@ -345,13 +417,33 @@ export default function Sales() {
     // whenever a menu price changed later). discount is the per-day/per-item NPR reduction (from
     // the vendor Excel import or typed manually) — kept as its own column rather than folded into
     // unit_price so it stays a separately editable, auditable figure.
+    //
+    // S756 (D8): a recipe that already has a row for this day keeps that row's stored price — see
+    // storedPriceMap. Only a recipe new to the day takes today's menu price.
     return recipes
       .filter(r => (merged[r.id] || 0) > 0)
       .map(r => ({
         recipe_id: r.id, qty_sold: merged[r.id],
-        unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
+        ...priceSnapshot(r, dailyPrices),
         discount: mergedDiscount[r.id] || 0,
       }))
+  }
+
+  // { unit_price, vat_rate } for a row about to be saved: the stored snapshot where the recipe
+  // already has one (D8), today's menu price where it does not.
+  function priceSnapshot(recipe, storedMap) {
+    const stored = storedMap[recipe.id]
+    if (stored) return { unit_price: stored.unit_price, vat_rate: stored.vat_rate }
+    return { unit_price: parseFloat(recipe.selling_price) || 0, vat_rate: recipe.vat_rate }
+  }
+
+  // The price a row's on-screen revenue is figured at — the same one the save will write, so the
+  // Day/Period Revenue beside a quantity is what that quantity will be recorded as. A legacy row
+  // with no stored price is shown at the menu price, which is how every report prices it too.
+  function effectivePrice(recipe, storedMap) {
+    const stored = storedMap[recipe.id]
+    if (stored && stored.unit_price != null) return stored.unit_price
+    return parseFloat(recipe.selling_price) || 0
   }
 
   function buildBulkRows() {
@@ -368,7 +460,7 @@ export default function Sales() {
       .filter(r => (merged[r.id] || 0) > 0)
       .map(r => ({
         recipe_id: r.id, qty_sold: merged[r.id],
-        unit_price: parseFloat(r.selling_price) || 0, vat_rate: r.vat_rate,
+        ...priceSnapshot(r, salesPrices),   // S756 (D8): a stored Bulk row keeps its price
       }))
   }
 
@@ -384,6 +476,14 @@ export default function Sales() {
   // silently delete on the other side (Bulk vs Daily supersede each other per recipe, across the
   // whole period). Anything to delete → hand off to the typed-confirmation modal; otherwise commit
   // straight away. See findSupersededRows() for why this warning exists (S457).
+  //
+  // S756: the save is pinned to what was on screen at the CLICK — `target` carries the period, the
+  // day and the client, and the rows are built from that moment's baseline. Until then commitSave
+  // re-read `selectedPeriod`/`selectedDay` when it finally wrote, which could be seconds later (the
+  // supersede check is a network round trip, and the confirmation modal waits on a human). A ›
+  // press or a period change in between wrote the rows built from one day under another day's
+  // bs_day, after save_sales_day had deleted what that day held. Now the write goes where the rows
+  // came from, and if the page has moved on in between, the save stops before sending anything.
   async function requestSave(mode) {
     if (!selectedPeriod) return
     // Both writing tabs are unreachable when POS owns sales, so this can't be hit through the UI.
@@ -395,6 +495,15 @@ export default function Sales() {
     if (isBulk ? bulkSaving : dailySaving) return
     const setSaving = isBulk ? setBulkSaving : setDailySaving
     const setErr = isBulk ? setBulkSaveError : setDailySaveError
+    const target = { mode, periodId: selectedPeriod.id, bsDay: isBulk ? 0 : selectedDay, clientId }
+
+    // The baseline on screen must be the one for the period/day being saved. A load still in
+    // flight (just after › or a period change) leaves the previous day's figures in `dailySales`,
+    // and merging typed values over those would write them under the new day.
+    if ((isBulk ? bulkBaselineFor : dailyBaselineFor) !== baselineKeyOf(target)) {
+      setErr(`The saved figures for ${targetLabel(target)} are still loading, so there is nothing safe to save against yet. Wait a moment for the table to refresh, then save again.`)
+      return
+    }
 
     // An empty menu builds an empty payload, and save_sales_day reads that as "delete this day's
     // manual rows and insert nothing". `recipes` is only ever empty because the client genuinely has
@@ -422,8 +531,8 @@ export default function Sales() {
       const rows = isBulk ? buildBulkRows() : buildDailyRows()
       const superseded = rows.length
         ? await findSupersededRows(supabase, {
-            periodId: selectedPeriod.id,
-            bsDay: isBulk ? 0 : selectedDay,
+            periodId: target.periodId,
+            bsDay: target.bsDay,
             recipeIds: rows.map(r => r.recipe_id),
             signal: abortCtl.signal,
           })
@@ -437,21 +546,53 @@ export default function Sales() {
       setSaving(false)
     }
     if (!prepared) return
+    // Navigation is disabled while the check runs, but an admin switching client re-runs init()
+    // and moves the page regardless — so ask rather than assume.
+    if (!targetStillOnScreen(target)) { setErr(movedOnMessage(target)); return }
 
     if (prepared.superseded.total > 0) {
-      setPendingSave({ mode, rows: prepared.rows, superseded: prepared.superseded })
+      setPendingSave({ target, rows: prepared.rows, superseded: prepared.superseded })
       return
     }
-    await commitSave(mode, prepared.rows)
+    await commitSave(target, prepared.rows, prepared.superseded)
+  }
+
+  // The key each baseline records it was loaded for — see bulkBaselineFor / dailyBaselineFor.
+  function baselineKeyOf(target) {
+    return target.mode === 'bulk' ? target.periodId : `${target.periodId}:${target.bsDay}`
+  }
+
+  // Is the page still on the period (and, for Daily, the day) this save was built from? Asked of
+  // the load guards rather than of state: they are refs, so they are current inside an async
+  // function whose closure captured older state, and they move the instant a new load is claimed.
+  function targetStillOnScreen(target) {
+    if (!periodReq.isCurrent(target.periodId)) return false
+    if (target.mode === 'daily' && !dayReq.isCurrent(`${target.periodId}:${target.bsDay}`)) return false
+    return true
+  }
+
+  function targetLabel(target) {
+    const p = periods.find(x => x.id === target.periodId)
+    const month = p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : 'that month'
+    return target.mode === 'bulk' ? `the ${month} period total` : `${formatBsDay(target.bsDay, p?.bs_month)} (${month})`
+  }
+
+  // Refused BEFORE any request is sent, so this one may truthfully say nothing was written.
+  function movedOnMessage(target) {
+    return `This save was stopped before anything was sent: the page moved to a different ${target.mode === 'bulk' ? 'month' : 'day or month'} while it was being prepared, so nothing was written for ${targetLabel(target)}. Go back to it, re-enter anything no longer on screen, and save again.`
   }
 
   // Step 2: the write itself. Reached either directly (nothing to supersede) or from the modal.
-  async function commitSave(mode, rows) {
-    if (!selectedPeriod) return
+  // Everything it writes comes from `target` and `rows`, never from the page's current selection.
+  async function commitSave(target, rows, superseded) {
+    const { mode, periodId, bsDay } = target
     const isBulk = mode === 'bulk'
     const setSaving = isBulk ? setBulkSaving : setDailySaving
     const setErr = isBulk ? setBulkSaveError : setDailySaveError
     const setSaved = isBulk ? setBulkSaved : setDailySaved
+
+    // The modal can sit open for as long as it takes someone to read it.
+    if (!targetStillOnScreen(target)) { setErr(movedOnMessage(target)); return }
 
     setSaving(true)
     setErr('')
@@ -478,9 +619,7 @@ export default function Sales() {
     try {
       // One atomic RPC: delete + insert + cross-mode cleanup in a single transaction, so a stall
       // can no longer leave this day deleted with nothing written back (S456).
-      await persistSalesDay(supabase, {
-        periodId: selectedPeriod.id, bsDay: isBulk ? 0 : selectedDay, rows, signal: abortCtl.signal,
-      })
+      await persistSalesDay(supabase, { periodId, bsDay, rows, signal: abortCtl.signal })
       saveSucceeded = true
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
@@ -494,15 +633,24 @@ export default function Sales() {
     if (!saveSucceeded) return
     // Manual-sales stock depletion — best-effort, non-blocking (see depleteManualSales' own
     // try/catch); the sales save itself already committed above regardless of this outcome.
-    depleteManualSales(supabase, {
-      clientId, periodId: selectedPeriod.id, bsDay: isBulk ? 0 : selectedDay, rows,
-    })
+    depleteManualSales(supabase, { clientId: target.clientId, periodId, bsDay, rows })
+    // The rows this save superseded in the OTHER mode were deleted by the RPC, but their stock
+    // movements were not — rebuild those days so the ledger does not deplete them twice (S756).
+    // A Bulk save wiped dated rows on the days the precheck listed; a Daily save wiped the Bulk row.
+    const supersededDays = !superseded?.total ? []
+      : isBulk ? superseded.byRecipe.flatMap(e => e.days) : [0]
+    if (supersededDays.length > 0) {
+      repostSupersededMovements(supabase, { clientId: target.clientId, periodId, days: supersededDays })
+    }
     // Refresh the displayed data — best-effort. Both modes reload both maps, since a save in
     // either one may have just superseded rows belonging to the other. If this hangs or fails,
     // the save itself already succeeded; the table just won't reflect it until the next reload.
+    // The period loaders guard themselves; the day reload only runs if the page is still on the
+    // saved day — loadDailySales claims its key, and claiming the OLD day would cancel the load of
+    // whichever day the page has moved on to (S756).
     try {
-      const reloads = [loadAllDaySums(selectedPeriod.id), loadSales(selectedPeriod.id)]
-      if (!isBulk) reloads.push(loadDailySales(selectedPeriod.id, selectedDay))
+      const reloads = [loadAllDaySums(periodId), loadSales(periodId)]
+      if (!isBulk && targetStillOnScreen(target)) reloads.push(loadDailySales(periodId, bsDay))
       await Promise.all(reloads)
     } catch (err) {
       console.error(`${mode} post-save reload error:`, err)
@@ -512,7 +660,7 @@ export default function Sales() {
   async function confirmPendingSave() {
     const pending = pendingSave
     setPendingSave(null)
-    if (pending) await commitSave(pending.mode, pending.rows)
+    if (pending) await commitSave(pending.target, pending.rows, pending.superseded)
   }
 
   // recipe_id → name, so the confirmation modal can name what it's about to delete.
@@ -539,7 +687,22 @@ export default function Sales() {
     periodReq.begin(periodId)   // claim the page before any await
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
+    // S756: the previous period's grids used to stay on screen, under the new period's label and a
+    // live Save button, until the new reads landed — so a Save in that window merged typed figures
+    // over one month's baseline and wrote them into another. Clear every baseline and draft, and
+    // show the loading state, before the first await. The baseline keys are what Save actually
+    // checks; `loading` is what the reader sees.
+    setLoading(true)
+    setBulkBaselineFor(null); setDailyBaselineFor(null)
+    setSales({}); setSalesPrices({}); setBulkForm({})
+    setDailySales({}); setDailyPrices({}); setDailyForm({})
+    setDailyDiscounts({}); setDiscountForm({})
+    setPosDaySales({}); setPosDayDiscounts({}); setPosDayPricedRev({}); setPosDayUnpricedQty({})
+    setAllDaySums({}); setAllDayDiscounts({}); setAllDayPricedRev({}); setAllDayUnpricedQty({})
+    setMonthlyEntries([])
+    setBulkSaveError(''); setDailySaveError('')
     await Promise.all([loadSales(periodId), loadAllDaySums(periodId)])
+    if (periodReq.isCurrent(periodId)) setLoading(false)
   }
 
   function getQty(recipeId) {
@@ -632,8 +795,20 @@ export default function Sales() {
   // never sees a column of dashes. Its revenue is stated separately rather than folded into Day
   // revenue: that figure is what this grid is about to save, and the two must not be confusable.
   const hasPosDay = Object.keys(posDaySales).length > 0 || Object.keys(posDayDiscounts).length > 0
+  // Priced from the POS rows' own unit_price (S756) — the till folds a bill discount into that
+  // price, so today's menu price overstated every discounted bill. `posDayDiscounts` is kept in
+  // case a POS row ever does carry a discount; today it is always 0 for them.
   const posDayRevenue = recipes.reduce((s, r) =>
-    s + (posDaySales[r.id] || 0) * (parseFloat(r.selling_price) || 0) - (posDayDiscounts[r.id] || 0), 0)
+    s + (posDayPricedRev[r.id] || 0)
+      + (posDayUnpricedQty[r.id] || 0) * (parseFloat(r.selling_price) || 0)
+      - (posDayDiscounts[r.id] || 0), 0)
+
+  // Save/Import are live only once the grid on screen is the one for the selected period/day.
+  const bulkReady = !!selectedPeriod && bulkBaselineFor === selectedPeriod.id
+  const dailyReady = !!selectedPeriod && dailyBaselineFor === `${selectedPeriod.id}:${selectedDay}`
+  // While a save is being checked, confirmed or written, the period and the day stay where they
+  // are — the save is pinned to them, and moving would only turn it into a refusal (S756).
+  const saveBusy = bulkSaving || dailySaving || !!pendingSave
 
   // Daily Breakdown pivot — one row per recipe × one column per day (~9,000 cells on a real
   // month). Rebuilt per keystroke of the menu search before this memo; the totals are precomputed
@@ -709,6 +884,7 @@ export default function Sales() {
             style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
             value={selectedPeriod?.id || ''}
             onChange={e => handlePeriodChange(e.target.value)}
+            disabled={saveBusy}
           >
             {periods.map(p => (
               <option key={p.id} value={p.id}>
@@ -725,6 +901,17 @@ export default function Sales() {
       {isLocked && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
           🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
+        </div>
+      )}
+      {/* The same fact, told to the people the lock lets through (S756, closed-periods.md → "Admin
+          must be TOLD the month is closed"). Same amber shape as Purchases.js's banner. */}
+      {canEditClosedPeriods && selectedPeriod?.status === 'closed' && (
+        <div role="note" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          ✎ <strong>{periodLabel} is closed — you are editing a closed month.</strong> Sales saved here still change that month's
+          revenue, food cost % and stock movements. Afterwards, open{' '}
+          <Link to="/owner-report" style={{ color: 'inherit', textDecoration: 'underline' }}>Monthly Report</Link>{' '}
+          for this month and use <strong>Regenerate Snapshot</strong> — the report was frozen when the month closed and will not
+          include what you change here until it is regenerated.
         </div>
       )}
       {/* POS-supersedes-manual banner. Accent rather than red — this is how the product is meant
@@ -863,7 +1050,7 @@ export default function Sales() {
                     <button
                       className="btn btn-primary"
                       onClick={() => requestSave('bulk')}
-                      disabled={bulkSaving || isLocked || noMenu}
+                      disabled={bulkSaving || isLocked || noMenu || !bulkReady}
                     >
                       {bulkSaving ? 'Saving…' : bulkSaved ? '✓ Saved' : 'Save'}
                     </button>
@@ -887,7 +1074,7 @@ export default function Sales() {
                         <th><Tip text="Recipe category — Food, Beverage, Dessert, etc. Use the search box above to find one item." width={240}>Category</Tip></th>
                         <th style={{ textAlign: 'right' }}><Tip text="Ex-VAT selling price per portion as set in Recipe Costing." width={230}>Selling Price</Tip></th>
                         <th style={{ textAlign: 'right', width: 160 }}><Tip text="Total portions sold across the entire period. Enter or edit in the Qty Sold column." width={240}>Total Qty Sold</Tip></th>
-                        <th style={{ textAlign: 'right' }}><Tip text="Total revenue = Qty Sold × Selling Price (ex-VAT). Used in food cost % and variance calculations." width={260}>Period Revenue</Tip></th>
+                        <th style={{ textAlign: 'right' }}><Tip text="Total revenue = Qty Sold × price (ex-VAT). A figure already saved keeps the price it was first recorded at, even if you correct its quantity; a new entry takes today's Selling Price. Used in food cost % and variance calculations." width={280}>Period Revenue</Tip></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -896,7 +1083,7 @@ export default function Sales() {
                       )}
                       {bulkRows.map(recipe => {
                         const qty = getQty(recipe.id)
-                        const rev = (parseFloat(qty) || 0) * (parseFloat(recipe.selling_price) || 0)
+                        const rev = (parseFloat(qty) || 0) * effectivePrice(recipe, salesPrices)
                         return (
                           <tr key={recipe.id}>
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
@@ -953,7 +1140,7 @@ export default function Sales() {
                             <button
                               className="btn btn-ghost"
                               aria-label="Previous day"
-                              disabled={selectedDay <= 1}
+                              disabled={selectedDay <= 1 || saveBusy}
                               onClick={() => setSelectedDay(d => Math.max(1, d - 1))}
                               style={{ padding: '8px 12px', fontSize: 14 }}
                             >‹</button>
@@ -964,12 +1151,13 @@ export default function Sales() {
                                 value={selectedDay}
                                 onChange={v => setSelectedDay(Number(v))}
                                 placeholder="Pick day"
+                                disabled={saveBusy}
                               />
                             </div>
                             <button
                               className="btn btn-ghost"
                               aria-label="Next day"
-                              disabled={selectedDay >= dayCount}
+                              disabled={selectedDay >= dayCount || saveBusy}
                               onClick={() => setSelectedDay(d => Math.min(dayCount, d + 1))}
                               style={{ padding: '8px 12px', fontSize: 14 }}
                             >›</button>
@@ -978,6 +1166,7 @@ export default function Sales() {
                             <button
                               className="btn btn-ghost"
                               onClick={() => setSelectedDay(today.day)}
+                              disabled={saveBusy}
                               style={{ fontSize: 11, padding: '4px 10px', color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
                             >Today (day {today.day})</button>
                           )}
@@ -986,7 +1175,10 @@ export default function Sales() {
                     })()}
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <SalesImportButton recipes={recipes} disabled={isLocked || noMenu} onMatched={handleImportMatched} />
+                    {/* Waits for the day's baseline too: a load landing after an import clears the
+                        form, which would silently throw the imported figures away (S756). */}
+                    <SalesImportButton recipes={recipes} disabled={isLocked || noMenu || !dailyReady || saveBusy} onMatched={handleImportMatched}
+                      selectedDate={selectedPeriod ? { year: selectedPeriod.bs_year, month: selectedPeriod.bs_month, day: selectedDay } : null} />
                     <button
                       className="btn btn-ghost"
                       disabled={isLocked}
@@ -1001,7 +1193,7 @@ export default function Sales() {
                     <button
                       className="btn btn-primary"
                       onClick={() => requestSave('daily')}
-                      disabled={dailySaving || isLocked || noMenu}
+                      disabled={dailySaving || isLocked || noMenu || !dailyReady}
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
                 </div>
@@ -1021,7 +1213,7 @@ export default function Sales() {
                     recipes.forEach(r => {
                       const q = parseFloat(getDailyQty(r.id)) || 0
                       totQty += q
-                      totGross += q * (parseFloat(r.selling_price) || 0)
+                      totGross += q * effectivePrice(r, dailyPrices)
                       totDiscount += parseFloat(getDailyDiscount(r.id)) || 0
                     })
                     const totRev = totGross - totDiscount
@@ -1055,7 +1247,7 @@ export default function Sales() {
                           <th style={{ textAlign: 'right', width: 110 }}><Tip text="Portions the till already sold on this day. Read-only — POS posts its own sales automatically, and Save Day never writes, changes or deletes these. They are shown so you can see the whole day before typing anything by hand." width={300}>From POS</Tip></th>
                         )}
                         <th style={{ textAlign: 'right', width: 130 }}><Tip text="NPR discount applied to this item on this day — e.g. staff discount, promo, or complimentary reduction. Subtracted from Day Revenue. Auto-filled by ↑ Import Excel from the report's Discount column, or type it in directly." width={280}>Discount</Tip></th>
-                        <th style={{ textAlign: 'right' }}><Tip text="Revenue for this item on this day = (Qty × Selling Price) − Discount, ex-VAT." width={260}>Day Revenue</Tip></th>
+                        <th style={{ textAlign: 'right' }}><Tip text="Revenue for this item on this day = (Qty × price) − Discount, ex-VAT. An item already saved for this day keeps the price it was first recorded at, even if you correct its quantity; a new entry takes today's Selling Price." width={280}>Day Revenue</Tip></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1067,7 +1259,7 @@ export default function Sales() {
                         const qty = parseFloat(rawVal) || 0
                         const discRaw = getDailyDiscount(recipe.id)
                         const disc = parseFloat(discRaw) || 0
-                        const rev = qty * (parseFloat(recipe.selling_price) || 0) - disc
+                        const rev = qty * effectivePrice(recipe, dailyPrices) - disc
                         return (
                           <tr key={recipe.id}>
                             <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{recipe.name}</td>
@@ -1137,7 +1329,7 @@ export default function Sales() {
                     <button
                       className="btn btn-primary"
                       onClick={() => requestSave('daily')}
-                      disabled={dailySaving || isLocked || noMenu}
+                      disabled={dailySaving || isLocked || noMenu || !dailyReady}
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
                   </>

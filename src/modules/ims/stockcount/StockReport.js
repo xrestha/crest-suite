@@ -50,7 +50,11 @@ export default function StockReport() {
     setPeriods(p || [])
     setCategories(c || [])
     const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (open) { setSelectedPeriod(open); await loadReport(open.id) }
+    // The auto-selected period claims the page like a chosen one (S756, useLatestRequest's own
+    // contract). Without it, once handlePeriodChange has run the ref is never null again — so an
+    // admin switching client re-ran this with the previous client's period id still current, and
+    // loadReport's isCurrent check skipped every setter: the new tenant's chip over no report.
+    if (open) { periodReq.begin(open.id); setSelectedPeriod(open); await loadReport(open.id) }
     setLoading(false)
   }
 

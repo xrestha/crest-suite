@@ -14,7 +14,7 @@ import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
-import { VAT_RATE, splitPurchaseVat, buildVendorSummary } from './purchaseTaxSplit'
+import { VAT_RATE, splitPurchaseVat, buildVendorSummary, billWiseVat, summariseUnlinkedReturns } from './purchaseTaxSplit'
 
 function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -103,6 +103,22 @@ export default function VatReport() {
   const vendorRows  = buildVendorSummary(vatLines, vatReturns, split.factors)
   const periodLabel = (p) => p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : ''
 
+  // S756. A return whose purchase line was deleted or re-saved is unlinked, and nothing can say
+  // whether VAT was charged on it — so it is deducted from neither this report nor Non-VAT, and it is
+  // NAMED here, on screen and in the workbook, rather than vanishing as it used to (which overstated
+  // the input VAT claimed). See isUnlinkedReturn in purchaseTaxSplit.js.
+  const unlinked = summariseUnlinkedReturns(split.unlinkedReturns)
+  const unlinkedNote = unlinked.count > 0
+    ? `NOT INCLUDED: ${unlinked.count} return${unlinked.count !== 1 ? 's' : ''} (NPR ${unlinked.value.toFixed(2)} at list rate) `
+      + 'could not be linked to a purchase line — the bill was deleted or re-saved after the return — so it is not '
+      + 'known whether VAT was charged on them. They are deducted from neither the VAT nor the Non-VAT report; '
+      + `settle them with your CA. ${unlinked.examples.join('; ')}${unlinked.more ? `; and ${unlinked.more} more` : ''}`
+    : null
+  const caveats = unlinkedNote ? [unlinkedNote] : []
+  // A month with returns and no new VAT purchases still has a filing figure (a negative claim), so
+  // it must be printable and exportable (S756).
+  const hasFigures = vatLines.length > 0 || vatReturns.length > 0
+
   // A VAT return handed to a CA is a document, not a grid. sheetWithLetterhead puts the company
   // name, PAN/VAT number and address on every sheet, and — the part that matters most here — the
   // PERIOD AND ITS STATUS: figures pulled from a period that is still open can change after the
@@ -135,8 +151,42 @@ export default function VatReport() {
       'Invoice Ref':       e.invoice_ref || '',
     }))
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
-      title: 'VAT Report — Input VAT on Purchases', biz, scopeLine, rows: entryRows,
+      title: 'VAT Report — Input VAT on Purchases', biz, scopeLine, rows: entryRows, notes: caveats,
     }), 'VAT Purchases')
+
+    // Bill-wise sheet (S756, owner decision D28): one row per invoice, the shape the purchase book is
+    // kept in. Built from the same allocated lines as everything else, so its Taxable, Exempt and VAT
+    // columns total to the Taxable Base on the sheet above and the Non-VAT figure before returns.
+    const bills = billWiseVat(split.allocated)
+    const r2 = n => Number(n.toFixed(2))
+    const billRows = bills.map(b => ({
+      'Day':                    b.bs_day,
+      'Supplier':               b.vendor,
+      'PAN/VAT No.':            b.pan,
+      'Invoice No.':            b.invoice,
+      'Taxable (ex-VAT, net of discount)': r2(b.taxable),
+      'Exempt / Non-VAT':       r2(b.exempt),
+      'VAT (13%)':              r2(b.vat),
+      'Total':                  r2(b.total),
+    }))
+    if (bills.length > 0) {
+      const tot = k => bills.reduce((s, b) => s + b[k], 0)
+      billRows.push({
+        'Day': 'TOTAL', 'Supplier': `${bills.length} bill${bills.length !== 1 ? 's' : ''}`, 'PAN/VAT No.': '', 'Invoice No.': '',
+        'Taxable (ex-VAT, net of discount)': r2(tot('taxable')),
+        'Exempt / Non-VAT':       r2(tot('exempt')),
+        'VAT (13%)':              r2(tot('vat')),
+        'Total':                  r2(tot('total')),
+      })
+    }
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'VAT Report — Purchases Bill-wise', biz, scopeLine, rows: billRows,
+      notes: [
+        "One row per purchase invoice. A bill's discount is split between its VAT and non-VAT lines in proportion to line value.",
+        'Returns are credit notes, not invoices, and are not on this sheet — see VAT Returns and CA Summary for the net figures.',
+        ...caveats,
+      ],
+    }), 'Bill-wise')
 
     // VAT Returns sheet
     if (vatReturns.length > 0) {
@@ -155,7 +205,7 @@ export default function VatReport() {
       }))
       XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
         title: 'VAT Report — Returns (input VAT reversed)', biz, scopeLine, rows: retRows,
-        notes: ['Returned goods are valued at the discounted rate their original bill carried.'],
+        notes: ['Returned goods are valued at the discounted rate their original bill carried.', ...caveats],
       }), 'VAT Returns')
     }
 
@@ -179,7 +229,7 @@ export default function VatReport() {
     })
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'VAT Report — Vendor-wise Summary', biz, scopeLine, rows: caRows,
-      notes: ['For reference only — verify bills with your CA before filing.'],
+      notes: ['For reference only — verify bills with your CA before filing.', ...caveats],
     }), 'CA Summary')
 
     XLSX.writeFile(wb, `VAT-Report-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
@@ -197,7 +247,9 @@ export default function VatReport() {
           <h1 className="page-title">VAT Report</h1>
           <p className="page-subtitle">Input VAT summary on purchases</p>
           <div className="page-scope-row">
-            <PeriodScope label={periodLabel(selectedPeriod)} status={selectedPeriod?.status} />
+            {/* provisionalWhenOpen (S756): an open month's input VAT can still change as bills and
+                returns are entered, and this is the figure that gets filed. */}
+            <PeriodScope label={periodLabel(selectedPeriod)} status={selectedPeriod?.status} provisionalWhenOpen />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -205,13 +257,43 @@ export default function VatReport() {
             {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
           </select>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={!vatLines.length || !!loadError}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={!vatLines.length}>Export Excel</button>
+            {/* Gated on `loading` too (S756): the period label, print title, scope line and filename
+                move the moment a month is picked, and the rows on screen are the PREVIOUS month's
+                until the read lands — so an ungated export shipped last month's figures under this
+                month's name. And on biz.error for Excel, or the letterhead's company name is blank. */}
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={loading || !!loadError || !hasFigures}>Print</button>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !!biz.error || !hasFigures}>Export Excel</button>
           </div>
         </div>
       </div>
 
       {loadError && <ReportLoadError error={loadError} />}
+
+      {biz.error && !loadError && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a VAT
+          report with a blank company name. The figures below are unaffected. Reload the page to try again.
+        </p>
+      )}
+
+      {!loadError && !loading && unlinked.count > 0 && (
+        <div role="alert" className="card" style={{
+          marginBottom: 16, padding: '12px 16px',
+          borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+        }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
+            ⚠ {unlinked.count} return{unlinked.count !== 1 ? 's are' : ' is'} not counted in this report — {fmtNPR(unlinked.value)} at list rate
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            The bill {unlinked.count !== 1 ? 'these were' : 'this was'} returned against was deleted or re-saved afterwards, so
+            there is no longer any record of whether VAT was charged on {unlinked.count !== 1 ? 'them' : 'it'}. Rather than
+            guess, {unlinked.count !== 1 ? 'they are' : 'it is'} left out of both the VAT and the Non-VAT report. Settle
+            {unlinked.count !== 1 ? ' them' : ' it'} with your CA before filing: {unlinked.examples.join('; ')}
+            {unlinked.more ? `; and ${unlinked.more} more` : ''}.
+          </p>
+        </div>
+      )}
 
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           yet is NPR 0 wearing the confidence of a real figure (S594 rule). */}
@@ -220,7 +302,7 @@ export default function VatReport() {
         <div className="stat-card">
           <div className="stat-label"><Tip text="Total net purchases this period: non-VAT plus VAT-inclusive, both after bill discounts and after goods returned. Includes VAT on the VAT-inclusive half." width={260}>Total Net Purchases</Tip></div>
           <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {Math.round(totalNet).toLocaleString('en-IN')}</div>
-          <div className="stat-sub">{entries.length} purchase entries</div>
+          <div className="stat-sub">{entries.length} purchase lines</div>
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Non-VAT purchases after their share of any bill discount and after goods returned — the same figure the Non-VAT Report shows." width={270}>Non-VAT Purchases</Tip></div>
@@ -228,19 +310,21 @@ export default function VatReport() {
           <div className="stat-sub">{nonVatLines.length} entries</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Gross VAT-inclusive purchases minus VAT-inclusive returns (incl. VAT)." width={260}>Net VAT Purchases</Tip></div>
+          {/* S756: these figures are AFTER each line's share of the bill discount, so neither the
+              tooltip nor the sub-line may call them "Gross" — the Gross column is the pre-discount one. */}
+          <div className="stat-label"><Tip text="VAT-inclusive purchases after their share of any bill discount, minus VAT-inclusive goods returned — including the VAT." width={260}>Net VAT Purchases</Tip></div>
           <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-amber-text)' }}>NPR {Math.round(netVatTotal).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
-            {vatLines.length} purchases
+            {vatLines.length} lines
             {vatReturns.length > 0 && <span style={{ color: 'var(--theme-red-text)' }}> − {vatReturns.length} returns</span>}
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Net input VAT claimable = (Gross VAT purchases − VAT returns) × 13%. Use this for your IRD VAT return." width={270}>Net Input VAT (13%)</Tip></div>
+          <div className="stat-label"><Tip text="Net input VAT claimable = (taxable VAT purchases after discount − VAT returns) × 13%. Use this for your IRD VAT return." width={270}>Net Input VAT (13%)</Tip></div>
           <div className="stat-value" style={{ fontSize: 16, color: 'var(--theme-green-text)' }}>NPR {Math.round(netVatAmt).toLocaleString('en-IN')}</div>
           <div className="stat-sub">
             {vatReturns.length > 0
-              ? <span>Gross {fmtNPR(vatAmtGross)} − {fmtNPR(retVatTotal)}</span>
+              ? <span>Purchases {fmtNPR(vatAmtGross)} − returns {fmtNPR(retVatTotal)}</span>
               : 'Claimable input tax'}
           </div>
         </div>
@@ -287,17 +371,23 @@ export default function VatReport() {
                       <th>Vendor</th>
                       <th style={{ textAlign: 'right' }}>Qty</th>
                       <th>UOM</th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Net cost before VAT — the rate you entered × qty.">Base (ex-VAT)</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text="Input VAT = Base × 13%. Claimable as input tax credit from IRD." width={220}>VAT (13%)</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Actual amount paid = Base + VAT (Base × 1.13).">Total (incl. VAT)</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="The rate you entered × qty, ex-VAT, before this line's share of the bill discount." width={240}>Gross (ex-VAT)</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="This line's share of its bill's discount, in proportion to line value. On a bill with non-VAT lines the rest of the discount sits in the Non-VAT Report." width={260}>Discount</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Gross − discount share. VAT is levied on this amount per Nepal IRD." width={220}>Taxable</Tip></th>
+                      <th style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}><Tip text="Input VAT = Taxable × 13%. Claimable as input tax credit from IRD." width={220}>VAT (13%)</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Taxable + VAT — what this line actually cost including VAT.">Total (incl. VAT)</Tip></th>
                       <th>Invoice</th>
                     </tr>
                   </thead>
                   <tbody>
                     {vatLines.map(e => {
-                      const base  = e.qty * e.rate
-                      const vat   = base * VAT_RATE
-                      const total = base + vat
+                      // S756: the line's own post-discount value, as the workbook's VAT Purchases sheet
+                      // prints it. This was qty × rate — the pre-discount figure — under a VAT column
+                      // whose tooltip called it claimable, so the rows summed to more VAT than the
+                      // Net Input VAT card and the exported sheet both claimed.
+                      const disc  = e.lineGross - e.lineNet
+                      const vat   = e.lineNet * VAT_RATE
+                      const total = e.lineNet + vat
                       return (
                         <tr key={e.id}>
                           <td style={{ color: 'var(--theme-accent-ink)', fontWeight: 700, whiteSpace: 'nowrap' }}>{formatBsDay(e.bs_day, selectedPeriod?.bs_month)}</td>
@@ -310,36 +400,27 @@ export default function VatReport() {
                           <td style={{ color: 'var(--theme-text2)' }}>{e.vendors?.name || '—'}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{Number(e.qty).toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                           <td style={{ color: 'var(--theme-text2)' }}>{e.items?.uom}</td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(base)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(e.lineGross)}</td>
+                          <td style={{ textAlign: 'right', color: disc > 0.005 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{disc > 0.005 ? `−${fmtNPR(disc)}` : '—'}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(e.lineNet)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)', fontWeight: 600 }}>{fmtNPR(vat)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }}>{fmtNPR(total)}</td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{e.invoice_ref || '—'}</td>
                         </tr>
                       )
                     })}
-                    <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
-                      <td colSpan={6} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>GROSS TOTALS</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseList)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{fmtNPR(vatBaseList * VAT_RATE)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(vatBaseList * (1 + VAT_RATE))}</td>
+                    {/* One TOTALS row whose every cell is the sum of the column above it (S756) —
+                        the rows now carry their own discount share, so the separate Trade Discount
+                        and TAXABLE TOTALS rows had nothing left to reconcile. */}
+                    <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700, background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' }}>
+                      <td colSpan={6} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>TOTALS</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtNPR(vatBaseList)}</td>
+                      <td style={{ textAlign: 'right', color: totalVatDiscount > 0.005 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{totalVatDiscount > 0.005 ? `−${fmtNPR(totalVatDiscount)}` : '—'}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseGross)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{fmtNPR(vatAmtGross)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(vatTotalGross)}</td>
                       <td></td>
                     </tr>
-                    {totalVatDiscount > 0 && <>
-                      <tr>
-                        <td colSpan={6} style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>Trade Discount</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(totalVatDiscount)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(totalVatDiscount * VAT_RATE)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>−{fmtNPR(totalVatDiscount * (1 + VAT_RATE))}</td>
-                        <td></td>
-                      </tr>
-                      <tr style={{ fontWeight: 700, background: 'color-mix(in srgb, var(--theme-accent) 5%, transparent)' }}>
-                        <td colSpan={6} style={{ color: 'var(--theme-text2)', fontSize: 12 }}>TAXABLE TOTALS</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtNPR(vatBaseGross)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-amber-text)' }}>{fmtNPR(vatAmtGross)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{fmtNPR(vatTotalGross)}</td>
-                        <td></td>
-                      </tr>
-                    </>}
                   </tbody>
                 </table>
               </div>
@@ -456,7 +537,7 @@ export default function VatReport() {
                   <tr>
                     <th>Vendor</th>
                     <th><Tip text="PAN or VAT registration number of the supplier — add it in Vendors if missing.">PAN / VAT No.</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Number of VAT-inclusive purchase entries from this vendor."># Bills</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Number of bills from this vendor this period carrying at least one VAT-inclusive line — bills, not lines."># Bills</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Gross purchases at list price before trade discount, ex-VAT.">Gross Base</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}><Tip text="Trade/promo discount from the vendor, prorated to VAT items. Reduces the taxable base." width={260}>Discount</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Taxable base = Gross − Discount. VAT is levied on this amount per Nepal IRD." width={240}>Taxable Base</Tip></th>

@@ -174,9 +174,13 @@ export default function PurchaseBillPage() {
   // One .in() read for every line's item, not one .single() per line — a 20-line bill was paying
   // 20 serial round trips here, after the save had already visibly completed.
   async function detectRateChanges(validLines) {
-    const { data: freshItems } = await supabase.from('items')
+    const { data: freshItems, error: freshErr } = await supabase.from('items')
       .select('id, name, uom, per_uom_rate, purchase_unit, conversion_factor')
       .in('id', [...new Set(validLines.map(l => l.item_id))])
+    // The prompt is an optional follow-up to a bill that has already saved, and there is nothing
+    // for the reader to do about a failed read here, so it is genuinely swallowed — but not
+    // silently to whoever diagnoses it (S756). No read, no prompt: never offer a sync off nothing.
+    if (freshErr) { console.error('Purchase bill: Item Master rate check could not read items', freshErr); return [] }
     const freshById = new Map((freshItems || []).map(i => [i.id, i]))
     const changed = []
     for (const l of validLines) {
@@ -203,6 +207,11 @@ export default function PurchaseBillPage() {
   // The save is done; what is left is a print that may still be on screen and a prompt that may
   // still be owed. Both are optional, so neither can be the thing that decides when to leave —
   // a two-sided barrier is. Leaving early would cancel the print dialog or drop the prompt.
+  //
+  // The form AWAITS this and keeps its Save button disabled throughout and after (S756): the
+  // window between the RPC returning and navigate() below — the rate read, the print timeout —
+  // was when a second click wrote the bill again under a new group id. Every path out of here ends
+  // in navigate(listUrl), directly or from the rate prompt, so the form never needs Save back.
   async function handleBillSaved(header, validLines, savedCreatedAt) {
     const wasNew = !isEdit
     let printDone = !wasNew

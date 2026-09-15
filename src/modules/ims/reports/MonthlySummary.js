@@ -38,8 +38,19 @@ export default function MonthlySummary() {
       .order('bs_month', { ascending: false })
     if (error) { setLoadError(error.message); setLoading(false); return }
     setPeriods(p || [])
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) { setSelectedPeriod(open); await buildReport(open.id) }
+    // Falls back to the latest period when none is open (the S722 rule): between closing one month
+    // and opening the next, this page selected nothing and said "No data for this period yet"
+    // under a "—" chip, about months that have data.
+    const chosen = (p || []).find(x => x.status === 'open') || (p || [])[0]
+    if (chosen) {
+      // init() claims the page too (S756) — once a period change has run, the ref holds that id,
+      // and an admin client switch re-running init would otherwise have every setter skipped.
+      periodReq.begin(chosen.id)
+      setSelectedPeriod(chosen)
+      await buildReport(chosen.id)
+      if (periodReq.isCurrent(chosen.id)) setLoading(false)
+      return
+    }
     setLoading(false)
   }
 
@@ -49,7 +60,9 @@ export default function MonthlySummary() {
     setSelectedPeriod(p)
     setLoading(true)
     await buildReport(periodId)
-    setLoading(false)
+    // Only the load that still owns the page may clear the flag (S756): a superseded load returns
+    // early from buildReport, and clearing here would paint the previous report under the new label.
+    if (periodReq.isCurrent(periodId)) setLoading(false)
   }
 
   async function buildReport(periodId) {
@@ -71,7 +84,10 @@ export default function MonthlySummary() {
       fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for. See
       // migration 20260706170000 for why sales_entries now carries that source separately.
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', periodId).neq('source', 'pos_comp').order('id')),
+      // Filtered in JS, not with a server-side .neq (S756): `source` is nullable, and
+      // `NULL <> 'pos_comp'` is NULL, so the .neq silently dropped every legacy row — Revenue read
+      // short and Food Cost % high, on the denominator of the page's headline ratio.
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId).order('id')),
       scopedFrom('recipes', 'id, selling_price')
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded — a stale load's failure must not clobber the current view either
@@ -87,9 +103,10 @@ export default function MonthlySummary() {
       { data: returns },
       { data: wastages },
       { data: staffMealsData },
-      { data: salesData },
+      { data: allSales },
       { data: recipes }
     ] = results
+    const salesData = (allSales || []).filter(r => r.source !== 'pos_comp')
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
@@ -223,7 +240,9 @@ export default function MonthlySummary() {
               </option>
             ))}
           </select>
-          <button className="btn btn-ghost" onClick={() => printWithTitle(`Monthly Summary - ${periodLabel}`)} style={{ fontSize: 13 }}>⎙ Print</button>
+          {/* Gated on the load (S728/S756): mid-load the page holds the previous month's figures
+              while the print title already names the new one. */}
+          <button className="btn btn-ghost" onClick={() => printWithTitle(`Monthly Summary - ${periodLabel}`)} disabled={loading || !!loadError} style={{ fontSize: 13 }}>⎙ Print</button>
         </div>
       </div>
 

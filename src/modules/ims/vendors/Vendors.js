@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -45,8 +45,38 @@ function usagePhrase(counts) {
   return { text, total }
 }
 
+// S756: the prefix is a free-text setting and went into `new RegExp` raw — "V.N" matched "VXN-004",
+// "A+" meant "one or more A", and "(" threw, taking Add Vendor down with it.
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** The next `PREFIX-NNN` after the highest one in `codes`. Exported for Vendors.test.js. */
+export function nextVendorCodeAfter(rawPrefix, codes) {
+  const prefix = String(rawPrefix).toUpperCase()
+  const re = new RegExp(`^${escapeRegExp(prefix)}-(\\d+)$`)
+  let maxNum = 0
+  ;(codes || []).forEach(code => {
+    const match = String(code || '').match(re)
+    if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10))
+  })
+  return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
+}
+
+// S756 (D25): a zero-row write is not a save. Every write on this page updates one vendor by id, and
+// an update matching nothing — the vendor deleted in another tab, or a row this account may not
+// change — returns no error, so each of them used to reload and read as done.
+function notChanged(vendor, what) {
+  return `"${vendor.name}" was not ${what} — Crest could not find it to change. It may have been removed in another tab, or this account may not change it. The list has been refreshed.`
+}
+
 export default function Vendors() {
-  const { clientId, isAdmin, hasImsAccess } = useAuth()
+  const { clientId, isAdmin, isOwner, hasImsAccess } = useAuth()
+  // S756 (D25, owner decision): the account Owner archives, restores and deletes suppliers, not
+  // only the operator. `vendors_all` already lets the Owner's JWT update and delete its own rows,
+  // and `vendors_guard_referenced_delete` still refuses a delete of a supplier with history for
+  // every client account, so this widens the page, not the database's protection.
+  const canManageLifecycle = isAdmin || isOwner
   const { settings } = useSettings()
   const { scopedFrom, scopedInsert } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -82,9 +112,27 @@ export default function Vendors() {
   // deleteVendor() is what fails closed.
   const [usage, setUsage] = useState({ status: 'loading', map: {} })
   const [deleting, setDeleting] = useState(null) // vendor id whose delete is mid-flight
-  const [showArchived, setShowArchived] = useState(false) // admin-only view of vendors taken off the page
+  const [showArchived, setShowArchived] = useState(false) // Owner/operator view of vendors taken off the page
 
-  useEffect(() => { if (clientId) loadVendors() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // S756: which client the list on screen belongs to — the Items.js guard, which this page lacked.
+  // An admin switching clients does not remount the page, so the previous client's vendors stayed
+  // up under the new client's name, and a late response for the client just left could land over
+  // the new one's list (and getNextVendorCode would then mint off the wrong book).
+  const loadedClientRef = useRef(clientId)
+
+  useEffect(() => {
+    if (!clientId) return
+    const switched = loadedClientRef.current !== clientId
+    loadedClientRef.current = clientId
+    if (switched) {
+      const cached = readPageCache('vendors', 'vendors', clientId)
+      setVendors(cached ?? [])
+      setUsage({ status: 'loading', map: {} })
+      setLoadError(null); setListError(null); setShowArchived(false); setShowForm(false)
+      setLoading(!cached)
+    }
+    loadVendors(clientId)
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drops nothing, and caches nothing it did not get. This loader used to be
   // `const { data } = await …`: a dropped read then set the list to `[]`, rendered "No vendors yet.
@@ -98,16 +146,17 @@ export default function Vendors() {
   // nothing in the data to say so — a partial supplier list presented as the whole one, and the
   // same duplicate code minted off the visible slice. `.order('id')` is the unique tiebreaker
   // paging requires after the display order.
-  async function loadVendors() {
+  async function loadVendors(forClient = clientId) {
     if (vendors.length === 0) setLoading(true) // a cached (or already-loaded) list keeps showing while this refreshes
     const { data, error } = await fetchAllRows(() =>
       scopedFrom('vendors').order('name').order('id'))
+    if (loadedClientRef.current !== forClient) return // S756: a response for the client we left
     if (error) { setLoadError(asActionError(error)); setLoading(false); return }
     setLoadError(null)
     setVendors(data || [])
-    writePageCache('vendors', 'vendors', clientId, data || [])
+    writePageCache('vendors', 'vendors', forClient, data || [])
     setLoading(false)
-    loadUsage(data || []) // deliberately not awaited — the list paints first, chips fill in after
+    loadUsage(data || [], forClient) // deliberately not awaited — the list paints first, chips fill in after
   }
 
   // One read per referencing table over every vendor at once, rather than a count per vendor per
@@ -115,7 +164,7 @@ export default function Vendors() {
   // crosses PostgREST's silent 1000-row cap on any real client, and a truncated read here would
   // report a used vendor as unused — the exact shape S528 found on Items. Same cost and the same
   // shape as Items' own `checkAllUsage`, which runs this for every visitor across eight tables.
-  async function loadUsage(list) {
+  async function loadUsage(list, forClient = clientId) {
     const ids = list.map(v => v.id)
     if (ids.length === 0) { setUsage({ status: 'ready', map: {} }); return }
     setUsage(u => ({ ...u, status: 'loading' }))
@@ -131,9 +180,10 @@ export default function Vendors() {
           supabase.from(table).select('vendor_id').in('vendor_id', chunk).order('id'))))
     } catch (e) {
       console.error('vendor usage check failed', e)
-      setUsage({ status: 'failed', map: {} })
+      if (loadedClientRef.current === forClient) setUsage({ status: 'failed', map: {} })
       return
     }
+    if (loadedClientRef.current !== forClient) return // S756: the chips of the client we left
     if (results.some(r => r.error)) { setUsage({ status: 'failed', map: {} }); return }
     const map = {}
     results.forEach(({ data }, i) => {
@@ -178,15 +228,21 @@ export default function Vendors() {
     setSaving(true)
     setError('')
     if (editing) {
-      const { error } = await supabase.from('vendors').update({
+      const { data, error } = await supabase.from('vendors').update({
         name: form.name.trim(),
         contact_person: form.contact_person.trim(),
         phone: form.phone.trim(),
         address: form.address.trim(),
         pan_vat_no: form.pan_vat_no.trim(),
         payment_terms: form.payment_terms.trim() || null
-      }).eq('id', editing)
+      }).eq('id', editing).select('id')
       if (error) { setError(asActionError(error)); setSaving(false); return false }
+      // S756: zero rows back is proof nothing was written — and the dialog used to close as a save.
+      if (!data?.length) {
+        setError(`"${form.name.trim()}" was not saved — Crest could not find this vendor to update. It may have been removed in another tab, or this account may not change it. Close this dialog and reload the page; what you typed here is not stored anywhere else.`)
+        setSaving(false)
+        return false
+      }
     } else {
       const { error } = await scopedInsert('vendors', {
         vendor_code: getNextVendorCode(),
@@ -216,23 +272,19 @@ export default function Vendors() {
   }
 
   function getNextVendorCode() {
-    const prefix = (settings?.vendor_code_prefix || 'VND').toUpperCase()
-    let maxNum = 0
-    vendors.forEach(v => {
-      const match = (v.vendor_code || '').match(new RegExp(`^${prefix}-(\\d+)$`))
-      if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10))
-    })
-    return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
+    return nextVendorCodeAfter(settings?.vendor_code_prefix || 'VND', vendors.map(v => v.vendor_code))
   }
 
   async function toggleActive(vendor) {
     setListError(null)
-    const { error } = await supabase.from('vendors').update({ is_active: !vendor.is_active }).eq('id', vendor.id)
+    const { data, error } = await supabase.from('vendors').update({ is_active: !vendor.is_active }).eq('id', vendor.id).select('id')
     if (error) { setListError(asActionError(error)); return }
+    if (!data?.length) setListError(notChanged(vendor, vendor.is_active ? 'deactivated' : 'activated'))
     loadVendors()
   }
 
-  // Admin only, and the row-level gate below already hides this where `usage` says it cannot work.
+  // Owner and operator only (S756, D25), and the row-level gate below already hides this where
+  // `usage` says it cannot work.
   // The counts are re-read here anyway: the map is a page-load snapshot, and a bill entered on
   // another till since then must still be able to stop the delete.
   async function deleteVendor(vendor) {
@@ -268,9 +320,10 @@ export default function Vendors() {
       body: <p style={{ margin: 0 }}>Nothing is recorded against this vendor, so no purchase history is lost — the row itself is removed and cannot be restored. If it might be bought from again, archive it instead.</p>,
       run: async () => {
         setDeleting(vendor.id)
-        const { error } = await supabase.from('vendors').delete().eq('id', vendor.id)
+        const { data, error } = await supabase.from('vendors').delete().eq('id', vendor.id).select('id')
         setDeleting(null)
         if (error) { const a = asActionError(error); setListError({ text: `"${vendor.name}" was not deleted — it is still listed. ` + a.text, detail: a.detail }); return }
+        if (!data?.length) setListError(notChanged(vendor, 'deleted'))
         loadVendors()
       },
     })
@@ -291,10 +344,11 @@ You can put it back from "Show archived".`)) return
     setDeleting(vendor.id)
     // is_active goes with it: the DB CHECK requires it, and `is_active` is what every picker
     // filters on, so an archived-but-active vendor would keep appearing where it was archived to leave.
-    const { error } = await supabase.from('vendors')
-      .update({ archived_at: new Date().toISOString(), is_active: false }).eq('id', vendor.id)
+    const { data, error } = await supabase.from('vendors')
+      .update({ archived_at: new Date().toISOString(), is_active: false }).eq('id', vendor.id).select('id')
     setDeleting(null)
     if (error) { setListError(asActionError(error)); return }
+    if (!data?.length) setListError(notChanged(vendor, 'archived'))
     loadVendors()
   }
 
@@ -303,18 +357,20 @@ You can put it back from "Show archived".`)) return
   async function restoreVendor(vendor) {
     setListError(null)
     setDeleting(vendor.id)
-    const { error } = await supabase.from('vendors').update({ archived_at: null }).eq('id', vendor.id)
+    const { data, error } = await supabase.from('vendors').update({ archived_at: null }).eq('id', vendor.id).select('id')
     setDeleting(null)
     if (error) { setListError(asActionError(error)); return }
+    if (!data?.length) setListError(notChanged(vendor, 'restored'))
     loadVendors()
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
-  // Archived vendors are off the page by default and invisible to anyone but an admin. They stay in
+  // Archived vendors are off the page by default and visible only to the Owner and the operator
+  // (S756, D25 — was operator-only). They stay in
   // `vendors` (so getNextVendorCode still sees their codes and can't reuse one) and are split out here.
   const archivedCount = vendors.filter(v => v.archived_at).length
-  const viewing = vendors.filter(v => (isAdmin && showArchived ? !!v.archived_at : !v.archived_at))
+  const viewing = vendors.filter(v => (canManageLifecycle && showArchived ? !!v.archived_at : !v.archived_at))
   const filtered = viewing.filter(v =>
     !search ||
     v.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -333,10 +389,14 @@ You can put it back from "Show archived".`)) return
     if (used.length === 0) return null
     const detail = used.map(t => `${counts[t.table]} ${counts[t.table] === 1 ? t.one : t.many}`).join(', ')
     return <UsageChip width={280} codes={used.map(t => t.code)}
-      text={`Has records: ${detail}. A vendor with records can't be deleted — deactivate it, then archive it to take it off this page while every past record keeps its supplier.`} />
+      text={`Has records: ${detail}. A vendor with records can't be deleted — ${canManageLifecycle
+        ? 'deactivate it, then archive it to take it off this page while every past record keeps its supplier.'
+        // S756 (D25): a supervisor or manager sees this chip but not the Archive control, so the
+        // chip must not send them looking for a button this page does not show them.
+        : 'you can deactivate it to take it out of purchase entry; taking it off this page altogether (archiving) is done by the account owner.'}`} />
   }
 
-  // What sits in the row's last slot for an admin — one of three, never a control whose answer is
+  // What sits in the row's last slot for the Owner or the operator (S756, D25) — one of three, never a control whose answer is
   // already known (the S632 reading of a gate that can only refuse):
   //   nothing references it        → Delete, a real hard delete
   //   referenced, already inactive → Archive: off this page, name kept on every record
@@ -504,7 +564,7 @@ You can put it back from "Show archived".`)) return
             {filtered.length} matched
           </span>
         )}
-        {isAdmin && (archivedCount > 0 || showArchived) && (
+        {canManageLifecycle && (archivedCount > 0 || showArchived) && (
           <button className="tab-btn" style={{ marginLeft: 10 }} aria-pressed={showArchived}
             onClick={() => setShowArchived(a => !a)}>
             {showArchived ? '← Back to vendor list' : `Show archived (${archivedCount})`}
@@ -637,7 +697,7 @@ You can put it back from "Show archived".`)) return
                               : `Activate ${v.name} — it starts appearing in purchase entry again.`}>
                             {v.is_active ? <EyeOff /> : <Eye />}
                           </button>
-                          {isAdmin && adminSlot(v)}
+                          {canManageLifecycle && adminSlot(v)}
                         </>
                       )}
                     </td>

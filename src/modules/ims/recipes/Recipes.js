@@ -26,7 +26,7 @@ import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
 import { Navigate } from 'react-router-dom'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
-import { fcBand, fcThresholds, fcFigure } from '../../../shared/imsFormulas'
+import { fcBand, fcThresholds, fcFigure, recipeCostOf, menuFcPct, unratedReason } from '../../../shared/imsFormulas'
 import { bandFigure, nmBand } from '../../../shared/operatingBands'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 
@@ -223,9 +223,14 @@ export default function Recipes() {
     if (openPeriodId) {
       const ohResults = await Promise.all([
         scopedFrom('overheads', 'amount').eq('period_id', openPeriodId).eq('bucket', 'overhead'),
-        // Excludes comps (source='pos_comp') — never actually paid for, shouldn't earn a
-        // revenue share of overhead. Matches the exclusion Overheads.js/OwnerDashboard.jsx use.
-        fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', openPeriodId).neq('source', 'pos_comp').order('id'))
+        // Comps (source='pos_comp') are excluded — never paid for, so they shouldn't earn a
+        // revenue share of overhead. The exclusion runs in JS below, NOT as a server-side
+        // `.neq('source', 'pos_comp')` (S756): `sales_entries.source` is nullable, `NULL <> x` is
+        // NULL in SQL, so the `.neq` also dropped every legacy row written before the column had a
+        // default. Those rows fell out of BOTH totalRevenue (the denominator every recipe's share
+        // is taken over) and revenueByRecipe/coversByRecipe, so a dish that sold mostly before the
+        // column existed was allocated too little overhead and its True Net Margin read high.
+        fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', openPeriodId).order('id'))
       ])
       // These two failing does NOT blank the page — the True Cost panel is supplementary and the
       // recipe list above it is already loaded and correct. But it must not fail as an absence
@@ -252,7 +257,7 @@ export default function Recipes() {
       const revenueByRecipe = {}
       const coversByRecipe = {}
       let totalRevenue = 0
-      ;(salesRows || []).forEach(se => {
+      ;(salesRows || []).filter(se => se.source !== 'pos_comp').forEach(se => {
         const price = se.unit_price != null ? parseFloat(se.unit_price) : (priceMap[se.recipe_id] || 0)
         const qty = parseFloat(se.qty_sold || 0)
         const rev = qty * price - (parseFloat(se.discount) || 0)
@@ -659,6 +664,12 @@ export default function Recipes() {
     setSaving(true)
     setError('')
 
+    // The recipe row a NEW recipe's save has already committed, if a later step then refuses (S756).
+    // Every post-insert refusal below says "save again" — and for a new recipe that was false: the
+    // form still had no selectedRecipe, so the retry took the INSERT path a second time and left
+    // two recipes behind. The catch re-points the form at the committed row instead.
+    let committed = null
+
     // Every awaited call below is wrapped in withTimeout so this multi-step save can never
     // freeze the button forever the way it used to (S459 — same root cause as Sales Entry's
     // S449-S455: a stalled request that never resolves or rejects). Each `if (error) throw`
@@ -708,7 +719,6 @@ export default function Recipes() {
         yield_qty: parseFloat(recipeForm.yield_qty) || 1,
         yield_uom: recipeForm.yield_uom || 'portion',
         target_fc_pct: parseFloat(recipeForm.target_fc_pct) || 30,
-        is_active: true,
         // Guest-facing QR menu fields — all optional, blank means "not shown" on that page.
         description: recipeForm.description.trim() || null,
         image_url: recipeForm.image_url.trim() || null,
@@ -723,6 +733,13 @@ export default function Recipes() {
       if (!isSubRecipe) {
         payload.recipe_code = recipeForm.recipe_code?.trim().toUpperCase() || null
       }
+
+      // A NEW recipe starts active; an edit never touches the flag (S756). `is_active: true` sat in
+      // the shared payload, so fixing a typo in a dish someone had Hidden silently put it back on
+      // Sales Entry, the POS till and the guest QR menu — the Hide button's whole promise undone by
+      // the Edit button beside it, with nothing on the form saying so. Show/Hide is the one control
+      // that changes it.
+      if (!selectedRecipe) payload.is_active = true
 
       // S754: below manager the price and VAT fields of an EXISTING dish are read-only, and they are
       // left out of the update entirely rather than re-sent. Re-sending is what the trigger was
@@ -765,6 +782,7 @@ export default function Recipes() {
         }
         if (error) throw error
         recipeId = data.id
+        committed = { ...payload, ...data, linked_item_id: null }
       } else {
         // Same shape as the sub-recipe branch above: an AUTO-issued code is computed from
         // in-memory state, so a second tab (or a fast double-save) can genuinely take the number
@@ -784,6 +802,7 @@ export default function Recipes() {
         }
         if (error) throw error.code === '23505' ? new SaveRefusal(DUP_CODE_MSG, errorDetail(error)) : error
         recipeId = data.id
+        committed = { ...payload, ...data, linked_item_id: null }
       }
 
       const ingPayload = validIngs.map(ing => ({
@@ -832,7 +851,13 @@ export default function Recipes() {
         const uom = recipeForm.yield_uom || 'portion'
         // Ensure "Sub-Recipes" category exists
         let srCategoryId = null
-        const { data: existingCat } = await withTimeout(scopedFrom('categories', 'id').eq('name', 'Sub-Recipes').maybeSingle(), SAVE_TIMEOUT_MS, 'Save')
+        const { data: existingCat, error: catReadErr } = await withTimeout(scopedFrom('categories', 'id').eq('name', 'Sub-Recipes').maybeSingle(), SAVE_TIMEOUT_MS, 'Save')
+        // A failed read is not "no such category" (S756): falling through would create a second
+        // "Sub-Recipes" category every time the read failed.
+        if (catReadErr) {
+          const a = asActionError(catReadErr)
+          throw new SaveRefusal(`"${recipeForm.name.trim()}" was saved, but its stock-count item was not updated because the "Sub-Recipes" category could not be read — Stock Count will use its previous name and cost until this succeeds. Open it and save again. ${a.text}`, a.detail)
+        }
         if (existingCat) {
           srCategoryId = existingCat.id
         } else {
@@ -884,10 +909,34 @@ export default function Recipes() {
           throw new SaveRefusal(`Couldn't check whether "${itemPayload.name}" is already taken in Item Master, so the sub-recipe's stock-count item was not updated. Try again. ${a.text}`, a.detail)
         }
         const taken = (mirrorClash.data || []).find(i => i.id !== existingLinkedId)
-        if (taken) throw new SaveRefusal(DUP_MIRROR_MSG(itemPayload.name, taken.is_sub_recipe))
 
-        if (existingLinkedId) {
-          const { error: updateErr } = await withTimeout(scopedUpdate('items', itemPayload).eq('id', existingLinkedId), SAVE_TIMEOUT_MS, 'Save')
+        // AN UNOWNED MIRROR IS ADOPTED, NOT REFUSED (S756).
+        //
+        // The link write below (`recipes.linked_item_id`) runs AFTER the mirror is inserted, so a
+        // failure between the two leaves a sub-recipe with no link and a mirror carrying its exact
+        // name. Every later save then found that mirror here and refused with DUP_MIRROR_MSG — for
+        // ever, since Item Master filters mirrors out and nobody can rename it. The same orphan is
+        // left by a sub-recipe converted away and back (the conversion nulls the link). So when a
+        // recipe with NO mirror of its own finds a mirror that NO recipe points at, it takes it
+        // over. Asked of the database rather than the in-memory list, because adopting a mirror
+        // another recipe still owns would merge two sub-recipes' stock counts into one row.
+        let adoptedId = null
+        if (taken && taken.is_sub_recipe && !existingLinkedId) {
+          const ownerRes = await withTimeout(
+            scopedFrom('recipes', 'id').eq('linked_item_id', taken.id).limit(1),
+            SAVE_TIMEOUT_MS, 'Save'
+          )
+          if (ownerRes.error) {
+            const a = asActionError(ownerRes.error)
+            throw new SaveRefusal(`Couldn't check whether the stock-count item "${itemPayload.name}" belongs to another sub-recipe, so this sub-recipe's stock-count item was not updated. Try again. ${a.text}`, a.detail)
+          }
+          if ((ownerRes.data || []).length === 0) adoptedId = taken.id
+        }
+        if (taken && !adoptedId) throw new SaveRefusal(DUP_MIRROR_MSG(itemPayload.name, taken.is_sub_recipe))
+
+        const mirrorToUpdate = existingLinkedId || adoptedId
+        if (mirrorToUpdate) {
+          const { error: updateErr } = await withTimeout(scopedUpdate('items', itemPayload).eq('id', mirrorToUpdate), SAVE_TIMEOUT_MS, 'Save')
           if (updateErr) {
             if (updateErr.code === '23505') throw new SaveRefusal(DUP_MIRROR_MSG(itemPayload.name, false), errorDetail(updateErr))
             const a = asActionError(updateErr)
@@ -903,22 +952,48 @@ export default function Recipes() {
           }
           linkedItemId = newItem?.id
         }
-        if (linkedItemId) {
-          await withTimeout(scopedUpdate('recipes', { linked_item_id: linkedItemId }).eq('id', recipeId), SAVE_TIMEOUT_MS, 'Save')
+        if (adoptedId) linkedItemId = adoptedId
+        // Only when the link actually changes — re-writing an unchanged id is a round trip that can
+        // only fail. The error was dropped until S756, and it is the step whose failure strands a
+        // mirror with no owner; the adoption above is what makes "save again" true here.
+        if (linkedItemId && linkedItemId !== existingLinkedId) {
+          const { error: linkErr } = await withTimeout(scopedUpdate('recipes', { linked_item_id: linkedItemId }).eq('id', recipeId), SAVE_TIMEOUT_MS, 'Save')
+          if (linkErr) {
+            const a = asActionError(linkErr)
+            throw new SaveRefusal(`"${recipeForm.name.trim()}" was saved and its stock-count item "${itemPayload.name}" exists, but the two could not be linked — until they are, this sub-recipe's cost will not reach that item in Stock Count. Open it and save again to link them. ${a.text}`, a.detail)
+          }
         }
       } else if (selectedRecipe?.linked_item_id) {
         // This recipe WAS a sub-recipe (had a mirror item) but its category was just changed away
         // from "Sub-Recipe" — the sync block above only ever runs `if (isSubRecipe)`, so without
         // this the mirror row in `items` stayed is_active/is_sub_recipe=true forever, frozen at its
         // last cost, orphaned from the recipe that used to own it.
-        await withTimeout(scopedUpdate('items', { is_active: false }).eq('id', selectedRecipe.linked_item_id), SAVE_TIMEOUT_MS, 'Save')
-        await withTimeout(scopedUpdate('recipes', { linked_item_id: null }).eq('id', recipeId), SAVE_TIMEOUT_MS, 'Save')
+        //
+        // Both writes' errors were dropped until S756. Each refusal below names the state the save
+        // left, and both are retry-safe: the link is still set after either failure, so the next
+        // save of this recipe comes back through this branch and repeats both (idempotent) writes.
+        const { error: hideErr } = await withTimeout(scopedUpdate('items', { is_active: false }).eq('id', selectedRecipe.linked_item_id), SAVE_TIMEOUT_MS, 'Save')
+        if (hideErr) {
+          const a = asActionError(hideErr)
+          throw new SaveRefusal(`"${recipeForm.name.trim()}" was saved as ${recipeForm.category}, but its old sub-recipe stock-count item is still active — Stock Count will keep listing it at its last cost. Open it and save again. ${a.text}`, a.detail)
+        }
+        const { error: unlinkErr } = await withTimeout(scopedUpdate('recipes', { linked_item_id: null }).eq('id', recipeId), SAVE_TIMEOUT_MS, 'Save')
+        if (unlinkErr) {
+          const a = asActionError(unlinkErr)
+          throw new SaveRefusal(`"${recipeForm.name.trim()}" was saved as ${recipeForm.category} and its old stock-count item is hidden, but the recipe still records the link to it. Nothing is counted wrongly; open it and save again to clear the link. ${a.text}`, a.detail)
+        }
       }
 
       await init()
       setView('list')
     } catch (err) {
       console.error('Recipe save error:', err)
+      // See `committed` above: the row exists now, so the form edits it from here on and the list
+      // behind it reloads to show it.
+      if (committed && !selectedRecipe) {
+        setSelectedRecipe(committed)
+        init()
+      }
       // A timeout is the one failure that cannot say whether the write landed — the response can
       // be lost after the server has committed it, and this save retries on a duplicate product
       // code, so a blind retry can leave two recipes behind. withTimeout's own message is already
@@ -1079,7 +1154,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
   const liveCost = useMemo(() => calcLiveCost(ingredients, items, recipes), [ingredients, items, recipes])
   const livePrice = parseFloat(recipeForm.selling_price) || 0
   const liveVat = (recipeForm.vat_rate === '' || recipeForm.vat_rate == null) ? 0.13 : parseFloat(recipeForm.vat_rate)
-  const liveFcPct = livePrice > 0 ? (liveCost / livePrice) * 100 : null
+  // null, never 0, when either side is missing (S756 — the S713 rule).
+  const liveFcPct = menuFcPct(liveCost, livePrice)
   const livePriceWithVat = livePrice * (1 + liveVat)
   const liveFcTarget = (parseFloat(recipeForm.target_fc_pct) || 30) / 100
   const suggestedPrice = liveCost > 0 && !isSubRecipeForm ? getSuggestedPrice(liveCost, liveVat, liveFcTarget) : null
@@ -1128,12 +1204,22 @@ Check the recipe list before saving again — if it timed out after the recipe w
   // sub-recipe trees, and it used to run per rendered row (and again inside the FC filter) on
   // every keystroke of either search box — hundreds of thousands of iterations per character on a
   // real menu.
+  // A plain object rather than a Map so it is the `costMap` recipeCostOf() takes (S756).
   const recipeCostById = useMemo(() => {
-    const m = new Map()
-    recipes.forEach(r => m.set(r.id, calcRecipeCost(r, recipes)))
+    const m = {}
+    recipes.forEach(r => { m[r.id] = calcRecipeCost(r, recipes) })
     return m
   }, [recipes])
-  const costOf = (r) => recipeCostById.get(r.id) ?? calcRecipeCost(r, recipes)
+  // The raw ingredient total — right for a sub-recipe's batch cost and for the ingredient table,
+  // whose rows it is the sum of.
+  const costOf = (r) => recipeCostById[r.id] ?? calcRecipeCost(r, recipes)
+  // A DISH's food cost, or null when this page does not know it (S756). Menu Pricing's + Add Item
+  // writes a dish with no ingredients and a manual `cost_price`; this page selected that column and
+  // never read it, so such a dish showed Food Cost NPR 0.00 and `0.0% ✓` in green, and matched the
+  // "✓ ≤30%" pill — the S713 zero-numerator band, on the page that manufactures the state (its own
+  // + New Recipe can save a dish before its costs are known). recipeCostOf() is computed cost, else
+  // the manual cost, else null, and the null is carried to every cell, pill, share text and print.
+  const dishCostOf = (r) => recipeCostOf({ [r.id]: costOf(r) }, r)
 
   const { filtered, regularRecipes, subRecipeList, tabs } = useMemo(() => {
     const q = search.toLowerCase()
@@ -1143,9 +1229,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
       const matchIngredient = !ingQ || recipeHasIngredient(r, ingQ, recipes)
       const matchFC = (() => {
         if (fcFilter === 'all') return true
-        const cost = recipeCostById.get(r.id) || 0
-        const price = parseFloat(r.selling_price) || 0
-        const fcPct = price > 0 ? (cost / price) * 100 : null
+        // An uncosted dish is in no band, so it matches no band pill (S756) — it used to be a `0`
+        // here and was returned by "✓ ≤30%".
+        const fcPct = menuFcPct(recipeCostOf(recipeCostById, r), parseFloat(r.selling_price) || 0)
         if (fcPct == null) return false
         if (fcFilter === 'good')  return fcPct <= fcWarn
         if (fcFilter === 'watch') return fcPct > fcWarn && fcPct <= fcCrit
@@ -1211,10 +1297,11 @@ Check the recipe list before saving again — if it timed out after the recipe w
       })
     } else {
       printShareRows.forEach(recipe => {
-        const cost = calcRecipeCost(recipe, recipes)
+        // A message that leaves the building says "not costed", never "NPR 0.00" (S756).
+        const cost = dishCostOf(recipe)
         const price = parseFloat(recipe.selling_price) || 0
-        const fcPct = price > 0 ? (cost / price) * 100 : null
-        lines.push(`${recipe.name} — FC ${fcPct != null ? fcPct.toFixed(1) + '%' : '—'} (NPR ${cost.toFixed(2)}${price ? ` / NPR ${price.toFixed(2)}` : ''})`)
+        const fcPct = menuFcPct(cost, price)
+        lines.push(`${recipe.name} — FC ${fcPct != null ? fcPct.toFixed(1) + '%' : '—'} (${cost != null ? `NPR ${cost.toFixed(2)}` : 'not costed'}${price ? ` / NPR ${price.toFixed(2)}` : ''})`)
       })
     }
     return lines.join('\n').trim()
@@ -1468,16 +1555,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
                       <th>Ingredients</th>
                       <th style={{ textAlign: 'right' }}>Food Cost</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Menu price ex-VAT (stored without VAT). VAT-inclusive price = selling price × (1 + VAT rate)." width={240}>Selling Price</Tip></th>
-                      <th style={{ textAlign: 'right' }}><Tip text="Food Cost % = ingredient cost ÷ selling price. ≤30% excellent, 31–38% acceptable, >38% too high. Nepal F&B target: 28–35%." width={280}>FC %</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text={`Food Cost % = food cost ÷ selling price (ex-VAT). ✓ up to ${fcWarn}%, △ ${fcWarn}–${fcCrit}%, ▲ above ${fcCrit}% — your thresholds from Settings. A dash means it can't be worked out yet: no selling price, or no costed ingredients and no manual cost.`} width={290}>FC %</Tip></th>
                       <th><Tip text="Inactive hides this recipe from Sales Entry, POS ordering, the Guest Menu, and the menu-analysis tools — past sales history and revenue are unaffected." width={280}>Status</Tip></th>
                       <th className="no-print"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {tabFiltered.map(recipe => {
-                      const cost = costOf(recipe)
+                      const cost = dishCostOf(recipe)
+                      const manualCost = cost != null && !(costOf(recipe) > 0)
                       const price = parseFloat(recipe.selling_price) || 0
-                      const fcPct = price > 0 ? (cost / price) * 100 : null
+                      const fcPct = menuFcPct(cost, price)
                       const fcB = fcBand(fcPct, settings)
                       const fcColor = fcB.color
                       const subIngCount = (recipe.recipe_ingredients || []).filter(ri => ri.sub_recipe_id).length
@@ -1505,11 +1593,14 @@ Check the recipe list before saving again — if it timed out after the recipe w
                               </Tip>
                             )}
                           </td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>NPR {cost.toFixed(2)}</td>
+                          <td style={{ textAlign: 'right', color: cost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}
+                            title={cost == null ? 'Not costed — add ingredients, or a manual cost in Menu Pricing' : manualCost ? 'Manual cost entered in Menu Pricing — this dish has no costed ingredients' : undefined}>
+                            {cost != null ? `NPR ${cost.toFixed(2)}${manualCost ? ' (manual)' : ''}` : '—'}
+                          </td>
                           <td style={{ textAlign: 'right' }}>
                             {recipe.selling_price ? `NPR ${Number(recipe.selling_price).toFixed(2)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor }} title={fcPct != null ? fcB.label : undefined}>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor }} title={fcPct != null ? fcB.label : (unratedReason(cost, price) || undefined)}>
                             {fcPct != null ? `${fcPct.toFixed(1)}% ${fcB.mark}` : '—'}
                           </td>
                           <td>
@@ -1622,13 +1713,36 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     </div>
                   </div>
                   <div className="form-field">
-                    <label htmlFor="recipe-f5"><Tip text="Standard Nepal VAT is 13%. Set to 0% for VAT-exempt dishes (some raw food items).">VAT Rate</Tip></label>
+                    <label htmlFor="recipe-f5"><Tip text="Standard Nepal VAT is 13%. Set to 0% for VAT-exempt dishes (some raw food items). Changing it keeps the menu price the guest pays and recalculates the ex-VAT price stored for food cost." width={280}>VAT Rate</Tip></label>
                     <select id="recipe-f5" value={recipeForm.vat_rate} disabled={priceLocked}
+                      aria-describedby={recipeForm.selling_price ? 'recipe-vat-exvat' : undefined}
                       title={priceLocked ? 'The VAT rate is part of the menu price — set by a manager or the Owner in Menu Pricing.' : undefined}
-                      onChange={e => setRecipeForm(f => ({ ...f, vat_rate: e.target.value }))}>
+                      onChange={e => {
+                        // KEEP THE PRICE THE GUEST PAYS (owner decision D15, S756). The form stores
+                        // the EX-VAT price and the Menu Price box re-derives the incl-VAT figure from
+                        // it, so switching 13% → 0% used to keep NPR 442.48 ex-VAT and silently
+                        // re-price a NPR 500 dish to NPR 442 — while Menu Pricing's own edit keeps
+                        // the NPR 500 and re-derives the ex-VAT side. One dish, two answers depending
+                        // on which screen changed its VAT. Now both keep the menu price.
+                        const nextVat = e.target.value
+                        setRecipeForm(f => {
+                          const ex = parseFloat(f.selling_price)
+                          if (!(ex > 0)) return { ...f, vat_rate: nextVat }
+                          const rateOf = v => (v === '' || v == null) ? 0.13 : parseFloat(v)
+                          // Rounded to paisa first: the ex-VAT figure was stored from a whole-rupee
+                          // menu price to 4 dp, so ex × (1 + vat) lands a hair off it (499.99998).
+                          const menuPrice = Math.round(ex * (1 + rateOf(f.vat_rate)) * 100) / 100
+                          return { ...f, vat_rate: nextVat, selling_price: (menuPrice / (1 + rateOf(nextVat))).toFixed(4) }
+                        })
+                      }}>
                       <option value="0.13">13% (VAT)</option>
                       <option value="0">0% (No VAT)</option>
                     </select>
+                    {recipeForm.selling_price && (
+                      <div id="recipe-vat-exvat" style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>
+                        Guest pays NPR {(parseFloat(recipeForm.selling_price) * (1 + liveVat)).toFixed(0)} · ex-VAT NPR {parseFloat(recipeForm.selling_price).toFixed(2)}
+                      </div>
+                    )}
                   </div>
                   <div className="form-field">
                     <label htmlFor="recipe-f10" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1919,10 +2033,15 @@ Check the recipe list before saving again — if it timed out after the recipe w
       {/* ── DETAIL VIEW ── */}
       {!loadError && view === 'detail' && selectedRecipe && (() => {
         const isSubRec = selectedRecipe.category === 'Sub-Recipe'
+        // `cost` is the ingredient total (the table below sums to it); `dishCost` is what the dish
+        // costs for pricing — the manual cost when it has no costed ingredients, null when neither
+        // exists — and every tile that divides by or subtracts it reads that (S756).
         const cost = calcRecipeCost(selectedRecipe, recipes)
+        const dishCost = recipeCostOf({ [selectedRecipe.id]: cost }, selectedRecipe)
+        const manualCost = dishCost != null && !(cost > 0)
         const price = parseFloat(selectedRecipe.selling_price) || 0
         const vat = vatOf(selectedRecipe)
-        const fcPct = price > 0 ? (cost / price) * 100 : null
+        const fcPct = menuFcPct(dishCost, price)
         const yieldQty = parseFloat(selectedRecipe.yield_qty) || 1
         const costPerUnit = cost / yieldQty
         const fcB2 = fcBand(fcPct, settings)
@@ -1975,7 +2094,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 { label: `Cost per ${selectedRecipe.yield_uom}`, value: `NPR ${costPerUnit.toFixed(2)}`, color: 'var(--theme-green-text)' },
                 { label: 'Yield', value: `${selectedRecipe.yield_qty} ${selectedRecipe.yield_uom}`, color: 'var(--theme-text1)' },
               ] : [
-                { label: 'Food Cost', value: `NPR ${cost.toFixed(2)}`, color: 'var(--theme-accent-ink)' },
+                { label: manualCost ? 'Food Cost (manual)' : 'Food Cost', value: dishCost != null ? `NPR ${dishCost.toFixed(2)}` : '— not costed', color: dishCost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' },
                 { label: 'Food Cost %', value: fcPct != null ? `${fcPct.toFixed(1)}% ${fcB2.mark}` : '—', color: fcColor },
                 { label: 'Selling Price (ex. VAT)', value: price ? `NPR ${price.toFixed(2)}` : '—', color: 'var(--theme-text1)' },
                 { label: `Menu Price (incl. ${(vat*100).toFixed(0)}% VAT)`, value: price ? `NPR ${(price*(1+vat)).toFixed(0)}` : '—', color: 'var(--theme-text1)' },
@@ -1984,7 +2103,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 // rounded up to NPR 5 (S711). Unlabelled, the two read as directly comparable and
                 // the suggestion looks ~13% higher than it is — it is the counterpart of "Menu
                 // Price (incl. VAT)" beside it, not of the ex-VAT price.
-                { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC (incl. VAT)`, value: `NPR ${getSuggestedPrice(cost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}`, color: 'var(--theme-green-text)' },
+                // A suggestion from an unknown cost is NPR 0 — "charge nothing" (S756).
+                { label: `Suggested @ ${selectedRecipe.target_fc_pct || 30}% FC (incl. VAT)`, value: dishCost != null ? `NPR ${getSuggestedPrice(dishCost, vat, (parseFloat(selectedRecipe.target_fc_pct) || 30) / 100)}` : '—', color: dishCost != null ? 'var(--theme-green-text)' : 'var(--theme-text3)' },
               ]).map(s => (
                 <div key={s.label} className="stat-card">
                   <div className="stat-label">{s.label}</div>
@@ -2005,13 +2125,14 @@ Check the recipe list before saving again — if it timed out after the recipe w
             {/* Overhead panel — shown when overheads + sales exist for open period */}
             {!isSubRec && overheadData && price > 0 && (() => {
               const { ohPerPortion, revenueSharePct, covers } = allocateOverhead(selectedRecipe.id, overheadData)
-              const trueCost = cost + ohPerPortion
-              const trueNetMargin = price > 0 ? ((price - trueCost) / price) * 100 : null
+              // Without a food cost the true cost is overhead alone, and the margin built on it is the
+              // flattering one S724 took off Recipe Margin — so both read as unknown (S756).
+              const trueCost = dishCost != null ? dishCost + ohPerPortion : null
+              const trueNetMargin = trueCost != null && price > 0 ? ((price - trueCost) / price) * 100 : null
               const vat = vatOf(selectedRecipe)
               // Targets a 30% true margin (true cost = 70% of price), matching the health-check
               // threshold below — not a 20%-food-cost-style ratio.
-              const suggestedRaw = trueCost / 0.70
-              const suggestedVat = Math.ceil((suggestedRaw * (1 + vat)) / 5) * 5
+              const suggestedVat = trueCost != null ? Math.ceil(((trueCost / 0.70) * (1 + vat)) / 5) * 5 : null
               return (
                 <div style={{
                   background: 'color-mix(in srgb, var(--theme-green) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)',
@@ -2030,8 +2151,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>True Cost / Portion</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {trueCost.toFixed(2)}</div>
-                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Food + Overhead</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: trueCost != null ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{trueCost != null ? `NPR ${trueCost.toFixed(2)}` : '—'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{trueCost != null ? 'Food + Overhead' : 'Food cost not known yet'}</div>
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>True Net Margin %</div>
@@ -2046,7 +2167,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Suggested Price @ 30% margin</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-green-text)' }}>NPR {suggestedVat}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: suggestedVat != null ? 'var(--theme-green-text)' : 'var(--theme-text3)' }}>{suggestedVat != null ? `NPR ${suggestedVat}` : '—'}</div>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>incl. {(vat*100).toFixed(0)}% VAT, rounded to ÷5</div>
                     </div>
                   </div>

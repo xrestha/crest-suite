@@ -1,5 +1,6 @@
 import { NUTRIENTS, calcRecipeNutrition } from '../../../utils/nutrition'
 import { calcRecipeCost, calcSubRecipeCostPerUnit, vatOf, fmtNutrient, allocateOverhead } from './recipeCostCalc'
+import { recipeCostOf, menuFcPct } from '../../../shared/imsFormulas'
 
 // The A4 print-only Recipe Cost Card. Previously duplicated verbatim in two places in
 // Recipes.js — the detail view's "🖶 Print" and the list rows' 🖶 button — which had drifted
@@ -7,10 +8,16 @@ import { calcRecipeCost, calcSubRecipeCostPerUnit, vatOf, fmtNutrient, allocateO
 // wrapper the caller supplies (so the caller controls when it's in the DOM).
 export default function RecipeCostCardPrint({ recipe, recipes, settings, overheadData, showNutrition }) {
   const isSubRec = recipe.category === 'Sub-Recipe'
+  // `cost` is the ingredient total the TOTAL FOOD COST row sums to. `dishCost` is what the dish
+  // costs for pricing: the manual cost when there are no costed ingredients, else null — never 0
+  // (S756). A dish with neither printed "Food Cost % 0.0%" and "Gross Margin % 100.0%" on a sheet
+  // someone prices a menu from; both read "—" now.
   const cost = calcRecipeCost(recipe, recipes)
+  const dishCost = recipeCostOf({ [recipe.id]: cost }, recipe)
+  const manualCost = dishCost != null && !(cost > 0)
   const price = parseFloat(recipe.selling_price) || 0
   const vat = vatOf(recipe)
-  const fcPct = price > 0 ? (cost / price) * 100 : null
+  const fcPct = menuFcPct(dishCost, price)
   const yieldQty = parseFloat(recipe.yield_qty) || 1
   const costPerUnit = cost / yieldQty
   const nutri = showNutrition ? calcRecipeNutrition(recipe, recipes) : null
@@ -39,7 +46,7 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
           { label: `Cost per ${recipe.yield_uom}`, value: `NPR ${costPerUnit.toFixed(2)}` },
           { label: 'Yield', value: `${recipe.yield_qty} ${recipe.yield_uom}` },
         ] : [
-          { label: 'Food Cost', value: `NPR ${cost.toFixed(2)}` },
+          { label: manualCost ? 'Food Cost (manual)' : 'Food Cost', value: dishCost != null ? `NPR ${dishCost.toFixed(2)}` : '— not costed' },
           { label: 'Selling Price (ex-VAT)', value: price ? `NPR ${price.toFixed(2)}` : '—' },
           { label: `Menu Price (incl. ${(vat * 100).toFixed(0)}% VAT)`, value: price ? `NPR ${(price * (1 + vat)).toFixed(0)}` : '—' },
           { label: 'Food Cost %', value: fcPct != null ? `${fcPct.toFixed(1)}%` : '—' },
@@ -124,22 +131,23 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
       {/* Overhead section */}
       {!isSubRec && overheadData && price > 0 && (() => {
         const { ohPerPortion: ohPer } = allocateOverhead(recipe.id, overheadData)
-        const trueCost = cost + ohPer
-        const trueMargin = price > 0 ? ((price - trueCost) / price) * 100 : null
+        // Unknown food cost → unknown true cost, margin and suggestion (S756), as on screen.
+        const trueCost = dishCost != null ? dishCost + ohPer : null
+        const trueMargin = trueCost != null && price > 0 ? ((price - trueCost) / price) * 100 : null
         // Targets a 30% true margin (true cost = 70% of price) — matches Recipes.js's detail view.
-        const suggested = Math.ceil(((trueCost / 0.70) * (1 + vat)) / 5) * 5
+        const suggested = trueCost != null ? Math.ceil(((trueCost / 0.70) * (1 + vat)) / 5) * 5 : null
         return (
           <div style={{ marginTop: 16, padding: '10px 12px', border: '1px solid #ccc', borderRadius: 3 }}>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#555', marginBottom: 8 }}>True Cost with Overheads</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
               {[
                 { label: 'Overhead / Portion', value: `NPR ${ohPer.toFixed(2)}` },
-                { label: 'True Cost / Portion', value: `NPR ${trueCost.toFixed(2)}` },
+                { label: 'True Cost / Portion', value: trueCost != null ? `NPR ${trueCost.toFixed(2)}` : '—' },
                 { label: 'True Net Margin %', value: trueMargin != null ? `${trueMargin.toFixed(1)}%` : '—' },
                 // Says "incl. VAT" for the same reason the on-screen tiles do (S711): this is a
                 // printed sheet someone prices a menu from, and the figure is VAT-inclusive and
                 // rounded up to NPR 5, unlike the ex-VAT Selling Price above it.
-                { label: `Suggested @ 30% Margin (incl. ${(vat * 100).toFixed(0)}% VAT)`, value: `NPR ${suggested}` },
+                { label: `Suggested @ 30% Margin (incl. ${(vat * 100).toFixed(0)}% VAT)`, value: suggested != null ? `NPR ${suggested}` : '—' },
               ].map(m => (
                 <div key={m.label}>
                   <div style={{ fontSize: 9, color: '#777', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>{m.label}</div>

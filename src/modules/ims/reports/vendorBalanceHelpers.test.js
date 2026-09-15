@@ -160,6 +160,28 @@ describe('opening balance', () => {
     expect(opening).toBeCloseTo(-300, 2)
   })
 
+  // S756. A bill written before purchase_group_id existed carries NULL there and is grouped by
+  // billKeyOf's vendor|invoice|day fallback. The discount used to be deduped by
+  // `purchase_group_id || line.id`, which keyed each LINE of such a bill separately and summed the
+  // bill's single discount once per line: 5 × 1,000 less a 500 discount read 2,500, not 4,500.
+  test('a legacy (ungrouped) multi-line bill takes its discount off ONCE', () => {
+    const creditEntries = ['l1', 'l2', 'l3', 'l4', 'l5'].map(id =>
+      line(id, null, PRE_FY, { qty: 1, rate: 1000, discount: 500, ref: 'INV-7', day: 12 }))
+    expect(computeOpeningBalance(creditEntries, [], [], FY_START)).toBeCloseTo(4500, 2)
+  })
+
+  test('…and the FY schedule states the same legacy bill at the same figure', () => {
+    const creditEntries = ['l1', 'l2', 'l3'].map(id =>
+      line(id, null, IN_FY, { qty: 2, rate: 500, discount: 300, ref: 'INV-9', day: 3 }))
+    const result = computeVendorBalance({
+      creditEntries, cashEntries: [], payments: [], returns: [],
+      fyStart: FY_START, fyEnd: FY_END,
+    })
+    expect(result.schedule.filter(e => e.type === 'bill')).toHaveLength(1)
+    expect(result.totals.totalPurchasesFy).toBeCloseTo(2700, 2)
+    expect(result.closingBalance).toBeCloseTo(2700, 2)
+  })
+
   test('a payment dated inside the FY does not reduce the opening balance', () => {
     const creditEntries = [line('a1', 'g1', PRE_FY, { qty: 1, rate: 3000 })]
     const inFyPayment = [payment('a1', 30, 1000)]

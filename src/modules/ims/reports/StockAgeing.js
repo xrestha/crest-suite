@@ -16,9 +16,9 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import {
-  bsToAd, getBsToday, getBsFiscalYear, daysInBsMonth, BS_MONTHS,
+  bsToAd, getBsFiscalYear, BS_MONTHS,
 } from '../../../utils/bsCalendar'
-import { AGE_BANDS, buildAgeing, ageInDays } from './stockAgeingCalc'
+import { AGE_BANDS, buildAgeing, ageInDays, asOfForWindow, splitReturns } from './stockAgeingCalc'
 
 
 // How old stock has to be before the page calls it capital worth acting on. Matches the last
@@ -40,19 +40,13 @@ const bsLabel = bs => (bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : 
 //
 // A past fiscal year is aged as at the END of its last period, which is the only date that makes
 // the answer mean anything — "how old was the stock when that year finished".
-function asOfForFy(fy, periodsInFy) {
-  const today = getBsToday()
-  if (fy === getBsFiscalYear(today.year, today.month)) {
-    return { date: new Date(), bs: today, isToday: true }
-  }
-  const last = periodsInFy[periodsInFy.length - 1]
-  if (!last) return { date: new Date(), bs: today, isToday: true }
-  const day = daysInBsMonth(last.bs_year, last.bs_month)
-  return {
-    date: bsToAd(last.bs_year, last.bs_month, day),
-    bs: { year: last.bs_year, month: last.bs_month, day },
-    isToday: false,
-  }
+//
+// S756: the NEWEST fiscal year is aged to today in Nepal, not only the current FY — early in
+// Shrawan, before the new year's first period is opened, the newest year is last year, and ageing
+// it to its own Ashadh end hid every day since. The rule is `asOfForWindow` in stockAgeingCalc.js
+// (tested), shared with FIFO / Expiry.
+function asOfForFy(periodsInFy, isNewest) {
+  return asOfForWindow(periodsInFy[periodsInFy.length - 1], { isNewest })
 }
 
 export default function StockAgeing() {
@@ -188,15 +182,12 @@ export default function StockAgeing() {
       return bsToAd(p.bs_year, p.bs_month, Math.min(Math.max(parseInt(bsDay, 10) || 1, 1), 32))
     }
 
-    // Returns come off their own purchase line where one is named, so a returned batch stops
-    // ageing as if it were still on the shelf.
-    const returnedByEntry = {}
-    const returnedByItem = {}
-    for (const r of returns || []) {
-      const q = parseFloat(r.qty) || 0
-      if (r.purchase_entry_id) returnedByEntry[r.purchase_entry_id] = (returnedByEntry[r.purchase_entry_id] || 0) + q
-      else if (r.item_id) returnedByItem[r.item_id] = (returnedByItem[r.item_id] || 0) + q
-    }
+    // Returns come off their own purchase line where that line is in the window, so a returned
+    // batch stops ageing as if it were still on the shelf. A return against a bill from an earlier
+    // year used to match no batch and was never counted at all (S756); splitReturns sends it, like
+    // an orphan return, to the item's consumption, where FIFO takes it off the carried-in stock.
+    const { byEntry: returnedByEntry, byItem: returnedByItem } =
+      splitReturns(returns, new Set((purchases || []).map(p => p.id)))
 
     const batches = []
     const windowStart = adDateOf(periodIds[0], 1)
@@ -257,7 +248,10 @@ export default function StockAgeing() {
     // item's stock as consumption rather than letting it age on the shelf forever.
     for (const [itemId, q] of Object.entries(returnedByItem)) consumed[itemId] = (consumed[itemId] || 0) + q
 
-    const ref = asOfForFy(fy, inFy)
+    // Newest FY the client has: the FY of its latest period (fiscal-year labels do not sort as
+    // strings across a century, so compare the periods, not the labels).
+    const latest = (allPeriods || []).reduce((a, p) => (!a || p.bs_year > a.bs_year || (p.bs_year === a.bs_year && p.bs_month > a.bs_month) ? p : a), null)
+    const ref = asOfForFy(inFy, !!latest && getBsFiscalYear(latest.bs_year, latest.bs_month) === fy)
     setAsOf(ref)
     const { items: aged, totals: agedTotals } = buildAgeing(batches, consumed, ref.date)
     setRows(aged.sort((a, b) => b.bands['90+'].value - a.bands['90+'].value || b.value - a.value))
@@ -345,10 +339,13 @@ export default function StockAgeing() {
 
   const actions = (
     <>
-      <button className="btn btn-ghost" style={{ fontSize: 12 }}
+      {/* Print gated on the load (S756): it printed the previous FY's table under the new FY's
+          title while a load was in flight, and a failure card as a report. Export also waits on
+          the client-name read, or the workbook ships with a blank CompanyName line. */}
+      <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
         onClick={() => printWithTitle(`Stock Ageing — ${scopeLine}`)}>🖨 Print</button>
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={loading || !!loadError || filtered.length === 0}>↓ Export Excel</button>
+        disabled={loading || !!loadError || filtered.length === 0 || !!biz.error}>↓ Export Excel</button>
       <select aria-label="Fiscal year" className="form-select" value={selectedFy}
         onChange={e => handleFyChange(e.target.value)}>
         {fyOptions.map(fy => <option key={fy} value={fy}>FY {fy}</option>)}
@@ -397,10 +394,13 @@ export default function StockAgeing() {
       </div>
       <div className="stat-card">
         <div className="stat-label">Items 90+ Days Old</div>
-        <div className="stat-value" style={{ color: staleItems > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>
-          {staleItems} {staleItems > 0 ? '▲' : '✓'}
+        {/* The same floor as the capital card beside it (S756). S718 withheld the ✓ there while
+            carried-in stock of unknown age sat in a younger band, and left this card printing a
+            green "0 ✓" off the same arithmetic — two verdicts on one question, side by side. */}
+        <div className="stat-value" style={{ color: staleItems > 0 || staleIsFloor ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>
+          {staleIsFloor ? '≥ ' : ''}{staleItems} {staleItems > 0 ? '▲' : staleIsFloor ? '△' : '✓'}
         </div>
-        <div className="stat-sub">worth reviewing first</div>
+        <div className="stat-sub">{staleIsFloor ? 'at least — carried-in stock is of unknown age' : 'worth reviewing first'}</div>
       </div>
       <div className="stat-card">
         <div className="stat-label">
@@ -487,6 +487,12 @@ export default function StockAgeing() {
       title="Stock Ageing"
       subtitle="How long the stock you are still holding has been sitting"
       scope={<PeriodScope label={`FY ${selectedFy || '—'} · as at ${asOfLabel}`} />}
+      banners={biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
+          with a blank company name. The report below is unaffected. Reload the page to try again.
+        </p>
+      )}
       actions={actions}
       noPeriod={!loading && !loadError && periods.length === 0}
       noPeriodWhat="the stock ageing report"

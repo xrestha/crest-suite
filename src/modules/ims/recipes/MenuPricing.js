@@ -347,7 +347,11 @@ export default function MenuPricing() {
     setAddSaving(true); setAddError('')
     const payload = {
       name:          addForm.name.trim(),
-      category:      addForm.category.trim() || 'Other',
+      // A dish can have no category (S714 made those rows visible), so the form can hold null. Both
+      // branches' modals share this save, and `.trim()` on null threw AFTER setAddSaving(true): the
+      // button stuck on Saving… and nothing was written (S756). Editing an uncategorised dish keeps it
+      // uncategorised rather than quietly filing it under Other.
+      category:      String(addForm.category ?? '').trim() || (editingId ? null : 'Other'),
       selling_price: parseFloat(exVat.toFixed(4)),
       vat_rate:      addForm.vatRate,
       cost_price:    costPriceNum > 0 ? costPriceNum : null,
@@ -401,7 +405,7 @@ export default function MenuPricing() {
     setEditingId(recipe.id)
     setAddForm({
       name:      recipe.name,
-      category:  recipe.category,
+      category:  recipe.category || '',
       price:     recipe.inclVat > 0 ? recipe.inclVat.toFixed(2) : '',
       vatRate:   recipe.vat,
       costPrice: recipe.cost_price != null ? String(recipe.cost_price) : '',
@@ -621,7 +625,7 @@ export default function MenuPricing() {
                   placeholder="Beverage / Food / Dessert / Other"
                   style={{ width: '100%', boxSizing: 'border-box', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', fontSize: 13, color: 'var(--theme-text1)' }} />
                 <datalist id="menu-cats-pos">
-                  {['Beverage', 'Food', 'Dessert', 'Snack', 'Other', ...Array.from(new Set(recipes.map(r => r.category))).sort()]
+                  {['Beverage', 'Food', 'Dessert', 'Snack', 'Other', ...Array.from(new Set(recipes.map(r => r.category).filter(Boolean))).sort()]
                     .filter((v, i, a) => a.indexOf(v) === i).map(c => <option key={c} value={c} />)}
                 </datalist>
               </div>
@@ -1026,7 +1030,7 @@ export default function MenuPricing() {
                 />
                 <datalist id="menu-cats">
                   {['Beverage', 'Food', 'Dessert', 'Snack', 'Other',
-                    ...Array.from(new Set(recipes.map(r => r.category))).sort()
+                    ...Array.from(new Set(recipes.map(r => r.category).filter(Boolean))).sort()
                   ].filter((v, i, a) => a.indexOf(v) === i).map(c => <option key={c} value={c} />)}
                 </datalist>
               </div>

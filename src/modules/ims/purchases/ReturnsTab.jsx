@@ -67,6 +67,17 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
     const maxDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 32
     const retDay = parseInt(returnForm.bs_day)
     if (!retDay || retDay < 1 || retDay > maxDay) { setDayErr(`Pick the day the goods went back (1–${maxDay}).`); return }
+    // Goods cannot go back before they arrived (S756). Only the 1–daysInBsMonth range was checked,
+    // so a return could be dated days before its own bill, and Vendor Balance Confirmation's
+    // running ledger — which orders by that day — then credited the vendor before it had billed us.
+    // `purchases` is this period's bills and a return is written into the same period, so the two
+    // day numbers are always in one month and compare directly. A return in a LATER month than its
+    // bill is a separate, open decision and is not built here.
+    const billDay = parseInt(linked.bs_day)
+    if (billDay && retDay < billDay) {
+      setDayErr(`This bill is dated ${formatBsDay(billDay, period?.bs_month)}, so the goods cannot have gone back before then. Pick ${formatBsDay(billDay, period?.bs_month)} or a later day.`)
+      return
+    }
     setDayErr('')
     const retCf = getCf(linked.items)
     const baseRetQty = retQty * retCf
@@ -101,8 +112,11 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
     }
 
     if (editingReturnId) {
-      const { error } = await scopedUpdate('vendor_returns', payload).eq('id', editingReturnId)
+      // `.select('id')` (S756): an update an RLS policy filters to nothing is `error: null`, so the
+      // form closed as if saved over a return that had not changed. Zero rows back is proof.
+      const { data: updated, error } = await scopedUpdate('vendor_returns', payload).eq('id', editingReturnId).select('id')
       if (error) { const a = asActionError(error); setReturnError({ text: 'The return was not updated — it still shows its previous figures. ' + a.text, detail: a.detail }); setReturnSaving(false); return }
+      if (!updated?.length) { setReturnError('The return was not updated — it still shows its previous figures. It may have been deleted since you opened it (the list behind this form has been reloaded), or your login is not allowed to change it — ask your manager or the Owner.'); setReturnSaving(false); onChanged(); return }
     } else {
       const { error } = await scopedInsert('vendor_returns', payload)
       if (error) { const a = asActionError(error); setReturnError({ text: 'The return was not recorded. ' + a.text, detail: a.detail }); setReturnSaving(false); return }
@@ -125,10 +139,13 @@ export default function ReturnsTab({ period, purchases, returns, isLocked, effec
       body: <p style={{ margin: 0 }}>{ret.items?.name || 'This return'}, NPR {Math.round(value).toLocaleString('en-IN')}, goes back onto this period's net purchases and the vendor's payable. This cannot be undone.</p>,
       run: async () => {
         setActionError(null)
-        const { error } = await scopedDelete('vendor_returns').eq('id', ret.id)
+        const { data: removed, error } = await scopedDelete('vendor_returns').eq('id', ret.id).select('id')
         if (error) {
           const { text, detail } = asActionError(error)
           setActionError({ text: `This return is still recorded — it was not deleted. ${text}`, detail })
+        } else if (!removed?.length) {
+          // Zero rows removed with no error (S756): a policy filtered the delete, or it was already gone.
+          setActionError('Nothing was removed. If the return is still in the list below (it has been reloaded), your login is not allowed to delete it — ask your manager or the Owner. If it is gone, it was already deleted.')
         }
         onChanged()
       },

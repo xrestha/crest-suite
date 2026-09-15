@@ -1,6 +1,7 @@
 import { withTimeout } from '../../../utils/withTimeout'
 import { isAuthExpiredError } from '../../../utils/sessionKeepAlive'
 import { scopedInsert, scopedDelete } from '../../../shared/scopedDb'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { buildPosIndex, posSupersedesManual } from './salesDepletion'
 
@@ -40,13 +41,23 @@ const manualOnly = builder => builder.or('source.is.null,source.eq.manual')
 // Reads the whole period's opposite-mode rows and intersects client-side rather than sending
 // `.in('recipe_id', [...])` — a 92-recipe menu would put ~3.4kB of UUIDs in the query string, and
 // an over-long URL is its own failure mode (postgrest-js warns about exactly this).
+//
+// PAGED, with a unique tiebreaker (S756). The Bulk-side read is every dated manual row in the
+// period — ~50 dishes a day is 1,500 rows a month — and a bare select stops at PostgREST's 1000-row
+// cap with no error and in no particular order. So the recipes this save was about to wipe could
+// fall past the cut, `total` could come back 0, the confirmation never showed, and save_sales_day
+// deleted a month of daily entries unannounced: the exact incident this function exists to stop,
+// reintroduced by the read that guards it. A warning is only as complete as the read behind it.
 export async function findSupersededRows(supabase, { periodId, bsDay, recipeIds, signal, timeoutMs = SAVE_TIMEOUT_MS }) {
   if (!recipeIds.length) return { total: 0, byRecipe: [] }
 
-  const base = manualOnly(supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId))
-  const scoped = bsDay === 0 ? base.gt('bs_day', 0) : base.eq('bs_day', 0)
+  const makeQuery = () => {
+    const base = manualOnly(supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold').eq('period_id', periodId))
+    const scoped = bsDay === 0 ? base.gt('bs_day', 0) : base.eq('bs_day', 0)
+    return signalled(scoped.order('id'), signal)
+  }
 
-  const { data, error } = await withTimeout(signalled(scoped, signal), timeoutMs, 'Check')
+  const { data, error } = await withTimeout(fetchAllRows(makeQuery), timeoutMs, 'Check')
   if (error) throw new Error(error.message)
 
   const wanted = new Set(recipeIds)
@@ -154,62 +165,134 @@ async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, 
 // stock for it.
 export async function depleteManualSales(supabase, { clientId, periodId, bsDay, rows }) {
   try {
-    const candidates = (rows || []).filter(r => Number(r.qty_sold) > 0)
+    await replaceManualMovements(supabase, { clientId, periodId, rowsByDay: new Map([[bsDay, rows || []]]) })
+  } catch (err) {
+    console.error('manual stock_movements write failed:', err)
+  }
+}
 
-    // The POS-supersedes-manual guard reads BEFORE this day's movements are replaced, and a read
-    // that fails stops here — leaving the previous save's depletion in place rather than an empty
-    // day. It used to run after the delete and drop its error: on a failed read `posRows` was
-    // null, the index empty, every manual row "not superseded", and a recipe POS had already
-    // depleted deposited a second movement (S683). A check that could not run has not passed.
-    let posIndex = buildPosIndex([])
-    if (candidates.length > 0) {
-      const recipeIds = [...new Set(candidates.map(r => r.recipe_id))]
-      // bs_day is selected (not just recipe_id) so buildPosIndex can key the supersedes check by
-      // day — the query below is already day-scoped, but the shared index is what Stock Movements'
-      // Sub-Recipe Usage view also reads, and that one sees the whole period at once.
-      const posQuery = supabase.from('sales_entries').select('recipe_id, bs_day')
-        .eq('period_id', periodId).in('recipe_id', recipeIds).in('source', ['pos', 'pos_comp'])
-      const { data: posRows, error: posErr } = await (bsDay === 0 ? posQuery : posQuery.eq('bs_day', bsDay))
-      if (posErr) {
-        console.error("manual stock_movements: the POS-supersedes check could not run, so this day's movements were left as they were:", posErr)
-        return
-      }
-      // The POS-supersedes-manual rule lives in salesDepletion.js, shared with the read path that
-      // re-derives sub-recipe consumption from sales_entries — see that file's header for why.
-      posIndex = buildPosIndex((posRows || []).map(r => ({ ...r, source: 'pos' })))
-    }
+// A cross-mode supersede leaves the OTHER mode's movements behind, so re-post those days (S756).
+//
+// save_sales_day's step 3 deletes the opposite mode's manual sales rows for every recipe in the
+// payload — a Bulk save removes those recipes' dated rows across the whole period, a Daily save
+// removes their Bulk row. depleteManualSales only ever replaced movements for the day being SAVED,
+// so the superseded day's movements survived: the item was depleted once by the new Bulk row and
+// again by the dated rows it had just replaced, and the perpetual ledger (Stock Movements, Book
+// Stock, Reorder) over-consumed it for the rest of the period.
+//
+// Why re-post rather than delete narrowly: stock_movements has no recipe_id. A manual movement is
+// ONE row per item per day, AGGREGATED across every recipe sold that day — flour from the momo
+// that was superseded and flour from the pizza that was not are the same row. There is no
+// narrower delete that removes only the superseded recipes' share, and deleting the whole day would
+// strip the recipes that were never touched. So each affected day is rebuilt from the manual
+// sales rows it still holds, through the same replace-wholesale path as an ordinary save — which
+// also means the POS-supersedes guard and the refuse-on-failed-read rule apply unchanged.
+//
+// `days` are the superseded days the save's precheck found (the dated days a Bulk save wipes, or
+// [0] for the Bulk row a Daily save wipes). A day left with no manual rows gets its movements
+// cleared and nothing re-posted, which is exactly its new state. Best-effort, like the ordinary
+// depletion: the sales save has already committed and nothing here may undo it.
+export async function repostSupersededMovements(supabase, { clientId, periodId, days }) {
+  try {
+    const uniqueDays = [...new Set((days || []).map(Number))].filter(d => Number.isInteger(d) && d >= 0)
+    if (uniqueDays.length === 0) return
 
-    // Replace this day's manual movements wholesale, matching save_sales_day's own delete+reinsert
-    // semantics for sales_entries — otherwise a re-save with fewer/changed rows leaves stale
-    // movements behind from a previous save. A refused delete stops the reinsert: inserting over
-    // rows that are still there is the double-depletion this function exists to prevent.
-    const { error: delErr } = await scopedDelete('stock_movements', clientId)
-      .eq('period_id', periodId).eq('bs_day', bsDay).eq('source', 'manual')
-    if (delErr) {
-      console.error('manual stock_movements: could not clear this day before re-depleting; left as they were:', delErr)
+    // Bounded (≤ 33 distinct days, so the .in() is short), paged, uniquely ordered. manualOnly so a
+    // POS row on the same day is never re-posted as a manual movement.
+    const { data, error } = await fetchAllRows(() =>
+      manualOnly(supabase.from('sales_entries').select('recipe_id, bs_day, qty_sold, source').eq('period_id', periodId))
+        .in('bs_day', uniqueDays).order('id'))
+    if (error) {
+      console.error('manual stock_movements: could not read the superseded days, so their movements were left as they were (they still count the replaced entries):', error)
       return
     }
-    if (candidates.length === 0) return
 
-    const qualifying = candidates.filter(r => !posSupersedesManual(r.recipe_id, bsDay, posIndex))
-    if (qualifying.length === 0) return
+    const rowsByDay = new Map(uniqueDays.map(d => [d, []]))
+    for (const r of data || []) {
+      const day = Number(r.bs_day) || 0
+      if (rowsByDay.has(day)) rowsByDay.get(day).push(r)
+    }
+    await replaceManualMovements(supabase, { clientId, periodId, rowsByDay })
+  } catch (err) {
+    console.error('manual stock_movements: re-posting the superseded days failed:', err)
+  }
+}
 
-    const breakdown = await explodeRecipeIngredients(supabase, [...new Set(qualifying.map(r => r.recipe_id))])
+// Replace the manual movements for one or more days of a period with what `rowsByDay` says those
+// days sold. One guard read, one delete, one ingredient explosion and one insert however many days
+// are involved — a Bulk supersede can touch every day of the month, and a round trip per day is
+// the loop-with-an-await shape frontend-performance.md warns about.
+async function replaceManualMovements(supabase, { clientId, periodId, rowsByDay }) {
+  const days = [...rowsByDay.keys()]
+  if (days.length === 0) return
+  const candidatesByDay = new Map(days.map(d => [d, (rowsByDay.get(d) || []).filter(r => Number(r.qty_sold) > 0)]))
+  const allCandidates = [...candidatesByDay.values()].flat()
+
+  // The POS-supersedes-manual guard reads BEFORE the movements are replaced, and a read that fails
+  // stops here — leaving the previous save's depletion in place rather than an empty day. It used
+  // to run after the delete and drop its error: on a failed read `posRows` was null, the index
+  // empty, every manual row "not superseded", and a recipe POS had already depleted deposited a
+  // second movement (S683). A check that could not run has not passed.
+  let posIndex = buildPosIndex([])
+  if (allCandidates.length > 0) {
+    const recipeIds = [...new Set(allCandidates.map(r => r.recipe_id))]
+    // Chunked and paged (S756). A Bulk save's payload is the whole menu, so a bare .in() of every
+    // recipe id is a URL past what a proxy accepts; and the Bulk case reads the WHOLE period's POS
+    // rows (one per bill line), which crosses the 1000-row cap on an ordinary month. A truncated
+    // guard read is the vacuous pass described above wearing a different coat: a recipe POS sold
+    // after the cut reads as not superseded and is depleted twice.
+    //
+    // bs_day is selected (not just recipe_id) so buildPosIndex can key the supersedes check by day.
+    // Day 0 (Bulk) is superseded by a POS sale anywhere in the period, so it needs every day read.
+    const wholePeriod = days.includes(0)
+    const { data: posRows, error: posErr } = await fetchAllRowsChunked(recipeIds, ids => {
+      const q = supabase.from('sales_entries').select('recipe_id, bs_day')
+        .eq('period_id', periodId).in('recipe_id', ids).in('source', ['pos', 'pos_comp'])
+      const scoped = wholePeriod ? q : (days.length === 1 ? q.eq('bs_day', days[0]) : q.in('bs_day', days))
+      return scoped.order('id')
+    })
+    if (posErr) {
+      console.error("manual stock_movements: the POS-supersedes check could not run, so this day's movements were left as they were:", posErr)
+      return
+    }
+    // The POS-supersedes-manual rule lives in salesDepletion.js, shared with the read path that
+    // re-derives sub-recipe consumption from sales_entries — see that file's header for why.
+    posIndex = buildPosIndex((posRows || []).map(r => ({ ...r, source: 'pos' })))
+  }
+
+  // Replace the days' manual movements wholesale, matching save_sales_day's own delete+reinsert
+  // semantics for sales_entries — otherwise a re-save with fewer/changed rows leaves stale
+  // movements behind from a previous save. A refused delete stops the reinsert: inserting over
+  // rows that are still there is the double-depletion this function exists to prevent.
+  // source='manual' always: since S756 the database refuses a non-manual movement delete from a
+  // staff login, and a POS movement is never ours to remove anyway.
+  const del = scopedDelete('stock_movements', clientId).eq('period_id', periodId)
+  const { error: delErr } = await (days.length === 1 ? del.eq('bs_day', days[0]) : del.in('bs_day', days)).eq('source', 'manual')
+  if (delErr) {
+    console.error('manual stock_movements: could not clear this day before re-depleting; left as they were:', delErr)
+    return
+  }
+  if (allCandidates.length === 0) return
+
+  const qualifyingByDay = days.map(d => [d, candidatesByDay.get(d).filter(r => !posSupersedesManual(r.recipe_id, d, posIndex))])
+  const qualifyingRecipes = [...new Set(qualifyingByDay.flatMap(([, rows]) => rows.map(r => r.recipe_id)))]
+  if (qualifyingRecipes.length === 0) return
+
+  const breakdown = await explodeRecipeIngredients(supabase, qualifyingRecipes)
+  const movementRows = []
+  for (const [day, rows] of qualifyingByDay) {
     const agg = {}
-    qualifying.forEach(({ recipe_id, qty_sold }) => {
+    rows.forEach(({ recipe_id, qty_sold }) => {
       ;(breakdown[recipe_id] || []).forEach(({ item_id, qty }) => {
         agg[item_id] = (agg[item_id] || 0) + qty * Number(qty_sold)
       })
     })
-
-    const movementRows = Object.entries(agg).map(([item_id, qty]) => ({
-      item_id, period_id: periodId, bs_day: bsDay, qty: -qty, source: 'manual',
-    }))
-    if (movementRows.length > 0) {
-      const { error } = await scopedInsert('stock_movements', clientId, movementRows)
-      if (error) console.error('manual stock_movements write failed:', error)
-    }
-  } catch (err) {
-    console.error('manual stock_movements write failed:', err)
+    Object.entries(agg).forEach(([item_id, qty]) => {
+      movementRows.push({ item_id, period_id: periodId, bs_day: day, qty: -qty, source: 'manual' })
+    })
+  }
+  if (movementRows.length > 0) {
+    const { error } = await scopedInsert('stock_movements', clientId, movementRows)
+    if (error) console.error('manual stock_movements write failed:', error)
   }
 }

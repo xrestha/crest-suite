@@ -1,7 +1,8 @@
 import {
   AGE_BANDS, bandOf, ageInDays, allocateFifo, buildAgeing,
-  daysUntilExpiry, parseDateLocal,
+  daysUntilExpiry, parseDateLocal, asOfForWindow, nepalTodayRef, splitReturns,
 } from './stockAgeingCalc'
+import { daysInBsMonth } from '../../../utils/bsCalendar'
 
 const AS_OF = new Date('2026-08-19T12:00:00')
 const daysAgo = n => new Date(AS_OF.getTime() - n * 24 * 60 * 60 * 1000)
@@ -258,5 +259,55 @@ describe('buildAgeing', () => {
     expect(items).toEqual([])
     expect(totals.value).toBe(0)
     expect(totals.qty).toBe(0)
+  })
+})
+
+// S756 — the as-of date and the out-of-window return.
+describe('asOfForWindow', () => {
+  const NOW = new Date(2026, 8, 15, 12, 0) // midday, so Nepal's civil date is the runtime's too
+  const today = nepalTodayRef(NOW)
+  const prev = today.bs.month === 1
+    ? { bs_year: today.bs.year - 1, bs_month: 12 }
+    : { bs_year: today.bs.year, bs_month: today.bs.month - 1 }
+
+  test('the NEWEST period measures to today even when it is last month — an expired batch must read expired', () => {
+    const ref = asOfForWindow(prev, { isNewest: true }, NOW)
+    expect(ref.isToday).toBe(true)
+    expect(ref.bs).toEqual(today.bs)
+    const threeDaysAgo = new Date(today.date.getFullYear(), today.date.getMonth(), today.date.getDate() - 3)
+    const iso = `${threeDaysAgo.getFullYear()}-${String(threeDaysAgo.getMonth() + 1).padStart(2, '0')}-${String(threeDaysAgo.getDate()).padStart(2, '0')}`
+    expect(daysUntilExpiry(iso, ref.date)).toBe(-3)
+  })
+
+  test('an older period with something newer after it measures to its own last day', () => {
+    const ref = asOfForWindow(prev, { isNewest: false }, NOW)
+    expect(ref.isToday).toBe(false)
+    expect(ref.bs).toEqual({ year: prev.bs_year, month: prev.bs_month, day: daysInBsMonth(prev.bs_year, prev.bs_month) })
+  })
+
+  test('a period that has not ended yet measures to today, and so does no period at all', () => {
+    expect(asOfForWindow({ bs_year: today.bs.year, bs_month: today.bs.month }, {}, NOW).isToday).toBe(true)
+    expect(asOfForWindow(null, {}, NOW).isToday).toBe(true)
+  })
+})
+
+describe('splitReturns', () => {
+  test('a return against a bill outside the window is consumption of the item, not lost', () => {
+    const { byEntry, byItem } = splitReturns([
+      { purchase_entry_id: 'in', item_id: 'rice', qty: 2 },
+      { purchase_entry_id: 'last-year', item_id: 'rice', qty: 3 },
+      { purchase_entry_id: null, item_id: 'oil', qty: '1.5' },
+    ], new Set(['in']))
+    expect(byEntry).toEqual({ in: 2 })
+    expect(byItem).toEqual({ rice: 3, oil: 1.5 })
+  })
+
+  test('taken off the carried-in batch first, so the window batch keeps its stock', () => {
+    const { byItem } = splitReturns([{ purchase_entry_id: 'last-year', item_id: 'rice', qty: 3 }], new Set())
+    const out = allocateFifo([
+      { item_id: 'rice', qty: 5, rate: 1, date: daysAgo(40), carriedForward: true },
+      { item_id: 'rice', qty: 10, rate: 1, date: daysAgo(10) },
+    ], byItem)
+    expect(out.map(b => b.remaining)).toEqual([2, 10])
   })
 })

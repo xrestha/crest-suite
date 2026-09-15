@@ -14,7 +14,7 @@ import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
-import { splitPurchaseVat, buildVendorSummary } from './purchaseTaxSplit'
+import { splitPurchaseVat, buildVendorSummary, summariseUnlinkedReturns } from './purchaseTaxSplit'
 
 function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -105,6 +105,18 @@ export default function NonVatReport() {
 
   const periodLabel = (p) => p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : ''
 
+  // S756 — the same unlinked returns VAT Report names, named here too: this is the other half of the
+  // same filing, and a reader of only this page must not assume they were counted on it.
+  const unlinked = summariseUnlinkedReturns(split.unlinkedReturns)
+  const caveats = unlinked.count > 0
+    ? [`NOT INCLUDED: ${unlinked.count} return${unlinked.count !== 1 ? 's' : ''} (NPR ${unlinked.value.toFixed(2)} at list rate) `
+      + 'could not be linked to a purchase line — the bill was deleted or re-saved after the return — so it is not '
+      + 'known whether VAT was charged on them. They are deducted from neither the VAT nor the Non-VAT report; '
+      + `settle them with your CA. ${unlinked.examples.join('; ')}${unlinked.more ? `; and ${unlinked.more} more` : ''}`]
+    : []
+  // A month with non-VAT returns and no new non-VAT purchases still has a figure (S756).
+  const hasFigures = entries.length > 0 || nonVatReturns.length > 0
+
   // The other half of the filing gets the same letterhead and the same period-status warning as
   // the VAT half — see VatReport's scopeLineFor.
   const scopeLineFor = (p) =>
@@ -136,7 +148,7 @@ export default function NonVatReport() {
     }))
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Non-VAT Report — Purchases without VAT', biz, scopeLine, rows: entryRows,
-      notes: ['No input VAT credit is claimable on these purchases.'],
+      notes: ['No input VAT credit is claimable on these purchases.', ...caveats],
     }), 'Non-VAT Entries')
 
     // CA Summary sheet
@@ -152,7 +164,7 @@ export default function NonVatReport() {
     }))
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Non-VAT Report — Vendor-wise Summary', biz, scopeLine, rows: caRows,
-      notes: ['For reference only — verify bills with your CA before filing.'],
+      notes: ['For reference only — verify bills with your CA before filing.', ...caveats],
     }), 'CA Summary')
 
     XLSX.writeFile(wb, `Non-VAT-Report-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
@@ -170,7 +182,8 @@ export default function NonVatReport() {
           <h1 className="page-title">Non-VAT Report</h1>
           <p className="page-subtitle">Purchases without VAT this period</p>
           <div className="page-scope-row">
-            <PeriodScope label={periodLabel(selectedPeriod)} status={selectedPeriod?.status} />
+            {/* provisionalWhenOpen (S756): an open month's figures still move, and this is filed. */}
+            <PeriodScope label={periodLabel(selectedPeriod)} status={selectedPeriod?.status} provisionalWhenOpen />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -178,13 +191,42 @@ export default function NonVatReport() {
             {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
           </select>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`Non-VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={!entries.length || !!loadError}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={!entries.length}>Export Excel</button>
+            {/* Gated on `loading` (S756): the label, scope line and filename move on the click, the
+                rows only when the read lands — an ungated export named last month's rows after this
+                month. Excel also waits on biz.error, or the letterhead's company name is blank. */}
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`Non-VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={loading || !!loadError || !hasFigures}>Print</button>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !!biz.error || !hasFigures}>Export Excel</button>
           </div>
         </div>
       </div>
 
       {loadError && <ReportLoadError error={loadError} />}
+
+      {biz.error && !loadError && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a report
+          with a blank company name. The figures below are unaffected. Reload the page to try again.
+        </p>
+      )}
+
+      {!loadError && !loading && unlinked.count > 0 && (
+        <div role="alert" className="card" style={{
+          marginBottom: 16, padding: '12px 16px',
+          borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+        }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
+            ⚠ {unlinked.count} return{unlinked.count !== 1 ? 's are' : ' is'} not counted in this report — {fmtNPR(unlinked.value)} at list rate
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            The bill {unlinked.count !== 1 ? 'these were' : 'this was'} returned against was deleted or re-saved afterwards, so
+            there is no longer any record of whether VAT was charged on {unlinked.count !== 1 ? 'them' : 'it'}. Rather than
+            guess, {unlinked.count !== 1 ? 'they are' : 'it is'} left out of both the VAT and the Non-VAT report. Settle
+            {unlinked.count !== 1 ? ' them' : ' it'} with your CA before filing: {unlinked.examples.join('; ')}
+            {unlinked.more ? `; and ${unlinked.more} more` : ''}.
+          </p>
+        </div>
+      )}
 
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           yet is NPR 0 wearing the confidence of a real figure (S594 rule). */}
@@ -242,6 +284,14 @@ export default function NonVatReport() {
             <div className="empty-state">
               <div className="empty-state-icon">₨</div>
               <p className="empty-state-text">No non-VAT purchases this period. Bills with the VAT toggle off will appear here.</p>
+              {/* The deductions rows live in this table's footer, so a returns-only month would
+                  otherwise show no trace of the figure its own headline card is reporting (S756). */}
+              {returnTotal > 0 && (
+                <p className="empty-state-text" style={{ color: 'var(--theme-red-text)' }}>
+                  {nonVatReturns.length} return{nonVatReturns.length !== 1 ? 's' : ''} of non-VAT goods bought earlier
+                  come to −{fmtNPR(returnTotal)} — see the CA Summary tab for the vendor-wise figures.
+                </p>
+              )}
             </div>
           ) : (
             <div className="table-wrap">
@@ -352,7 +402,7 @@ export default function NonVatReport() {
                   <tr>
                     <th>Vendor</th>
                     <th><Tip text="PAN or VAT registration number of the supplier — add it in Vendors if missing.">PAN / VAT No.</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Number of non-VAT purchase entries from this vendor this period."># Bills</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="Number of bills from this vendor this period carrying at least one non-VAT line — bills, not lines."># Bills</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Gross purchase amount before any bill-level discount.">Gross (NPR)</Tip></th>
                     {totalDiscount > 0 && <th style={{ textAlign: 'right' }}><Tip text="This vendor's bill discounts, only the share falling on non-VAT lines. On a mixed bill the rest sits in the VAT Report." width={260}>Discount</Tip></th>}
                     {returnTotal > 0 && <th style={{ textAlign: 'right' }}><Tip text="Value of non-VAT goods sent back to this vendor this period. Deducted from the net, since returned goods were never really purchased." width={260}>Returns</Tip></th>}

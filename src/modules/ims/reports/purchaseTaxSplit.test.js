@@ -7,6 +7,7 @@ import path from 'path'
 import { calcBillTotals } from '../purchases/purchasesHelpers'
 import {
   VAT_RATE, splitPurchaseVat, buildVendorSummary, billPayables, netFactors, returnBase,
+  isVatReturn, isNonVatReturn, isUnlinkedReturn, annexure13Rows, normalisePan, billWiseVat, ONE_LAKH, summariseUnlinkedReturns,
 } from './purchaseTaxSplit'
 import { allocateBillDiscounts } from './supplierAttribution'
 
@@ -91,6 +92,49 @@ describe('splitPurchaseVat — returns', () => {
     expect(s.nonVatReturnBase).toBeCloseTo(3600, 6)
   })
 
+  // S756. `purchase_entry_id` is ON DELETE SET NULL, and deleting or re-saving a bill unlinks every
+  // return against it. The predicates were `=== true` / `=== false`, so such a return — embed null —
+  // was in NEITHER half: gone from both statutory reports, overstating the input VAT claimed.
+  it('puts every return in exactly one of VAT, non-VAT or unlinked', () => {
+    const cases = [
+      ret(VAT_LINE),
+      ret(NONVAT_LINE),
+      ret(VAT_LINE, { id: 'legacy', purchase_entries: { vat_inclusive: null } }),
+      ret(VAT_LINE, { id: 'unlinked', purchase_entry_id: null, purchase_entries: null }),
+    ]
+    for (const r of cases) {
+      expect([isVatReturn(r), isNonVatReturn(r), isUnlinkedReturn(r)].filter(Boolean)).toHaveLength(1)
+    }
+  })
+
+  it('routes a return on a legacy NULL vat_inclusive line to the non-VAT half, like its line', () => {
+    const legacy = { ...NONVAT_LINE, vat_inclusive: null }
+    const s = splitPurchaseVat([VAT_LINE, legacy], [ret(legacy, { purchase_entries: { vat_inclusive: null } })])
+    expect(s.nonVatLines).toHaveLength(1)
+    expect(s.nonVatReturns).toHaveLength(1)
+    expect(s.nonVatReturnBase).toBeCloseTo(3600, 6)
+  })
+
+  it('counts an unlinked return, at list rate, and deducts it from neither half', () => {
+    const orphan = ret(VAT_LINE, { id: 'u1', purchase_entry_id: null, purchase_entries: null })
+    const s = splitPurchaseVat(MIXED_BILL, [orphan])
+    expect(s.unlinkedReturns).toHaveLength(1)
+    expect(s.unlinkedReturnBase).toBeCloseTo(6000, 6)
+    expect(s.vatReturnBase).toBe(0)
+    expect(s.nonVatReturnBase).toBe(0)
+    // Every return is accounted for somewhere.
+    expect(s.vatReturns.length + s.nonVatReturns.length + s.unlinkedReturns.length).toBe(1)
+  })
+
+  it('summarises the unlinked returns a page must name', () => {
+    const orphan = ret(VAT_LINE, { id: 'u1', purchase_entry_id: null, purchase_entries: null, items: { name: 'Chicken' } })
+    const sum = summariseUnlinkedReturns([ret(VAT_LINE), orphan, { ...orphan, id: 'u2' }], { max: 1 })
+    expect(sum.count).toBe(2)
+    expect(sum.value).toBeCloseTo(12000, 6)
+    expect(sum.examples).toEqual(['day 5 · Chicken · Acme'])
+    expect(sum.more).toBe(1)
+  })
+
   it('prices a return whose purchase is not in the fetched set at its list rate', () => {
     // Falls back rather than dropping the row: a return nobody can price is still a return, and
     // silently omitting it overstates the period.
@@ -153,6 +197,109 @@ describe('buildVendorSummary', () => {
     expect(full.net).toBeCloseTo(0, 6)
     expect(full.vatAmt).toBeCloseTo(0, 6)
     expect(full.invoiced).toBeCloseTo(0, 6)
+  })
+})
+
+// S756, owner decision D12. The disclosure is about a SUPPLIER (a PAN), not a vendor card. Two cards
+// for one supplier each under one lakh used to be two undisclosed rows.
+describe('annexure13Rows — one row per PAN', () => {
+  const bill = (id, vendorId, name, pan, rate, vat = false) => ({
+    id, purchase_group_id: `G-${id}`, vendor_id: vendorId, vendors: { name, pan_vat_no: pan },
+    bs_day: 1, qty: 1, rate, vat_inclusive: vat, discount_amount: 0,
+  })
+  const rowsFor = (entries, returns = []) => {
+    const allocated = allocateBillDiscounts(entries)
+    return annexure13Rows(buildVendorSummary(allocated, returns, netFactors(allocated)))
+  }
+
+  it('normalises a PAN by trimming and removing inner spaces', () => {
+    expect(normalisePan(' 301 234 567 ')).toBe('301234567')
+    expect(normalisePan(null)).toBe('')
+  })
+
+  it('discloses a supplier whose two cards are each under one lakh', () => {
+    const rows = rowsFor([
+      bill('a', 'V1', 'Himalayan Traders', '301234567', 60000),
+      bill('b', 'V2', 'Himalayan Traders Pvt Ltd', '301 234 567 ', 60000),
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].net).toBeCloseTo(120000, 6)
+    expect(rows[0].over).toBe(true)
+    expect(rows[0].cards).toBe(2)
+    expect(rows[0].count).toBe(2)
+    expect(rows[0].name).toBe('Himalayan Traders / Himalayan Traders Pvt Ltd')
+  })
+
+  it('tests the invoiced total on the aggregate too', () => {
+    // 45,000 + 45,000 ex-VAT is 90,000 — under. Invoiced with VAT it is 1,01,700 — over.
+    const rows = rowsFor([
+      bill('a', 'V1', 'Acme', '111', 45000, true),
+      bill('b', 'V2', 'Acme Suppliers', '111', 45000, true),
+    ])
+    expect(rows[0].net).toBeCloseTo(90000, 6)
+    expect(rows[0].invoiced).toBeCloseTo(101700, 6)
+    expect(rows[0].over).toBe(true)
+  })
+
+  it('nets a return on either card against the aggregate', () => {
+    const entries = [bill('a', 'V1', 'Acme', '111', 60000), bill('b', 'V2', 'Acme 2', '111', 60000)]
+    const r = { id: 'r', purchase_entry_id: 'b', vendor_id: 'V2', vendors: { name: 'Acme 2', pan_vat_no: '111' },
+      qty: 1, rate: 30000, purchase_entries: { vat_inclusive: false } }
+    const [row] = rowsFor(entries, [r])
+    expect(row.net).toBeCloseTo(90000, 6)
+    expect(row.over).toBe(false)
+  })
+
+  it('keeps a PAN-less card on its own row and marks it unmatchable', () => {
+    const rows = rowsFor([
+      bill('a', 'V1', 'Local Veg', '', 60000),
+      bill('b', 'V2', 'Local Veg Shop', '  ', 60000),
+    ])
+    expect(rows).toHaveLength(2)
+    expect(rows.every(r => r.panMissing && !r.over)).toBe(true)
+  })
+
+  it('does not merge different PANs', () => {
+    const rows = rowsFor([bill('a', 'V1', 'A', '1', 60000), bill('b', 'V2', 'B', '2', 60000)])
+    expect(rows).toHaveLength(2)
+    expect(rows.some(r => r.over)).toBe(false)
+  })
+
+  it('uses the one-lakh threshold by default, strictly above it', () => {
+    expect(rowsFor([bill('a', 'V1', 'A', '1', ONE_LAKH)])[0].over).toBe(false)
+    expect(rowsFor([bill('a', 'V1', 'A', '1', ONE_LAKH + 1)])[0].over).toBe(true)
+  })
+})
+
+// S756, owner decision D28 — one row per invoice beside the item-level sheet, tying to the same totals.
+describe('billWiseVat', () => {
+  const OTHER_BILL = [
+    { ...VAT_LINE, id: 'l4', purchase_group_id: 'G9', bs_day: 2, rate: 2000, discount_amount: 0, invoice_ref: 'INV-9' },
+  ]
+  const ENTRIES = [...MIXED_BILL.map(l => ({ ...l, invoice_ref: 'INV-1' })), ...OTHER_BILL]
+
+  it('writes one row per bill, in day order', () => {
+    const rows = billWiseVat(allocateBillDiscounts(ENTRIES))
+    expect(rows).toHaveLength(2)
+    expect(rows.map(r => r.invoice)).toEqual(['INV-9', 'INV-1'])
+  })
+
+  it('reconciles to the split the page and the other sheets show', () => {
+    const s = splitPurchaseVat(ENTRIES, [])
+    const rows = billWiseVat(s.allocated)
+    const sum = k => rows.reduce((t, r) => t + r[k], 0)
+    expect(sum('taxable')).toBeCloseTo(s.vatBase, 6)
+    expect(sum('exempt')).toBeCloseTo(s.nonVatBase, 6)
+    expect(sum('vat')).toBeCloseTo(s.vatAmt, 6)
+    expect(sum('total')).toBeCloseTo(s.vatTotal + s.nonVatBase, 6)
+  })
+
+  it("values each bill at what calcBillTotals says it was invoiced at", () => {
+    const [, mixed] = billWiseVat(allocateBillDiscounts(ENTRIES))
+    expect(mixed.taxable).toBeCloseTo(5400, 6)
+    expect(mixed.exempt).toBeCloseTo(3600, 6)
+    expect(mixed.total).toBeCloseTo(calcBillTotals(MIXED_BILL, 1000).grandTotal, 6)
+    expect(mixed.pan).toBe('123')
   })
 })
 

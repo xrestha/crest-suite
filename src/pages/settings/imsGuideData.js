@@ -135,6 +135,7 @@ export const IMS_GUIDE_GROUPS = [
           'Delete is blocked with an explanation if the item is referenced in any of the eleven tables listed under "Used In" — unless you\'re admin, in which case a force-delete option removes the item and every one of those records together, as a single all-or-nothing step that either completes or changes nothing. The block lives in the database, not only on this screen, so it holds however the delete is attempted.',
           'Two items cannot share a name within one outlet, and that includes sub-recipes — a sub-recipe is counted alongside your items in Stock Count, so two rows with one name would split that ingredient\'s stock between them. Saving a duplicate is refused, naming the row that already holds it.',
           '"Hide"/"Show" toggles is_active instead of deleting — inactive items disappear from pickers but their history stays intact. Prefer this over delete in almost every real case.',
+          'S756: the base unit is locked once the item is referenced anywhere (purchases, counts, wastage, staff meals, movements, recipe lines, par levels) — the select is disabled and the save re-checks live across all item reference tables, refusing on a failed read. A rate change opens a confirm naming how many past records it re-values. A pack-size change only warns (purchases are stored in base units).',
         ],
         fields: [
           { label: 'Yield %', desc: 'Usable percentage after trim/prep/cook loss (whole chicken ≈70%, spinach ≈60%, onion ≈85%). Default 100 = no loss. Factors into recipe costing (you must buy more than you serve) but NOT into nutrition (the diner eats exactly what\'s in the recipe).' },
@@ -171,6 +172,7 @@ export const IMS_GUIDE_GROUPS = [
           'Row actions are icon buttons (hover for the label): balance-confirmation letter, Edit, Deactivate-Activate, plus one admin-only slot that is a bin icon (Delete) on a vendor nothing references, a box icon (Archive) on a referenced vendor that is already inactive, and a padlock — no action, only a tooltip naming what is attached — on a referenced vendor still active. They are icons because four text buttons were 314px of a table whose min-content then exceeded the page at 1280px; the vendor name column is sticky for the same reason.',
           'Archived vendors leave the list entirely. An admin-only "Show archived (N)" toggle switches the table to them; each of those rows offers Confirm Balance and Restore only — Edit and Activate are withheld, since either would put the vendor back into the purchase dropdowns by a side door and Activate would trip the DB CHECK. Restore leaves it inactive.',
           'Prev/Next buttons in the edit modal let an admin walk the whole vendor list without closing/reopening it.',
+          'S756: Archive, Restore, Delete and Show archived are shown to the account Owner as well as admin. vendors_guard_referenced_delete still refuses deleting a supplier with history.',
         ],
         fields: [
           { label: 'Vendor Code', desc: 'Auto-generated ({prefix}-{3 digits}, prefix set in Settings → Vendor Codes, default VND) and not editable on this page — shown as a badge everywhere the vendor appears. It is NOT permanent: Settings → Vendor Codes → "Regenerate All" renumbers every vendor alphabetically from {prefix}-001, archived vendors included, so a code quoted on an old printout can later belong to a different supplier.' },
@@ -241,6 +243,7 @@ export const IMS_GUIDE_GROUPS = [
           'Saving auto-prints a gate-pass voucher and sets status = open.',
           '"Mark Exited" sets status = closed and records the exit time. "Reprint" re-prints and increments a print counter.',
           'Any pass still open from a previous calendar day is auto-swept to closed (flagged auto_closed) the next time the page loads — there is no server-side cron for this.',
+          'S756: the auto-close boundary is 6 AM Nepal time (the POS parking service day), not the viewer\'s midnight. Void (supervisor+, required reason) sets status = voided with voided_at/void_reason; voided_by is stamped by the database (ims_gate_pass_void_guard) and a voided pass is final. exited_by is recorded on Mark Exited, and Reprint really increments print_count (it was never sent before).',
         ],
         fields: [
           { label: 'Auto-Closed badge', desc: 'Visually distinct (gray) from a real staff-confirmed Closed (green) — it means the vehicle\'s actual exit time was never verified by staff, which matters for security review.' },
@@ -510,6 +513,7 @@ export const IMS_GUIDE_GROUPS = [
           'Each bucket is a free-form table: Category (preset dropdown + "Custom…"), Description, Amount, with a live % of Bucket column.',
           'Save deletes and reinserts every non-empty row across all 3 buckets for the period in one shot — there is no per-row incremental save. Both halves are error-checked (S716): the delete runs first so its failure changes nothing, and if the insert fails afterwards the page says the period was cleared but not saved, keeps everything on screen, and tells the user to press Save again WITHOUT reloading — the rows in the browser are then the only surviving copy.',
           'Below the entry card: P&L Summary (traffic-light target-vs-actual for Food/Labor/Overhead/Tax/Net Profit), a Cost Visualisation stacked bar, a cross-bucket "All Cost Lines Ranked by Spend" table, and Break-Even + Cost-per-Dish panels — all four only render once the period has sales revenue.',
+          'S756: purchases are valued net of bill discounts (allocateBillDiscounts); Food Cost and Labor band through fcFigure/bandFigure; a depreciation memo line (not subtracted) reads posted schedule rows; an IMS staff login is told payroll cannot be read and gets no Net Profit verdict; Save is refused on a blank-category row with an amount, and during a period load.',
         ],
         fields: [
           { label: 'Daily Fixed Cost', desc: 'Divides by the actual number of days in that specific BS month (28–32, never a flat 30) — a flat /30 would misstate daily burn by up to ~7%.' },
@@ -544,6 +548,7 @@ export const IMS_GUIDE_GROUPS = [
           'Depreciation Runs tab: pick a period, Preview (computes but writes nothing), optionally override a line\'s depreciation amount (requires a reason), then Post — this freezes the period\'s schedule rows permanently at the database level; a correction is a brand new run, never an edit to an old one.',
           'Valuation Report: portfolio Net Book Value as of any posted period, by category. Disposal Report: every disposed/written-off asset with its gain or loss. Both print with the standard "Generated by Crest Suite" footer.',
           'Tax Depreciation (IRD) tab: pick a BS fiscal year, log any repair/maintenance expenses against a pool, Preview the 5-pool pooled-WDV schedule, then Post — same one-way freeze as the book depreciation runs. Written in plain language with F&B examples (e.g. Pool D\'s tooltip lists ovens/fridges/dishwashers) since most users here are café/restaurant owners, not accountants.',
+          'S756: disposal charges straight-line depreciation from the last posted run to the disposal date as a one-line run before the register update; Adjustment mode reverses a chosen run with negative overrides; posting a period or FY that already has a run requires confirmation; overrides are bounded 0 … opening NBV − salvage (adjustments: −run charge … 0).',
         ],
         fields: [
           { label: 'Tax Pool (A-E)', desc: 'Nepal groups assets into 5 statutory pools instead of depreciating each item separately — A: buildings you own, B: furniture/computers/office equipment, C: vehicles, D: kitchen equipment & everything else (the catch-all most gear lands in), E: intangibles (software, franchise rights). Optional — "untracked" is fine if a client only cares about book depreciation.' },
@@ -705,6 +710,7 @@ export const IMS_GUIDE_GROUPS = [
           'Select period (default: the open month, else the most recent one — since S696 the page no longer shows "Stock is healthy" over a report it never built when no month is open). Default filter: Reorder Only. Click a Par Level cell to edit inline (Enter=save, Escape=cancel). Search/filter by category.',
           '"Book Stock" column (when the item has any stock_movements this period — POS bills/comps AND saved manual Sales Entry days both write them) links to Stock Movements filtered to that item/period.',
           'Admin-only "Clear Book Stock" deletes stock_movements for the period (destructive, confirm-gated). "Clear All Par" resets every item\'s par level to 0 across the whole client (also confirm-gated).',
+          'S756: shortfall is shown in base units plus whole packs rounded up (reorderPacks.js) on screen, print, WhatsApp and Excel; the KPI strip and every export/print/share control wait for the load; with no par levels the page counts the items it cannot judge instead of saying stock is healthy.',
         ],
         fields: [
           { label: 'Book Stock', desc: 'Opening + Net Purchases − Wastage − Staff Meals + Σ stock_movements (negative) for the period — a live, ledger-aware figure shown only if the item has movement rows.' },
@@ -766,6 +772,7 @@ export const IMS_GUIDE_GROUPS = [
           'Predicts plates per dish, revenue and (with POS) covers for the next 7 or 30 days, then explodes the same forecast into the raw ingredients it will consume — prep planning and purchasing from one page. A recency-weighted day-of-week average: simple and auditable, explicitly not a trained AI model, so every number can be traced to the eight same-weekday days that produced it (S694).',
         workflow: [
           'Toggle horizon (7 or 30 days). Click "Recompute Forecast" to rebuild — this does NOT run automatically; a stale forecast persists until manually recomputed. Each day lists its dishes as whole plates to prep (top 8, then "+N more dishes · M occasional"); hover a dish for its raw average. "Ingredients to buy" below the days is the horizon\'s raw-item demand with a value; Export Excel writes both tables.',
+          'S756: past holiday dates are excluded from the weekday averages; the ingredient list is forecast use / in store (buildStockRows) / to buy; stored days before today are dropped with a banner prompting Recompute; export uses the letterhead.',
         ],
         fields: [
           { label: 'Small print under the weekday', desc: '"from the last 8 Wednesdays" is how many same-weekday history days fed the row (sample_count on the covers-level row). Fewer than 8 says "with sales" — the window had that many Wednesdays with any entry. Rows written before S694 have no sample_count and show nothing rather than a guess.' },
@@ -951,12 +958,13 @@ export const IMS_GUIDE_GROUPS = [
           'Detects consistent, unexplained stock loss across multiple CLOSED periods — as opposed to Variance/Theoretical Variance which only look at one period at a time. The "is this theft or systematic over-portioning, not just a one-off" report.',
         workflow: [
           'Select how many recent closed periods to analyze (3/6/12) — open periods are excluded entirely. Filter by category and status.',
+          'S756: a period counts only when the item has a closing count for it, and only when varianceBand(pct, value, settings, {measured:true}) is over — the client\'s variance tolerance and the NPR 500 materiality floor, the same test Variance and Theoretical Variance use.',
         ],
         fields: [
           { label: 'Status classification', desc: 'Consistent (red, ≥67% of tracked periods showed over-use, min 2 occurrences) / Occasional (amber, ≥2 occurrences but under 67%) / Once (gold, exactly 1) / Clear (green, 0).' },
         ],
         formulas: [
-          'Per covered period (theoretical>0 for that item): variance = Actual − Theoretical. If variance>0, that period counts as a shrinkage occurrence.',
+          'Per covered period (theoretical>0 and a closing count for that item): variance = Actual − Theoretical. Since S756 that period counts as a shrinkage occurrence only when it bands as over the variance tolerance and the NPR 500 materiality floor.',
           'Total Loss (NPR) = Σ variance qty across occurrences × per_uom_rate.',
           'Theoretical usage comes from the shared explodeRecipeIngredients() util — the same one Variance Report, Stock Report and Reorder use — so it recurses through sub-recipes and divides by each ingredient yield_pct. Until 2026-07-27 this page read recipe_ingredients flat instead, dropping sub-recipe ingredients entirely and ignoring yield_pct; both errors understated theoretical usage, which OVERSTATED shrinkage. Figures from before that date read high.',
         ],
@@ -984,6 +992,7 @@ export const IMS_GUIDE_GROUPS = [
         summary: 'Summarizes input VAT (13%) on VAT-inclusive purchases for a selected BS month, for filing Nepal\'s IRD VAT return and reconciling with a CA.',
         workflow: [
           'Pick a period. Entries tab (line-item detail + returns) and CA Summary tab (vendor-grouped totals for the accountant). Print or Export Excel.',
+          'S756: returns split three ways — VAT, non-VAT (incl. legacy NULL vat_inclusive) and UNLINKED (bill deleted or re-saved), which are named in a banner and workbook note and deducted from neither report. Per-line figures on screen are post-discount, as in the workbook; the export adds a Bill-wise sheet.',
         ],
         fields: [
           { label: 'CA Summary → PAN/VAT No.', desc: 'Flagged red "Missing" if the vendor has no PAN on file — a real compliance issue since Annexure filings need it.' },
@@ -1087,6 +1096,7 @@ export const IMS_GUIDE_GROUPS = [
           'Nepal IRD VAT return Annexure 13 (अनुसूची १३) compliance report — flags any single vendor whose cumulative purchases across a fiscal year exceed NPR 1,00,000, which must be disclosed by name + PAN.',
         workflow: [
           'Select a BS Fiscal Year (not a single month — this is the one report scoped to a fiscal year instead of a monthly period, a common point of confusion).',
+          'S756: vendor cards sharing a PAN (trimmed, spaces removed) are aggregated into one row listing every name, and both threshold tests run on the aggregate; blank-PAN cards stay separate and are flagged. The export carries the letterhead and an FY scope line naming months still open.',
         ],
         fields: [
           { label: 'Flag badge', desc: 'Amber "Annexure 13" if PAN is on file and the vendor is over threshold; red "⚠ Missing PAN" if over threshold with no PAN — a hard compliance flag that needs fixing before filing.' },

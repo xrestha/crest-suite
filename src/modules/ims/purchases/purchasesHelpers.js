@@ -49,6 +49,53 @@ export function calcBillTotals(lines, discountAmt) {
   return { taxableBase, nonTaxableBase, subTotal, discount, vatTotal, grandTotal }
 }
 
+// Every bill in `entries` valued over ALL of its lines, keyed the way the Purchases list keys a
+// bill (`purchase_group_id || id`). Returns Map<key, { lineCount, ...calcBillTotals }>.
+//
+// S756: the Purchases register grouped its FILTERED rows and valued each group as a bill, so the
+// Item filter — which narrows per LINE — handed calcBillTotals one surviving line and the WHOLE
+// bill's discount: a 10-line NPR 10,000 bill with a 1,000 discount, filtered to one 500 line, read
+// Bill Total −500 and the footer's Total payable summed it. A filter may choose which bills and
+// lines are SHOWN; it must never choose which lines a bill is valued from (vendor-payables.md,
+// S723). So the page builds this from the unfiltered period and looks each shown bill up in it.
+//
+// The discount is the max the lines repeat, never a sum (S601) — every line carries the same one.
+export function billTotalsByKey(entries) {
+  const byKey = new Map()
+  for (const e of entries || []) {
+    const key = e.purchase_group_id || e.id
+    if (!byKey.has(key)) byKey.set(key, [])
+    byKey.get(key).push(e)
+  }
+  const out = new Map()
+  byKey.forEach((lines, key) => {
+    const discount = Math.max(0, ...lines.map(l => parseFloat(l.discount_amount) || 0))
+    out.set(key, { lineCount: lines.length, ...calcBillTotals(lines, discount) })
+  })
+  return out
+}
+
+// Why a bill-level discount cannot be saved, or '' when it can (S756). The box was an
+// `<input type="number" min="0">` outside any <form>, so constraint validation never ran and a
+// negative discount, or one larger than the goods on the bill, saved a grand total below zero —
+// a bill the vendor owes US for, on a screen meant to record what we owe them. `subTotal` is the
+// ex-VAT goods value the discount comes off (calcBillTotals' subTotal). A discount equal to it is
+// allowed: a bill that was given away entirely is a real, if rare, bill. The half-paisa tolerance
+// absorbs float noise in a summed subtotal, never a real rupee.
+export function billDiscountError(discountAmt, subTotal) {
+  const raw = discountAmt == null ? '' : String(discountAmt).trim()
+  if (raw === '') return ''
+  const d = Number(raw)
+  if (!Number.isFinite(d)) return 'Enter the discount as a number, or leave it blank.'
+  if (d < 0) return 'A discount cannot be negative. Enter the amount taken off the bill, or leave it blank.'
+  const goods = Number(subTotal) || 0
+  if (d > goods + 0.005) {
+    const fmt = n => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return `The discount (NPR ${fmt(d)}) is more than the goods on this bill (NPR ${fmt(goods)} before VAT), which would leave the bill below zero. Check the discount and the line rates.`
+  }
+  return ''
+}
+
 // One bill = one vendor's invoice on one day of one period. Prefers purchase_group_id; falls back
 // to a vendor+invoice+date composite for older rows written before that column existed. Needs
 // `period` (not just the row) because cross-period call sites (Outstanding Payables, Vendor

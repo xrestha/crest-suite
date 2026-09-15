@@ -35,7 +35,7 @@ export default function DisposalReportTab({ assets }) {
                   <th>Name</th>
                   <th>Outcome</th>
                   <th>Disposal Date</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Net Book Value — cost minus depreciation charged so far — right before disposal." width={230}>NBV at Disposal</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Net Book Value at the disposal date — cost minus depreciation charged up to that day. Disposals recorded before depreciation to the disposal date was charged automatically use the value at the last posted run instead." width={230}>NBV at Disposal</Tip></th>
                   <th style={{ textAlign: 'right' }}>Proceeds</th>
                   <th style={{ textAlign: 'right' }}><Tip text="Proceeds minus NBV at Disposal. Green = you sold it for more than its book value (a gain); red = for less (a loss)." width={260}>Gain / (Loss)</Tip></th>
                   <th>Reason</th>

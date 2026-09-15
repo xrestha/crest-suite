@@ -5,8 +5,17 @@ import Modal from '../../../components/Modal'
 import { convertQty } from '../../../utils/nutrition'
 import { calcRecipeCost, calcSubRecipeCostPerUnit } from './recipeCostCalc'
 import { asActionError } from '../../../components/ActionError'
+import { recipeCostOf, menuFcPct } from '../../../shared/imsFormulas'
 
-const IMPORT_COLS = ['Menu Item (Recipe)', 'Category', 'Selling Price', 'Yield', 'Ingredient (name or code)', 'Qty', 'Unit']
+// The price column is EX-VAT, and its header says so (S756). It is written straight to
+// `recipes.selling_price`, which is stored ex-VAT, while every other place a price is typed — the
+// recipe form, Menu Pricing's + Add Item — takes the menu (incl-VAT) price and divides it. Headed
+// just "Selling Price", a client naturally typed the menu price, and every imported dish then sold
+// 13% above it. The template's own example (433.63 → NPR 490 on the menu) shows ex-VAT was always
+// meant. Parsing is POSITIONAL and a header row is recognised by its first cell only, so a sheet
+// saved under the old "Selling Price" header still imports unchanged.
+const IMPORT_VAT_RATE = 0.13
+const IMPORT_COLS = ['Menu Item (Recipe)', 'Category', 'Selling Price (ex-VAT)', 'Yield', 'Ingredient (name or code)', 'Qty', 'Unit']
 
 // Parse + validate an uploaded sheet against the current items/sub-recipes.
 function parseImportRows(rows, items, subRecipes, recipes) {
@@ -107,7 +116,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
       ['Peri Peri Wings', 'Food', 575.22, 1, items[2]?.name || 'Chicken Wings', 250, items[2]?.uom || 'GM'],
     ]
     const wsRecipes = XLSX.utils.aoa_to_sheet([IMPORT_COLS, ...example])
-    wsRecipes['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 13 }, { wch: 7 }, { wch: 26 }, { wch: 8 }, { wch: 8 }]
+    wsRecipes['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 20 }, { wch: 7 }, { wch: 26 }, { wch: 8 }, { wch: 8 }]
 
     // Reference sheet: exact item + sub-recipe names/units to copy from
     const itemRows = items.map(i => [i.item_code || '', i.name, (i.uom || '').toUpperCase()])
@@ -135,11 +144,16 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
     const rows = []
     ;(exportRecipes || recipes).forEach(r => {
       const cost = calcRecipeCost(r, recipes)
+      // Recipe Food Cost / FC% use the dish cost — manual cost when there are no costed
+      // ingredients, blank when neither exists. This sheet leaves the building and gets priced
+      // against, so an unknown is a blank cell, never "0.00" and "0.0" (S756, the S724 rule).
+      const dishCost = r.category === 'Sub-Recipe' ? cost : recipeCostOf({ [r.id]: cost }, r)
       const price = parseFloat(r.selling_price) || 0
-      const fcPct = price > 0 ? (cost / price) * 100 : null
+      const fcPct = menuFcPct(dishCost, price)
+      const dishCostCell = dishCost != null ? dishCost.toFixed(2) : ''
       const ings = (r.recipe_ingredients || []).filter(ri => (ri.item_id && ri.items) || (ri.sub_recipe_id && ri.sub_recipe))
       if (ings.length === 0) {
-        rows.push([r.name, r.category, r.selling_price ?? '', r.yield_qty, '', '', '', '', '', cost.toFixed(2), fcPct != null ? fcPct.toFixed(1) : ''])
+        rows.push([r.name, r.category, r.selling_price ?? '', r.yield_qty, '', '', '', '', '', dishCostCell, fcPct != null ? fcPct.toFixed(1) : ''])
         return
       }
       ings.forEach((ri, idx) => {
@@ -165,14 +179,14 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           isFirst ? r.yield_qty : '',
           ingName, ri.qty_per_portion, ingUom,
           ingRate.toFixed(2), ingCost.toFixed(2),
-          isFirst ? cost.toFixed(2) : '',
+          isFirst ? dishCostCell : '',
           isFirst ? (fcPct != null ? fcPct.toFixed(1) : '') : '',
         ])
       })
     })
     const header = [...IMPORT_COLS, 'Ingredient Rate (NPR)', 'Ingredient Cost (NPR)', 'Recipe Food Cost (NPR)', 'Recipe FC%']
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
-    ws['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 13 }, { wch: 7 }, { wch: 26 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 10 }]
+    ws['!cols'] = [{ wch: 24 }, { wch: 12 }, { wch: 20 }, { wch: 7 }, { wch: 26 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 10 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Recipes')
     XLSX.writeFile(wb, 'Recipe-Export.xlsx')
@@ -227,7 +241,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
           name: r.name,
           category: r.category || 'Food',
           selling_price: r.selling_price != null && !isNaN(r.selling_price) ? r.selling_price : null,
-          vat_rate: 0.13,
+          vat_rate: IMPORT_VAT_RATE,
           yield_qty: r.yield_qty || 1,
           yield_uom: 'portion',
           target_fc_pct: 30,
@@ -269,7 +283,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
 
   return (
     <>
-      <Tip text="Bulk-add recipes from a spreadsheet. Download the template, fill one row per ingredient (Menu Item on the recipe's first row, then its ingredients below), and upload. Ingredients are matched to your Item Master by name or code; unmatched ones are listed so you can fix them." width={320}>
+      <Tip text="Bulk-add recipes from a spreadsheet. Download the template, fill one row per ingredient (Menu Item on the recipe's first row, then its ingredients below), and upload. Selling Price is EX-VAT: for a NPR 500 menu price at 13% VAT, enter 442.48 — the preview shows the menu price each row will produce. Ingredients are matched to your Item Master by name or code; unmatched ones are listed so you can fix them." width={320}>
         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px' }} onClick={downloadRecipeTemplate}>↓ Template</button>
       </Tip>
       <label className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px', cursor: 'pointer', margin: 0 }}>
@@ -306,6 +320,15 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                     <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {r.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', fontWeight: 400 }}>· {r.category} · {r.matchedLines.length}/{r.lines.length} ingredients</span>
+                      {/* The column is ex-VAT; the guest price it produces is what a reader can check
+                          against the menu, so it is shown before anything is written (S756). */}
+                      {!r.isSub && (
+                        <div style={{ fontSize: 11, color: 'var(--theme-text2)', fontWeight: 400, marginTop: 2 }}>
+                          {r.selling_price > 0
+                            ? `NPR ${r.selling_price.toFixed(2)} ex-VAT → menu price NPR ${(r.selling_price * (1 + IMPORT_VAT_RATE)).toFixed(0)} incl. ${(IMPORT_VAT_RATE * 100).toFixed(0)}% VAT`
+                            : 'No selling price — set one in Menu Pricing after import'}
+                        </div>
+                      )}
                     </div>
                     <span style={{ fontSize: 11, fontWeight: 600, color: status.c, whiteSpace: 'nowrap' }}>{status.t}</span>
                   </div>

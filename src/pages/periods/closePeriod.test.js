@@ -14,14 +14,18 @@ jest.mock('../../modules/hr/leave/backfillApprovedLeave', () => ({
   backfillApprovedLeave: jest.fn(),
 }))
 
+// jest.mock is hoisted above these by babel-jest; the rule cannot see that (computeMonthlyReport.test.js does the same).
+/* eslint-disable import/first */
 import { supabase } from '../../supabaseClient'
 import { scopedFrom, scopedInsert, scopedUpdate } from '../../shared/scopedDb'
 import { generateMonthlyReport, saveGeneratedReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { backfillApprovedLeave } from '../../modules/hr/leave/backfillApprovedLeave'
 import {
+  closingCountPreflight,
   performPeriodClose, closeFailureText, payrollNote, nextBsMonth,
   nextExistingPeriod, previousExistingPeriod, carryForwardOpeningStock, createPeriodWithCarryForward,
 } from './closePeriod'
+/* eslint-enable import/first */
 
 const PERIOD = { id: 'p-bhadra', bs_year: 2083, bs_month: 5 }
 const NO_LEAVE = { filled: 0, skipped: 0, employees: 0, error: null }
@@ -84,6 +88,47 @@ describe('chronological neighbours', () => {
   test('a period is never its own neighbour', () => {
     expect(nextExistingPeriod(LIST, { bs_year: 2083, bs_month: 5 })?.id).toBe('kartik')
     expect(previousExistingPeriod(LIST, { bs_year: 2083, bs_month: 5 })?.id).toBe('chaitra-82')
+  })
+})
+
+describe('closingCountPreflight', () => {
+  // Records every call on a table's chain so the test can assert WHICH rows are counted.
+  function recorder(result) {
+    const calls = []
+    const b = {
+      calls,
+      select: (...a) => { calls.push(['select', ...a]); return b },
+      eq: (...a) => { calls.push(['eq', ...a]); return b },
+      not: (...a) => { calls.push(['not', ...a]); return b },
+      then: (res, rej) => Promise.resolve(result).then(res, rej),
+    }
+    return b
+  }
+
+  test('counts closing rows over the same population as the total: counted AND on an active item (S756)', async () => {
+    // A count left on an item since hidden in Item Master used to score in the numerator while
+    // the total excluded it, so the dialog could say "All 200 active items" with five uncounted.
+    const closing = recorder({ count: 195, error: null })
+    const items = recorder({ count: 200, error: null })
+    supabase.from.mockImplementation(t => (t === 'closing_stock' ? closing : items))
+    expect(await closingCountPreflight('p1', 'c1')).toEqual({ counted: 195, items: 200 })
+
+    const [, cols, opts] = closing.calls.find(c => c[0] === 'select')
+    expect(cols).toMatch(/items!inner\(is_active\)/)
+    expect(opts).toEqual({ count: 'exact', head: true })
+    expect(closing.calls).toContainEqual(['eq', 'period_id', 'p1'])
+    expect(closing.calls).toContainEqual(['eq', 'items.is_active', true])
+    // carryForwardOpeningStock's rule: a NULL physical_qty is not a count, a 0 is.
+    expect(closing.calls).toContainEqual(['not', 'physical_qty', 'is', null])
+    expect(items.calls).toContainEqual(['eq', 'is_active', true])
+    expect(items.calls).toContainEqual(['eq', 'client_id', 'c1'])
+  })
+
+  test('a failed read reports that it could not check, never a count', async () => {
+    supabase.from.mockImplementation(t => (t === 'closing_stock'
+      ? recorder({ count: null, error: { message: 'Failed to fetch' } })
+      : recorder({ count: 200, error: null })))
+    expect(await closingCountPreflight('p1', 'c1')).toBeNull()
   })
 })
 

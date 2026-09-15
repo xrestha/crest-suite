@@ -78,12 +78,17 @@ function groupRawBills(entries) {
   return Object.values(byBill)
 }
 
-// discount_amount is stored on every line of a bill but represents ONE bill-level discount —
-// deduped per purchase_group_id before summing, same convention as VendorReport.js.
+// discount_amount is stored on every line of a bill but represents ONE bill-level discount. Every
+// caller hands this one bill's lines, already grouped by billKeyOf, so the bill's discount is the
+// value they all repeat — max, as OutstandingPayables (S747) and allocateBillDiscounts take it.
+//
+// S756: this used to dedupe by `purchase_group_id || l.id` and SUM. A pre-grouping bill
+// (purchase_group_id NULL, grouped by billKeyOf's vendor|invoice|day fallback) then keyed every
+// LINE separately, so a five-line bill's discount came off five times — understating the Opening
+// Balance and the FY schedule on the IRD Annexure-13 letter by four discounts. OutstandingPayables
+// had exactly this bug and fixed it in S747; the letter kept its copy.
 function billDiscountOf(lines) {
-  const discountByGroup = {}
-  lines.forEach(l => { discountByGroup[l.purchase_group_id || l.id] = parseFloat(l.discount_amount || 0) })
-  return Object.values(discountByGroup).reduce((s, d) => s + d, 0)
+  return Math.max(0, ...lines.map(l => parseFloat(l.discount_amount || 0) || 0))
 }
 
 // VAT-correct grand total for a bill's lines via calcBillTotals. `netByEntry` (optional) nets a

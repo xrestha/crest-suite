@@ -49,8 +49,19 @@ export default function BudgetVsActual() {
     const [{ data: p }, { data: cats }] = initResults
     setPeriods(p || [])
     setCategories(cats || [])
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) { setSelectedPeriod(open); await loadData(open.id, cats || []) }
+    // Falls back to the latest period when none is open (S722 rule, S756). With every period closed
+    // this selected nothing: the budget inputs still rendered, and saveBudget silently returned on
+    // `!selectedPeriod` — a figure typed, tabbed away from, and never written, with no message.
+    const chosen = (p || []).find(x => x.status === 'open') || (p || [])[0]
+    if (chosen) {
+      // init() claims the page too (S756), or an admin client switch after any period change leaves
+      // the ref on the old client's period and loadData skips every setter.
+      periodReq.begin(chosen.id)
+      setSelectedPeriod(chosen)
+      await loadData(chosen.id, cats || [])
+      if (periodReq.isCurrent(chosen.id)) setLoading(false)
+      return
+    }
     setLoading(false)
   }
 
@@ -127,7 +138,10 @@ export default function BudgetVsActual() {
     setDirty({})   // an unsaved draft belongs to the period it was typed in, not the next one
     setLoading(true)
     await loadData(periodId, categories)
-    setLoading(false)
+    // Only the load that still owns the page may clear the flag (S756): a superseded load returns
+    // early from loadData, and clearing here would show the previous period's actuals and budgets
+    // — editable — under the new period's label.
+    if (periodReq.isCurrent(periodId)) setLoading(false)
   }
 
   function updateBudget(categoryId, value) {
@@ -139,7 +153,13 @@ export default function BudgetVsActual() {
     // Blur fires whether or not anything was typed, so tabbing across an untouched row used to
     // upsert `amount: 0` for every category it passed through — writing rows nobody had asked for.
     if (!dirty[categoryId]) return
-    if (!selectedPeriod?.id || !effectiveClientId) return
+    // Loud, not silent (S756): this return used to discard a typed budget with nothing on screen,
+    // under a banner promising budgets save automatically.
+    if (!selectedPeriod?.id || !effectiveClientId) {
+      const name = categories.find(c => c.id === categoryId)?.name || 'this category'
+      setSaveError(`The budget for ${name} was NOT saved — no period is selected. Pick a period above, then click into the box and out again.`)
+      return
+    }
     const amount = parseFloat(budgets[categoryId]) || 0
     setSaving(prev => ({ ...prev, [categoryId]: true }))
     setSaveError(null)
@@ -209,7 +229,9 @@ export default function BudgetVsActual() {
               </option>
             ))}
           </select>
-          <button className="btn btn-ghost" style={{ fontSize: 13 }} onClick={() => printWithTitle(`Budget vs Actual - ${periodLabel}`)}>⎙ Print</button>
+          {/* Gated on the load (S728/S756): mid-load the table holds the previous period's figures
+              while the print title already names the new one. */}
+          <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={loading || !!loadError} onClick={() => printWithTitle(`Budget vs Actual - ${periodLabel}`)}>⎙ Print</button>
         </div>
       </div>
 
@@ -272,7 +294,10 @@ export default function BudgetVsActual() {
                         </div>
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
-                        {actual > 0 ? fmt(actual) : '—'}
+                        {/* `!== 0`, not `> 0` (S756): returns larger than a month's purchases make
+                            net spend negative, and a dash there hid a real credit that the Totals
+                            row below still counts. */}
+                        {actual !== 0 ? fmt(actual) : '—'}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: noBudget ? 'var(--theme-text2)' : isOver ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                         {noBudget ? '—' : (variance >= 0 ? '+' : '') + fmt(variance)}

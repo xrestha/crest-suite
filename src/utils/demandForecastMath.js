@@ -97,11 +97,23 @@ export function weightedMean(values) {
 
 // One forecast row per coming day. `now` is injectable for tests; the day it falls on is never a
 // sample — a recompute at 8 AM used to feed one hour of trade into next week as a whole day.
+//
+// A PAST holiday is never a sample either (S756, D21 — decided with Aashish). `holidaysByKey` is the
+// Holiday Calendar the forecast already reads for future multipliers, and it covers past dates too.
+// A Dashain Tika Wednesday that sold three times the usual (or closed and sold nothing) is not
+// evidence about an ordinary Wednesday; averaged in, it inflated or flattened the next eight weeks
+// of that weekday, and the multiplier on the holiday itself then counted the festival twice. The
+// next-most-recent ordinary day of that weekday takes its place.
 export function forecastByWeekday(dailyHistory, horizonDays, holidaysByKey = {}, now = new Date()) {
   const todayStart = startOfDay(now)
   const byWeekday = Array.from({ length: 7 }, () => [])
+  const hasHolidays = Object.keys(holidaysByKey || {}).length > 0
   for (const row of dailyHistory) {
     if (row.date >= todayStart) continue
+    if (hasHolidays) {
+      const bs = adToBs(row.date)
+      if (holidaysByKey[`${bs.year}:${bs.month}:${bs.day}`]) continue
+    }
     byWeekday[row.weekday].push(row)
   }
   for (const rows of byWeekday) rows.sort((a, b) => b.date - a.date) // most recent first
@@ -197,4 +209,22 @@ export function aggregateIngredientDemand(totalsByRecipe, explodedByRecipe) {
     }
   }
   return byItem
+}
+
+// What to buy for the horizon: forecast use, what is in store, and the difference (S756, D21).
+//
+// `onHandById` comes from `buildStockRows()` (stockReportCalc.js) — the one on-hand calculation,
+// never a local copy. Pass null when that read could not run: every row then carries
+// `inStore: null, toBuy: null`, because "we could not look at the shelf" must not read as "the shelf
+// is empty, buy all of it". An item the stock read has no row for is 0 in store — buildStockRows
+// returns a row for every item it is handed, so an absent one genuinely has nothing recorded.
+// To buy never goes negative: surplus stock is not a purchase.
+export function ingredientBuyList(demandByItem, onHandById) {
+  const known = onHandById != null
+  return Object.entries(demandByItem || {}).map(([id, use]) => {
+    if (!known) return { id, use, inStore: null, toBuy: null }
+    const inStore = Math.max(0, Number(onHandById[id]) || 0)
+    const gap = use - inStore
+    return { id, use, inStore, toBuy: gap > 1e-9 ? gap : 0 }
+  })
 }

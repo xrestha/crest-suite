@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { getBsFiscalYear, getBsFiscalYearStart, getBsToday, formatAd } from '../../../utils/bsCalendar'
 import { getFiscalYearAdRange } from '../reports/vendorBalanceHelpers'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -27,6 +28,7 @@ function fyOptionsAround(currentFyStart) {
 export default function TaxPoolTab({ assets }) {
   const { clientId, hasImsAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
+  const { ask: askConfirm, confirmEl } = useConfirm()
 
   const todayBs = getBsToday()
   const currentFyStart = getBsFiscalYearStart(todayBs.year, todayBs.month)
@@ -64,6 +66,16 @@ export default function TaxPoolTab({ assets }) {
     setErr(null)
     if (!newExpense.expense_date || !(parseFloat(newExpense.amount) > 0)) {
       setErr('A repair expense needs a date and an amount above zero.')
+      return
+    }
+    // The row is stamped with the SELECTED fiscal year, and the Section 16 cap is measured per
+    // year off that stamp — so a repair dated in another year would count against this one's cap
+    // and never against its own (S756). Compared as bare date strings, both built by formatAd,
+    // so no timezone can move either end.
+    const { start: fyStartAd, end: fyEndAd } = getFiscalYearAdRange(fyStart)
+    const fyFrom = formatAd(fyStartAd), fyTo = formatAd(fyEndAd)
+    if (newExpense.expense_date < fyFrom || newExpense.expense_date > fyTo) {
+      setErr(`That date is outside FY ${fyLabel} (${fyFrom} to ${fyTo}), so it was not added. Pick a date inside the year, or switch the Fiscal Year above to the year the repair belongs to.`)
       return
     }
     const { error } = await scopedInsert('assets_repair_expenses', {
@@ -170,8 +182,38 @@ export default function TaxPoolTab({ assets }) {
     setLoading(false)
   }
 
+  // A fiscal year can be posted twice — there is deliberately no unique constraint, since a
+  // correction is a new run — and the next year's opening WDV then reads whichever posted last.
+  // Look first, and make a second schedule for the same year a decision naming the first (S756).
   async function post() {
     if (!lines) return
+    setMsg(''); setErr(null)
+    setPosting(true)
+    const { data: existing, error: existingErr } = await scopedFrom('assets_tax_pool_runs', 'id, posted_at, created_at')
+      .eq('fiscal_year', fyLabel).eq('status', 'posted').order('created_at').order('id')
+    setPosting(false)
+    if (existingErr) {
+      // A check that could not run has not passed.
+      const a = asActionError(existingErr)
+      setErr({ text: `Could not check whether FY ${fyLabel} already has a posted schedule, so nothing was posted. Try again. ` + a.text, detail: a.detail })
+      return
+    }
+    if (!existing || existing.length === 0) { await submitPost(); return }
+    askConfirm({
+      title: `FY ${fyLabel} already has a posted schedule`,
+      danger: true,
+      body: (
+        <p style={{ margin: 0 }}>
+          A tax pool schedule for FY {fyLabel} was posted on {existing.map(r => new Date(r.posted_at || r.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })).join(', ')}.
+          {' '}Posting again adds a second locked schedule for the same year beside it; next year's opening values will be taken from this new one. Neither can be edited afterwards.
+        </p>
+      ),
+      confirmLabel: 'Post a second schedule',
+      run: submitPost,
+    })
+  }
+
+  async function submitPost() {
     setPosting(true); setMsg(''); setErr(null)
     const { error } = await supabase.rpc('post_tax_pool_run', {
       p_client_id: clientId, p_fiscal_year: fyLabel, p_lines: lines, p_notes: null,
@@ -315,6 +357,7 @@ ${text}`, detail })
           </div>
         </div>
       )}
+      {confirmEl}
     </div>
   )
 }

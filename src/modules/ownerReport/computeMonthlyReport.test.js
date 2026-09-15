@@ -117,6 +117,21 @@ describe('computeMonthlyReport reads what the two helpers need', () => {
     }
   })
 
+  test('every per-item and per-period IMS read in the snapshot is paged with a unique tiebreaker (S756)', () => {
+    // The six reads that sat bare beside paged ones, plus payable_payments. Truncation returns no
+    // error, so throwFirstError cannot catch it and the frozen report keeps the short figure.
+    const reads = [
+      "from('vendor_returns')", "scopedFrom('items'", "scopedFrom('par_levels'", "from('opening_stock')",
+      "from('closing_stock')", "from('staff_meals')", "scopedFrom('payable_payments'",
+    ]
+    for (const read of reads) {
+      const at = flat.indexOf(read)
+      expect(at).toBeGreaterThan(-1)
+      expect(flat.slice(Math.max(0, at - 40), at)).toMatch(/fetchAllRows\(\(\) => (supabase\.)?$/)
+      expect(flat.slice(at, at + 200)).toMatch(/\.order\('id'\)\)/)
+    }
+  })
+
   test('the hr_employees read selects ssf_no, and nothing gates employer SSF on the flag alone', () => {
     const at = flat.indexOf("scopedFrom('hr_employees'")
     expect(at).toBeGreaterThan(-1)

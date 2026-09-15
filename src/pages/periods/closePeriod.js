@@ -75,8 +75,14 @@ export async function closingCountPreflight(periodId, clientId) {
   try {
     const [countedRes, itemsRes] = await withTimeout(Promise.all([
       // Rows with a real physical count only — carryForwardOpeningStock uses the same test.
-      supabase.from('closing_stock').select('item_id', { count: 'exact', head: true })
-        .eq('period_id', periodId).not('physical_qty', 'is', null),
+      //
+      // And only rows whose ITEM is active — the same population as the total below (S756). A
+      // count left on an item since hidden in Item Master used to score here while the total
+      // excluded it, so 195 active items counted plus 5 hidden ones read "All 200 active items
+      // have a closing count" with five active items uncounted. The !inner embed turns the item
+      // filter into a row filter; head: true keeps it an uncapped count.
+      supabase.from('closing_stock').select('item_id, items!inner(is_active)', { count: 'exact', head: true })
+        .eq('period_id', periodId).not('physical_qty', 'is', null).eq('items.is_active', true),
       // NO is_sub_recipe filter, deliberately: Stock.js counts active items WITHOUT that
       // filter, so sub-recipe mirror items get closing_stock rows like any other. Excluding
       // them here measured the two sides against different populations — a client with 200

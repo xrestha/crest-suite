@@ -1,15 +1,16 @@
 import { npr2 } from '../../../shared/nepalMoney'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import QtyInput from '../../../components/QtyInput'
-import FieldError from '../../../components/FieldError'
+import FieldError, { fieldAria } from '../../../components/FieldError'
+import { invalidStyle } from '../../../shared/inlineFieldState'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { getCf, calcBillTotals, fmtRate, lineState, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
+import { getCf, calcBillTotals, billDiscountError, fmtRate, lineState, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false }
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
@@ -64,6 +65,16 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // Per-field validation. `error` above stays the form-level channel — a rejected write, and the
   // "add at least one line" rule, which belongs to the line table rather than any one box (S603).
   const [dayErr, setDayErr] = useState('')
+  const [discountErr, setDiscountErr] = useState('')
+  // A bill that has SAVED stays unsaveable for the rest of this form's life (S756). The page still
+  // has work to do after the RPC returns — print the voucher, read Item Master for rate changes —
+  // before it navigates away, and `setSaving(false)` used to run BEFORE onSaved: for that whole
+  // window Save was live again, and a second click minted a fresh crypto.randomUUID() group and
+  // wrote the bill twice. Every exit from a successful save is a navigation, so nothing needs the
+  // button back. The ref is the guard that does not wait for a render: two clicks inside one frame
+  // both see `saving === false` in state.
+  const [saved, setSaved] = useState(false)
+  const committingRef = useRef(false)
   // The duplicate-bill question (S698). A warning, never a hard stop — some vendors reuse numbers.
   const { ask: askConfirm, confirmEl } = useConfirm()
 
@@ -152,6 +163,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   }
 
   async function saveBill() {
+    if (saved || committingRef.current) return
     const maxDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 32
     if (!billHeader.bs_day || billHeader.bs_day < 1 || billHeader.bs_day > maxDay) {
       setDayErr(`Enter a valid BS day (1–${maxDay}).`); return
@@ -175,6 +187,15 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     const valid = billLines.filter(l => lineState(l) === 'complete')
     if (valid.length === 0) { setError('Add at least one item with a quantity.'); return }
 
+    // 0 ≤ discount ≤ the goods it comes off (S756). The box is `type="number" min="0"` outside any
+    // <form>, so the browser enforced neither bound and a negative, or oversized, discount saved a
+    // grand total below zero. Measured over the lines that will actually SAVE, which is what
+    // calcBillTotals prices once it lands. A CHECK on the table is being added separately; this is
+    // the sentence under the box.
+    const discountMsg = billDiscountError(billHeader.discount, calcBillTotals(valid, 0).subTotal)
+    if (discountMsg) { setDiscountErr(discountMsg); return }
+    setDiscountErr('')
+
     // An edit with nothing to supersede is a contradiction, and the one that would duplicate the
     // bill. Refuse — the page only renders this form for an edit once it has loaded the bill's
     // rows, so reaching here means something is wrong.
@@ -185,7 +206,11 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
 
     setError('')
     setSaving(true)
+    // Held for the duplicate check too: a second click while it is in flight would otherwise run
+    // its own check and, finding nothing, commit alongside the first.
+    committingRef.current = true
     const dup = await findDuplicateBill()
+    committingRef.current = false
     setSaving(false)
     if (dup?.error) {
       const { text } = asActionError(dup.error)
@@ -223,6 +248,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // payments cascade off the lines it would delete; that refusal reaches here as an error the
   // errorText table knows how to word.
   async function commitBill(valid) {
+    // Reached from Save directly AND from the duplicate-bill dialog's run(); both go through here.
+    if (saved || committingRef.current) return
+    committingRef.current = true
     setSaving(true); setError('')
 
     const discountAmt = parseFloat(billHeader.discount) || 0
@@ -286,11 +314,22 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
           : text,
         detail,
       })
+      committingRef.current = false
       setSaving(false); return
     }
 
-    setSaving(false)
-    onSaved(billHeader, valid, savedCreatedAt || null)
+    // The bill is committed. Saving stays on, and `saved` keeps Save disabled, through onSaved and
+    // the navigation it ends in (S756 — see `saved` above). Only a throw from onSaved hands the
+    // form back, and then with a sentence that does not invite a second save: the first one landed.
+    setSaved(true)
+    try {
+      await onSaved(billHeader, valid, savedCreatedAt || null)
+    } catch (err) {
+      const { text, detail } = asActionError(err)
+      setError({ text: `The bill is saved. What follows a save (the printed voucher, the Item Master rate check) did not finish — do not save it again; go back to Purchases to see it. ${text}`, detail })
+    } finally {
+      setSaving(false)
+    }
   }
 
   // No QuickCalculator here any more. The form carried its own second instance plus a header
@@ -358,9 +397,10 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
           <label htmlFor="purcha-f3"><Tip text="Promo or trade discount on the total bill. Applied before VAT — VAT is levied only on the net taxable amount." width={260}>Discount (NPR)</Tip></label>
           <input id="purcha-f3" type="number" min="0" step="any"
             value={billHeader.discount}
-            onChange={e => setBillHeader(h => ({ ...h, discount: e.target.value }))}
+            onChange={e => { setDiscountErr(''); setBillHeader(h => ({ ...h, discount: e.target.value })) }}
             placeholder="0"
-            style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-red-text)', outline: 'none', width: '90px', textAlign: 'right' }} />
+            {...fieldAria('purcha-f3', discountErr)}
+            style={invalidStyle({ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-red-text)', outline: 'none', width: '90px', textAlign: 'right' }, discountErr)} />
         </div>
         <div className="form-field">
           <label htmlFor="purcha-f4"><Tip text="Cash: paid on delivery. Credit: pay later. FonePay: digital payment. Applied to all items on this bill.">Payment</Tip></label>
@@ -369,6 +409,10 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
           </select>
         </div>
       </div>
+      {/* The discount's message sits under the whole header row rather than inside its 90px
+          column, where a sentence would stand ten lines tall and push the row's bottom-aligned
+          neighbours out of line. Same control id, so the box's aria-describedby still resolves. */}
+      {discountErr && <div style={{ marginTop: -12, marginBottom: 14 }}><FieldError id="purcha-f3" message={discountErr} /></div>}
 
       <div style={{ borderTop: '1px solid var(--theme-border)', marginBottom: 16 }} />
 
@@ -558,8 +602,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
           `1fr auto 1fr`, which pushed Cancel and Save to opposite ends of a 1160px modal. */}
       <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" onClick={saveBill} disabled={saving}>
+        <button className="btn btn-primary" onClick={saveBill} disabled={saving || saved} aria-busy={saving || undefined}>
           {(() => {
+            if (saved) return 'Saved'
             if (saving) return 'Saving…'
             if (editingGroupId) return 'Update Bill'
             const n = billLines.filter(l => lineState(l) === 'complete').length

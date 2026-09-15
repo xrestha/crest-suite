@@ -21,6 +21,9 @@
 // oldest-first, ordinary turnover consumes it before touching real purchases — so anything left
 // in it is genuinely stale, which is the whole point of the report.
 
+import { bsToAd, adToBs, adToBsSafe, daysInBsMonth } from '../../../utils/bsCalendar'
+import { nepalCivilDate } from '../../../shared/nepalTime'
+
 export const AGE_BANDS = [
   { key: '0-30', label: '0–30 days', min: 0, max: 30 },
   { key: '31-60', label: '31–60 days', min: 31, max: 60 },
@@ -78,6 +81,60 @@ export function daysUntilExpiry(expiryIso, asOf) {
   if (!e || isNaN(b)) return null
   const bMid = new Date(b.getFullYear(), b.getMonth(), b.getDate())
   return Math.round((e - bMid) / MS_PER_DAY)
+}
+
+/**
+ * Today IN NEPAL, as `{ date, bs, isToday: true }` — `date` at the runtime's local midnight carrying
+ * Nepal's Y/M/D, so `ageInDays`/`daysUntilExpiry` (which read local getters) count Nepal's days.
+ *
+ * `new Date()` is today for a viewer in Kathmandu and yesterday or tomorrow for the operator viewing
+ * the client from anywhere else near midnight — the S670 display rule, applied to an as-of date.
+ */
+export function nepalTodayRef(now = new Date()) {
+  const date = nepalCivilDate(now) || new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  return { date, bs: adToBsSafe(date) || adToBs(date), isToday: true }
+}
+
+/**
+ * The date a stock report measures ages or expiry AGAINST, for a window ending with `lastPeriod`.
+ *
+ * Today (Nepal) when the window is the NEWEST one the client has, or has not ended yet; otherwise
+ * the last day of `lastPeriod` — "how things stood when that month ended" (S594/S717).
+ *
+ * WHY "newest", not "the current BS month" (S756): the page defaults to the latest period, and
+ * early in a month — before anyone opens the new period — the latest period is LAST month. Measured
+ * to that month's end, a batch that expired three days ago read "Expiring in 4d" and the Expired
+ * card said 0 ✓, on the exact days the stock is going off. When nothing newer exists, what that
+ * window left on the shelf is what is on the shelf today, so today is the honest as-of date.
+ */
+export function asOfForWindow(lastPeriod, { isNewest = false } = {}, now = new Date()) {
+  const today = nepalTodayRef(now)
+  if (!lastPeriod) return today
+  const day = daysInBsMonth(lastPeriod.bs_year, lastPeriod.bs_month)
+  const end = bsToAd(lastPeriod.bs_year, lastPeriod.bs_month, day)
+  if (isNewest || !(end < today.date)) return today
+  return { date: end, bs: { year: lastPeriod.bs_year, month: lastPeriod.bs_month, day }, isToday: false }
+}
+
+/**
+ * Split vendor returns into the ones that come off a batch in the window and the ones that do not
+ * (S756). A return names its purchase line where it can; a line OUTSIDE the window (a bill from an
+ * earlier fiscal year, returned this one) matches no batch here, and used to land in the by-entry
+ * map and be subtracted from nothing — the goods left the building and the report kept them on the
+ * shelf. Those, like a return with no line at all, are taken off the item as consumption, which
+ * FIFO eats from the carried-forward stock first: exactly where an earlier year's bill now lives.
+ *
+ * `entryIds` is the Set of purchase_entries ids the window's batches were built from.
+ */
+export function splitReturns(returns, entryIds) {
+  const byEntry = {}
+  const byItem = {}
+  for (const r of returns || []) {
+    const q = parseFloat(r.qty) || 0
+    if (r.purchase_entry_id && entryIds.has(r.purchase_entry_id)) byEntry[r.purchase_entry_id] = (byEntry[r.purchase_entry_id] || 0) + q
+    else if (r.item_id) byItem[r.item_id] = (byItem[r.item_id] || 0) + q
+  }
+  return { byEntry, byItem }
 }
 
 /**

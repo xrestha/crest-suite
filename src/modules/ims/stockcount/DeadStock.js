@@ -20,6 +20,13 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 // Item is "Slow" if used < 20% of net available
 const SLOW_THRESHOLD = 0.2
 
+// Quantity tolerance for the two exact tests below (S756). `computeUsed` is a chain of float
+// subtractions, so a fully-consistent item can land at 0.7 + 0.1 − 0.8 = −1.1e-16: tested with
+// `< 0` that is "counted higher than was available" — a missing-bill banner over a correct count —
+// and tested with `=== 0` a genuinely unmoved item's 1e-15 escapes Dead. Far below any real
+// quantity in a base unit.
+const QTY_EPS = 1e-6
+
 // THIS REPORT CANNOT RUN WITHOUT A CLOSING COUNT, AND USED TO PRETEND OTHERWISE (S717).
 //
 // Consumption here is the periodic COGS residual — opening + purchases − returns − wastage −
@@ -73,7 +80,12 @@ export default function DeadStock() {
         // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
         if (error) { setLoadError(error.message); setLoading(false); return }
         setPeriods(data || [])
-        if (data?.length) setSelected(data[0])
+        // The most recent CLOSED period, else the latest (S756). `data[0]` is the open month, which
+        // is almost never counted yet — and this report cannot judge anything without a closing
+        // count, so the default view was the "needs a stock count" state for most of every month.
+        // Same default the variance pages use, for the same reason (ims-figures.md).
+        const initial = (data || []).find(p => p.status === 'closed') || data?.[0]
+        if (initial) setSelected(initial)
         else setLoading(false)   // nothing will call fetchData, so nothing else will clear it
       })
   }, [effectiveClientId, scopedFrom])
@@ -150,7 +162,7 @@ export default function DeadStock() {
 
       // Skip items with no stock presence at all — nothing in the data says this item was ever on
       // the shelf this period, so it is neither dead nor unassessed, it is simply absent.
-      if (available <= 0 && !hasCount) continue
+      if (available <= QTY_EPS && !hasCount) continue
 
       // No closing count: consumption is not merely unknown, it is unknowable in this model.
       // Counted, not classified — the banner names how many, because the alternative is a report
@@ -160,7 +172,7 @@ export default function DeadStock() {
       // Counted, and the count is zero on an item nothing was available of either: the original
       // "no stock presence" skip, which the hasCount split above would otherwise have let through
       // as a Dead item worth NPR 0 — noise on a report about capital tied up.
-      if (available <= 0 && closing <= 0) continue
+      if (available <= QTY_EPS && closing <= QTY_EPS) continue
 
       // A count larger than what was theoretically available means a purchase is missing or the
       // count is wrong. `used` then goes negative and the old `Math.max(…, 0)` turned that into a
@@ -168,9 +180,10 @@ export default function DeadStock() {
       // Report already surfaces this class as "negative theoretical stock"; here it is excluded
       // and counted, since "write this stock off" is the wrong thing to say about a bad number.
       const rawUsed = computeUsed({ opening, purchases: purchased, returns: returned, wastage: wasted, staffMeals: staffUsed, closing })
-      if (rawUsed < 0) { inconsistentCount += 1; continue }
+      if (rawUsed < -QTY_EPS) { inconsistentCount += 1; continue }
       assessableCount += 1
-      const used = rawUsed
+      // Inside the tolerance a residue either side of zero IS zero — so the row prints 0, not −0.0.
+      const used = Math.abs(rawUsed) <= QTY_EPS ? 0 : rawUsed
 
       const status = used === 0
         ? 'Dead'
@@ -304,9 +317,18 @@ export default function DeadStock() {
           </select>
           <button className="btn btn-ghost" disabled={loading || !!loadError}
             onClick={() => printWithTitle(`Dead Stock / Slow Movers — ${scopeLine}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length}>Export Excel</button>
+          {/* biz.error (S756): a failed client-name read shipped the workbook with a blank
+              CompanyName line. The export waits rather than send a nameless document. */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length || !!biz.error}>Export Excel</button>
         </div>
       </div>
+
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
+          with a blank company name. The report below is unaffected. Reload the page to try again.
+        </p>
+      )}
 
       {/* What the report could NOT judge. It goes above the figures because it qualifies all of
           them: "no dead stock" across 12 assessed items out of 900 is not the same sentence as

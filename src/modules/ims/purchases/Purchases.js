@@ -12,7 +12,7 @@ import Tip from '../../../components/Tip'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import PeriodScope from '../../../components/PeriodScope'
 import SearchableSelect from '../../../components/SearchableSelect'
-import { getCf, calcBillTotals, methodOf, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
+import { getCf, billTotalsByKey, methodOf, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -230,13 +230,19 @@ export default function Purchases() {
     // supabase-js resolves `{ error }`; a bare await here meant a refused delete (RLS on a closed
     // period, a dropped connection) just reloaded the same rows and the bill "came back" with no
     // explanation (S682).
-    const { error } = hasGroupId
-      ? await supabase.from('purchase_entries').delete().eq('purchase_group_id', groupId)
+    //
+    // `.select('id')` (S756): a delete an RLS policy filters down to nothing returns
+    // `{ data: [], error: null }` — success at a call site that only reads `error`. PostgREST
+    // returns what it actually removed, so zero rows back is proof the bill is still there.
+    const { data: removed, error } = hasGroupId
+      ? await supabase.from('purchase_entries').delete().eq('purchase_group_id', groupId).select('id')
       // Legacy pre-purchase_group_id bills: one .in() delete, not one round trip per entry.
-      : await supabase.from('purchase_entries').delete().in('id', groupEntries.map(e => e.id))
+      : await supabase.from('purchase_entries').delete().in('id', groupEntries.map(e => e.id)).select('id')
     if (error) {
       const { text, detail } = asActionError(error)
       setActionError({ text: `This bill is still recorded — it was not deleted. ${text}`, detail })
+    } else if (!removed?.length) {
+      setActionError('Nothing was removed. If the bill is still in the list below (it has been reloaded), your login is not allowed to delete it — ask your manager or the Owner. If it is gone, someone else deleted it first and there is nothing more to do.')
     }
     loadPurchases(selectedPeriod.id)
     loadReturns(selectedPeriod.id)
@@ -389,14 +395,29 @@ export default function Purchases() {
     return acc
   }, {}), [filtered])
 
+  // Every bill in the period valued over ALL of its lines (S756). `byDay` above is built from
+  // `filtered`, and the Item filter narrows per LINE — so valuing a group from `byDay` handed
+  // calcBillTotals the one line that survived plus the WHOLE bill's discount: a 10-line NPR 10,000
+  // bill with a 1,000 discount, filtered to one 500 line, read Bill Total −500, and the footer's
+  // Total payable summed it. The filters choose which bills and lines are shown; this is what each
+  // shown bill is worth. Keyed on `purchases`, not on any filter, so a keystroke in the Bill no.
+  // box reuses it.
+  const billTotals = useMemo(() => billTotalsByKey(purchases), [purchases])
+
   // The Total column on each bill row shows what was actually PAYABLE (incl. VAT, after the
   // bill's discount) while the footer and the Gross Purchases KPI are the ex-VAT, pre-discount
   // base. Both are legitimate figures, neither was labelled, and they differ by exactly
   // (VAT − discount) — so the column visibly did not add up to the total printed beneath it.
-  // Footer now carries both, each named. Grouped the same way the table groups.
+  // Footer now carries both, each named. Summed over the bills the table SHOWS, each at its whole-
+  // bill value, so the footer adds up the Bill Total column above it.
   const filteredPayable = useMemo(() => Object.values(byDay).reduce((sum, dayGroups) =>
-    sum + Object.values(dayGroups).reduce((s, lines) =>
-      s + calcBillTotals(lines, lines[0]?.discount_amount).grandTotal, 0), 0), [byDay])
+    sum + Object.keys(dayGroups).reduce((s, gid) =>
+      s + (billTotals.get(gid)?.grandTotal || 0), 0), 0), [byDay, billTotals])
+  // When the Item filter hides some lines of a bill, the two footer rows describe different
+  // populations — goods value is the lines shown, payable is the whole bills — so say so.
+  const hasPartialBills = useMemo(() => filterItem !== 'all' && Object.values(byDay).some(dayGroups =>
+    Object.entries(dayGroups).some(([gid, lines]) => lines.length < (billTotals.get(gid)?.lineCount || 0))),
+  [byDay, billTotals, filterItem])
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
@@ -701,12 +722,15 @@ export default function Purchases() {
                       return groupIds.flatMap((gid, gIdx) => {
                         const groupEntries = dayGroupsObj[gid]
                         const first = groupEntries[0]
-                        const groupTotal    = groupEntries.reduce((s, e) => s + e.qty * e.rate, 0)
-                        const vatSubtotalG  = groupEntries.filter(e => e.vat_inclusive).reduce((s, e) => s + e.qty * e.rate, 0)
-                        const discountAmt   = parseFloat(first.discount_amount) || 0
-                        const vatTaxableG   = groupTotal > 0 ? vatSubtotalG * (1 - discountAmt / groupTotal) : 0
-                        const vatAmount     = vatTaxableG * 0.13
-                        const groupGrand    = (groupTotal - discountAmt) + vatAmount
+                        // The bill's figures come from the WHOLE bill, never from the lines the
+                        // filters left in `groupEntries` (S756 — see billTotals above). This was an
+                        // inline copy of calcBillTotals' arithmetic over the filtered lines.
+                        const whole         = billTotals.get(gid)
+                        const discountAmt   = whole?.discount || 0
+                        const vatAmount     = whole?.vatTotal || 0
+                        const groupGrand    = whole?.grandTotal || 0
+                        const totalLines    = whole?.lineCount || groupEntries.length
+                        const partial       = groupEntries.length < totalLines
 
                         // When this bill was TYPED INTO Crest — not when the goods arrived. The Day
                         // column is the receiving date, and the two routinely differ: the whole
@@ -775,8 +799,10 @@ export default function Purchases() {
                         // A single-item bill has nothing left to say on a second row — the bill-level
                         // fields (vendor/total/payment/actions) and the one line item's fields (item/
                         // qty/rate) collapse into one row instead of leaving every other cell blank
-                        // on two separate rows.
-                        if (groupEntries.length === 1) {
+                        // on two separate rows. Not when the Item filter is hiding the bill's other
+                        // lines (S756): the Bill Total is the whole bill's, and on one collapsed row
+                        // it would read as the price of the single item beside it.
+                        if (groupEntries.length === 1 && !partial) {
                           const entry = groupEntries[0]
                           const cf = getCf(entry.items)
                           const displayQty  = cf > 1 ? entry.qty / cf : entry.qty
@@ -828,7 +854,9 @@ export default function Purchases() {
                               <span style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{first.vendors?.name || <span style={{ color: 'var(--theme-text2)' }}>No Vendor</span>}</span>
                               <span style={{ display: 'block', whiteSpace: 'nowrap', fontSize: 11, marginTop: 2, color: 'var(--theme-text3)' }}>
                                 {first.invoice_ref && <span style={{ color: 'var(--theme-text2)' }}>#{first.invoice_ref} · </span>}
-                                {groupEntries.length} items
+                                {partial
+                                  ? <Tip text="The Item filter is showing only some of this bill's lines. The Bill Total is still the whole bill — every line, its discount and its VAT." width={260}>{groupEntries.length} of {totalLines} items shown</Tip>
+                                  : `${groupEntries.length} items`}
                               </span>
                               {entryLine}
                             </td>
@@ -896,7 +924,12 @@ export default function Purchases() {
                     </tr>
                     <tr>
                       <td colSpan={6} style={{ fontWeight: 700, color: 'var(--theme-text2)' }}>
-                        <Tip text="The same bills after their discounts and with VAT added — what actually leaves the bank. This is the figure the Bill Total column adds up to." width={270}>Total payable (incl. VAT)</Tip>
+                        <Tip text="The same bills after their discounts and with VAT added — what actually leaves the bank. This is the figure the Bill Total column adds up to. Each bill counts in full, even where the Item filter is showing only some of its lines." width={270}>Total payable (incl. VAT)</Tip>
+                        {hasPartialBills && (
+                          <span className="cell-sub" style={{ display: 'block', fontWeight: 400 }}>
+                            Whole bills — includes lines the Item filter is hiding, so it is not comparable with the goods value above.
+                          </span>
+                        )}
                       </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14 }}>
                         NPR {filteredPayable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

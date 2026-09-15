@@ -109,3 +109,24 @@ describe.each(FILES)('%s nets the bill-level discount out of purchases', (_name,
     expect(flat).toMatch(/line(Gross|Net)/)
   })
 })
+
+// 3. NULL-SOURCE ROWS (S756). `sales_entries.source` is nullable, and a server-side
+//    `.neq('source', 'pos_comp')` drops every legacy NULL row (`NULL <> x` is NULL), so revenue —
+//    the denominator of every FC% on these pages — read short. Comps are filtered in JS instead,
+//    which only works if `source` is actually selected.
+const REVENUE_FILES = FILES.filter(([name]) => name !== 'BudgetVsActual.js')
+
+describe.each(REVENUE_FILES)('%s keeps NULL-source sales rows', (name, file) => {
+  const flat = flatten(file)
+
+  it('has no server-side .neq on source', () => {
+    expect(flat).not.toMatch(/\.neq\(\s*'source'/)
+  })
+
+  it('selects source on its sales_entries read and filters comps in JS', () => {
+    const at = readSites(flat, 'sales_entries')[0]
+    expect(`${name} ${at}`).not.toMatch(/ -1$/)
+    expect(flat.slice(at, at + 200)).toMatch(/select\('[^']*\bsource\b/)
+    expect(flat).toMatch(/source !== 'pos_comp'/)
+  })
+})

@@ -16,6 +16,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { buildStockRows } from './stockReportCalc'
+import { packsFor, packText, reorderQtyText } from './reorderPacks'
 
 export default function ReorderReport() {
   const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
@@ -323,8 +324,8 @@ export default function ReorderReport() {
   }
 
   // Plain text, WhatsApp's own markdown (*bold*) — no HTML, since wa.me only ever prefills a
-  // text box. Qty is base UOM as shown on screen (grams/ml etc.), not converted to a purchase
-  // unit — matches what every other figure on this page already shows.
+  // text box. Qty is the base UOM the screen shows AND, where the item has a pack size, the whole
+  // packs to buy (S756, D18) — this message goes to whoever is at the market, who buys sacks.
   function buildWhatsAppText() {
     const lines = [
       `*Reorder List — ${periodLabel}*`,
@@ -333,7 +334,7 @@ export default function ReorderReport() {
     ]
     reorderPrintGroups.forEach(g => {
       lines.push(`*${g.category}*`)
-      g.items.forEach(r => { lines.push(`• ${r.item.name} — ${r.shortfall.toFixed(2)} ${r.item.uom} (Par ${r.par})`) })
+      g.items.forEach(r => { lines.push(`• ${r.item.name} — ${reorderQtyText(r.shortfall, r.item)} · Par ${r.par}`) })
       lines.push('')
     })
     return lines.join('\n').trim()
@@ -348,22 +349,30 @@ export default function ReorderReport() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const exportRows = selectedIds.size > 0 ? filtered.filter(r => selectedIds.has(r.item.id)) : filtered
-    const data = exportRows.map(r => ({
-      'Item': r.item.name,
-      'Code': r.item.item_code || '',
-      'Category': r.category,
-      'UOM': r.item.uom,
-      'Par Level': r.par || '',
-      'Current Stock': parseFloat(r.currentStock.toFixed(3)),
-      'Book Stock (POS)': r.hasMovements ? parseFloat(r.bookStock.toFixed(3)) : '',
-      'Stock Source': r.stockSource === 'closing' ? 'Physical Count' : 'Calculated (Opening + Net Purchases − Usage − Wastage − Staff Meals)',
-      'Shortfall': r.shortfall > 0 ? parseFloat(r.shortfall.toFixed(3)) : '',
-      'Unit Rate (NPR)': r.unitValue,
-      'Shortfall Value (NPR)': r.shortfall > 0 ? parseFloat(r.shortfallValue.toFixed(0)) : '',
-      'Status': r.needsReorder ? 'REORDER' : r.par === 0 ? 'No Par Set' : 'OK'
-    }))
+    const data = exportRows.map(r => {
+      // Packs as their own NUMERIC columns rather than the one-line text the screen shows — a
+      // spreadsheet has to sum and sort them (S756, D18). Blank where the item has no pack size.
+      const pk = r.shortfall > 0 ? packsFor(r.shortfall, r.item) : null
+      return {
+        'Item': r.item.name,
+        'Code': r.item.item_code || '',
+        'Category': r.category,
+        'UOM': r.item.uom,
+        'Par Level': r.par || '',
+        'Current Stock': parseFloat(r.currentStock.toFixed(3)),
+        'Book Stock (POS)': r.hasMovements ? parseFloat(r.bookStock.toFixed(3)) : '',
+        'Stock Source': r.stockSource === 'closing' ? 'Physical Count' : 'Calculated (Opening + Net Purchases − Usage − Wastage − Staff Meals)',
+        'Shortfall': r.shortfall > 0 ? parseFloat(r.shortfall.toFixed(3)) : '',
+        'Packs to Order': pk ? pk.packs : '',
+        'Purchase Unit': pk ? pk.unit : '',
+        'Pack Size (UOM)': pk ? pk.packSize : '',
+        'Unit Rate (NPR)': r.unitValue,
+        'Shortfall Value (NPR)': r.shortfall > 0 ? parseFloat(r.shortfallValue.toFixed(0)) : '',
+        'Status': r.needsReorder ? 'REORDER' : r.par === 0 ? 'No Par Set' : 'OK'
+      }
+    })
     const ws = XLSX.utils.json_to_sheet(data)
-    ws['!cols'] = [22,10,18,8,10,14,14,24,10,14,18,10].map(w => ({ wch: w }))
+    ws['!cols'] = [22,10,18,8,10,14,14,24,10,12,12,14,14,18,10].map(w => ({ wch: w }))
     const wb = XLSX.utils.book_new()
     const period = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : 'Report'
     XLSX.utils.book_append_sheet(wb, ws, 'Reorder Report')
@@ -406,6 +415,17 @@ export default function ReorderReport() {
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
 
+  // Whether `rows` describes `selectedPeriod` (S756). A period change sets the new label at once and
+  // keeps the previous period's rows until the load lands, so every figure-bearing element — and
+  // every control that EMITS the figures (print, WhatsApp, Excel, whose title and filename come
+  // from the already-updated label) — waits on this. The S616/S728 rule: a stale render is
+  // transient on screen and permanent in a file or a sent message.
+  const figuresReady = !loading && !loadError
+
+  // Items this page cannot judge: no par, so "below par" has no answer for them (S756, the S717
+  // rule). They must be counted where the report would otherwise say everything is fine.
+  const judged = rows.length - noPar
+
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the reorder report" />
@@ -423,10 +443,10 @@ export default function ReorderReport() {
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Tip text="Prints the actual purchase list — items at/below par, grouped by category, with qty to order and estimated value (respects the Category/Search filters above, always Reorder-only regardless of the Status filter). Check specific rows in the table below first to print just those." width={280}>
-              <button className="btn btn-ghost" onClick={printReorderList} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>🖨 Print Reorder List</button>
+              <button className="btn btn-ghost" onClick={printReorderList} disabled={!figuresReady || reorderPrintRows.length === 0} style={{ fontSize: 12 }}>🖨 Print Reorder List</button>
             </Tip>
             <Tip text="Opens WhatsApp with the same purchase list pre-filled as a text message — pick a contact or group to send it to. Respects the same row checkboxes as Print Reorder List." width={270}>
-              <button className="btn btn-ghost" onClick={shareReorderListWhatsApp} disabled={reorderPrintRows.length === 0} style={{ fontSize: 12 }}>📱 Share via WhatsApp</button>
+              <button className="btn btn-ghost" onClick={shareReorderListWhatsApp} disabled={!figuresReady || reorderPrintRows.length === 0} style={{ fontSize: 12 }}>📱 Share via WhatsApp</button>
             </Tip>
             {selectedIds.size > 0 && (
               <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -437,10 +457,13 @@ export default function ReorderReport() {
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <Tip text="Prints a blank par-level sheet (grouped by category, respecting the Category/Search filters above) for staff to fill in by hand — enter the values back into the Par Level column here afterward. Not affected by row checkboxes — always the full filtered list." width={280}>
-              <button className="btn btn-ghost" onClick={() => { setPrintMode('par'); setTimeout(() => { printWithTitle(`Par Level Sheet - ${periodLabel}`); setPrintMode(null) }, 80) }} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
+              <button className="btn btn-ghost" onClick={() => { setPrintMode('par'); setTimeout(() => { printWithTitle(`Par Level Sheet - ${periodLabel}`); setPrintMode(null) }, 80) }} disabled={!figuresReady} style={{ fontSize: 12 }}>🖨 Print Par Sheet</button>
             </Tip>
+            {/* Export had no `disabled` at all (S756): during a period change it wrote the previous
+                period's rows into a file named for the new one, and after a failed read an empty
+                sheet named as a report. */}
             <Tip text="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." width={260}>
-              <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>Export Excel</button>
+              <button className="btn btn-ghost" onClick={exportExcel} disabled={!figuresReady || rows.length === 0} style={{ fontSize: 12 }}>Export Excel</button>
             </Tip>
           </div>
           <select aria-label="Period" className="form-select" style={{ marginLeft: 'auto' }} value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -454,11 +477,17 @@ export default function ReorderReport() {
       {confirmEl}
       {loadError ? <ReportLoadError error={loadError} /> : <>
 
+      {/* The strip, the no-par tip and the filter count wait for the load (S756). They sat under
+          the error branch with no `!loading`, so a period change painted the PREVIOUS period's
+          counts and reorder value under the new period's label until the reads landed. */}
+      {!loading && (
       <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">Items to Reorder</div>
-          <div className="stat-value" style={{ color: reorderCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{reorderCount}</div>
-          <div className="stat-sub">below par level</div>
+          {/* A 0 is only a green all-clear when there was something to judge: with no par levels
+              set, "0 below par" is a question the page could not ask (S756). */}
+          <div className="stat-value" style={{ color: reorderCount > 0 ? 'var(--theme-red-text)' : judged > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{reorderCount}</div>
+          <div className="stat-sub">{judged > 0 ? `below par, of ${judged} with a par level` : 'no par levels set to judge against'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Reorder Value</div>
@@ -476,8 +505,9 @@ export default function ReorderReport() {
           <div className="stat-sub">{selectedPeriod?.status === 'open' ? 'Open period' : 'Closed period'}</div>
         </div>
       </div>
+      )}
 
-      {noPar > 0 && (
+      {!loading && noPar > 0 && (
         <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)' }}>
           <strong style={{ color: 'var(--theme-accent-ink)' }}>Tip:</strong> {noPar} item{noPar !== 1 ? 's have' : ' has'} no par level set. Click the par field in any row to set it inline — press Enter to save.
         </div>
@@ -494,7 +524,7 @@ export default function ReorderReport() {
           <option value="reorder">Reorder Only</option>
           <option value="all">All Items</option>
         </select>
-        <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}</span>
+        {!loading && <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{filtered.length} item{filtered.length !== 1 ? 's' : ''}</span>}
         <button
           className="btn btn-ghost"
           onClick={resetAllPar}
@@ -519,10 +549,22 @@ export default function ReorderReport() {
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building report…</p>
         ) : filtered.length === 0 ? (
+          /* "Stock is healthy" is a claim about every item, so it may only be made about the items
+             that HAVE a par (S756, the S717 rule). With no pars anywhere it used to be the default
+             view's whole message — the most reassuring sentence the page has, said when it had
+             judged nothing. An item exactly at par is fine (S696), hence "at or above". */
           <div className="empty-state">
-            <div className="empty-state-icon">✓</div>
+            <div className="empty-state-icon">{filterStatus === 'reorder' && reorderCount === 0 && judged > 0 && noPar === 0 ? '✓' : '◈'}</div>
             <p className="empty-state-text">
-              {filterStatus === 'reorder' && reorderCount === 0 ? 'All items are above par level. Stock is healthy.' : 'No items match your filters.'}
+              {filterStatus !== 'reorder' || reorderCount > 0
+                ? 'No items match your filters.'
+                : rows.length === 0
+                  ? 'No active items to check.'
+                  : judged === 0
+                    ? `No par levels are set, so none of the ${rows.length} item${rows.length === 1 ? '' : 's'} can be checked for reordering. Switch the Status filter to All Items and click an item's par field to set one.`
+                    : noPar > 0
+                      ? `All ${judged} item${judged === 1 ? '' : 's'} with a par level ${judged === 1 ? 'is' : 'are'} at or above it. ${noPar} more ${noPar === 1 ? 'has' : 'have'} no par level and could not be checked.`
+                      : 'All items are at or above par level. Stock is healthy.'}
             </p>
           </div>
         ) : (
@@ -543,7 +585,7 @@ export default function ReorderReport() {
                   <th style={{ textAlign: 'right' }}>Current Stock</th>
                   <th style={{ textAlign: 'right' }}><Tip text="Live stock from the depletion ledger — every POS bill or comp, and every manual Sales Entry day, records the ingredients it used. Shown only for items with a ledger entry this period — '—' means nothing recorded yet, not zero usage." width={270}>Book Stock</Tip></th>
                   <th><Tip text="Physical = based on your closing count entry. Calc'd = estimated from Opening + Net Purchases − Usage − Wastage − Staff Meals (less reliable). Same figure as Stock Report's On-hand." width={260}>Source</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Par Level − Current Stock. The quantity you need to order to get back to par." width={210}>Shortfall</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Par Level − Current Stock, in the item's UOM: the quantity you need to get back to par. Where the item has a purchase unit in Item Master (e.g. a 25 kg sack), the line beneath says how many whole packs cover it — rounded up, since half a pack cannot be bought." width={260}>Shortfall</Tip></th>
                   <th style={{ textAlign: 'right' }}>Est. Value (NPR)</th>
                   <th>Status</th>
                 </tr>
@@ -613,6 +655,12 @@ export default function ReorderReport() {
                         </td>
                         <td style={{ textAlign: 'right', color: row.shortfall > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)', fontWeight: row.shortfall > 0 ? 700 : 400 }}>
                           {row.shortfall > 0 ? row.shortfall.toFixed(2) : '—'}
+                          {/* The same shortfall in whole purchase packs, rounded up (S756, D18). */}
+                          {row.shortfall > 0 && packText(row.shortfall, row.item) && (
+                            <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
+                              {packText(row.shortfall, row.item)}
+                            </div>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right', color: row.shortfallValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)', fontWeight: row.shortfallValue > 0 ? 600 : 400 }}>
                           {row.shortfallValue > 0 ? row.shortfallValue.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '—'}
@@ -711,7 +759,10 @@ export default function ReorderReport() {
                       <td style={{ color: 'var(--theme-text2)' }}>{r.item.uom}</td>
                       <td style={{ textAlign: 'right' }}>{r.par.toLocaleString('en-IN')}</td>
                       <td style={{ textAlign: 'right' }}>{r.currentStock.toFixed(2)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{r.shortfall.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                        {r.shortfall.toFixed(2)}
+                        {packText(r.shortfall, r.item) && <div style={{ fontSize: 11, fontWeight: 400 }}>{packText(r.shortfall, r.item)}</div>}
+                      </td>
                       <td style={{ textAlign: 'right' }}>{r.shortfallValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                     </tr>
                   ))}

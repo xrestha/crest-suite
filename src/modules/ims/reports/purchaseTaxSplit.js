@@ -38,9 +38,25 @@ export const VAT_RATE = 0.13
 export { netFactors, returnBase }
 
 /** Whether the return's original purchase line carried VAT. `vendor_returns` has no column of its
- *  own for this — it is only ever knowable through the join to `purchase_entries`. */
+ *  own for this — it is only ever knowable through the join to `purchase_entries`.
+ *
+ *  S756: the three predicates are a COMPLETE partition of every return, and that is the point of
+ *  them. They used to be `=== true` and `=== false`, which left two kinds of return in neither half,
+ *  silently:
+ *
+ *  - an UNLINKED return. `vendor_returns.purchase_entry_id` is ON DELETE SET NULL, and both a bill
+ *    delete (single or Delete All) and a bill re-save (`save_purchase_bill` deletes the superseded
+ *    lines) unlink every return against that bill. Its embed is then null, so nothing can say whether
+ *    VAT was charged on it — and it vanished from both statutory reports, overstating the input VAT
+ *    claimed on the VAT one.
+ *  - a return linked to a legacy line whose `vat_inclusive` is NULL. `splitPurchaseVat` has always put
+ *    such a LINE in the non-VAT half (`!e.vat_inclusive`), so its return goes there too now.
+ *
+ *  An unlinked return is not guessed into a half: it is counted and named by every page that reads
+ *  these (the S725 rule — an exclusion a report cannot value must be counted, never dropped). */
+export function isUnlinkedReturn(r) { return !r.purchase_entries }
 export function isVatReturn(r) { return r.purchase_entries?.vat_inclusive === true }
-export function isNonVatReturn(r) { return r.purchase_entries?.vat_inclusive === false }
+export function isNonVatReturn(r) { return !isUnlinkedReturn(r) && r.purchase_entries.vat_inclusive !== true }
 
 /**
  * Split one period's purchases into the two halves of the filing.
@@ -65,6 +81,9 @@ export function splitPurchaseVat(entries, returns) {
   const withBase = r => ({ ...r, base: returnBase(r, factors) })
   const vatReturns = (returns || []).filter(isVatReturn).map(withBase)
   const nonVatReturns = (returns || []).filter(isNonVatReturn).map(withBase)
+  // Valued at the LIST rate (returnBase's fallback — its purchase line is gone, so there is no
+  // discount factor to apply) and deducted from neither half. See isUnlinkedReturn.
+  const unlinkedReturns = (returns || []).filter(isUnlinkedReturn).map(withBase)
   const vatReturnBase = sum(vatReturns, 'base')
   const nonVatReturnBase = sum(nonVatReturns, 'base')
 
@@ -74,6 +93,8 @@ export function splitPurchaseVat(entries, returns) {
   return {
     allocated, factors,
     vatLines, nonVatLines, vatReturns, nonVatReturns,
+    unlinkedReturns,
+    unlinkedReturnBase: sum(unlinkedReturns, 'base'),
     // VAT half — every figure ex-VAT unless the name says otherwise
     vatGross,
     vatDiscount: vatGross - vatBase,
@@ -110,8 +131,9 @@ export function splitPurchaseVat(entries, returns) {
  */
 export function buildVendorSummary(allocatedEntries, returnRows, factors) {
   const map = {}
+  // `vendorId` is carried out (S756) so annexure13Rows can keep a PAN-less card on its own row.
   const ensure = (id, name, pan) =>
-    (map[id] = map[id] || { name, pan, bills: new Set(), count: 0, gross: 0, discount: 0, returned: 0, vatAmt: 0 })
+    (map[id] = map[id] || { vendorId: id, name, pan, bills: new Set(), count: 0, gross: 0, discount: 0, returned: 0, vatAmt: 0 })
   ;(allocatedEntries || []).forEach(e => {
     const v = ensure(e.vendor_id || '__unknown__', e.vendors?.name || 'Unknown Vendor', e.vendors?.pan_vat_no || '')
     // `count` is BILLS, not lines. It was lines, under a column header reading "Bills" on both
@@ -142,6 +164,107 @@ export function buildVendorSummary(allocatedEntries, returnRows, factors) {
       return { ...v, count: bills.size, net, invoiced: net + v.vatAmt }
     })
     .sort((a, b) => b.net - a.net)
+}
+
+/**
+ * What a page needs to NAME the unlinked returns it could not place (S756, see isUnlinkedReturn):
+ * how many, their list-rate value, and up to `max` readable examples. The sentence around it is the
+ * page's own, because what happens to these rows differs — the two tax reports deduct them from
+ * neither half, the one-lakh disclosure still deducts them from their supplier.
+ */
+export function summariseUnlinkedReturns(returns, { max = 10, dayLabel } = {}) {
+  const unlinked = (returns || []).filter(isUnlinkedReturn)
+  const valueOf = r => (r.base !== undefined ? r.base : returnBase(r, new Map()))
+  // A bare day number only reads correctly inside one period; a multi-period caller passes its own.
+  const dayOf = dayLabel || (r => (r.bs_day ? `day ${r.bs_day}` : null))
+  return {
+    count: unlinked.length,
+    value: unlinked.reduce((s, r) => s + valueOf(r), 0),
+    examples: unlinked.slice(0, max).map(r =>
+      [dayOf(r), r.items?.name, r.vendors?.name].filter(Boolean).join(' · ')),
+    more: Math.max(0, unlinked.length - max),
+  }
+}
+
+export const ONE_LAKH = 100000
+
+/** A PAN as typed, reduced to what identifies it: no surrounding or inner whitespace. */
+export function normalisePan(pan) {
+  return String(pan ?? '').replace(/\s+/g, '')
+}
+
+/**
+ * The Annexure-13 one-lakh disclosure rows, one per SUPPLIER rather than one per vendor card.
+ *
+ * WHY (S756, owner decision D12). The disclosure is about a supplier — a PAN — and the vendor master
+ * is a list of cards someone typed. "Himalayan Traders" and "Himalayan Traders Pvt Ltd" carrying the
+ * same PAN are one supplier; totalled card by card, 60,000 on each is two rows under the threshold
+ * and a supplier who sold 1,20,000 is never disclosed. So cards sharing a normalised PAN are summed
+ * into one row naming every card, and BOTH threshold tests (ex-VAT net, invoiced total — the S723
+ * decision) run on that sum.
+ *
+ * A card with no PAN cannot be matched to anything, so it stays on its own row and is marked
+ * `panMissing` for the page to warn about. Guessing by name would merge two genuinely different
+ * suppliers who happen to share one, which is worse than a warning.
+ *
+ * `vendorRows` is buildVendorSummary()'s output over EVERY line of the fiscal year.
+ */
+export function annexure13Rows(vendorRows, threshold = ONE_LAKH) {
+  const SUMMED = ['count', 'gross', 'discount', 'returned', 'vatAmt', 'net', 'invoiced']
+  const groups = new Map()
+  for (const v of vendorRows || []) {
+    const pan = normalisePan(v.pan)
+    const key = pan ? `pan:${pan}` : `card:${v.vendorId}`
+    let g = groups.get(key)
+    if (!g) {
+      groups.set(key, g = { key, pan, names: [], vendorIds: [] })
+      for (const k of SUMMED) g[k] = 0
+    }
+    if (!g.names.includes(v.name)) g.names.push(v.name)
+    g.vendorIds.push(v.vendorId)
+    // `count` is bills, and a bill belongs to exactly one card, so bills sum across cards.
+    for (const k of SUMMED) g[k] += v[k] || 0
+  }
+  return [...groups.values()]
+    .map(g => ({
+      ...g,
+      name: g.names.join(' / '),
+      cards: g.vendorIds.length,
+      taxBase: g.gross - g.discount,
+      panMissing: !g.pan,
+      over: g.net > threshold || g.invoiced > threshold,
+    }))
+    .sort((a, b) => b.invoiced - a.invoiced)
+}
+
+/**
+ * One row per purchase INVOICE, for the VAT Report workbook's bill-wise sheet (S756, owner decision
+ * D28) — the shape an accountant keys into the IRD purchase book, beside the item-level sheet.
+ *
+ * Built from allocateBillDiscounts() output over EVERY line of the period, so each bill's discount
+ * is already split between its VAT and non-VAT lines exactly as splitPurchaseVat splits it. Taxable
+ * therefore sums to `vatBase`, Exempt to `nonVatBase` and VAT to `vatAmt` — the same figures the
+ * page and the other sheets show — and a bill's Total is what calcBillTotals says it was invoiced at.
+ * Returns are deliberately not here: they are credit notes, not invoices.
+ */
+export function billWiseVat(allocatedEntries) {
+  const bills = new Map()
+  for (const e of allocatedEntries || []) {
+    const key = e.billId != null ? e.billId : e.id
+    let b = bills.get(key)
+    if (!b) {
+      bills.set(key, b = {
+        key, bs_day: e.bs_day, vendor: e.vendors?.name || '', pan: e.vendors?.pan_vat_no || '',
+        invoice: e.invoice_ref || '', taxable: 0, exempt: 0,
+      })
+    }
+    // Same test splitPurchaseVat uses, so a legacy NULL line lands in the same half on both sheets.
+    if (e.vat_inclusive) b.taxable += e.lineNet
+    else b.exempt += e.lineNet
+  }
+  return [...bills.values()]
+    .map(b => ({ ...b, vat: b.taxable * VAT_RATE, total: b.taxable * (1 + VAT_RATE) + b.exempt }))
+    .sort((a, b) => (a.bs_day || 0) - (b.bs_day || 0))
 }
 
 /**

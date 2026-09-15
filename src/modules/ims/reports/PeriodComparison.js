@@ -146,6 +146,12 @@ export default function PeriodComparison() {
     // `.order()` the months that lose their stock differ between loads. S719's rule, on the page
     // with the longest window in IMS.
     const results = await Promise.all([
+      // The ACTIVE, non-sub-recipe item set, and its rates (S756). Every stock-valued read below
+      // used to join `items(per_uom_rate)` with no filter, so an inactive item or a sub-recipe
+      // mirror row was valued into opening/closing/wastage/staff meals here while Monthly Summary
+      // and Annual Summary both drop it — the same month's COGS differed between the pages by
+      // exactly that stock. Now one rate map, the AnnualSummary rateMap/isTracked shape.
+      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
       // `discount_amount` + the bill-key columns feed allocateBillDiscounts(): a bill-level
       // discount is repeated on every line of the bill, and until it was deduped and spread this
       // page's "Net Purchases" and COGS sat above MonthlySummary's and Consolidated P&L's for the
@@ -153,23 +159,26 @@ export default function PeriodComparison() {
       fetchAllRows(() => supabase.from('purchase_entries')
         .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
         .in('period_id', ids).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, qty, rate').in('period_id', ids).order('id')),
-      fetchAllRows(() => supabase.from('wastages').select('period_id, qty, items(per_uom_rate)').in('period_id', ids).order('id')),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, item_id, qty, rate').in('period_id', ids).order('id')),
+      fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', ids).order('id')),
       // Staff meals belong in COGS (src/shared/imsFormulas.js) — omitted here until 2026-08-13,
       // which put this page's COGS and FC% below MonthlySummary's for the identical month.
-      fetchAllRows(() => supabase.from('staff_meals').select('period_id, qty, items(per_uom_rate)').in('period_id', ids).order('id')),
-      fetchAllRows(() => supabase.from('opening_stock').select('period_id, qty, items(per_uom_rate)').in('period_id', ids).order('id')),
-      fetchAllRows(() => supabase.from('closing_stock').select('period_id, physical_qty, items(per_uom_rate)').in('period_id', ids).order('id')),
+      fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', ids).order('id')),
+      fetchAllRows(() => supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', ids).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', ids).order('id')),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for.
       // Paged like its purchase_entries sibling above: sales across up to 24 periods crosses
-      // PostgREST's silent 1000-row cap easily (S528).
-      fetchAllRows(() => supabase.from('sales_entries').select('period_id, qty_sold, unit_price, discount, recipes(selling_price, category)').in('period_id', ids).neq('source', 'pos_comp').order('id')),
+      // PostgREST's silent 1000-row cap easily (S528). Comps are filtered in JS, not with .neq
+      // (S756): `source` is nullable and `NULL <> 'pos_comp'` is NULL, so the server-side form
+      // dropped every legacy row — revenue short and FC% high across the whole trend.
+      fetchAllRows(() => supabase.from('sales_entries').select('period_id, qty_sold, unit_price, discount, source, recipes(selling_price, category)').in('period_id', ids).order('id')),
     ])
     if (!limitReq.isCurrent(key)) return   // superseded — a stale load's failure must not clobber the current view either
     // A failed read must not render as a quiet run of NPR 0 periods (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setStats({}); setLoading(false); return }
     const [
+      { data: trackedItems },
       { data: purchases },
       { data: returns },
       { data: wastes },
@@ -187,13 +196,18 @@ export default function PeriodComparison() {
       }
       return m
     }
-    const purchBy = byPeriod(allocateBillDiscounts(purchases))
-    const retBy   = byPeriod(returns)
+    const rateMap = {}
+    ;(trackedItems || []).forEach(i => { rateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
+    const isTracked = id => Object.prototype.hasOwnProperty.call(rateMap, id)
+    // Discounts are allocated over EVERY line of a bill (the bill's gross must include all of them,
+    // or each share inflates) and only then narrowed to tracked items — AnnualSummary's order.
+    const purchBy = byPeriod(allocateBillDiscounts(purchases).filter(r => isTracked(r.item_id)))
+    const retBy   = byPeriod((returns || []).filter(r => isTracked(r.item_id)))
     const wasteBy = byPeriod(wastes)
     const staffBy = byPeriod(staffMeals)
     const openBy  = byPeriod(openings)
     const closeBy = byPeriod(closings)
-    const salesBy = byPeriod(sales)
+    const salesBy = byPeriod((sales || []).filter(r => r.source !== 'pos_comp'))
     const at = (m, pid) => m.get(pid) || []
 
     const result = {}
@@ -202,10 +216,10 @@ export default function PeriodComparison() {
       const purchV   = purchRows.reduce((s,r)=>s+r.lineGross,0)
       const discV    = purchV - purchRows.reduce((s,r)=>s+r.lineNet,0)
       const retV     = at(retBy,   pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.rate||0),0)
-      const wasteV   = at(wasteBy, pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
-      const staffV   = at(staffBy, pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
-      const openV    = at(openBy,  pid).reduce((s,r)=>s+parseFloat(r.qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
-      const closeV   = at(closeBy, pid).reduce((s,r)=>s+parseFloat(r.physical_qty||0)*parseFloat(r.items?.per_uom_rate||0),0)
+      const wasteV   = at(wasteBy, pid).reduce((s,r)=>s+parseFloat(r.qty||0)*(rateMap[r.item_id]||0),0)
+      const staffV   = at(staffBy, pid).reduce((s,r)=>s+parseFloat(r.qty||0)*(rateMap[r.item_id]||0),0)
+      const openV    = at(openBy,  pid).reduce((s,r)=>s+parseFloat(r.qty||0)*(rateMap[r.item_id]||0),0)
+      const closeV   = at(closeBy, pid).reduce((s,r)=>s+parseFloat(r.physical_qty||0)*(rateMap[r.item_id]||0),0)
       // Uses unit_price captured on the row (the price actually charged that period) when
       // present, falling back to the joined recipe's current price only for rows recorded before
       // that column existed — otherwise the "vs Prev" trend was comparing today's menu price
@@ -410,8 +424,11 @@ export default function PeriodComparison() {
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`Period-over-Period Comparison - ${scopeLine}`)}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={!shown.length}>Export Excel</button>
+            {/* Gated on the load (S728/S756): while a range change loads, `stats` holds the previous
+                range's figures while scopeLine, the print title and the filename already name the new one. */}
+            <button className="btn btn-ghost" onClick={() => printWithTitle(`Period-over-Period Comparison - ${scopeLine}`)} disabled={loading || !!loadError}>Print</button>
+            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !!biz.error || !shown.length}
+              title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
           </div>
         </div>
       </div>

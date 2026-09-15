@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
+import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { varianceBand, varianceFlagPct, VARIANCE_MATERIALITY_NPR } from '../../../shared/imsFormulas'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
@@ -23,10 +25,40 @@ function shrinkageStatus(count, covered) {
   return                                  { label: 'Clear',      badge: 'badge-green',  color: 'var(--theme-green-text)' }
 }
 
+// A period counts as shrinkage only when the variance is OVER the client's tolerance AND material
+// (S756). The old test was `variance > 0.001` — a hundredth of a gram over theoretical was a
+// shrinkage period — and neither `variance_flag_pct` nor VARIANCE_MATERIALITY_NPR reached this
+// page, so an item a hair over recipe every month read "Consistent" in red on the report a client
+// uses to decide whether staff are stealing, while the Variance Report called the same months OK.
+// Pure over the observations buildReport stored, so a settings change re-bands without a re-read.
+function bandItem(raw, settings) {
+  let shrinkCount = 0
+  let totalShrinkQty = 0
+  raw.observations.forEach(({ variance, theor, rate }) => {
+    const pct = theor > 0 ? (variance / theor) * 100 : null
+    if (varianceBand(pct, variance * rate, settings, { measured: true }).key === 'over') {
+      shrinkCount++
+      totalShrinkQty += variance
+    }
+  })
+  const coveredPeriods = raw.observations.length
+  const totalShrinkValue = totalShrinkQty * raw.rate
+  return {
+    ...raw,
+    shrinkCount,
+    coveredPeriods,
+    totalShrinkQty,
+    totalShrinkValue,
+    avgShrinkQty: shrinkCount > 0 ? totalShrinkQty / shrinkCount : 0,
+    status: shrinkageStatus(shrinkCount, coveredPeriods),
+  }
+}
+
 export default function ShrinkageReport() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
+  const { settings } = useSettings()
   const windowReq = useLatestRequest()
 
   const [periods, setPeriods]         = useState([])
@@ -34,8 +66,10 @@ export default function ShrinkageReport() {
   const [categories, setCategories]   = useState([])
   const [filterCat, setFilterCat]     = useState('all')
   const [filterStatus, setFilterStatus] = useState('flagged')
-  const [report, setReport]           = useState([])
-  const [summary, setSummary]         = useState(null)
+  // Per-item OBSERVATIONS, not verdicts — the verdict depends on settings and is derived below.
+  const [rawRows, setRawRows]         = useState([])
+  const [uncountedInfo, setUncountedInfo] = useState({ items: 0, itemPeriods: 0 })
+  const [ready, setReady]             = useState(false)   // a build has completed for the current window
   const [loading, setLoading]         = useState(true)
   const [loadError, setLoadError]     = useState(null)
   const [periodsUsed, setPeriodsUsed] = useState(0)
@@ -62,7 +96,7 @@ export default function ShrinkageReport() {
     setPeriods(p || [])
     const none = !(p || []).length
     setNoClosed(none)
-    if (none) { setReport([]); setSummary(null); setPeriodsUsed(0); setLoading(false) }
+    if (none) { setRawRows([]); setReady(false); setPeriodsUsed(0); setLoading(false) }
   }
 
   async function buildReport() {
@@ -70,7 +104,7 @@ export default function ShrinkageReport() {
     setLoading(true)
     setLoadError(null)
     const selected = periods.slice(0, periodCount)
-    if (!selected.length) { setReport([]); setSummary(null); setLoading(false); return }
+    if (!selected.length) { setRawRows([]); setReady(false); setLoading(false); return }
     const periodIds = selected.map(p => p.id)
     setPeriodsUsed(selected.length)
 
@@ -97,7 +131,7 @@ export default function ShrinkageReport() {
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     if (!windowReq.isCurrent(key)) return   // superseded by a newer window selection
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setReport([]); setSummary(null); setLoading(false); return }
+    if (failed) { setLoadError(failed); setRawRows([]); setReady(false); setLoading(false); return }
     const [
       { data: items },
       { data: opening },
@@ -129,7 +163,7 @@ export default function ShrinkageReport() {
       // The isCurrent guard belongs on the failure path too: without it a superseded load's
       // error replaces the report the reader is actually looking at with a red banner (S719).
       if (!windowReq.isCurrent(key)) return
-      setLoadError(err); setReport([]); setSummary(null); setLoading(false); return
+      setLoadError(err); setRawRows([]); setReady(false); setLoading(false); return
     }
 
     // Build per-period-per-item lookups
@@ -197,55 +231,60 @@ export default function ShrinkageReport() {
       })
     })
 
-    // Aggregate per item
+    // Observations per item. A period is observed only when the item has recipe coverage AND a
+    // closing count in that period (S756). `closeMap[pid]?.[item.id] || 0` read "not counted" as
+    // "counted zero" — the S719 rule the Variance pages already follow — so an uncounted item in a
+    // closed month read as the whole shelf consumed, which is a large Over variance, and a few such
+    // months made it "Consistent" red shrinkage. Presence is `in`, never `> 0`: a count of 0 is a
+    // real count (S695). Skipped periods are counted and named on screen instead.
+    let uncountedItems = 0
+    let uncountedItemPeriods = 0
     const rows = (items || []).map(item => {
-      let shrinkCount    = 0
-      let totalShrinkQty = 0
-      let coveredPeriods = 0
+      const observations = []
+      let skipped = 0
 
       periodIds.forEach(pid => {
         const theor = theorMap[pid]?.[item.id] || 0
         if (theor <= 0) return
-        coveredPeriods++
+        if (!closeMap[pid] || !(item.id in closeMap[pid])) { skipped++; return }
         const open   = openMap[pid]?.[item.id]  || 0
-        const close  = closeMap[pid]?.[item.id] || 0
+        const close  = closeMap[pid][item.id]
         const purch  = purchMap[pid]?.[item.id] || 0
         const waste  = wasteMap[pid]?.[item.id] || 0
         const staffMealQty = staffMap[pid]?.[item.id] || 0
         const actual = open + purch - close - waste - staffMealQty
-        const variance = actual - theor
-        if (variance > 0.001) {
-          shrinkCount++
-          totalShrinkQty += variance
-        }
+        observations.push({ variance: actual - theor, theor, rate: parseFloat(item.per_uom_rate || 0) })
       })
 
-      if (coveredPeriods === 0) return null
-
-      const totalShrinkValue = totalShrinkQty * parseFloat(item.per_uom_rate || 0)
-      const status = shrinkageStatus(shrinkCount, coveredPeriods)
+      if (skipped > 0) { uncountedItems++; uncountedItemPeriods += skipped }
+      if (observations.length === 0) return null
 
       return {
         item,
-        shrinkCount,
-        coveredPeriods,
-        totalShrinkQty,
-        totalShrinkValue,
-        avgShrinkQty: shrinkCount > 0 ? totalShrinkQty / shrinkCount : 0,
-        status,
+        observations,
+        uncountedPeriods: skipped,
+        rate: parseFloat(item.per_uom_rate || 0),
         category: item.categories?.name || 'Uncategorised',
       }
     }).filter(Boolean)
 
-    const consistent    = rows.filter(r => r.status.label === 'Consistent').length
-    const anyFlagged    = rows.filter(r => r.shrinkCount > 0).length
-    const totalLossVal  = rows.reduce((s, r) => s + r.totalShrinkValue, 0)
-
     if (!windowReq.isCurrent(key)) return   // a second await (recipe explosion) sits above this
-    setSummary({ consistent, anyFlagged, totalLossVal, totalTracked: rows.length })
-    setReport(rows)
+    setUncountedInfo({ items: uncountedItems, itemPeriods: uncountedItemPeriods })
+    setRawRows(rows)
+    setReady(true)
     setLoading(false)
   }
+
+  // Verdicts are derived from the stored observations against the CURRENT settings, so a tolerance
+  // that loads after the report (or is changed in another tab) re-bands without a re-read.
+  const report = useMemo(() => rawRows.map(r => bandItem(r, settings)), [rawRows, settings])
+  const summary = ready ? {
+    consistent:   report.filter(r => r.status.label === 'Consistent').length,
+    anyFlagged:   report.filter(r => r.shrinkCount > 0).length,
+    totalLossVal: report.reduce((s, r) => s + r.totalShrinkValue, 0),
+    totalTracked: report.length,
+  } : null
+  const flagPct = varianceFlagPct(settings)
 
   const filtered = report
     .filter(r => {
@@ -281,8 +320,21 @@ export default function ShrinkageReport() {
       <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 15%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
         <strong style={{ color: 'var(--theme-accent-ink)' }}>What this shows:</strong> Items where actual usage consistently exceeded theoretical (recipe-based) usage across multiple closed periods.
         Unlike wastage — which is <em style={{ color: 'var(--theme-text1)' }}>logged</em> — shrinkage is <em style={{ color: 'var(--theme-red-text)' }}>unexplained</em>. Possible causes: unlogged theft, over-portioning, unlogged spillage, or data entry errors. Anything you log on the Daily Wastage tab — theft included — is explained, and so leaves this figure.
-        Only items linked to recipes (with sales data) are analysed.
+        Only items linked to recipes (with sales data) are analysed. A period counts as shrinkage when the item was
+        over-used by more than your ±{flagPct}% tolerance <em>and</em> by more than NPR {VARIANCE_MATERIALITY_NPR.toLocaleString('en-IN')} — the
+        same test the Variance Report uses.
       </div>
+
+      {/* Named, not silently skipped (S756): an item with no closing count in a period cannot be
+          judged for that period — without a count its whole shelf reads as consumed. The sibling
+          Variance pages have said this since S719; this page had turned it into red shrinkage. */}
+      {!loading && ready && uncountedInfo.items > 0 && (
+        <div role="note" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>△ {uncountedInfo.items} item{uncountedInfo.items === 1 ? ' was' : 's were'} not counted in {uncountedInfo.itemPeriods} of the item-months analysed.</strong>{' '}
+          Without a closing count, everything on the shelf reads as used, so those months are left out of each item&apos;s
+          shrinkage count, its periods tracked and its loss value rather than being treated as a count of zero.
+        </div>
+      )}
 
       {/* KPI strip waits for the load — a stale run's figures under a new period-count label is the S594 trap */}
       {!loading && summary && (
@@ -294,21 +346,21 @@ export default function ShrinkageReport() {
           </div>
           <div className="stat-card">
             <div className="stat-label">
-              <Tip text="Items over-used in 67%+ of monitored periods — your highest-risk items." width={240}>Consistent Shrinkage</Tip>
+              <Tip text={`Items over-used beyond your ±${flagPct}% tolerance (and by more than NPR ${VARIANCE_MATERIALITY_NPR}) in 67%+ of the counted periods — your highest-risk items.`} width={260}>Consistent Shrinkage</Tip>
             </div>
             <div className="stat-value" style={{ color: summary.consistent > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{summary.consistent}</div>
             <div className="stat-sub">items</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">
-              <Tip text="Items with at least one period of unexplained over-use vs theoretical usage." width={220}>Any Shrinkage</Tip>
+              <Tip text={`Items with at least one counted period of over-use beyond your ±${flagPct}% tolerance and NPR ${VARIANCE_MATERIALITY_NPR}.`} width={240}>Any Shrinkage</Tip>
             </div>
             <div className="stat-value" style={{ color: summary.anyFlagged > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{summary.anyFlagged}</div>
             <div className="stat-sub">of {summary.totalTracked} recipe-covered items</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">
-              <Tip text="Total NPR value of unexplained loss across all periods analysed (qty × item rate)." width={240}>Total Loss Value</Tip>
+              <Tip text="Total NPR value of unexplained loss across the shrinkage periods (over-used qty × item rate). Periods where the item was not counted are left out." width={260}>Total Loss Value</Tip>
             </div>
             <div className="stat-value" style={{ fontSize: 16, color: summary.totalLossVal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
               {summary.totalLossVal > 0 ? fmt(summary.totalLossVal) : '—'}
@@ -362,10 +414,10 @@ export default function ShrinkageReport() {
                   <th>Category</th>
                   <th>UOM</th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Number of closed periods where this item was over-used vs theoretical recipe usage." width={240}>Shrinkage Count</Tip>
+                    <Tip text={`Number of counted closed periods where this item was over-used beyond your ±${flagPct}% tolerance and by more than NPR ${VARIANCE_MATERIALITY_NPR}.`} width={260}>Shrinkage Count</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="Number of periods where this item had recipe coverage (sales + recipe data)." width={230}>Periods Tracked</Tip>
+                    <Tip text="Number of periods where this item had recipe coverage (sales + recipe data) AND a closing count. Months it was not counted are shown separately and not judged." width={260}>Periods Tracked</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text="Average unexplained over-usage per period it occurred, in base UOM." width={220}>Avg Qty / Period</Tip>
@@ -385,7 +437,12 @@ export default function ShrinkageReport() {
                     <td style={{ textAlign: 'right', fontWeight: 700, color: row.shrinkCount > 0 ? row.status.color : 'var(--theme-text2)' }}>
                       {row.shrinkCount > 0 ? row.shrinkCount : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{row.coveredPeriods}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
+                      {row.coveredPeriods}
+                      {row.uncountedPeriods > 0 && (
+                        <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-amber-text)' }}>△ {row.uncountedPeriods} not counted</span>
+                      )}
+                    </td>
                     <td style={{ textAlign: 'right', color: row.shrinkCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
                       {row.avgShrinkQty > 0 ? Number(row.avgShrinkQty.toFixed(3)).toLocaleString('en-IN') : '—'}
                     </td>

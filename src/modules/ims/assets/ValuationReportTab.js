@@ -8,7 +8,8 @@ import ChartCard from '../../../components/ChartCard'
 import StatPill from '../../../components/StatPill'
 import Tip from '../../../components/Tip'
 import { printWithTitle } from '../../../utils/printTitle'
-import { computePortfolioValuation } from './depreciationCompute'
+import { computePortfolioValuation, latestPostedByAsset } from './depreciationCompute'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
 import ReportLoadError from '../../../components/ReportLoadError'
 
 const fmt = nprInt
@@ -28,8 +29,10 @@ export default function ValuationReportTab({ assets }) {
 
   async function load() {
     setLoading(true)
-    const { data, error } = await scopedFrom('assets_depreciation_schedule', 'asset_id, period_end, closing_nbv')
-      .eq('is_posted', true).order('period_end', { ascending: true })
+    // Paged, with tiebreakers: one row per asset per run crosses the 1000-row cap, and a truncated
+    // read values the assets past the cut at full cost (S756).
+    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_end, created_at, closing_nbv')
+      .eq('is_posted', true).order('period_end', { ascending: true }).order('created_at', { ascending: true }).order('id'))
     if (error) { setLoadError(error); setLoading(false); return }
     setLoadError(null)
     setPosted(data || [])
@@ -42,11 +45,9 @@ export default function ValuationReportTab({ assets }) {
   const valuation = useMemo(() => {
     if (!asOf) return null
     const eligible = assets.filter(a => a.status === 'active' && (a.personal_use_percent ?? 0) === 0 && a.acquisition_date <= asOf)
-    const latestByAsset = {}
-    posted.filter(p => p.period_end <= asOf).forEach(p => {
-      const cur = latestByAsset[p.asset_id]
-      if (!cur || p.period_end > cur.period_end) latestByAsset[p.asset_id] = p
-    })
+    // latestPostedByAsset breaks a period_end tie by created_at, so an adjustment run beats the
+    // run it reverses; the old `>` comparison kept whichever of the two came first (S756).
+    const latestByAsset = latestPostedByAsset(posted.filter(p => p.period_end <= asOf))
     const rows = eligible.map(a => ({
       categoryName: a.assets_categories?.name || 'Uncategorized',
       totalCost: a.total_cost,

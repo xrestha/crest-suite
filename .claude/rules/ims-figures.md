@@ -402,9 +402,13 @@ gone stale the moment code changed twice now. The grep is
 `grep -rn "\.neq(\s*['\"]source['\"]" src/`, skipping comment lines and `salesReads.test.js`:
 
 ```text
-Recipes  AnnualSummary  MonthlySummary  PeriodComparison  ConsolidatedPnl
 computeMonthlyReport  computeMenuEngineeringSection
 ```
+
+Re-derived S756: `Recipes` (True Cost revenue), `AnnualSummary`, `MonthlySummary` and
+`PeriodComparison` (all three the FC% denominator) now select `source` and filter in JS, and
+`summaryReads.test.js` fails if the `.neq` returns. `ConsolidatedPnl` no longer matches outside a
+comment. The grep also matches comment lines that quote the old form, so read each hit.
 
 Re-derived S734, which took **`OwnerDashboard`'s revenue read and `useSalesPivotData`** off it.
 Both are worth reading as arguments for shortening this list rather than curating it:

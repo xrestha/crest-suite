@@ -18,7 +18,12 @@ function makeMockSupabase({ rpcResult = { error: null }, rpcResults, tableResult
     calls.push(rec)
     const result = () => {
       if (rec.kind === 'rpc') return rpcQueue ? (rpcQueue.shift() ?? { error: null }) : rpcResult
-      if (rec.kind === 'select') return selectResult ?? { data: [], error: null }
+      if (rec.kind === 'select') {
+        const res = selectResult ?? { data: [], error: null }
+        // Behave like PostgREST under .range(): hand back only that page of the result set.
+        if (rec.range && Array.isArray(res.data)) return { ...res, data: res.data.slice(rec.range[0], rec.range[1] + 1) }
+        return res
+      }
       return tableResult
     }
     const b = {
@@ -26,6 +31,8 @@ function makeMockSupabase({ rpcResult = { error: null }, rpcResults, tableResult
       gt: (c, v) => { rec.filters.push(['gt', c, v]); return b },
       in: (c, v) => { rec.filters.push(['in', c, v]); return b },
       or: (expr) => { rec.filters.push(['or', expr]); return b },
+      order: (c) => { rec.order = c; return b },
+      range: (from, to) => { rec.range = [from, to]; return b },
       abortSignal: (s) => { rec.signal = s; return b },
       then: (res, rej) => Promise.resolve(result()).then(res, rej),
     }
@@ -230,6 +237,23 @@ describe('findSupersededRows — what a save will silently delete (S457)', () =>
     const res = await findSupersededRows(sb, { periodId: 'p1', bsDay: 0, recipeIds: ['small', 'big'] })
     expect(res.byRecipe.map(e => e.recipeId)).toEqual(['big', 'small'])
     expect(res.total).toBe(4)
+  })
+
+  // S756: ~50 dishes a day is 1,500 dated rows a month. A bare select stopped at 1000 in no
+  // particular order, so the recipes about to be wiped could fall past the cut, `total` came back
+  // 0, no confirmation showed, and the save deleted a month of daily entries unannounced.
+  test('pages past the 1000-row cap, ordered by id, so a big month is counted in full', async () => {
+    const data = Array.from({ length: 1500 }, (_, i) => ({ recipe_id: i >= 1200 ? 'late' : 'early', bs_day: (i % 30) + 1, qty_sold: 1 }))
+    const sb = makeMockSupabase({ selectResult: { data, error: null } })
+    const signal = new AbortController().signal
+    const res = await findSupersededRows(sb, { periodId: 'p1', bsDay: 0, recipeIds: ['late'], signal })
+
+    expect(res.total).toBe(300)          // every one of them sits past the first page
+    expect(sb.calls.filter(c => c.kind === 'select')).toHaveLength(2)
+    sb.calls.forEach(c => {
+      expect(c.order).toBe('id')
+      expect(c.signal).toBe(signal)      // each page is still cancellable
+    })
   })
 
   test('a failed precheck throws rather than silently reporting "nothing to delete"', async () => {

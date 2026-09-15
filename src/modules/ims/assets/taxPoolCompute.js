@@ -7,14 +7,30 @@ import { POOL_RATES, REPAIR_CAP_RATE } from './taxPoolConstants'
 
 const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100
 
+// A stored `date` column ("YYYY-MM-DD") as LOCAL midnight of that calendar day (S756).
+//
+// `new Date('2026-01-15')` is UTC midnight, and adToBs() reads the Date's LOCAL getters. East of
+// Greenwich (Nepal, +05:45) that is still the 15th, so this never showed on a till in Kathmandu —
+// but for a viewer anywhere west of UTC (the operator abroad, an accountant's laptop set to
+// another zone) it is the evening of the 14th, one BS day early. On the first day of Magh or of
+// Baisakh that one day moves the asset into the previous proration tier, so the pool's allowance
+// is computed at the wrong fraction of the rate and can be POSTED that way. depreciationCompute.js
+// avoids the same trap for day counts by staying in UTC throughout; here the consumer is adToBs,
+// which is local by design, so the parse has to be local too.
+export function parseAdDateLocal(dateLike) {
+  if (dateLike instanceof Date) return dateLike
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateLike || ''))
+  if (!m) return new Date(dateLike)
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
 // Which proration tier an acquisition falls into within a BS fiscal year (Schedule 2's
 // "beginning of the income year to the last day of Poush" = full rate; the next quarter
 // (Magh-Chaitra) = 2/3; the last quarter (Baisakh-Ashadh) = 1/3). `fiscalYearStartBs` is the BS
 // year the fiscal year STARTS in (e.g. getBsFiscalYearStart()'s output) — the fiscal year runs
 // Shrawan (month 4) of that year through Ashadh (month 3) of the following year.
 export function acquisitionProrationTier({ acquisitionDate, fiscalYearStartBs }) {
-  const d = acquisitionDate instanceof Date ? acquisitionDate : new Date(acquisitionDate)
-  const { year, month } = adToBs(d)
+  const { year, month } = adToBs(parseAdDateLocal(acquisitionDate))
 
   if (year === fiscalYearStartBs && month >= 4 && month <= 9) return 'full'        // Shrawan-Poush
   if (year === fiscalYearStartBs && month >= 10 && month <= 12) return 'two_third' // Magh-Chaitra

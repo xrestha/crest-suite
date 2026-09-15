@@ -43,6 +43,52 @@ const EMPTY_FORM = {
   purchase_unit: '', conversion_factor: ''
 }
 
+// S756: the code prefix is a free-text setting, and it went into `new RegExp` raw — so "A+" made
+// the pattern mean "one or more A", and "V.N" matched "VXN-004" too. A misparse mints off the wrong
+// max (a duplicate code); a prefix like "(" throws and takes Add Item down with it.
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** The next `PREFIX-NNN` after the highest one in `codes`. Exported for Items.test.js. */
+export function nextCodeAfter(rawPrefix, codes) {
+  const prefix = String(rawPrefix).toUpperCase()
+  const re = new RegExp(`^${escapeRegExp(prefix)}-(\\d+)$`)
+  let maxNum = 0
+  ;(codes || []).forEach(code => {
+    const match = String(code || '').match(re)
+    if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10))
+  })
+  return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
+}
+
+// S756 (D5): which past records a new PRICE re-values. Stock counts, wastage, staff meals and stock
+// movements store a quantity and nothing else, so every report values them at `items.per_uom_rate`
+// as it is NOW — closed months included — and a recipe is costed live the same way. Purchase bills,
+// returns and PO lines carry their own rate and are untouched, so they are not named (requisition
+// lines have captured theirs since S710; older ones still fall back to the live rate).
+const REVALUED_BY_PRICE = [
+  { codes: ['OS', 'CS'], one: 'stock count', many: 'stock counts' },
+  { codes: ['W'], one: 'wastage entry', many: 'wastage entries' },
+  { codes: ['SM'], one: 'staff meal', many: 'staff meals' },
+  { codes: ['MV'], one: 'stock movement', many: 'stock movements' },
+  { codes: ['R'], one: 'recipe line', many: 'recipe lines' },
+]
+
+/**
+ * `{ text: "3 stock counts, 12 wastage entries and 1 recipe line", total: 16 }`, or null when
+ * nothing is re-valued. Exported for Items.test.js.
+ */
+export function priceImpactPhrase(counts) {
+  const found = REVALUED_BY_PRICE
+    .map(g => ({ g, n: g.codes.reduce((s, c) => s + ((counts || {})[c] || 0), 0) }))
+    .filter(x => x.n > 0)
+  if (found.length === 0) return null
+  const parts = found.map(({ g, n }) => `${n} ${n === 1 ? g.one : g.many}`)
+  const text = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+  return { text, total: found.reduce((s, x) => s + x.n, 0) }
+}
+
 export default function Items() {
   const { clientId, isAdmin, hasImsAccess } = useAuth()
   const { settings } = useSettings()
@@ -85,6 +131,10 @@ export default function Items() {
   // earn a badge still gets destroyed by a delete that thinks the item is unreferenced.
   const [usageMap, setUsageMap] = useState({})
   const [refMap, setRefMap] = useState({})
+  // S756 (D5): the same rows as `refMap`, counted per badge code — `{ [itemId]: { OS: 3, W: 12 } }`.
+  // Built in the same pass, so the price-change warning can say how many past records a new price
+  // re-values without a second round of reads.
+  const [refCounts, setRefCounts] = useState({})
   // Whether the usage scan actually answered. An absent chip must always mean "no records" and
   // never "we could not check" (the UsageChip rule), and the delete guard must refuse rather than
   // promise that nothing references an item it failed to look up.
@@ -134,7 +184,7 @@ export default function Items() {
       const cached = readPageCache('items', 'items', clientId)
       setItems(cached ?? [])
       setCategories(readPageCache('items', 'categories', clientId) ?? [])
-      setUsageMap({}); setRefMap({}); setUsageScan({ ok: false, failed: [] }); setBook(null)
+      setUsageMap({}); setRefMap({}); setRefCounts({}); setUsageScan({ ok: false, failed: [] }); setBook(null)
       setLoadError(null); setPageError(null)
       setLoading(!cached)
     } else if (items.length === 0) {
@@ -179,7 +229,7 @@ export default function Items() {
 
     const myItemIds = (myItems || []).map(i => i.id)
     if (myItemIds.length === 0) {
-      setUsageMap({}); setRefMap({}); setUsageScan({ ok: true, failed: [] }); return
+      setUsageMap({}); setRefMap({}); setRefCounts({}); setUsageScan({ ok: true, failed: [] }); return
     }
 
     // CHUNKED, not one big `.in()`. A `.in()` list is spelled out in the request URL and a uuid
@@ -198,6 +248,7 @@ export default function Items() {
 
     const map = {}      // live usage — the badge
     const refs = {}     // any reference at all — the delete guard
+    const counts = {}   // the same rows, counted per code — the price-change warning (S756)
     const failed = []
     ITEM_REF_TABLES.forEach(({ label, name, qtyCol }, idx) => {
       const { data, error } = results[idx]
@@ -208,6 +259,8 @@ export default function Items() {
         if (!row.item_id) return
         if (!refs[row.item_id]) refs[row.item_id] = []
         if (!refs[row.item_id].includes(label)) refs[row.item_id].push(label)
+        if (!counts[row.item_id]) counts[row.item_id] = {}
+        counts[row.item_id][label] = (counts[row.item_id][label] || 0) + 1
         if (qtyCol && (!row[qtyCol] || parseFloat(row[qtyCol]) <= 0)) return
         if (!map[row.item_id]) map[row.item_id] = []
         if (!map[row.item_id].includes(label)) map[row.item_id].push(label)
@@ -215,6 +268,7 @@ export default function Items() {
     })
     setUsageMap(map)
     setRefMap(refs)
+    setRefCounts(counts)
     setUsageScan({ ok: failed.length === 0, failed })
   }
 
@@ -474,17 +528,8 @@ export default function Items() {
   // keys off it, and pushing HQ's codes into a branch that minted its own would make every such
   // push an abort), so nothing downstream would have caught the collision.
   function getNextItemCode() {
-    const prefix = (settings?.item_code_prefix || 'ITM').toUpperCase()
     const codes = book ? book.codes : items.map(i => i.item_code).filter(Boolean)
-    let maxNum = 0
-    codes.forEach(code => {
-      const match = String(code || '').match(new RegExp(`^${prefix}-(\\d+)$`))
-      if (match) {
-        const num = parseInt(match[1], 10)
-        if (num > maxNum) maxNum = num
-      }
-    })
-    return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
+    return nextCodeAfter(settings?.item_code_prefix || 'ITM', codes)
   }
 
   // One entry point for the modal's error line, so a stale technical detail can never outlive the
@@ -515,9 +560,76 @@ export default function Items() {
     showError(text, detail)
   }
 
-  // Core save — validates + writes, returns true on success. Does NOT close the modal or reload,
-  // so callers can chain a "save & next" navigation.
-  async function doSave() {
+  // S756 (D5): a unit change re-reads history. Every table that references an item stores its
+  // quantity in the item's `uom` and nothing else — purchase lines, counts, wastage, recipe lines,
+  // par levels — so "500" recorded as GM silently becomes 500 KG the moment the unit is changed,
+  // in every report at once. Refused once anything references the item; the way through is a new
+  // item. Returns the refusal sentence, or null when the change is safe.
+  //
+  // Fails CLOSED: a scan that did not answer refuses, and a clean page-load map is re-checked live,
+  // because the map is a snapshot and a bill entered on another device since then still counts.
+  async function unitChangeRefusal(original, newUom) {
+    const oldUom = original.uom
+    const refused = names =>
+      `The unit can't be changed: "${original.name}" already has records in ${names}, every one of them counted in ${oldUom}. ` +
+      `Changing the unit would re-read all of them as ${newUom} — 500 ${oldUom} already recorded would become 500 ${newUom}. ` +
+      `Hide this item and create a new one in ${newUom} instead; its history stays in ${oldUom}, where it was counted.`
+    const unchecked =
+      `The unit can't be changed right now: Crest could not check where "${original.name}" is used, and a unit change re-reads every past record. ` +
+      `Reload the page and try again, or keep ${oldUom}.`
+    const known = refMap[original.id] || []
+    if (known.length > 0) return refused(known.map(code => USAGE_LABELS[code] || code).join(', '))
+    if (!usageScan.ok) return unchecked
+    const results = await Promise.all(ITEM_REF_TABLES.map(({ table }) =>
+      supabase.from(table).select('item_id', { count: 'exact', head: true }).eq('item_id', original.id)
+        .then(r => r, err => ({ error: err }))))
+    // `count` is null on a failed read and `null > 0` is false — the natural check would pass.
+    if (results.some(r => r.error)) return unchecked
+    const found = ITEM_REF_TABLES.filter((_, i) => results[i].count > 0)
+    return found.length > 0 ? refused(found.map(t => t.name).join(', ')) : null
+  }
+
+  // S756 (D5): the consequence dialog for an edit that changes what past figures MEAN without being
+  // refused — a new price (re-values every quantity-only record, closed months included) and a new
+  // pack (changes how the next Purchase Bill counts, and nothing already recorded). Returns the
+  // dialog body, or null when the edit touches neither or the item has no history to affect.
+  function editConsequences(original, payload) {
+    const oldRate = Number(original.per_uom_rate ?? original.rate)
+    const priceMoved = !(Math.abs(oldRate - payload.rate) <= 1e-9)
+    const oldPu = original.purchase_unit || null
+    const oldCf = Number(original.conversion_factor) || 1
+    const packMoved = oldPu !== payload.purchase_unit || Math.abs(oldCf - payload.conversion_factor) > 1e-9
+    const counts = refCounts[original.id] || {}
+    const impact = priceImpactPhrase(counts)
+    const bought = (counts.P || 0) > 0 || (counts.PO || 0) > 0
+    const parts = []
+    if (priceMoved && (impact || !usageScan.ok)) {
+      parts.push(
+        <p key="price" style={{ margin: '0 0 8px' }}>
+          Price per {payload.uom} goes from <strong>NPR {fmtPerUom(oldRate)}</strong> to <strong>NPR {fmtPerUom(payload.rate)}</strong>.{' '}
+          {impact
+            ? <>This item's {impact.text} {impact.total === 1 ? 'is' : 'are'} valued at this price wherever a report reads them — including months already closed — so those past figures change the moment you save.</>
+            : <>Crest could not count this item's past records, so it cannot say how many figures change — but stock counts, wastage, staff meals and recipe costs all read this price live, including months already closed.</>}
+          {' '}Purchase bills keep the price typed on them, and a closed month's Monthly Owner Report was frozen when the month closed.
+        </p>
+      )
+    }
+    if (packMoved && (bought || !usageScan.ok)) {
+      const packOf = (pu, cf) => (pu ? `1 ${pu} = ${cf} ${payload.uom}` : `no pack (bought in ${payload.uom})`)
+      parts.push(
+        <p key="pack" style={{ margin: '0 0 8px' }}>
+          The pack changes from <strong>{packOf(oldPu, oldCf)}</strong> to <strong>{packOf(payload.purchase_unit, payload.conversion_factor)}</strong>.
+          Past purchases are stored in {payload.uom} and do not change; from the next Purchase Bill on, its Qty box counts {payload.purchase_unit || payload.uom}.
+        </p>
+      )
+    }
+    return parts.length ? parts : null
+  }
+
+  // Core save — validates, then writes and calls `onSaved`. Does NOT close the modal or reload
+  // itself, so callers can chain a "save & next" navigation. A callback rather than a boolean since
+  // S756: an edit that re-values history is confirmed first, and that answer arrives later.
+  async function doSave(onSaved) {
     if (!clientId) { showError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
     const fe = {}
     if (!form.name.trim()) fe.name = 'Item name is required.'
@@ -563,9 +675,6 @@ export default function Items() {
       return false
     }
 
-    setSaving(true)
-    showError('')
-
     const cf = hasFactor ? parseFloat(form.conversion_factor) : 1
 
     // purchase_qty is pinned to 1 and deliberately NOT set from the conversion factor: a
@@ -589,27 +698,64 @@ export default function Items() {
       yield_pct: yieldNum,
     }
 
-    if (editing) {
-      const { error } = await supabase.from('items').update(payload).eq('id', editing)
+    const editingId = editing
+    const original = editingId ? items.find(i => i.id === editingId) : null
+    if (original) {
+      if (original.uom !== payload.uom) {
+        setSaving(true)
+        const refusal = await unitChangeRefusal(original, payload.uom)
+        setSaving(false)
+        if (refusal) { setFieldErr(e => ({ ...e, uom: refusal })); setActiveTab('details'); return false }
+      }
+      const consequences = editConsequences(original, payload)
+      if (consequences) {
+        askConfirm({
+          title: `Save changes to "${payload.name}"?`,
+          confirmLabel: 'Save Changes', busyLabel: 'Saving…',
+          // Raised over the Edit Item dialog, which sits at Modal's default 100.
+          zIndex: 110,
+          body: consequences,
+          run: () => writeItem(editingId, payload, onSaved),
+        })
+        return false
+      }
+    }
+    return writeItem(editingId, payload, onSaved)
+  }
+
+  async function writeItem(editingId, payload, onSaved) {
+    setSaving(true)
+    showError('')
+    if (editingId) {
+      // S756: `.select('id')`, because an update that matches no row returns no error — the item
+      // deleted in another tab, or a row this account may not change — and this used to close the
+      // dialog as a save. Zero rows back is proof nothing was written, so the message may say so.
+      const { data, error } = await supabase.from('items').update(payload).eq('id', editingId).select('id')
       if (error) { showSaveError(error); setSaving(false); return false }
+      if (!data?.length) {
+        showError(`"${payload.name}" was not saved — Crest could not find it to update. It may have been deleted in another tab, or this account may not change it. Close this dialog and reload the list; what you typed here is not stored anywhere else.`)
+        setSaving(false)
+        return false
+      }
     } else {
       const { error } = await scopedInsert('items', { ...payload, item_code: getNextItemCode() })
       if (error) { showSaveError(error); setSaving(false); return false }
     }
     setSaving(false)
+    onSaved?.()
     return true
   }
 
-  async function save() {
-    if (await doSave()) { setShowForm(false); loadItems() }
+  function save() {
+    doSave(() => { setShowForm(false); loadItems() })
   }
 
   // Save current item, then open the adjacent one (dir = +1 next / -1 prev) in the visible order.
-  async function saveAndGo(dir) {
+  function saveAndGo(dir) {
     const idx = filtered.findIndex(i => i.id === editing)
     const target = filtered[idx + dir]
     if (!target) return
-    if (await doSave()) { loadItems(); openEdit(target) }
+    doSave(() => { loadItems(); openEdit(target) })
   }
 
   // Hide / Show. A bare `await` with nothing destructured discarded the only evidence this failed,
@@ -621,10 +767,14 @@ export default function Items() {
     setTogglingId(item.id)
     setPageError(null)
     const hiding = item.is_active
-    const { error } = await supabase.from('items').update({ is_active: !item.is_active }).eq('id', item.id)
+    // S756: `.select('id')` — zero rows matched is no error, and read as a Hide that worked.
+    const { data, error } = await supabase.from('items').update({ is_active: !item.is_active }).eq('id', item.id).select('id')
     if (error) {
       const { text, detail } = asActionError(error)
       setPageError({ text: `"${item.name}" is still ${hiding ? 'visible' : 'hidden'} — the change was not saved. ${text}`, detail })
+    } else if (!data?.length) {
+      setPageError(`"${item.name}" was not ${hiding ? 'hidden' : 'shown'} — Crest could not find it to change. It may have been deleted in another tab, or this account may not change it. The list has been refreshed.`)
+      await loadItems()
     } else {
       await loadItems()
     }
@@ -695,6 +845,11 @@ export default function Items() {
     search.trim() ? `matching "${search.trim()}"` : null,
     usageScopeLabel[filterUsage],
   ].filter(Boolean).join(' · ')
+
+  // S756 (D5): the unit is a property of every quantity already recorded against the item, so it
+  // stops being editable as soon as anything references it. `doSave` refuses independently (and
+  // re-checks live), because this map is a page-load snapshot.
+  const uomLocked = !!editing && (refMap[editing]?.length || 0) > 0
 
   const tabProps = (tab) => ({
     type: 'button',
@@ -821,10 +976,22 @@ export default function Items() {
                   {!fieldErr.yield_pct && <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>Usable % after trim/prep. 100 = no loss</span>}
                 </div>
                 <div className="form-field">
-                  <label htmlFor="items-f4">UOM (base unit)</label>
-                  <select id="items-f4" value={form.uom} onChange={e => setForm(f({ uom: e.target.value }))}>
+                  <label htmlFor="items-f4">
+                    <Tip width={300} text={`The unit this item is counted, costed and reported in. Every past record stores a quantity in it and nothing else, so once the item has been bought, counted or used in a recipe the unit is locked — a new unit would re-read all of that history. Hide the item and add a new one instead.`}>
+                      UOM (base unit)
+                    </Tip>
+                  </label>
+                  <select id="items-f4" value={form.uom} disabled={uomLocked}
+                    onChange={e => setForm(f({ uom: e.target.value }))}
+                    {...fieldAria('items-f4', fieldErr.uom)}>
                     {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
+                  <FieldError id="items-f4" message={fieldErr.uom} />
+                  {uomLocked && !fieldErr.uom && (
+                    <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>
+                      Locked — this item already has records counted in {form.uom}
+                    </span>
+                  )}
                 </div>
                 <div className="form-field">
                   <label htmlFor="items-f6">

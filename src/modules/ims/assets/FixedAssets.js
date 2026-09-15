@@ -8,6 +8,8 @@ import DepreciationRunTab from './DepreciationRunTab'
 import ValuationReportTab from './ValuationReportTab'
 import DisposalReportTab from './DisposalReportTab'
 import TaxPoolTab from './TaxPoolTab'
+import ReportLoadError from '../../../components/ReportLoadError'
+import { firstError } from '../../../shared/queryError'
 
 const TABS = [
   { key: 'register',   label: 'Register' },
@@ -27,6 +29,11 @@ export default function FixedAssets() {
   const [categories, setCategories] = useState([])
   const [assets, setAssets] = useState([])
   const [loading, setLoading] = useState(true)
+  // A failed read is not an empty register (S756). Both reads dropped their error, so a dead
+  // connection rendered "No assets", a Valuation of NPR 0 and — the one that writes — a Tax Pool
+  // preview with no additions and no disposals that a manager could POST as the year's locked
+  // schedule. While this is set the whole tab tree is withheld, and with it both Post buttons.
+  const [loadError, setLoadError] = useState(null)
   // Only the very first load shows the full-page "Loading…" skeleton. A reload triggered by a
   // child tab (e.g. after Add Asset or Post) must NOT unmount the tab tree — that would wipe the
   // triggering tab's own local state (DepreciationRunTab's period fields, its just-posted success
@@ -40,10 +47,18 @@ export default function FixedAssets() {
 
   async function load() {
     if (!hasLoadedOnce.current) setLoading(true)
-    const [{ data: cats }, { data: rows }] = await Promise.all([
+    const results = await Promise.all([
       scopedFrom('assets_categories').order('sort_order').order('name'),
       scopedFrom('assets_register', '*, assets_categories(name, tax_pool_hint)').order('created_at', { ascending: false }),
     ])
+    const failed = firstError(results)
+    if (failed) {
+      setLoadError(failed)
+      setLoading(false)
+      return
+    }
+    setLoadError(null)
+    const [{ data: cats }, { data: rows }] = results
     setCategories(cats || [])
     setAssets(rows || [])
     setLoading(false)
@@ -78,6 +93,11 @@ export default function FixedAssets() {
 
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
+      ) : loadError ? (
+        <>
+          <ReportLoadError error={loadError} />
+          <button className="btn btn-ghost" style={{ marginTop: 12 }} onClick={load}>Try again</button>
+        </>
       ) : (
         <>
           {activeTab === 'register' && (

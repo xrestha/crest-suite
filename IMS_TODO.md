@@ -20,36 +20,52 @@ access. High-severity claims were spot-checked against source before any decisio
 | D2 | Who ends/reopens the month | Owner, IMS supervisor/manager, Crest operator — enforced in DB on `monthly_periods` INSERT/UPDATE, and the Dashboard button hidden for everyone else. Reopen/relabel: Owner or operator. ✅ S756 |
 | D3 | Recipe ranks | **Hide/unhide a dish: IMS supervisor+. Delete a dish: manager+.** Enforced in DB (`guard_recipe_rank`; rank check on `recipe_ingredients` writes). ✅ S756 |
 | D4 | Counting tablets | One **"Sign out all counting tablets"** button (rotates `ims_device_secret`); also rotated by archive/clear/delete client. ✅ S756 |
-| D5 | Item unit/price edits with history | **Refuse a unit change** once the item has purchases or counts ("hide it and create a new item"). **Warn on a price change**, naming how many past records it re-values. |
+| D5 | Item unit/price edits with history | **Refuse a unit change** once the item has purchases or counts ("hide it and create a new item"). **Warn on a price change**, naming how many past records it re-values. ✅ S756 |
 | D6 | Uncounted items on summaries | Stock Count Summary, Monthly Summary, Annual Summary, Period Comparison: **amber warning naming the uncounted items, marked in table and export; FC% shown without a colour verdict** while the gap is material. Totals unchanged. |
 | D7 | Open-month reports | Monthly Summary / Budget vs Actual keep opening on the current month, **marked provisional, no red/green verdict** until closed. Fall back to latest period when none is open. |
-| D8 | Price on a corrected past sales day | **Every row keeps its stored `unit_price`**; only new rows take today's menu price. |
+| D8 | Price on a corrected past sales day | **Every row keeps its stored `unit_price`**; only new rows take today's menu price. ✅ S756 |
 | D9 | Lump-sum supplier payment | **One amount per supplier, applied oldest bill first, split shown before saving.** Per-bill entry stays. |
 | D10 | Late returns | A return may pick a bill from an earlier month and **sits in the month it happened** (VAT timing to be confirmed by an accountant — say so in Help). |
 | D11 | Supplier credit | **"Settle using supplier credit"** on a payment against another bill of the same supplier. |
-| D12 | Same PAN on two suppliers (1L report) | **Aggregate by PAN**, listing all names; warn on blank PANs. |
+| D12 | Same PAN on two suppliers (1L report) | **Aggregate by PAN**, listing all names; warn on blank PANs. ✅ S756 |
 | D13 | Invoice VAT capture | **Two optional fields** on a purchase bill (invoice VAT, invoice total); flag mismatch > NPR 1. Migration. |
 | D14 | Requisitions | **Record requested_by / issued_by / issued_at**; add **Rejected** status with reason. No two-person rule, no back-orders. |
-| D15 | Dish VAT toggle | **Keep the guest price** on both Recipe Costing and Menu Pricing; show resulting ex-VAT. |
+| D15 | Dish VAT toggle | **Keep the guest price** on both Recipe Costing and Menu Pricing; show resulting ex-VAT. ✅ S756 |
 | D16 | Dish photos | **Upload button** storing photos in Crest (Supabase Storage). |
-| D17 | Non-recipe items on Variance | Grey **"no recipe linked"** state, excluded from flagged count and loss total. |
-| D18 | Reorder quantities | **Both units, rounded up to whole packs** — print, WhatsApp and Excel. |
+| D17 | Non-recipe items on Variance | Grey **"no recipe linked"** state, excluded from flagged count and loss total. ✅ S756 |
+| D18 | Reorder quantities | **Both units, rounded up to whole packs** — print, WhatsApp and Excel. ✅ S756 |
 | D19 | Stock Ageing / FIFO basis | **Anchor to the physical count** where one exists (oldest removed first), **state the basis**, **rolling 12-month** window. |
 | D20 | Dead stock | **Dead after 2–3 consecutive months** with no movement (shorter = Slow); **suggested next step** per item. |
-| D21 | Demand forecast | **Exclude past holidays** from weekday averages; ingredient list shows **forecast use / in store / to buy**. |
+| D21 | Demand forecast | **Exclude past holidays** from weekday averages; ingredient list shows **forecast use / in store / to buy**. ✅ S756 |
 | D22 | Dashboard labour | Dashboard Fixed Costs % / Est. Net Margin **use finalized payroll**, like Overheads, naming the source. |
-| D23 | Depreciation in profit | **Memo line** on Overheads P&L — shown, not subtracted. |
-| D24 | Asset fixes | **Charge depreciation to the disposal date**; **Adjustment run** to reverse a wrong run + warn before posting an overlapping period. Personal-use apportionment **not** chosen (legal question). |
-| D25 | Supplier tidy-up | **Owner can archive, restore and delete** suppliers (DB trigger still refuses deleting one with history). |
-| D26 | Bill edit with a return against it | **Refused** until the return is removed (same shape as `purchase_bill_has_payments`). Migration. |
-| D27 | Gate passes | Day boundary **6 AM Nepal time**; **void with reason** keeping the number. |
-| D28 | Accountant extras | **Bill-wise sheet** in VAT export; **Sales import warns** when the file's date range ≠ selected day. |
+| D23 | Depreciation in profit | **Memo line** on Overheads P&L — shown, not subtracted. ✅ S756 |
+| D24 | Asset fixes | **Charge depreciation to the disposal date**; **Adjustment run** to reverse a wrong run + warn before posting an overlapping period. Personal-use apportionment **not** chosen (legal question). ✅ S756 |
+| D25 | Supplier tidy-up | **Owner can archive, restore and delete** suppliers (DB trigger still refuses deleting one with history). ✅ S756 |
+| D26 | Bill edit with a return against it | **Refused** until the return is removed (same shape as `purchase_bill_has_payments`). Migration. ✅ S756 |
+| D27 | Gate passes | Day boundary **6 AM Nepal time**; **void with reason** keeping the number. ✅ S756 |
+| D28 | Accountant extras | **Bill-wise sheet** in VAT export; **Sales import warns** when the file's date range ≠ selected day. ✅ S756 |
 
 Open question for an accountant, not engineering: IMS-only clients have no sales-side VAT view (net VAT payable) anywhere in Crest.
 
 ---
 
 ## 2. Clear-cut fixes (one right answer)
+
+**Stage 2 (wrong numbers and lost changes) shipped in S756** — migration `20260918110000` (bill edit refused with returns, non-negative discount CHECK, gate-pass void) plus ~60 frontend files, with owner decisions D5, D8, D12, D15, D17, D18, D21, D23, D24, D25, D26, D27 and D28 built alongside the fixes in the same files.
+
+**Open after stage 2** (found or left by the stage-2 work):
+- 🔴 D22 — ClientDashboard Fixed Costs % / Est. Net Margin use finalized payroll, and say "labour unreadable on this login" for an IMS staff login (Overheads does both now).
+- 🔴 VendorReport: `provisionalWhenOpen` on PeriodScope; SupplierContribution + VendorReport export gating on loading/biz.error.
+- 🔴 PaymentReport `billPayables`: unlinked returns valued with no VAT added back and no banner (VAT/Non-VAT now name them).
+- 🔴 ReorderReport export has no letterhead (`sheetWithLetterhead`).
+- 🔴 PurchaseBillPage `applyRateUpdates` rewrites `items.rate` with no D5 price warning and no zero-row check; its `load()` shows raw `error.message`.
+- 🔴 Purchases/Returns "Delete All" has no zero-row check; OutstandingPayables bulk `paid_at` `.in()` is not chunked.
+- 🔴 TheoreticalVariance's Over/Under-consumed filter buttons test raw `variance > 0.01`, not the tolerance band.
+- 🔴 `findSupersededRows` / `persistSalesDay` rethrow `new Error(error.message)`, losing the error code.
+- 🔴 Move `serviceDayStartIso` (POS parking) into `src/shared/nepalTime.js`; GatePasses imports it from the POS modal. Decide whether POS parking's auto-close should use the actual 6 AM like gate passes (it cuts off at the service day's midnight).
+- ⚪ Disposals recorded before S756 keep a gain/loss measured at the last posted run (no backfill) — owner decision if wanted.
+- ⚪ 1L report: an UNLINKED return is still deducted from its supplier's total (at list rate, no VAT reversed) — agent's choice, to confirm.
+- ⚪ Demand Forecast Recompute now skips past holidays, which changes what Roster's Labor Forecast reads.
 
 **Stage 1 (security + closed months) shipped in S756** — migration `20260918100000`, `admin-user-ops`, `ims-staff-login`. Assets were fenced to match the page (register/categories/repairs supervisor; disposal and posting manager), not all-manager. Known gaps it left: a staff login can add lines to an issued requisition over REST; Sales, Stock Count, Overheads and Requisitions show no amber "editing a closed month" banner to the Owner; Roster's labour-actuals reads still hit tables fenced from HR logins (`recipes`, `sales_entries`, `pos_orders`).
 
@@ -62,10 +78,10 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 — `recipes`/`recipe_ingredients` (D3).
 - ✅ S756 — `assets_register`/`assets_depreciation_runs`/`assets_repair_expenses` + post RPCs: IMS manager. `settings` IMS threshold columns: manager.
 - ✅ S756 — `demand_forecast_daily` readable by HR roles (Roster labour overlay silently empty for every HR login).
-- 🔴 `save_purchase_bill` refuses superseding lines with returns (D26).
+- ✅ S756 — `save_purchase_bill` refuses superseding lines with returns (D26).
 - ✅ S756 — `get_ims_count_staff`: drop settlement-blocked employees; RAISE on bad device secret.
 - ✅ S756 — `ims_device_secret` rotate RPC (D4).
-- 🔴 `purchase_entries` CHECK `discount_amount >= 0`.
+- ✅ S756 — `purchase_entries` CHECK `discount_amount >= 0`.
 
 ### 2b. Edge Functions
 - ✅ S756 — `admin-user-ops update_ims_role`: refuse any rank but `staff` for a count-PIN (`ims_email`) target; `revokeClientTablets` also rotates `ims_device_secret`.
@@ -74,59 +90,59 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 — `AuthContext.js:225` profile select lacks `ims_email` → `imsCountOnly` always false; count PIN reaches everything staff can.
 - ✅ S756 — `ImsStaff.jsx:594/245/167` hide rank select for PIN rows; exclude from job-title sync.
 - ✅ S756 — `ClientDashboard.jsx:2574-2596` End Period button role check (D2).
-- 🔴 `Overheads.js:210+` IMS-role login can't read payroll → says "no payroll run" and green Net Profit; say labour unreadable, withhold verdict.
+- ✅ S756 — `Overheads.js:210+` IMS-role login can't read payroll → says "no payroll run" and green Net Profit; say labour unreadable, withhold verdict.
 
 ### 2d. Frontend — wrong numbers / data loss
-- 🔴 `Stock.js:709-727` Save All writes/deletes every visible row (parallel tablets wipe each other; restamps counted_by; recount guard refuses) → send changed cells only.
+- ✅ S756 — `Stock.js:709-727` Save All writes/deletes every visible row (parallel tablets wipe each other; restamps counted_by; recount guard refuses) → send changed cells only.
 - ✅ S756 — `Stock.js:549-586` offline replay into closed period (with D1).
-- 🔴 `Stock.js:810,242` bare selects (pull-from-last-month, items).
-- 🔴 `computeMonthlyReport.js:58,77-84` six bare selects inside the frozen snapshot.
-- 🔴 `Stock.js:944-951,1163` Summary purchases at master rate, no discounts; wrong "exactly" note.
-- 🔴 `closePeriod.js:78-88` counted-vs-active mismatch.
-- 🔴 `Purchases.js:383-399,703` Item filter values half a bill (negative totals).
-- 🔴 `vendorBalanceHelpers.js:83-87` legacy-bill discount multiplied.
-- 🔴 `PurchaseBillForm.jsx:358` discount unvalidated; `:292` Save live after save → duplicate bill.
-- 🔴 `ReturnsTab.jsx:67` return dated before its bill; `OutstandingPayables.js:396` silent overpay cap.
-- 🔴 `persistSalesDay.js:43-49` unpaged supersede check → silent month delete.
-- 🔴 `Sales.js` save against stale day/period baseline (3 windows) → capture `{periodId, bsDay}` at click.
-- 🔴 `Sales.js:348-373` unit_price restamp (D8).
-- 🔴 `persistSalesDay.js:186-191` cross-mode supersede leaves stock_movements (double depletion); `:170` huge `.in()` / unpaged.
-- 🔴 `SalesImportButton.jsx:6-9,40` `1,250.00`→1; `Disc %` picked as amount.
-- 🔴 `Sales.js:635` From-POS revenue at today's price; `:225` unpaged day read; `:676` admin closed-month banner.
+- ✅ S756 — `Stock.js:810,242` bare selects (pull-from-last-month, items).
+- ✅ S756 — `computeMonthlyReport.js:58,77-84` six bare selects inside the frozen snapshot.
+- ✅ S756 — `Stock.js:944-951,1163` Summary purchases at master rate, no discounts; wrong "exactly" note.
+- ✅ S756 — `closePeriod.js:78-88` counted-vs-active mismatch.
+- ✅ S756 — `Purchases.js:383-399,703` Item filter values half a bill (negative totals).
+- ✅ S756 — `vendorBalanceHelpers.js:83-87` legacy-bill discount multiplied.
+- ✅ S756 — `PurchaseBillForm.jsx:358` discount unvalidated; `:292` Save live after save → duplicate bill.
+- ✅ S756 — `ReturnsTab.jsx:67` return dated before its bill; `OutstandingPayables.js:396` silent overpay cap.
+- ✅ S756 — `persistSalesDay.js:43-49` unpaged supersede check → silent month delete.
+- ✅ S756 — `Sales.js` save against stale day/period baseline (3 windows) → capture `{periodId, bsDay}` at click.
+- ✅ S756 — `Sales.js:348-373` unit_price restamp (D8).
+- ✅ S756 — `persistSalesDay.js:186-191` cross-mode supersede leaves stock_movements (double depletion); `:170` huge `.in()` / unpaged.
+- ✅ S756 — `SalesImportButton.jsx:6-9,40` `1,250.00`→1; `Disc %` picked as amount.
+- ✅ S756 — `Sales.js:635` From-POS revenue at today's price; `:225` unpaged day read; `:676` admin closed-month banner.
 - ✅ S756 — `Recipes.js:1896` list-view errors render nowhere (Delete/Hide refusals invisible).
-- 🔴 `Recipes.js:1469…`, `RecipeCostCardPrint.jsx` no-ingredient recipe shows `0.0% ✓` → `recipeCostOf`/`menuFcPct`.
-- 🔴 `Recipes.js:703` update re-activates hidden dish.
-- 🔴 `Recipes.js:899,906,907` dropped write errors (mirror link).
-- 🔴 `.neq('source','pos_comp')` drops NULL rows: `Recipes.js:227`, `MonthlySummary.js:74`, `AnnualSummary.js:109`, `PeriodComparison.js:166`.
-- 🔴 `MenuPricing.js:350,403` null category crash (ask branch before editing — POS-only branch).
-- 🔴 `RecipeImportButton.jsx:29` Selling Price column is ex-VAT, unlabelled.
-- 🔴 `Variance.js:51-53` total band NPR ÷ mixed quantities; `:210-248` flag vs band disagree.
-- 🔴 `ShrinkageReport.js:211,217` uncounted = zero; no tolerance/materiality.
-- 🔴 `PeriodComparison.js:153-166` includes inactive + sub-recipe mirror items.
-- 🔴 `BudgetVsActual.js:52,142` budgets typed with no open period silently discarded.
-- 🔴 Superseded load clears `loading`: `Variance.js`, `TheoreticalVariance.js`, `MonthlySummary.js`, `BudgetVsActual.js`; `init()` never `begin()`s on those four + `StockReport.js:39`.
-- 🔴 `TheoreticalVariance.js:532` footer includes unmeasured rows.
-- 🔴 `AnnualSummary.js:72` request key collides calendar/FY.
-- 🔴 `BudgetVsActual.js:275` negative actual renders `—`.
-- 🔴 `DeadStock.js:170` float equality; `:76` defaults to open month.
-- 🔴 `FifoReport.js:40`/`StockAgeing.js:43` as-of = end of last month while it is still open (expired shows green).
-- 🔴 `FifoReport.js:178`/`StockAgeing.js:195` returns against out-of-window bills lost; `StockAgeing.js:398` 90+ card ✓.
-- 🔴 `DemandForecast.js:122` past days listed as "next 7"; `:159` dropped error; `:177` horizon switch mid-recompute.
-- 🔴 `purchaseTaxSplit.js:42-43` unlinked returns vanish from VAT/Non-VAT (input VAT overstated) → partition + named banner.
-- 🔴 `VatReport.js:297` on-screen per-line VAT pre-discount vs workbook post-discount.
-- 🔴 `PurchaseOneLakhAboveReport.js` no letterhead/scope; `:46` infinite Loading with no periods; `:67` error before isCurrent.
-- 🔴 `AssetCard.jsx:32` disposal gain/loss from dropped read; `FixedAssets.js:43` both reads drop errors (Post from zeros).
-- 🔴 `Overheads.js:93,110,520` Save during load deletes the wrong period's rows; no `useLatestRequest`.
-- 🔴 `Overheads.js:195` purchases ignore bill discounts; `:406` hardcoded traffic light; `:137` carried-forward draft unlabelled; `:317` blank-category row totalled then dropped; `:196,207` unpaged.
-- 🔴 `taxPoolCompute.js:242` AD parsed as UTC → wrong tier abroad; `DepreciationRunTab.js:70` override unbounded; `TaxPoolTab.js:63` repair outside FY.
-- 🔴 `GatePasses.jsx:91` reprint never awaited; `:34-62` failed reads/writes dropped; `:48` viewer-clock sweep; `:81` no `exited_by`; `:35` unpaged; `GatePassPrint.jsx:12` locale date.
+- ✅ S756 — `Recipes.js:1469…`, `RecipeCostCardPrint.jsx` no-ingredient recipe shows `0.0% ✓` → `recipeCostOf`/`menuFcPct`.
+- ✅ S756 — `Recipes.js:703` update re-activates hidden dish.
+- ✅ S756 — `Recipes.js:899,906,907` dropped write errors (mirror link).
+- ✅ S756 — `.neq('source','pos_comp')` drops NULL rows: `Recipes.js:227`, `MonthlySummary.js:74`, `AnnualSummary.js:109`, `PeriodComparison.js:166`.
+- ✅ S756 — `MenuPricing.js:350,403` null category crash (ask branch before editing — POS-only branch).
+- ✅ S756 — `RecipeImportButton.jsx:29` Selling Price column is ex-VAT, unlabelled.
+- ✅ S756 — `Variance.js:51-53` total band NPR ÷ mixed quantities; `:210-248` flag vs band disagree.
+- ✅ S756 — `ShrinkageReport.js:211,217` uncounted = zero; no tolerance/materiality.
+- ✅ S756 — `PeriodComparison.js:153-166` includes inactive + sub-recipe mirror items.
+- ✅ S756 — `BudgetVsActual.js:52,142` budgets typed with no open period silently discarded.
+- ✅ S756 — Superseded load clears `loading`: `Variance.js`, `TheoreticalVariance.js`, `MonthlySummary.js`, `BudgetVsActual.js`; `init()` never `begin()`s on those four + `StockReport.js:39`.
+- ✅ S756 — `TheoreticalVariance.js:532` footer includes unmeasured rows.
+- ✅ S756 — `AnnualSummary.js:72` request key collides calendar/FY.
+- ✅ S756 — `BudgetVsActual.js:275` negative actual renders `—`.
+- ✅ S756 — `DeadStock.js:170` float equality; `:76` defaults to open month.
+- ✅ S756 — `FifoReport.js:40`/`StockAgeing.js:43` as-of = end of last month while it is still open (expired shows green).
+- ✅ S756 — `FifoReport.js:178`/`StockAgeing.js:195` returns against out-of-window bills lost; `StockAgeing.js:398` 90+ card ✓.
+- ✅ S756 — `DemandForecast.js:122` past days listed as "next 7"; `:159` dropped error; `:177` horizon switch mid-recompute.
+- ✅ S756 — `purchaseTaxSplit.js:42-43` unlinked returns vanish from VAT/Non-VAT (input VAT overstated) → partition + named banner.
+- ✅ S756 — `VatReport.js:297` on-screen per-line VAT pre-discount vs workbook post-discount.
+- ✅ S756 — `PurchaseOneLakhAboveReport.js` no letterhead/scope; `:46` infinite Loading with no periods; `:67` error before isCurrent.
+- ✅ S756 — `AssetCard.jsx:32` disposal gain/loss from dropped read; `FixedAssets.js:43` both reads drop errors (Post from zeros).
+- ✅ S756 — `Overheads.js:93,110,520` Save during load deletes the wrong period's rows; no `useLatestRequest`.
+- ✅ S756 — `Overheads.js:195` purchases ignore bill discounts; `:406` hardcoded traffic light; `:137` carried-forward draft unlabelled; `:317` blank-category row totalled then dropped; `:196,207` unpaged.
+- ✅ S756 — `taxPoolCompute.js:242` AD parsed as UTC → wrong tier abroad; `DepreciationRunTab.js:70` override unbounded; `TaxPoolTab.js:63` repair outside FY.
+- ✅ S756 — `GatePasses.jsx:91` reprint never awaited; `:34-62` failed reads/writes dropped; `:48` viewer-clock sweep; `:81` no `exited_by`; `:35` unpaged; `GatePassPrint.jsx:12` locale date.
 - ✅ S756 — `ImsCountLogin.jsx:122-130,208` every failure = "Incorrect PIN"; bad secret = "no PINs set up".
-- 🔴 `Items.js:593,624`, `Vendors.js:181,230,294,306` zero-row writes report success.
+- ✅ S756 — `Items.js:593,624`, `Vendors.js:181,230,294,306` zero-row writes report success.
 
 ### 2e. Frontend — report hygiene (S728/S616/S754 rules)
-- 🔴 Export/print not gated on `loading || loadError`: ReorderReport (Export has no `disabled`), TheoreticalVariance, PeriodComparison, AnnualSummary, MonthlySummary, BudgetVsActual, VatReport, NonVatReport, 1L, SupplierContribution, StockAgeing Print.
-- 🔴 Exports not gated on `biz.error`: VAT, Non-VAT, Vendor, SupplierContribution, 1L, DeadStock, FIFO, StockAgeing.
-- 🔴 `ReorderReport.js:455` KPI strip visible during load; `:525` "Stock is healthy" with no pars.
-- 🔴 Hand-built sheets without `sheetWithLetterhead`: Variance, TheoreticalVariance, AnnualSummary (money as text), DemandForecast, 1L.
-- 🔴 `provisionalWhenOpen` missing on VatReport, NonVatReport, VendorReport; stale tooltips (# Bills, "Gross"); VAT export disabled on returns-only months.
-- 🔴 `counted_by` shown nowhere; `Stock.js:885` retyped `computeUsed`; `Stock.js:1369` locale date.
+- 🟡 S756 (IMS pages done; VendorReport/SupplierContribution open) — Export/print not gated on `loading || loadError`: ReorderReport (Export has no `disabled`), TheoreticalVariance, PeriodComparison, AnnualSummary, MonthlySummary, BudgetVsActual, VatReport, NonVatReport, 1L, SupplierContribution, StockAgeing Print.
+- 🟡 S756 (IMS pages done; VendorReport/SupplierContribution open) — Exports not gated on `biz.error`: VAT, Non-VAT, Vendor, SupplierContribution, 1L, DeadStock, FIFO, StockAgeing.
+- ✅ S756 — `ReorderReport.js:455` KPI strip visible during load; `:525` "Stock is healthy" with no pars.
+- ✅ S756 — Hand-built sheets without `sheetWithLetterhead`: Variance, TheoreticalVariance, AnnualSummary (money as text), DemandForecast, 1L.
+- 🟡 S756 (IMS pages done; VendorReport/SupplierContribution open) — `provisionalWhenOpen` missing on VatReport, NonVatReport, VendorReport; stale tooltips (# Bills, "Gross"); VAT export disabled on returns-only months.
+- ✅ S756 — `counted_by` shown nowhere; `Stock.js:885` retyped `computeUsed`; `Stock.js:1369` locale date.

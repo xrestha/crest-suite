@@ -6,6 +6,8 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import RowDisclosure from '../../../components/RowDisclosure'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import FieldError, { fieldAria } from '../../../components/FieldError'
+import { invalidStyle } from '../../../shared/inlineFieldState'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { supabase } from '../../../supabaseClient'
 import { BS_MONTHS, bsToAd, adToBsSafe, formatAd } from '../../../utils/bsCalendar'
@@ -73,6 +75,8 @@ export default function OutstandingPayables() {
   const [payForm, setPayForm]           = useState({ amount: '', paid_at: todayIso(), note: '', payment_mode: 'Cash' })
   const [savingPayment, setSavingPayment] = useState(false)
   const [payError, setPayError]           = useState(null)
+  // The amount box's own message — an overpayment is refused under the box, by name (S756).
+  const [payAmountErr, setPayAmountErr]   = useState('')
   // The second write of each two-write sequence (stamping/clearing purchase_entries.paid_at after
   // the payment rows have committed) can fail on its own. The payment is real at that point, so
   // this is not a refusal — it names the state the bill is now in. Page-level because load()
@@ -341,6 +345,7 @@ export default function OutstandingPayables() {
     setExpandedBill(prev => prev === key ? null : key)
     setPayForm({ amount: '', paid_at: todayIso(), note: '', payment_mode: 'Cash' })
     setPayError('')
+    setPayAmountErr('')
   }
 
   // Allocates a payment amount across a bill's unpaid lines, oldest-first, rounding each line's
@@ -388,12 +393,47 @@ export default function OutstandingPayables() {
     return { error }
   }
 
+  // The second write of every pay/unpay sequence: stamp or clear purchase_entries.paid_at on the
+  // lines just settled or reopened. Returns null when every line was written, else the { text,
+  // detail } of what went wrong, for the caller to fold into a sentence naming the bill's state.
+  //
+  // `.select('id')` is the point (S756). An UPDATE a policy filters down to fewer rows — or to
+  // none — returns `error: null`, so a bill whose payment landed and whose stamp did not read as
+  // settled here and stayed under Outstanding after the reload, with nothing to say why. PostgREST
+  // returns the rows it actually changed, so a short count is proof and may be named. A refusal
+  // raised by the database (the S756 `ims_rank` / `period_closed` guards) arrives as `error` and
+  // is worded by asActionError. paid_at-only updates pass the closed-month guard by design.
+  async function writePaidAt(ids, paidAt) {
+    const { data, error } = await supabase.from('purchase_entries').update({ paid_at: paidAt }).in('id', ids).select('id')
+    if (error) return asActionError(error)
+    const n = data?.length || 0
+    if (n < ids.length) {
+      return {
+        text: `Only ${n} of the ${ids.length} bill line${ids.length === 1 ? '' : 's'} could be updated; this login may not be allowed to change the rest.`,
+        detail: `purchase_entries paid_at update matched ${n} of ${ids.length} rows`,
+      }
+    }
+    return null
+  }
+
   // One payment for a whole bill — distributed across its unpaid line items (oldest first).
   async function payBill(bill) {
     let amount = parseFloat(payForm.amount)
     if (!amount || amount <= 0) return
     if (!effectiveClientId) { setPayError('No client selected. Pick a client in the top-left switcher before saving.'); return }
-    amount = Math.min(amount, bill.remaining) // never over-pay the bill
+    // An overpayment is REFUSED, never quietly shrunk (S756). This was `Math.min(amount,
+    // bill.remaining)`: typing 5,000 against a 4,200 balance recorded 4,200 and said nothing, so
+    // the payment history disagreed with the cheque the reader was holding. The half-paisa
+    // tolerance is not a rupee — `remaining` is a sum of per-line 2dp figures and can carry float
+    // noise below "Pay in full"'s .toFixed(2), and only that noise is absorbed by the min below
+    // (the S510 stuck-settlement layer: the payment must reach, not fall a hair short of, the
+    // unrounded balance).
+    if (amount > bill.remaining + 0.005) {
+      setPayAmountErr(`This bill has ${fmt2(bill.remaining)} left to pay. Enter that or less — if you paid the vendor more, record ${fmt2(bill.remaining)} here and the rest against their next bill.`)
+      return
+    }
+    setPayAmountErr('')
+    amount = Math.min(amount, bill.remaining)
     setSavingPayment(true)
     setPayError('')
     setSettleWarn(null)
@@ -410,11 +450,10 @@ export default function OutstandingPayables() {
       setSavingPayment(false); return
     }
     if (settleIds.length > 0) {
-      const { error: settleErr } = await supabase.from('purchase_entries').update({ paid_at: date }).in('id', settleIds)
-      if (settleErr) {
+      const settleWarnText = await writePaidAt(settleIds, date)
+      if (settleWarnText) {
         // The payment rows are committed; refusing is not available. Name the state instead.
-        const { text, detail } = asActionError(settleErr)
-        setSettleWarn({ text: `The payment was recorded, but the bill could not be marked as settled — it still shows under Outstanding with nothing remaining. Reload the page; if it is still listed there, send the detail below to support. ${text}`, detail })
+        setSettleWarn({ ...settleWarnText, text: `The payment was recorded, but the bill could not be marked as settled — it still shows under Outstanding with nothing remaining. Reload the page; if it is still listed there, send the detail below to support. ${settleWarnText.text}` })
       }
     }
     setSavingPayment(false)
@@ -437,12 +476,17 @@ export default function OutstandingPayables() {
     setTermsSaving(true)
     setTermsError('')
     const trimmed = termsForm.trim() || null
-    const { error } = await scopedUpdate('vendors', { payment_terms: trimmed }).eq('id', editingTermsVendor.id)
+    // `.select('id')` (S756): zero rows back with no error is a save that did not land.
+    const { data: updated, error } = await scopedUpdate('vendors', { payment_terms: trimmed }).eq('id', editingTermsVendor.id).select('id')
     setTermsSaving(false)
     if (error) {
       setTermsError(error.code === '42703'
         ? 'Needs a one-time database setup. Run this in Supabase → SQL Editor, then try again: ALTER TABLE vendors ADD COLUMN IF NOT EXISTS payment_terms text;'
         : asActionError(error))
+      return
+    }
+    if (!updated?.length) {
+      setTermsError(`The payment terms were not saved — ${editingTermsVendor.name} still shows its previous terms. This login may not be allowed to change vendors; ask your manager or the Owner.`)
       return
     }
     setVendorTerms(prev => ({ ...prev, [editingTermsVendor.id]: trimmed }))
@@ -495,11 +539,24 @@ export default function OutstandingPayables() {
       run: async () => {
         setSettleWarn(null)
         const ids = toDelete.map(p => p.id)
-        const { error } = await scopedDelete('payable_payments').in('id', ids)
+        // `.select('id')` (S756). payable_payments writes below IMS manager are refused by the
+        // database since S756, and a policy that FILTERS a delete rather than raising returns
+        // `error: null` with nothing removed — which went on to clear paid_at and reload, so the
+        // payments "came back" with no explanation. Only what was actually removed is acted on.
+        const { data: removedRows, error } = await scopedDelete('payable_payments').in('id', ids).select('id')
         if (error) {
           const { text, detail } = asActionError(error)
           setPayError({ text: `${n === 1 ? 'That payment is' : 'Those payments are'} still recorded against this bill — nothing was removed. ${text}`, detail })
           return
+        }
+        const removedIds = new Set((removedRows || []).map(r => r.id))
+        if (removedIds.size === 0) {
+          setPayError(`${n === 1 ? 'That payment is' : 'Those payments are'} still recorded against this bill — nothing was removed. This login may not be allowed to delete payments; ask your manager or the Owner.`)
+          return
+        }
+        const actuallyRemoved = toDelete.filter(p => removedIds.has(p.id))
+        if (actuallyRemoved.length < n) {
+          setSettleWarn(`Only ${actuallyRemoved.length} of the ${n} selected payments were removed; the other ${n - actuallyRemoved.length} are still recorded. Reload and check the bill's payment history.`)
         }
         // Always clear paid_at on any affected line rather than re-checking against entry.value —
         // that field is a proportional split of the bill's grand total across whichever lines are
@@ -507,14 +564,15 @@ export default function OutstandingPayables() {
         // fixed discount is left dividing an ever-shrinking subset of lines mid-cleanup. A false
         // "still fully paid" after this is always safe to re-settle with Pay Bill; silently leaving a
         // $0-paid line marked paid is not.
-        const affectedEntryIds = [...new Set(toDelete.map(p => p.purchase_entry_id))]
+        const affectedEntryIds = [...new Set(actuallyRemoved.map(p => p.purchase_entry_id))]
           .filter(id => entries.find(e => e.id === id)?.paid_at)
         if (affectedEntryIds.length > 0) {
-          const { error: reopenErr } = await supabase.from('purchase_entries').update({ paid_at: null }).in('id', affectedEntryIds)
-          if (reopenErr) {
+          const reopenFail = await writePaidAt(affectedEntryIds, null)
+          if (reopenFail) {
             // The payment rows are already gone; what the reader needs is where the bill sits now.
-            const { text, detail } = asActionError(reopenErr)
-            setSettleWarn({ text: `The payment${n === 1 ? ' was' : 's were'} removed, but the bill could not be reopened — it still shows under Paid History even though ${fmt(total)} of it is now unpaid. Reload the page; if it is still listed as settled, send the detail below to support. ${text}`, detail })
+            const removedTotal = actuallyRemoved.reduce((s, p) => s + parseFloat(p.amount), 0)
+            const m = actuallyRemoved.length
+            setSettleWarn({ ...reopenFail, text: `The payment${m === 1 ? ' was' : 's were'} removed, but the bill could not be reopened — it still shows under Paid History even though ${fmt(removedTotal)} of it is now unpaid. Reload the page; if it is still listed as settled, send the detail below to support. ${reopenFail.text}` })
           }
         }
         setSelectedPayments(new Set())
@@ -540,9 +598,15 @@ export default function OutstandingPayables() {
     setNoteSaving(true)
     setNoteError('')
     const trimmed = noteForm.trim() || null
-    const { error } = await scopedUpdate('payable_payments', { note: trimmed }).in('id', editingNotePayments.ids)
+    // `.select('id')` (S756): a policy-filtered update is `error: null`; count what actually changed.
+    const { data: updated, error } = await scopedUpdate('payable_payments', { note: trimmed }).in('id', editingNotePayments.ids).select('id')
     setNoteSaving(false)
     if (error) { setNoteError(asActionError(error)); return }
+    const want = editingNotePayments.ids.length
+    if ((updated?.length || 0) < want) {
+      setNoteError(`${updated?.length ? `Only ${updated.length} of the ${want} payments were updated` : 'The note was not saved on any of these payments'} — the rest still show their previous note. This login may not be allowed to change payments; ask your manager or the Owner.`)
+      return
+    }
     setEditingNotePayments(null)
     setSelectedPayments(new Set())
     load(activeTab)
@@ -564,9 +628,14 @@ export default function OutstandingPayables() {
     if (!editingModePayments) return
     setModeSaving(true)
     setModeError('')
-    const { error } = await scopedUpdate('payable_payments', { payment_mode: modeForm }).in('id', editingModePayments.ids)
+    const { data: updated, error } = await scopedUpdate('payable_payments', { payment_mode: modeForm }).in('id', editingModePayments.ids).select('id')
     setModeSaving(false)
     if (error) { setModeError(asActionError(error)); return }
+    const want = editingModePayments.ids.length
+    if ((updated?.length || 0) < want) {
+      setModeError(`${updated?.length ? `Only ${updated.length} of the ${want} payments were updated` : 'The payment mode was not saved on any of these payments'} — the rest still show their previous mode. This login may not be allowed to change payments; ask your manager or the Owner.`)
+      return
+    }
     setEditingModePayments(null)
     setSelectedPayments(new Set())
     load(activeTab)
@@ -618,10 +687,9 @@ export default function OutstandingPayables() {
       setBulkSaving(false); return
     }
     if (settleIds.length > 0) {
-      const { error: settleErr } = await supabase.from('purchase_entries').update({ paid_at: date }).in('id', settleIds)
-      if (settleErr) {
-        const { text, detail } = asActionError(settleErr)
-        setSettleWarn({ text: `The payments were recorded, but ${targets.length === 1 ? 'the bill' : `the ${targets.length} bills`} could not be marked as settled — ${targets.length === 1 ? 'it still shows' : 'they still show'} under Outstanding with nothing remaining. Reload the page; if ${targets.length === 1 ? 'it is' : 'they are'} still listed there, send the detail below to support. ${text}`, detail })
+      const settleFail = await writePaidAt(settleIds, date)
+      if (settleFail) {
+        setSettleWarn({ ...settleFail, text: `The payments were recorded, but ${targets.length === 1 ? 'the bill' : `the ${targets.length} bills`} could not be marked as settled — ${targets.length === 1 ? 'it still shows' : 'they may still show'} under Outstanding with nothing remaining. Reload the page; if ${targets.length === 1 ? 'it is' : 'any are'} still listed there, send the detail below to support. ${settleFail.text}` })
       }
     }
     setBulkSaving(false)
@@ -630,6 +698,8 @@ export default function OutstandingPayables() {
   }
 
   function fmt(v) { return `NPR ${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
+  // To the paisa, for a sentence the reader types a figure back from — `fmt` rounds to the rupee.
+  function fmt2(v) { return `NPR ${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
 
   const AGING_LABELS = ['Current', '31–60 days', '61–90 days', '90+ days']
 
@@ -925,7 +995,10 @@ export default function OutstandingPayables() {
                     <tbody>
                       {sorted.map(b => {
                         const isExpanded = expandedBill === b.key
-                        const willSettle = payForm.amount && parseFloat(payForm.amount) + b.paid >= b.total - EPS
+                        // Not when the amount is more than is owed — that is refused on Save, and
+                        // "this will fully settle" beside it would be the opposite claim (S756).
+                        const overpaid = payForm.amount && parseFloat(payForm.amount) > b.remaining + 0.005
+                        const willSettle = payForm.amount && !overpaid && parseFloat(payForm.amount) + b.paid >= b.total - EPS
                         return (
                           <Fragment key={b.key}>
                             {/* The <tr> keeps its implicit `row` role: role="button" on a row takes it out of the
@@ -1089,10 +1162,11 @@ export default function OutstandingPayables() {
                                         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                                           <div>
                                             <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 4 }}>Amount (NPR)</div>
-                                            <input type="number" style={{ ...INPUT, width: 150 }} placeholder={`full: ${fmt(b.remaining)}`}
+                                            <input id={`pay-amount-${b.key}`} type="number" style={invalidStyle({ ...INPUT, width: 150 }, payAmountErr)} placeholder={`full: ${fmt(b.remaining)}`}
                                               aria-label={`Payment amount in NPR for ${b.vendorName}'s bill`}
+                                              {...fieldAria(`pay-amount-${b.key}`, payAmountErr)}
                                               value={payForm.amount}
-                                              onChange={ev => setPayForm(f => ({ ...f, amount: ev.target.value }))}
+                                              onChange={ev => { setPayAmountErr(''); setPayForm(f => ({ ...f, amount: ev.target.value })) }}
                                               onClick={ev => ev.stopPropagation()} />
                                           </div>
                                           <div>
@@ -1121,7 +1195,7 @@ export default function OutstandingPayables() {
                                               onClick={ev => ev.stopPropagation()} />
                                           </div>
                                           <button className="btn btn-ghost" style={{ padding: '8px 14px', fontSize: 12 }}
-                                            onClick={ev => { ev.stopPropagation(); setPayForm(f => ({ ...f, amount: String(Number(b.remaining.toFixed(2))) })) }}>
+                                            onClick={ev => { ev.stopPropagation(); setPayAmountErr(''); setPayForm(f => ({ ...f, amount: String(Number(b.remaining.toFixed(2))) })) }}>
                                             Pay in full
                                           </button>
                                           <button className="btn btn-primary" style={{ padding: '8px 18px', fontSize: 13 }}
@@ -1130,6 +1204,7 @@ export default function OutstandingPayables() {
                                             {savingPayment ? '…' : 'Save'}
                                           </button>
                                         </div>
+                                        <FieldError id={`pay-amount-${b.key}`} message={payAmountErr} />
                                         <ActionError error={payError} />
                                         {willSettle && !payError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--theme-green-text)' }}>✓ This will fully settle the bill</div>}
                                       </div>

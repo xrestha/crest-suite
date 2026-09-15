@@ -14,12 +14,15 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 
 export default function TheoreticalVariance() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const { settings } = useSettings()
+  const biz = useBizInfo()
   // item_id -> yield_pct for EVERY item, unfiltered. A ref rather than state because init() must
   // populate it and then call computeVariance() in the same tick, before a state update lands.
   const yieldMapRef = useRef({})
@@ -122,9 +125,15 @@ export default function TheoreticalVariance() {
     // every item read as massively over-consumed. Same fix as Variance.js.
     const chosen = (p || []).find(x => x.status === 'closed') || (p || []).find(x => x.status === 'open')
     if (chosen) {
+      // init() claims the page too (S756) — otherwise, once a period change has ever run, an admin
+      // client switch re-runs init against a ref still holding the old client's period id and
+      // computeVariance's isCurrent checks skip every setter (the S721 shape).
+      periodReq.begin(chosen.id)
       setSelectedPeriod(chosen)
       await computeVariance(chosen.id, i || [], allRecipes)
     }
+    // Unconditional on purpose: a period picked mid-init runs under its own `computing` flag, and
+    // the table shows "Computing variance…" until THAT load clears it.
     setLoading(false)
   }
 
@@ -134,7 +143,9 @@ export default function TheoreticalVariance() {
     setSelectedPeriod(p)
     setComputing(true)
     await computeVariance(periodId, items, recipes)
-    setComputing(false)
+    // Only the load that still owns the page may clear the flag (S756) — a superseded one returns
+    // early from computeVariance and would otherwise un-gate the newer load's half-built view.
+    if (periodReq.isCurrent(periodId)) setComputing(false)
   }
 
   // Recursively expand a recipe's ingredients into raw { item_id, qty } pairs.
@@ -268,6 +279,19 @@ export default function TheoreticalVariance() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
+    // Shared letterhead + the same caveats the screen shows (S756). The sheet was a bare
+    // json_to_sheet with no client, no period and none of the no-closing-count warning Variance.js's
+    // export carries — so the confident numbers travelled without the banner that qualifies them.
+    const uncountedN = rows.filter(r => !r.hasCount).length
+    const notes = [
+      hasClosing
+        ? `Tolerance ±${varianceFlagPct(settings)}% · theoretical = sales × recipe qty · actual = ${COGS_FORMULA}`
+        : 'NO CLOSING COUNT ENTERED — these figures treat everything still on hand as used; finish the Stock Count before acting on them',
+      hasClosing && uncountedN > 0
+        ? `${uncountedN} item(s) have no closing count and are marked "not counted" — they are excluded from the period totals`
+        : null,
+    ].filter(Boolean)
+    const scopeLine = `Period: ${periodLabel}${selectedPeriod?.status === 'open' ? ' (open — provisional)' : ''}`
     const data = filteredRows().map(({ item, theor, actual, variance, variancePct, varianceVal, hasCount }) => ({
       'Item':                item.name,
       'Category':            item.categories?.name || '',
@@ -279,7 +303,9 @@ export default function TheoreticalVariance() {
       'Variance Value (NPR)': Math.round(varianceVal),
       'Closing counted':     hasCount ? 'yes' : 'no',
     }))
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Theoretical Variance')
+    XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+      title: 'Theoretical vs Actual', biz, scopeLine, notes, rows: data,
+    }), 'Theoretical Variance')
     XLSX.writeFile(wb, `Theoretical-Variance-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
 
@@ -443,7 +469,11 @@ export default function TheoreticalVariance() {
           </select>
         </div>
 
-        <button className="btn btn-ghost" onClick={exportExcel} disabled={rows.length === 0}>Export Excel</button>
+        {/* Gated on the load as well as the rows (S728): while a period change computes, `rows` is
+            the previous month's while the filename and scope line already name the new one. */}
+        <button className="btn btn-ghost" onClick={exportExcel}
+          disabled={loading || computing || !!loadError || !!biz.error || rows.length === 0}
+          title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
       </div>
 
       {/* Table */}
@@ -522,35 +552,44 @@ export default function TheoreticalVariance() {
                   )
                 })}
               </tbody>
-              {visible.length > 1 && (
-                <tfoot>
-                  <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
-                    <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
-                      {visible.length} items shown
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text3)' }}>
-                      {fmtNPR(visible.reduce((s, r) => s + r.theor * r.rate, 0))}
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                      {fmtNPR(visible.reduce((s, r) => s + r.actual * r.rate, 0))}
-                    </td>
-                    <td colSpan={2} />
-                    {(() => {
-                      // Was `> 0 ? red : green` on the filtered subtotal — no threshold at all, so
-                      // a NPR 3 total wore the same red as NPR 30,000. Banded against the same
-                      // tolerance as every row above it.
-                      const vVal   = visible.reduce((s, r) => s + r.varianceVal, 0)
-                      const vTheor = visible.reduce((s, r) => s + r.theor * r.rate, 0)
-                      const vb     = band(vTheor > 0 ? (vVal / vTheor) * 100 : null, vVal)
-                      return (
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: vb.color }} title={vb.label !== '—' ? vb.label : undefined}>
-                          {fmtNPR(vVal)}{vb.mark ? ` ${vb.mark}` : ''}
-                        </td>
-                      )
-                    })()}
-                  </tr>
-                </tfoot>
-              )}
+              {visible.length > 1 && (() => {
+                // Measured rows only (S756), the same population the KPI cards above use. The footer
+                // summed every visible row, so an uncounted item's "actual = everything on hand"
+                // went into a subtotal sitting directly under cards that had excluded it — two
+                // totals of one table disagreeing by exactly the shelf nobody counted.
+                const vis    = visible.filter(r => r.measured)
+                const vTheor = vis.reduce((s, r) => s + r.theor * r.rate, 0)
+                const vAct   = vis.reduce((s, r) => s + r.actual * r.rate, 0)
+                const vVal   = vis.reduce((s, r) => s + r.varianceVal, 0)
+                // Was `> 0 ? red : green` on the filtered subtotal — no threshold at all, so a NPR 3
+                // total wore the same red as NPR 30,000. Banded against the same tolerance as every
+                // row above it.
+                const vb     = band(vTheor > 0 ? (vVal / vTheor) * 100 : null, vVal)
+                const excluded = visible.length - vis.length
+                return (
+                  <tfoot>
+                    <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
+                      <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-accent-ink)' }}>
+                        {excluded > 0
+                          ? <Tip text="The totals on this row cover counted items only. An item with no closing count has an 'actual' that is everything on hand — a figure, not a finding — so it is left out, exactly as in the cards above." width={280}>
+                              Total — {vis.length} counted of {visible.length} shown
+                            </Tip>
+                          : `Total — ${visible.length} items shown`}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text3)' }}>
+                        {fmtNPR(vTheor)}
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                        {fmtNPR(vAct)}
+                      </td>
+                      <td colSpan={2} />
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: vb.color }} title={vb.label !== '—' ? vb.label : undefined}>
+                        {fmtNPR(vVal)}{vb.mark ? ` ${vb.mark}` : ''}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )
+              })()}
             </table>
           </div>
         </div>

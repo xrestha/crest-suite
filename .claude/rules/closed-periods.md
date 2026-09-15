@@ -232,8 +232,8 @@ to a route and left all four exits pointing at the default month.
 The same `!isAdmin` that unlocks the page also suppresses the red "this period is closed" banner, so
 before S651 an admin editing history saw a screen identical to the open month. Both Purchases
 screens and Purchase Orders now render an **amber** banner whenever
-`canEditClosedPeriods && period.status === 'closed'` (the Owner sees it since S756). Sales, Stock
-Count, Overheads and Requisitions still do not — open in `IMS_TODO.md`. Any page
+`canEditClosedPeriods && period.status === 'closed'` (the Owner sees it since S756), and Sales does
+since S756 stage 2. Stock Count, Overheads and Requisitions still do not. Any page
 that adopts the `isLocked` line owes its admin the same notice — the lock and the notice are the
 same fact, and only one of them was being shown.
 
