@@ -126,6 +126,26 @@ const rules = [
     operator: 'Credit Note, settlement and close details can only be recorded on a closed bill, and this one is still open — nothing was changed.',
   },
   {
+    test: e => hasCode(e, 'option_edit_rank'),
+    staff: 'Only the Owner or a manager can change the customization options. Nothing was changed.',
+    operator: 'Only the Owner, a POS manager or an IMS manager can change customization options, and this login is none of those — nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'customization_off'),
+    staff: 'Crest Customization is not switched on for this outlet. Nothing was changed.',
+    operator: 'Crest Customization is not switched on for this outlet (or its POS is off), so options cannot be changed — nothing was changed. Ask Crest to switch it on.',
+  },
+  {
+    test: e => hasCode(e, 'option_ingredient_foreign'),
+    staff: 'That ingredient could not be added. Nothing was changed.',
+    operator: 'That ingredient is not one of this outlet\'s stock items or sub-recipes (a prep item is added as its sub-recipe, not as its stock item), so it was not added. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'option_attach_foreign', 'option_default_foreign'),
+    staff: 'That option group could not be attached. Nothing was changed.',
+    operator: 'That group could not be attached to this dish — the dish or the default option belongs somewhere else. Nothing was changed; reload the page and try again.',
+  },
+  {
     test: e => hasCode(e, 'customization_requires_pos'),
     staff: 'Crest Customization needs Crest POS switched on. Nothing was changed.',
     operator: 'Crest Customization sits on top of Crest POS, so it cannot be switched on for a client whose POS is off. Nothing was changed — switch POS on first, then Customization.',
@@ -770,6 +790,23 @@ const rules = [
     test: e => /items_client_name_key/i.test(e.message || ''),
     staff: 'An item with that name already exists. Ask your manager which one to use.',
     operator: 'This client already has an item — or a sub-recipe, which is stock-counted alongside items — with that name. Two rows with one name split that ingredient’s purchases and stock between them. Rename one of them, or use the existing row.',
+  },
+
+  // Crest Customization's own name indexes (S758) — say WHICH name clashed, not just "exists".
+  {
+    test: e => /pos_option_groups_client_name_key/i.test(e.message || ''),
+    staff: 'An option group with that name already exists.',
+    operator: 'An option group with that name already exists for this outlet — nothing was saved. Use the existing group, or give this one a different name.',
+  },
+  {
+    test: e => /pos_options_group_name_key/i.test(e.message || ''),
+    staff: 'That group already has an option with that name.',
+    operator: 'This group already has an option with that name — nothing was saved. Edit the existing option, or give this one a different name.',
+  },
+  {
+    test: e => /pos_recipe_option_groups_recipe_group_key/i.test(e.message || ''),
+    staff: 'That group is already on this dish.',
+    operator: 'That group is already attached to this dish — nothing was changed.',
   },
 
   // Something already exists on a unique index.

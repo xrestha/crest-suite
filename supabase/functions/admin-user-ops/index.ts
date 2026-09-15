@@ -241,6 +241,13 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   // No FK cascade from monthly_owner_reports.period_id -> monthly_periods.id — must go first.
   await del(admin.from('monthly_owner_reports').delete().eq('client_id', clientId), 'monthly_owner_reports')
   await del(admin.from('monthly_periods').delete().eq('client_id', clientId), 'monthly_periods')
+  // Crest Customization (S758) BEFORE recipes and items: pos_option_ingredients' item_id and
+  // sub_recipe_id are plain FKs, so a client with any option ingredient would refuse both deletes
+  // below. Children first — the composite FKs cascade anyway, but the sequence names every table.
+  await del(admin.from('pos_recipe_option_groups').delete().eq('client_id', clientId), 'pos_recipe_option_groups')
+  await del(admin.from('pos_option_ingredients').delete().eq('client_id', clientId), 'pos_option_ingredients')
+  await del(admin.from('pos_options').delete().eq('client_id', clientId), 'pos_options')
+  await del(admin.from('pos_option_groups').delete().eq('client_id', clientId), 'pos_option_groups')
   await del(admin.from('recipes').delete().eq('client_id', clientId), 'recipes')
   await del(admin.from('items').delete().eq('client_id', clientId), 'items')
   await del(admin.from('ims_gate_passes').delete().eq('client_id', clientId), 'ims_gate_passes')

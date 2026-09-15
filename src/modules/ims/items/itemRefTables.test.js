@@ -112,12 +112,25 @@ describe('ITEM_REF_TABLES', () => {
   //
   // Two copies of a list that must never diverge is the exact defect this whole file was written
   // for, one layer down — so the same technique applies: read the SQL and compare.
-  describe('and its SQL twin in 20260909130000', () => {
+  //
+  // Against the LATEST migration that defines each function, not the one that first did (S758):
+  // 20260919120000 re-created both to add pos_option_ingredients, and a test pinned to the original
+  // file would have kept passing against a list the database no longer runs.
+  const latestDefining = fnName => {
+    const files = fs.readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith('.sql')).sort()
+    const hits = files.filter(f => fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8')
+      .includes(`CREATE OR REPLACE FUNCTION public.${fnName}`))
+    return fs.readFileSync(path.join(MIGRATIONS_DIR, hits[hits.length - 1]), 'utf8')
+  }
+
+  describe('and its SQL twin in the latest migration defining each function', () => {
     const sql = fs.readFileSync(
       path.join(MIGRATIONS_DIR, '20260909130000_items_delete_reference_guard.sql'), 'utf8')
+    const countsSql = latestDefining('item_reference_counts')
+    const forceSql = latestDefining('force_delete_item')
 
-    it('checks the same eleven tables in item_reference_counts()', () => {
-      const body = sql.split('CREATE OR REPLACE FUNCTION public.item_reference_counts')[1]
+    it('checks the same tables in item_reference_counts()', () => {
+      const body = countsSql.split('CREATE OR REPLACE FUNCTION public.item_reference_counts')[1]
         .split('$fn$;')[0]
       // Each UNION ALL branch reads `FROM <table> x JOIN scoped`, which is the only place a table
       // name appears in that shape — so a table added to the list but not the union fails here.
@@ -125,8 +138,8 @@ describe('ITEM_REF_TABLES', () => {
       expect(checked.slice().sort()).toEqual(ITEM_REF_TABLES.map(t => t.table).sort())
     })
 
-    it('clears the same eleven tables, in the same dependency order, in force_delete_item()', () => {
-      const arr = sql
+    it('clears the same tables, in the same dependency order, in force_delete_item()', () => {
+      const arr = forceSql
         .split('CREATE OR REPLACE FUNCTION public.force_delete_item')[1]
         .split('FOREACH v_tbl IN ARRAY ARRAY[')[1]
         .split(']')[0]
@@ -151,7 +164,7 @@ describe('ITEM_REF_TABLES', () => {
       expect(guard).not.toMatch(/SECURITY DEFINER/i)
       expect(guard).toMatch(/current_user IN \('anon', 'authenticated'\)/)
 
-      const force = code(sql.split('CREATE OR REPLACE FUNCTION public.force_delete_item')[1]
+      const force = code(forceSql.split('CREATE OR REPLACE FUNCTION public.force_delete_item')[1]
         .split('$fn$;')[0])
       expect(force).toMatch(/SECURITY DEFINER/i)
       // Admin-only, and wrapped — is_admin() returns NULL for a caller with no profiles row, and

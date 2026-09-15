@@ -21,6 +21,10 @@ import { supabase } from '../../../supabaseClient'
 const RESTORE_ORDER = [
   // Foundations
   'categories', 'vendors', 'items', 'recipes', 'recipe_ingredients', 'recipe_suggestions',
+  // Crest Customization (S758): groups before options before their ingredients (composite FKs);
+  // the attachment needs recipes and groups AND pos_options (default_option_id). Items and recipes
+  // are above, which pos_option_ingredients' item_id / sub_recipe_id point at.
+  'pos_option_groups', 'pos_options', 'pos_option_ingredients', 'pos_recipe_option_groups',
   'monthly_periods', 'monthly_owner_reports',
   // Fixed assets
   'assets_categories', 'assets_register', 'assets_repair_expenses',

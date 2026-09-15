@@ -21,10 +21,10 @@ import { imsCountPathReachable } from '../shared/imsCountAccess'
 import {
   Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
   Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
-  CalendarX2, ChefHat, ChevronDown, ClipboardCheck, ClipboardList, Clock, Coins, Combine,
+  Blend, CalendarX2, ChefHat, ChevronDown, ClipboardCheck, ClipboardList, Clock, Coins, Combine,
   ConciergeBell, Contact, CreditCard, Crown, FileBarChart, FileCheck2, FileDigit,
   FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, LifeBuoy,
-  History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart,
+  History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart, ListPlus,
   LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree,
   ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
   Receipt, ReceiptText, RefreshCw, Scale, ScrollText, Search, Settings, Settings2,
@@ -174,6 +174,15 @@ const POS_GROUPS = [
   ]},
   { key: 'pos-admin', label: 'Admin', items: [
     { to: '/pos/staff', label: 'POS Staff', icon: Users2, minPosRole: 'manager' },
+  ]},
+]
+// Crest Customization (S758) — its own panel, an add-on that exists only on a client with POS.
+// Option Groups opens for the menu-price set (menuPricingAccess), the same people who may change a
+// dish's price, which is exactly who the database lets write these tables. The Customization
+// Report joins this list in stage 8.
+const CUSTOMIZATION_GROUPS = [
+  { key: 'cust-setup', label: null, items: [
+    { to: '/customization/groups', label: 'Option Groups', icon: ListPlus, menuPricingAccess: true },
   ]},
 ]
 const HR_GROUPS = [
@@ -442,8 +451,9 @@ export default function Layout() {
   const [activePanel, setActivePanel] = useState(null) // resolved against module visibility below
   useEffect(() => {
     const p = location.pathname
-    if (p === '/menu-pricing') { setActivePanel(prev => prev === 'pos' ? 'pos' : 'ims'); return } // shared IMS/POS route — don't yank a POS user over to IMS
-    if (p.startsWith('/pos')) setActivePanel('pos')
+    if (p === '/menu-pricing') { setActivePanel(prev => (prev === 'pos' || prev === 'customization') ? prev : 'ims'); return } // shared IMS/POS/Customization route — don't yank the user to another panel
+    if (p.startsWith('/customization')) setActivePanel('customization')
+    else if (p.startsWith('/pos')) setActivePanel('pos')
     else if (p.startsWith('/hr')) setActivePanel('hr')
     else if (p.startsWith('/admin')) setActivePanel('admin')
     else if ([...NAV, ...REPORTS, ...IMS_GROUPS.flatMap(g => g.items)].some(i => p === i.to || p.startsWith(i.to + '/')) || p === '/settings') {
@@ -766,14 +776,20 @@ export default function Layout() {
   const imsVisible = clientModules.ims && (!isAdmin || adminViewClientId) && (isAdmin || imsRole || isOwner)
   const hrVisible  = clientModules.hr  && (!isAdmin || adminViewClientId) && (isAdmin || hrRole || isOwner)
   const posVisible = clientModules.pos && (!isAdmin || adminViewClientId) && (isAdmin || posRole || isOwner)
+  // Customization (S758): only while the viewed client has it, and only for someone who can reach
+  // one of its pages — a panel with nothing inside it is a dead tab. Its sole page today is the
+  // menu-price set's, so the panel follows that predicate through isItemVisible.
+  const customizationVisible = !!clientModules.customization && (!isAdmin || adminViewClientId)
+    && CUSTOMIZATION_GROUPS.some(g => g.items.some(isItemVisible))
   const panelOrder = [
     isAdmin && 'admin',
     imsVisible && 'ims',
     hrVisible && 'hr',
     posVisible && 'pos',
+    customizationVisible && 'customization',
   ].filter(Boolean)
   const panel = panelOrder.includes(activePanel) ? activePanel : panelOrder[0]
-  const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS' }
+  const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS', customization: 'Crest Customization' }
   const { hrPending, posPending, posRequests, posNew } = useNavBadgeCounts(hrVisible, posVisible)
   // Per-route counts rendered on the nav row itself, so a number waiting on one page is visible
   // from every other page in the module. Keyed by route because NAV is a module-level constant.
@@ -836,6 +852,7 @@ export default function Layout() {
       ...tag('IMS', IMS_GROUPS.find(g => g.key === 'ims-admin').items),
       ...(hrVisible ? tag('HR', [HR_DASHBOARD, ...HR_GROUPS.flatMap(g => g.items)]) : []),
       ...(posVisible ? tag('POS', POS_GROUPS.flatMap(g => g.items)) : []),
+      ...(customizationVisible ? tag('Customization', CUSTOMIZATION_GROUPS.flatMap(g => g.items)) : []),
       ...(isAdmin ? tag('Admin', [
         { to: '/admin/clients', label: 'Clients', icon: Building2 },
         { to: '/admin/guest-menu', label: 'Guest Menu', icon: QrCode },
@@ -848,7 +865,7 @@ export default function Layout() {
   // isOwner and outlets gate the Suite block above; suitePlan is deliberately absent, because the
   // palette lists Suite destinations regardless of entitlement, exactly as the sidebar does.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hrVisible, posVisible, isAdmin, isOwner, outlets, plan, dashLabel])
+  }, [hrVisible, posVisible, customizationVisible, isAdmin, isOwner, outlets, plan, dashLabel])
 
   const [calcOpen, setCalcOpen] = useState(false)
 
@@ -1042,6 +1059,7 @@ export default function Layout() {
         ].filter(Boolean).join(' · ')}`
         : 'Crest POS',
     },
+    customizationVisible && { key: 'customization', label: 'Custom', icon: Blend, tip: 'Crest Customization', dot: null },
   ].filter(Boolean)
   const totalTabCount = (adminTab ? 1 : 0) + moduleTabs.length
 
@@ -1430,6 +1448,15 @@ export default function Layout() {
               {POS_GROUPS.map(group => renderGroup({ ...group, items: group.items.filter(isItemVisible) }))}
             </>
           )}
+
+          {panel === 'customization' && customizationVisible && (
+            <>
+              {renderDashboardRow()}
+              {renderSuiteGroup()}
+              {renderPinnedGroup()}
+              {CUSTOMIZATION_GROUPS.map(group => renderGroup({ ...group, items: group.items.filter(isItemVisible) }))}
+            </>
+          )}
         </nav>
 
         {isOwner && plan !== 'pro' && (
@@ -1714,6 +1741,13 @@ export default function Layout() {
             <>
               {renderBarGroup(suiteGroup())}
               {POS_GROUPS.map(renderBarGroup)}
+            </>
+          )}
+
+          {panel === 'customization' && customizationVisible && (
+            <>
+              {renderBarGroup(suiteGroup())}
+              {CUSTOMIZATION_GROUPS.map(renderBarGroup)}
             </>
           )}
         </nav>

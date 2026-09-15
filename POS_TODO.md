@@ -21,9 +21,18 @@ In this order. Service charge was offered and **not** chosen.
   tables onto one bill, and splitting one table's order across bills. S754 added a unique index
   allowing one open order per table (`pos_orders_one_open_per_table`), so a merge has to close or
   re-point the second order in the same transaction rather than leave two open.
-- [ ] 🔴 **Add-ons and sizes.** Half/full plates, extra cheese, large/small. A line's price now
-  comes from `recipes.selling_price` inside `save_pos_order_items` (S754), so a modifier's price
-  has to come from the menu on the server too, never from the tablet.
+- [ ] 🟡 **Add-ons and sizes — being built as the Crest Customization module (S758).** Half/full
+  plates, extra cheese, large/small. A line's price now comes from `recipes.selling_price` inside
+  `save_pos_order_items` (S754), so a modifier's price has to come from the menu on the server too,
+  never from the tablet. Stages 1–3 done (line identity, the paid module, Option Groups page and its
+  tables — migrations `20260919100000`–`20260919120000`); stages 4–8 (order lines saving options,
+  till picker, guest menu, stock deduction, reports) open. Plan: `C:\Users\xrest\.claude\plans\i-want-to-add-hashed-ladybug.md`.
+  Known follow-ups:
+  - Deleting a **sub-recipe** that an option's stock line uses is refused by the plain FK
+    `pos_option_ingredients.sub_recipe_id` with a generic message — `deleteRecipe`'s pre-check only
+    looks at `recipe_ingredients.sub_recipe_id`. Safe direction (nothing is lost); needs the wording.
+  - `billing-export` needs pasting into the dashboard and `admin-user-ops` redeploying for trials
+    and the Danger Zone to know about the module and its tables.
 - [ ] 🔴 **Kitchen and bar printers.** Routing KOT/BOT to a network printer per station instead of
   the till's own print dialog. `pos_bot_categories` already decides the station.
 

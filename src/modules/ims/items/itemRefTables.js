@@ -26,6 +26,9 @@
 export const ITEM_REF_TABLES = [
   { table: 'vendor_returns',       label: 'VR',  name: 'Vendor Returns',    qtyCol: 'qty',          cascades: true  },
   { table: 'recipe_ingredients',   label: 'R',   name: 'Recipes',           qtyCol: null,           cascades: false },
+  // Crest Customization (S758): an option's stock line ("Extra cheese adds 30 GM"). Signed qty, so
+  // no badge filter — any line is usage. Plain FK: a delete is refused, never cascaded.
+  { table: 'pos_option_ingredients', label: 'OPT', name: 'Customization Options', qtyCol: null,   cascades: false },
   { table: 'requisition_lines',    label: 'RQ',  name: 'Requisitions',      qtyCol: null,           cascades: true  },
   { table: 'staff_meals',          label: 'SM',  name: 'Staff Meals',       qtyCol: 'qty',          cascades: true  },
   { table: 'wastages',             label: 'W',   name: 'Wastage',           qtyCol: 'qty',          cascades: false },

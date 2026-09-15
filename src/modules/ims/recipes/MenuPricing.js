@@ -15,6 +15,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { calcSubRecipeCostPerUnit } from './recipeCostCalc'
 import { nextProductCode, productCodePrefix } from '../../../shared/productCode'
 import Modal from '../../../components/Modal'
+import AttachGroupsModal from '../../customization/AttachGroupsModal'
 
 
 function vatOf(r) {
@@ -43,6 +44,11 @@ const DRAFT_SORT_KEYS = { newFc: true, change: true }
 
 export default function MenuPricing() {
   const { clientId, profile, clientModules, hasImsAccess, hasPosAccess, isAdmin, isOwner } = useAuth()
+  // Crest Customization (S758): the "Customize" link on each row opens the same attach dialog as
+  // the Option Groups page. Shown only when the viewed client has the module — the database would
+  // refuse the write otherwise.
+  const customizationOn = !!clientModules?.customization
+  const [customizeFor, setCustomizeFor] = useState(null)
   const { settings } = useSettings()
   // `fcFigure` is the one rendered form of a banded food-cost figure — colour, the ✓/△/▲ mark and
   // the band name as a title, together. This page used to take the three apart into its own
@@ -553,6 +559,16 @@ export default function MenuPricing() {
                           {(suggMap[r.id]?.length || 0) > 0 ? `${suggMap[r.id].length} pairing${suggMap[r.id].length !== 1 ? 's' : ''}` : 'Pair'}
                         </button>
                       </Tip>
+                      {customizationOn && (
+                        <>
+                          {' · '}
+                          <Tip text="Choose which option groups (size, extras, spice…) this item offers. Groups are built on Customization → Option Groups." width={260}>
+                            <button onClick={() => setCustomizeFor(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'underline' }}>
+                              Customize
+                            </button>
+                          </Tip>
+                        </>
+                      )}
                     </div>
                   </td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
@@ -609,6 +625,8 @@ export default function MenuPricing() {
             </div>
         </Modal>
       )}
+
+      {customizeFor && <AttachGroupsModal recipe={customizeFor} onClose={() => setCustomizeFor(null)} />}
 
       {addModal && (
         <Modal onClose={() => { setAddModal(false); setEditingId(null) }} title={editingId ? 'Edit Menu Item' : 'Add Menu Item'} maxWidth={440}>
@@ -922,6 +940,16 @@ export default function MenuPricing() {
                           ? <Tip text={`VAT-registered item. Menu price includes ${Number((r.vat * 100).toFixed(2))}% VAT. FC% is calculated on the ex-VAT portion.`} width={260}> · {vatLabel(r.vat)}</Tip>
                           : <Tip text="No VAT on this item. Menu price = ex-VAT price. FC% = food cost ÷ full selling price." width={240}> · No VAT</Tip>
                         }
+                        {customizationOn && (
+                          <>
+                            {' · '}
+                            <Tip text="Choose which option groups (size, extras, spice…) this dish offers. Groups are built on Customization → Option Groups." width={260}>
+                              <button className="no-print" onClick={() => setCustomizeFor(r)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: 'var(--theme-text3)', textDecoration: 'underline' }}>
+                                Customize
+                              </button>
+                            </Tip>
+                          </>
+                        )}
                       </div>
                     </td>
                     <td style={{ textAlign: 'right' }}>
@@ -994,6 +1022,9 @@ export default function MenuPricing() {
           </table>
         </div>
       )}
+
+      {/* Rendered in BOTH returns — this page has two (component-library.md). */}
+      {customizeFor && <AttachGroupsModal recipe={customizeFor} onClose={() => setCustomizeFor(null)} />}
 
       {/* No Pair With modal here. The IMS branch renders no Pair control — `openSuggestModal`
           is called only from the POS-only table above — so the copy that used to sit here was
