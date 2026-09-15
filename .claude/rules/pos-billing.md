@@ -209,6 +209,29 @@ floor-view check.
 - **The guest menu calls `get_guest_menu_options` beside `get_guest_menu`**, and a `PGRST202` (the
   function not deployed yet) reads as "no choices", not a warning to every guest.
 
+### A size scales the picks after it (S760, build-your-own dishes)
+
+- **One rule in three pricers**: `save_pos_order_items`, `pos_price_selection` and
+  `src/shared/optionPricing.js`. The factor is the product of the chosen SIZE options'
+  `portion_factor` (NULL = 1, `pos_selection_portion_factor` in SQL, `sizeFactor` in JS). A group's
+  `size_scaling` decides the rest: `stock` multiplies its stock lines, `stock_and_price` its price as
+  well (`round(price × factor, 2)`, half away from zero on both sides). A size group is always
+  `none`, so a size's own lines never scale. The free-picks rule runs first, so a free pick stays 0.
+  Change the rule in all three, and extend the fixture shared by `optionPricing.test.js` and the
+  migration's verification block.
+- **The scaled quantity is frozen at order time.** `ingredient_deltas` already holds it, so no IMS
+  reader multiplies anything and a later factor edit never rewrites a sent line. There is no factor
+  column on the snapshot on purpose: `apply_pos_item_comps` copies the snapshot's columns by name.
+- **`recipes.is_build_your_own` is a mark, not a category.** Category drives KOT/BOT routing, the
+  product code prefix and the category splits. The mark makes the till always open the choice window
+  (the S759 one-tap default is skipped), makes the guest sheet a stepper (size first, then Review), and
+  swaps the dish's cost for a range (`src/shared/buildCost.js`, `useBuildCostRanges`).
+- **No page's own recipe query names the new columns.** The mark reaches the till, Menu Pricing and the
+  range through `loadOptionCatalog`'s `buildYourOwn`, which reads `[]` on a missing column, and the
+  catalog reads fall back to the S758 column lists. The admin edit dialogs write the new columns only
+  when they change. So the migration can land after the frontend without breaking service, but setting
+  a portion or a mark needs it.
+
 ## Closed in S575 (phase 8), for the record
 
 - **Short cash tender**: single-payment Cash now blocks Confirm Payment when tendered < bill

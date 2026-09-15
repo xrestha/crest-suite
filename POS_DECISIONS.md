@@ -180,6 +180,19 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~Build-your-own dishes~~ — **shipped S760 (2026-09-15), from Aashish's handwritten sketch.
+  Migration `20260920100000` applied live the same day after a live diff and a rolled-back dry run;
+  the browser pass is still open in POS_TODO.md.** Acai bowl, pizza, salad: size → base → sauces → toppings → checkout.
+  Owner decisions: a MARK on the recipe, not a new category (category drives tickets, codes and
+  report splits); a size carries a portion factor and each group chooses whether it scales stock, or
+  stock and price; the guest QR menu walks a marked dish step by step while the till keeps its one
+  screen (but always opens the window for a marked dish); Recipe Costing and Menu Pricing (IMS
+  branch) show a cost range — cheapest and typical build per size — instead of the fixed-ingredient
+  food cost. Option Groups gained a one-transaction template (`create_build_your_own_template`).
+  Considered and dropped the same day: selling Customization as its own package of POS + IMS.
+  Plan: `C:\Users\xrest\.claude\plans\this-is-what-i-ethereal-squid.md`; narrative in
+  `CHANGELOG/S754-S803.md` (S760).
+
 - [x] ~~Add-ons and sizes~~ — **shipped as the Crest Customization module, S758 (2026-09-15), reshaped
   by its critique pass S759 the same day.** Half/full plates, extra cheese, "No onion", spice — a
   fourth PAID module (flat, one monthly price on Plan Pricing, exists only with POS; a trial gets it

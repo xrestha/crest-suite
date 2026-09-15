@@ -1108,7 +1108,9 @@ figure here: the sentence has to move when the arithmetic does.
 `sales_entries.ingredient_deltas` (nullable jsonb) carries a Crest Customization sale's choice stock
 lines per plate, signed — `{item_id, qty}` or `{sub_recipe_id, qty}` as written on the option ("+30 g
 cheese", "−5 pcs momo" for a Half). NULL on every ordinary sale, so a client without the module
-computes exactly as before. **Usage of a sales row is recipe × qty_sold + deltas × qty_sold**, and:
+computes exactly as before. Since S760 a line's deltas are already SCALED by the chosen size (a Large
+bowl's 30 g topping is stored as 45 g), so no reader multiplies by a portion factor — it has been
+applied once, at order time. **Usage of a sales row is recipe × qty_sold + deltas × qty_sold**, and:
 
 - **`src/utils/orderLineIngredients.js` is the one conversion** — `loadDeltaExplosion` (item yields,
   sub-recipes through the one `explodeRecipeIngredients` walk; throws on a failed read like the recipe

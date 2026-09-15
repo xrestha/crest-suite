@@ -28,7 +28,7 @@ paths:
 
 ### Sub-recipe mirror items
 
-Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_sub_recipe = true`. Filter these out of Item Master, Purchases, POs, Requisitions, Reorder Report, and Supplier Price Tracker:
+Recipes with `category = 'Sub-Recipe'` (`SUB_RECIPE_CATEGORY` in `src/shared/productCode.js`; there is no `type` column — `sub_recipe` exists only inside `RecipeImportButton.jsx`) auto-create a mirror row in `items` with `is_sub_recipe = true`. Filter these out of Item Master, Purchases, POs, Requisitions, Reorder Report, and Supplier Price Tracker:
 
 ```js
 .eq('is_sub_recipe', false)

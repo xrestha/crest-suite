@@ -2,7 +2,7 @@
 
 Multi-tenant hospitality SaaS for Nepal's F&B industry. One React app on one Supabase project;
 inventory, HR and POS are modules toggled per client, Crest Customization (sizes, extras and "No …"
-choices on a dish) is a paid add-on to POS, and Crest Suite Pro is the owner layer sold on top.
+choices on a dish, and build-your-own dishes walked step by step) is a paid add-on to POS, and Crest Suite Pro is the owner layer sold on top.
 
 **Repo:** `C:\crest-suite` · **E-drive backup:** `E:\CREST SUITE MANAGEMENT\`
 

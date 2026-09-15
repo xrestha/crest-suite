@@ -34,6 +34,14 @@ In this order. Service charge was offered and **not** chosen.
   - Not yet pressed on a real till after S759: the cart's choices line, the choice window's
     scroll-to-short-group on a refused Add, and the guest sheet's sticky header.
   - Release 2: combos / build-your-own bundles.
+  - **S760 build-your-own: applied live 2026-09-15, not yet pressed in a browser.** Still to do: the
+    headed-browser pass from the plan — the template on CASA ACAI CAFE, a Large bowl on the till and
+    through the guest steps, scaled stock at bill close, and the cost range on Recipe Costing and Menu
+    Pricing (IMS branch).
+  - `push_master_data` does not carry `recipes.is_build_your_own`, nor option groups at all, so a
+    branch receives a build-your-own dish as an ordinary one.
+  - The Complimentary slip and Menu Pricing's POS-only branch show no build-your-own cost range (the
+    POS-only branch has no costs at all).
   - Deleting a **sub-recipe** that an option's stock line uses is refused by the plain FK
     `pos_option_ingredients.sub_recipe_id` with a generic message — `deleteRecipe`'s pre-check only
     looks at `recipe_ingredients.sub_recipe_id`. Safe direction (nothing is lost); needs the wording.

@@ -342,7 +342,7 @@ See `.claude/rules/pos-billing.md` (auto-loads when editing `src/modules/pos/`).
 ### Sub-recipe mirror items
 
 See `.claude/rules/recipes-and-subrecipes.md` (auto-loads when editing Recipes.js, `recipeCost.js` or
-the IMS recipe/stock-count modules). Headline rules: a recipe with `type = 'sub_recipe'` auto-creates
+the IMS recipe/stock-count modules). Headline rules: a recipe with `category = 'Sub-Recipe'` auto-creates
 a mirror row in `items` with `is_sub_recipe = true`, so filter `.eq('is_sub_recipe', false)` out of
 Item Master, Purchases, POs, Requisitions, Reorder Report and Supplier Price Tracker; a sub-recipe
 can never appear in `stock_movements` and must not be written there; sub-recipes nest, so a cycle
