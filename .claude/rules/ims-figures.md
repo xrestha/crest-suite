@@ -101,7 +101,31 @@ Two standing notes for this page specifically:
   onBlur-autosave interleaving that lock exists to prevent comes back. Reasoning in
   `.claude/rules/frontend-performance.md`; the offline queue path is deliberately still per-item,
   since no network is involved.
+- **Save All and on-blur write only CHANGED cells (S756).** `storedRef` holds what the server has for
+  each cell (reset on every load, updated when a write lands or is queued); a cell equal to it is not
+  sent. Before this, Save All wrote every visible row and a blank was a delete, so two tablets counting
+  at once erased each other's counts, re-stamped `counted_by` on untouched rows, and tripped the
+  recount guard for a staff counter. A deliberately blanked cell still differs, so it is still a
+  delete. Clear All is unchanged by design. `closing_stock.counted_by_name` is now shown on the
+  Closing tab and exported.
+- **Stock Count's Summary values purchases like Monthly Summary does (S756)** — the bill line's own
+  rate through `allocateBillDiscounts()`, returns at `vendor_returns.rate` — so the two pages' COGS
+  now differ by the sub-recipe amount alone, which is what the note on the page says.
 - **Stock Count includes sub-recipes; `MonthlySummary.js` excludes them** (`.eq('is_sub_recipe', false)`). Both are deliberate — Stock Count physically counts prep — but it means the two pages' COGS for the same month differ by exactly the sub-recipe amount, with nothing on either page saying so. Left as-is; if this is ever reconciled, it is a product decision about which figure "COGS" names, not a bug fix.
+
+### Uncounted items and open months on the summaries (S756, owner decisions D6/D7)
+
+`src/shared/uncountedItems.js` names active, non-sub-recipe items with stock presence (opening or
+purchases) and NO closing row — a count of 0 is a count. Stock Count Summary, Monthly Summary, Annual
+Summary and Period Comparison show an amber banner naming them, mark them in their tables and exports,
+and withhold the food-cost VERDICT (colour and ✓/△/▲) while the gap is material: at least 5% of the
+items with stock, or their opening + purchases value at least 5% of COGS (`isMaterialGap`, tested).
+**Totals are unchanged** — excluding the items would silently omit real spend. Annual and Comparison
+judge per month. Monthly Summary and Budget vs Actual keep opening on the open month but are
+provisional with no verdict until it closes. Stock Ageing and FIFO now follow closed-month counts over
+a rolling 12 months (`anchorToCounts` in `stockAgeingCalc.js`), and Dead Stock needs 3 consecutive
+counted still months (`deadStockCalc.js`); the frozen Owner Report's dead-stock section still uses the
+one-month rule (open in `IMS_TODO.md`).
 
 ### Stock Count and Stock Report: what a 0 means, what a requisition is, and what a failed read does (S695)
 

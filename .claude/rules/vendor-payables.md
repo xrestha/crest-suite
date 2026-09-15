@@ -10,6 +10,34 @@ paths:
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
+### Supplier credit is a PAIR of payments, and a return can be against an earlier month (S756)
+
+**Owner decision D11.** A credit left on a bill (returns after it was paid) is used on another bill of
+the same supplier as two `payable_payments` rows sharing `credit_link_id`, with `payment_mode =
+'Supplier credit'`: a negative row on the credit bill's line and an equal positive row on the target
+line. `payable_payments.amount` may now be negative ONLY on a credit half (CHECK). A deferred
+constraint trigger (`payable_payments_credit_pair`, migration `20260918120000`) checks each pair at
+commit — exactly two rows, equal and opposite, same date and client, both Credit bills of one supplier,
+different bills, the source line never net-negative. Delete both halves together. Every reader that
+sums `amount` per line stays correct; the balance letter labels credit rows "Supplier credit applied"
+and keeps them out of `totalPaymentsFy`. The allocation arithmetic (lump-sum oldest-first, D9, and the
+credit plan) is `src/modules/ims/reports/payablesAllocation.js`, which now also holds the page's bill
+valuation.
+
+**Owner decision D10.** A return may pick a bill from up to 12 earlier months and sits in the month on
+screen (its own `period_id`/`bs_day`). The over-return cap reads every return against the line in any
+month. VAT and Non-VAT value such a return at its own bill's discount through `readPriorBillLines.js`;
+Payment Report, Vendor Report, Supplier Contribution and `computeVendorPurchasingSection` still fall
+back to the list rate for it, and Vendor Report's drilldown shows it on no row — open in `IMS_TODO.md`.
+
+**Also S756:** editing a bill with returns against it is refused (`purchase_bill_has_returns`, D26);
+`discount_amount >= 0` is a CHECK; the Purchases register values every bill over ALL its lines under
+any filter (`billTotalsByKey`, the S723 rule applied to the register itself); `billDiscountOf` in
+`vendorBalanceHelpers.js` takes a legacy bill's discount once, as Outstanding Payables has since S747;
+returns split VAT / non-VAT / UNLINKED in `purchaseTaxSplit.js`, and unlinked ones are named rather
+than dropped; the One Lakh report aggregates suppliers by PAN (D12); optional `invoice_vat_amount` /
+`invoice_total_amount` flag a mismatch over NPR 1 with Crest's own figure (D13).
+
 ### A tolerance in ABSOLUTE currency, on a PER-UNIT rate, is a percentage that moves (S728)
 
 Price Tracker's Stable band was `Math.abs(last - prev) < 0.01`. That reads like a rounding guard

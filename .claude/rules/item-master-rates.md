@@ -10,6 +10,17 @@ paths:
 > Moved out of the root CLAUDE.md (2026-08-27 /doctor pass) so it loads only when working on
 > these files. Root CLAUDE.md keeps the universal invariants.
 
+### The base unit is locked once an item has history (S756, owner decision D5)
+
+Every stored quantity — purchases, counts, wastage, staff meals, movements, recipe lines, par levels —
+is a plain number read through the item's CURRENT unit, so changing ML to LTR re-reads closed months
+by 1000×. `Items.js` disables the unit select once the item is referenced anywhere, and the save
+re-checks all item reference tables live and refuses on any failed read. A rate change opens a
+confirm naming how many past records it re-values (closed months included; purchase bills keep their
+own rate). A pack-size / purchase-unit change only warns, because purchases are stored in base units
+(`conversion_factor` is display-only). `PurchaseBillPage`'s post-save rate sync carries the same
+warning wording since S756 stage 3.
+
 ### Every item is stored in its SMALLEST unit — `purchase_qty` is always 1 (S597, supersedes S566)
 
 `items.per_uom_rate` is a **generated column** — `rate / NULLIF(purchase_qty, 0)` — and `purchase_qty`

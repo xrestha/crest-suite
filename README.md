@@ -75,6 +75,7 @@ quotes as the evidence of what a signed contract incorporated by reference, so u
 | [`.claude/skills/new-feature-checklist/`](.claude/skills/new-feature-checklist/) | The steps between "it works" and "it shipped". Invoke it before any new page, report or module feature. |
 | [`DESIGN.md`](DESIGN.md) | The design system as it actually exists in the code: tokens, scales, components, and the named rules that are already enforced. |
 | [`PRODUCT.md`](PRODUCT.md) | Who buys this and why — users, positioning, brand personality, anti-references. |
+| [`IMS_TODO.md`](IMS_TODO.md) | The S756 IMS re-analysis: the owner's 28 decisions and the fix list by stage, with what is still open. |
 | [`POS_TODO.md`](POS_TODO.md) | POS open items. Shipping something listed there closes the entry in the same commit. |
 | [`POS_DECISIONS.md`](POS_DECISIONS.md) | POS shipped history and everything decided *against*, rationale intact. Read before proposing POS work. |
 | [`CHANGELOG/`](CHANGELOG/) | The session log, S023 to now, split by S-range. [`CHANGELOG/README.md`](CHANGELOG/README.md) is the index and holds the convention for adding an entry. |

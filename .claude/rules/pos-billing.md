@@ -13,6 +13,14 @@ defects. Everything here is a rule that was broken once, in production code.
 
 ## The IMS handoff is the seam where money goes missing
 
+**Manual Sales Entry changed in S756, and it shares these tables.** A save keeps every row's stored
+`unit_price` (a correction never reprices a past day — owner decision D8); a cross-mode supersede
+re-posts the superseded days' MANUAL `stock_movements` (`repostSupersededMovements`) so the ledger is
+not depleted twice; the POS-supersedes check is paged and chunked; and "From POS" revenue uses the POS
+rows' own `unit_price`. Since `20260918100000` the database refuses a non-manual `stock_movements`
+delete from anyone but the Owner or admin, and a `pos_sale`/`pos_comp` insert below POS or IMS
+supervisor.
+
 **A closed POS bill must reach IMS, and if it can't, that must be visible.** `writeSalesEntries()`
 returns early when there is no open `monthly_periods` row, or when today's BS month isn't the open
 one. It used to return silently: the bill still closed, printed and consumed an invoice number

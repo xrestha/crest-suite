@@ -11,6 +11,21 @@ paths:
 > Moved out of the root CLAUDE.md (2026-08-27 /doctor pass) so it loads only when working on
 > these files. Root CLAUDE.md keeps the universal invariants.
 
+### Recipes after the S756 re-analysis
+
+- **Hide is IMS supervisor+, Delete is IMS manager+ (owner decision D3), enforced by `guard_recipe_rank`**
+  (migration `20260918100000`); a supervisor may delete only a recipe created in the last 15 minutes with
+  no ingredient rows, which is Recipe Import's own cleanup. `recipe_ingredients` writes are supervisor+.
+- **Editing a hidden dish keeps it hidden** — `is_active: true` is sent only on insert.
+- **A dish with no costed ingredients shows "—", never `0.0% ✓`**, on the list, detail, cost card print,
+  WhatsApp text and export (`recipeCostOf` / `menuFcPct`); a manual `cost_price` is shown as manual.
+- **Changing a dish's VAT keeps the price the guest pays** on both Recipe Costing and Menu Pricing (D15).
+- **A stock-count item no recipe points to, with the recipe's name, is adopted on save** rather than
+  refused forever by `DUP_MIRROR_MSG`; the mirror-link writes are checked.
+- **Dish photos upload to the `dish-photos` bucket** (D16, `20260918150000`) — never with `upsert`, and
+  the bucket carries a scoped SELECT policy because Storage's remove runs `DELETE … RETURNING`
+  (`settings-row.md` has the rule). `image_url` stores the public URL with `?v=`.
+
 ### Sub-recipe mirror items
 
 Recipes with `type = 'sub_recipe'` auto-create a mirror row in `items` with `is_sub_recipe = true`. Filter these out of Item Master, Purchases, POs, Requisitions, Reorder Report, and Supplier Price Tracker:
