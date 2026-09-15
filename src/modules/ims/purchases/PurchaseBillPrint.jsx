@@ -1,7 +1,7 @@
 import { npr2 } from '../../../shared/nepalMoney'
 import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
-import { getCf, calcBillTotals } from './purchasesHelpers'
+import { getCf, calcBillTotals, parseInvoiceAmount, invoiceMismatch } from './purchasesHelpers'
 
 // A4 print-only Purchase Entry Voucher — auto-printed right after a new bill is saved (Purchases.js)
 // so it can be stapled to the vendor's physical bill for record-keeping/approval. Line items print
@@ -10,6 +10,10 @@ import { getCf, calcBillTotals } from './purchasesHelpers'
 // purchase_entries stores — see CLAUDE.md's "Purchases: qty/rate storage convention".
 export default function PurchaseBillPrint({ header, lines, items, vendorName, period, bizInfo, enteredBy, enteredAt }) {
   const totals = calcBillTotals(lines, header.discount)
+  const usable = n => (n === null || Number.isNaN(n) ? null : n)
+  const invoiceVat = usable(parseInvoiceAmount(header.invoice_vat))
+  const invoiceTotal = usable(parseInvoiceAmount(header.invoice_total))
+  const invoiceCheck = invoiceMismatch({ invoiceVat, invoiceTotal }, totals)
   const bsDateStr = period && header.bs_day ? `${header.bs_day} ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}` : ''
   const fmt = npr2
   const entryStamp = enteredAt || new Date()
@@ -105,6 +109,28 @@ export default function PurchaseBillPrint({ header, lines, items, vendorName, pe
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid #000', marginTop: 4, fontWeight: 700, fontSize: 14 }}>
             <span>Grand Total</span><span>NPR {fmt(totals.grandTotal)}</span>
           </div>
+          {/* The supplier's printed figures, when typed (S756, D13). This voucher is stapled to
+              that very paper bill for approval, so a difference is exactly what the person signing
+              "Checked By" needs to see — printed in words, not a colour, since it goes to paper. */}
+          {invoiceCheck.checked && (
+            <div style={{ marginTop: 6, paddingTop: 4, borderTop: '1px dashed #999', fontSize: 11 }}>
+              {invoiceVat !== null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span style={{ color: '#777' }}>VAT on supplier's invoice</span><span>{fmt(invoiceVat)}</span>
+                </div>
+              )}
+              {invoiceTotal !== null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span style={{ color: '#777' }}>Supplier's invoice total</span><span>{fmt(invoiceTotal)}</span>
+                </div>
+              )}
+              <div style={{ padding: '3px 0', fontWeight: 700 }}>
+                {invoiceCheck.mismatch
+                  ? `DOES NOT MATCH the lines entered${invoiceCheck.vatMismatch ? ` — VAT differs by ${fmt(Math.abs(invoiceCheck.vatDiff))}` : ''}${invoiceCheck.totalMismatch ? ` — total differs by ${fmt(Math.abs(invoiceCheck.totalDiff))}` : ''}`
+                  : 'Matches the lines entered (within NPR 1)'}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

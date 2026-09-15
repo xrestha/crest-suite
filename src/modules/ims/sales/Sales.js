@@ -19,6 +19,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import ReportLoadError from '../../../components/ReportLoadError'
+import ActionError, { asActionError } from '../../../components/ActionError'
 
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
 // purpose and is deliberately GONE (S458): an 8s gate is *tighter* than the 15s cap that
@@ -469,6 +470,12 @@ export default function Sales() {
     // into a returned {error} rather than a thrown AbortError, so that path arrives here as a
     // plain Error whose message we wrapped above — detect it by substring, not err.name.
     if (/abort/i.test(err.message || '')) return 'Save timed out — check your connection and try again.'
+    // S756: a server answer (persistSalesDay's supabaseError keeps code/hint and marks it) goes
+    // through the error table, so a closed-month refusal reads as who can change a closed month
+    // rather than the trigger's own text, and the raw code survives as fine print. Sentences this
+    // page or persistSalesDay wrote by hand (session expiry, withTimeout) pass through untouched —
+    // running them through the table would flatten them into "that didn't work" (the S714 rule).
+    if (err?.fromSupabase) return asActionError(err, canEditClosedPeriods ? 'operator' : 'staff')
     return err.message || 'Failed to save — please try again.'
   }
 
@@ -1056,11 +1063,9 @@ export default function Sales() {
                     </button>
                   </div>
                 </div>
-                {bulkSaveError && (
-                  <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--theme-red-text)' }}>
-                    ⚠ {bulkSaveError}
-                  </div>
-                )}
+                {/* A plain string (the page's own validation copy) or { text, detail } from
+                    asActionError — ActionError renders both, keeping the code as fine print (S756). */}
+                <ActionError error={bulkSaveError} className="action-error--top no-print" />
                 {recipes.length === 0 ? (
                   <div className="empty-state">
                     <p className="empty-state-text">No active recipes. Add recipes in Recipe Costing first.</p>
@@ -1197,11 +1202,7 @@ export default function Sales() {
                     >{dailySaving ? 'Saving…' : dailySaved ? '✓ Saved' : 'Save Day'}</button>
                   </div>
                 </div>
-                {dailySaveError && (
-                  <div className="no-print" style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', marginBottom: 16, fontSize: 12, color: 'var(--theme-red-text)' }}>
-                    ⚠ {dailySaveError}
-                  </div>
-                )}
+                <ActionError error={dailySaveError} className="action-error--top no-print" />
                 {recipes.length === 0 ? (
                   <div className="empty-state">
                     <p className="empty-state-text">No active recipes. Add recipes in Recipe Costing first.</p>

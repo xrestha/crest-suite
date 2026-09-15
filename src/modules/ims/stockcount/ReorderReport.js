@@ -3,6 +3,8 @@ import { useNavigate, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
@@ -23,6 +25,7 @@ export default function ReorderReport() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
+  const biz = useBizInfo()
   const [actionError, setActionError] = useState(null) // a reset or clear that did not land
   const navigate = useNavigate()
 
@@ -371,12 +374,29 @@ export default function ReorderReport() {
         'Status': r.needsReorder ? 'REORDER' : r.par === 0 ? 'No Par Set' : 'OK'
       }
     })
-    const ws = XLSX.utils.json_to_sheet(data)
+    // Letterhead + scope line (S756). The sheet was a bare json_to_sheet — no business name, no
+    // month, no record of which filter or which checked rows produced it — and it is the list a
+    // purchase is placed from, so a copy forwarded to a supplier or opened next week has to say
+    // what it covers on its own (S594).
+    const statusLabel = filterStatus === 'all' ? 'All items' : 'Reorder needed only'
+    const scopeLine = `Period : ${periodLabel}${selectedPeriod?.status === 'open' ? ' (open)' : ' (closed)'}`
+      + ` · ${statusLabel} · ${filterCat === 'all' ? 'All categories' : filterCat}`
+      + (search ? ` · Search "${search}"` : '')
+      + (selectedIds.size > 0 ? ` · ${exportRows.length} checked row${exportRows.length === 1 ? '' : 's'} only` : '')
+    const ws = sheetWithLetterhead(XLSX, {
+      title: 'Reorder Report',
+      biz,
+      scopeLine,
+      rows: data,
+      notes: [
+        'Current Stock is the closing count where the item was counted; otherwise opening + net purchases − recipe usage − wastage − staff meals.',
+        'Shortfall is par level less current stock. An item exactly at par is not flagged.',
+      ],
+    })
     ws['!cols'] = [22,10,18,8,10,14,14,24,10,12,12,14,14,18,10].map(w => ({ wch: w }))
     const wb = XLSX.utils.book_new()
-    const period = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : 'Report'
     XLSX.utils.book_append_sheet(wb, ws, 'Reorder Report')
-    XLSX.writeFile(wb, `Reorder_Report_${period.replace(' ', '_')}.xlsx`)
+    XLSX.writeFile(wb, `Reorder_Report_${periodLabel.replace(' ', '_')}.xlsx`)
   }
 
   // Both actions wipe a whole table for the client; they ask through the product's own dialog and
@@ -463,7 +483,7 @@ export default function ReorderReport() {
                 period's rows into a file named for the new one, and after a failed read an empty
                 sheet named as a report. */}
             <Tip text="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." width={260}>
-              <button className="btn btn-ghost" onClick={exportExcel} disabled={!figuresReady || rows.length === 0} style={{ fontSize: 12 }}>Export Excel</button>
+              <button className="btn btn-ghost" onClick={exportExcel} disabled={!figuresReady || rows.length === 0 || !!biz.error} style={{ fontSize: 12 }}>Export Excel</button>
             </Tip>
           </div>
           <select aria-label="Period" className="form-select" style={{ marginLeft: 'auto' }} value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -472,6 +492,13 @@ export default function ReorderReport() {
         </div>
       </div>
 
+      {/* S756: the letterhead's client-name read failed — Excel waits rather than ship a nameless sheet. */}
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
+          with a blank company name. The report below is unaffected. Reload the page to try again.
+        </p>
+      )}
       {/* A failed read renders as a failure — Book Stock is ordered against (S612). */}
       <ActionError error={actionError} className="no-print" />
       {confirmEl}

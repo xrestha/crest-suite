@@ -1,4 +1,8 @@
-import { lineState, calcBillTotals, billTotalsByKey, billDiscountError } from './purchasesHelpers'
+import {
+  lineState, calcBillTotals, billTotalsByKey, billDiscountError,
+  parseInvoiceAmount, invoiceAmountError, billInvoiceAmount, invoiceMismatch, invoiceMismatchText,
+  returnBillPeriods, remainingReturnableQty, returnDayProblem,
+} from './purchasesHelpers'
 
 // What a bill line IS before it is saved (S698). The old filter — item && qty > 0 && rate > 0 —
 // dropped a row with an item and a quantity but no price from the save with nothing on screen to
@@ -118,5 +122,114 @@ describe('billDiscountError', () => {
 
   test('something that is not a number is refused rather than read as zero', () => {
     expect(billDiscountError('12abc', 5000)).toMatch(/number/)
+  })
+})
+
+// S756, owner decision D13. The supplier's printed VAT and total, compared with Crest's own
+// arithmetic. Blank changes nothing; a difference past NPR 1 is flagged, never blocked.
+describe('invoice figures as printed on the supplier bill', () => {
+  // 10,000 − 1,000 + 13% × 6,000 × 0.9 → VAT 702, total 9,702
+  const mixed = [
+    { id: 'a', purchase_group_id: 'g2', qty: 1, rate: 6000, vat_inclusive: true, discount_amount: 1000 },
+    { id: 'b', purchase_group_id: 'g2', qty: 1, rate: 4000, vat_inclusive: false, discount_amount: 1000 },
+  ]
+  const totals = calcBillTotals(mixed, 1000)
+
+  test('blank is "not typed", never zero; a typed zero is a real figure', () => {
+    expect(parseInvoiceAmount('')).toBeNull()
+    expect(parseInvoiceAmount(null)).toBeNull()
+    expect(parseInvoiceAmount('  ')).toBeNull()
+    expect(parseInvoiceAmount('0')).toBe(0)
+    expect(parseInvoiceAmount('9,702.00')).toBe(9702)
+    expect(parseInvoiceAmount('12abc')).toBeNaN()
+  })
+
+  test('the form refuses a negative or non-numeric figure by name and accepts blank', () => {
+    expect(invoiceAmountError('', 'invoice total')).toBe('')
+    expect(invoiceAmountError('-1', 'invoice total')).toMatch(/cannot be negative/)
+    expect(invoiceAmountError('x', 'VAT on the invoice')).toMatch(/number/)
+  })
+
+  test('nothing typed → nothing checked, nothing flagged', () => {
+    const c = invoiceMismatch({}, totals)
+    expect(c.checked).toBe(false)
+    expect(c.mismatch).toBe(false)
+    expect(invoiceMismatchText(c, {})).toBe('')
+  })
+
+  test('a match within NPR 1 is not a mismatch — paper bills round', () => {
+    const c = invoiceMismatch({ invoiceVat: 702.4, invoiceTotal: 9701 }, totals)
+    expect(c.checked).toBe(true)
+    expect(c.mismatch).toBe(false)
+  })
+
+  test('a difference past NPR 1 on either side is flagged, with the sign of the difference', () => {
+    const c = invoiceMismatch({ invoiceVat: 780, invoiceTotal: 9702 }, totals)
+    expect(c.vatMismatch).toBe(true)
+    expect(c.totalMismatch).toBe(false)
+    expect(c.vatDiff).toBeCloseTo(78, 6)
+    const text = invoiceMismatchText(c, { crestVat: totals.vatTotal, crestTotal: totals.grandTotal, invoiceVat: 780, invoiceTotal: 9702 })
+    expect(text).toMatch(/780\.00/)
+    expect(text).toMatch(/702\.00/)
+    expect(text).toMatch(/bill is higher/)
+  })
+
+  test('only the side that was typed is compared', () => {
+    const c = invoiceMismatch({ invoiceVat: null, invoiceTotal: 9000 }, totals)
+    expect(c.vatDiff).toBeNull()
+    expect(c.totalMismatch).toBe(true)
+  })
+
+  test('a bill reads its figure once, from whichever lines carry it; none → null', () => {
+    expect(billInvoiceAmount(mixed, 'invoice_total_amount')).toBeNull()
+    const stamped = mixed.map(l => ({ ...l, invoice_total_amount: 9702 }))
+    expect(billInvoiceAmount(stamped, 'invoice_total_amount')).toBe(9702)
+    // a typed zero survives (a bill that prints no VAT)
+    expect(billInvoiceAmount(mixed.map(l => ({ ...l, invoice_vat_amount: '0' })), 'invoice_vat_amount')).toBe(0)
+  })
+
+  test('billTotalsByKey carries the check for the register badge', () => {
+    const stamped = mixed.map(l => ({ ...l, invoice_vat_amount: 780, invoice_total_amount: 9780 }))
+    const t = billTotalsByKey(stamped).get('g2')
+    expect(t.invoiceVat).toBe(780)
+    expect(t.invoiceCheck.mismatch).toBe(true)
+    expect(billTotalsByKey(mixed).get('g2').invoiceCheck.checked).toBe(false)
+  })
+})
+
+// S756, owner decision D10. A return sits in the month it happened and may take its bill from an
+// earlier month.
+describe('late returns', () => {
+  const P = (id, y, m) => ({ id, bs_year: y, bs_month: m })
+  const periods = [P('ash', 2082, 6), P('bha', 2082, 5), P('shr', 2082, 4), P('old', 2081, 5), P('older', 2081, 6), P('next', 2082, 7)]
+
+  test('bill months: this one first, then earlier months within a year, never a later one', () => {
+    const ids = returnBillPeriods(periods, periods[0]).map(p => p.id)
+    expect(ids).toEqual(['ash', 'bha', 'shr', 'older'])   // 2081-6 is exactly 12 months back; 2081-5 is 13
+    expect(ids).not.toContain('next')
+    expect(returnBillPeriods(periods, null)).toEqual([])
+  })
+
+  test('the over-return cap counts every return against the line, whichever month it sits in', () => {
+    // 10 kg bought in Bhadra. 8 kg already returned in Bhadra, 2 kg in Ashwin.
+    const prior = [{ id: 'r1', qty: 8, period_id: 'bha' }, { id: 'r2', qty: 2, period_id: 'ash' }]
+    expect(remainingReturnableQty(10, prior).remaining).toBe(0)
+    // THE BUG: a cap built from the month on screen (Ashwin) alone saw only r2 and allowed 8 more.
+    expect(remainingReturnableQty(10, prior.filter(r => r.period_id === 'ash')).remaining).toBe(8)
+  })
+
+  test('the return being edited does not count against its own cap', () => {
+    const prior = [{ id: 'r1', qty: 8 }, { id: 'r2', qty: 2 }]
+    expect(remainingReturnableQty(10, prior, 'r2')).toEqual({ total: 10, prior: 8, remaining: 2 })
+  })
+
+  test('"not before its bill" applies only when the bill is in the same month', () => {
+    // bill 28th, return 2nd of the SAME month → refused
+    expect(returnDayProblem({ retDay: 2, maxDay: 30, billDay: 28, samePeriod: true })).toBe('before-bill')
+    // bill 28th Bhadra, return 2nd Ashwin → fine
+    expect(returnDayProblem({ retDay: 2, maxDay: 30, billDay: 28, samePeriod: false })).toBe('')
+    expect(returnDayProblem({ retDay: 28, maxDay: 30, billDay: 28, samePeriod: true })).toBe('')
+    expect(returnDayProblem({ retDay: 0, maxDay: 30, billDay: 1, samePeriod: false })).toBe('range')
+    expect(returnDayProblem({ retDay: 32, maxDay: 31, billDay: 1, samePeriod: false })).toBe('range')
   })
 })

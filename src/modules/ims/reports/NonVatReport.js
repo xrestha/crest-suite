@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
+import { readPriorBillLines } from './readPriorBillLines'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -14,7 +15,7 @@ import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
-import { splitPurchaseVat, buildVendorSummary, summariseUnlinkedReturns } from './purchaseTaxSplit'
+import { splitPurchaseVat, buildVendorSummary, summariseUnlinkedReturns, returnLinesOutsidePeriod } from './purchaseTaxSplit'
 
 function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -30,6 +31,7 @@ export default function NonVatReport() {
   const [selectedPeriod, setSelected] = useState(null)
   const [allEntries, setAllEntries]   = useState([])
   const [returns, setReturns]         = useState([])
+  const [priorBillLines, setPriorBillLines] = useState([])   // earlier-month bills a return points at (S756, D10)
   const [loading, setLoading]         = useState(false)
   const [loadError, setLoadError]     = useState(null)
   const [tab, setTab]                 = useState('entries')
@@ -84,14 +86,25 @@ export default function NonVatReport() {
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setAllEntries([]); setReturns([]); setLoading(false); return }
     const [{ data }, { data: rets }] = results
+    // A return against an earlier month's bill is valued at that bill's discount, exactly as VAT
+    // Report values it — the two halves of the filing share one read (readPriorBillLines.js).
+    const outsideIds = returnLinesOutsidePeriod(data, rets)
+    let priorLines = []
+    if (outsideIds.length > 0) {
+      const prior = await readPriorBillLines(outsideIds)
+      if (!periodReq.isCurrent(periodId)) return
+      if (prior.error) { setLoadError(prior.error); setAllEntries([]); setReturns([]); setPriorBillLines([]); setLoading(false); return }
+      priorLines = prior.data
+    }
     setAllEntries(data || [])
     setReturns(rets || [])
+    setPriorBillLines(priorLines)
     setLoading(false)
   }
 
   // The same split VAT Report runs, over the same rows — so this page's discount and that page's
   // discount are two shares of one number rather than two independent claims on it.
-  const split = splitPurchaseVat(allEntries, returns)
+  const split = splitPurchaseVat(allEntries, returns, { priorBillLines })
   const {
     nonVatLines: entries, nonVatReturns,
     nonVatGross: grossTotal, nonVatDiscount: totalDiscount,

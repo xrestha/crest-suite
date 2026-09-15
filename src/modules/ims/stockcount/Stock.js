@@ -29,6 +29,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { WASTAGE_REASON_GROUPS, DEFAULT_WASTAGE_REASON } from '../../../shared/constants/wastageReasons'
 import StockCountSettings from './StockCountSettings'
+import { findUncountedItems, gapNote, UncountedItemsBanner } from '../../../shared/uncountedItems'
 
 function dispPurch(baseQty, item) {
   const cf = parseFloat(item.conversion_factor) || 1
@@ -1149,9 +1150,31 @@ export default function Stock() {
     return byCategory
   }
 
+  // Items with stock this period and no closing count (S756 D6). Read off on-screen state, which is
+  // what the Summary's figures are built from, so the warning and the COGS beside it cannot describe
+  // two different counts: `toQty(closing) != null` is the same blank-vs-0 line every save path draws
+  // (a 0 is a count, a blank is not). Active, non-sub-recipe items only, per the owner's rule —
+  // this page counts prep too, but a missing prep count is not what the summaries are warning about.
+  function getUncountedGap() {
+    const openingQty = {}
+    const countedIds = new Set()
+    let cogs = 0
+    items.forEach(item => {
+      const row = stockData[item.id] || {}
+      openingQty[item.id] = parseFloat(row.opening) || 0
+      if (toQty(row.closing) != null) countedIds.add(item.id)
+      cogs += getCogsValue(item)
+    })
+    const purchaseValue = {}
+    items.forEach(item => { purchaseValue[item.id] = purchaseValueOf(item) })
+    return findUncountedItems({ items, openingQty, purchaseQty: purchases, purchaseValue, countedIds, cogs })
+  }
+
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
+    const gap = getUncountedGap()
+    const uncountedIds = new Set(gap.uncounted.map(u => u.id))
     const rows = items.map(item => {
       const row      = stockData[item.id] || {}
       const rate     = parseFloat(item.per_uom_rate || 0)
@@ -1182,12 +1205,24 @@ export default function Stock() {
         'Closing Value':     rate > 0 ? Math.round(closeQty * rate) : '',
         // Who last counted it — written since S737, carried out of the building since S756.
         'Counted By':        row.closing !== '' && row.closing != null ? (countedBy[item.id] || '') : '',
+        // Marked as on screen (S756 D6): this item's COGS counts its whole stock as used.
+        'Closing counted':   uncountedIds.has(item.id) ? 'NOT COUNTED' : '',
         'Used Qty':          usedQty   || '',
         'COGS (NPR)':        Math.round(getCogsValue(item)) || '',
         'Requisitioned Qty': requisitioned[item.id] || '',
       }
     })
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Stock Register')
+    // The warning travels with the sheet (S756 D6). Scope and note lines above the table rather than
+    // the shared letterhead: that needs the client-name read, a round trip this counting page does
+    // not otherwise make, for a register that has never carried one.
+    const note = gapNote(gap, periodLabel)
+    const ws = XLSX.utils.aoa_to_sheet([
+      [`Stock Register — ${periodLabel}${selectedPeriod?.status === 'open' ? ' (open)' : ''}`],
+      ...(note ? [[note]] : []),
+      [],
+    ])
+    XLSX.utils.sheet_add_json(ws, rows, { origin: -1 })
+    XLSX.utils.book_append_sheet(wb, ws, 'Stock Register')
     XLSX.writeFile(wb, `Stock-Register-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
 
@@ -1354,9 +1389,16 @@ export default function Stock() {
                 cogs:       rows.reduce((s, r) => s + r.cogs,               0),
               }
               const fmt = npr2
+              const gap = getUncountedGap()
               const thStyle = { textAlign: 'right', whiteSpace: 'nowrap' }
               const tdStyle = (color) => ({ textAlign: 'right', color: color || 'var(--theme-text1)', whiteSpace: 'nowrap' })
               return (
+                <>
+                {/* D6 (S756): named here, above the Totals a month is closed on. Totals are unchanged —
+                    the uncounted items are still in them, counted as fully used. */}
+                <UncountedItemsBanner gap={gap} scope={periodLabel}>
+                  They are marked in the item table below and in the Excel export.
+                </UncountedItemsBanner>
                 <div className="card" style={{ marginBottom: 24 }}>
                   {/* The disclosure exists for the accountant reconciling this page against Monthly
                       Summary (S575). Until S756 it claimed the two differed by exactly the
@@ -1428,6 +1470,7 @@ export default function Stock() {
                     </table>
                   </div>
                 </div>
+                </>
               )
             })()}
 
@@ -1469,9 +1512,10 @@ export default function Stock() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map(item => {
+                  {(() => { const uncountedIds = new Set(getUncountedGap().uncounted.map(u => u.id)); return items.map(item => {
                     const row      = stockData[item.id] || {}
                     const used     = getUsed(item.id)
+                    const notCounted = uncountedIds.has(item.id)
                     const returned = returns[item.id] || 0
                     const rate     = parseFloat(item.per_uom_rate || 0)
                     const openQty  = parseFloat(row.opening     || 0)
@@ -1501,7 +1545,13 @@ export default function Stock() {
                     const stickyBg = 'var(--theme-card)'
                     return (
                       <tr key={item.id}>
-                        <td style={{ fontWeight: hasData ? 600 : 400, color: hasData ? 'var(--theme-text1)' : 'var(--theme-text3)', position: 'sticky', left: 0, zIndex: 1, background: stickyBg }}>{item.name}</td>
+                        <td style={{ fontWeight: hasData ? 600 : 400, color: hasData ? 'var(--theme-text1)' : 'var(--theme-text3)', position: 'sticky', left: 0, zIndex: 1, background: stickyBg }}>
+                          {item.name}
+                          {/* S756 D6: stock this period, no closing count — Used and COGS count all of it. */}
+                          {notCounted && (
+                            <span className="badge badge-amber" style={{ marginLeft: 6 }} title="Has stock this period but no closing count — Used and COGS treat all of it as consumed">not counted</span>
+                          )}
+                        </td>
                         <td><span className="badge badge-yellow">{item.categories?.name}</span></td>
                         <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
                         <td style={{ textAlign: 'right' }}>{row.opening !== '' ? Number(row.opening).toLocaleString('en-IN') : '—'}</td>
@@ -1526,7 +1576,7 @@ export default function Stock() {
                         </td>
                       </tr>
                     )
-                  })}
+                  }) })()}
                 </tbody>
               </table>
             </div>

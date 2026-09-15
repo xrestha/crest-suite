@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { npr, NPR_LOCALE } from '../../../shared/nepalMoney'
@@ -12,43 +12,42 @@ import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import NoPeriodState from '../../../components/NoPeriodState'
-import { COGS_FORMULA, computeUsed } from '../../../shared/imsFormulas'
+import { COGS_FORMULA } from '../../../shared/imsFormulas'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate, Link } from 'react-router-dom'
-import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, formatBsDay } from '../../../utils/bsCalendar'
+import { asOfForWindow, periodMonthIndex } from '../reports/stockAgeingCalc'
+import {
+  judgeItemPeriod, classifyItem, suggestNextStep,
+  DEAD_AFTER_MONTHS, SLOW_THRESHOLD,
+} from './deadStockCalc'
 
-// Item is "Slow" if used < 20% of net available
-const SLOW_THRESHOLD = 0.2
-
-// Quantity tolerance for the two exact tests below (S756). `computeUsed` is a chain of float
-// subtractions, so a fully-consistent item can land at 0.7 + 0.1 − 0.8 = −1.1e-16: tested with
-// `< 0` that is "counted higher than was available" — a missing-bill banner over a correct count —
-// and tested with `=== 0` a genuinely unmoved item's 1e-15 escapes Dead. Far below any real
-// quantity in a base unit.
-const QTY_EPS = 1e-6
+// How many months back the page reads to measure a standstill (S756, D20). Dead needs three; the
+// rest is so "still for N months" can say how long, up to a year, rather than stopping at three.
+const HISTORY_MONTHS = 12
 
 // THIS REPORT CANNOT RUN WITHOUT A CLOSING COUNT, AND USED TO PRETEND OTHERWISE (S717).
 //
 // Consumption here is the periodic COGS residual — opening + purchases − returns − wastage −
 // staff meals − CLOSING — so the closing count is not one input among several, it is the only
-// thing standing between "we used it all" and "none of it moved".
+// thing standing between "we used it all" and "none of it moved". An uncounted item used to
+// compute as fully consumed and drop out, so an uncounted month said "No dead or slow-moving
+// stock". A `closing_stock` row with `physical_qty = 0` is a COUNT and no row is not (S695);
+// presence is tested per month in `judgeItemPeriod` (deadStockCalc.js, tested).
 //
-// The old code summed `closing` with a filter that returned 0 for an item with no `closing_stock`
-// row at all, which is the ordinary state of every item in an open month before the count is
-// done. An uncounted item therefore computed as **fully consumed**, failed both the Dead test and
-// the Slow test, and was dropped from the report — so an uncounted period rendered zero rows and
-// the sentence *"No dead or slow-moving stock this period."* That is the single most reassuring
-// thing this page can say, and it was what it said when it knew nothing at all.
-//
-// It also conflated the two states S695 spent a session separating: a `closing_stock` row with
-// `physical_qty = 0` is a COUNT ("we looked and there was none"), and no row is not. Presence is
-// tested with `item.id in closeMap` here, as it is in `buildStockRows`.
+// S756 (D20): the verdict is no longer one month's. See deadStockCalc.js for the rule — Dead after
+// three consecutive counted still months, Slow for one or two (or under 20% used), an uncounted
+// month breaks the streak — and for the suggested next step.
 const num = v => parseFloat(v) || 0
-function sumByItem(rows, field) {
+function sumByPeriodItem(rows, field) {
   const out = {}
-  for (const r of rows || []) out[r.item_id] = (out[r.item_id] || 0) + num(r[field])
+  for (const r of rows || []) {
+    if (!out[r.period_id]) out[r.period_id] = {}
+    out[r.period_id][r.item_id] = (out[r.period_id][r.item_id] || 0) + num(r[field])
+  }
   return out
 }
+const monthLabel = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '')
 
 export default function DeadStock() {
   const { clientId, profile, hasImsAccess } = useAuth()
@@ -61,16 +60,15 @@ export default function DeadStock() {
   const [rows, setRows]                 = useState([])
   const [statusFilter, setStatusFilter] = useState('All')
   const [catFilter, setCatFilter]       = useState('All')
-  // Starts TRUE. It used to start false, so the first paint — before any read had been issued —
-  // rendered the KPI strip as `0 Dead / 0 Slow / —` above the empty state's "No dead or slow-moving
-  // stock this period." Every one of those is a claim the page had not yet earned (S594/S616).
+  // Starts TRUE: the first paint must not render "0 Dead / 0 Slow" before any read (S594/S616).
   const [loading, setLoading]           = useState(true)
   const [loadError, setLoadError]       = useState(null)
-  // How many items could not be judged, and why. An item the report cannot assess must be counted
-  // and named, never silently dropped into the same absence as an item that is fine.
+  // How many items could not be judged this month, and why — counted and named, never dropped.
   const [uncounted, setUncounted]       = useState(0)
   const [inconsistent, setInconsistent] = useState(0)
   const [assessable, setAssessable]     = useState(0)
+  // How many months the history actually covered — a client with two periods cannot show Dead.
+  const [historyLength, setHistoryLength] = useState(0)
 
   useEffect(() => {
     if (!effectiveClientId) return
@@ -80,10 +78,8 @@ export default function DeadStock() {
         // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
         if (error) { setLoadError(error.message); setLoading(false); return }
         setPeriods(data || [])
-        // The most recent CLOSED period, else the latest (S756). `data[0]` is the open month, which
-        // is almost never counted yet — and this report cannot judge anything without a closing
-        // count, so the default view was the "needs a stock count" state for most of every month.
-        // Same default the variance pages use, for the same reason (ims-figures.md).
+        // The most recent CLOSED period, else the latest (S756) — this report cannot judge without
+        // a closing count, and the open month is almost never counted yet.
         const initial = (data || []).find(p => p.status === 'closed') || data?.[0]
         if (initial) setSelected(initial)
         else setLoading(false)   // nothing will call fetchData, so nothing else will clear it
@@ -98,100 +94,100 @@ export default function DeadStock() {
     periodReq.begin(periodId)   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
+    // The selected month and up to eleven before it, newest first (S756, D20). `periods` is
+    // newest-first from the load above.
+    const at = periods.findIndex(p => p.id === periodId)
+    const history = at >= 0 ? periods.slice(at, at + HISTORY_MONTHS) : []
+    const ids = history.map(p => p.id)
+    const byMonth = (table, cols) => fetchAllRowsChunked(ids, c =>
+      supabase.from(table).select(cols).in('period_id', c).order('id'))
+
     const results = await Promise.all([
-      // Every read is paged, not just purchases and wastage (S717). `opening_stock`,
-      // `closing_stock` and `staff_meals` are one row per item per period, so a client past 1000
-      // items truncates silently — and truncation returns NO error, so the firstError() check
-      // below walks straight over it. The consequence here is specific and bad: a missing
-      // `closing_stock` row is indistinguishable from "not counted", so the tail of a large item
-      // book would drop out of the report exactly as if nobody had counted it. Stock Count and
-      // Stock Report already page these three; this page and Reorder Report were the two that
-      // could still disagree with them about what is on the shelf.
+      // Every read is paged (S717), and now spans up to twelve months: one row per item per month
+      // × 12 crosses the silent 1000-row cap at ~85 items, and a missing closing_stock row is
+      // indistinguishable from "not counted" — which here would break a Dead streak silently.
       fetchAllRows(() => scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)')
         .eq('is_active', true).eq('is_sub_recipe', false).order('id')),
-      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('purchase_entries').select('item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
-      // Staff meals count as consumption (src/shared/imsFormulas.js). Without them an item only
-      // ever eaten by staff read as "Dead — no movement", which is the opposite of true.
-      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
+      byMonth('opening_stock', 'period_id, item_id, qty'),
+      // bs_day, expiry_date and vendor_id pick the item's latest purchase for the next-step rule.
+      byMonth('purchase_entries', 'period_id, item_id, qty, bs_day, expiry_date, vendor_id'),
+      fetchAllRowsChunked(ids, c => scopedFrom('vendor_returns', 'period_id, item_id, qty').in('period_id', c).order('id')),
+      byMonth('wastages', 'period_id, item_id, qty'),
+      // Staff meals count as consumption (imsFormulas.js).
+      byMonth('staff_meals', 'period_id, item_id, qty'),
+      byMonth('closing_stock', 'period_id, item_id, physical_qty'),
+      // Every vendor, not only active ones: this resolves a NAME on history (S708) — an archived
+      // supplier still sold you the stock.
+      fetchAllRows(() => scopedFrom('vendors', 'id, name').order('id')),
     ])
-    // A failed read must never flow through the `|| []`s below — every item would read as "Dead"
-    // or vanish, both believable (S612 silent-zero rule).
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    // A failed read must never flow through the `|| []`s below (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
     const [
-      { data: itemsData },
-      { data: openings },
-      { data: purchases },
-      { data: rets },
-      { data: wastes },
-      { data: staffMealRows },
-      { data: closings },
+      { data: itemsData }, { data: openings }, { data: purchases }, { data: rets },
+      { data: wastes }, { data: staffMealRows }, { data: closings }, { data: vendors },
     ] = results
 
-    // One pass per table instead of a `.filter()` per item per table. The old `sumField` walked
-    // every row of all six arrays once for each item — at 800 items and a busy month that is tens
-    // of millions of element visits on a page load.
-    const openMap  = sumByItem(openings, 'qty')
-    const purchMap = sumByItem(purchases, 'qty')
-    const retMap   = sumByItem(rets, 'qty')
-    const wasteMap = sumByItem(wastes, 'qty')
-    const staffMap = sumByItem(staffMealRows, 'qty')
-    // Built directly rather than through sumByItem: presence is the fact this page turns on, and
-    // an item counted at 0 must be present in the map. There is at most one row per item.
+    const openMap  = sumByPeriodItem(openings, 'qty')
+    const purchMap = sumByPeriodItem(purchases, 'qty')
+    const retMap   = sumByPeriodItem(rets, 'qty')
+    const wasteMap = sumByPeriodItem(wastes, 'qty')
+    const staffMap = sumByPeriodItem(staffMealRows, 'qty')
+    // Built directly: presence is the fact this page turns on, and a 0 count must be present.
     const closeMap = {}
-    for (const r of closings || []) closeMap[r.item_id] = num(r.physical_qty)
+    for (const r of closings || []) {
+      if (r.physical_qty == null) continue
+      if (!closeMap[r.period_id]) closeMap[r.period_id] = {}
+      closeMap[r.period_id][r.item_id] = num(r.physical_qty)
+    }
+
+    // Each item's latest purchase in the months read.
+    const periodById = Object.fromEntries(history.map(p => [p.id, p]))
+    const vendorName = Object.fromEntries((vendors || []).map(v => [v.id, v.name]))
+    const lastBuy = {}
+    for (const p of purchases || []) {
+      const per = periodById[p.period_id]
+      if (!per || !(num(p.qty) > 0)) continue
+      const rank = periodMonthIndex(per) * 40 + (parseInt(p.bs_day, 10) || 0)
+      if (!lastBuy[p.item_id] || rank > lastBuy[p.item_id].rank) lastBuy[p.item_id] = { rank, row: p, period: per }
+    }
+
+    const selected = history[0]
+    const asOf = asOfForWindow(selected, { isNewest: periods[0]?.id === periodId }).date
 
     const built = []
     let uncountedCount = 0
     let inconsistentCount = 0
     let assessableCount = 0
     for (const item of (itemsData || [])) {
-      const opening   = openMap[item.id]  || 0
-      const purchased = purchMap[item.id] || 0
-      const returned  = retMap[item.id]   || 0
-      const wasted    = wasteMap[item.id] || 0
-      const staffUsed = staffMap[item.id] || 0
-      const hasCount  = item.id in closeMap
-      const closing   = hasCount ? closeMap[item.id] : 0
-      const available = opening + purchased - returned
-
-      // Skip items with no stock presence at all — nothing in the data says this item was ever on
-      // the shelf this period, so it is neither dead nor unassessed, it is simply absent.
-      if (available <= QTY_EPS && !hasCount) continue
-
-      // No closing count: consumption is not merely unknown, it is unknowable in this model.
-      // Counted, not classified — the banner names how many, because the alternative is a report
-      // that quietly gets shorter the less anyone counts.
-      if (!hasCount) { uncountedCount += 1; continue }
-
-      // Counted, and the count is zero on an item nothing was available of either: the original
-      // "no stock presence" skip, which the hasCount split above would otherwise have let through
-      // as a Dead item worth NPR 0 — noise on a report about capital tied up.
-      if (available <= QTY_EPS && closing <= QTY_EPS) continue
-
-      // A count larger than what was theoretically available means a purchase is missing or the
-      // count is wrong. `used` then goes negative and the old `Math.max(…, 0)` turned that into a
-      // flat 0, i.e. **Dead** — the loudest verdict on the page, produced by a data fault. Stock
-      // Report already surfaces this class as "negative theoretical stock"; here it is excluded
-      // and counted, since "write this stock off" is the wrong thing to say about a bad number.
-      const rawUsed = computeUsed({ opening, purchases: purchased, returns: returned, wastage: wasted, staffMeals: staffUsed, closing })
-      if (rawUsed < -QTY_EPS) { inconsistentCount += 1; continue }
+      const monthFigures = pid => ({
+        opening:   openMap[pid]?.[item.id] || 0,
+        purchased: purchMap[pid]?.[item.id] || 0,
+        returned:  retMap[pid]?.[item.id] || 0,
+        wasted:    wasteMap[pid]?.[item.id] || 0,
+        staffUsed: staffMap[pid]?.[item.id] || 0,
+        hasCount:  !!closeMap[pid] && item.id in closeMap[pid],
+        closing:   closeMap[pid]?.[item.id] || 0,
+      })
+      const itemHistory = history.map(p => ({ monthIndex: periodMonthIndex(p), judgement: judgeItemPeriod(monthFigures(p.id)) }))
+      const latest = itemHistory[0]?.judgement
+      if (!latest || latest.state === 'absent') continue
+      if (latest.state === 'uncounted') { uncountedCount += 1; continue }
+      if (latest.state === 'inconsistent') { inconsistentCount += 1; continue }
       assessableCount += 1
-      // Inside the tolerance a residue either side of zero IS zero — so the row prints 0, not −0.0.
-      const used = Math.abs(rawUsed) <= QTY_EPS ? 0 : rawUsed
 
-      const status = used === 0
-        ? 'Dead'
-        : available > 0 && used / available < SLOW_THRESHOLD
-          ? 'Slow'
-          : null
+      const verdict = classifyItem(itemHistory)
+      if (!verdict.status) continue
 
-      if (!status) continue
+      const f = monthFigures(selected.id)
+      const buy = lastBuy[item.id]
+      const lastPurchase = buy ? {
+        date: bsToAd(buy.period.bs_year, buy.period.bs_month, Math.min(Math.max(parseInt(buy.row.bs_day, 10) || 1, 1), 32)),
+        vendorName: buy.row.vendor_id ? vendorName[buy.row.vendor_id] : null,
+        expiryDate: buy.row.expiry_date || null,
+      } : null
+      const suggestion = suggestNextStep({ status: verdict.status, stillMonths: verdict.stillMonths, lastPurchase, asOf })
 
       const rate = parseFloat(item.per_uom_rate || 0)
       built.push({
@@ -199,16 +195,21 @@ export default function DeadStock() {
         name:        item.name,
         category:    item.categories?.name || 'Uncategorised',
         uom:         item.uom,
-        opening,
-        purchased,
-        returned,
-        wasted,
-        used,
-        closing,
-        available,
+        opening:     f.opening,
+        purchased:   f.purchased,
+        returned:    f.returned,
+        wasted:      f.wasted,
+        used:        latest.used,
+        closing:     f.closing,
+        available:   latest.available,
         rate,
-        valueAtRisk: closing * rate,
-        status,
+        valueAtRisk: f.closing * rate,
+        status:      verdict.status,
+        stillMonths: verdict.stillMonths,
+        atLeast:     verdict.atLeast,
+        suggestion:  suggestion?.text || '',
+        lastBought:  buy ? `${formatBsDay(buy.row.bs_day, buy.period.bs_month)} ${buy.period.bs_year}` : '',
+        supplier:    lastPurchase?.vendorName || '',
       })
     }
 
@@ -217,6 +218,7 @@ export default function DeadStock() {
     setUncounted(uncountedCount)
     setInconsistent(inconsistentCount)
     setAssessable(assessableCount)
+    setHistoryLength(history.length)
     setStatusFilter('All')
     setCatFilter('All')
     setLoading(false)
@@ -231,45 +233,49 @@ export default function DeadStock() {
   if (statusFilter !== 'All') filtered = filtered.filter(r => r.status === statusFilter)
   if (catFilter !== 'All')   filtered = filtered.filter(r => r.category === catFilter)
 
-  const periodLabel = selectedPeriod
-    ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
-    : ''
+  const periodLabel = monthLabel(selectedPeriod)
 
-  // The scope this report is read under, in one line — on screen, in the print header and in the
-  // workbook alike. It has to carry the coverage, not just the month: "3 dead items" means one
-  // thing across a fully counted book and something else across 40 of 900 items (S594).
+  // The scope in one line — on screen, in print and in the workbook. It carries the coverage and
+  // the rule, not just the month (S594): "3 dead items" means nothing without "dead = 3 months".
   const scopeLine = `${periodLabel} · ${assessable} item${assessable === 1 ? '' : 's'} assessed`
     + (uncounted > 0 ? ` · ${uncounted} not counted` : '')
     + (inconsistent > 0 ? ` · ${inconsistent} with inconsistent figures` : '')
+    + ` · Dead = nothing used for ${DEAD_AFTER_MONTHS}+ counted months in a row`
 
   function fmt(n) {
     return n ? npr(n) : '—'
   }
 
-  // A QUANTITY, not money — so it keeps its decimals. S717/S719 routed these through nprInt(),
-  // which is `Math.round`, so a 0.4 kg count printed as "0" while its own Value at Risk stayed
-  // non-zero and the row contradicted itself. nepalMoney.js is for MONEY; the "render money through
-  // the shared helper" rule does not extend to quantities. NPR_LOCALE keeps the Nepali grouping.
+  // A QUANTITY, not money — keeps its decimals (S721). NPR_LOCALE keeps the Nepali grouping.
   function fmtQty(n) {
     return n ? Number(n).toLocaleString(NPR_LOCALE, { maximumFractionDigits: 3 }) : '—'
+  }
+
+  function stillText(r) {
+    if (!(r.stillMonths > 0)) return 'Moving slowly'
+    return `${r.stillMonths}${r.atLeast ? '+' : ''} month${r.stillMonths === 1 && !r.atLeast ? '' : 's'}`
   }
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb   = XLSX.utils.book_new()
     const data = rows.map(r => ({
-      'Item':               r.name,
-      'Category':           r.category,
-      'UOM':                r.uom,
-      'Status':             r.status,
-      'Opening Qty':        r.opening   || '',
-      'Purchased Qty':      r.purchased || '',
-      'Returned Qty':       r.returned  || '',
-      'Net Available':      r.available || '',
-      'Wasted Qty':         r.wasted    || '',
-      'Used Qty':           r.used      || '',
-      'Closing Qty':        r.closing   || '',
-      'Value at Risk (NPR)':r.valueAtRisk ? r.valueAtRisk.toFixed(0) : '',
+      'Item':                 r.name,
+      'Category':             r.category,
+      'UOM':                  r.uom,
+      'Status':               r.status,
+      'Months Without Use':   r.stillMonths || 0,
+      'Suggested Next Step':  r.suggestion,
+      'Last Bought':          r.lastBought,
+      'Supplier':             r.supplier,
+      'Opening Qty':          r.opening   || '',
+      'Purchased Qty':        r.purchased || '',
+      'Returned Qty':         r.returned  || '',
+      'Net Available':        r.available || '',
+      'Wasted Qty':           r.wasted    || '',
+      'Used Qty':             r.used      || '',
+      'Closing Qty':          r.closing   || '',
+      'Value at Risk (NPR)':  r.valueAtRisk ? Number(r.valueAtRisk.toFixed(0)) : '',
     }))
     const ws = sheetWithLetterhead(XLSX, {
       title: 'Dead Stock / Slow Movers',
@@ -278,7 +284,9 @@ export default function DeadStock() {
       rows: data,
       notes: [
         `Consumption is ${COGS_FORMULA}.`,
-        'Only items with a closing count for this period can be judged; the rest are excluded and counted in the scope line above.',
+        `Dead = nothing used for ${DEAD_AFTER_MONTHS} or more months in a row. Slow = nothing used for 1–2 months, or less than ${SLOW_THRESHOLD * 100}% of what was available used this month.`,
+        'A month with no closing count for an item is not judged and breaks the run — it is never counted as a month without use.',
+        'Only items with a closing count for the selected month can be judged; the rest are excluded and counted in the scope line above.',
       ],
     })
     XLSX.utils.book_append_sheet(wb, ws, 'Dead Stock')
@@ -302,10 +310,10 @@ export default function DeadStock() {
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Dead Stock / Slow Movers</h1>
-          <p className="page-subtitle">Items with zero or low consumption — capital tied up in stock</p>
+          <p className="page-subtitle">Items that have stopped moving — capital tied up in stock, and what to do about it</p>
           <div className="page-scope-row">
-            {/* provisionalWhenOpen: this report is computed from the closing count, so before the
-                month is counted it is not merely provisional, it is mostly blank (S717). */}
+            {/* provisionalWhenOpen: computed from the closing count, so before the month is counted
+                it is mostly blank (S717). */}
             <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
           </div>
         </div>
@@ -317,8 +325,7 @@ export default function DeadStock() {
           </select>
           <button className="btn btn-ghost" disabled={loading || !!loadError}
             onClick={() => printWithTitle(`Dead Stock / Slow Movers — ${scopeLine}`)}>Print</button>
-          {/* biz.error (S756): a failed client-name read shipped the workbook with a blank
-              CompanyName line. The export waits rather than send a nameless document. */}
+          {/* biz.error (S756): the export waits rather than send a nameless document. */}
           <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length || !!biz.error}>Export Excel</button>
         </div>
       </div>
@@ -330,9 +337,7 @@ export default function DeadStock() {
         </p>
       )}
 
-      {/* What the report could NOT judge. It goes above the figures because it qualifies all of
-          them: "no dead stock" across 12 assessed items out of 900 is not the same sentence as
-          "no dead stock" across a counted month, and until S717 the page said both identically. */}
+      {/* What the report could NOT judge — above the figures, because it qualifies all of them. */}
       {!loading && !loadError && (uncounted > 0 || inconsistent > 0) && (
         <div className="no-print" style={{
           background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)',
@@ -346,21 +351,30 @@ export default function DeadStock() {
         </div>
       )}
 
-      {/* KPI strip waits for the load and never survives a failure: unloaded or failed,
-          Dead Stock Items / Value at Risk read as a confident 0 (S594). `assessable > 0` is the
-          same rule one step further — with nothing counted the page has computed nothing, and
-          "0 Dead / 0 Slow" is a finding it has not made (S717). */}
+      {/* The rule, stated before the verdicts (S756, D20) — a Dead count means nothing to a reader
+          who does not know Dead now takes three months. Gated like the KPI strip. */}
+      {!loading && !loadError && assessable > 0 && (
+        <p className="no-print" style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 16px', lineHeight: 1.6 }}>
+          <strong>Dead</strong> means nothing was used for {DEAD_AFTER_MONTHS} or more counted months in a row.
+          {' '}<strong>Slow</strong> means nothing was used for one or two months, or less than {SLOW_THRESHOLD * 100}% of what was available was used.
+          {' '}A month without a stock count for an item is not judged and restarts the run.
+          {historyLength < DEAD_AFTER_MONTHS && <> Only {historyLength} month{historyLength === 1 ? '' : 's'} of records exist so far, so nothing can be called Dead yet.</>}
+        </p>
+      )}
+
+      {/* KPI strip waits for the load and never survives a failure; `assessable > 0` because with
+          nothing counted "0 Dead / 0 Slow" is a finding the page has not made (S594/S717). */}
       {!loading && !loadError && assessable > 0 && (
       <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">Dead Stock Items</div>
           <div className="stat-value" style={{ color: 'var(--theme-red-text)' }}>{deadCount}</div>
-          <div className="stat-label" style={{ marginTop: 4 }}>Zero consumption</div>
+          <div className="stat-label" style={{ marginTop: 4 }}>No use for {DEAD_AFTER_MONTHS}+ months</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Slow Movers</div>
           <div className="stat-value" style={{ color: 'var(--theme-amber-text)' }}>{slowCount}</div>
-          <div className="stat-label" style={{ marginTop: 4 }}>Used &lt;20% of available</div>
+          <div className="stat-label" style={{ marginTop: 4 }}>Still 1–2 months, or &lt;20% used</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
@@ -371,13 +385,7 @@ export default function DeadStock() {
       </div>
       )}
 
-      {/* Filters. Gated exactly like the KPI strip above (S720). S717 gated the strip and left this
-          row forty lines below it ungated, so `All (0) Dead (0) Slow (0)` painted for the whole of
-          the seven-query load and stayed there permanently above ReportLoadError's "Could not load
-          this report" — three counts saying "no dead stock, no slow movers" about a period the page
-          never read. S616's rule is positional and this is the file it was recorded against: the
-          guard has to open before the element, and every slot ReportPage would gate needs it, not
-          just the stat-grid. */}
+      {/* Filters — gated exactly like the KPI strip (S720): counts are figures too. */}
       {!loading && !loadError && assessable > 0 && (
       <div className="no-print" style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         {['All', 'Dead', 'Slow'].map(s => (
@@ -404,8 +412,7 @@ export default function DeadStock() {
       ) : loadError ? (
         <ReportLoadError error={loadError} />
       ) : assessable === 0 && uncounted > 0 ? (
-        /* "Nothing is dead" and "we could not look" are different facts, and this page used to
-           render them with the same sentence — the reassuring one (S717). */
+        /* "Nothing is dead" and "we could not look" are different facts (S717). */
         <div className="empty-state">
           <div className="empty-state-icon">◷</div>
           <p className="empty-state-text">
@@ -415,8 +422,6 @@ export default function DeadStock() {
           </p>
         </div>
       ) : assessable === 0 ? (
-        /* A third fact again: no opening, no purchases, no count — there is simply nothing in
-           this period to have an opinion about. */
         <div className="empty-state">
           <div className="empty-state-icon">◈</div>
           <p className="empty-state-text">No stock recorded in {periodLabel} yet — nothing to assess.</p>
@@ -460,7 +465,13 @@ export default function DeadStock() {
                   <Tip text="Closing stock × per-unit rate. NPR value currently sitting idle in inventory." width={240}>Value at Risk</Tip>
                 </th>
                 <th>
-                  <Tip text="Dead = zero consumption this period. Slow = used less than 20% of net available stock." width={260}>Status</Tip>
+                  <Tip text={`Dead = nothing used for ${DEAD_AFTER_MONTHS} or more counted months in a row. Slow = nothing used for 1–2 months, or less than ${SLOW_THRESHOLD * 100}% of the stock available this month used. A month with no stock count for the item is not judged and restarts the run.`} width={300}>Status</Tip>
+                </th>
+                <th>
+                  <Tip text={`How many months in a row, ending with ${periodLabel}, nothing of this item was used. "+" means the run reaches back to the oldest month this report reads, so it may be longer.`} width={280}>Still For</Tip>
+                </th>
+                <th>
+                  <Tip text="A suggested next step. Past its expiry date or still for more than 3 months: write it off. Bought in the last 45 days: ask the supplier to take it back (or buy less, if it is moving). Otherwise: put it on the menu as a special." width={300}>Suggested Next Step</Tip>
                 </th>
               </tr>
             </thead>
@@ -485,6 +496,15 @@ export default function DeadStock() {
                     }}>
                       {r.status}
                     </span>
+                  </td>
+                  <td style={{ color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{stillText(r)}</td>
+                  <td style={{ color: 'var(--theme-text1)', fontSize: 13 }}>
+                    {r.suggestion}
+                    {r.lastBought && (
+                      <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
+                        Last bought <span style={{ whiteSpace: 'nowrap' }}>{r.lastBought}</span>{r.supplier ? ` · ${r.supplier}` : ''}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

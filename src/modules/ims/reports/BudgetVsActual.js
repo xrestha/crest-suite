@@ -201,6 +201,10 @@ export default function BudgetVsActual() {
   const totalVariance = totalBudget - totalBudgetedActual
 
   const fmt = npr2
+  // D7 (S756): the page opens on the current month, which is still OPEN — bills are still being
+  // entered, so every category reads under budget until they are. No green/red and no Over/Under
+  // verdict until the month is closed; the figures themselves still print.
+  const provisional = selectedPeriod?.status === 'open'
   const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
@@ -239,6 +243,12 @@ export default function BudgetVsActual() {
         Enter a budget for each category — the app compares it against net purchases (purchases − bill discounts − returns) for the selected period, the same figure Monthly Summary shows. Budgets are saved automatically when you click out of the box.
       </div>
 
+      {!loading && !loadError && provisional && (
+        <div role="status" className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: 13, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>△ Provisional</strong> — this month is still open and its bills are still being entered, so spend reads low. Over / under budget is not judged until the month is closed.
+        </div>
+      )}
+
       {/* role="alert", above the table: someone who typed a budget, tabbed away and heard nothing
           has been told it saved. */}
       <ActionError error={saveError} className="action-error--top" />
@@ -257,7 +267,7 @@ export default function BudgetVsActual() {
                   <th>Category</th>
                   <th style={{ textAlign: 'right' }}><Tip text="Enter your target spend for this category. Saved automatically when you click outside the field.">Budget (NPR)</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Net purchases = gross purchases minus vendor returns for this category this period.">Actual Net (NPR)</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Budget − Actual. Positive (green) = under budget. Negative (red) = over budget.">Variance (NPR)</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Budget − Actual. Positive (green) = under budget. Negative (red) = over budget. Not coloured while the month is still open — its spend is not final.">Variance (NPR)</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Variance as % of budget. Shows how far over or under your target you are." width={220}>Variance %</Tip></th>
                   <th style={{ textAlign: 'center' }}>Status</th>
                 </tr>
@@ -299,15 +309,17 @@ export default function BudgetVsActual() {
                             row below still counts. */}
                         {actual !== 0 ? fmt(actual) : '—'}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: noBudget ? 'var(--theme-text2)' : isOver ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: noBudget ? 'var(--theme-text2)' : provisional ? 'var(--theme-text1)' : isOver ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                         {noBudget ? '—' : (variance >= 0 ? '+' : '') + fmt(variance)}
                       </td>
-                      <td style={{ textAlign: 'right', color: noBudget ? 'var(--theme-text2)' : isOver ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+                      <td style={{ textAlign: 'right', color: noBudget || provisional ? 'var(--theme-text2)' : isOver ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
                         {pct !== null ? fmtPct(pct) : '—'}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         {noBudget
                           ? <span style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>No Budget</span>
+                          : provisional
+                          ? <span title="The month is still open — judged once it is closed" style={{ fontSize: 11, color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 15%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>{isOver ? 'Above so far' : 'Within so far'}</span>
                           : isOver
                           ? <span style={{ fontSize: 11, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Over Budget</span>
                           : <span style={{ fontSize: 11, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', padding: '2px 10px', borderRadius: 'var(--radius-md)' }}>Under Budget</span>
@@ -351,10 +363,10 @@ export default function BudgetVsActual() {
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text3)' }}>
                     {totalActual !== 0 ? fmt(totalActual) : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 || provisional ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     {totalBudget > 0 ? (totalVariance >= 0 ? '+' : '') + fmt(totalVariance) : '—'}
                   </td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: totalBudget === 0 || provisional ? 'var(--theme-text2)' : totalVariance >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     {totalBudget > 0 ? fmtPct((totalVariance / totalBudget) * 100) : '—'}
                   </td>
                   <td></td>

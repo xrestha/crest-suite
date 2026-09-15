@@ -3,7 +3,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { npr, nprInt } from '../../../shared/nepalMoney'
@@ -13,16 +13,24 @@ import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
-import { allocateFifo, daysUntilExpiry, asOfForWindow, splitReturns } from './stockAgeingCalc'
+import {
+  daysUntilExpiry, asOfForWindow, splitReturns,
+  anchorToCounts, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods, periodMonthIndex,
+} from './stockAgeingCalc'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import {
-  BS_MONTHS, bsToAd, getBsFiscalYear, formatBsDay,
+  BS_MONTHS, bsToAd, daysInBsMonth, formatBsDay,
 } from '../../../utils/bsCalendar'
 
 const bsLabel = bs => (bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : '—')
+const monthLabel = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '—')
+
+// Shared word-for-word with Stock Ageing (S756, D19): on screen, in print and in the workbook.
+const BASIS = 'Quantities follow your stock counts; ages are estimated from purchase dates, oldest used first.'
+const WINDOW_MONTHS = 12
 
 // The date every batch's expiry is measured AGAINST.
 //
@@ -51,6 +59,10 @@ export default function FifoReport() {
   const [rows, setRows] = useState([])
   const [asOf, setAsOf] = useState(null)
   const [windowLabel, setWindowLabel] = useState('')
+  // The latest closed month whose count the quantities follow, and how many batch-holding items no
+  // count reached (S756, D19) — so the basis line is a checkable claim.
+  const [latestCount, setLatestCount] = useState(null)
+  const [uncountedItems, setUncountedItems] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [filterFlag, setFilterFlag] = useState('all')
@@ -111,19 +123,16 @@ export default function FifoReport() {
     //     of it that actually came off stock carried in from before. The new batches were
     //     over-consumed and expiry exposure was understated, in entirely believable rows.
     //
-    // The window is now every period in the same fiscal year UP TO AND INCLUDING the selected one
-    // — the window Stock Ageing already ages within — and stock carried into it is modelled as one
-    // undated batch consumed first (below). Selecting a period means "as at the end of that
-    // month", not "bought during that month".
+    // The window is the 12 months UP TO AND INCLUDING the selected one (S756, D19) — it was the
+    // fiscal year to date, which reset on Shrawan 1, so long-dated stock bought in Ashadh vanished
+    // from the expiry check the day the new year began. Stock carried into it is one undated batch
+    // consumed first (below). Selecting a period means "as at the end of that month".
     const selected = (allPeriods || []).find(p => p.id === periodId)
     if (!selected) { setRows([]); setAsOf(null); return }
-    const fy = getBsFiscalYear(selected.bs_year, selected.bs_month)
-    const inWindow = (allPeriods || [])
-      .filter(p => getBsFiscalYear(p.bs_year, p.bs_month) === fy)
-      .filter(p => p.bs_year < selected.bs_year || (p.bs_year === selected.bs_year && p.bs_month <= selected.bs_month))
-      .sort((a, b) => a.bs_year - b.bs_year || a.bs_month - b.bs_month)
+    const inWindow = rollingWindow(allPeriods, selected, WINDOW_MONTHS)
     const periodIds = inWindow.map(p => p.id)
     if (periodIds.length === 0) { setRows([]); setAsOf(null); return }
+    const closedIds = inWindow.filter(p => p.status === 'closed').map(p => p.id)
 
     const results = await Promise.all([
       // EVERY purchase in the window, not only the ones carrying an expiry date. A batch with no
@@ -135,20 +144,26 @@ export default function FifoReport() {
         .select('id, period_id, item_id, qty, rate, bs_day, expiry_date, items(name, uom, categories(name))')
         .in('period_id', periodIds)
         .order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'purchase_entry_id, item_id, qty')
+      // period_id: an off-batch return comes off in ITS month, before that month's count (S756).
+      fetchAllRows(() => scopedFrom('vendor_returns', 'purchase_entry_id, item_id, qty, period_id')
         .in('period_id', periodIds).order('id')),
-      // Paged (S528/S529): every read below spans a fiscal year to date, so all of them are well
+      // Paged (S528/S529): every read below spans up to twelve periods, so all of them are well
       // past PostgREST's silent 1000-row cap — and a truncated read here understates the
       // consumption netted off each batch, overstating expiry exposure with no error to catch.
       fetchAllRows(() => supabase.from('sales_entries')
         .select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('wastages')
-        .select('item_id, qty').in('period_id', periodIds).order('id')),
+        .select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('staff_meals')
-        .select('item_id, qty').in('period_id', periodIds).order('id')),
+        .select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       // Only the FIRST period's opening count — that is the stock carried into the window.
       fetchAllRows(() => supabase.from('opening_stock')
         .select('item_id, qty').eq('period_id', periodIds[0]).order('id')),
+      // The anchors (S756, D19): closing counts of the window's CLOSED months, paged and chunked.
+      // A truncated read is indistinguishable from "not counted", so the estimate would silently
+      // stand in for the count.
+      fetchAllRowsChunked(closedIds, ids => supabase.from('closing_stock')
+        .select('period_id, item_id, physical_qty').in('period_id', ids).order('id')),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below into a confident report (S612).
@@ -156,14 +171,14 @@ export default function FifoReport() {
     if (failed) { setLoadError(failed); setRows([]); return }
     const [
       { data: purchases }, { data: returns }, { data: sales },
-      { data: wastages }, { data: staffMeals }, { data: opening },
+      { data: wastages }, { data: staffMeals }, { data: opening }, { data: closing },
     ] = results
 
     // Returns come off their own purchase line where that line is IN the window; an orphan return,
     // or one against a bill from before the window (S756 — it used to match no batch and vanish),
-    // still left the building and is treated as consumption of that item (splitReturns, shared
-    // with Stock Ageing).
-    const { byEntry: returnedByEntry, byItem: returnedByItem } =
+    // still left the building and is treated as consumption of that item IN ITS MONTH
+    // (splitReturns, shared with Stock Ageing).
+    const { byEntry: returnedByEntry, byPeriodItem: returnedByPeriodItem } =
       splitReturns(returns, new Set((purchases || []).map(p => p.id)))
 
     const periodById = Object.fromEntries(inWindow.map(p => [p.id, p]))
@@ -184,7 +199,7 @@ export default function FifoReport() {
     for (const o of opening || []) {
       const qty = parseFloat(o.qty) || 0
       if (qty <= 0) continue
-      batches.push({ item_id: o.item_id, qty, rate: 0, date: windowStart, carriedForward: true, entry: null })
+      batches.push({ item_id: o.item_id, qty, rate: 0, date: windowStart, period_id: periodIds[0], carriedForward: true, entry: null })
     }
     for (const p of purchases || []) {
       const qty = Math.max(0, (parseFloat(p.qty) || 0) - (returnedByEntry[p.id] || 0))
@@ -192,7 +207,7 @@ export default function FifoReport() {
       const date = adDateOf(p.period_id, p.bs_day)
       if (!date) continue
       batches.push({
-        item_id: p.item_id, qty, rate: parseFloat(p.rate) || 0, date,
+        item_id: p.item_id, qty, rate: parseFloat(p.rate) || 0, date, period_id: p.period_id,
         entry: p, returnedQty: returnedByEntry[p.id] || 0,
       })
     }
@@ -206,12 +221,7 @@ export default function FifoReport() {
     // consumption, putting stock back and overstating what was at risk. Both directions were live,
     // and both produced rows that looked entirely ordinary.
     const depleting = selectDepletingSalesAcrossPeriods(sales || [])
-    const soldByRecipe = {}
-    for (const s of depleting) {
-      if (!s.recipe_id) continue
-      soldByRecipe[s.recipe_id] = (soldByRecipe[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
-    }
-    const soldRecipeIds = Object.keys(soldByRecipe)
+    const soldRecipeIds = [...new Set(depleting.map(s => s.recipe_id).filter(Boolean))]
     // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
     // consumption figure below silently came out as wastage + staff meals only.
     let breakdown = {}
@@ -225,21 +235,24 @@ export default function FifoReport() {
     }
     if (!periodReq.isCurrent(periodId)) return   // superseded while the recipe walk was in flight
 
-    const consumed = {}
-    for (const [recipeId, ingRows] of Object.entries(breakdown)) {
-      const sold = soldByRecipe[recipeId] || 0
-      if (sold <= 0) continue
-      for (const { item_id, qty } of ingRows) consumed[item_id] = (consumed[item_id] || 0) + sold * qty
-    }
-    for (const w of wastages || []) consumed[w.item_id] = (consumed[w.item_id] || 0) + (parseFloat(w.qty) || 0)
-    for (const m of staffMeals || []) consumed[m.item_id] = (consumed[m.item_id] || 0) + (parseFloat(m.qty) || 0)
-    for (const [itemId, q] of Object.entries(returnedByItem)) consumed[itemId] = (consumed[itemId] || 0) + q
+    // Consumption per MONTH, so each month's count settles what came before it (S756, D19).
+    const consumedByPeriod = sumConsumptionByPeriod({
+      sales: depleting, breakdown, wastages, staffMeals, returnsByPeriodItem: returnedByPeriodItem,
+    })
 
-    // ONE shared FIFO allocation, not a second copy — Stock Ageing solves the same problem the
-    // same way and `allocateFifo` is where that arithmetic lives (see stockAgeingCalc.js).
+    // ONE shared walk, not a second copy — Stock Ageing solves the same problem the same way and
+    // `anchorToCounts` is where that arithmetic lives (stockAgeingCalc.js, tested). Quantities follow
+    // each closed month's count: a lower count takes the missing stock off the OLDEST batches
+    // (so a stolen or spilled case stops reading as still-to-expire), a higher count adds an
+    // undated surplus with no expiry, which is never shown here.
     // `allPeriods` is newest-first (init's order), so [0] is the newest the client has.
     const ref = asOfForWindow(selected, { isNewest: allPeriods?.[0]?.id === selected.id })
-    const allocated = allocateFifo(batches, consumed)
+    const { batches: allocated, lastCountByItem } = anchorToCounts({
+      periods: inWindow.map(p => ({ id: p.id, endDate: bsToAd(p.bs_year, p.bs_month, daysInBsMonth(p.bs_year, p.bs_month)) })),
+      batches,
+      consumedByPeriod,
+      countsByPeriod: countsFromClosedPeriods(closing, inWindow),
+    })
 
     const reportRows = allocated
       .filter(b => b.entry && b.entry.expiry_date && b.remaining > 0.001)
@@ -260,6 +273,10 @@ export default function FifoReport() {
           originalQty: parseFloat(p.qty) || 0,
           returnedQty: b.returnedQty || 0,
           consumedQty: b.consumed,
+          // The part of consumedQty a stock count took off (S756, D19) — stock that left without
+          // being recorded as used.
+          countedOffQty: b.countedOff || 0,
+          countedIn: periodById[lastCountByItem[b.item_id]] || null,
           rate: parseFloat(p.rate) || 0,
           value: b.remaining * (parseFloat(p.rate) || 0),
           expiryDate: p.expiry_date,
@@ -270,11 +287,17 @@ export default function FifoReport() {
       })
       .sort((a, b) => (a.daysUntilExpiry ?? 1e9) - (b.daysUntilExpiry ?? 1e9))
 
+    // Items still holding a batch that no count reached — they follow the estimate alone.
+    const holding = new Set(allocated.filter(b => b.remaining > 0.001).map(b => b.item_id))
+    const counted = Object.values(lastCountByItem).map(pid => periodById[pid]).filter(Boolean)
+
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setAsOf(ref)
     setWindowLabel(inWindow.length === 1
-      ? `${BS_MONTHS[inWindow[0].bs_month - 1]} ${inWindow[0].bs_year}`
-      : `${BS_MONTHS[inWindow[0].bs_month - 1]} ${inWindow[0].bs_year} – ${BS_MONTHS[selected.bs_month - 1]} ${selected.bs_year}`)
+      ? monthLabel(inWindow[0])
+      : `${monthLabel(inWindow[0])} – ${monthLabel(selected)}`)
+    setLatestCount(counted.reduce((a, p) => (!a || periodMonthIndex(p) > periodMonthIndex(a) ? p : a), null))
+    setUncountedItems([...holding].filter(id => !lastCountByItem[id]).length)
     setRows(reportRows)
   }
 
@@ -300,7 +323,10 @@ export default function FifoReport() {
   // What the reader is actually looking at, in one line — on screen, in the print header and in
   // the workbook alike. The filter bar is `no-print`, so a printed sheet otherwise showed a
   // filtered table with no record anywhere of which filter produced it (S594).
-  const scopeLine = `Stock on hand as at ${asOfLabel} · batches bought ${windowLabel || periodLabel} · ${flagLabel} · ${filterCat === 'all' ? 'All categories' : filterCat}`
+  // S756 (D19): the basis and the latest count go in the scope too — "quantities follow the counts"
+  // is only checkable if the reader is told which count.
+  const countLabel = latestCount ? `counts to end of ${monthLabel(latestCount)}` : 'no closed-month count in the window'
+  const scopeLine = `Stock on hand as at ${asOfLabel} · batches bought ${windowLabel || periodLabel} (12 months) · quantities follow ${countLabel} · ${flagLabel} · ${filterCat === 'all' ? 'All categories' : filterCat}`
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
@@ -312,7 +338,9 @@ export default function FifoReport() {
       'Qty Still On Hand': Number(r.qty.toFixed(3)),
       'Original Qty': Number(r.originalQty.toFixed(3)),
       'Returned Qty': Number((r.returnedQty || 0).toFixed(3)),
-      'Consumed Qty (FIFO)': Number((r.consumedQty || 0).toFixed(3)),
+      'Used or Counted Off Qty (FIFO)': Number((r.consumedQty || 0).toFixed(3)),
+      'of which Counted Off': Number((r.countedOffQty || 0).toFixed(3)),
+      'Quantity Follows': r.countedIn ? `Count, end of ${monthLabel(r.countedIn)}` : 'Estimate (no count in window)',
       'Rate': r.rate,
       'Value (NPR)': Math.round(r.value),
       'Expiry Date': r.expiryDate,
@@ -325,8 +353,10 @@ export default function FifoReport() {
       scopeLine,
       rows: data,
       notes: [
+        BASIS,
         `Days Left is measured to ${asOfLabel}${asOf && !asOf.isToday ? ' — the end of the selected period, not today.' : '.'}`,
-        'FIFO assumption: each item’s consumption is taken off its oldest batches first. Not a batch-precise trace.',
+        'Where a closed month has a stock count, each item is set to that count: stock the count did not find comes off the oldest batches first ("Counted Off"). Not a batch-precise trace.',
+        uncountedItems > 0 ? `${uncountedItems} item(s) had no count in the window and follow purchases less recipe usage.` : 'Every item listed was reached by a stock count in the window.',
         'Stock carried into the window absorbs consumption before any batch listed here.',
       ],
     })
@@ -351,6 +381,7 @@ export default function FifoReport() {
       <div className="print-only" style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>FIFO / Expiry Report</h2>
         <div style={{ fontSize: 12 }}>{scopeLine}</div>
+        <div style={{ fontSize: 12 }}>{BASIS}</div>
       </div>
 
       <div className="page-header page-header--split no-print">
@@ -367,6 +398,16 @@ export default function FifoReport() {
               </Tip>
             </span>
           </div>
+          {/* The basis, stated where the reader looks first (S756, D19). Waits for the load so it
+              never names the previous month's count under the new month's chip. */}
+          {!loading && !loadError && (
+            <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '6px 0 0' }}>
+              {BASIS}{' '}
+              {latestCount
+                ? <>Latest count used: end of <strong>{monthLabel(latestCount)}</strong>{uncountedItems > 0 ? ` · ${uncountedItems} item${uncountedItems === 1 ? '' : 's'} with no count in the window follow the estimate` : ''}.</>
+                : <strong style={{ color: 'var(--theme-amber-text)' }}>No closed month in the window has a stock count, so every quantity is an estimate.</strong>}
+            </p>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -453,7 +494,7 @@ export default function FifoReport() {
             <div className="empty-state">
               <div className="empty-state-icon">◷</div>
               <p className="empty-state-text">
-                No stock on hand from batches with an expiry date, for purchases up to {periodLabel}.
+                No stock on hand from batches with an expiry date, for purchases in the 12 months to {periodLabel}.
                 Add expiry dates when recording purchases so perishable stock shows up here.
               </p>
             </div>
@@ -469,8 +510,8 @@ export default function FifoReport() {
                   <tr>
                     <th>Item</th>
                     <th>Category</th>
-                    <th><Tip text="The day this batch was bought. Batches from earlier months in the same fiscal year are included — expiry does not respect a month boundary." width={280}>Bought</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="What is left of this batch: purchased quantity, less returns, less this window's consumption (sales usage, wastage, staff meals) allocated oldest-batch-first. Stock carried into the window is consumed before any batch listed here. Not batch-precise — nothing in the data records which lot a portion came out of." width={320}>On Hand</Tip></th>
+                    <th><Tip text="The day this batch was bought. Batches from the 12 months up to the selected month are included — expiry does not respect a month or a fiscal-year boundary." width={280}>Bought</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="What is left of this batch: purchased quantity, less returns, less consumption (sales usage, wastage, staff meals) taken oldest-batch-first. At every closed month with a stock count the item is set to what was counted — stock the count did not find comes off the oldest batches too. Stock carried into the window is consumed before any batch listed here. Not batch-precise — nothing in the data records which lot a portion came out of." width={320}>On Hand</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returned</th>
                     <th>UOM</th>
                     <th style={{ textAlign: 'right' }}>Rate</th>

@@ -4,7 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { supabase } from '../../../supabaseClient'
@@ -15,39 +15,43 @@ import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
+import { bsToAd, daysInBsMonth, BS_MONTHS } from '../../../utils/bsCalendar'
 import {
-  bsToAd, getBsFiscalYear, BS_MONTHS,
-} from '../../../utils/bsCalendar'
-import { AGE_BANDS, buildAgeing, ageInDays, asOfForWindow, splitReturns } from './stockAgeingCalc'
+  AGE_BANDS, ageAllocated, ageInDays, asOfForWindow, splitReturns,
+  anchorToCounts, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods, periodMonthIndex,
+} from './stockAgeingCalc'
 
 
 // How old stock has to be before the page calls it capital worth acting on. Matches the last
 // band's floor so the headline figure and the column a user clicks through to always agree.
 const STALE_FROM_DAYS = 91
 
+// How far back the window reaches (S756, D19). See `rollingWindow` for why it is no longer the
+// fiscal year.
+const WINDOW_MONTHS = 12
+
+// The basis, in the owner's words. It goes on screen, in print and into the workbook verbatim
+// (S756, D19): a reader has to know that the quantities are counted and the ages are estimated
+// before trusting either.
+const BASIS = 'Quantities follow your stock counts; ages are estimated from purchase dates, oldest used first.'
+
 const bsLabel = bs => (bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : '—')
+const monthLabel = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '—')
 
 // The date every batch is aged AGAINST, and the single most important thing this page has to say
 // about itself.
 //
-// WHY (S594): this used to be `new Date()` unconditionally, while the FY selector accepted any
-// past fiscal year. Picking FY 2081/82 therefore aged every surviving batch to TODAY — so every
-// item landed in the 90+ band, the headline "Capital in 90+ Day Stock" turned amber and reported
-// the entire stock value, and every row highlighted. It failed silently, and in the alarming
-// direction, which is the direction that provokes action. An ageing schedule without an as-of
-// date is the first thing an accountant checks for, and this one did not have one anywhere: not
-// in the subtitle, not in the print title, not in the exported workbook.
+// WHY (S594): this used to be `new Date()` unconditionally, while the selector accepted any past
+// fiscal year — so every surviving batch landed in the 90+ band, the headline turned amber and
+// reported the entire stock value. A past window is aged as at the END of its last period.
 //
-// A past fiscal year is aged as at the END of its last period, which is the only date that makes
-// the answer mean anything — "how old was the stock when that year finished".
+// S756: the NEWEST period is aged to today in Nepal (`asOfForWindow`, tested, shared with FIFO /
+// Expiry) — early in a month, before the next period is opened, the newest period is last month.
 //
-// S756: the NEWEST fiscal year is aged to today in Nepal, not only the current FY — early in
-// Shrawan, before the new year's first period is opened, the newest year is last year, and ageing
-// it to its own Ashadh end hid every day since. The rule is `asOfForWindow` in stockAgeingCalc.js
-// (tested), shared with FIFO / Expiry.
-function asOfForFy(periodsInFy, isNewest) {
-  return asOfForWindow(periodsInFy[periodsInFy.length - 1], { isNewest })
-}
+// S756 (D19): the selector is now an AS-AT MONTH, not a fiscal year. The window is the 12 months
+// ending with that month, so "which year?" stopped being a question the page can ask; "as at when?"
+// is the one it answers. It matches FIFO / Expiry's period selector, which is the least surprising
+// thing for a reader moving between the two.
 
 export default function StockAgeing() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -56,33 +60,36 @@ export default function StockAgeing() {
   const biz = useBizInfo()
 
   const [periods, setPeriods] = useState([])
-  const [fyOptions, setFyOptions] = useState([])
-  const [selectedFy, setSelectedFy] = useState('')
+  const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
   const [totals, setTotals] = useState(null)
   const [itemMeta, setItemMeta] = useState({})
   const [categories, setCategories] = useState([])
   const [filterCat, setFilterCat] = useState('all')
   const [filterBand, setFilterBand] = useState('all')
-  // How many days back the window itself reaches. The report cannot see past it, and early in a
-  // fiscal year that is the single most important caveat on the page (S718).
+  // How many days back the window itself reaches. The report cannot see past it (S718).
   const [windowDays, setWindowDays] = useState(0)
+  const [windowLabel, setWindowLabel] = useState('')
   // Whether the window held any stock to age in the first place. "Everything was used up" and
-  // "nothing was ever bought or carried in" are different facts and the empty state used to assert
-  // the first one for both (S718).
+  // "nothing was ever bought or carried in" are different facts (S718).
   const [hadBatches, setHadBatches] = useState(false)
+  // Which closed month's count each item's quantity follows, and the latest across the report
+  // (S756, D19) — named so the basis is a checkable claim, not a slogan.
+  const [lastCountByItem, setLastCountByItem] = useState({})
   const [asOf, setAsOf] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
-  // Overlapping-load guard (S601 class): arrowing the FY select fires a whole-fiscal-year load per
-  // keypress, and the last response to land would win the figures while `selectedFy` — which drives
-  // the subtitle, the print title and the workbook's scopeLine — is whatever was picked last.
-  const fyReq = useLatestRequest()
+  // Overlapping-load guard (S601 class): arrowing the month select fires a 12-month load per
+  // keypress, and the last response to land would win the figures while the label — subtitle,
+  // print title, workbook scopeLine and filename — is whatever was picked last.
+  const periodReq = useLatestRequest()
 
-  // authLoading is a real dependency: a hard load lands here while auth is still resolving, and
-  // with [clientId] alone the guard fails once and nothing ever re-fires — the page sits on the
-  // loading line forever. Caught live on ConsolidatedPnl and backported here (S594).
+  // authLoading is a real dependency: a hard load lands here while auth is still resolving (S594).
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function resetFigures() {
+    setRows([]); setTotals(null); setWindowDays(0); setWindowLabel(''); setHadBatches(false); setLastCountByItem({})
+  }
 
   async function init() {
     setLoading(true)
@@ -96,97 +103,87 @@ export default function StockAgeing() {
     const [{ data: p }, { data: c }] = results
     setPeriods(p || [])
     setCategories(c || [])
-    const fys = [...new Set((p || []).map(x => getBsFiscalYear(x.bs_year, x.bs_month)))]
-    setFyOptions(fys)
-    if (fys.length > 0) {
-      // init() claims the page too — it calls setSelectedFy, which no guard covers, so changing FY
-      // during the first load left the dropdown snapping back to the default over another year's
-      // table. The hook's own contract says so; S698 and S709 fixed the same omission elsewhere.
-      fyReq.begin(fys[0])
-      setSelectedFy(fys[0])
-      await buildReport(fys[0], p || [])
+    // The newest period — the report's default is "as at today" (asOfForWindow).
+    const initial = (p || [])[0]
+    if (initial) {
+      // init() claims the page too — it sets the label, which no guard covers (S698/S709/S718).
+      periodReq.begin(initial.id)
+      setSelectedPeriod(initial)
+      await buildReport(initial.id, p || [])
     }
     setLoading(false)
   }
 
-  async function handleFyChange(fy) {
-    fyReq.begin(fy)   // claim the page before any await
-    setSelectedFy(fy)
+  async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await
+    setSelectedPeriod(periods.find(p => p.id === periodId) || null)
     setLoading(true)
-    await buildReport(fy, periods)
+    await buildReport(periodId, periods)
     setLoading(false)
   }
 
-  async function buildReport(fy, allPeriods) {
+  async function buildReport(periodId, allPeriods) {
     setLoadError(null)
-    // Every period in the chosen fiscal year, oldest first — the window this report ages within.
-    const inFy = (allPeriods || [])
-      .filter(p => getBsFiscalYear(p.bs_year, p.bs_month) === fy)
-      .sort((a, b) => a.bs_year - b.bs_year || a.bs_month - b.bs_month)
-    const periodIds = inFy.map(p => p.id)
-    if (periodIds.length === 0) { setRows([]); setTotals(null); setWindowDays(0); setHadBatches(false); setAsOf(null); return }
+    const selected = (allPeriods || []).find(p => p.id === periodId)
+    // Every period in the 12 months ending with the selected one, oldest first (S756, D19).
+    const inWindow = rollingWindow(allPeriods, selected, WINDOW_MONTHS)
+    const periodIds = inWindow.map(p => p.id)
+    if (periodIds.length === 0) { resetFigures(); setAsOf(null); return }
+    const closedIds = inWindow.filter(p => p.status === 'closed').map(p => p.id)
 
     const results = await Promise.all([
       // .eq('is_active', true) per the S436 rule: never value stock off an inactive item.
-      // Paged (S717): `itemById` is what admits a batch into the report at all, so a truncated
-      // item read does not shorten a column — it drops the tail of the book's stock out of the
-      // ageing entirely, and the headline "Capital in 90+ Day Stock" comes out low.
+      // Paged (S717): `itemById` is what admits a batch into the report at all.
       fetchAllRows(() => scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)')
         .eq('is_active', true).eq('is_sub_recipe', false).order('id')),
-      // Every read below spans a whole fiscal year, so all of them are paged — a year of
-      // purchase lines and POS-synced sales is far past the silent 1000-row cap.
+      // Every read below spans up to twelve periods, so all of them are paged.
       fetchAllRows(() => supabase.from('purchase_entries')
         .select('id, period_id, item_id, qty, rate, bs_day').in('period_id', periodIds).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'purchase_entry_id, item_id, qty')
+      // period_id: an off-batch return comes off in ITS month, before that month's count (S756).
+      fetchAllRows(() => scopedFrom('vendor_returns', 'purchase_entry_id, item_id, qty, period_id')
         .in('period_id', periodIds).order('id')),
-      // period_id is selected because the depletion rule below is applied PER PERIOD (S718) —
-      // `bs_day` is a day number within a month, so a year's rows handed to the single-period form
-      // collide across months.
+      // period_id: the depletion rule is applied PER PERIOD (S718) and consumption is now summed
+      // per period for the count anchoring (S756).
       fetchAllRows(() => supabase.from('sales_entries')
         .select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('wastages')
-        .select('item_id, qty').in('period_id', periodIds).order('id')),
+        .select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('staff_meals')
-        .select('item_id, qty').in('period_id', periodIds).order('id')),
-      // Only the FIRST period's opening count — that is the stock carried into the window. Paged
-      // like everything else here: it is one row per item, so past 1000 SKUs the carried-forward
-      // batch silently went missing for the tail of the book and that stock aged from its
-      // purchase date instead — younger than it is, which is the direction that hides the finding
-      // this report exists for (S717).
+        .select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
+      // Only the FIRST period's opening count — the stock carried into the window (S717: paged).
       fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodIds[0]).order('id')),
+      // The anchors (S756, D19): closing counts of the window's CLOSED months. One row per item per
+      // month × 12 months crosses the 1000-row cap at ~85 items, and a truncated read is
+      // indistinguishable from "not counted" — the estimate would silently stand in for the count.
+      fetchAllRowsChunked(closedIds, ids => supabase.from('closing_stock')
+        .select('period_id, item_id, physical_qty').in('period_id', ids).order('id')),
       scopedFrom('recipes', 'id'),
     ])
 
-    if (!fyReq.isCurrent(fy)) return   // superseded by a newer FY selection
-    // A failed read must never reach the arithmetic below: every one of these results flows
-    // through `|| []`, so an RLS rejection or a stalled token would produce a complete, confident
-    // report of NPR 0 rather than an error. See shared/queryError.js.
+    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer selection
+    // A failed read must never reach the arithmetic below (S612).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setRows([]); setTotals(null); setWindowDays(0); setHadBatches(false); return }
+    if (failed) { setLoadError(failed); resetFigures(); return }
 
     const [
       { data: items }, { data: purchases }, { data: returns },
       { data: sales }, { data: wastages }, { data: staffMeals },
-      { data: opening }, { data: clientRecipes },
+      { data: opening }, { data: closing }, { data: clientRecipes },
     ] = results
 
     const itemById = Object.fromEntries((items || []).map(i => [i.id, i]))
-    setItemMeta(itemById)
 
-    const periodById = Object.fromEntries(inFy.map(p => [p.id, p]))
-    const adDateOf = (periodId, bsDay) => {
-      const p = periodById[periodId]
+    const periodById = Object.fromEntries(inWindow.map(p => [p.id, p]))
+    const adDateOf = (pid, bsDay) => {
+      const p = periodById[pid]
       if (!p) return null
-      // bsToAd returns LOCAL midnight — used here only for day-count arithmetic, never serialised
-      // (the S550 .toISOString() trap shifts the date by a day at Nepal's +05:45).
+      // bsToAd returns LOCAL midnight — day-count arithmetic only, never serialised (S550).
       return bsToAd(p.bs_year, p.bs_month, Math.min(Math.max(parseInt(bsDay, 10) || 1, 1), 32))
     }
 
-    // Returns come off their own purchase line where that line is in the window, so a returned
-    // batch stops ageing as if it were still on the shelf. A return against a bill from an earlier
-    // year used to match no batch and was never counted at all (S756); splitReturns sends it, like
-    // an orphan return, to the item's consumption, where FIFO takes it off the carried-in stock.
-    const { byEntry: returnedByEntry, byItem: returnedByItem } =
+    // Returns come off their own purchase line where that line is in the window; one against a bill
+    // from before the window, or with no line, is consumption of the item in its month (S756).
+    const { byEntry: returnedByEntry, byPeriodItem: returnedByPeriodItem } =
       splitReturns(returns, new Set((purchases || []).map(p => p.id)))
 
     const batches = []
@@ -195,7 +192,7 @@ export default function StockAgeing() {
       const qty = parseFloat(o.qty) || 0
       if (qty <= 0 || !itemById[o.item_id]) continue
       batches.push({
-        item_id: o.item_id, qty,
+        item_id: o.item_id, qty, period_id: periodIds[0],
         rate: parseFloat(itemById[o.item_id].per_uom_rate) || 0,
         date: windowStart, carriedForward: true,
       })
@@ -206,58 +203,50 @@ export default function StockAgeing() {
       if (qty <= 0) continue
       const date = adDateOf(p.period_id, p.bs_day)
       if (!date) continue
-      batches.push({ item_id: p.item_id, qty, rate: parseFloat(p.rate) || 0, date })
+      batches.push({ item_id: p.item_id, qty, rate: parseFloat(p.rate) || 0, date, period_id: p.period_id })
     }
 
-    // Consumption over the window: recipe-exploded sales + wastage + staff meals, exactly what
-    // FifoReport nets off. Sales go through the shared POS-supersedes-manual rule so a client
-    // running POS *and* manual bulk entry doesn't count the same dish twice and over-consume its
-    // own batches — which here would make real stock vanish from the shelf rather than merely skew
-    // a variance.
-    //
-    // ACROSS PERIODS, not in one pass (S718). This window is a whole fiscal year and the rule is
-    // keyed on `bs_day`, a day number *within a month* — so the single-period form let a POS sale
-    // on 5 Shrawan suppress the manual sale of the same dish on 5 Bhadra, and let any Bulk row be
-    // suppressed by a POS sale of that dish anywhere in the year. Every suppressed row is
-    // consumption that never gets subtracted, so stock that was eaten went on ageing on the shelf
-    // and the 90+ headline read HIGH — the alarming direction, on the figure the page exists for.
+    // The recipe walk throws on a failed read (S695).
     const recipeIds = (clientRecipes || []).map(r => r.id)
-    // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
-    // batch on the shelf read as never consumed.
     let breakdown = {}
     try {
       breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
     } catch (err) {
-      if (!fyReq.isCurrent(fy)) return
-      setLoadError(err); setRows([]); setTotals(null); setWindowDays(0); setHadBatches(false); return
+      if (!periodReq.isCurrent(periodId)) return
+      setLoadError(err); resetFigures(); return
     }
-    if (!fyReq.isCurrent(fy)) return   // superseded while the recipe walk was in flight
-    const soldByRecipe = {}
-    for (const s of selectDepletingSalesAcrossPeriods(sales || [])) {
-      soldByRecipe[s.recipe_id] = (soldByRecipe[s.recipe_id] || 0) + (parseFloat(s.qty_sold) || 0)
-    }
-    const consumed = {}
-    for (const [recipeId, ingRows] of Object.entries(breakdown)) {
-      const sold = soldByRecipe[recipeId] || 0
-      if (sold <= 0) continue
-      for (const { item_id, qty } of ingRows) consumed[item_id] = (consumed[item_id] || 0) + sold * qty
-    }
-    for (const w of wastages || []) consumed[w.item_id] = (consumed[w.item_id] || 0) + (parseFloat(w.qty) || 0)
-    for (const m of staffMeals || []) consumed[m.item_id] = (consumed[m.item_id] || 0) + (parseFloat(m.qty) || 0)
-    // A return with no purchase line to attach to still left the building — take it off the
-    // item's stock as consumption rather than letting it age on the shelf forever.
-    for (const [itemId, q] of Object.entries(returnedByItem)) consumed[itemId] = (consumed[itemId] || 0) + q
+    if (!periodReq.isCurrent(periodId)) return   // superseded while the recipe walk was in flight
 
-    // Newest FY the client has: the FY of its latest period (fiscal-year labels do not sort as
-    // strings across a century, so compare the periods, not the labels).
-    const latest = (allPeriods || []).reduce((a, p) => (!a || p.bs_year > a.bs_year || (p.bs_year === a.bs_year && p.bs_month > a.bs_month) ? p : a), null)
-    const ref = asOfForFy(inFy, !!latest && getBsFiscalYear(latest.bs_year, latest.bs_month) === fy)
+    // Consumption per MONTH: recipe-exploded sales (through the shared POS-supersedes-manual rule,
+    // partitioned by period — S718), wastage, staff meals, off-batch returns.
+    const consumedByPeriod = sumConsumptionByPeriod({
+      sales: selectDepletingSalesAcrossPeriods(sales || []),
+      breakdown, wastages, staffMeals, returnsByPeriodItem: returnedByPeriodItem,
+    })
+
+    // Anchor to the counts (S756, D19) — see anchorToCounts for the walk.
+    const { batches: anchored, lastCountByItem: lastCounts } = anchorToCounts({
+      periods: inWindow.map(p => ({ id: p.id, endDate: bsToAd(p.bs_year, p.bs_month, daysInBsMonth(p.bs_year, p.bs_month)) })),
+      batches,
+      consumedByPeriod,
+      countsByPeriod: countsFromClosedPeriods(closing, inWindow),
+      // A surplus the count found has no purchase line; valued at the master rate, like carried-in
+      // stock, and disclosed the same way.
+      surplusRateOf: id => parseFloat(itemById[id]?.per_uom_rate) || 0,
+      itemIds: new Set(Object.keys(itemById)),
+    })
+
+    const isNewest = allPeriods?.[0]?.id === periodId   // init orders newest-first
+    const ref = asOfForWindow(selected, { isNewest })
+    const { items: aged, totals: agedTotals } = ageAllocated(anchored, ref.date)
+    setItemMeta(itemById)
     setAsOf(ref)
-    const { items: aged, totals: agedTotals } = buildAgeing(batches, consumed, ref.date)
     setRows(aged.sort((a, b) => b.bands['90+'].value - a.bands['90+'].value || b.value - a.value))
     setTotals(agedTotals)
+    setLastCountByItem(Object.fromEntries(Object.entries(lastCounts).map(([k, pid]) => [k, periodById[pid]])))
     setWindowDays(ageInDays(windowStart, ref.date))
-    setHadBatches(batches.length > 0)
+    setWindowLabel(inWindow.length === 1 ? monthLabel(inWindow[0]) : `${monthLabel(inWindow[0])} – ${monthLabel(selected)}`)
+    setHadBatches(anchored.length > 0)
   }
 
   const filtered = rows.filter(r => {
@@ -271,12 +260,7 @@ export default function StockAgeing() {
   const staleValue = totals ? totals.bands['90+'].value : 0
   const stalePct = totals && totals.value > 0 ? (staleValue / totals.value) * 100 : 0
   const staleItems = rows.filter(r => r.bands['90+'].qty > 0).length
-  // The TOTAL row follows the TABLE (S718). It used to render `totals`, the whole report's
-  // figures, under a filtered set of rows — labelled "(all items, by value)", which is honest but
-  // not useful: a reader who has filtered to Dairy wants Dairy's total, and a footer that cannot be
-  // reconciled with the rows directly above it discredits the rows as much as itself (the S594
-  // Supplier Contribution lesson). The KPI cards stay whole-report by their own documented
-  // decision, and the filter bar states the count, so the two scopes are never unlabelled.
+  // The TOTAL row follows the TABLE (S718); the KPI cards stay whole-report.
   const isFiltered = filterCat !== 'all' || filterBand !== 'all'
   const footTotals = (() => {
     const acc = { value: 0, bands: Object.fromEntries(AGE_BANDS.map(b => [b.key, 0])) }
@@ -288,22 +272,28 @@ export default function StockAgeing() {
   })()
   const cfValue = totals ? totals.carriedForwardValue : 0
   const cfItems = rows.filter(r => r.carriedForwardQty > 0).length
-  // Carried-forward stock the window is too short to have placed in the 90+ band. While this is
-  // above zero the 90+ figure is a FLOOR, not a total, and the page must not award it a ✓ (S718).
+  const surplusValue = totals ? totals.countSurplusValue : 0
+  // Carried-in stock (at the window start, or found by a count) sitting in a younger band. While
+  // this is above zero the 90+ figure is a FLOOR, not a total, and gets no ✓ (S718).
   const unknownAgeValue = totals ? totals.unknownAgeValue : 0
   const staleIsFloor = unknownAgeValue > 0
 
+  // The latest count any item's quantity follows, and how many on-hand items no count reached.
+  const latestCount = Object.values(lastCountByItem).reduce((a, p) => (!a || (p && periodMonthIndex(p) > periodMonthIndex(a)) ? p : a), null)
+  const uncountedItems = rows.filter(r => !lastCountByItem[r.item_id]).length
+  const countLabel = latestCount ? `counts to end of ${monthLabel(latestCount)}` : 'no closed-month count in the window'
+
+  const periodLabel = monthLabel(selectedPeriod)
   const asOfLabel = asOf ? `${bsLabel(asOf.bs)}${asOf.isToday ? ' (today)' : ''}` : '—'
   const bandLabel = filterBand === 'all' ? 'All ages' : AGE_BANDS.find(b => b.key === filterBand)?.label
-  // What the reader is actually looking at, in one line. It goes into the print output and the
-  // workbook as well as on screen: the filter bar is `no-print`, so a printed sheet used to show a
-  // filtered table with no record anywhere of which filter produced it.
-  const scopeLine = `FY ${selectedFy} · aged as at ${asOfLabel} · ${bandLabel} · ${filterCat === 'all' ? 'All categories' : filterCat}`
+  // What the reader is looking at, in one line — on screen, in print and in the workbook.
+  const scopeLine = `12 months to ${periodLabel}${windowLabel ? ` (${windowLabel})` : ''} · aged as at ${asOfLabel} · quantities follow ${countLabel} · ${bandLabel} · ${filterCat === 'all' ? 'All categories' : filterCat}`
 
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const data = filtered.map(r => {
       const meta = itemMeta[r.item_id] || {}
+      const counted = lastCountByItem[r.item_id]
       const row = {
         'Item': meta.name || r.item_id,
         'Category': meta.categories?.name || '',
@@ -311,6 +301,8 @@ export default function StockAgeing() {
         'On Hand Qty': Number(r.qty.toFixed(3)),
         'Total Value (NPR)': Math.round(r.value),
         'Oldest (days)': r.oldestDays,
+        'Quantity Follows': counted ? `Count, end of ${monthLabel(counted)}` : 'Estimate (no count in window)',
+        'Unknown-Age Qty': Number(r.carriedForwardQty.toFixed(3)),
       }
       for (const b of AGE_BANDS) {
         row[`${b.label} Qty`] = Number(r.bands[b.key].qty.toFixed(3))
@@ -324,31 +316,30 @@ export default function StockAgeing() {
       scopeLine,
       rows: data,
       notes: [
-        `Ages are measured to ${asOfLabel}${asOf && !asOf.isToday ? ' — the end of the selected fiscal year, not today.' : '.'}`,
-        `This window reaches back ${windowDays} days. Stock already on hand when it began is aged from the start of the window, so its true age is at least that and may be far more.`,
-        'FIFO assumption: consumption is taken off the oldest batches first. Not a batch-precise trace.',
-        'Batches are valued at the rate actually paid. Stock carried into the year has no purchase line and is valued at the current Item Master rate.',
+        BASIS,
+        `Ages are measured to ${asOfLabel}${asOf && !asOf.isToday ? ' — the end of the selected month, not today.' : '.'}`,
+        `Where a closed month has a stock count, each item's quantity is set to that count: a lower count comes off the oldest stock, a higher count is added as stock of unknown age. ${uncountedItems > 0 ? `${uncountedItems} item(s) had no count in the window and follow the purchase-minus-usage estimate.` : ''}`.trim(),
+        `The window reaches back ${windowDays} days. Stock on hand when it began, and any surplus a count found, is of unknown age — at least the age shown, possibly more.`,
+        'Batches are valued at the rate actually paid. Stock of unknown age has no purchase line and is valued at the current Item Master rate.',
       ],
     })
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Stock Ageing')
-    XLSX.writeFile(wb, `stock-ageing-FY${selectedFy.replace('/', '-')}.xlsx`)
+    XLSX.writeFile(wb, `stock-ageing-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
   const actions = (
     <>
-      {/* Print gated on the load (S756): it printed the previous FY's table under the new FY's
-          title while a load was in flight, and a failure card as a report. Export also waits on
-          the client-name read, or the workbook ships with a blank CompanyName line. */}
+      {/* Print and export gated on the load (S756, S728) and export on the client-name read. */}
       <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
         onClick={() => printWithTitle(`Stock Ageing — ${scopeLine}`)}>🖨 Print</button>
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
         disabled={loading || !!loadError || filtered.length === 0 || !!biz.error}>↓ Export Excel</button>
-      <select aria-label="Fiscal year" className="form-select" value={selectedFy}
-        onChange={e => handleFyChange(e.target.value)}>
-        {fyOptions.map(fy => <option key={fy} value={fy}>FY {fy}</option>)}
+      <select aria-label="As at month" className="form-select" value={selectedPeriod?.id || ''}
+        onChange={e => handlePeriodChange(e.target.value)}>
+        {periods.map(p => <option key={p.id} value={p.id}>As at {monthLabel(p)}{p.status === 'open' ? ' (open)' : ''}</option>)}
       </select>
     </>
   )
@@ -357,64 +348,49 @@ export default function StockAgeing() {
     <div className="stat-grid">
       <div className="stat-card">
         <div className="stat-label">
-          <Tip width={340} text="Value of stock still on hand as at the date this report is aged to, valued at what you actually paid for each batch. The one exception is stock carried into the fiscal year: it has no purchase line behind it, so it is valued at the current Item Master rate — see the Carried Into This FY card.">Stock On Hand</Tip>
+          <Tip width={340} text="Value of stock still on hand as at the date this report is aged to, valued at what you actually paid for each batch. Quantities follow your latest stock count for each item. Stock of unknown age has no purchase line, so it is valued at the current Item Master rate — see the Unknown Age card.">Stock On Hand</Tip>
         </div>
         <div className="stat-value gold" style={{ fontSize: 18 }}>{npr(totals?.value)}</div>
-        {/* rows, not filtered: the value above is the whole report's, and a filtered count
-            under an unfiltered figure read as "NPR 800,000 across 5 items". The filtered count
-            is shown in the filter bar below, where it belongs. */}
+        {/* rows, not filtered: the value above is the whole report's. */}
         <div className="stat-sub">{rows.length} item{rows.length === 1 ? '' : 's'}</div>
       </div>
       <div className="stat-card">
         <div className="stat-label">
           <Tip width={340} text={staleIsFloor
-            ? `Money tied up in stock that had been sitting ${STALE_FROM_DAYS}+ days as at ${asOfLabel} — AT LEAST this much. This window only reaches back ${windowDays} days, so stock that was already on the shelf when it began cannot be placed in the 90+ band even though it is older than everything in it. The carried-in figure to the right is the part that is missing from this one.`
+            ? `Money tied up in stock that had been sitting ${STALE_FROM_DAYS}+ days as at ${asOfLabel} — AT LEAST this much. Some stock is of unknown age (on the shelf when the window began, or found by a count) and sits in a younger band only because of the date it had to be given. The Unknown Age card shows how much.`
             : `Money tied up in stock that had been sitting ${STALE_FROM_DAYS}+ days as at ${asOfLabel}. This is the working capital the report exists to surface — it is not yet a loss, but it is cash on a shelf.`}>
             Capital in 90+ Day Stock
           </Tip>
         </div>
-        {/* Stale vs clean was amber vs green and nothing else. Under deuteranopia those two sit
-            ΔE 3.1 apart on Light, so the one distinction these tiles exist to draw was invisible
-            to roughly 1 in 12 men. ▲ / ✓ differ by shape and fill, so they survive greyscale, a
-            monochrome print and every form of colour blindness — same reasoning as fcBand's.
-
-            The ✓ is withheld entirely while carried-in stock is sitting in a younger band (S718).
-            Early in a fiscal year the window is shorter than 90 days, so stock that has genuinely
-            been on the shelf for years is arithmetically incapable of reaching this band — and the
-            card read NPR 0 with a green ✓ for the first three months of every year, which is the
-            page's headline saying "all clear" on the one question it cannot yet answer. */}
+        {/* ▲ / △ / ✓ differ by shape as well as colour (deuteranopia, monochrome print). The ✓ is
+            withheld while stock of unknown age sits in a younger band (S718). */}
         <div className="stat-value" style={{ fontSize: 18, color: staleValue > 0 || staleIsFloor ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>
           {staleIsFloor ? '≥ ' : ''}{npr(staleValue)} {staleValue > 0 ? '▲' : staleIsFloor ? '△' : '✓'}
         </div>
         <div className="stat-sub">
           {staleIsFloor
-            ? `${stalePct.toFixed(1)}% of stock value, plus carried-in stock of unknown age`
+            ? `${stalePct.toFixed(1)}% of stock value, plus stock of unknown age`
             : `${stalePct.toFixed(1)}% of stock value`}
         </div>
       </div>
       <div className="stat-card">
         <div className="stat-label">Items 90+ Days Old</div>
-        {/* The same floor as the capital card beside it (S756). S718 withheld the ✓ there while
-            carried-in stock of unknown age sat in a younger band, and left this card printing a
-            green "0 ✓" off the same arithmetic — two verdicts on one question, side by side. */}
+        {/* The same floor as the capital card beside it (S756). */}
         <div className="stat-value" style={{ color: staleItems > 0 || staleIsFloor ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>
           {staleIsFloor ? '≥ ' : ''}{staleItems} {staleItems > 0 ? '▲' : staleIsFloor ? '△' : '✓'}
         </div>
-        <div className="stat-sub">{staleIsFloor ? 'at least — carried-in stock is of unknown age' : 'worth reviewing first'}</div>
+        <div className="stat-sub">{staleIsFloor ? 'at least — some stock is of unknown age' : 'worth reviewing first'}</div>
       </div>
       <div className="stat-card">
         <div className="stat-label">
-          <Tip width={340} text={`Value of stock that was already on the shelf when this fiscal year began — the window reaches back ${windowDays} days and no further, so this stock's true age is unknown and at least that. It carries no purchase line, so it is the one figure here valued at the current Item Master rate rather than at what was actually paid.`}>Carried Into This FY</Tip>
+          <Tip width={340} text={`Value of stock whose age the report cannot know: what was already on the shelf when the window began (${windowDays} days back), plus any extra a stock count found beyond what purchases and usage account for${surplusValue > 0 ? ` (${npr(surplusValue)} of it)` : ''}. Its true age is at least what is shown. It carries no purchase line, so it is valued at the current Item Master rate.`}>Unknown Age</Tip>
         </div>
-        {/* Value, not quantity (S718). This card used to sum `carriedForwardQty` across every item
-            and print it as "units" — kilograms of flour added to litres of oil added to pieces of
-            napkin. The table's own TOTAL row prints "—" in the On Hand column for precisely that
-            reason, two hundred pixels below. */}
+        {/* Value, not quantity (S718): kilograms plus litres plus pieces is not a figure. */}
         <div className="stat-value" style={{ fontSize: 18, color: cfValue > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
           {cfValue > 0 ? npr(cfValue) : '—'}
         </div>
         <div className="stat-sub">
-          {cfValue > 0 ? `${cfItems} item${cfItems === 1 ? '' : 's'} · age ≥ ${windowDays} days` : 'nothing carried in'}
+          {cfValue > 0 ? `${cfItems} item${cfItems === 1 ? '' : 's'} · carried in or found by a count` : 'none'}
         </div>
       </div>
     </div>
@@ -427,24 +403,24 @@ export default function StockAgeing() {
       borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
       fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6,
     }}>
-      <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> each purchase is a batch;
-      everything you sold, wasted or served as staff meals this year is taken off the <em>oldest</em> batches first,
-      and whatever survives is what is still on the shelf, aged from the day it was bought.
-      Consumption is not tracked per batch anywhere in the system, so this is the standard FIFO assumption
-      rather than a batch-precise trace — the same basis the FIFO / Expiry report uses.
+      <strong style={{ color: 'var(--theme-accent-ink)' }}>How to read this:</strong> {BASIS}{' '}
+      Each purchase is a batch. Everything sold, wasted or served as staff meals is taken off the <em>oldest</em> batches
+      first, and at every closed month with a stock count the item is set to what was counted — if the count is lower,
+      the missing stock comes off the oldest batches; if it is higher, the extra is added as stock of unknown age.
+      {latestCount
+        ? <> The latest count used is the end of <strong>{monthLabel(latestCount)}</strong>{uncountedItems > 0 ? <>; {uncountedItems} item{uncountedItems === 1 ? ' has' : 's have'} no count in the window and follow the estimate.</> : '.'}</>
+        : <> <strong style={{ color: 'var(--theme-amber-text)' }}>No closed month in this window has a stock count</strong>, so every quantity here is an estimate from purchases and recipe usage.</>}
+      {' '}The window is the 12 months to {periodLabel}.
       {asOf && !asOf.isToday && (
         <>
           {' '}Ages are measured to <strong style={{ color: 'var(--theme-amber-text)' }}>{asOfLabel}</strong>, the
-          end of the fiscal year you selected — not to today, which would call every surviving batch stale.
+          end of the month you selected — not to today, which would call every surviving batch stale.
         </>
       )}
       {staleIsFloor && (
         <>
-          {' '}<strong style={{ color: 'var(--theme-amber-text)' }}>This window only reaches back {windowDays} days.</strong>{' '}
-          Stock already on the shelf when the year began is aged from the start of the window, so it cannot
-          reach the 90+ column yet however long it has really been there — {npr(unknownAgeValue)} of it is
-          sitting in a younger band for that reason alone. Treat the 90+ figure as a floor until the year is
-          past its first quarter.
+          {' '}<strong style={{ color: 'var(--theme-amber-text)' }}>{npr(unknownAgeValue)} of stock is of unknown age</strong> and
+          sits in a younger band only because of the date it had to be given, so treat the 90+ figure as a floor.
         </>
       )}
     </div>
@@ -469,16 +445,15 @@ export default function StockAgeing() {
           {filtered.length} item{filtered.length === 1 ? '' : 's'}
         </span>
       </div>
-      {/* The filter bar above is no-print, so without this a printed sheet showed a filtered table
-          with nothing anywhere saying which filter produced it. */}
-      <p className="print-only" style={{ fontSize: 12, marginBottom: 12 }}>{scopeLine}</p>
+      {/* The filter bar is no-print, so the scope and the basis print here. */}
+      <p className="print-only" style={{ fontSize: 12, marginBottom: 12 }}>{scopeLine}<br />{BASIS}</p>
     </>
   )
 
   const footnote = (
     <p style={{ marginTop: 10, fontSize: 12, color: 'var(--theme-text3)' }}>
       Age band columns show <strong>quantity</strong>; the TOTAL row shows each band&apos;s <strong>value</strong>,
-      so you can see where the money sits. Ages are measured to {asOfLabel}.
+      so you can see where the money sits. Ages are measured to {asOfLabel}. {BASIS}
     </p>
   )
 
@@ -486,7 +461,7 @@ export default function StockAgeing() {
     <ReportPage
       title="Stock Ageing"
       subtitle="How long the stock you are still holding has been sitting"
-      scope={<PeriodScope label={`FY ${selectedFy || '—'} · as at ${asOfLabel}`} />}
+      scope={<PeriodScope label={`12 months to ${periodLabel} · as at ${asOfLabel}`} />}
       banners={biz.error && (
         <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
           This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
@@ -503,8 +478,8 @@ export default function StockAgeing() {
       emptyText={rows.length > 0
         ? 'No items match the current filters.'
         : hadBatches
-          ? `No stock on hand for FY ${selectedFy} — everything bought or carried into the year has been used, wasted or returned.`
-          : `Nothing to age for FY ${selectedFy} — no purchases were recorded and no opening stock was carried in.`}
+          ? `No stock on hand as at ${asOfLabel} — everything bought, carried in or counted in the 12 months to ${periodLabel} has been used, wasted or returned.`
+          : `Nothing to age in the 12 months to ${periodLabel} — no purchases were recorded, no opening stock was carried in and no stock was counted.`}
       stats={stats}
       note={note}
       filters={filters}
@@ -518,7 +493,7 @@ export default function StockAgeing() {
                 <th>Item</th>
                 <th>Category</th>
                 <th>UOM</th>
-                <th style={{ textAlign: 'right' }}><Tip text="Estimated quantity still on hand, after this year's consumption was taken off oldest batches first." width={260}>On Hand</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Quantity still on hand: your latest stock count for the item where a closed month has one, then purchases less usage since. Usage is taken off the oldest batches first." width={280}>On Hand</Tip></th>
                 {AGE_BANDS.map(b => (
                   <th key={b.key} style={{ textAlign: 'right' }}>
                     <Tip width={280} text={`Quantity still on hand that was bought ${b.label.replace(' days', '')} days before ${asOfLabel}. These columns are quantities — the TOTAL row at the foot of the table shows each band's value in NPR.`}>
@@ -527,6 +502,7 @@ export default function StockAgeing() {
                   </th>
                 ))}
                 <th style={{ textAlign: 'right' }}><Tip text={`Age of the oldest batch of this item still on hand, as at ${asOfLabel}.`} width={240}>Oldest</Tip></th>
+                <th><Tip text="The stock count this item's quantity follows — the end of the latest closed month in the window that counted it. 'Estimate' means no count reached it, so its quantity is purchases less recipe usage." width={280}>Counted</Tip></th>
                 <th style={{ textAlign: 'right' }}>Value</th>
               </tr>
             </thead>
@@ -534,13 +510,20 @@ export default function StockAgeing() {
               {filtered.map(r => {
                 const meta = itemMeta[r.item_id] || {}
                 const stale = r.bands['90+'].qty > 0
+                const counted = lastCountByItem[r.item_id]
+                const windowCf = r.carriedForwardQty - r.countSurplusQty
                 return (
                   <tr key={r.item_id} style={{ background: stale ? 'color-mix(in srgb, var(--theme-amber) 10%, transparent)' : 'transparent' }}>
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {meta.name || '—'}
-                      {r.carriedForwardQty > 0 && (
-                        <Tip text="Part of this item's on-hand stock was already here when the fiscal year began. Its true age is at least the figure shown and may be far more, and that part is valued at the current Item Master rate rather than at what was paid for it." width={300}>
+                      {windowCf > 1e-9 && (
+                        <Tip text="Part of this item's stock was already on the shelf when the 12-month window began. Its true age is at least the figure shown and may be far more, and that part is valued at the current Item Master rate." width={300}>
                           <span className="badge badge-gray" style={{ marginLeft: 6 }}>c/f</span>
+                        </Tip>
+                      )}
+                      {r.countSurplusQty > 1e-9 && (
+                        <Tip text="A stock count found more of this item than purchases and usage account for. The extra is shown as stock of unknown age, dated at that count, and valued at the current Item Master rate — no purchase was invented for it. A missing purchase bill is the usual cause." width={300}>
+                          <span className="badge badge-gray" style={{ marginLeft: 6 }}>count+</span>
                         </Tip>
                       )}
                     </td>
@@ -561,13 +544,13 @@ export default function StockAgeing() {
                         </td>
                       )
                     })}
-                    {/* The 90+ BAND cell above is already carried by two non-colour cues — the
-                        column it sits in, and its bold weight — so it needs no glyph and would
-                        only be noisier for one. This cell has neither, and it is the column the
-                        table sorts on. */}
+                    {/* The oldest cell carries a ▲ as its non-colour cue — it is the sort column. */}
                     <td style={{ textAlign: 'right', color: r.oldestDays >= STALE_FROM_DAYS ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}
                         title={r.oldestDays >= STALE_FROM_DAYS ? `Sitting ${STALE_FROM_DAYS}+ days` : undefined}>
                       {r.oldestDays}d{r.oldestDays >= STALE_FROM_DAYS ? ' ▲' : ''}
+                    </td>
+                    <td style={{ color: counted ? 'var(--theme-text2)' : 'var(--theme-text3)', whiteSpace: 'nowrap' }}>
+                      {counted ? monthLabel(counted) : 'Estimate'}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)' }}>{npr(r.value)}</td>
                   </tr>
@@ -582,13 +565,12 @@ export default function StockAgeing() {
                       ? `TOTAL (${filtered.length} filtered item${filtered.length === 1 ? '' : 's'}, by value)`
                       : 'TOTAL (all items, by value)'}
                   </td>
-                  {/* Deliberately not a sum. On Hand is a QUANTITY, and quantities do not add up
-                      across items — kilograms plus litres plus pieces. This dash is the reason the
-                      Carried Into This FY card had to stop printing one (S718). */}
+                  {/* Deliberately not a sum: quantities do not add up across items (S718). */}
                   <td style={{ textAlign: 'right' }}>—</td>
                   {AGE_BANDS.map(b => (
                     <td key={b.key} style={{ textAlign: 'right' }}>{npr(footTotals.bands[b.key])}</td>
                   ))}
+                  <td></td>
                   <td></td>
                   <td style={{ textAlign: 'right' }}>{npr(footTotals.value)}</td>
                 </tr>

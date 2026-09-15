@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
+import { readPriorBillLines } from './readPriorBillLines'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -14,7 +15,7 @@ import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
-import { VAT_RATE, splitPurchaseVat, buildVendorSummary, billWiseVat, summariseUnlinkedReturns } from './purchaseTaxSplit'
+import { VAT_RATE, splitPurchaseVat, buildVendorSummary, billWiseVat, summariseUnlinkedReturns, returnLinesOutsidePeriod } from './purchaseTaxSplit'
 
 function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -30,6 +31,7 @@ export default function VatReport() {
   const [selectedPeriod, setSelected] = useState(null)
   const [entries, setEntries]         = useState([])
   const [returns, setReturns]         = useState([])
+  const [priorBillLines, setPriorBillLines] = useState([])   // earlier-month bills a return points at (S756, D10)
   const [loading, setLoading]         = useState(false)
   const [loadError, setLoadError]     = useState(null)
   const [tab, setTab]                 = useState('entries')
@@ -77,11 +79,28 @@ export default function VatReport() {
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setEntries([]); setReturns([]); setLoading(false); return }
     const [{ data: entData }, { data: retData }] = results
+
+    // A return sits in the month the goods went back, and may be against a bill from an EARLIER
+    // month (S756, owner decision D10). Its VAT half is already right — the embed above reads the
+    // linked line's own vat_inclusive whatever month it is in — but its VALUE needs that bill's
+    // discount, and the bill is not among this month's entries. Read those bills whole (every line,
+    // so the discount apportions as it did on the bill) and hand them to splitPurchaseVat. Without
+    // this, such a return falls back to the list rate and reverses VAT that was never claimed.
+    const outsideIds = returnLinesOutsidePeriod(entData, retData)
+    let priorLines = []
+    if (outsideIds.length > 0) {
+      const prior = await readPriorBillLines(outsideIds)
+      if (!periodReq.isCurrent(periodId)) return
+      if (prior.error) { setLoadError(prior.error); setEntries([]); setReturns([]); setPriorBillLines([]); setLoading(false); return }
+      priorLines = prior.data
+    }
+
     // Every entry and every return of the period, both halves. The VAT/non-VAT split happens in
     // splitPurchaseVat() rather than in the query, because a bill's discount cannot be apportioned
     // from one half of itself.
     setEntries(entData || [])
     setReturns(retData || [])
+    setPriorBillLines(priorLines)
     setLoading(false)
   }
 
@@ -90,7 +109,7 @@ export default function VatReport() {
   // by the full discount of every mixed bill. See purchaseTaxSplit.js.
   //
   // Discount is applied before VAT throughout (per Nepal IRD: VAT is on the net taxable amount).
-  const split = splitPurchaseVat(entries, returns)
+  const split = splitPurchaseVat(entries, returns, { priorBillLines })
   const {
     vatLines, nonVatLines, vatReturns,
     vatGross: vatBaseList, vatDiscount: totalVatDiscount,
@@ -114,7 +133,30 @@ export default function VatReport() {
       + 'known whether VAT was charged on them. They are deducted from neither the VAT nor the Non-VAT report; '
       + `settle them with your CA. ${unlinked.examples.join('; ')}${unlinked.more ? `; and ${unlinked.more} more` : ''}`
     : null
-  const caveats = unlinkedNote ? [unlinkedNote] : []
+  // Every bill of the period, one row each — the bill-wise sheet, and the supplier-bill check below.
+  const bills = billWiseVat(split.allocated)
+  // S756 (owner decision D13): bills whose supplier's printed VAT or total, where someone typed it,
+  // differs from Crest's own figure for the bill by more than NPR 1. Named on screen and in the
+  // workbook, because the figure filed is Crest's and a keying error found after filing is costly.
+  const invoiceMismatches = bills.filter(b => b.invoiceCheck.mismatch)
+  const invoiceChecked = bills.filter(b => b.invoiceCheck.checked).length
+  const mismatchNote = invoiceMismatches.length > 0
+    ? `CHECK: ${invoiceMismatches.length} bill${invoiceMismatches.length !== 1 ? 's differ' : ' differs'} from the VAT or total printed on the supplier's bill by more than NPR 1 `
+      + '(see "Matches Supplier Bill?" on the Bill-wise sheet). The figures in this report are the lines as entered — '
+      + "correct the bill in Purchases, or confirm the supplier's bill is what is wrong, before filing."
+    : null
+  // S756 (owner decision D10): returns sitting in this month against a bill from an earlier month.
+  // They are counted here, in the month the goods went back; which month the VAT belongs in is the
+  // accountant's call, so the report says so rather than deciding it.
+  const entryIds = new Set(entries.map(e => e.id))
+  const lateReturnCount = [...split.vatReturns, ...split.nonVatReturns]
+    .filter(r => r.purchase_entry_id && !entryIds.has(r.purchase_entry_id)).length
+  const lateReturnNote = lateReturnCount > 0
+    ? `${lateReturnCount} return${lateReturnCount !== 1 ? 's' : ''} in this month ${lateReturnCount !== 1 ? 'are' : 'is'} against a bill from an earlier month. `
+      + 'They are counted in this month — the month the goods went back — at the discounted rate their bill carried. '
+      + 'Confirm with your accountant which month the VAT on a return like this should be claimed in.'
+    : null
+  const caveats = [unlinkedNote, mismatchNote, lateReturnNote].filter(Boolean)
   // A month with returns and no new VAT purchases still has a filing figure (a negative claim), so
   // it must be printable and exportable (S756).
   const hasFigures = vatLines.length > 0 || vatReturns.length > 0
@@ -157,7 +199,6 @@ export default function VatReport() {
     // Bill-wise sheet (S756, owner decision D28): one row per invoice, the shape the purchase book is
     // kept in. Built from the same allocated lines as everything else, so its Taxable, Exempt and VAT
     // columns total to the Taxable Base on the sheet above and the Non-VAT figure before returns.
-    const bills = billWiseVat(split.allocated)
     const r2 = n => Number(n.toFixed(2))
     const billRows = bills.map(b => ({
       'Day':                    b.bs_day,
@@ -168,6 +209,16 @@ export default function VatReport() {
       'Exempt / Non-VAT':       r2(b.exempt),
       'VAT (13%)':              r2(b.vat),
       'Total':                  r2(b.total),
+      // S756 (D13). Blank when nobody typed the supplier's figures — never 0, which would read as a
+      // real printed VAT of nothing.
+      'Supplier Bill VAT':      b.invoiceVat === null ? '' : r2(b.invoiceVat),
+      'Supplier Bill Total':    b.invoiceTotal === null ? '' : r2(b.invoiceTotal),
+      'Matches Supplier Bill?': !b.invoiceCheck.checked ? ''
+        : !b.invoiceCheck.mismatch ? 'Yes'
+        : ['NO',
+          b.invoiceCheck.vatMismatch ? `VAT differs by ${r2(b.invoiceCheck.vatDiff)}` : '',
+          b.invoiceCheck.totalMismatch ? `total differs by ${r2(b.invoiceCheck.totalDiff)}` : '',
+        ].filter(Boolean).join(' — '),
     }))
     if (bills.length > 0) {
       const tot = k => bills.reduce((s, b) => s + b[k], 0)
@@ -177,6 +228,9 @@ export default function VatReport() {
         'Exempt / Non-VAT':       r2(tot('exempt')),
         'VAT (13%)':              r2(tot('vat')),
         'Total':                  r2(tot('total')),
+        'Supplier Bill VAT':      '',
+        'Supplier Bill Total':    '',
+        'Matches Supplier Bill?': invoiceChecked > 0 ? `${invoiceMismatches.length} of ${invoiceChecked} checked differ` : '',
       })
     }
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
@@ -184,6 +238,7 @@ export default function VatReport() {
       notes: [
         "One row per purchase invoice. A bill's discount is split between its VAT and non-VAT lines in proportion to line value.",
         'Returns are credit notes, not invoices, and are not on this sheet — see VAT Returns and CA Summary for the net figures.',
+        "Supplier Bill VAT / Total are the figures typed off the supplier's paper bill, where someone entered them. 'Matches Supplier Bill?' compares them with this row's VAT and Total, allowing NPR 1 for rounding; blank means they were not typed.",
         ...caveats,
       ],
     }), 'Bill-wise')
@@ -293,6 +348,35 @@ export default function VatReport() {
             {unlinked.more ? `; and ${unlinked.more} more` : ''}.
           </p>
         </div>
+      )}
+
+      {/* S756 (D13). Gated like the cards: a count from rows that have not arrived is not a count. */}
+      {!loadError && !loading && invoiceMismatches.length > 0 && (
+        <div role="alert" className="card" style={{
+          marginBottom: 16, padding: '12px 16px',
+          borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+        }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
+            △ {invoiceMismatches.length} bill{invoiceMismatches.length !== 1 ? 's don’t' : ' doesn’t'} match the supplier’s printed VAT or total
+            <span style={{ fontWeight: 400, color: 'var(--theme-text2)' }}> — {invoiceChecked} of {bills.length} bill{bills.length !== 1 ? 's' : ''} had those figures typed in</span>
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            The figures below are worked out from the lines as entered, and differ from the paper bill by more than NPR 1 on:{' '}
+            {invoiceMismatches.slice(0, 8).map(b => [formatBsDay(b.bs_day, selectedPeriod?.bs_month), b.vendor || 'No vendor', b.invoice ? `#${b.invoice}` : null].filter(Boolean).join(' · ')).join('; ')}
+            {invoiceMismatches.length > 8 ? `; and ${invoiceMismatches.length - 8} more` : ''}.
+            {' '}Usually a rate typed in the wrong unit, a missed line or VAT ticked on the wrong item — open the bill in Purchases and check it before filing.
+            The Excel export's Bill-wise sheet flags each one.
+          </p>
+        </div>
+      )}
+
+      {!loadError && !loading && lateReturnCount > 0 && (
+        <p role="note" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--theme-text1)' }}>{lateReturnCount} return{lateReturnCount !== 1 ? 's' : ''} this month {lateReturnCount !== 1 ? 'are' : 'is'} against a bill from an earlier month.</strong>{' '}
+          {lateReturnCount !== 1 ? 'They are' : 'It is'} counted here, in the month the goods went back, at the discounted rate the bill carried.
+          Confirm with your accountant which month the VAT on a return like this should be claimed in.
+        </p>
       )}
 
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived

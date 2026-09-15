@@ -12,7 +12,7 @@ import Tip from '../../../components/Tip'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import PeriodScope from '../../../components/PeriodScope'
 import SearchableSelect from '../../../components/SearchableSelect'
-import { getCf, billTotalsByKey, methodOf, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
+import { getCf, billTotalsByKey, methodOf, invoiceMismatchText, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import ReturnsTab from './ReturnsTab'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -137,9 +137,15 @@ export default function Purchases() {
   }
 
   async function loadReturns(periodId) {
-    const { data, error } = await scopedFrom('vendor_returns', '*, items(name, uom, purchase_unit, conversion_factor), vendors(name), purchase_entries(bs_day, qty, rate)')
+    // The embed carries the BILL's own month (S756, D10): a return sits in the month it happened
+    // and may point at a bill from an earlier one, and the Returns tab says which. Paged with a
+    // unique tiebreaker like the purchases read — the S722 rule, a returns read beside a paged
+    // purchases read is not exempt because returns are usually few.
+    const { data, error } = await fetchAllRows(() => scopedFrom('vendor_returns', '*, items(name, uom, purchase_unit, conversion_factor), vendors(name), purchase_entries(bs_day, qty, rate, period_id, invoice_ref, monthly_periods(bs_year, bs_month))')
       .eq('period_id', periodId)
+      .order('bs_day')
       .order('created_at')
+      .order('id'))
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     if (error) { setLoadError(error); return }
     setAndCache(setReturns, `returns_${periodId}`, data || [])
@@ -219,7 +225,7 @@ export default function Purchases() {
     askConfirm({
       title: 'Delete this bill?',
       confirmLabel: 'Delete Bill', danger: true, busyLabel: 'Deleting…',
-      body: <p style={{ margin: 0 }}>{n} item{n !== 1 ? 's' : ''}, NPR {Math.round(groupTotal).toLocaleString('en-IN')}, come off this period's purchases and the vendor's payable. Any returns linked to these entries are unlinked and stay on the returns list. This cannot be undone.</p>,
+      body: <p style={{ margin: 0 }}>{n} item{n !== 1 ? 's' : ''}, NPR {Math.round(groupTotal).toLocaleString('en-IN')}, come off this period's purchases and the vendor's payable. Any returns against this bill — including one entered in a later month — stay recorded but are unlinked from it. This cannot be undone.</p>,
       run: () => deleteGroupNow(groupId, groupEntries),
     })
   }
@@ -267,10 +273,19 @@ export default function Purchases() {
       setActionError(`Nothing was deleted. ${paid.bills} bill${paid.bills === 1 ? ' has' : 's have'} payments recorded against ${paid.bills === 1 ? 'it' : 'them'} (${paid.count} payment${paid.count === 1 ? '' : 's'}, NPR ${Math.round(paid.total).toLocaleString('en-IN')}), and deleting ${paid.bills === 1 ? 'it' : 'them'} would erase money already paid to the vendor. Remove those payments in Outstanding Payables first, or delete the other bills one at a time.`)
       return
     }
-    const { error } = await supabase.from('purchase_entries').delete().eq('period_id', selectedPeriod.id)
+    // `count: 'exact'` (S756): a delete an RLS policy or a rank guard filters down to nothing
+    // returns `{ error: null }`, and this reported nothing at all — the list reloaded unchanged and
+    // read as "the button did nothing". PostgREST's count is what the statement actually removed.
+    // A count rather than `.select('id')`: a month of lines can run past 1000, and the returned
+    // representation is not something to page, while the count covers every row.
+    const expected = purchases.length
+    const { count, error } = await supabase.from('purchase_entries').delete({ count: 'exact' }).eq('period_id', selectedPeriod.id)
     if (error) {
       const { text, detail } = asActionError(error)
       setActionError({ text: `The purchases for this period were not deleted — check the list below for what is still recorded. ${text}`, detail })
+    } else {
+      const msg = deleteAllShortfall(count, expected, 'purchase line')
+      if (msg) setActionError(msg)
     }
     await Promise.all([loadPurchases(selectedPeriod.id), loadReturns(selectedPeriod.id)])
   }
@@ -278,12 +293,33 @@ export default function Purchases() {
   async function performDeleteAllReturns() {
     if (!selectedPeriod || returns.length === 0) return
     setActionError(null)
-    const { error } = await scopedDelete('vendor_returns').eq('period_id', selectedPeriod.id)
+    const expected = returns.length
+    // Same zero-row check as Delete All purchases (S756). Deletes the returns SITTING in this month —
+    // including any against a bill from an earlier month — and none that sit in a later month
+    // against this month's bills.
+    // `.select('id')` rather than a count here, to stay on scopedDb (which takes no options): a
+    // month's returns are one row per return, far below the 1000-row representation limit.
+    const { data: removed, error } = await scopedDelete('vendor_returns').eq('period_id', selectedPeriod.id).select('id')
     if (error) {
       const { text, detail } = asActionError(error)
       setActionError({ text: `The returns for this period were not deleted — check the list below for what is still recorded. ${text}`, detail })
+    } else {
+      const msg = deleteAllShortfall(removed?.length ?? 0, expected, 'return')
+      if (msg) setActionError(msg)
     }
     loadReturns(selectedPeriod.id)
+  }
+
+  // The sentence for a Delete All that removed fewer rows than the list showed, or null when it
+  // removed them all. `count` null means PostgREST did not report one — say nothing rather than
+  // guess, since the reload below shows the truth either way.
+  function deleteAllShortfall(count, expected, noun) {
+    if (count == null || count >= expected) return null
+    const plural = n => `${n} ${noun}${n === 1 ? '' : 's'}`
+    if (count === 0) {
+      return `Nothing was removed. If the ${noun}s are still in the list below (it has been reloaded), your login is not allowed to delete them — ask your manager or the Owner. If the list is empty, someone else deleted them first.`
+    }
+    return `Only ${plural(count)} of ${expected} were removed. The rest are still recorded — see the list below, which has been reloaded. Your login may not be allowed to delete some of them, or they changed since the list was loaded.`
   }
 
   async function confirmDeleteAll() {
@@ -352,6 +388,9 @@ export default function Purchases() {
 
   const grossTotal  = purchases.reduce((s, p) => s + p.qty * p.rate, 0)
   const returnTotal = returns.reduce((s, r) => s + r.qty * r.rate, 0)
+  // Returns SITTING in this month against a bill from an earlier one (S756, D10). They count here —
+  // in this month's returns and net purchases — because this is the month the goods went back.
+  const lateReturnCount = returns.filter(r => r.purchase_entries?.period_id && selectedPeriod && r.purchase_entries.period_id !== selectedPeriod.id).length
   const netTotal    = grossTotal - returnTotal
   const filteredValue = filtered.reduce((s, p) => s + p.qty * p.rate, 0)
   // Only meaningful when one specific item is filtered — summing raw qty across
@@ -444,7 +483,8 @@ export default function Purchases() {
           <Modal title={`⚠ Delete all ${noun} entries?`} maxWidth={440} onClose={() => { setDeleteAllTarget(null); setDeleteAllTyped('') }}>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', marginTop: 0 }}>
               This permanently deletes <strong style={{ color: 'var(--theme-red-text)' }}>all {count} {noun} entr{count !== 1 ? 'ies' : 'y'}</strong> for <strong>{periodLabel}</strong>.
-              {deleteAllTarget === 'purchases' && ' Returns recorded against them stay on the Returns tab, unlinked. A bill with vendor payments recorded against it stops the whole delete.'}
+              {deleteAllTarget === 'purchases' && ' Returns recorded against them stay recorded — in whichever month each was entered — but unlinked from their bill. A bill with vendor payments recorded against it stops the whole delete.'}
+              {deleteAllTarget === 'returns' && ' This covers every return entered in this month, including any against a bill from an earlier month. Returns entered in a later month are not touched.'}
               {' '}This cannot be undone.
             </p>
             <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginBottom: 6 }}>
@@ -547,11 +587,14 @@ export default function Purchases() {
           <div className="stat-value gold" style={{ fontSize: 16 }}>NPR {grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Returns</div>
+          <div className="stat-label"><Tip text="Goods sent back to suppliers in this month, at the rate on the original bill. A return counts in the month it happened — including one against a bill from an earlier month (milk bought on the 28th of last month and returned on the 2nd of this one is this month's return)." width={300}>Returns</Tip></div>
           <div className="stat-value" style={{ fontSize: 16, color: returnTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>
             {returnTotal > 0 ? `−NPR ${returnTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
           </div>
-          <div className="stat-sub">{returns.length} entr{returns.length !== 1 ? 'ies' : 'y'}</div>
+          <div className="stat-sub">
+            {returns.length} entr{returns.length !== 1 ? 'ies' : 'y'}
+            {lateReturnCount > 0 && ` · ${lateReturnCount} against an earlier month's bill`}
+          </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Net Purchases</div>
@@ -731,6 +774,16 @@ export default function Purchases() {
                         const groupGrand    = whole?.grandTotal || 0
                         const totalLines    = whole?.lineCount || groupEntries.length
                         const partial       = groupEntries.length < totalLines
+                        // The supplier's printed VAT/total disagreeing with the lines (S756, D13).
+                        // A flag beside the figure it contradicts; the Tip says by how much.
+                        const invoiceFlag = whole?.invoiceCheck?.mismatch ? (
+                          <div style={{ marginTop: 3 }}>
+                            <Tip text={`${invoiceMismatchText(whole.invoiceCheck, { crestVat: whole.vatTotal, crestTotal: whole.grandTotal, invoiceVat: whole.invoiceVat, invoiceTotal: whole.invoiceTotal })} Open the bill to check each line's rate and unit, the VAT ticks and the discount.`} width={300}
+                              style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                              <span className="badge badge-amber">△ ≠ supplier bill</span>
+                            </Tip>
+                          </div>
+                        ) : null
 
                         // When this bill was TYPED INTO Crest — not when the goods arrived. The Day
                         // column is the receiving date, and the two routinely differ: the whole
@@ -832,6 +885,7 @@ export default function Purchases() {
                                 {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                                 {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                                {invoiceFlag}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
                                 {entry.expiry_date ? <span style={{ color: 'var(--theme-accent-ink)', fontSize: 11 }}>{entry.expiry_date}</span> : '—'}
@@ -865,6 +919,7 @@ export default function Purchases() {
                               {groupGrand.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               {vatAmount > 0 && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', fontWeight: 400 }}>+VAT: {vatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                               {discountAmt > 0 && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', fontWeight: 400 }}>−Disc: {discountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                              {invoiceFlag}
                             </td>
                             <td></td>
                             {actionsCell}
@@ -950,6 +1005,7 @@ export default function Purchases() {
       {!loadError && activeTab === 'returns' && (
         <ReturnsTab
           period={selectedPeriod}
+          periods={periods}
           purchases={purchases}
           returns={returns}
           isLocked={isLocked}

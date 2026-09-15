@@ -43,6 +43,10 @@ export default function PurchaseBillPage() {
   const [vendors, setVendors] = useState(() => readPageCache('purchases', 'vendors', effectiveClientId) ?? [])
   const [editingEntries, setEditingEntries] = useState(null)
   const [loading, setLoading] = useState(true)
+  // A plain string for a refusal this page wrote itself (the bill is gone, it belongs to another
+  // client), or `{ text, detail }` from asActionError for a failed read (S756). It was the raw
+  // `error.message` — 'TypeError: Failed to fetch' as the body of the card. The two stay separate
+  // because a sentence this page wrote must not be run back through the error table (S714).
   const [loadError, setLoadError] = useState('')
 
   // Company letterhead for the auto-printed voucher — same source fields the payslip print uses.
@@ -75,7 +79,7 @@ export default function PurchaseBillPage() {
     // items to bill and no vendor to bill them to (the report-pages rule, applied to an entry
     // screen). Say so instead of rendering an empty picker.
     const readErr = pErr || iErr || vErr
-    if (readErr) { setLoadError(readErr.message); setLoading(false); return }
+    if (readErr) { setLoadError(asActionError(readErr)); setLoading(false); return }
     setPeriods(p || [])
     setItems(i || [])
     setVendors(v || [])
@@ -90,7 +94,7 @@ export default function PurchaseBillPage() {
         .select('*')
         .or(`purchase_group_id.eq.${groupId},id.eq.${groupId}`)
         .order('created_at').order('id')
-      if (eErr) { setLoadError(eErr.message); setLoading(false); return }
+      if (eErr) { setLoadError(asActionError(eErr)); setLoading(false); return }
       const mine = (rows || []).filter(r => (r.purchase_group_id || r.id) === groupId)
       if (mine.length === 0) { setLoadError('That bill no longer exists. It may have been deleted.'); setLoading(false); return }
       // A bill id is now typeable in the URL, which the in-memory filter this replaced could not
@@ -121,7 +125,7 @@ export default function PurchaseBillPage() {
       const extraErr = extraV.error || extraI.error
       // A bill line's item is what the cf and every displayed qty/rate derive from — an unreadable
       // one is an unopenable bill, not a blank picker (the Overheads/Stock rule for entry pages).
-      if (extraErr) { setLoadError(extraErr.message); setLoading(false); return }
+      if (extraErr) { setLoadError(asActionError(extraErr)); setLoading(false); return }
       if (extraV.data?.length) setVendors([...(v || []), ...extraV.data.map(x => ({ ...x, _inactive: true }))])
       if (extraI.data?.length) setItems([...(i || []), ...extraI.data.map(x => ({ ...x, _inactive: true }))])
       setEditingEntries(mine)
@@ -243,10 +247,16 @@ export default function PurchaseBillPage() {
     // showing the NEW rate over a database still holding the old one: the screen agreeing with
     // the user and disagreeing with the database, which is the S597 shape. Only what landed is
     // cached; what did not stays in the prompt with the reason.
+    //
+    // `.select('id')` (S756): an update an RLS policy filters to nothing — or one aimed at an item
+    // deleted since the bill was opened — is `{ data: [], error: null }`, which this counted as
+    // landed and wrote into the cache. Zero rows back is proof it did not, so it joins `failed`
+    // with a sentence of its own instead of a Postgres one.
     const results = await Promise.all(toUpdate.map(i =>
-      supabase.from('items').update({ rate: toPerBase(i) }).eq('id', i.itemId).then(r => ({ item: i, error: r.error }))))
-    const landed = results.filter(r => !r.error).map(r => r.item)
-    const failed = results.filter(r => r.error)
+      supabase.from('items').update({ rate: toPerBase(i) }).eq('id', i.itemId).select('id')
+        .then(r => ({ item: i, error: r.error, none: !r.error && !r.data?.length }))))
+    const landed = results.filter(r => !r.error && !r.none).map(r => r.item)
+    const failed = results.filter(r => r.error || r.none)
     // Write the list page's cached `items` through as well. It seeds its state from this cache on
     // mount, so skipping it would show the pre-update rate on the page we are about to return to.
     const next = items.map(i => {
@@ -259,11 +269,14 @@ export default function PurchaseBillPage() {
     writePageCache('purchases', 'items', effectiveClientId, next.filter(i => !i._inactive))
     setRateUpdateBusy(false)
     if (failed.length > 0) {
-      const { text, detail } = asActionError(failed[0].error)
       const names = failed.map(f => f.item.itemName).join(', ')
+      const firstRefusal = failed.find(f => f.error)
+      const { text, detail } = firstRefusal
+        ? asActionError(firstRefusal.error)
+        : { text: 'Nothing was changed for them — your login may not be allowed to edit Item Master prices (ask your manager or the Owner), or the item was deleted since this bill was opened.', detail: undefined }
       setRateUpdateItems(failed.map(f => f.item))
       setRateUpdateSelected(new Set(failed.map(f => f.item.itemId)))
-      setRateUpdateError({ text: `${landed.length > 0 ? `${landed.length} item${landed.length === 1 ? '' : 's'} updated. ` : ''}Item Master still holds the old rate for ${names} — the update was refused. The bill itself is saved. ${text}`, detail })
+      setRateUpdateError({ text: `${landed.length > 0 ? `${landed.length} item price${landed.length === 1 ? ' was' : 's were'} updated. ` : ''}Item Master still holds the old price for ${names}. The bill itself is saved. ${text}`, detail })
       return
     }
     setRateUpdateItems([])
@@ -319,7 +332,7 @@ export default function PurchaseBillPage() {
           <div className="empty-state">
             <div className="empty-state-icon">⚠</div>
             <p className="empty-state-text">This bill could not be opened. Nothing has been changed.</p>
-            <p style={{ color: 'var(--theme-text3)', fontSize: 12, marginTop: 6 }}>{loadError}</p>
+            <div style={{ maxWidth: 520, margin: '6px auto 0', textAlign: 'left' }}><ActionError error={loadError} /></div>
             <button className="btn btn-ghost" style={{ marginTop: 14 }} onClick={backToList}>Back to Purchases</button>
           </div>
         ) : !period ? (
@@ -358,7 +371,16 @@ export default function PurchaseBillPage() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'var(--theme-card)', border: '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)', borderRadius: 'var(--radius-md)', padding: '24px 28px', maxWidth: 520, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 4 }}>📦 Rate changes detected</div>
-            <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 16 }}>Select items to update in the Item Master. This affects recipe costing going forward.</div>
+            <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 8 }}>This bill's rate differs from Item Master for {rateUpdateItems.length} item{rateUpdateItems.length !== 1 ? 's' : ''}. Tick the ones whose Item Master price should change to match it.</div>
+            {/* S756 (D5): the same consequence Items.js states before a price edit. Item Master's
+                price is not a "going forward" figure — stock counts, wastage, staff meals, stock
+                movements and recipe costs store a quantity and are valued at the price as it is NOW,
+                closed months included. The old sentence said "going forward", which is the opposite.
+                No per-item record counts here: this prompt follows a save and must not stall on a
+                usage scan, so it states the rule rather than a number it has not read. */}
+            <div role="note" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--theme-text2)', marginBottom: 16, padding: '8px 12px', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>Past figures change too.</strong> Each ticked item's stock counts, wastage, staff meals and recipe costs are valued at its Item Master price wherever a report reads them — including months already closed — so those figures move the moment you update. Purchase bills keep the price typed on them, and a closed month's Monthly Owner Report was frozen when the month closed.
+            </div>
 
             {/* Select all */}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--theme-text3)', marginBottom: 10, cursor: 'pointer', userSelect: 'none' }}>

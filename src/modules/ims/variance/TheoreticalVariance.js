@@ -264,8 +264,17 @@ export default function TheoreticalVariance() {
     return rows
       .filter(r => {
         if (filterCat !== 'all' && r.item.category_id !== filterCat) return false
-        if (filterType === 'over'  && r.variance <= 0.01)  return false
-        if (filterType === 'under' && r.variance >= -0.01) return false
+        // By BAND, the same `varianceBand(...).key` each row is painted with and the over/under tiles
+        // count (S756). The raw `variance > 0.01` test put nearly every item of a real month under
+        // "Over-consumed" — including rows wearing a green ✓ or a quiet ≈, and uncounted rows whose
+        // variance is an artefact of the missing count — so the filter contradicted the tile above it.
+        // `varianceBand` directly, not the render-body `band` helper: that const is declared below
+        // the `filteredRows()` call and would be in its temporal dead zone here.
+        if (filterType !== 'all') {
+          const key = varianceBand(r.variancePct, r.varianceVal, settings, { measured: r.measured }).key
+          if (filterType === 'over'  && key !== 'over')  return false
+          if (filterType === 'under' && key !== 'under') return false
+        }
         return true
       })
       .sort((a, b) => {

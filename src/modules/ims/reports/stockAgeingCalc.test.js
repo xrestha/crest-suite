@@ -1,6 +1,7 @@
 import {
   AGE_BANDS, bandOf, ageInDays, allocateFifo, buildAgeing,
   daysUntilExpiry, parseDateLocal, asOfForWindow, nepalTodayRef, splitReturns,
+  anchorToCounts, ageAllocated, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods,
 } from './stockAgeingCalc'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
 
@@ -309,5 +310,214 @@ describe('splitReturns', () => {
       { item_id: 'rice', qty: 10, rate: 1, date: daysAgo(10) },
     ], byItem)
     expect(out.map(b => b.remaining)).toEqual([2, 10])
+  })
+})
+
+// S756 (D19) — quantities follow the stock counts; ages stay estimated from purchase dates.
+describe('rollingWindow', () => {
+  const P = (y, m) => ({ id: `${y}-${m}`, bs_year: y, bs_month: m })
+  const all = [P(2081, 3), P(2081, 4), P(2081, 12), P(2082, 1), P(2082, 3), P(2082, 4), P(2082, 5)]
+
+  test('the 12 months ending with the selected one, oldest first, across Shrawan 1', () => {
+    expect(rollingWindow(all, P(2082, 4)).map(p => p.id)).toEqual(['2081-12', '2082-1', '2082-3', '2082-4'])
+    // Ashadh-bought stock (2082-3) is still in the window of Bhadra (2082-5): the fiscal year no
+    // longer hides it.
+    expect(rollingWindow(all, P(2082, 5)).map(p => p.id)).toContain('2082-3')
+  })
+
+  test('a gap is not made up by reaching further back', () => {
+    expect(rollingWindow(all, P(2082, 3)).map(p => p.id)).toEqual(['2081-4', '2081-12', '2082-1', '2082-3'])
+  })
+
+  test('nothing selected is an empty window', () => {
+    expect(rollingWindow(all, null)).toEqual([])
+  })
+})
+
+describe('sumConsumptionByPeriod', () => {
+  test('keeps each month separate and explodes sales through the recipe breakdown', () => {
+    const out = sumConsumptionByPeriod({
+      sales: [
+        { period_id: 'p1', recipe_id: 'r1', qty_sold: 2 },
+        { period_id: 'p2', recipe_id: 'r1', qty_sold: 1 },
+        { period_id: 'p2', recipe_id: 'r1', qty_sold: -3 },   // a credit note: net -2 consumes nothing
+      ],
+      breakdown: { r1: [{ item_id: 'rice', qty: 0.5 }] },
+      wastages: [{ period_id: 'p2', item_id: 'rice', qty: 4 }],
+      staffMeals: [{ period_id: 'p1', item_id: 'oil', qty: '1.5' }],
+      returnsByPeriodItem: { p2: { oil: 2 } },
+    })
+    expect(out).toEqual({ p1: { rice: 1, oil: 1.5 }, p2: { rice: 4, oil: 2 } })
+  })
+})
+
+describe('splitReturns by period', () => {
+  test('an off-batch return is also filed under the month it was made in', () => {
+    const { byPeriodItem } = splitReturns([
+      { purchase_entry_id: 'in', item_id: 'rice', qty: 2, period_id: 'p2' },
+      { purchase_entry_id: 'old', item_id: 'rice', qty: 3, period_id: 'p2' },
+      { purchase_entry_id: null, item_id: 'oil', qty: 1, period_id: 'p3' },
+    ], new Set(['in']))
+    expect(byPeriodItem).toEqual({ p2: { rice: 3 }, p3: { oil: 1 } })
+  })
+})
+
+describe('countsFromClosedPeriods', () => {
+  test('only closed months anchor, and a 0 count is a count', () => {
+    const periods = [{ id: 'p1', status: 'closed' }, { id: 'p2', status: 'open' }]
+    const out = countsFromClosedPeriods([
+      { period_id: 'p1', item_id: 'rice', physical_qty: 0 },
+      { period_id: 'p1', item_id: 'oil', physical_qty: null },
+      { period_id: 'p2', item_id: 'rice', physical_qty: 9 },
+    ], periods)
+    expect(out).toEqual({ p1: { rice: 0 } })
+  })
+})
+
+describe('anchorToCounts', () => {
+  const d = (month, day) => new Date(2026, month, day)
+  const periods = [
+    { id: 'p1', endDate: d(4, 31) },
+    { id: 'p2', endDate: d(5, 30) },
+    { id: 'p3', endDate: d(6, 31) },
+  ]
+  const remainingOf = batches => batches.map(b => Number(b.remaining.toFixed(6)))
+
+  test('no count: the purchase-minus-theoretical estimate stands, oldest eaten first', () => {
+    const { batches, lastCountByItem } = anchorToCounts({
+      periods,
+      batches: [
+        { item_id: 'A', qty: 10, rate: 5, date: d(4, 1), period_id: 'p1', carriedForward: true },
+        { item_id: 'A', qty: 10, rate: 6, date: d(5, 10), period_id: 'p2' },
+      ],
+      consumedByPeriod: { p1: { A: 4 }, p2: { A: 8 } },
+    })
+    expect(remainingOf(batches)).toEqual([0, 8])
+    expect(lastCountByItem).toEqual({})
+  })
+
+  test('count LOWER than the estimate: the gap comes off the OLDEST batches, not the newest', () => {
+    // Theft or spillage: 20 on the books, 12 on the shelf. The 8 that vanished were the old stock.
+    const { batches, lastCountByItem } = anchorToCounts({
+      periods,
+      batches: [
+        { item_id: 'A', qty: 10, rate: 5, date: d(4, 1), period_id: 'p1' },
+        { item_id: 'A', qty: 10, rate: 6, date: d(4, 20), period_id: 'p1' },
+      ],
+      countsByPeriod: { p1: { A: 12 } },
+    })
+    expect(remainingOf(batches)).toEqual([2, 10])
+    expect(batches[0].countedOff).toBe(8)
+    expect(batches[0].consumed).toBe(8)
+    expect(batches[1].countedOff).toBe(0)
+    expect(lastCountByItem).toEqual({ A: 'p1' })
+  })
+
+  test('count HIGHER than the estimate: the surplus is ONE carried-in batch of unknown age, no purchase invented', () => {
+    const { batches } = anchorToCounts({
+      periods,
+      batches: [{ item_id: 'A', qty: 10, rate: 6, date: d(4, 5), period_id: 'p1' }],
+      consumedByPeriod: { p1: { A: 8 } },
+      countsByPeriod: { p1: { A: 5 } },
+      surplusRateOf: () => 7,
+    })
+    expect(batches).toHaveLength(2)
+    const surplus = batches.find(b => b.fromCount)
+    expect(surplus).toMatchObject({ item_id: 'A', qty: 3, remaining: 3, rate: 7, carriedForward: true, period_id: 'p1' })
+    expect(surplus.date).toEqual(d(4, 31))       // dated at the count
+    expect(batches.find(b => !b.fromCount).remaining).toBe(2)
+  })
+
+  test('a count of 0 empties the shelf; a count on an item with no batches creates its stock', () => {
+    const { batches } = anchorToCounts({
+      periods,
+      batches: [{ item_id: 'A', qty: 10, rate: 6, date: d(4, 5), period_id: 'p1' }],
+      countsByPeriod: { p1: { A: 0, B: 4 } },
+    })
+    expect(batches.find(b => b.item_id === 'A').remaining).toBe(0)
+    expect(batches.find(b => b.item_id === 'B')).toMatchObject({ remaining: 4, fromCount: true })
+  })
+
+  test('between counts the estimate resumes FROM the count, and the latest count is the one named', () => {
+    const { batches, lastCountByItem } = anchorToCounts({
+      periods,
+      batches: [
+        { item_id: 'A', qty: 20, rate: 5, date: d(4, 1), period_id: 'p1' },
+        { item_id: 'A', qty: 10, rate: 5, date: d(5, 15), period_id: 'p2' },
+        { item_id: 'A', qty: 10, rate: 5, date: d(6, 15), period_id: 'p3' },
+      ],
+      consumedByPeriod: { p2: { A: 5 }, p3: { A: 6 } },
+      countsByPeriod: { p1: { A: 15 }, p2: { A: 18 } },
+    })
+    // p1: 20, count 15. p2: +10, -5 off the oldest (15 to 10), count 18 takes 2 more (10 to 8).
+    // p3: +10, -6 off the oldest (8 to 2): 2, 10, 10.
+    expect(remainingOf(batches)).toEqual([2, 10, 10])
+    expect(lastCountByItem).toEqual({ A: 'p2' })
+  })
+
+  test('consumption beyond what is held is dropped, not charged to next month\'s delivery', () => {
+    const { batches } = anchorToCounts({
+      periods,
+      batches: [
+        { item_id: 'A', qty: 2, rate: 5, date: d(4, 1), period_id: 'p1' },
+        { item_id: 'A', qty: 10, rate: 5, date: d(5, 1), period_id: 'p2' },
+      ],
+      consumedByPeriod: { p1: { A: 9 } },
+    })
+    expect(remainingOf(batches)).toEqual([0, 10])
+  })
+
+  test('returns: an on-batch return shrinks its batch, an off-batch return is consumed in its month', () => {
+    const { byEntry, byPeriodItem } = splitReturns([
+      { purchase_entry_id: 'pe-1', item_id: 'A', qty: 3, period_id: 'p1' },
+      { purchase_entry_id: 'last-year', item_id: 'A', qty: 4, period_id: 'p1' },
+    ], new Set(['pe-1']))
+    const { batches } = anchorToCounts({
+      periods,
+      batches: [
+        { item_id: 'A', qty: 5, rate: 1, date: d(4, 1), period_id: 'p1', carriedForward: true },
+        { item_id: 'A', qty: 10 - (byEntry['pe-1'] || 0), rate: 1, date: d(4, 9), period_id: 'p1' },
+      ],
+      consumedByPeriod: sumConsumptionByPeriod({ returnsByPeriodItem: byPeriodItem }),
+    })
+    expect(remainingOf(batches)).toEqual([1, 7])
+  })
+
+  test('items outside the report (sub-recipe mirrors, inactive items) are ignored entirely', () => {
+    const { batches, lastCountByItem } = anchorToCounts({
+      periods,
+      batches: [
+        { item_id: 'A', qty: 5, rate: 1, date: d(4, 1), period_id: 'p1' },
+        { item_id: 'SUB', qty: 5, rate: 1, date: d(4, 1), period_id: 'p1', carriedForward: true },
+      ],
+      countsByPeriod: { p1: { SUB: 9, A: 5 } },
+      itemIds: new Set(['A']),
+    })
+    expect(batches.map(b => b.item_id)).toEqual(['A'])
+    expect(lastCountByItem).toEqual({ A: 'p1' })
+  })
+
+  test('does not mutate its input and carries caller fields through', () => {
+    const entry = { id: 'pe-9', expiry_date: '2026-12-01' }
+    const input = [{ item_id: 'A', qty: 10, rate: 5, date: d(4, 1), period_id: 'p1', entry }]
+    const { batches } = anchorToCounts({ periods, batches: input, countsByPeriod: { p1: { A: 4 } } })
+    expect(input[0].remaining).toBeUndefined()
+    expect(batches[0].entry).toBe(entry)
+    expect(batches[0].remaining).toBe(4)
+  })
+
+  test('the surplus ages as unknown-age stock, while the real old purchase stays in 90+', () => {
+    const asOf = new Date(2026, 7, 10)
+    const { batches } = anchorToCounts({
+      periods,
+      batches: [{ item_id: 'A', qty: 1, rate: 10, date: d(0, 1), period_id: 'p1' }],
+      countsByPeriod: { p3: { A: 6 } },
+      surplusRateOf: () => 10,
+    })
+    const { items, totals } = ageAllocated(batches, asOf)
+    expect(items[0].countSurplusQty).toBe(5)
+    expect(totals.countSurplusValue).toBe(50)
+    expect(totals.unknownAgeValue).toBe(50)      // dated at the p3 count, ~10 days old
+    expect(items[0].bands['90+'].qty).toBe(1)
   })
 })

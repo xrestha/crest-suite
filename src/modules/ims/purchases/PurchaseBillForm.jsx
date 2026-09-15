@@ -10,9 +10,12 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { invalidStyle } from '../../../shared/inlineFieldState'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { getCf, calcBillTotals, billDiscountError, fmtRate, lineState, PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
+import {
+  getCf, calcBillTotals, billDiscountError, fmtRate, lineState, PURCHASE_PAYMENT_METHODS,
+  parseInvoiceAmount, invoiceAmountError, invoiceMismatch, invoiceMismatchText,
+} from './purchasesHelpers'
 
-const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false }
+const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false, invoice_vat: '', invoice_total: '' }
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
 
 // Builds the initial header/lines from the group of raw purchase_entries being edited — mirrors
@@ -27,6 +30,9 @@ function initFromEditingEntries(entries, items) {
     payment_method: first.payment_method || 'Cash',
     discount: first.discount_amount ? String(first.discount_amount) : '',
     vat_inclusive: first.vat_inclusive || false,
+    // S756 (D13): blank when the bill was saved without them — never '0', which is a real figure.
+    invoice_vat: first.invoice_vat_amount == null ? '' : String(first.invoice_vat_amount),
+    invoice_total: first.invoice_total_amount == null ? '' : String(first.invoice_total_amount),
   }
   const lines = entries.map(e => {
     const item = items.find(i => i.id === e.item_id)
@@ -66,6 +72,8 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // "add at least one line" rule, which belongs to the line table rather than any one box (S603).
   const [dayErr, setDayErr] = useState('')
   const [discountErr, setDiscountErr] = useState('')
+  const [invoiceVatErr, setInvoiceVatErr] = useState('')
+  const [invoiceTotalErr, setInvoiceTotalErr] = useState('')
   // A bill that has SAVED stays unsaveable for the rest of this form's life (S756). The page still
   // has work to do after the RPC returns — print the voucher, read Item Master for rate changes —
   // before it navigates away, and `setSaving(false)` used to run BEFORE onSaved: for that whole
@@ -196,6 +204,14 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     if (discountMsg) { setDiscountErr(discountMsg); return }
     setDiscountErr('')
 
+    // The supplier's printed figures (S756, D13) are optional and a mismatch never stops a save —
+    // but a figure that is not a number, or is negative, is refused by name rather than saved as a
+    // guess (the table's CHECK would refuse a negative anyway, with a far worse sentence).
+    const vatMsg = invoiceAmountError(billHeader.invoice_vat, "VAT on the supplier's invoice")
+    const totalMsg = invoiceAmountError(billHeader.invoice_total, 'invoice total')
+    setInvoiceVatErr(vatMsg); setInvoiceTotalErr(totalMsg)
+    if (vatMsg || totalMsg) return
+
     // An edit with nothing to supersede is a contradiction, and the one that would duplicate the
     // bill. Refuse — the page only renders this form for an edit once it has loaded the bill's
     // rows, so reaching here means something is wrong.
@@ -254,6 +270,10 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     setSaving(true); setError('')
 
     const discountAmt = parseFloat(billHeader.discount) || 0
+    // Bill-level, repeated on every line like the discount. null (not 0) when the box is blank:
+    // "not typed" and "the bill prints no VAT" are different facts (S756, D13).
+    const invoiceVat = parseInvoiceAmount(billHeader.invoice_vat)
+    const invoiceTotal = parseInvoiceAmount(billHeader.invoice_total)
     const lines = valid.map(l => {
       const item = items.find(i => i.id === l.item_id)
       const cf = getCf(item)
@@ -269,6 +289,8 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
         payment_method:  billHeader.payment_method || 'Cash',
         vat_inclusive:   l.vat_inclusive || false,
         discount_amount: discountAmt,
+        invoice_vat_amount:   invoiceVat,
+        invoice_total_amount: invoiceTotal,
       }
     })
 
@@ -556,7 +578,62 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
           where it was previously a solid --theme-amber fill competing with Save for the eye. */}
       <button className="btn btn-ghost" onClick={addBillLine} style={{ marginTop: 10 }}>+ Add Item</button>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', marginTop: 14, gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 14, gap: 16, flexWrap: 'wrap' }}>
+        {/* The supplier's own printed figures (S756, owner decision D13). Optional, and never a
+            block: a difference is shown here, beside the figures it is compared with, so the reader
+            can find the mis-keyed line before saving — and saves anyway if the paper is what's wrong.
+            Text inputs with inputMode="decimal" rather than type="number", so "9,702.00" typed the
+            way the bill prints it is read as a number instead of silently emptied by the browser. */}
+        {(() => {
+          const totals = calcBillTotals(billLines, billHeader.discount)
+          const invoiceVat = parseInvoiceAmount(billHeader.invoice_vat)
+          const invoiceTotal = parseInvoiceAmount(billHeader.invoice_total)
+          const usable = n => (n === null || Number.isNaN(n) || n < 0 ? null : n)
+          const check = totals.subTotal > 0
+            ? invoiceMismatch({ invoiceVat: usable(invoiceVat), invoiceTotal: usable(invoiceTotal) }, totals)
+            : { checked: false, mismatch: false }
+          const inputStyle = { background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: 130, textAlign: 'right' }
+          return (
+            <div style={{ maxWidth: 480, flex: '1 1 320px' }}>
+              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
+                <Tip text="Optional. Copy these two figures straight off the supplier's paper bill and Crest checks them against the lines you entered. If they differ by more than NPR 1 you'll see why before you save — usually a rate typed in the wrong unit, a missed line, or VAT ticked on the wrong item. Leave both blank to skip the check." width={320}>As printed on the supplier's bill</Tip>
+                <span style={{ textTransform: 'none', letterSpacing: 0, marginLeft: 6, color: 'var(--theme-text3)' }}>(optional)</span>
+              </div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <div className="form-field" style={{ marginBottom: 0 }}>
+                  <label htmlFor="purcha-inv-vat"><Tip text="The VAT amount exactly as the supplier's bill prints it. Type 0 if the bill shows no VAT; leave blank if you don't want this checked." width={260}>VAT on supplier's invoice</Tip></label>
+                  <input id="purcha-inv-vat" type="text" inputMode="decimal" autoComplete="off"
+                    value={billHeader.invoice_vat}
+                    onChange={e => { setInvoiceVatErr(''); setBillHeader(h => ({ ...h, invoice_vat: e.target.value })) }}
+                    placeholder="e.g. 702.00"
+                    {...fieldAria('purcha-inv-vat', invoiceVatErr)}
+                    style={invalidStyle(inputStyle, invoiceVatErr)} />
+                </div>
+                <div className="form-field" style={{ marginBottom: 0 }}>
+                  <label htmlFor="purcha-inv-total"><Tip text="The final amount the supplier's bill asks for — after its discount and including VAT. Leave blank if you don't want this checked." width={260}>Invoice total</Tip></label>
+                  <input id="purcha-inv-total" type="text" inputMode="decimal" autoComplete="off"
+                    value={billHeader.invoice_total}
+                    onChange={e => { setInvoiceTotalErr(''); setBillHeader(h => ({ ...h, invoice_total: e.target.value })) }}
+                    placeholder="e.g. 9,702.00"
+                    {...fieldAria('purcha-inv-total', invoiceTotalErr)}
+                    style={invalidStyle(inputStyle, invoiceTotalErr)} />
+                </div>
+              </div>
+              <FieldError id="purcha-inv-vat" message={invoiceVatErr} />
+              <FieldError id="purcha-inv-total" message={invoiceTotalErr} />
+              {check.mismatch && (
+                <div role="status" style={{ marginTop: 8, padding: '8px 12px', fontSize: 12, lineHeight: 1.5, color: 'var(--theme-text2)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+                  <strong style={{ color: 'var(--theme-amber-text)' }}>△ Doesn't match the supplier's bill.</strong>{' '}
+                  {invoiceMismatchText(check, { crestVat: totals.vatTotal, crestTotal: totals.grandTotal, invoiceVat, invoiceTotal })}
+                  {' '}Check each line's rate and unit, the VAT ticks and the discount. You can still save — the difference will show as a flag on the Purchases list and the VAT Report.
+                </div>
+              )}
+              {check.checked && !check.mismatch && (
+                <div style={{ marginTop: 6, fontSize: 12, color: 'var(--theme-green-text)' }}>✓ Matches the supplier's bill (within NPR 1).</div>
+              )}
+            </div>
+          )
+        })()}
         {(() => {
           const { taxableBase, nonTaxableBase, subTotal, discount, vatTotal, grandTotal } = calcBillTotals(billLines, billHeader.discount)
           if (subTotal === 0) return null

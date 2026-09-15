@@ -202,6 +202,16 @@ still stands; its remedy was one step short.
   The provider is also the ONLY loader now (`wantedCidRef` + a sequence discard superseded
   responses) — a page calling `loadSettings` on the same client switch doubles the read and races it.
 
+**A storage bucket written with `upsert: true` or `remove()` needs a SELECT policy for the writer
+(S756, `20260918160000`).** Supabase Storage runs an upsert as `INSERT … ON CONFLICT DO UPDATE …
+RETURNING *` and a remove as `DELETE … RETURNING` in the caller's session, and Postgres applies
+SELECT policies to RETURNING — so with no SELECT policy the upsert raises 42501 however permissive
+the INSERT policy is, and the remove matches nothing and reports success. `20260914140100` left
+Logos with admin INSERT/UPDATE/DELETE and no SELECT, which broke replacing and removing a logo;
+`logos_select_admin` restores it. Public reads never consult RLS, so the policy is invisible to
+viewers. The reverted `hr_employee_photo` bucket failed the same way. `dish-photos`
+(`20260918150000`) uploads without upsert and carries a scoped SELECT policy.
+
 **The Logos bucket is admin-write-only** (`20260914140100`). Its dashboard-made policies let any
 signed-in account of any client overwrite or delete any object, including `admin/logo.*`, Crest's own
 login-page mark. Only admins upload logos (Settings → Branding, ClientDrawer). **A storage bucket's

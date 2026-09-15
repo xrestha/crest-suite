@@ -24,6 +24,7 @@ import { productCodePrefix, nextProductCode, SUB_RECIPE_CATEGORY } from '../../.
 import RecipeCostCardPrint from './RecipeCostCardPrint'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
+import DishPhotoField from './DishPhotoField'
 import { Navigate } from 'react-router-dom'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fcBand, fcThresholds, fcFigure, recipeCostOf, menuFcPct, unratedReason } from '../../../shared/imsFormulas'
@@ -396,6 +397,23 @@ export default function Recipes() {
     }
     setSelectedRecipe(detailStack[detailStack.length - 1])
     setDetailStack(stack => stack.slice(0, -1))
+  }
+
+  // S756 (D16): the dish photo's immediate write for a SAVED recipe. `.select('id')` because a
+  // refused RLS update is 0 rows and no error; DishPhotoField treats an empty result as a refusal
+  // and removes the file it just uploaded. The page's copies are updated only on success.
+  async function persistDishPhoto(url) {
+    const recipeId = selectedRecipe?.id
+    if (!recipeId) return { data: null, error: { message: 'No saved recipe to attach the photo to.' } }
+    const res = await withTimeout(
+      scopedUpdate('recipes', { image_url: url }).eq('id', recipeId).select('id'),
+      SAVE_TIMEOUT_MS, 'Save photo'
+    )
+    if (!res.error && res.data?.length) {
+      setSelectedRecipe(r => (r && r.id === recipeId ? { ...r, image_url: url } : r))
+      setRecipes(rs => rs.map(r => (r.id === recipeId ? { ...r, image_url: url } : r)))
+    }
+    return res
   }
 
   async function saveFcPct() {
@@ -1786,10 +1804,18 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   <label htmlFor="recipe-f6"><Tip text="Optional — shown on the guest-facing QR menu (Table Management → Print QR). Leave blank to omit." width={280}>Description (guest menu)</Tip></label>
                   <input id="recipe-f6" value={recipeForm.description} onChange={e => setRecipeForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Grilled chicken breast, herb butter, seasonal veg" />
                 </div>
-                <div className="form-field">
-                  <label htmlFor="recipe-f7"><Tip text="Optional — a public image URL shown on the guest-facing QR menu. Paste a link to an already-hosted photo." width={280}>Photo URL (guest menu)</Tip></label>
-                  <input id="recipe-f7" value={recipeForm.image_url} onChange={e => setRecipeForm(f => ({ ...f, image_url: e.target.value }))} placeholder="https://..." />
-                </div>
+                {/* S756 (D16): an upload stored in Crest, because the guest menu's CSP blocks
+                    photos linked from other websites. For a saved recipe the photo writes straight
+                    away (see DishPhotoField); the form value is kept in step so Save Recipe writes
+                    the same URL rather than reverting it. */}
+                <DishPhotoField
+                  id="recipe-f7"
+                  clientId={clientId}
+                  recipeId={selectedRecipe?.id || null}
+                  value={recipeForm.image_url}
+                  onChange={url => setRecipeForm(f => ({ ...f, image_url: url }))}
+                  persist={selectedRecipe?.id ? persistDishPhoto : null}
+                />
                 <div className="form-field">
                   <label htmlFor="recipe-f8"><Tip text="Optional — shows a veg/non-veg badge on the guest-facing QR menu. Leave unset to hide the badge for this item.">Veg / Non-Veg</Tip></label>
                   <select id="recipe-f8" value={recipeForm.is_veg} onChange={e => setRecipeForm(f => ({ ...f, is_veg: e.target.value }))}>

@@ -8,6 +8,7 @@ import { calcBillTotals } from '../purchases/purchasesHelpers'
 import {
   VAT_RATE, splitPurchaseVat, buildVendorSummary, billPayables, netFactors, returnBase,
   isVatReturn, isNonVatReturn, isUnlinkedReturn, annexure13Rows, normalisePan, billWiseVat, ONE_LAKH, summariseUnlinkedReturns,
+  returnLinesOutsidePeriod, priorBillFactors,
 } from './purchaseTaxSplit'
 import { allocateBillDiscounts } from './supplierAttribution'
 
@@ -133,6 +134,41 @@ describe('splitPurchaseVat — returns', () => {
     expect(sum.value).toBeCloseTo(12000, 6)
     expect(sum.examples).toEqual(['day 5 · Chicken · Acme'])
     expect(sum.more).toBe(1)
+  })
+
+  // S756, owner decision D10. The return sits in THIS month; its bill is last month's, so the bill's
+  // lines are not in this month's entries. Its VAT half still comes from the linked line, and its
+  // value from that bill's own discount — read whole from its own month.
+  describe('a return against a bill from an earlier month', () => {
+    const LAST_MONTH = MIXED_BILL.map(l => ({ ...l, period_id: 'bhadra' }))
+    const THIS_MONTH = [{ ...VAT_LINE, id: 'n1', purchase_group_id: 'G2', discount_amount: 0, rate: 1000 }]
+    const late = ret(LAST_MONTH[0], { id: 'late', period_id: 'ashwin', bs_day: 2 })
+
+    it('names the bill lines it has to fetch — and nothing already in the period, nothing unlinked', () => {
+      const orphan = ret(VAT_LINE, { id: 'u', purchase_entry_id: null, purchase_entries: null })
+      expect(returnLinesOutsidePeriod(THIS_MONTH, [late, ret(THIS_MONTH[0]), orphan])).toEqual(['l1'])
+    })
+
+    it('goes to the VAT half by its own line, not by this month', () => {
+      const s = splitPurchaseVat(THIS_MONTH, [late], { priorBillLines: LAST_MONTH })
+      expect(s.vatReturns).toHaveLength(1)
+      expect(s.unlinkedReturns).toHaveLength(0)
+    })
+
+    it("is valued at its bill's discounted rate once the bill's lines are passed", () => {
+      const s = splitPurchaseVat(THIS_MONTH, [late], { priorBillLines: LAST_MONTH })
+      expect(s.vatReturnBase).toBeCloseTo(5400, 6)
+      // THE BUG it closes: without the bill, the list rate — 600 of VAT reversed that was never claimed.
+      expect(splitPurchaseVat(THIS_MONTH, [late]).vatReturnBase).toBeCloseTo(6000, 6)
+    })
+
+    it("keeps two months' legacy bills (no group id) with the same vendor, invoice and day apart", () => {
+      const legacyA = { ...VAT_LINE, id: 'la', purchase_group_id: null, invoice_ref: 'X', period_id: 'p1', discount_amount: 1000, rate: 2000 }
+      const legacyB = { ...VAT_LINE, id: 'lb', purchase_group_id: null, invoice_ref: 'X', period_id: 'p2', discount_amount: 0, rate: 8000 }
+      const f = priorBillFactors([legacyA, legacyB])
+      expect(f.get('la')).toBeCloseTo(0.5, 6)   // its own 1,000 off its own 2,000
+      expect(f.get('lb')).toBeCloseTo(1, 6)     // untouched by the other month's discount
+    })
   })
 
   it('prices a return whose purchase is not in the fetched set at its list rate', () => {
@@ -300,6 +336,19 @@ describe('billWiseVat', () => {
     expect(mixed.exempt).toBeCloseTo(3600, 6)
     expect(mixed.total).toBeCloseTo(calcBillTotals(MIXED_BILL, 1000).grandTotal, 6)
     expect(mixed.pan).toBe('123')
+  })
+
+  // S756, owner decision D13 — the supplier's printed figures, flagged against the row's own VAT/Total.
+  it('flags a bill whose printed VAT or total differs from the row by more than NPR 1', () => {
+    const stamped = ENTRIES.map(l => (l.purchase_group_id === 'G1'
+      ? { ...l, invoice_vat_amount: 702, invoice_total_amount: 9800 }
+      : { ...l, invoice_vat_amount: 260.5 }))
+    const [other, mixed] = billWiseVat(allocateBillDiscounts(stamped))
+    expect(mixed.invoiceTotal).toBe(9800)
+    expect(mixed.invoiceCheck.vatMismatch).toBe(false)
+    expect(mixed.invoiceCheck.totalMismatch).toBe(true)
+    expect(other.invoiceCheck.mismatch).toBe(false)   // 260 vs 260.50, inside the tolerance
+    expect(billWiseVat(allocateBillDiscounts(ENTRIES))[0].invoiceCheck.checked).toBe(false)
   })
 })
 

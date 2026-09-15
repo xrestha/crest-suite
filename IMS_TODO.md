@@ -21,23 +21,23 @@ access. High-severity claims were spot-checked against source before any decisio
 | D3 | Recipe ranks | **Hide/unhide a dish: IMS supervisor+. Delete a dish: manager+.** Enforced in DB (`guard_recipe_rank`; rank check on `recipe_ingredients` writes). ✅ S756 |
 | D4 | Counting tablets | One **"Sign out all counting tablets"** button (rotates `ims_device_secret`); also rotated by archive/clear/delete client. ✅ S756 |
 | D5 | Item unit/price edits with history | **Refuse a unit change** once the item has purchases or counts ("hide it and create a new item"). **Warn on a price change**, naming how many past records it re-values. ✅ S756 |
-| D6 | Uncounted items on summaries | Stock Count Summary, Monthly Summary, Annual Summary, Period Comparison: **amber warning naming the uncounted items, marked in table and export; FC% shown without a colour verdict** while the gap is material. Totals unchanged. |
-| D7 | Open-month reports | Monthly Summary / Budget vs Actual keep opening on the current month, **marked provisional, no red/green verdict** until closed. Fall back to latest period when none is open. |
+| D6 | Uncounted items on summaries | Stock Count Summary, Monthly Summary, Annual Summary, Period Comparison: **amber warning naming the uncounted items, marked in table and export; FC% shown without a colour verdict** while the gap is material. Totals unchanged. ✅ S756 |
+| D7 | Open-month reports | Monthly Summary / Budget vs Actual keep opening on the current month, **marked provisional, no red/green verdict** until closed. Fall back to latest period when none is open. ✅ S756 |
 | D8 | Price on a corrected past sales day | **Every row keeps its stored `unit_price`**; only new rows take today's menu price. ✅ S756 |
-| D9 | Lump-sum supplier payment | **One amount per supplier, applied oldest bill first, split shown before saving.** Per-bill entry stays. |
-| D10 | Late returns | A return may pick a bill from an earlier month and **sits in the month it happened** (VAT timing to be confirmed by an accountant — say so in Help). |
-| D11 | Supplier credit | **"Settle using supplier credit"** on a payment against another bill of the same supplier. |
+| D9 | Lump-sum supplier payment | **One amount per supplier, applied oldest bill first, split shown before saving.** Per-bill entry stays. ✅ S756 |
+| D10 | Late returns | A return may pick a bill from an earlier month and **sits in the month it happened** (VAT timing to be confirmed by an accountant — say so in Help). ✅ S756 |
+| D11 | Supplier credit | **"Settle using supplier credit"** on a payment against another bill of the same supplier. ✅ S756 |
 | D12 | Same PAN on two suppliers (1L report) | **Aggregate by PAN**, listing all names; warn on blank PANs. ✅ S756 |
-| D13 | Invoice VAT capture | **Two optional fields** on a purchase bill (invoice VAT, invoice total); flag mismatch > NPR 1. Migration. |
-| D14 | Requisitions | **Record requested_by / issued_by / issued_at**; add **Rejected** status with reason. No two-person rule, no back-orders. |
+| D13 | Invoice VAT capture | **Two optional fields** on a purchase bill (invoice VAT, invoice total); flag mismatch > NPR 1. Migration. ✅ S756 |
+| D14 | Requisitions | **Record requested_by / issued_by / issued_at**; add **Rejected** status with reason. No two-person rule, no back-orders. ✅ S756 |
 | D15 | Dish VAT toggle | **Keep the guest price** on both Recipe Costing and Menu Pricing; show resulting ex-VAT. ✅ S756 |
-| D16 | Dish photos | **Upload button** storing photos in Crest (Supabase Storage). |
+| D16 | Dish photos | **Upload button** storing photos in Crest (Supabase Storage). ✅ S756 |
 | D17 | Non-recipe items on Variance | Grey **"no recipe linked"** state, excluded from flagged count and loss total. ✅ S756 |
 | D18 | Reorder quantities | **Both units, rounded up to whole packs** — print, WhatsApp and Excel. ✅ S756 |
-| D19 | Stock Ageing / FIFO basis | **Anchor to the physical count** where one exists (oldest removed first), **state the basis**, **rolling 12-month** window. |
-| D20 | Dead stock | **Dead after 2–3 consecutive months** with no movement (shorter = Slow); **suggested next step** per item. |
+| D19 | Stock Ageing / FIFO basis | **Anchor to the physical count** where one exists (oldest removed first), **state the basis**, **rolling 12-month** window. ✅ S756 |
+| D20 | Dead stock | **Dead after 2–3 consecutive months** with no movement (shorter = Slow); **suggested next step** per item. ✅ S756 |
 | D21 | Demand forecast | **Exclude past holidays** from weekday averages; ingredient list shows **forecast use / in store / to buy**. ✅ S756 |
-| D22 | Dashboard labour | Dashboard Fixed Costs % / Est. Net Margin **use finalized payroll**, like Overheads, naming the source. |
+| D22 | Dashboard labour | Dashboard Fixed Costs % / Est. Net Margin **use finalized payroll**, like Overheads, naming the source. ✅ S756 |
 | D23 | Depreciation in profit | **Memo line** on Overheads P&L — shown, not subtracted. ✅ S756 |
 | D24 | Asset fixes | **Charge depreciation to the disposal date**; **Adjustment run** to reverse a wrong run + warn before posting an overlapping period. Personal-use apportionment **not** chosen (legal question). ✅ S756 |
 | D25 | Supplier tidy-up | **Owner can archive, restore and delete** suppliers (DB trigger still refuses deleting one with history). ✅ S756 |
@@ -53,16 +53,28 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 
 **Stage 2 (wrong numbers and lost changes) shipped in S756** — migration `20260918110000` (bill edit refused with returns, non-negative discount CHECK, gate-pass void) plus ~60 frontend files, with owner decisions D5, D8, D12, D15, D17, D18, D21, D23, D24, D25, D26, D27 and D28 built alongside the fixes in the same files.
 
-**Open after stage 2** (found or left by the stage-2 work):
-- 🔴 D22 — ClientDashboard Fixed Costs % / Est. Net Margin use finalized payroll, and say "labour unreadable on this login" for an IMS staff login (Overheads does both now).
-- 🔴 VendorReport: `provisionalWhenOpen` on PeriodScope; SupplierContribution + VendorReport export gating on loading/biz.error.
-- 🔴 PaymentReport `billPayables`: unlinked returns valued with no VAT added back and no banner (VAT/Non-VAT now name them).
-- 🔴 ReorderReport export has no letterhead (`sheetWithLetterhead`).
-- 🔴 PurchaseBillPage `applyRateUpdates` rewrites `items.rate` with no D5 price warning and no zero-row check; its `load()` shows raw `error.message`.
-- 🔴 Purchases/Returns "Delete All" has no zero-row check; OutstandingPayables bulk `paid_at` `.in()` is not chunked.
-- 🔴 TheoreticalVariance's Over/Under-consumed filter buttons test raw `variance > 0.01`, not the tolerance band.
-- 🔴 `findSupersededRows` / `persistSalesDay` rethrow `new Error(error.message)`, losing the error code.
-- 🔴 Move `serviceDayStartIso` (POS parking) into `src/shared/nepalTime.js`; GatePasses imports it from the POS modal. Decide whether POS parking's auto-close should use the actual 6 AM like gate passes (it cuts off at the service day's midnight).
+**Stage 3 (owner decisions) shipped in S756** — migrations `20260918120000` (supplier credit pairs), `20260918130000` (invoice VAT/total columns), `20260918140000` (requisition attribution + Rejected, and the staff-adds-lines-to-an-issued-slip gap closed), `20260918150000` (dish-photos bucket), `20260918160000` (Logos SELECT policy — logo replace/remove had been failing since 20260914140100). All eleven remaining decisions are built.
+
+**Open after stage 3:**
+- 🔴 A return against an EARLIER month's bill is valued at list price (no discount) on PaymentReport, VendorReport, SupplierContribution and computeVendorPurchasingSection — VAT and Non-VAT now read the prior bill via `readPriorBillLines.js`. VendorReport's bill drilldown shows such a return on no row.
+- 🔴 Monthly Owner Report's `computeInventoryDeadStock.js` still uses the one-month Dead rule; move it onto `deadStockCalc.js` and bump `CURRENT_SCHEMA_VERSION`.
+- 🔴 Overheads.js should adopt `src/modules/dashboard/labourSource.js` (same rule, one copy); its payslips read is unpaged.
+- 🔴 OwnerDashboard's Labor/Prime/True Net Margin use a prorated HR estimate even after payroll is finalized, and its overheads read ignores the Labor bucket — decide whether it should prefer the finalized run (owner decision).
+- 🔴 KitchenDisplay.jsx keeps its own copy of `serviceDayStartIso`; import the shared one from nepalTime.js.
+- ⚪ POS parking auto-close cuts off at the service day's midnight while gate passes use the actual 6 AM — align? (one line in PosParkingSlips.jsx).
+- ⚪ D6 choices to confirm: Stock Count Summary export has a scope line and warning but no letterhead; Annual Summary's YEAR-total FC% also loses its verdict when the year's gap is material; Budget vs Actual's provisional line talks about spend rather than food cost.
+- ⚪ Stock Ageing: count surpluses (count above theoretical usage — common) are unknown-age stock and will often hold back the ✓ on the 90+ card.
+- ⚪ Dish photos uploaded to a NEW recipe that is then cancelled leave an unused file in storage.
+
+- ✅ S756 stage 3 — D22 — ClientDashboard Fixed Costs % / Est. Net Margin use finalized payroll, and say "labour unreadable on this login" for an IMS staff login (Overheads does both now).
+- ✅ S756 stage 3 — VendorReport: `provisionalWhenOpen` on PeriodScope; SupplierContribution + VendorReport export gating on loading/biz.error.
+- ✅ S756 stage 3 — PaymentReport `billPayables`: unlinked returns valued with no VAT added back and no banner (VAT/Non-VAT now name them).
+- ✅ S756 stage 3 — ReorderReport export has no letterhead (`sheetWithLetterhead`).
+- ✅ S756 stage 3 — PurchaseBillPage `applyRateUpdates` rewrites `items.rate` with no D5 price warning and no zero-row check; its `load()` shows raw `error.message`.
+- ✅ S756 stage 3 — Purchases/Returns "Delete All" has no zero-row check; OutstandingPayables bulk `paid_at` `.in()` is not chunked.
+- ✅ S756 stage 3 — TheoreticalVariance's Over/Under-consumed filter buttons test raw `variance > 0.01`, not the tolerance band.
+- ✅ S756 stage 3 — `findSupersededRows` / `persistSalesDay` rethrow `new Error(error.message)`, losing the error code.
+- ✅ S756 stage 3 — Move `serviceDayStartIso` (POS parking) into `src/shared/nepalTime.js`; GatePasses imports it from the POS modal. Decide whether POS parking's auto-close should use the actual 6 AM like gate passes (it cuts off at the service day's midnight).
 - ⚪ Disposals recorded before S756 keep a gain/loss measured at the last posted run (no backfill) — owner decision if wanted.
 - ⚪ 1L report: an UNLINKED return is still deducted from its supplier's total (at list rate, no VAT reversed) — agent's choice, to confirm.
 - ⚪ Demand Forecast Recompute now skips past holidays, which changes what Roster's Labor Forecast reads.

@@ -6,7 +6,8 @@ import { fcBand, fcThresholds, recipeCostOf } from '../../shared/imsFormulas'
 import { nmBand, descendingBand, bandFigure } from '../../shared/operatingBands'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
+import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel } from '../../modules/dashboard/labourSource'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
@@ -311,6 +312,12 @@ export default function ClientDashboard() {
   // tenant's numbers. Each load call captures the id current at its own start and checks it's
   // still current before committing any setState.
   const loadIdRef = useRef(0)
+  // Labour on this page follows Overheads' rule (S756, D22): a finalized payroll run supersedes the
+  // typed Labor bucket. `hr_payroll_runs`/`hr_payslips` carry the rank-blind RESTRICTIVE
+  // `no_ims_staff` policy, so an IMS login reads both as `[]` with no error — which would look
+  // exactly like "no finalized run" and quietly fall back to the bucket. Such a login does not ask.
+  const hrOn = !!clientModules.hr
+  const payrollFenced = isPayrollFenced({ hrOn, isAdmin, isOwner, imsRole: profile?.ims_role })
   const [advancingPeriod, setAdvancingPeriod] = useState(false)
   const [periodCloseError, setPeriodCloseError] = useState('')
   const [confirmPeriodClose, setConfirmPeriodClose] = useState(false)
@@ -341,7 +348,7 @@ export default function ClientDashboard() {
     if (clientModules.ims) loadStats(myId); else setLoading(false)
     if (clientModules.hr) loadHrStats(myId); else setHrStats(null)
     if (clientModules.pos) { posIsStationTeam ? loadKitchenPosStats(myId) : loadPosStats(myId) } else setPosStats(null)
-  }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, posIsStationTeam, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, posIsStationTeam, payrollFenced, location.key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const canSales    = hasFeature('sales_entry')
   const canVariance = hasFeature('variance_report')
@@ -455,6 +462,12 @@ export default function ClientDashboard() {
       // here UNDER-deducts staff meals, which makes on-hand look higher than it is and quietly
       // drops items off the "below par" list this tile exists to show.
       period ? fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
+      // Finalized payroll for this period (S756, D22) — only asked when HR is on AND this login can
+      // read payroll at all (payrollFenced). `{ data: [] }` keeps the tuple shape. At most one run
+      // per period, but paged anyway so this read carries its rows-per-what in code, not in a hope.
+      period && hrOn && !payrollFenced
+        ? fetchAllRows(() => scopedFrom('hr_payroll_runs', 'id').eq('period_id', period.id).eq('status', 'finalized').order('id'))
+        : { data: [] },
     ])
 
     const independentResults = await independentPromise
@@ -496,12 +509,28 @@ export default function ClientDashboard() {
       { data: closing },
       { data: overheadsData },
       { data: wastagesData },
-      { data: staffMealsData }
+      { data: staffMealsData },
+      { data: payrollRuns, error: payrollRunsErr }
     ] = dependentResults
+
+    // The run's payslips — gross + employer SSF, the definition Overheads, ConsolidatedPnl and
+    // get_group_summary share. One row per employee per run; paged and chunked all the same. A
+    // failed read is carried as `labourReadFailed` and must NOT fall through to the typed Labor
+    // bucket: that would quietly substitute a different labour source for the one the tile names.
+    let labourPayroll = null
+    let labourReadFailed = !!payrollRunsErr
+    const payrollRunIds = (payrollRuns || []).map(r => r.id)
+    if (!labourReadFailed && payrollRunIds.length > 0) {
+      const { data: slips, error: slipErr } = await fetchAllRowsChunked(payrollRunIds, ids =>
+        scopedFrom('hr_payslips', 'gross, ssf_employer').in('run_id', ids).order('id'))
+      if (loadIdRef.current !== myId) return // superseded during the payslip read
+      if (slipErr) labourReadFailed = true
+      else labourPayroll = payrollLabourTotal(slips || [])
+    }
 
     const hadRealError = (periodErr && periodErr.code !== 'PGRST116')
       || independentResults.some(r => r.error) || dependentResults.some(r => r.error)
-      || rawBreakdown === null
+      || rawBreakdown === null || labourReadFailed
     setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
 
     // purchaseTotal = purchases NET of bill discounts − returns. `discount_amount` is a BILL-level
@@ -802,7 +831,10 @@ export default function ClientDashboard() {
     // itemRateMap already built above (for recipeCostMap) — same items(id, per_uom_rate) shape.
     const wastageValueTotal = (wastagesData || []).reduce((s, w) => s + parseFloat(w.qty || 0) * (itemRateMap[w.item_id] || 0), 0)
 
-    setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, overheadBuckets, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
+    // `overheadTotal` stays the raw all-bucket sum of what was TYPED; the labour actually counted is
+    // resolved at render (resolveLabour) from `overheadBuckets.labor`, `labourPayroll` and the
+    // viewer's fence, so a cached stats object from before S756 still renders (payroll unknown).
+    setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, overheadBuckets, labourPayroll, labourReadFailed, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
     setLoading(false)
   }
 
@@ -1139,17 +1171,45 @@ export default function ClientDashboard() {
   //
   // And the mark is withheld with the colour before SETTLE_DAY, not kept alongside a grey number:
   // a ✓ on a day-4 food cost is the same claim in a quieter voice.
-  const verdictFigure = (value, bander) => {
+  //
+  // `withhold` (S756): the same neutral rendering for a figure that may be MISSING a cost rather than
+  // merely unsettled — labour this login cannot read. A ✓ on a margin that might not include the
+  // wage bill is the flattering half of the D22 defect in a quieter voice.
+  const verdictFigure = (value, bander, withhold = false) => {
     const f = bandFigure(value, bander)
     if (value == null) return { color: 'var(--theme-text2)', title: undefined, text: f.text }
-    if (periodTooEarly) return { color: 'var(--theme-text1)', title: undefined, text: `${value.toFixed(1)}%` }
+    if (periodTooEarly || withhold) return { color: 'var(--theme-text1)', title: undefined, text: `${value.toFixed(1)}%` }
     return { color: f.style.color, title: f.title, text: f.text }
   }
 
+  // ── Labour: finalized payroll XOR the typed Labor bucket, never the sum (S756, D22) ─────────────
+  //
+  // Until S756 Fixed Costs % and Est. Net Margin % counted only what was typed on the Overheads
+  // page's Labor tab, while the Overheads page itself used the finalized payroll run — so a client
+  // paying NPR 4 lakh in wages with an empty Labor tab saw a healthy margin here and a loss there,
+  // for the same month. The precedence lives in labourSource.js so the two pages cannot drift.
+  // `fixedCostTotal` is the figure both tiles and the cost pie use; `stats.overheadTotal` stays the
+  // raw typed sum. A stats object cached before S756 has no `labourPayroll` and degrades to the old
+  // bucket-only reading until the reload underneath it lands.
+  const ohBuckets = stats?.overheadBuckets
+  const labour = resolveLabour({
+    labourBucket: ohBuckets?.labor || 0,
+    payroll: stats?.labourPayroll ?? null,
+    hrOn,
+    fenced: payrollFenced,
+    readFailed: !!stats?.labourReadFailed,
+  })
+  // Named on both ratio tiles when there are two possible sources (HR on), or when there is none at
+  // all; an IMS-only client with a filled Labor tab has one source and nothing to disambiguate.
+  const labourLabel = hrOn || labour.source === 'none' ? labourSourceLabel(labour, hrOn) : ''
+  const fixedCostTotal = ohBuckets
+    ? (ohBuckets.overhead || 0) + labour.amount + (ohBuckets.tax_fees || 0)
+    : (stats?.overheadTotal || 0)
+
   const fcPct = stats?.revenueTotal > 0 ? (stats.purchaseTotal / stats.revenueTotal) * 100 : null
-  const ohPct = stats?.revenueTotal > 0 && stats?.overheadTotal > 0 ? (stats.overheadTotal / stats.revenueTotal) * 100 : null
+  const ohPct = stats?.revenueTotal > 0 && fixedCostTotal > 0 ? (fixedCostTotal / stats.revenueTotal) * 100 : null
   const netMarginPct = stats?.revenueTotal > 0
-    ? ((stats.revenueTotal - stats.purchaseTotal - (stats.overheadTotal || 0)) / stats.revenueTotal) * 100
+    ? ((stats.revenueTotal - stats.purchaseTotal - fixedCostTotal) / stats.revenueTotal) * 100
     : null
   // Computed once per render instead of inside the pie-legend .map() below, where every row was
   // redundantly re-reducing the same, unchanging total.
@@ -1229,7 +1289,8 @@ export default function ClientDashboard() {
   // the Est. Net Margin % card (revenue minus food cost and overheads), in the standard restaurant
   // P&L order: Food Cost → Labor → Overheads → Tax & Fees → what's left.
   //
-  // Labor comes from the Overheads page's own `labor` bucket, NOT from HR payroll. Until S526 this
+  // Labor is `labour.amount` (S756): the finalized payroll run when one exists, otherwise the
+  // Overheads page's own `labor` bucket — never both. Until S526 this
   // chart drew `stats.overheadTotal` (which is all three buckets summed, labor included) as one
   // "Overheads" slice AND added `hrStats.payroll` on top as a separate "Labor (basic)" slice — so
   // every rupee of labor was counted twice and the pie's own total came out well above the total
@@ -1275,29 +1336,40 @@ export default function ClientDashboard() {
   }
   // Falls back to one combined slice for a `stats` object restored from a pre-S526 session cache,
   // which has overheadTotal but no overheadBuckets — still correct, just less broken out.
-  const ohBuckets = stats?.overheadBuckets
   const costBreakdown = [
     { name: 'Food Cost', value: Math.max(0, stats?.purchaseTotal || 0) },
     ...(ohBuckets
       ? [
-          { name: 'Labor',      value: Math.max(0, ohBuckets.labor || 0) },
+          { name: 'Labor',      value: Math.max(0, labour.amount) },
           { name: 'Overheads',  value: Math.max(0, ohBuckets.overhead || 0) },
           { name: 'Tax & Fees', value: Math.max(0, ohBuckets.tax_fees || 0) },
         ]
       : [{ name: 'Overheads', value: Math.max(0, stats?.overheadTotal || 0) }]),
     ...(netMarginPct != null && netMarginPct > 0
-      ? [{ name: 'Net Margin', value: Math.max(0, (stats.revenueTotal || 0) - (stats.purchaseTotal || 0) - (stats.overheadTotal || 0)) }]
+      ? [{ name: 'Net Margin', value: Math.max(0, (stats.revenueTotal || 0) - (stats.purchaseTotal || 0) - fixedCostTotal) }]
       : []),
   ].filter(r => r.value > 0)
   const costBreakdownTotal = costBreakdown.reduce((s, r) => s + r.value, 0)
-  // HR is running real payroll but nobody has filled the Overheads page's Labor bucket for this
-  // period — so labor is genuinely missing from the split above rather than double-counted. Say so
-  // instead of quietly substituting the payroll figure, which would no longer tie to Est. Net
-  // Margin % (that card, and this pie, are both driven by the Overheads page's numbers).
-  const laborBucketMissing = clientModules.hr && hrStats?.payroll > 0 && ohBuckets && !(ohBuckets.labor > 0)
+  // The sentence for whichever labour branch the page took (S683's rule: a branch the page knows
+  // about is said out loud). Before S756 this only fired for "Labor tab empty but HR has basic
+  // salaries" — the page now reads the finalized run itself, so what is left to say is: payroll
+  // superseded a typed figure (named, with its amount), there is no labour anywhere yet, or this
+  // login could not see payroll. Null when labour came from exactly one source with nothing to add.
+  const npr0 = n => `NPR ${Math.round(n).toLocaleString('en-IN')}`
+  const labourNote = !ohBuckets ? null
+    : labour.source === 'payroll' && labour.ignoredBucket > 0
+      ? `Labor is your finalized payroll run (${npr0(labour.amount)}). The ${npr0(labour.ignoredBucket)} on the Overheads Labor tab is not added — the two measure the same cost.`
+    : labour.source === 'none' && hrOn
+      ? 'Labor not included — no finalized payroll run this period, and nothing on the Overheads Labor tab.'
+    : labour.source === 'unreadable'
+      ? 'Payroll cannot be read on this login, so any finalized payroll run is not in these figures and the margin is not judged. The account owner sees the full figure.'
+    : labour.source === 'failed'
+      ? 'Payroll could not be loaded, so labour may be missing from these figures and the margin is not judged. Retry from the notice at the top of the page.'
+    : null
+  const labourNoteIsWarning = labour.verdictWithheld || labour.source === 'none'
   const costBreakdownSummary = costBreakdown.length === 0
     ? 'No cost data for this period.'
-    : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${Math.round(r.value).toLocaleString('en-IN')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.${laborBucketMissing ? ` Labor is not included — the Overheads page's Labor bucket is empty for this period, though HR payroll is NPR ${Math.round(hrStats.payroll).toLocaleString('en-IN')}.` : ''}`
+    : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${Math.round(r.value).toLocaleString('en-IN')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.${labourNote ? ` ${labourNote}` : ''}`
 
   // Shared mini card style + a11y — returns a spreadable props object so every KPI card gets
   // keyboard support (role/tabIndex/onKeyDown) and a visible focus ring for free, instead of each
@@ -1527,7 +1599,7 @@ export default function ClientDashboard() {
         {/* The tip used to say "Target: under 60% combined" while the colours banded at 50 and
             65 — so a 58% read amber under a sentence calling it on target. The card states the
             ladder it actually paints (S734). */}
-        <Tip text={`All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Healthy up to ${FIXED_COST_WARN}%, worth watching to ${FIXED_COST_CRITICAL}%, too high above that. See the Overheads page for the full breakdown.`} width={250}>Fixed Costs % of Revenue</Tip>
+        <Tip text={`All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Labor is your finalized HR payroll run for the month when one exists (gross pay + employer SSF), otherwise what is typed on the Overheads Labor tab — never both added together, the same rule the Overheads page uses. Healthy up to ${FIXED_COST_WARN}%, worth watching to ${FIXED_COST_CRITICAL}%, too high above that. See the Overheads page for the full breakdown.`} width={280}>Fixed Costs % of Revenue</Tip>
       </div>
       {/* Carries the same settle guard as Food Cost % and Est. Net Margin % beside it (S734).
           It had none, and it is the LUMPIEST of the three: a month's rent is entered as one row
@@ -1535,12 +1607,17 @@ export default function ClientDashboard() {
           perfectly healthy outlet read several hundred percent, in red, with nothing on the card
           saying the month was three days old. Two of the three ratios greyed out and the third
           did not, which made the two that did look like the exception. */}
-      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(ohPct, ohCardBand).color }} title={verdictFigure(ohPct, ohCardBand).title}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(ohPct, ohCardBand).text}
+      {/* Withheld (grey, no mark) when labour may be missing — a fenced IMS login or a failed
+          payroll read (S756): a low fixed-cost % that leaves out the wage bill is not "Healthy". */}
+      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).color }} title={verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).title}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).text}
       </div>
       <div style={kpiSubtextStyle}>
-        {partialNote || (stats?.overheadTotal ? `NPR ${stats.overheadTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} total →` : 'No overhead data')}
+        {partialNote || (fixedCostTotal ? `NPR ${fixedCostTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} total →` : 'No overhead data')}
       </div>
+      {!loading && stats && labourLabel && (
+        <div style={{ ...kpiSubtextStyle, color: labour.verdictWithheld ? 'var(--theme-amber-text)' : kpiSubtextStyle.color }}>{labourLabel}</div>
+      )}
     </div>
   ) : (
     // The tier is read from the feature catalog, not typed: this said "Pro" while Overheads has
@@ -1552,13 +1629,18 @@ export default function ClientDashboard() {
   const netMarginCard = canOverheads ? (
     <div {...kpiCard(null)}>
       <div style={kpiLabelStyle}>
-        <Tip text="Revenue minus food cost and every overhead bucket — including labor and tax & fees — as a % of revenue. This is what the business keeps after ingredient and fixed costs. Healthy Nepal F&B target: ≥20%." width={260}>Est. Net Margin %</Tip>
+        <Tip text="Revenue minus food cost, labor, overheads and tax & fees, as a % of revenue — what the business keeps after ingredient and fixed costs. Labor is your finalized HR payroll run for the month when one exists (gross pay + employer SSF); otherwise it is what is typed on the Overheads Labor tab. The two are never added together, so this matches the Overheads page for the same month. The line under the figure says which one was used. Healthy Nepal F&B target: ≥20%." width={280}>Est. Net Margin %</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(netMarginPct, nmBand).color }} title={verdictFigure(netMarginPct, nmBand).title}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(netMarginPct, nmBand).text}
+      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).color }} title={verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).title}>
+        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).text}
       </div>
       {/* Inherits Food Cost's lumpiness through purchaseTotal, so it carries the same caveat. */}
-      <div style={kpiSubtextStyle}>{partialNote || 'After food & overheads · target ≥20%'}</div>
+      <div style={kpiSubtextStyle}>{partialNote || (labour.verdictWithheld ? 'Not judged on this login · target ≥20%' : 'After food & overheads · target ≥20%')}</div>
+      {/* The labour source is named ON the tile, not only in a hover (S756, D22) — a screenshot of
+          this card loses the Tip, and which wage figure a margin contains is what makes it true. */}
+      {!loading && stats && labourLabel && (
+        <div style={{ ...kpiSubtextStyle, color: labour.verdictWithheld ? 'var(--theme-amber-text)' : kpiSubtextStyle.color }}>{labourLabel}</div>
+      )}
     </div>
   ) : null
 
@@ -2229,7 +2311,7 @@ export default function ClientDashboard() {
               smallHeight={costTabAvailable && mixTabAvailable ? 172 : 140}
               footer={costCardEffectiveView === 'cost' ? (
                 <>
-                  <div style={{ fontSize: 11, marginTop: 8, color: netMarginPct == null ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+                  <div style={{ fontSize: 11, marginTop: 8, color: netMarginPct == null || labour.verdictWithheld ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                     Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
                     {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
                   </div>
@@ -2237,11 +2319,11 @@ export default function ClientDashboard() {
                       which flips with the sign of the margin — say which, rather than leaving a bare
                       "23.4%" to be read against the wrong denominator. */}
                   <div style={{ fontSize: 11, marginTop: 4, color: 'var(--theme-text3)' }}>
-                    {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · from Overheads page buckets
+                    {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · {labour.source === 'payroll' ? 'labor from finalized payroll, the rest from Overheads' : 'from Overheads page buckets'}
                   </div>
-                  {laborBucketMissing && (
-                    <div style={{ fontSize: 11, marginTop: 4, color: 'var(--theme-amber-text)' }}>
-                      Labor not included — the Labor bucket on Overheads is empty this period, but HR payroll is NPR {Math.round(hrStats.payroll).toLocaleString('en-IN')}.
+                  {labourNote && (
+                    <div style={{ fontSize: 11, marginTop: 4, color: labourNoteIsWarning ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
+                      {labourNote}
                     </div>
                   )}
                   <p className="sr-only">{costBreakdownSummary}</p>

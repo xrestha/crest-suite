@@ -21,6 +21,26 @@ export function isMissingFunctionError(error) {
 
 const signalled = (builder, signal) => (signal ? builder.abortSignal(signal) : builder)
 
+// A Supabase/PostgREST error, rethrown as a real Error that KEEPS its code, hint and details (S756).
+//
+// Every throw in this file used to be `throw new Error(error.message)`, which discards `error.code`
+// and `error.hint` — so errorText's code-keyed rules could never match a save refusal. The one that
+// matters most here is `period_closed` (ims_closed_period_guard, migration 20260918100000): a Save
+// into a closed month reached the page as the raw trigger message instead of the sentence saying who
+// can change a closed month. `fromSupabase` tells the page this is a server answer to be run through
+// the error table, as opposed to the hand-written sentences below (session expiry) and withTimeout's
+// own message, which are already user-facing and must pass through untouched (the S714 rule).
+export function supabaseError(error) {
+  if (error instanceof Error && error.fromSupabase) return error
+  const e = new Error(error?.message || 'The server refused the request.')
+  e.code = error?.code
+  e.hint = error?.hint
+  e.details = error?.details
+  e.status = error?.status
+  e.fromSupabase = true
+  return e
+}
+
 // sales_entries is shared with POS: a POS client's rows carry source 'pos' (one per bill),
 // 'pos_comp' (comped lines) or 'pos_credit' (negative credit-note reversals). Manual entry must
 // never read those as its own baseline or delete them — see migration 20260727180000 for the full
@@ -58,7 +78,7 @@ export async function findSupersededRows(supabase, { periodId, bsDay, recipeIds,
   }
 
   const { data, error } = await withTimeout(fetchAllRows(makeQuery), timeoutMs, 'Check')
-  if (error) throw new Error(error.message)
+  if (error) throw supabaseError(error)
 
   const wanted = new Set(recipeIds)
   const byId = new Map()
@@ -114,7 +134,7 @@ export async function persistSalesDay(supabase, { periodId, bsDay, rows, signal,
   }
 
   if (!error) return { atomic: true }
-  if (!isMissingFunctionError(error)) throw new Error(error.message)
+  if (!isMissingFunctionError(error)) throw supabaseError(error)
 
   await persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, timeoutMs })
   return { atomic: false }
@@ -125,7 +145,7 @@ async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, 
     signalled(manualOnly(supabase.from('sales_entries').delete()).eq('period_id', periodId).eq('bs_day', bsDay), signal),
     timeoutMs, 'Save'
   )
-  if (delErr) throw new Error(delErr.message)
+  if (delErr) throw supabaseError(delErr)
 
   if (!rows.length) return
 
@@ -138,7 +158,7 @@ async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, 
     ),
     timeoutMs, 'Save'
   )
-  if (insErr) throw new Error(insErr.message)
+  if (insErr) throw supabaseError(insErr)
 
   const recipeIds = rows.map(r => r.recipe_id)
   const cleanup = manualOnly(supabase.from('sales_entries').delete().eq('period_id', periodId))
@@ -147,7 +167,7 @@ async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, 
     signalled(scoped.in('recipe_id', recipeIds), signal),
     timeoutMs, 'Save'
   )
-  if (clearErr) throw new Error(clearErr.message)
+  if (clearErr) throw supabaseError(clearErr)
 }
 
 // Manual-sales stock depletion (added 2026-07-30) — mirrors PosOrders.jsx's POS depletion exactly

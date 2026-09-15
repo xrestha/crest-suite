@@ -123,7 +123,9 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
             <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
               <td style={{ padding: '5px 6px 5px 0' }}>{fmtBs(e.date)}</td>
               <td style={{ padding: '5px 6px' }}>
-                {EVENT_LABEL[e.type]}{(e.type === 'bill' || e.type === 'settlement') && e.method !== 'Credit' ? ` (${e.method})` : ''}
+                {/* A supplier credit moved from one bill to another is not money paid (S756, D11) —
+                    the supplier checking this letter must be able to tell the two apart. */}
+                {e.creditApplied ? 'Supplier credit applied' : EVENT_LABEL[e.type]}{(e.type === 'bill' || e.type === 'settlement') && e.method !== 'Credit' ? ` (${e.method})` : ''}
               </td>
               <td style={{ padding: '5px 6px' }}>
                 {/* Invoice number bolded on its own line — a free-text payment note (e.g. "Fonepay

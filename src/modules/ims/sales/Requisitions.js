@@ -18,6 +18,8 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { buildStockRows } from '../stockcount/stockReportCalc'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import RequisitionRejectModal from './RequisitionRejectModal'
+import { statusMeta, trailParts } from './requisitionTrail'
 
 const DEPARTMENTS = [
   'Kitchen',
@@ -78,20 +80,35 @@ export default function Requisitions() {
 
   // List filters
   const [filterDept, setFilterDept] = useState('all')
+  const [filterStatus, setFilterStatus] = useState('all') // 'all' | 'draft' | 'issued' | 'rejected'
+
+  // S756 (D14): who raised / issued / rejected each slip. The ids are stamped by the database; the
+  // names come from get_client_profile_names, because a raw profiles read returns only the caller's
+  // own row. A failed names read does not block the page — the slips are still right — but it is
+  // kept apart from "no such person" so the trail says the name could not be loaded.
+  const [names, setNames] = useState({})
+  const [namesFailed, setNamesFailed] = useState(false)
+  // The draft being rejected, or null. Its own dialog (RequisitionRejectModal) because the reason
+  // is required and must survive a refused write.
+  const [rejecting, setRejecting] = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
 
   async function init() {
     setLoading(true)
     setLoadError(null)
-    const results = await Promise.all([
+    const [periodsRes, itemsRes, namesRes] = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name')
+      scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
+      supabase.rpc('get_client_profile_names', { p_client_id: effectiveClientId }),
     ])
+    const results = [periodsRes, itemsRes]
     // A failed read is not an empty period and must not render as one (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: p }, { data: i }] = results
+    setNamesFailed(!!namesRes.error)
+    setNames(Object.fromEntries((namesRes.data || []).map(n => [n.id, n.full_name])))
     setPeriods(p || [])
     setItems(i || [])
     const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
@@ -292,7 +309,14 @@ export default function Requisitions() {
       bs_day: parseInt(formDay),
       department: formDept || 'Kitchen',
       notes: formNotes || null,
-      status: statusOverride || 'draft'
+      status: statusOverride || 'draft',
+      // S756: these two are NOT trusted. For every client login the database overwrites them from
+      // the session (ims_requisition_attribution) — attribution the subject can choose is not
+      // attribution. They are sent only because an operator session (admin "viewing as", which is
+      // also how a restore writes) keeps what it supplies, so an operator's own raise is still
+      // named rather than recorded as unattributed.
+      requested_by: profile?.id || null,
+      issued_by: statusOverride === 'issued' ? (profile?.id || null) : null,
     }, { single: true })
 
     if (hErr || !header) {
@@ -333,7 +357,9 @@ ${text}`, detail })
   async function deleteReq(reqId, status) {
     if (!window.confirm(status === 'issued'
       ? 'Delete this ISSUED requisition? Its quantities will stop counting towards the Requisitioned column in Stock Count.'
-      : 'Delete this draft requisition?')) return
+      : status === 'rejected'
+        ? 'Delete this REJECTED requisition? The record that it was refused, and why, goes with it.'
+        : 'Delete this draft requisition?')) return
     // A bare `await scopedDelete(...)` discarded the only evidence the delete failed: supabase-js
     // RESOLVES with { data, error } rather than throwing, so an RLS refusal reloaded the list and
     // the row simply reappeared, with nothing on screen to say why (S654).
@@ -343,6 +369,27 @@ ${text}`, detail })
     const wasSelected = selectedReq?.id === reqId
     await loadReqs(selectedPeriod.id)
     if (wasSelected) backToList()
+  }
+
+  // S756 (D14). Returns an error for the dialog to show, or null once the slip is rejected.
+  // `.eq('status', 'draft')` + `.select('id')`: a slip issued, rejected or deleted on another device
+  // while this dialog was open matches nothing, and a zero-row update returns no error — so the
+  // count is what tells the two apart (S738). The database refuses rejecting a non-draft anyway
+  // (requisition_not_draft); this names the situation before that refusal is ever reached.
+  async function rejectReq(reason) {
+    const req = rejecting
+    if (!req || !selectedPeriod) return 'Nothing to reject — close this dialog and open the requisition again.'
+    const { data, error: rErr } = await scopedUpdate('requisitions', { status: 'rejected', rejected_reason: reason })
+      .eq('id', req.id).eq('status', 'draft').select('id')
+    if (rErr) return asActionError(rErr)
+    if (!data?.length) {
+      return 'This requisition is no longer a draft, so it was not rejected — it was issued, rejected or deleted from another screen while this was open. Close this and check the list.'
+    }
+    setRejecting(null)
+    setActionError('')
+    await loadReqs(selectedPeriod.id)
+    backToList()
+    return null
   }
 
   function startIssuing() {
@@ -409,7 +456,10 @@ ${text}`, detail })
     setSaving(false)
   }
 
+  // A rejected slip moved no stock, so it carries no value in the list (its requested value is
+  // still on the slip itself, labelled as such).
   function reqIssuedValue(req) {
+    if (req.status === 'rejected') return 0
     return (req.requisition_lines || []).reduce((s, l) => {
       const qty = req.status === 'issued' ? parseFloat(l.qty_issued || 0) : parseFloat(l.qty_requested || 0)
       return s + qty * lineRate(l)
@@ -434,7 +484,20 @@ ${text}`, detail })
         'Value (NPR)':    rate > 0 ? Math.round(valueQty * rate) : '',
       }
     })
-    const ws = XLSX.utils.json_to_sheet(rows)
+    // S756: the slip's header rides above the lines, so the exported copy carries who raised and
+    // who issued it — and, for a rejected slip, why — exactly as the printed one does.
+    const trail = trailParts(req, { names, namesFailed, clock: '24' })
+    const head = [
+      ['Store Requisition Slip'],
+      ['Period', periodLabel, 'Day', req.bs_day],
+      ['Department', req.department || '', 'Status', statusMeta(req.status).label.toUpperCase()],
+      ...trail.map(t => [t.text]),
+      ...(req.status === 'rejected' ? [['Reason for rejecting', req.rejected_reason || '']] : []),
+      ...(req.notes ? [['Notes', req.notes]] : []),
+      [],
+    ]
+    const ws = XLSX.utils.aoa_to_sheet(head)
+    XLSX.utils.sheet_add_json(ws, rows, { origin: -1 })
     XLSX.utils.book_append_sheet(wb, ws, 'Requisition')
     // Four of the eighteen departments carry a slash ("Pastry / Bakery"), which is not a legal
     // filename character on Windows and gets silently rewritten by the browser on the way down.
@@ -456,7 +519,19 @@ ${text}`, detail })
   // figure that contradicts the scope stated an inch below it — and the cards say which scope they
   // are on rather than leaving the reader to infer it.
   const issuedReqs = filteredReqs.filter(r => r.status === 'issued')
+  // Pending means draft and nothing else: a rejected slip has been decided (S756).
   const draftReqs = filteredReqs.filter(r => r.status === 'draft')
+  const rejectedReqs = filteredReqs.filter(r => r.status === 'rejected')
+  // The status tabs narrow the TABLE only; the stat strip keeps counting the department scope, so
+  // "Issued" never reads 0 because the Rejected tab is selected.
+  const tableReqs = filterStatus === 'all' ? filteredReqs : filteredReqs.filter(r => r.status === filterStatus)
+  const statusTabs = [
+    { key: 'all', label: 'All', count: filteredReqs.length },
+    { key: 'draft', label: 'Draft', count: draftReqs.length },
+    { key: 'issued', label: 'Issued', count: issuedReqs.length },
+    { key: 'rejected', label: 'Rejected', count: rejectedReqs.length },
+  ]
+  const selectedTrail = selectedReq ? trailParts(selectedReq, { names, namesFailed }) : []
   const totalIssuedValue = issuedReqs.reduce((s, r) => s + reqIssuedValue(r), 0)
   const statScope = filterDept === 'all' ? '' : ` — ${filterDept}`
   // Correcting or removing an issued slip is a supervisor's call, matching Purchases' own
@@ -648,8 +723,21 @@ ${text}`, detail })
                   <td style={{ padding: '4px 8px', fontWeight: 600 }}>Department:</td>
                   <td style={{ padding: '4px 8px' }}>{selectedReq.department}</td>
                   <td style={{ padding: '4px 8px', fontWeight: 600 }}>Status:</td>
-                  <td style={{ padding: '4px 8px' }}>{selectedReq.status === 'issued' ? 'ISSUED' : 'DRAFT'}</td>
+                  <td style={{ padding: '4px 8px' }}>{statusMeta(selectedReq.status).label.toUpperCase()}</td>
                 </tr>
+                {/* S756: the paper copy is the one that gets signed and filed, so it carries the
+                    trail too. */}
+                {selectedTrail.map(t => (
+                  <tr key={t.key}>
+                    <td colSpan={4} style={{ padding: '4px 8px' }}>{t.text}</td>
+                  </tr>
+                ))}
+                {selectedReq.status === 'rejected' && (
+                  <tr>
+                    <td style={{ padding: '4px 8px', fontWeight: 600 }}>Reason:</td>
+                    <td colSpan={3} style={{ padding: '4px 8px' }}>{selectedReq.rejected_reason}</td>
+                  </tr>
+                )}
                 {selectedReq.notes && (
                   <tr>
                     <td style={{ padding: '4px 8px', fontWeight: 600 }}>Notes:</td>
@@ -676,8 +764,8 @@ ${text}`, detail })
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 3 }}>Status</div>
-                  <span className={`badge ${selectedReq.status === 'issued' ? 'badge-green' : 'badge-amber'}`} style={{ fontSize: 12, padding: '3px 10px' }}>
-                    {selectedReq.status === 'issued' ? 'ISSUED' : 'DRAFT'}
+                  <span className={`badge ${statusMeta(selectedReq.status).badge}`} style={{ fontSize: 12, padding: '3px 10px' }}>
+                    {statusMeta(selectedReq.status).label.toUpperCase()}
                   </span>
                 </div>
                 <div>
@@ -699,8 +787,20 @@ ${text}`, detail })
                       onClick={() => deleteReq(selectedReq.id, selectedReq.status)}
                       style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                     >Delete</button>
+                    <button className="btn btn-ghost" onClick={() => { setActionError(''); setRejecting(selectedReq) }}>
+                      <Tip text="Refuse this request with a reason. Nothing is issued, it stops counting as pending, and it cannot be issued or edited afterwards." width={260}>Reject</Tip>
+                    </button>
                     <button className="btn btn-primary" onClick={startIssuing}>Issue</button>
                   </>
+                )}
+                {/* A rejected slip is final (S756): no edit, no issue. Deleting one follows the
+                    issued-slip rule, and the database enforces both. */}
+                {selectedReq.status === 'rejected' && !periodClosed && canAmendIssued && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => deleteReq(selectedReq.id, selectedReq.status)}
+                    style={{ color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
+                  >Delete</button>
                 )}
                 {/* An issued slip used to be terminal in every direction: no edit, no delete, no
                     un-issue. A quantity keyed wrong was permanent, and so was a requisition raised
@@ -721,6 +821,16 @@ ${text}`, detail })
                 <button className="btn btn-ghost" onClick={() => exportExcel(selectedReq, selectedLines)}>Export Excel</button>
                 <button className="btn btn-ghost" onClick={() => printWithTitle(`Requisition - Day ${selectedReq.bs_day} - ${selectedReq.department} - ${periodLabel}`)}>Print</button>
               </div>
+            </div>
+            {/* S756 (D14): who raised it, who issued or rejected it, and when — stamped by the
+                database, never by this page. */}
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--theme-border)', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
+              {selectedTrail.map(t => <div key={t.key}>{t.text}</div>)}
+              {selectedReq.status === 'rejected' && (
+                <div style={{ color: 'var(--theme-text1)', marginTop: 4 }}>
+                  <span style={{ fontWeight: 600 }}>Reason: </span>{selectedReq.rejected_reason}
+                </div>
+              )}
             </div>
           </div>
 
@@ -842,7 +952,11 @@ ${text}`, detail })
                       return total > 0 ? (
                         <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                           <td colSpan={6} style={{ fontWeight: 700, paddingTop: 12 }}>
-                            {selectedReq.status === 'issued' ? 'Total Issued Value' : 'Total Requested Value'}
+                            {selectedReq.status === 'issued'
+                              ? 'Total Issued Value'
+                              : selectedReq.status === 'rejected'
+                                ? 'Total Requested Value (rejected — nothing was issued)'
+                                : 'Total Requested Value'}
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', paddingTop: 12 }}>
                             NPR {Math.round(total).toLocaleString('en-IN')}
@@ -899,7 +1013,26 @@ ${text}`, detail })
             </div>
           )}
 
-          {filteredReqs.length === 0 ? (
+          {filteredReqs.length > 0 && (
+            <div className="tab-bar" role="group" aria-label="Filter by status" style={{ marginBottom: 16 }}>
+              {statusTabs.map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setFilterStatus(t.key)}
+                  aria-pressed={filterStatus === t.key}
+                  className={`tab-btn${filterStatus === t.key ? ' tab-btn--active' : ''}`}
+                >{t.label} ({t.count})</button>
+              ))}
+            </div>
+          )}
+
+          {filteredReqs.length > 0 && tableReqs.length === 0 ? (
+            <div className="card">
+              <div className="empty-state">
+                <p className="empty-state-text">No {filterStatus} requisitions for {periodLabel}{statScope}.</p>
+              </div>
+            </div>
+          ) : filteredReqs.length === 0 ? (
             <div className="card">
               <div className="empty-state">
                 <div className="empty-state-icon">▤</div>
@@ -919,6 +1052,9 @@ ${text}`, detail })
                       <th>Department</th>
                       <th style={{ textAlign: 'right' }}>Items</th>
                       <th>Status</th>
+                      <th>
+                        <Tip text="Who raised the slip, and who issued or rejected it and when. Recorded by the system from the login that did it. Slips from before this was recorded say so." width={260}>Raised / Decided</Tip>
+                      </th>
                       <th>Notes</th>
                       <th style={{ textAlign: 'right' }}>
                         <Tip text="Total NPR value based on issued qty × item cost rate. Shows requested value for drafts." width={230}>Value</Tip>
@@ -927,7 +1063,7 @@ ${text}`, detail })
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredReqs.map(req => {
+                    {tableReqs.map(req => {
                       const value = reqIssuedValue(req)
                       const lineCount = (req.requisition_lines || []).length
                       return (
@@ -936,9 +1072,15 @@ ${text}`, detail })
                           <td style={{ fontWeight: 600 }}>{req.department}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{lineCount}</td>
                           <td>
-                            <span className={`badge ${req.status === 'issued' ? 'badge-green' : 'badge-amber'}`}>
-                              {req.status === 'issued' ? 'Issued' : 'Draft'}
+                            <span className={`badge ${statusMeta(req.status).badge}`}>
+                              {statusMeta(req.status).label}
                             </span>
+                          </td>
+                          <td style={{ color: 'var(--theme-text2)', fontSize: 12, minWidth: 180 }}>
+                            {trailParts(req, { names, namesFailed }).map(t => <div key={t.key}>{t.text}</div>)}
+                            {req.status === 'rejected' && (
+                              <div style={{ color: 'var(--theme-text1)' }}>Reason: {req.rejected_reason}</div>
+                            )}
                           </td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{req.notes || '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600, color: value > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
@@ -966,6 +1108,14 @@ ${text}`, detail })
       )}
 
       <Fab onClick={startNew} label="+ New Requisition" show={mode === 'list' && !periodClosed} />
+
+      {rejecting && (
+        <RequisitionRejectModal
+          slipLabel={`The ${rejecting.department || ''} requisition for ${formatBsDay(rejecting.bs_day, selectedPeriod?.bs_month) || `day ${rejecting.bs_day}`}`}
+          onConfirm={rejectReq}
+          onCancel={() => setRejecting(null)}
+        />
+      )}
     </div>
   )
 }

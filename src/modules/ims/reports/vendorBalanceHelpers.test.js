@@ -139,6 +139,36 @@ describe('the letter reconciles to itself', () => {
     // printed sentence double-count it before S502.
     expect(result.totals.totalPurchasesFy).toBeCloseTo(4968, 2)
   })
+
+  // S756 D11. A credit left by a return on a settled bill is moved onto another bill of the same
+  // supplier as a pair of payable_payments rows. No money moved and the return is already on the
+  // letter, so the closing balance must not change — but both halves must be visible, flagged, and
+  // kept out of "Payments (FY)", which is money actually paid.
+  test('supplier credit moved between two bills: balance unchanged, both halves shown, not a payment', () => {
+    const creditEntries = [
+      line('a1', 'gA', IN_FY, { qty: 10, rate: 100, ref: 'A' }),
+      line('b1', 'gB', IN_FY_LATER, { qty: 1, rate: 500, ref: 'B' }),
+    ]
+    const returns = [ret('a1', IN_FY, 3, 100, 25)]
+    const base = [payment('a1', 40, 1000)]
+    const pair = [
+      { ...payment('a1', 90, -300, { mode: 'Supplier credit', note: 'Supplier credit used on bill #B' }), credit_link_id: 'L1' },
+      { ...payment('b1', 90, 300, { mode: 'Supplier credit', note: 'Supplier credit from bill #A' }), credit_link_id: 'L1' },
+    ]
+    const without = computeVendorBalance({ creditEntries, cashEntries: [], payments: base, returns, fyStart: FY_START, fyEnd: FY_END })
+    const withPair = computeVendorBalance({ creditEntries, cashEntries: [], payments: [...base, ...pair], returns, fyStart: FY_START, fyEnd: FY_END })
+
+    expect(without.closingBalance).toBeCloseTo(200, 2)
+    expect(withPair.closingBalance).toBeCloseTo(without.closingBalance, 2)
+    assertReconciles(withPair)
+
+    const creditLines = withPair.schedule.filter(e => e.creditApplied)
+    expect(creditLines).toHaveLength(2)
+    expect(creditLines.map(e => e.amount).sort((x, y) => x - y)).toEqual([-300, 300])
+    expect(creditLines.every(e => e.paymentMode === 'Supplier credit')).toBe(true)
+    expect(withPair.totals.totalPaymentsFy).toBeCloseTo(1000, 2)
+    expect(withPair.totals.totalCreditAppliedFy).toBeCloseTo(300, 2)
+  })
 })
 
 describe('opening balance', () => {

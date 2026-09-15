@@ -14,7 +14,7 @@ import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { PURCHASE_PAYMENT_METHODS } from '../purchases/purchasesHelpers'
-import { billPayables } from './purchaseTaxSplit'
+import { billPayables, summariseUnlinkedReturns } from './purchaseTaxSplit'
 
 const METHODS = PURCHASE_PAYMENT_METHODS
 // Two roles, two values: the base token is the FILL (split bar, legend swatch), the -text variant
@@ -97,6 +97,17 @@ export default function PaymentReport() {
   // Outstanding Payables and no column agreed with the Purchases register. See purchaseTaxSplit.js.
   const { bills, returns: pricedReturns } = billPayables(purchases, returns, selectedPeriod)
 
+  // S756 stage 3 — returns whose purchase line is gone (the bill was deleted or re-saved after the
+  // return). billPayables still subtracts them from their method, but with no line behind them there
+  // is no discount to scale by and no record of VAT, so they are counted at list rate with no VAT
+  // added back. VAT and Non-VAT Report name the same rows; this page counted them silently.
+  const unlinked = summariseUnlinkedReturns(pricedReturns, {
+    dayLabel: r => (r.bs_day ? formatBsDay(r.bs_day, selectedPeriod?.bs_month) : null),
+  })
+  const unlinkedNote = unlinked.count > 0
+    ? `${unlinked.count} return${unlinked.count !== 1 ? 's' : ''} (NPR ${unlinked.value.toFixed(2)}) could not be linked to a purchase bill — the bill was deleted or re-saved after the return — so ${unlinked.count !== 1 ? 'they are' : 'it is'} counted at the price on the return with no VAT added. If VAT was charged, the real refund was higher. ${unlinked.examples.join('; ')}${unlinked.more ? `; and ${unlinked.more} more` : ''}`
+    : null
+
   const summary = METHODS.map(method => {
     const mb = bills.filter(b => b.method === method)
     const mr = pricedReturns.filter(r => r.method === method)
@@ -145,7 +156,7 @@ export default function PaymentReport() {
     }))
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Payment Summary — Purchase spend by method', biz, scopeLine, rows: summaryData,
-      notes: [BASIS_NOTE],
+      notes: [BASIS_NOTE, ...(unlinkedNote ? [unlinkedNote] : [])],
     }), 'Summary')
     const dailyData = dailyByMethod.map(d => ({
       'Day': d.day,
@@ -154,7 +165,7 @@ export default function PaymentReport() {
     }))
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Payment Summary — Daily Breakdown', biz, scopeLine, rows: dailyData,
-      notes: [BASIS_NOTE],
+      notes: [BASIS_NOTE, ...(unlinkedNote ? [unlinkedNote] : [])],
     }), 'Daily Breakdown')
     XLSX.writeFile(wb, `Payment-Report-${selectedPeriod?.bs_year}-${selectedPeriod?.bs_month}.xlsx`)
   }
@@ -181,6 +192,26 @@ export default function PaymentReport() {
       </div>
 
       {loadError && <ReportLoadError error={loadError} />}
+
+      {/* The VAT/Non-VAT banner's shape, with this page's own consequence: here the rows ARE counted. */}
+      {!loadError && !loading && unlinked.count > 0 && (
+        <div role="alert" className="card" style={{
+          marginBottom: 16, padding: '12px 16px',
+          borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+          background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+        }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
+            ⚠ {unlinked.count} return{unlinked.count !== 1 ? 's are' : ' is'} counted without VAT — NPR {unlinked.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })} at the price on the return
+          </p>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+            The bill {unlinked.count !== 1 ? 'these were' : 'this was'} returned against was deleted or re-saved afterwards, so there is
+            no record left of its discount or of whether VAT was charged. {unlinked.count !== 1 ? 'They are' : 'It is'} still taken
+            off {unlinked.count !== 1 ? 'their' : 'its'} payment method below, but with no VAT added — if the supplier charged VAT, the
+            real refund was higher and the Net figures read a little high. {unlinked.examples.join('; ')}
+            {unlinked.more ? `; and ${unlinked.more} more` : ''}.
+          </p>
+        </div>
+      )}
 
       {/* Summary cards — gated on !loading too: a stat computed from rows that have not arrived
           is NPR 0 wearing the confidence of a real figure (S594 rule). */}

@@ -15,6 +15,7 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import { allocateBillDiscounts } from './supplierAttribution'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { findUncountedItems, unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncountedItems'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -110,6 +111,10 @@ export default function MonthlySummary() {
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
+    // Which items were COUNTED (S756 D6): a row whose physical_qty is not null, so a count of 0 is a
+    // count and a blank row is not — closePeriod.js's `physical_qty IS NOT NULL` rule. closeMap above
+    // cannot answer this: it turns both into 0.
+    const countedIds = new Set((closing || []).filter(r => r.physical_qty != null).map(r => r.item_id))
     const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + parseFloat(r.qty) })
     const staffMealMap = {}; (staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
 
@@ -169,7 +174,10 @@ export default function MonthlySummary() {
       return {
         category: catName,
         openingVal, purchaseVal, discountVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal,
-        itemCount: catItems.length
+        itemCount: catItems.length,
+        // Items in this category with stock but no closing count (S756 D6) — the category's COGS
+        // counts their whole stock as used. Filled in once the period-level gap is known, below.
+        uncountedCount: 0,
       }
     }
 
@@ -201,10 +209,23 @@ export default function MonthlySummary() {
     const fcPct            = totalRevenue > 0 ? (totalCOGS / totalRevenue) * 100 : null
     const purchaseFcPct    = totalRevenue > 0 ? (totalNetPurchase / totalRevenue) * 100 : null
 
+    // Uncounted items (S756 D6): active, non-sub-recipe items (the `items` read is already exactly
+    // that set) with opening stock or purchases this period and no closing count. Totals are NOT
+    // changed — they must keep tying to the close and the frozen report — the gap is named and, while
+    // material, the FC% verdict is withheld. Built from the reads above; no extra round trip.
+    const purchaseQty = {}; const purchaseValue = {}
+    Object.entries(purchMap).forEach(([id, v]) => { purchaseQty[id] = v.qty; purchaseValue[id] = v.value })
+    const gap = findUncountedItems({ items, openingQty: openMap, purchaseQty, purchaseValue, countedIds, cogs: totalCOGS })
+    const uncountedIds = new Set(gap.uncounted.map(u => u.id))
+    const catKeyOf = i => i.categories?.id ? i.categories.name : 'Uncategorized'
+    const uncountedByCat = {}
+    ;(items || []).forEach(i => { if (uncountedIds.has(i.id)) uncountedByCat[catKeyOf(i)] = (uncountedByCat[catKeyOf(i)] || 0) + 1 })
+    catRows.forEach(r => { r.uncountedCount = uncountedByCat[r.category] || 0 })
+
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setReport({
       catRows, totalOpening, totalPurchase, totalDiscount, totalReturn, totalNetPurchase,
-      totalWastage, totalStaffMeals, totalClosing, totalCOGS, totalRevenue, fcPct, purchaseFcPct
+      totalWastage, totalStaffMeals, totalClosing, totalCOGS, totalRevenue, fcPct, purchaseFcPct, gap
     })
   }
 
@@ -214,6 +235,14 @@ export default function MonthlySummary() {
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
   const clientName = profile?.clients?.name || 'Property'
+  // Two reasons the FC% verdict is withheld, and either is enough (S756):
+  //  - D7: the month is still OPEN. Closing stock is counted at month end, so until then COGS counts
+  //    every shelf as used and food cost reads high — a red ▲ there is an artefact of the calendar.
+  //  - D6: the month is closed but a MATERIAL share of its stock was never counted (uncountedItems.js).
+  // The figure still prints; only the colour, the mark and the sentence that judges it go.
+  const isOpenPeriod = selectedPeriod?.status === 'open'
+  const gapMaterial = !!report?.gap?.material
+  const withholdVerdict = isOpenPeriod || gapMaterial
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   if (!loading && !loadError && periods.length === 0) return <NoPeriodState what="the monthly summary" />
@@ -254,6 +283,17 @@ export default function MonthlySummary() {
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>No data for this period yet.</p></div>
       ) : (
         <>
+          {/* D7 (S756): the open month is the page's default, so the caveat is the first thing on it. */}
+          {isOpenPeriod && (
+            <div role="status" className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: 13, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>△ Provisional</strong> — closing stock not counted yet, so food cost reads high until the month is closed.
+            </div>
+          )}
+          {/* D6 (S756): named on a closed month always; on an open month only once counting has begun,
+              since before that every item is uncounted and the line above already says so. */}
+          {(!isOpenPeriod || report.gap.uncountedCount < report.gap.presentCount) && (
+            <UncountedItemsBanner gap={report.gap} scope={periodLabel} />
+          )}
           {/* KPI row */}
           <div className="stat-grid">
             {[
@@ -266,7 +306,7 @@ export default function MonthlySummary() {
               { label: 'Wastage',          value: fmt(report.totalWastage),     color: 'var(--theme-red-text)' },
               { label: 'Closing Stock',    value: fmt(report.totalClosing),     color: 'var(--theme-green-text)' },
               { label: 'COGS',             value: fmt(report.totalCOGS),        color: 'var(--theme-accent-ink)',
-                sub: report.fcPct != null ? `${report.fcPct.toFixed(1)}% of revenue` : 'No sales data',
+                sub: report.fcPct != null ? `${report.fcPct.toFixed(1)}% of revenue${withholdVerdict ? ' · not judged' : ''}` : 'No sales data',
                 tip: `Cost of Goods Used: ${COGS_FORMULA}. The actual ingredient cost consumed.` }
             ].map(s => (
               <div key={s.label} className="stat-card">
@@ -283,13 +323,17 @@ export default function MonthlySummary() {
               set fc_warning_pct to 30 got a ▲ red figure sitting inside a green box captioned
               "✓ Within benchmark (28–35%)". One band now drives the tint, the number and the
               sentence, all off the client's own thresholds. */}
-          {(() => { const box = fcBand(report.fcPct, settings)
+          {(() => { const judged = fcBand(report.fcPct, settings)
+          // A withheld verdict takes the box to the neutral 'none' tint too — a red box around an
+          // unmarked figure would still be the verdict, just moved one element out (S720's rule:
+          // check what is touching a banded figure).
+          const box = withholdVerdict && judged.key !== 'none' ? { ...judged, key: 'unjudged' } : judged
           const tint = () =>
-            box.key === 'none' ? 'var(--theme-text2)' : box.key === 'good' ? 'var(--theme-green)' : box.key === 'watch' ? 'var(--theme-accent)' : 'var(--theme-red)'
+            box.key === 'none' || box.key === 'unjudged' ? 'var(--theme-text2)' : box.key === 'good' ? 'var(--theme-green)' : box.key === 'watch' ? 'var(--theme-accent)' : 'var(--theme-red)'
           return (
           <div style={{
-            background: `color-mix(in srgb, ${tint()} ${box.key === 'none' ? 8 : 6}%, transparent)`,
-            border: `1px solid ${box.key === 'none' ? 'var(--theme-border)' : `color-mix(in srgb, ${tint()} 20%, transparent)`}`,
+            background: `color-mix(in srgb, ${tint()} ${box.key === 'none' || box.key === 'unjudged' ? 8 : 6}%, transparent)`,
+            border: `1px solid ${box.key === 'none' || box.key === 'unjudged' ? 'var(--theme-border)' : `color-mix(in srgb, ${tint()} 20%, transparent)`}`,
             borderRadius: 'var(--radius-md)', padding: '20px 24px', marginBottom: 24,
             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px,1fr))', gap: 20
           }}>
@@ -312,11 +356,12 @@ export default function MonthlySummary() {
               {/* Banded through fcFigure(settings) — this was a local 35/45 ternary with no mark, a
                   third definition beside fcBand and Recipes' own, so the same month read green here
                   and amber on the dashboard (S682). 24px is the figure step; 28 was off the ramp. */}
-              {(() => { const f = fcFigure(report.fcPct, settings); return (
+              {(() => { const f = withholdVerdict ? unjudgedFcFigure(report.fcPct, { reason: isOpenPeriod ? 'Not judged: month still open' : 'Not judged: count incomplete' }) : fcFigure(report.fcPct, settings); return (
                 <div style={{ fontSize: 24, fontWeight: 800, ...f.style }} title={f.title}>{f.text}</div>
               ) })()}
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4 }}>
                 {box.key === 'none' ? 'Add sales entries to calculate' :
+                  box.key === 'unjudged' ? (isOpenPeriod ? 'Not judged: month still open' : 'Not judged: count incomplete') :
                   box.key === 'good'  ? `✓ Within your target (≤${box.warn}%)` :
                   box.key === 'watch' ? `△ Above target — review purchases (${box.warn}–${box.critical}%)` :
                   `▲ Critical — immediate review needed (>${box.critical}%)`}
@@ -364,6 +409,14 @@ export default function MonthlySummary() {
                         <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                           {row.category}
                           <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 8 }}>{row.itemCount} items</span>
+                          {/* Marked where the gap sits (S756 D6), so the reader knows which rows' COGS
+                              carries uncounted stock. Hidden on an open month before counting starts —
+                              every row would carry it and the provisional line already says why. */}
+                          {row.uncountedCount > 0 && (!isOpenPeriod || report.gap.uncountedCount < report.gap.presentCount) && (
+                            <span className="badge badge-amber" style={{ marginLeft: 8 }} title="Items in this category with stock but no closing count — their whole stock is counted as used">
+                              {row.uncountedCount} not counted
+                            </span>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                           {row.openingVal > 0 ? fmt(row.openingVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}

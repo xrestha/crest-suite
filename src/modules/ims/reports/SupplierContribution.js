@@ -339,10 +339,14 @@ export default function SupplierContribution() {
 
   const actions = (
     <>
-      <button className="btn btn-ghost" style={{ fontSize: 12 }}
+      {/* Print gated on the load (S756, the S728 rule): it was always live, so during a period
+          change it printed the previous month's table under the new month's title, and after a
+          failed read it printed the error card as a report. Export also waits on the client-name
+          read, or both sheets ship with a blank CompanyName line. */}
+      <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
         onClick={() => printWithTitle(`Supplier Contribution - ${periodLabel}`)}>🖨 Print</button>
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={loading || !!loadError || rows.length === 0}>↓ Export Excel</button>
+        disabled={loading || !!loadError || rows.length === 0 || !!biz.error}>↓ Export Excel</button>
       <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''}
         onChange={e => handlePeriodChange(e.target.value)}>
         {periods.map(p => (
@@ -439,7 +443,17 @@ export default function SupplierContribution() {
       empty={rows.length === 0}
       emptyIcon="🚚"
       emptyText={`No sales or purchases recorded for ${periodLabel}.`}
-      banners={unvaluedBanner}
+      banners={(biz.error || unvaluedBanner) ? (
+        <>
+          {biz.error && (
+            <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+              This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
+              with a blank company name. The report below is unaffected. Reload the page to try again.
+            </p>
+          )}
+          {unvaluedBanner}
+        </>
+      ) : null}
       stats={stats}
       note={note}
     >

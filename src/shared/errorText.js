@@ -316,6 +316,28 @@ const rules = [
     staff: 'This bill has payments recorded against it, so it cannot be changed or deleted. Ask your manager.',
     operator: 'This bill has vendor payments recorded against it, so it cannot be changed or deleted. Remove the payments in Outstanding Payables first, then try again.',
   },
+  // S756 stage 3 (D14, D11). Each is raised by a BEFORE trigger on the row it names, or by the
+  // deferred pair check at commit, which rolls the whole statement back.
+  {
+    test: e => hasCode(e, 'requisition_rejected'),
+    staff: 'This requisition was rejected and can\'t be changed. Raise a new one if the items are still needed.',
+    operator: 'This requisition was rejected, so it can\'t be changed, issued or have items added. If the department still needs the items, raise a new requisition.',
+  },
+  {
+    test: e => hasCode(e, 'requisition_not_draft'),
+    staff: 'Only a draft requisition can be rejected. This one has already been issued — ask a supervisor.',
+    operator: 'Only a draft requisition can be rejected. This one has already been issued, so the stock has left the store — a supervisor can Correct Quantities or delete it instead.',
+  },
+  {
+    test: e => /requisitions_rejected_reason/i.test(e.message || ''),
+    staff: 'A rejected requisition needs a reason. Nothing was changed.',
+    operator: 'A rejected requisition needs a reason, so nothing was changed. Type why it was rejected and try again.',
+  },
+  {
+    test: e => hasCode(e, 'supplier_credit_unbalanced') || /payable_payments_credit_mode_matches_link|payable_payments_amount_sign/i.test(e.message || ''),
+    staff: 'The supplier credit could not be recorded. Nothing was changed — ask your manager.',
+    operator: 'The supplier credit was not recorded — its two entries (one on the bill giving the credit, one on the bill using it) must be saved and deleted together, so neither was kept. Reload the page; both bills show their last saved state.',
+  },
   // S756 (D26). Raised by save_purchase_bill before it touches a row, so the bill really is as it was.
   {
     test: e => /purchase_bill_has_returns/i.test(e.message || ''),

@@ -28,7 +28,7 @@
 // claim on a statutory report. Every return here is scaled by its own line's net factor, so a full
 // return nets to exactly zero.
 import { allocateBillDiscounts, netFactors, returnBase } from './supplierAttribution'
-import { calcBillTotals, billKeyOf } from '../purchases/purchasesHelpers'
+import { calcBillTotals, billKeyOf, billInvoiceAmount, invoiceMismatch } from '../purchases/purchasesHelpers'
 
 export const VAT_RATE = 0.13
 
@@ -36,6 +36,40 @@ export const VAT_RATE = 0.13
 // `allocateBillDiscounts` they are derived from — that file needed them and could not import them
 // from here without a cycle. Re-exported so every existing caller of this module is unchanged.
 export { netFactors, returnBase }
+
+/**
+ * The purchase-line ids this period's returns point at that are NOT among this period's purchases —
+ * i.e. returns against a bill from an earlier month (S756, owner decision D10). The page reads those
+ * bills whole (every line of each, so the discount apportions correctly) and hands them to
+ * `splitPurchaseVat` as `priorBillLines`. Unlinked returns have no line to fetch and are not listed.
+ */
+export function returnLinesOutsidePeriod(entries, returns) {
+  const here = new Set((entries || []).map(e => e.id))
+  return [...new Set((returns || [])
+    .map(r => r.purchase_entry_id)
+    .filter(id => id != null && !here.has(id)))]
+}
+
+/**
+ * Discount factors for bills from OTHER months. Same arithmetic as the period's own, with one
+ * difference: the legacy fallback bill key (vendor + invoice + day, for a line with no
+ * purchase_group_id) is scoped by `period_id`, because lines from several months are passed together
+ * and day 5 exists in all of them — two months' legacy bills must not merge into one discount.
+ */
+export function priorBillFactors(lines) {
+  if (!lines || lines.length === 0) return new Map()
+  const scoped = lines.map(l => (l.purchase_group_id
+    ? l
+    : { ...l, purchase_group_id: `legacy|${l.period_id || ''}|${l.vendor_id || ''}|${l.invoice_ref || ''}|${l.bs_day}` }))
+  return netFactors(allocateBillDiscounts(scoped))
+}
+
+function mergeFactors(own, prior) {
+  if (!prior || prior.size === 0) return own
+  const out = new Map(prior)
+  for (const [k, v] of own) out.set(k, v)
+  return out
+}
 
 /** Whether the return's original purchase line carried VAT. `vendor_returns` has no column of its
  *  own for this — it is only ever knowable through the join to `purchase_entries`.
@@ -65,9 +99,13 @@ export function isNonVatReturn(r) { return !isUnlinkedReturn(r) && r.purchase_en
  * apportioned from one half of itself. `returns` must be every return of the period, with
  * `purchase_entries(vat_inclusive)` selected.
  */
-export function splitPurchaseVat(entries, returns) {
+export function splitPurchaseVat(entries, returns, { priorBillLines } = {}) {
   const allocated = allocateBillDiscounts(entries || [])
-  const factors = netFactors(allocated)
+  // A return may sit in a LATER month than its bill (S756, D10), so its purchase line is not among
+  // this period's `entries` and has no discount factor here — returnBase would fall back to the
+  // list rate and reverse more VAT than was ever claimed. The caller passes that bill's lines (every
+  // line of it, from its own month) and they are valued the same way. This period's own factors win.
+  const factors = mergeFactors(netFactors(allocated), priorBillFactors(priorBillLines))
 
   const vatLines = allocated.filter(e => e.vat_inclusive)
   const nonVatLines = allocated.filter(e => !e.vat_inclusive)
@@ -255,15 +293,25 @@ export function billWiseVat(allocatedEntries) {
     if (!b) {
       bills.set(key, b = {
         key, bs_day: e.bs_day, vendor: e.vendors?.name || '', pan: e.vendors?.pan_vat_no || '',
-        invoice: e.invoice_ref || '', taxable: 0, exempt: 0,
+        invoice: e.invoice_ref || '', taxable: 0, exempt: 0, lines: [],
       })
     }
     // Same test splitPurchaseVat uses, so a legacy NULL line lands in the same half on both sheets.
     if (e.vat_inclusive) b.taxable += e.lineNet
     else b.exempt += e.lineNet
+    b.lines.push(e)
   }
   return [...bills.values()]
-    .map(b => ({ ...b, vat: b.taxable * VAT_RATE, total: b.taxable * (1 + VAT_RATE) + b.exempt }))
+    .map(({ lines, ...b }) => {
+      const vat = b.taxable * VAT_RATE
+      const total = b.taxable * (1 + VAT_RATE) + b.exempt
+      // The supplier's printed figures, when someone typed them (S756, owner decision D13), checked
+      // against this row's own VAT and Total — which are calcBillTotals' figures for the bill.
+      const invoiceVat = billInvoiceAmount(lines, 'invoice_vat_amount')
+      const invoiceTotal = billInvoiceAmount(lines, 'invoice_total_amount')
+      const invoiceCheck = invoiceMismatch({ invoiceVat, invoiceTotal }, { vatTotal: vat, grandTotal: total })
+      return { ...b, vat, total, invoiceVat, invoiceTotal, invoiceCheck }
+    })
     .sort((a, b) => (a.bs_day || 0) - (b.bs_day || 0))
 }
 

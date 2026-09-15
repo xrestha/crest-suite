@@ -609,7 +609,10 @@ export default function VendorReport() {
           <h1 className="page-title">Vendor Purchase Report</h1>
           <p className="page-subtitle">Net spend by supplier (gross purchases − returns)</p>
           <div className="page-scope-row">
-            <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
+            {/* provisionalWhenOpen (S756): an open month's net spend still moves with every bill
+                and return entered, and the scopeLine already calls it PROVISIONAL in the workbook —
+                the chip on screen now says the same thing. */}
+            <PeriodScope label={periodLabel} status={selectedPeriod?.status} provisionalWhenOpen />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -621,9 +624,18 @@ export default function VendorReport() {
               while `scopeLine` and the filename already read the NEW `selectedPeriod` —
               one month’s figures leaving the building inside another month’s workbook,
               which is the S601 rule verbatim. */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError}>Export Excel</button>
+          {/* biz.error (S756): a failed client-name read shipped all three sheets with a blank
+              CompanyName line. */}
+          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !!biz.error}>Export Excel</button>
         </div>
       </div>
+
+      {biz.error && (
+        <p role="alert" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          This outlet's name could not be loaded, so Excel is switched off rather than exporting a sheet
+          with a blank company name. The report below is unaffected. Reload the page to try again.
+        </p>
+      )}
 
       {/* A failed read renders as a failure — never as a confident NPR-0 vendor ledger (S612). */}
       {/* `loading` as well as `loadError` (S616). The KPI strip and the split chart sat

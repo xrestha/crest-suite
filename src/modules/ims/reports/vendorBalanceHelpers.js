@@ -6,6 +6,7 @@
 // per vendor for a fiscal year — and doubles as NSA 17 (External Confirmations) audit evidence.
 import { bsToAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import { calcBillTotals, billKeyOf } from '../purchases/purchasesHelpers'
+import { SUPPLIER_CREDIT_MODE } from './payablesAllocation'
 
 // AD start/end of the BS fiscal year that begins in `fyStartYear` (Shrawan 1 -> last day of the
 // following year's Ashadh). `end` is pushed to end-of-day so same-day comparisons against dates
@@ -202,12 +203,22 @@ export function buildFySchedule({ creditEntries, cashEntries, payments, returns,
     const billKey = bill?.billKey || p.purchase_entry_id
     const groupKey = `${billKey}|${p.paid_at}|${p.note || ''}|${p.payment_mode || ''}`
     if (!paymentGroups[groupKey]) {
-      paymentGroups[groupKey] = { date: d, amount: 0, purchaseEntryId: p.purchase_entry_id, note: p.note || null, paymentMode: p.payment_mode || null }
+      paymentGroups[groupKey] = {
+        date: d, amount: 0, purchaseEntryId: p.purchase_entry_id, note: p.note || null, paymentMode: p.payment_mode || null,
+        // Half of a supplier-credit pair (S756 D11): credit a bill was holding, moved onto another
+        // bill of the same supplier. The negative half is on the bill giving the credit and the
+        // positive half on the bill receiving it, same date, so the two lines cancel in the running
+        // balance — which is right, because no money moved and the return that created the credit
+        // is already on the letter. They stay separate lines so the vendor can see where it went.
+        creditApplied: !!p.credit_link_id || p.payment_mode === SUPPLIER_CREDIT_MODE,
+      }
     }
     paymentGroups[groupKey].amount += parseFloat(p.amount)
   })
   Object.values(paymentGroups).forEach(g => {
-    events.push({ type: 'payment', date: g.date, ref: invoiceRefByEntryId[g.purchaseEntryId] || null, note: g.note, paymentMode: g.paymentMode, amount: g.amount, purchaseEntryId: g.purchaseEntryId })
+    // Kept as type 'payment' (the letter already prints its Payment Mode, which reads "Supplier
+    // credit" here) with a flag a renderer can use to label it — see creditApplied above.
+    events.push({ type: 'payment', date: g.date, ref: invoiceRefByEntryId[g.purchaseEntryId] || null, note: g.note, paymentMode: g.paymentMode, amount: g.amount, purchaseEntryId: g.purchaseEntryId, creditApplied: g.creditApplied })
   })
 
   // Returns: walk EVERY touched bill's own returns from its gross total, chronologically, so each
@@ -268,8 +279,17 @@ export function buildFySchedule({ creditEntries, cashEntries, payments, returns,
   // second expression the letter's reader could not see, so "Payments (FY)" in the headline
   // counted money that appeared nowhere in the Supporting Schedule below it: a vendor asked to
   // verify the letter line by line could not reconcile the box to the table.
+  //
+  // Supplier-credit lines are not payments — no money left the bank — so they are left out of the
+  // headline and totalled on their own. Leaving them out changes nothing arithmetically (a pair is
+  // equal and opposite and shares one date, so both halves fall in the same fiscal year), and it
+  // keeps "Payments (FY)" equal to money actually paid (S756 D11).
   const totalPaymentsFy = schedule
-    .filter(e => e.type === 'payment' || e.type === 'settlement')
+    .filter(e => (e.type === 'payment' && !e.creditApplied) || e.type === 'settlement')
+    .reduce((s, e) => s + e.amount, 0)
+  // How much credit was moved between this supplier's bills this year (the positive halves).
+  const totalCreditAppliedFy = schedule
+    .filter(e => e.type === 'payment' && e.creditApplied && e.amount > 0)
     .reduce((s, e) => s + e.amount, 0)
 
   if (process.env.NODE_ENV !== 'production') {
@@ -284,7 +304,7 @@ export function buildFySchedule({ creditEntries, cashEntries, payments, returns,
       'Vendor Balance Confirmation: closing balance reconciliation mismatch', { expected, closingBalance })
   }
 
-  return { schedule, closingBalance, totals: { totalPurchasesFy, totalPaymentsFy, totalReturnsFy } }
+  return { schedule, closingBalance, totals: { totalPurchasesFy, totalPaymentsFy, totalReturnsFy, totalCreditAppliedFy } }
 }
 
 // Top-level orchestrator the page component calls once all rows are fetched.

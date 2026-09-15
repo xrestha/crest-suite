@@ -3,9 +3,12 @@
 // in any environment without REACT_APP_SUPABASE_URL set, which includes a plain checkout and CI.
 // Mocked the same way scopedDb.test.js already does it; every test below passes its own mock
 // client into the function under test, so nothing here needs the real one.
-jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
-
 import { persistSalesDay, isMissingFunctionError, findSupersededRows } from './persistSalesDay'
+import { errorInfo } from '../../../shared/errorText'
+
+// babel-jest hoists jest.mock above the imports, so it still runs first; placed after them only
+// to satisfy import/first.
+jest.mock('../../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
 
 // Minimal stand-in for a PostgrestBuilder: chainable, records what was called on it, and is
 // thenable (the real builder is a thenable too, not a Promise — see withTimeout.js).
@@ -97,6 +100,16 @@ describe('persistSalesDay — atomic RPC path', () => {
     const sb = makeMockSupabase({ rpcResult: { error: { code: '23503', message: 'fk violation' } } })
     await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })).rejects.toThrow('fk violation')
     expect(sb.calls).toHaveLength(1) // no legacy fallback attempted
+  })
+
+  // S756: `throw new Error(error.message)` dropped the code, so errorText's code-keyed rules —
+  // period_closed above all — could never match a refused save.
+  test('a refusal keeps its code and hint, and is marked as a server answer', async () => {
+    const sb = makeMockSupabase({ rpcResult: { error: { code: 'P0001', hint: 'period_closed', message: 'sales_entries: period is closed', details: 'x' } } })
+    const err = await persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS }).catch(e => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).toMatchObject({ code: 'P0001', hint: 'period_closed', details: 'x', fromSupabase: true })
+    expect(errorInfo(err, 'operator').text).toMatch(/month is closed/)
   })
 })
 

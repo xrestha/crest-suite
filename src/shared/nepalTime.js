@@ -1,4 +1,4 @@
-import { adToBsSafe, BS_MONTHS } from '../utils/bsCalendar'
+import { adToBsSafe, BS_MONTHS, bsDayBoundaryIso, formatAd } from '../utils/bsCalendar'
 
 /**
  * Clock times, pinned to Nepal.
@@ -169,4 +169,30 @@ export function nepalBsLong(ts) {
 export function nepalTime24(ts) {
   const d = toDate(ts)
   return d ? hm24Fmt.format(d) : ''
+}
+
+// The POS SERVICE day's rollover: six hours past Nepal midnight.
+export const SERVICE_DAY_ROLLOVER_MS = 6 * 60 * 60 * 1000
+
+/**
+ * The instant the current service day began, as an ISO string pinned to +05:45: Nepal MIDNIGHT of
+ * the BS day that (now − 6h) falls on. So the day rolls over at 6 AM Nepal time, never at the
+ * device's midnight — a car parked at 11:30 PM during a late service is still "today" at 12:30 AM.
+ *
+ * Moved here from `pos/parking/NewParkingSlipModal.jsx` (S756) without changing a byte of what it
+ * returns: POS parking's auto-close sweep, parking's "today's bills" dropdown and the IMS gate-pass
+ * day (`gatePassDayStartMs`, which adds the six hours back to get "the most recent 6 AM") all read
+ * it, and an IMS page importing a helper out of a POS modal file was one rename away from breaking.
+ *
+ * Note what it returns is MIDNIGHT, not 6 AM: a caller comparing against it keeps anything from
+ * 00:00 onwards of that BS day, which is why parking keeps a 3 AM slip for a further day.
+ *
+ * Outside the verified BS table it falls back to the same Nepal civil day, built from the AD date.
+ */
+export function serviceDayStartIso(nowMs = Date.now()) {
+  const anchor = nowMs - SERVICE_DAY_ROLLOVER_MS
+  const bs = nepalBs(anchor)
+  const iso = bs ? bsDayBoundaryIso(bs.year, bs.month, bs.day) : null
+  if (iso) return iso
+  return `${formatAd(nepalCivilDate(anchor))}T00:00:00.000+05:45`
 }

@@ -14,9 +14,9 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import GatePassPrint from './GatePassPrint'
 import NewGatePassModal from './NewGatePassModal'
-import { nepalTime, nepalBs } from '../../../shared/nepalTime'
-// The POS parking day helper, reused rather than copied (S756, D27) — see gatePassDayStartMs.
-import { serviceDayStartIso } from '../../pos/parking/NewParkingSlipModal'
+// serviceDayStartIso is the POS parking day helper, reused rather than copied (S756, D27) — see
+// gatePassDayStartMs. It lives in shared/nepalTime.js, not in a POS modal file.
+import { nepalTime, nepalBs, serviceDayStartIso } from '../../../shared/nepalTime'
 
 const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'Maintenance', other: 'Other' }
 

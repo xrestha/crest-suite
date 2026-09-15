@@ -6,25 +6,18 @@ import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
-import { BS_MONTHS, bsDayBoundaryIso, formatAd } from '../../../utils/bsCalendar'
-import { nepalBs, nepalCivilDate, nepalDateAd } from '../../../shared/nepalTime'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { nepalBs, nepalDateAd, serviceDayStartIso } from '../../../shared/nepalTime'
 import { printParkingSlip } from './parkingSlipHtml'
 
 const VEHICLE_TYPES = ['Two Wheeler', 'Four Wheeler']
 
-// S754 (owner decision): parking's "day" is the SERVICE day — it starts at Nepal midnight of the BS
-// day that (now − 6h) falls on, so it rolls over at 6 AM Nepal time rather than at the device's
-// midnight. Same shape as serviceDayStartIso() in kds/KitchenDisplay.jsx; used both for the
-// auto-close sweep (PosParkingSlips) and for "today's bills" below, so the two cannot disagree.
-const SERVICE_DAY_ROLLOVER_MS = 6 * 60 * 60 * 1000
-export function serviceDayStartIso(nowMs = Date.now()) {
-  const anchor = nowMs - SERVICE_DAY_ROLLOVER_MS
-  const bs = nepalBs(anchor)
-  const iso = bs ? bsDayBoundaryIso(bs.year, bs.month, bs.day) : null
-  if (iso) return iso
-  // Outside the verified BS table: the same Nepal civil day, built from the AD date directly.
-  return `${formatAd(nepalCivilDate(anchor))}T00:00:00.000+05:45`
-}
+// S754 (owner decision): parking's "day" is the SERVICE day — it rolls over at 6 AM Nepal time, not
+// at the device's midnight. The helper lives in shared/nepalTime.js since S756 (it was defined here
+// and imported by the IMS gate-pass page); re-exported so any importer of this file keeps working.
+// Used both for the auto-close sweep (PosParkingSlips) and for "today's bills" below, so the two
+// cannot disagree.
+export { serviceDayStartIso }
 
 // Issue+auto-print a new customer vehicle parking token. Standalone — not tied to any order/table,
 // so a walk-in who hasn't ordered yet can still get one. Only entry point is PosParkingSlips.jsx,

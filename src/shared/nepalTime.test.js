@@ -1,4 +1,4 @@
-import { nepalTime, nepalCivilDate, nepalBs, nepalBsLong, nepalDateAd, nepalDateLong } from './nepalTime'
+import { nepalTime, nepalCivilDate, nepalBs, nepalBsLong, nepalDateAd, nepalDateLong, serviceDayStartIso } from './nepalTime'
 import { adToBs } from '../utils/bsCalendar'
 
 // These assertions are deliberately independent of the machine's timezone — that is the entire
@@ -115,5 +115,30 @@ describe('nepalBsLong', () => {
     expect(nepalBsLong('1900-01-01T00:00:00Z')).toBe('')
     expect(nepalBsLong(null)).toBe('')
     expect(nepalBsLong('not a date')).toBe('')
+  })
+})
+
+describe('serviceDayStartIso — the POS service day, rolling over at 6 AM Nepal (moved here S756)', () => {
+  const at = iso => Date.parse(iso)
+
+  it('returns Nepal MIDNIGHT of the BS day that (now − 6h) falls on, pinned to +05:45', () => {
+    // 15 Sep 2026 07:00 Nepal → anchor 01:00 the same day → that day's midnight.
+    expect(serviceDayStartIso(at('2026-09-15T07:00:00+05:45'))).toBe('2026-09-15T00:00:00.000+05:45')
+    expect(Date.parse(serviceDayStartIso(at('2026-09-15T23:30:00+05:45')))).toBe(at('2026-09-15T00:00:00+05:45'))
+  })
+
+  it('stays on the previous day until 6 AM, so a late service keeps its day past midnight', () => {
+    expect(Date.parse(serviceDayStartIso(at('2026-09-16T00:30:00+05:45')))).toBe(at('2026-09-15T00:00:00+05:45'))
+    expect(Date.parse(serviceDayStartIso(at('2026-09-16T05:59:00+05:45')))).toBe(at('2026-09-15T00:00:00+05:45'))
+    expect(Date.parse(serviceDayStartIso(at('2026-09-16T06:00:00+05:45')))).toBe(at('2026-09-16T00:00:00+05:45'))
+  })
+
+  it("is independent of the viewer's timezone", () => {
+    // 00:30Z is 06:15 in Kathmandu — past the rollover there, whatever the runtime thinks.
+    expect(Date.parse(serviceDayStartIso(at('2026-09-16T00:30:00Z')))).toBe(at('2026-09-16T00:00:00+05:45'))
+  })
+
+  it('falls back to the Nepal civil day outside the verified BS table', () => {
+    expect(serviceDayStartIso(at('1900-01-02T12:00:00+05:45'))).toBe('1900-01-02T00:00:00.000+05:45')
   })
 })

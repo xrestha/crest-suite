@@ -66,6 +66,7 @@ export const IMS_GUIDE_GROUPS = [
           'Renders two KPI rows, then four chart cards — two of which carry two views behind an in-card tab: Spend by Category / Top Items by Spend, Daily Purchases vs Sales, Food Cost % monthly trend, and Revenue vs Cost Breakdown / Sales Mix.',
           'Below the charts: a Top Variance Items table and an Items to Reorder panel (both Growth+), each linking to their full report.',
           'If the open period\'s BS month has already passed, a banner offers a one-click "End <month> & Start <next>" shortcut to the client\'s own logins. An admin viewing the client gets a "Go to Periods" link there instead.',
+          'S756: labour for Fixed Costs % / Est. Net Margin comes from labourSource.js — a finalized payroll run (gross + employer SSF) supersedes the typed Labor bucket, never both; an IMS staff login on an HR client is told payroll cannot be read and gets no verdict.',
         ],
         fields: [
           { label: 'Menu Health tile', desc: 'Count of recipes priced under their target_fc_pct, with an estimated monthly NPR opportunity if repriced to target — the same underlying calculation as Menu Repricing, just summarized to one number.' },
@@ -204,6 +205,7 @@ export const IMS_GUIDE_GROUPS = [
           'A bill with vendor payments recorded against it (Outstanding Payables) cannot be edited or deleted: payable_payments cascades off purchase_entries, so either would erase money already paid. A database trigger refuses, the save RPC refuses, and the list page says so before trying. Remove the payments first.',
           'Same vendor + same bill number: the form asks before saving a second time ("This bill number is already on record"). A warning, not a stop — some vendors reuse numbers.',
           'A line with an item and a quantity but a rate of 0 (or blank) saves as a FREE line — stock goes up, spend does not, and the rate-sync prompt ignores it. A row with something typed but no item or no quantity above 0 is refused by name, never silently dropped (S698; the old filter dropped both).',
+          'S756: returns may pick a bill from up to 12 earlier months and sit in the month on screen; the over-return cap reads every return against the line in any month; VAT/Non-VAT value such a return at its own bill\'s discount (readPriorBillLines.js). Optional invoice_vat_amount / invoice_total_amount are stored on every line like discount_amount and compared with calcBillTotals — a >NPR 1 difference is flagged on the form, the register and the VAT Report\'s bill-wise sheet.',
         ],
         fields: [
           { label: 'Qty / Rate storage convention', desc: 'purchase_entries.qty and .rate are ALWAYS stored in base units, never the purchase unit typed. On save: stored_qty = entered_qty × conversion_factor; stored_rate = entered_rate ÷ conversion_factor. Every downstream calculation (Stock, Variance, FIFO, Reorder) reads these base-unit values directly.' },
@@ -377,6 +379,7 @@ export const IMS_GUIDE_GROUPS = [
           'Save as Draft (qty_issued = whatever\'s typed, possibly 0) or Save & Issue (qty_issued defaults to qty_requested if left blank).',
           'From a draft\'s detail view, "Issue" opens an editable Confirm Issue Quantities table (adjust down if issuing less than requested), then Confirm Issue finalizes it.',
           'Before issuing, the app estimates on-hand stock per item and warns — non-blocking — if a line would issue more than what\'s estimated on hand.',
+          'S756: requested_by / issued_by / issued_at and rejected_by / rejected_at are stamped by the database (ims_requisition_attribution). Status \'rejected\' needs a reason, is reachable only from draft, and is final for every client login; deleting a rejected slip needs a supervisor. Below supervisor a line may be added to an issued slip only by its issuer within 5 minutes (Save & Issue).',
         ],
         fields: [
           { label: 'Qty Issued vs Qty Requested', desc: 'Requested is what the department asked for; Issued is what the store actually gave — can be less. Not validated as ≤ requested, only nudged by the shortfall warning; a NEGATIVE quantity is refused outright, in the page and again by a database CHECK.' },
@@ -413,6 +416,7 @@ export const IMS_GUIDE_GROUPS = [
           'A live cost/FC%/suggested-price preview updates as ingredients are typed, before saving.',
           'Saving a recipe with category = "Sub-Recipe" auto-creates/updates a mirror row in items (is_sub_recipe=true) so it can be referenced as an ingredient elsewhere. Changing a recipe away from "Sub-Recipe" deactivates and unlinks its mirror item, and is REFUSED while other recipes still list it as an ingredient (S714) — it names them, because those recipes would go on consuming it while it vanished from their ingredient pickers. Remove it from them first, or use Hide.',
           'Nutrition auto-fill: a one-click bulk match against a local regional library (DFTQC Nepal / IFCT 2017 / USDA seed data); a separate, explicit live USDA FoodData Central lookup is available only for ingredients the local library couldn\'t match.',
+          'S756: dish photos upload to the public dish-photos bucket under <client_id>/ (IMS supervisor+, POS manager, Owner or admin; jpeg/png/webp, 2 MB), never with upsert (an upsert\'s RETURNING needs a SELECT policy — the cause of the reverted staff-photo bucket and of the Logos bucket failure fixed in 20260918160000). image_url stores the public URL with ?v=.',
         ],
         fields: [
           { label: 'Product Code', desc: 'Issued automatically from the chosen category as the recipe is written — Beverage gives BEV-001, then BEV-002, and changing the category before saving re-issues it under the new prefix. Type your own code over it (e.g. one carried across from a previous menu or POS) and it is left alone from then on. Editing an existing recipe never re-issues its code. Staff can search this code on the POS order screen, and it prints as the Code column on the Item Wise sales report. Unique per client, enforced by the database.' },
@@ -587,6 +591,7 @@ export const IMS_GUIDE_GROUPS = [
         workflow: [
           'Auto-selects the open period; switch via dropdown. Print or view the Category Breakdown table (Opening, Gross Purchases, Discount, Returns, Net Purchases, Wastage, Staff Meals, Closing, COGS, % of Total COGS).',
           'Items with no category are grouped into a synthetic "Uncategorized" row rather than being dropped from totals.',
+          'S756: uncountedItems.js names active items with stock presence but no closing row; FC% loses its verdict while the gap is material (≥5% of items or ≥5% of COGS by value). Open months are provisional with no verdict. Totals are unchanged.',
         ],
         fields: [],
         formulas: [
@@ -609,6 +614,7 @@ export const IMS_GUIDE_GROUPS = [
         summary: 'Rolls up Monthly Summary\'s math across an entire year — either BS Calendar Year or Nepali Fiscal Year (Shrawan → Ashadh).',
         workflow: [
           'Toggle Calendar Year vs Fiscal Year, pick a year (auto-populated from periods that exist). One row per month, total row at the bottom. Print or Export Excel.',
+          'S756: per-month uncounted gaps are marked and withhold only that month\'s FC% verdict; the export gains a Closing count column.',
         ],
         fields: [],
         formulas: [
@@ -630,6 +636,7 @@ export const IMS_GUIDE_GROUPS = [
         summary: 'A trend table comparing Net Purchases, Wastage, COGS, Revenue, and FC% across the last N periods (any mix of months, not tied to one calendar/fiscal year).',
         workflow: [
           'Choose Last 6/12/24 periods or All. Table sorted newest-first with a "vs Prev" trend arrow against the next-older row. Stat cards: Latest FC% (+ trend), Best FC% Period, Latest Revenue.',
+          'S756: months with a material uncounted gap are marked (hollow grey chart dot) and excluded from Best FC% Period.',
         ],
         fields: [],
         formulas: [
@@ -652,6 +659,7 @@ export const IMS_GUIDE_GROUPS = [
         summary: 'Lets an admin set a per-category NPR spend budget for a period and compares it against actual net purchases.',
         workflow: [
           'Select period. Type a budget amount per category directly into the table — auto-saves on blur (no explicit Save button).',
+          'S756: while the month is open, variance colours and the Over/Under badge are withheld ("Within/Above so far").',
         ],
         fields: [
           { label: 'Status badge', desc: 'No Budget (grey, budget=0) / Over Budget (red) / Under Budget (green).' },
@@ -827,6 +835,7 @@ export const IMS_GUIDE_GROUPS = [
         workflow: [
           'Enter the closing count in Stock Count FIRST. Consumption here is worked backwards from what is left on the shelf, so an item with no closing count cannot be judged at all — those items are excluded and counted in the amber notice at the top of the page, and if nothing is counted the report says so instead of reporting "no dead stock".',
           'Select period. Filter by status (All/Dead/Slow) and category.',
+          'S756: deadStockCalc.js — Dead = no use in ≥3 consecutive counted months with stock; 1–2 = Slow; an uncounted month, a count above what was available, no stock or a calendar gap breaks the streak. A deterministic next step per item (expired/still >3 months → write off; bought within 45 days → ask the supplier; slow but recent → buy less; otherwise → menu special).',
         ],
         fields: [],
         formulas: [
@@ -877,6 +886,7 @@ export const IMS_GUIDE_GROUPS = [
           'Pick a period and read it as "stock on hand as at the end of that month". Batches from EVERY earlier month of the same fiscal year are included, because expiry does not respect a month boundary — a tin bought in Shrawan that goes off in Ashwin has to be visible in Ashwin.',
           'Filter by expiry status (All/Expired/Expiring Soon/In date) and category. The "expiring soon" window is set in Settings → Thresholds (expiry_warning_days, default 7).',
           'Days Left is counted to a stated as-of date, shown beside the period chip and printed on both the sheet and the Excel export: today for the current month, the last day of the period for any other.',
+          'S756: same 12-month window and count anchoring as Stock Ageing; the workbook adds "of which Counted Off" and "Quantity Follows".',
         ],
         fields: [],
         formulas: [
@@ -904,6 +914,7 @@ export const IMS_GUIDE_GROUPS = [
           'Check the as-of date in the subtitle. The CURRENT fiscal year ages to today; a PAST one ages to the end of its last period, not to today — the page says which, and both the print title and the Excel letterhead carry it.',
           'Filter by age band or category. The band columns show quantity; the TOTAL row shows each band\'s value, so you can see where the money sits rather than just where the units are. That row follows whatever filter is applied, so it always adds up to the rows on screen.',
           'Print or export to Excel — the export carries qty and value for every band per item.',
+          'S756: rolling 12-month window ending at the selected month; anchorToCounts forces each item to its closed-month count (shortfall off the oldest batches, surplus as an unknown-age batch at the count); a Counted column names the month each item follows.',
         ],
         fields: [
           { label: 'Capital in 90+ Day Stock', desc: 'The report\'s reason to exist: money committed to stock that has not moved in three months. It is not a loss — the stock is still good — but it is cash on a shelf instead of in the bank, and it usually points at over-ordering or a dish that quietly stopped selling.' },
@@ -1065,6 +1076,7 @@ export const IMS_GUIDE_GROUPS = [
           'Outstanding tab (unpaid bills) and Paid History tab. Lines are grouped into bills by purchase_group_id — the id every line saved together in one bill shares. Older rows written before that column existed have none, and fall back to vendor + invoice ref + period + day.',
           'Click a bill to expand line items, payment history, and (Outstanding only) a payment form — Amount, Date, Note, with a "Pay in full" shortcut.',
           'Payment allocation is automatic and oldest-line-first across the bill\'s unpaid lines, clamped so it can never exceed the bill\'s remaining balance.',
+          'S756: "Pay supplier…" (planSupplierLumpSum) applies one amount oldest bill first and previews the split; "Use supplier credit" writes a payable_payments PAIR sharing credit_link_id with payment_mode \'Supplier credit\' — negative on the credit bill\'s line, positive on the target — checked at commit by the deferred payable_payments_credit_pair trigger (equal and opposite, same date, same supplier, both Credit bills, different bills, source never net-negative). amount may now be negative only on a credit half. The balance letter labels these "Supplier credit applied" and keeps them out of the payments total.',
         ],
         fields: [
           { label: 'Aging buckets', desc: 'Current (≤30 days), 31–60, 61–90, 90+ — colored green/accent/amber/red, computed from the bill\'s BS date converted to AD, not from any separate "due date" concept.' },

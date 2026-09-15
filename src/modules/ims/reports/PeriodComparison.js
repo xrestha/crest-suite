@@ -24,6 +24,7 @@ import { BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
 import { nprOrDash } from '../../../shared/nepalMoney'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { findUncountedItems, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
 
 // Fallback categorical rotation for any recipe category beyond Food/Beverage (which get fixed
 // semantic colors) — mirrors the Dashboard's Sales Mix convention (ClientDashboard.jsx) so a
@@ -70,10 +71,12 @@ function DeltaRow({ pct, suffix, judge = 'neutral' }) {
 
 // Same idea as DeltaRow but for a percentage-POINT difference (FC%'s own unit) rather than a %
 // change — down is always "good" here since it means food cost fell as a share of revenue.
-function PpDeltaRow({ curr, prev, suffix }) {
+function PpDeltaRow({ curr, prev, suffix, judged = true }) {
   if (curr == null || prev == null) return null
   const diff = curr - prev
-  const color = diff < 0 ? 'var(--theme-green-text)' : diff > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)'
+  // `judged: false` (S756 D6) when either side's count is materially incomplete — the movement is
+  // then partly the gap, and green/red would be a verdict on it.
+  const color = !judged ? 'var(--theme-text2)' : diff < 0 ? 'var(--theme-green-text)' : diff > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)'
   return (
     <div style={{ fontSize: 11, color, marginTop: 1, fontStyle: suffix === 'vs LY' ? 'italic' : 'normal' }}>
       {diff < 0 ? '↓' : diff > 0 ? '↑' : '→'} {Math.abs(diff).toFixed(1)}pp {suffix}
@@ -151,7 +154,7 @@ export default function PeriodComparison() {
       // mirror row was valued into opening/closing/wastage/staff meals here while Monthly Summary
       // and Annual Summary both drop it — the same month's COGS differed between the pages by
       // exactly that stock. Now one rate map, the AnnualSummary rateMap/isTracked shape.
-      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
       // `discount_amount` + the bill-key columns feed allocateBillDiscounts(): a bill-level
       // discount is repeated on every line of the bill, and until it was deduped and spread this
       // page's "Net Purchases" and COGS sat above MonthlySummary's and Consolidated P&L's for the
@@ -243,7 +246,18 @@ export default function PeriodComparison() {
       const netPurch = purchV - discV - retV
       const cogs     = computeUsed({ opening: openV, purchases: netPurch, wastage: wasteV, staffMeals: staffV, closing: closeV })
       const fcPct    = revenue > 0 ? (cogs / revenue) * 100 : null
-      result[pid]    = { purchV, discV, retV, netPurch, wasteV, openV, closeV, revenue, cogs, fcPct, catRev }
+      // Uncounted items for this period (S756 D6), from the rows already grouped above: a closing
+      // row with physical_qty 0 is a count, a NULL or missing one is not. COGS is unchanged; the
+      // period's own FC% verdict is withheld while its gap is material.
+      const openingQty = {}; at(openBy, pid).forEach(r => { openingQty[r.item_id] = (openingQty[r.item_id] || 0) + parseFloat(r.qty || 0) })
+      const purchaseQty = {}; const purchaseValue = {}
+      purchRows.forEach(r => {
+        purchaseQty[r.item_id] = (purchaseQty[r.item_id] || 0) + parseFloat(r.qty || 0)
+        purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + r.lineNet
+      })
+      const countedIds = new Set(at(closeBy, pid).filter(r => r.physical_qty != null).map(r => r.item_id))
+      const gap = findUncountedItems({ items: trackedItems, openingQty, purchaseQty, purchaseValue, countedIds, cogs })
+      result[pid]    = { purchV, discV, retV, netPurch, wasteV, openV, closeV, revenue, cogs, fcPct, catRev, gap }
     }
     if (!limitReq.isCurrent(key)) return   // superseded by a newer range selection
     setStats(result)
@@ -265,10 +279,29 @@ export default function PeriodComparison() {
   const fcTrend      = latestStats?.fcPct != null && prevStats?.fcPct != null
     ? latestStats.fcPct - prevStats.fcPct
     : null
+  // S756 D6: a period whose count gap is material has no FC% verdict, and neither does a movement
+  // into or out of it.
+  const unjudged     = s => !!s?.gap?.material
+  const fcCell = s => {
+    if (unjudged(s)) {
+      const f = unjudgedFcFigure(s.fcPct)
+      return { color: f.style.color, title: f.title, text: s.fcPct != null ? `${f.text} · not judged` : '—' }
+    }
+    const pct = s?.fcPct
+    return { color: fcColor(pct), title: fcLabel(pct), text: pct != null ? `${pct.toFixed(1)}% ${fcMark(pct)}` : '—' }
+  }
+  // Named once counting has begun or the month is closed — an open month nobody has started counting
+  // has every item uncounted, and the OPEN tag already says why.
+  const gapShown = p => {
+    const g = stats[p.id]?.gap
+    return !!g && g.uncountedCount > 0 && (p.status !== 'open' || g.uncountedCount < g.presentCount)
+  }
+  const gapPeriods = shown.filter(gapShown)
 
   const bestFcPeriod = shown.reduce((best, p) => {
     const s = stats[p.id]
-    if (!s || s.fcPct == null) return best
+    // An unjudged period cannot be "best": its FC% is an artefact of the missing count.
+    if (!s || s.fcPct == null || unjudged(s)) return best
     if (!best || s.fcPct < (stats[best.id]?.fcPct ?? Infinity)) return p
     return best
   }, null)
@@ -292,10 +325,11 @@ export default function PeriodComparison() {
   // and undefined, which is the distinction the rest of the product already draws.
   const fmt = nprOrDash
 
-  function trendIcon(curr, prev) {
+  function trendIcon(curr, prev, judged = true) {
     if (curr == null || prev == null) return null
     const diff = curr - prev
     if (Math.abs(diff) < 0.3) return <span style={{ color: 'var(--theme-text2)' }}>→</span>
+    if (!judged) return <span style={{ color: 'var(--theme-text2)' }} title="Not judged: this period or the one before has too much uncounted stock">{diff < 0 ? '↓' : '↑'} {Math.abs(diff).toFixed(1)}pp</span>
     // For FC%: down is better (lower cost)
     return diff < 0
       ? <span style={{ color: 'var(--theme-green-text)' }}>↓ {Math.abs(diff).toFixed(1)}pp</span>
@@ -312,6 +346,7 @@ export default function PeriodComparison() {
       revenue: s.revenue ?? null,
       fc: s.fcPct != null ? Number(s.fcPct.toFixed(1)) : null,
       open: p.status === 'open',
+      unjudged: unjudged(s),
     }
   })
   const hasChartData = chartPeriods.some(d => d.purchases != null || d.revenue != null)
@@ -360,6 +395,10 @@ export default function PeriodComparison() {
         'Revenue ex-VAT (NPR)':  s.revenue  ? s.revenue.toFixed(0)  : '',
         'Revenue Δ% vs Prev':    (() => { const d = pctDelta(s.revenue, prev?.revenue); return d != null ? d.toFixed(1) + '%' : '' })(),
         'FC%':                   s.fcPct != null ? s.fcPct.toFixed(1) + '%' : '',
+        // Marked in the sheet as on screen (S756 D6).
+        'Closing count':         s.gap?.uncountedCount > 0
+          ? `${s.gap.uncountedCount} of ${s.gap.presentCount} items not counted${s.gap.material ? ' — FC% not judged' : ''}`
+          : (s.gap ? 'complete' : ''),
       }
       if (showYoy) {
         row['LY Net Purchases (NPR)'] = lyS?.netPurch ? lyS.netPurch.toFixed(0) : ''
@@ -374,6 +413,7 @@ export default function PeriodComparison() {
     // that does not state what it covers cannot be reconciled later by the person who made it.
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Period-over-Period Comparison', biz, scopeLine, rows: data,
+      notes: shown.filter(p => stats[p.id]?.gap?.uncountedCount > 0).map(p => gapNote(stats[p.id].gap, periodLabel(p))),
     }), 'Period Comparison')
     if (categories.length > 0) {
       const catData = categoryChartData.map(row => ({
@@ -435,17 +475,37 @@ export default function PeriodComparison() {
 
       {loadError && <ReportLoadError error={loadError} />}
 
+      {/* D6 (S756): which periods' COGS counts uncounted stock as used. Not no-print — a printed
+          comparison carries the caveat too. */}
+      {!loadError && !loading && gapPeriods.length > 0 && (
+        <div role="alert" className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: 13, lineHeight: 1.6, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>
+            △ {gapPeriods.length} period{gapPeriods.length === 1 ? ' has' : 's have'} items with no closing count
+          </strong>{' '}
+          — their COGS counts that stock as used, so food cost reads high. Totals still include them; a period
+          whose gap is material shows its FC% without a verdict, and is left out of Best FC% Period.
+          {gapPeriods.map(p => (
+            <details key={p.id} style={{ marginTop: 4 }}>
+              <summary style={{ cursor: 'pointer' }}>
+                {periodLabel(p)}: {stats[p.id].gap.uncountedCount} of {stats[p.id].gap.presentCount} items not counted{stats[p.id].gap.material ? ' — not judged' : ''}
+              </summary>
+              {stats[p.id].gap.uncounted.map(u => u.name).join(', ')}
+            </details>
+          ))}
+        </div>
+      )}
+
       {/* Stat cards — gated on !loading too: a stat computed from rows that have not arrived
           is NPR 0 wearing the confidence of a real figure (S594 rule). */}
       {!loadError && !loading && (
       <div className="stat-grid no-print">
         <div className="stat-card">
           <div className="stat-label">Latest FC%</div>
-          <div className="stat-value" style={{ color: fcColor(latestStats?.fcPct) }} title={fcLabel(latestStats?.fcPct)}>
-            {latestStats?.fcPct != null ? `${latestStats.fcPct.toFixed(1)}% ${fcMark(latestStats.fcPct)}` : '—'}
+          <div className="stat-value" style={{ color: fcCell(latestStats).color }} title={fcCell(latestStats).title}>
+            {fcCell(latestStats).text}
           </div>
           {fcTrend != null && (
-            <div className="stat-label" style={{ marginTop: 4, color: fcTrend < 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+            <div className="stat-label" style={{ marginTop: 4, color: unjudged(latestStats) || unjudged(prevStats) ? 'var(--theme-text2)' : fcTrend < 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
               {fcTrend < 0 ? '↓' : '↑'} {Math.abs(fcTrend).toFixed(1)}pp vs prev period
             </div>
           )}
@@ -571,6 +631,7 @@ export default function PeriodComparison() {
                 <span style={{ color: 'var(--theme-green-text)' }}>● ≤{fcT.warn}% Good</span>
                 <span style={{ color: 'var(--theme-amber-text)' }}>● {fcT.warn}–{fcT.critical}% Watch</span>
                 <span style={{ color: 'var(--theme-red-text)' }}>● &gt;{fcT.critical}% High</span>
+                <span style={{ color: 'var(--theme-text2)' }}>○ = not judged (count incomplete)</span>
                 <span style={{ marginLeft: 'auto', color: 'var(--theme-text2)' }}>⊙ = current open period</span>
               </div>
             }
@@ -592,7 +653,7 @@ export default function PeriodComparison() {
                     itemStyle={{ color: 'var(--theme-text1)' }}
                     formatter={(v, _n, props) => {
                       const p = props.payload
-                      const lines = [`${v}%`]
+                      const lines = [p.unjudged ? `${v}% (not judged: count incomplete)` : `${v}%`]
                       if (p.purchases != null) lines.push(`Purchases: NPR ${p.purchases.toLocaleString('en-IN')}`)
                       if (p.revenue != null)   lines.push(`Revenue: NPR ${p.revenue.toLocaleString('en-IN')}`)
                       return [lines.join(' · '), 'Food Cost %']
@@ -601,6 +662,10 @@ export default function PeriodComparison() {
                   <Line type="monotone" dataKey="fc" strokeWidth={2} stroke={colors.accent} connectNulls={false} {...chartMotion()}
                     dot={(props) => {
                       const { cx, cy, payload } = props
+                      // An unjudged period's dot is hollow and neutral (S756 D6) — no band colour.
+                      if (payload.unjudged && payload.fc != null) {
+                        return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3.5} fill={colors.card || 'none'} stroke={colors.text3} strokeWidth={1.5} />
+                      }
                       const col = payload.fc == null ? colors.text3 : payload.fc <= fcT.warn ? colors.green : payload.fc <= fcT.critical ? colors.amber : colors.red
                       return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.open ? 5 : 3} fill={col} stroke={payload.open ? colors.text1 : 'none'} strokeWidth={1.5} />
                     }}
@@ -669,7 +734,7 @@ export default function PeriodComparison() {
                       Settings → Thresholds values. The comment beside those reference lines
                       celebrates having fixed exactly this drift; the tooltip explaining the colour
                       was the copy it left behind. */}
-                  <Tip text={`COGS ÷ Revenue. Green ≤${fcT.warn}%, amber up to ${fcT.critical}%, red above that — set in Settings → Thresholds. Shows — when revenue is zero.`} width={260}>FC%</Tip>
+                  <Tip text={`COGS ÷ Revenue. Green ≤${fcT.warn}%, amber up to ${fcT.critical}%, red above that — set in Settings → Thresholds. Shows — when revenue is zero. "Not judged" means too much of that period's stock had no closing count (5% of items, or 5% of COGS by value) for a verdict.`} width={280}>FC%</Tip>
                 </th>
                 <th style={{ textAlign: 'center' }}>
                   <Tip text="FC% change vs previous period. ↓ green = improving, ↑ red = worsening." width={240}>vs Prev</Tip>
@@ -691,6 +756,11 @@ export default function PeriodComparison() {
                           OPEN
                         </span>
                       )}
+                      {gapShown(p) && (
+                        <span className="badge badge-amber" style={{ marginLeft: 8 }} title={`${s.gap.uncountedCount} of ${s.gap.presentCount} items with stock have no closing count`}>
+                          {s.gap.uncountedCount} not counted
+                        </span>
+                      )}
                       {showYoy && (
                         <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontStyle: 'italic', marginTop: 2 }}>
                           {ly ? `LY: ${periodLabel(ly)}` : 'LY: no matching period'}
@@ -709,12 +779,12 @@ export default function PeriodComparison() {
                       <DeltaRow pct={pctDelta(s.revenue, prev?.revenue)} suffix="vs prev" judge="good-up" />
                       {showYoy && <DeltaRow pct={pctDelta(s.revenue, lyS?.revenue)} suffix="vs LY" judge="good-up" />}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: fcColor(s.fcPct) }} title={fcLabel(s.fcPct)}>
-                      {s.fcPct != null ? `${s.fcPct.toFixed(1)}% ${fcMark(s.fcPct)}` : '—'}
-                      {showYoy && <PpDeltaRow curr={s.fcPct} prev={lyS?.fcPct} suffix="vs LY" />}
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: fcCell(s).color }} title={fcCell(s).title}>
+                      {fcCell(s).text}
+                      {showYoy && <PpDeltaRow curr={s.fcPct} prev={lyS?.fcPct} suffix="vs LY" judged={!unjudged(s) && !unjudged(lyS)} />}
                     </td>
                     <td style={{ textAlign: 'center', fontSize: 13 }}>
-                      {trendIcon(s.fcPct, prev?.fcPct)}
+                      {trendIcon(s.fcPct, prev?.fcPct, !unjudged(s) && !unjudged(prev))}
                     </td>
                   </tr>
                 )
