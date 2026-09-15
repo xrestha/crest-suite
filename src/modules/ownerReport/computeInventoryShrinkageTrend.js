@@ -9,6 +9,7 @@ import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
+import { loadDeltaExplosion, deltaItems } from '../../utils/orderLineIngredients'
 
 const WINDOW_SIZE = 6
 
@@ -47,7 +48,8 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
     // dish collected no money but its ingredients were still consumed, so excluding it understates
     // theoretical usage and inflates apparent shrinkage. Matches ShrinkageReport.js, which this
     // section mirrors, and the same reasoning PosOrders.jsx documents for the consumption reports.
-    fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold').in('period_id', windowIds).order('id')),
+    // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
+    fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, ingredient_deltas').in('period_id', windowIds).order('id')),
     scopedFrom('items', clientId, 'id, name, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
     scopedFrom('recipes', clientId, 'id'),
   ])
@@ -55,7 +57,12 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
   const [{ data: opening }, { data: purchases }, { data: returns }, { data: wastages }, { data: closing }, { data: staffMeals }, { data: salesData }, { data: items }, { data: recipes }] = results
 
   const recipeIds = (recipes || []).map(r => r.id)
-  const ingredientBreakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+  // The option-delta explosion (S758) throws on a failed read exactly like the recipe walk, so a
+  // failure names this section as failed rather than freezing a customized plate as its plain recipe.
+  const [ingredientBreakdown, explosion] = await Promise.all([
+    recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+    loadDeltaExplosion(supabase, (salesData || []).map(s => s.ingredient_deltas)),
+  ])
 
   // Bucket every row by period_id first, then aggregate per (period, item).
   const byPeriodItem = (rows, key) => {
@@ -87,6 +94,15 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
       if (sold <= 0) return
       rows.forEach(({ item_id, qty }) => { theoreticalByPeriod[pid][item_id] = (theoreticalByPeriod[pid][item_id] || 0) + sold * qty })
     })
+  })
+  // A customized plate consumes its options' stock lines too (S758): deltas × qty sold, signed,
+  // added to the row's own period, over the same rows the recipe usage above counts.
+  ;(salesData || []).forEach(s => {
+    if (!s.ingredient_deltas || !theoreticalByPeriod[s.period_id]) return
+    const n = parseFloat(s.qty_sold || 0)
+    if (!n) return
+    const bucket = theoreticalByPeriod[s.period_id]
+    deltaItems(s.ingredient_deltas, explosion).forEach(({ item_id, qty }) => { bucket[item_id] = (bucket[item_id] || 0) + n * qty })
   })
 
   const perItem = {}

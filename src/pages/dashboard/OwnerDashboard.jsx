@@ -23,6 +23,7 @@ import {
   SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY,
 } from '../../modules/hr/payrollConstants'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
+import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
@@ -250,7 +251,8 @@ export default function OwnerDashboard() {
       // to carry `.neq('source', 'pos_comp')`, which was wrong twice over: a comped dish still
       // consumed its ingredients, and a .neq on a NULLABLE column also drops every legacy manual
       // row whose source is NULL — so consumption was understated and the tile under-counted.
-      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', period.id).order('id')) : { data: [] },
+      // ingredient_deltas: a customized plate also consumes its options' stock lines (S758).
+      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')) : { data: [] },
       // Wastage and staff meals come off the shelf in the shared calculation (S696); this tile
       // deducted neither, so it disagreed with the Reorder Report it summarises.
       period ? fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
@@ -272,11 +274,19 @@ export default function OwnerDashboard() {
     // The recipe walk throws on a failed read (S695). This section's convention is to flag and
     // continue with what it has, so a failed walk is reported the way a failed read in the batch
     // above is — the reorder figures below are then computed without usage and say so.
+    // The option stock-line walk (S758 — a customized plate consumes its options' stock lines)
+    // throws the same way and is flagged the same way; allSettled keeps each failure independent.
     let ingredientBreakdown = {}
-    try {
-      ingredientBreakdown = dashRecipeIds.length > 0 ? await explodeRecipeIngredients(supabase, dashRecipeIds) : {}
-    } catch (err) {
-      console.error('Owner Dashboard: recipe walk failed', err)
+    let deltaExplosion = null
+    const [walkRes, deltaRes] = await Promise.allSettled([
+      dashRecipeIds.length > 0 ? explodeRecipeIngredients(supabase, dashRecipeIds) : Promise.resolve({}),
+      loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+    ])
+    if (walkRes.status === 'fulfilled') ingredientBreakdown = walkRes.value
+    if (deltaRes.status === 'fulfilled') deltaExplosion = deltaRes.value
+    for (const [res, what] of [[walkRes, 'recipe walk'], [deltaRes, 'option stock-line walk']]) {
+      if (res.status !== 'rejected') continue
+      console.error(`Owner Dashboard: ${what} failed`, res.reason)
       setLoadErrors(prev => ({ ...prev, reorder: 'Reorder figures failed to load — may be incomplete or stale.' }))
     }
 
@@ -285,7 +295,7 @@ export default function OwnerDashboard() {
     // here and the count on that page were different numbers for the same client.
     const rows = buildStockRows({
       items, opening, closing, purchases, returns, wastages, staffMeals,
-      sales, breakdown: ingredientBreakdown, pars: parLevels,
+      sales, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
     })
     if (loadIdRef.current !== myId) return // superseded again after the recipe walk
     setReorderStats(summarizeReorder(rows))

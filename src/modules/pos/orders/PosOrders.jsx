@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
@@ -15,6 +15,7 @@ import { getBsToday, getBsFiscalYear, bsDayBoundaryIso } from '../../../utils/bs
 import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf } from '../reservations/reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
 import { computeRecipeCosts, explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { lineIngredientDeltas, loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
@@ -25,6 +26,9 @@ import { disabledStyle } from '../../../shared/inlineFieldState'
 // called them unstyled; being un-missable is the property that was chosen, and it still wins.
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import IssueCreditNoteModal from '../creditnotes/IssueCreditNoteModal'
+import OptionPickerModal from '../../customization/OptionPickerModal'
+import { loadOptionCatalog } from '../../customization/customizationData'
+import { groupsForDish, describeSelection } from '../../../shared/optionPricing'
 import {
   cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
   cachePosSettings, getCachedPosSettings, cachePosOrderForTable, getCachedPosOrderForTable,
@@ -37,7 +41,7 @@ import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
-  storedLinesMatchPayload, lineKeyOf,
+  storedLinesMatchPayload, lineKeyOf, selectionKeyOf,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS,
 } from './posOrdersConstants'
@@ -54,6 +58,11 @@ const HINT = {
   notOpen:    'order_not_open',    // the bill is already closed
   offMenu:    'line_not_on_menu',  // a NEW line is not on the till menu (or qty < 1 / no recipe)
   locked:     'bill_locked',       // a write to a closed bill
+  // Crest Customization (S758): an option switched off, a pick the dish no longer allows, or the
+  // module switched off since the till loaded its menu. All three mean the menu on screen is stale.
+  optionOff:  'option_not_on_menu',
+  optionCount:'option_count',
+  optionsOff: 'order_options_off',
   rank:       'rank_required',     // the login's POS rank is too low for this write
 }
 // Postgres prefixes a RAISE message with the code word the function chose; the reader wants the
@@ -61,7 +70,7 @@ const HINT = {
 const stripCodeWord = (msg, word) => String(msg || '').replace(new RegExp(`^(pos_orders|pos_order_items|${word}):\\s*`), '')
 
 export default function PosOrders() {
-  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature, customizationEnabled } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   // Rendered in BOTH returns (this file has two — S578). One pending ask at a time, drawn by
   // whichever tree is live: the admin clear-all tool asks from the floor, and the discard-payments
@@ -168,6 +177,11 @@ export default function PosOrders() {
   const [menuLoaded,  setMenuLoaded]  = useState(false)
   // Same S754 rule as floorLoadError: a failed menu read is not "No POS-enabled items".
   const [menuLoadError, setMenuLoadError] = useState('')
+  // Crest Customization (S758): the option groups, options and dish attachments, read with the menu
+  // and cached with it for offline. Empty for a client without the module.
+  const [optionCatalog, setOptionCatalog] = useState({ groups: [], options: [], attachments: [] })
+  // { recipe, dishGroups, replaceIdx?, initialIds? } while the choice window is open.
+  const [optionPicker, setOptionPicker] = useState(null)
   // The cart as last loaded or saved — { recipe_id|name: 'qty|notes' } — so ← can tell an unsaved
   // edit from an untouched order (S754). A ref: only the back handler reads it.
   const savedItemsRef = useRef(new Map())
@@ -745,6 +759,21 @@ export default function PosOrders() {
     return () => clearTimeout(t)
   }, [previewHtml, billingTab]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Crest Customization lookups, rebuilt only when the catalog changes (not per keystroke).
+  const optionMaps = useMemo(() => ({
+    optionsById: Object.fromEntries(optionCatalog.options.map(o => [o.id, o])),
+    groupsById:  Object.fromEntries(optionCatalog.groups.map(g => [g.id, g])),
+  }), [optionCatalog])
+  const dishGroupsByRecipe = useMemo(() => {
+    const out = {}
+    if (!customizationEnabled) return out
+    for (const rid of new Set(optionCatalog.attachments.map(a => a.recipe_id))) {
+      const dg = groupsForDish(rid, optionCatalog)
+      if (dg.length) out[rid] = dg
+    }
+    return out
+  }, [optionCatalog, customizationEnabled])
+
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
   /* ── data loaders ── */
@@ -1002,6 +1031,13 @@ export default function PosOrders() {
         sent_to_kot: false,
         sent_qty:    0,
         notes:       it.note || '',
+        // A guest's customized dish (S758 stage 6) keeps its choices; the server re-prices it from
+        // the option ids on save, so the snapshot's price is display only.
+        ...(it.selection_key ? {
+          selection_key: it.selection_key, option_ids: it.option_ids || String(it.selection_key).split('+'),
+          base_unit_price: it.base_unit_price, options_delta: it.options_delta,
+          option_summary: it.option_summary, options: it.options,
+        } : {}),
       }]
     })
   }
@@ -1213,6 +1249,7 @@ export default function PosOrders() {
         if (syncErr) {
           const reason = {
             [HINT.stale]: 'stale', [HINT.notOpen]: 'closed', [HINT.locked]: 'closed', [HINT.offMenu]: 'off_menu',
+            [HINT.optionOff]: 'off_menu', [HINT.optionCount]: 'off_menu', [HINT.optionsOff]: 'off_menu',
           }[syncErr.hint]
           if (reason) { toConflict(reason); continue }
           throw syncErr
@@ -1361,12 +1398,15 @@ export default function PosOrders() {
       if (cached) {
         setMenu(cached.menu || [])
         setManualSuggestions(cached.manualSuggestions || {})
+        // Offline customized orders are allowed (owner decision): the till uses its saved copy of the
+        // options, and the server prices them when the order syncs.
+        if (cached.optionCatalog) setOptionCatalog(cached.optionCatalog)
         setMenuLoaded(true)
       }
       return
     }
 
-    const [{ data, error: menuErr }, { data: suggData, error: suggErr }] = await Promise.all([
+    const [{ data, error: menuErr }, { data: suggData, error: suggErr }, catalog] = await Promise.all([
       scopedFrom('recipes', 'id, name, category, recipe_code, selling_price, vat_rate, me_class')
         .eq('is_active', true)
         .eq('pos_enabled', true)
@@ -1377,6 +1417,9 @@ export default function PosOrders() {
         .or('category.is.null,category.neq.Sub-Recipe')
         .order('name'),
       scopedFrom('recipe_suggestions', 'recipe_id, suggest_recipe_id'),
+      customizationEnabled
+        ? loadOptionCatalog(scopedFrom)
+        : Promise.resolve({ error: null, groups: [], options: [], attachments: [] }),
     ])
     // S754: a dropped error here rendered "No POS-enabled items" over a menu the client has, AND
     // cached that empty menu as the offline fallback. Keep last-good, leave menuLoaded false so a
@@ -1386,7 +1429,16 @@ export default function PosOrders() {
       setMenuLoadError(menuErr.message || 'the menu could not be read')
       return
     }
+    // A failed options read is a failed menu read: without it a dish that must have a size could be
+    // added plain. Same keep-last-good rule.
+    if (catalog.error) {
+      console.error('option catalog read failed, keeping the last menu:', catalog.error)
+      setMenuLoadError(`the dish options could not be read (${catalog.error})`)
+      return
+    }
     setMenuLoadError('')
+    const nextCatalog = { groups: catalog.groups, options: catalog.options, attachments: catalog.attachments }
+    setOptionCatalog(nextCatalog)
     setMenu(data || [])
     let suggMap = {}
     if (suggErr) console.error('recipe_suggestions read failed — pairings fall back to the other signals:', suggErr)
@@ -1399,7 +1451,7 @@ export default function PosOrders() {
     }
     setMenuLoaded(true)
     // Only a complete read is worth keeping as the offline copy.
-    if (!suggErr) cachePosMenu(clientId, data || [], suggMap)
+    if (!suggErr) cachePosMenu(clientId, data || [], suggMap, nextCatalog)
   }
 
   // table_id → the booking that matters on that tile NOW, plus the bookings holding no table at
@@ -1629,7 +1681,14 @@ export default function PosOrders() {
 
   /* ── order item helpers ── */
 
+
   function addItem(recipe) {
+    // A dish with option groups always opens the choice window (owner decision, S758).
+    const dishGroups = dishGroupsByRecipe[recipe.id]
+    if (dishGroups) {
+      setOptionPicker({ recipe, dishGroups })
+      return
+    }
     const vat = vatReg ? vatOf(recipe) : 0
     setOrderItems(prev => {
       // A plain tap is the un-customized line of this recipe — it never merges into a customized one.
@@ -1659,6 +1718,43 @@ export default function PosOrders() {
     })
     setMsg('')
     computeSuggestions(recipe)
+  }
+
+  // A dish with its choices, from the choice window. The same choices tapped again add to the same
+  // line; different choices are a new line. `replaceIdx` is the Change button on an unsent line:
+  // that line is replaced (or folded into an identical one already on the order).
+  function addCustomLine(recipe, optionIds, replaceIdx = null) {
+    const vat = vatReg ? vatOf(recipe) : 0
+    const dishGroups = dishGroupsByRecipe[recipe.id] || []
+    const attachByGroup = Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment]))
+    const desc = describeSelection(optionIds, { ...optionMaps, attachByGroup })
+    const selection_key = selectionKeyOf(optionIds)
+    const base = parseFloat(recipe.selling_price) || 0
+    const custom = selection_key ? {
+      selection_key, option_ids: [...optionIds].map(String).sort(),
+      base_unit_price: base, options_delta: desc.delta, option_summary: desc.summary, options: desc.options,
+    } : {}
+    const key = lineKeyOf({ recipe_id: recipe.id, selection_key })
+    setOrderItems(prev => {
+      const replaced = replaceIdx != null ? prev[replaceIdx] : null
+      const rest = replaced ? prev.filter((_, n) => n !== replaceIdx) : prev
+      const addQty = replaced ? replaced.qty : 1
+      const idx = rest.findIndex(i => lineKeyOf(i) === key)
+      if (idx >= 0) {
+        return rest.map((item, n) => n === idx
+          ? { ...item, qty: item.qty + addQty, sent_to_kot: false, sent_qty: item.sent_to_kot ? item.qty : (item.sent_qty || 0) }
+          : item)
+      }
+      const line = {
+        recipe_id: recipe.id, name: recipe.name, category: recipe.category || 'Other',
+        qty: addQty, unit_price: base + desc.delta, vat_rate: vat,
+        sent_to_kot: false, sent_qty: 0, notes: replaced?.notes || '', ...custom,
+      }
+      if (replaced) { const out = [...rest]; out.splice(Math.min(replaceIdx, out.length), 0, line); return out }
+      return [...rest, line]
+    })
+    setMsg('')
+    if (replaceIdx == null) computeSuggestions(recipe)
   }
 
   // Fallback for when there is nothing data-driven to rank on — a POS-only client (no IMS, so no
@@ -1747,6 +1843,12 @@ export default function PosOrders() {
   // are the only honest answer — reading `sent_to_kot` alone reports 0 the moment someone nudges
   // the qty, which is exactly the edit this needs to catch.
   const kitchenQtyOf = item => item?.sent_to_kot ? item.qty : (item?.sent_qty || 0)
+
+  // What a station needs to know about a line's choices (S758): the kitchen's own name when the
+  // owner set one, and whether it takes something off. Prices never go to the kitchen.
+  const ticketOptions = item => (item.options || []).map(o => ({
+    kitchen: o.kitchen_name || o.option_name, is_removal: !!o.is_removal, group_kind: o.group_kind || '',
+  }))
 
   // Cutting a line below what the kitchen already has means food that exists is leaving the bill.
   // That is the classic till-shrinkage route (ring it, fire it, serve it, pull the line before
@@ -1987,6 +2089,13 @@ export default function PosOrders() {
     }
     if (err?.hint === HINT.notOpen || err?.hint === HINT.locked) {
       showClosedElsewhere()
+      return { ok: false, handled: true, error: err }
+    }
+    if (err?.hint === HINT.optionOff || err?.hint === HINT.optionCount || err?.hint === HINT.optionsOff) {
+      // Nothing was saved. The options on screen are what is out of date (an option hidden, a group
+      // re-ruled, the module switched off), so the menu and its options are re-read.
+      setMsg(`error:Not saved — ${errorText(err, 'staff')} The menu has been reloaded.`)
+      loadMenu({ force: true })
       return { ok: false, handled: true, error: err }
     }
     if (err?.hint === HINT.offMenu) {
@@ -2242,6 +2351,8 @@ export default function PosOrders() {
       station,
       items: items.map(i => ({
         recipe_id: i.recipe_id, name: i.name, category: i.category,
+        // A customized line (S758) carries its choices, so the Kitchen Display shows what to make.
+        ...(i.selection_key ? { selection_key: i.selection_key, options: ticketOptions(i) } : {}),
         // The printed KOT always carried the note ("no onion — allergy"); the logged ticket did
         // not, so the Kitchen Display never showed it (S754). items is jsonb — no migration. The
         // offline queue stores this same payload, so a replayed send carries it too.
@@ -2304,7 +2415,7 @@ export default function PosOrders() {
     let allPrinted = true
     for (const row of rows) {
       // Logged quantities are already the delta that was fired, so each prints as a plain ×qty.
-      const lines = (row.items || []).map(i => ({ name: i.name, qty: i.qty, notes: i.notes || '', sent_qty: 0 }))
+      const lines = (row.items || []).map(i => ({ name: i.name, qty: i.qty, notes: i.notes || '', sent_qty: 0, options: i.options || null }))
       if (!printTicket(row.station, lines, row.order_no ?? orderNo, { reprint: true })) allPrinted = false
     }
     setMsg(allPrinted
@@ -2548,12 +2659,33 @@ export default function PosOrders() {
     // 'pos_comp' rows stay at full price: comps are already zero-revenue (excluded by source),
     // and Variance/consumption reports only ever read qty_sold, never unit_price, from them.
     const saleDiscRatio = closeType === 'paid' ? discRatio : 0
+
+    // Crest Customization (S758): a customized line's stock lines come from the snapshot the SERVER
+    // saved (pos_order_item_options), never from the cart — the cart's choices were built by the
+    // till and carry no stock lines, and the server's are the ones frozen onto the bill. Keyed by
+    // line; a comped split carries the same snapshot, so the first row of a line is enough.
+    const deltasByLine = {}
+    if (soldItems.some(i => i.selection_key)) {
+      const { data: snapRows, error: snapErr } = await scopedFrom('pos_order_items', 'recipe_id, selection_key, pos_order_item_options(ingredient_deltas)')
+        .eq('order_id', orderId).neq('selection_key', '')
+      if (snapErr) {
+        warnWrite('Could not read the choices on this bill, so it was not posted to Inventory. Backfill it from Periods once the connection is back.', snapErr)
+        return false
+      }
+      for (const r of snapRows || []) {
+        const k = lineKeyOf(r)
+        if (!(k in deltasByLine)) deltasByLine[k] = lineIngredientDeltas(r.pos_order_item_options)
+      }
+    }
+
     const rows = []
-    qtySplit.forEach(({ recipe_id, saleQty, compQty, unit_price, vat_rate }) => {
+    qtySplit.forEach(line => {
+      const { recipe_id, saleQty, compQty, unit_price, vat_rate } = line
+      const ingredient_deltas = line.selection_key ? (deltasByLine[lineKeyOf(line)] ?? null) : null
       // pos_order_id mirrors stock_movements.ref_id: without it, "has this bill's revenue already
       // posted?" is unanswerable, and a bad post can't be undone by order (S573).
-      if (saleQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: saleQty, source: 'pos', unit_price: unit_price * (1 - saleDiscRatio), vat_rate, pos_order_id: orderId })
-      if (compQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: compQty, source: 'pos_comp', unit_price, vat_rate, pos_order_id: orderId })
+      if (saleQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: saleQty, source: 'pos', unit_price: unit_price * (1 - saleDiscRatio), vat_rate, pos_order_id: orderId, ...(ingredient_deltas ? { ingredient_deltas } : {}) })
+      if (compQty > 0) rows.push({ period_id: open.id, recipe_id, bs_day: today.day, qty_sold: compQty, source: 'pos_comp', unit_price, vat_rate, pos_order_id: orderId, ...(ingredient_deltas ? { ingredient_deltas } : {}) })
     })
     if (rows.length > 0) {
       // S754: this dropped its error and fell through to `return true`, so closeOrder stamped
@@ -2573,16 +2705,22 @@ export default function PosOrders() {
     try {
       const recipeIds = [...new Set(soldItems.map(i => i.recipe_id))]
       if (recipeIds.length > 0) {
-        const breakdown = await explodeRecipeIngredients(supabase, recipeIds)
+        const [breakdown, explosion] = await Promise.all([
+          explodeRecipeIngredients(supabase, recipeIds),
+          loadDeltaExplosion(supabase, Object.values(deltasByLine)),
+        ])
         const aggBySource = { pos_sale: {}, pos_comp: {} }
-        qtySplit.forEach(({ recipe_id, saleQty, compQty }) => {
-          ;(breakdown[recipe_id] || []).forEach(({ item_id, qty }) => {
+        qtySplit.forEach(line => {
+          const { recipe_id, saleQty, compQty } = line
+          // Base recipe ± the chosen options' stock lines, per plate (owner decision, S758).
+          const extra = line.selection_key ? deltaItems(deltasByLine[lineKeyOf(line)], explosion) : []
+          ;[...(breakdown[recipe_id] || []), ...extra].forEach(({ item_id, qty }) => {
             if (saleQty > 0) aggBySource.pos_sale[item_id] = (aggBySource.pos_sale[item_id] || 0) + qty * saleQty
             if (compQty > 0) aggBySource.pos_comp[item_id] = (aggBySource.pos_comp[item_id] || 0) + qty * compQty
           })
         })
         const movementRows = Object.entries(aggBySource).flatMap(([source, agg]) =>
-          Object.entries(agg).map(([item_id, qty]) => ({
+          Object.entries(agg).filter(([, qty]) => Math.abs(qty) > 1e-9).map(([item_id, qty]) => ({
             item_id, period_id: open.id, bs_day: today.day, qty: -qty, source, ref_id: orderId,
           }))
         )
@@ -3494,7 +3632,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           {pendingGuestOrders[activeTable.id].map(req => (
             <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 13 }}>
-                🔔 Guest ordered: {(req.items || []).map(it => `${it.qty}× ${it.name}`).join(', ')}
+                🔔 Guest ordered: {(req.items || []).map(it => `${it.qty}× ${it.name}${it.option_summary ? ` (${it.option_summary})` : ''}`).join(', ')}
                 {req.guest_notes && <span style={{ color: 'var(--theme-text3)' }}> — "{req.guest_notes}"</span>}
               </span>
               <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
@@ -3571,6 +3709,9 @@ The tables were left occupied rather than freed with their orders still open.`)
                   const vat   = vatReg ? vatOf(r) : 0
                   const price = Math.round((parseFloat(r.selling_price) || 0) * (1 + vat))
                   const inOrd = orderItems.find(i => i.recipe_id === r.id)
+                  // Every line of this dish, customized ones included (S758) — one tile, one count.
+                  const inOrdQty = orderItems.reduce((n, i) => n + (i.recipe_id === r.id ? i.qty : 0), 0)
+                  const hasOptions = !!dishGroupsByRecipe[r.id]
                   const kotTimer = inOrd?.sent_to_kot ? kotTimerLabel(ticketForRecipe(r.id), kotNow) : null
                   return (
                     <button key={r.id} onClick={() => addItem(r)} style={{
@@ -3588,7 +3729,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                           position: 'absolute', top: 6, right: 8,
                           background: 'var(--theme-accent)', color: 'var(--theme-accent-text)',
                           borderRadius: 'var(--radius-full)', fontSize: 11, fontWeight: 700, padding: '1px 7px',
-                        }}>{inOrd.qty}</span>
+                        }}>{inOrdQty}</span>
                       )}
                       <span style={{
                         fontWeight: 600, fontSize: 13, color: 'var(--theme-text1)',
@@ -3597,6 +3738,9 @@ The tables were left occupied rather than freed with their orders still open.`)
                       <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
                         NPR {price}
                       </span>
+                      {hasOptions && (
+                        <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>Has choices ›</span>
+                      )}
                       {kotTimer && (
                         <span style={{ fontSize: 10, fontWeight: 600, color: kotTimer.color }}>
                           {kotTimer.text}
@@ -3637,6 +3781,19 @@ The tables were left occupied rather than freed with their orders still open.`)
                       <span style={{ fontSize: 13, color: 'var(--theme-text1)', lineHeight: 1.3 }}>
                         {item.name}
                       </span>
+                      {item.selection_key && !item.sent_to_kot && !(item.sent_qty > 0) && dishGroupsByRecipe[item.recipe_id] && (
+                        <Tip text="Change this dish's choices. Once it has gone to the kitchen it can't be changed — remove it and add it again.">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const recipe = menu.find(m => m.id === item.recipe_id)
+                              if (!recipe) { setMsg('error:This dish is not on the till menu any more.'); return }
+                              setOptionPicker({ recipe, dishGroups: dishGroupsByRecipe[item.recipe_id], replaceIdx: idx, initialIds: item.option_ids || String(item.selection_key).split('+') })
+                            }}
+                            style={{ fontSize: 10, padding: '1px 6px', border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: 'pointer', fontFamily: 'inherit' }}
+                          >Change</button>
+                        </Tip>
+                      )}
                       {item.sent_to_kot && (
                         <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
                           <span style={{
@@ -3668,6 +3825,11 @@ The tables were left occupied rather than freed with their orders still open.`)
                         </Tip>
                       )}
                     </div>
+                    {item.option_summary && (
+                      <div style={{ fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.35, marginTop: 2 }}>
+                        {item.option_summary}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
                     <button onClick={() => setQty(idx, item.qty - 1)} style={btnSm} aria-label={`One fewer ${item.name}`}>−</button>
@@ -4381,6 +4543,24 @@ The tables were left occupied rather than freed with their orders still open.`)
           </div>
           </div>
         </Modal>
+      )}
+
+      {/* Crest Customization choice window (S758). In the ORDER return — addItem and the cart's Change
+          button both live on this screen (the S578 two-returns rule). */}
+      {optionPicker && (
+        <OptionPickerModal
+          recipe={optionPicker.recipe}
+          dishGroups={optionPicker.dishGroups}
+          catalog={optionMaps}
+          vatRate={vatReg ? vatOf(optionPicker.recipe) : 0}
+          initialIds={optionPicker.initialIds}
+          confirmLabel={optionPicker.replaceIdx != null ? 'Update dish' : 'Add to order'}
+          onClose={() => setOptionPicker(null)}
+          onConfirm={ids => {
+            addCustomLine(optionPicker.recipe, ids, optionPicker.replaceIdx ?? null)
+            setOptionPicker(null)
+          }}
+        />
       )}
 
       {/* Pulling an already-fired line. Not a ConfirmModal: this asks for an input, and the input

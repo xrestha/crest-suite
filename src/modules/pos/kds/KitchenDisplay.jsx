@@ -24,6 +24,17 @@ const POLL_MS = 4000
 function itemNote(i) {
   return typeof i?.notes === 'string' ? i.notes.trim() : ''
 }
+// A line's choices as the kitchen reads them (S758): "+ Extra cheese", "NO onion" in red.
+function ItemOptions({ options }) {
+  if (!options?.length) return null
+  return (
+    <div style={{ paddingLeft: 16, fontSize: 15, lineHeight: 1.35 }}>
+      {options.map((o, n) => o.is_removal
+        ? <div key={n} style={{ color: 'var(--theme-red-text)', fontWeight: 700 }}>NO {String(o.kitchen || '').replace(/^no\s+/i, '')}</div>
+        : <div key={n} style={{ color: 'var(--theme-text1)' }}>+ {o.kitchen}</div>)}
+    </div>
+  )
+}
 // S754 (owner decision): a pulled or reduced line shows on the ticket that sent it, so the kitchen
 // stops cooking it. pos_kot_removals (written inside save_pos_order_items, migration 20260819130000)
 // carries order, recipe, name, quantity, reason and time — but NOT the station or the ticket, so the
@@ -42,7 +53,11 @@ function attachRemovals(tickets, removals) {
   const onBoard = new Set(tickets.map(t => t.order_id))
   const byTicket = new Map()   // ticket id -> { [lineIdx]: [{ qty, removed_at, reason }] }
   const remaining = new Map()  // `${ticketId}:${lineIdx}` -> qty not yet taken by a removal
-  const sameLine = (r, i) => (r.recipe_id && i.recipe_id) ? r.recipe_id === i.recipe_id : (i.name || '') === (r.item_name || '')
+  // A customized line (S758) is its recipe AND its choices: pulling "Momo, extra cheese" must not strike
+  // the plain Momo on the same ticket. Rows written before either side carried a selection compare as ''.
+  const sameLine = (r, i) => (r.recipe_id && i.recipe_id)
+    ? r.recipe_id === i.recipe_id && (r.selection_key || '') === (i.selection_key || '')
+    : (i.name || '') === (r.item_name || '')
   const ordered = (removals || [])
     .filter(r => onBoard.has(r.order_id) && Number(r.qty_removed) > 0)
     .sort((a, b) => (new Date(a.removed_at) - new Date(b.removed_at)) || String(a.id).localeCompare(String(b.id)))
@@ -180,7 +195,7 @@ export default function KitchenDisplay() {
       // S754: today's pulled/reduced lines, over the same service-day window as the tickets. Read by
       // window rather than `.in(order_id, …)` — the board's order list would ride in the URL — and
       // narrowed to the orders on the board in attachRemovals. Paged: one row per pulled line.
-      fetchAllRows(() => scopedFrom('pos_kot_removals', 'id, order_id, recipe_id, item_name, qty_removed, reason, removed_at')
+      fetchAllRows(() => scopedFrom('pos_kot_removals', 'id, order_id, recipe_id, item_name, qty_removed, reason, removed_at, selection_key')
         .gte('removed_at', serviceDayStart)
         .order('removed_at', { ascending: true }).order('id')),
     ])
@@ -478,6 +493,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-red-text)', paddingLeft: 16 }}>
                   {nowQty === 0 ? 'Cancelled' : `${removedQty} cancelled`} {nepalTime(last.removed_at)} · {reasons || 'no reason given'}
                 </div>
+                {nowQty > 0 && <ItemOptions options={i.options} />}
                 {nowQty > 0 && note && <div style={{ fontSize: 16, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
               </div>
             )
@@ -485,6 +501,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
           return (
             <div key={idx} style={{ fontSize: 16, color: 'var(--theme-text2)' }}>
               {i.qty} × {i.name}
+              <ItemOptions options={i.options} />
               {note && <div style={{ fontSize: 16, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
             </div>
           )

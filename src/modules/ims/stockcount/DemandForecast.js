@@ -16,6 +16,7 @@ import { runForecast } from '../../../utils/demandForecastData'
 import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
 import { buildStockRows } from './stockReportCalc'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { printWithTitle } from '../../../utils/printTitle'
 import { errorText } from '../../../shared/errorText'
 import SuiteGate from '../../../components/SuiteGate'
@@ -62,15 +63,20 @@ async function loadOnHand(scopedFrom, items) {
     byItems('vendor_returns', 'item_id, qty', true),
     byItems('wastages', 'item_id, qty'),
     byItems('staff_meals', 'item_id, qty'),
-    // bs_day + source feed the POS-supersedes-manual rule inside buildStockRows.
-    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', period.id).order('id')),
+    // bs_day + source feed the POS-supersedes-manual rule inside buildStockRows; ingredient_deltas
+    // because a customized plate also consumes its options' stock lines (S758).
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
   ])
   const failed = firstError(results)
   if (failed) throw failed
   const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns }, { data: wastages }, { data: staffMeals }, { data: sales }] = results
   const soldIds = [...new Set((sales || []).map(s => s.recipe_id).filter(Boolean))]
-  const breakdown = soldIds.length > 0 ? await explodeRecipeIngredients(supabase, soldIds) : {}
-  const rows = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown })
+  // Both walks throw on a failed read, which the caller already turns into its own notice (S758).
+  const [breakdown, explosion] = await Promise.all([
+    soldIds.length > 0 ? explodeRecipeIngredients(supabase, soldIds) : {},
+    loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+  ])
+  const rows = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion })
   return {
     onHandById: Object.fromEntries(rows.map(r => [r.item.id, r.onHand])),
     period,

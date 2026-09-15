@@ -9,6 +9,7 @@ import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -130,7 +131,8 @@ export default function ReorderReport() {
       // bs_day + source feed the shared POS-supersedes-manual rule in buildUsageMap (S696) — this
       // was the last page summing sales_entries raw, so a day sold in both POS and manual entry
       // consumed its ingredients twice and a credit note put stock back on the shelf.
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
+      // ingredient_deltas: a customized plate also consumes its options' stock lines (S758).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
       // One row per item per client, so it truncates at exactly the volume par levels start being
       // worth having — and a missing par reads as "no par set", which means the item can never
       // flag for reorder on the page whose whole job is flagging it (S717).
@@ -169,9 +171,14 @@ export default function ReorderReport() {
     const soldRecipeIds = [...new Set((sales || []).map(s => s.recipe_id).filter(Boolean))]
     // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
     // item's current stock read as opening + purchases, so nothing ever needed reordering.
+    // The option stock-line walk (S758) throws the same way and fails the page the same way.
     let breakdown = {}
+    let explosion = null
     try {
-      breakdown = soldRecipeIds.length > 0 ? await explodeRecipeIngredients(supabase, soldRecipeIds) : {}
+      ;[breakdown, explosion] = await Promise.all([
+        soldRecipeIds.length > 0 ? explodeRecipeIngredients(supabase, soldRecipeIds) : {},
+        loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+      ])
     } catch (err) {
       setLoadError(err); setRows([]); return
     }
@@ -180,7 +187,7 @@ export default function ReorderReport() {
     // Report, both dashboards, the Monthly Owner Report and Requisitions use (S696) — this page
     // used to keep its own copy, which deducted no staff meals, summed sales raw and flagged an
     // item sitting exactly at par. See stockReportCalc.js for the five rules.
-    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars }).map(r => {
+    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion }).map(r => {
       const hasMovements = r.item.id in movementMap
       // Book Stock is the same theoretical figure with the ledger's own depletions in place of
       // sales × recipe: opening + net purchases − wastage − staff meals + Σ movements (negative).

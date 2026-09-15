@@ -117,8 +117,11 @@ export async function dequeue(id) {
 
 // ── POS: menu / tables / settings caches (order-taking offline mode) ───────
 
-export async function cachePosMenu(clientId, menu, manualSuggestions) {
-  await idbPut('pos_menu_cache', { client_id: clientId, menu, manualSuggestions, updated_at: Date.now() })
+// optionCatalog (S758, Crest Customization): { groups, options, attachments } so a customizable dish
+// can still be ordered offline. Absent on a copy cached before it existed — the till then treats
+// every dish as plain until it is next online, which the server accepts.
+export async function cachePosMenu(clientId, menu, manualSuggestions, optionCatalog = null) {
+  await idbPut('pos_menu_cache', { client_id: clientId, menu, manualSuggestions, optionCatalog, updated_at: Date.now() })
 }
 export async function getCachedPosMenu(clientId) {
   return await idbGet('pos_menu_cache', clientId)

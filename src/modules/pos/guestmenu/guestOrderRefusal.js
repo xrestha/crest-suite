@@ -54,6 +54,18 @@ export function guestOrderRefusal(err, outletName, { online = true } = {}) {
         refreshMenu: true,
       }
     }
+    // S758: a dish's choices (size, extras) are no longer offered, or a dish that needs a choice
+    // arrived without one — usually a menu opened before the owner changed its options.
+    case 'unavailable_options': {
+      const names = unavailableNames(err)
+      const subject = names.length ? joinNames(names) : 'a dish in your order'
+      const plural = names.length > 1
+      return {
+        text: `The choices for ${subject} have changed, so your order was not sent — open ${plural ? 'them' : 'it'} from your order, choose again and send.`,
+        removedText: `The choices for ${subject} have changed, so your order was not sent. ${plural ? 'They have' : 'It has'} been taken off your order — add ${plural ? 'them' : 'it'} again with the new choices and send.`,
+        refreshMenu: true,
+      }
+    }
     case 'not_accepting':
       return { text: `${who} isn't taking orders from this menu right now, so your order was not sent. Please ask a staff member to take it.`, refreshMenu: true }
     case 'inactive':

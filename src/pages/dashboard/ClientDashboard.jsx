@@ -29,6 +29,7 @@ import { nepalBs } from '../../shared/nepalTime'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
+import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
@@ -437,7 +438,8 @@ export default function ClientDashboard() {
       // matching every other consumption-facing report (ReorderReport, Variance, ShrinkageReport
       // etc. per PosOrders.jsx's own source-taxonomy comment) — a comped dish still used real
       // stock even though it collected no revenue.
-      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source').eq('period_id', period.id).order('id')) : { data: [] },
+      // ingredient_deltas: a customized plate also consumes its options' stock lines (S758).
+      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source, ingredient_deltas').eq('period_id', period.id).order('id')) : { data: [] },
       // Both paged (S734): one row per item per period, so they cross the cap at the same item
       // count the master-data reads above do. An opening or closing row past the cut reads as
       // ZERO on that item — which flows straight into the Variance top-5 (actual usage comes out
@@ -513,6 +515,12 @@ export default function ClientDashboard() {
       { data: payrollRuns, error: payrollRunsErr }
     ] = dependentResults
 
+    // What customized plates used beyond their recipes (S758). Throws on a failed read, like the
+    // recipe walk above, and is folded into hadRealError the same way — null = not computed.
+    const deltaExplosion = await loadDeltaExplosion(supabase, (salesData || []).map(s => s.ingredient_deltas))
+      .catch(err => { console.error('Dashboard: option stock-line walk failed', err); return null })
+    if (loadIdRef.current !== myId) return // superseded during the option stock-line read
+
     // The run's payslips — gross + overtime + employer SSF, the definition Overheads, ConsolidatedPnl and
     // get_group_summary share. One row per employee per run; paged and chunked all the same. A
     // failed read is carried as `labourReadFailed` and must NOT fall through to the typed Labor
@@ -530,7 +538,7 @@ export default function ClientDashboard() {
 
     const hadRealError = (periodErr && periodErr.code !== 'PGRST116')
       || independentResults.some(r => r.error) || dependentResults.some(r => r.error)
-      || rawBreakdown === null || labourReadFailed
+      || rawBreakdown === null || deltaExplosion === null || labourReadFailed
     setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
 
     // purchaseTotal = purchases NET of bill discounts − returns. `discount_amount` is a BILL-level
@@ -569,7 +577,8 @@ export default function ClientDashboard() {
     // page applies (S696) — POS supersedes a manual row for the same recipe and day, a credit note
     // never puts stock back. This page used to sum every row raw, so a day sold in both POS and
     // manual entry consumed its ingredients twice on the Variance widget and the Reorder panel.
-    const theoreticalMap = buildUsageMap(salesData, ingredientBreakdown)
+    // deltaExplosion adds each customized plate's option stock lines (S758).
+    const theoreticalMap = buildUsageMap(salesData, ingredientBreakdown, deltaExplosion)
 
     // itemRateMap built from allItems (unfiltered by is_active) — an item deactivated mid-period
     // still has real wastage/recipe-cost history for that period; it shouldn't zero-cost to 0.
@@ -800,7 +809,7 @@ export default function ClientDashboard() {
     if (canReorder) {
       const reorderRows = buildStockRows({
         items, opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
-        sales: salesData, breakdown: ingredientBreakdown, pars: parLevels,
+        sales: salesData, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
       })
         .filter(r => r.needsReorder)
         .map(r => ({

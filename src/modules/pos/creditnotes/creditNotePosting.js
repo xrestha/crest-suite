@@ -1,5 +1,6 @@
 import { fetchAllRows, fetchAllRowsChunked, runChunkedByIds } from '../../../shared/fetchAllRows'
 import { daysInBsMonth, adToBs, bsDayBoundaryIso } from '../../../utils/bsCalendar'
+import { lineIngredientDeltas } from '../../../utils/orderLineIngredients'
 
 // A credit note's revenue reversal in Inventory (S747).
 //
@@ -38,6 +39,9 @@ export function creditNoteReversalRows({ order, items, periodId, bsDay, creditNo
     unit_price: (Number(i.unit_price) || 0) * discRatio,
     vat_rate: i.vat_rate ?? 0,
     pos_credit_note_id: creditNoteId,
+    // A customized line's choices ride along (S758) so a reader rebuilding usage from sales treats
+    // the reversal as the same plate the sale was.
+    ...(lineIngredientDeltas(i.pos_order_item_options || i.options) ? { ingredient_deltas: lineIngredientDeltas(i.pos_order_item_options || i.options) } : {}),
   }))
 }
 
@@ -135,7 +139,7 @@ export async function backfillCreditNotesToIms({ supabase, scopedFrom, scopedUpd
   if (list.length === 0) return { posted: 0, skipped }
 
   const { data: orders, error: oErr } = await fetchAllRowsChunked(list.map(n => n.order_id),
-    chunk => scopedFrom('pos_orders', 'id, close_type, discount_amount, pos_order_items(recipe_id, qty, unit_price, vat_rate, comped)')
+    chunk => scopedFrom('pos_orders', 'id, close_type, discount_amount, pos_order_items(recipe_id, qty, unit_price, vat_rate, comped, pos_order_item_options(ingredient_deltas))')
       .in('id', chunk).order('id'))
   if (oErr) return { posted: 0, skipped, error: `Could not read the credited bills: ${oErr.message}` }
   const orderById = new Map((orders || []).map(o => [o.id, o]))

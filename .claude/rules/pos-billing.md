@@ -190,8 +190,20 @@ floor-view check.
 - **Comps are by line.** `p_full_recipe_ids` now matches only plain lines; a customized line goes in
   `p_full_lines` / carries `selection_key` in `p_partial`. The frontend sends `p_full_lines` only
   when it has one, so a plain comp keeps the old call shape.
-- **Order of deploys matters for reads**: `OPEN_ORDER_SELECT` gains `selection_key` and the
-  snapshot embed only in stage 5, after `20260919130000` is live.
+- **`OPEN_ORDER_SELECT` reads the selection and the `pos_order_item_options` embed** (since stage 5,
+  after `20260919130000` went live); `cartLineFromStored` turns the embed into `options` and the key
+  into `option_ids`, so a reopened line has the shape the choice window builds.
+- **A dish with option groups always opens the choice window** (owner decision), and a failed option
+  catalog read is a failed menu read — without it a dish that must have a size could go on plain,
+  which `save_pos_order_items` accepts because it validates only rows that send options.
+- **A sent line's choices are never edited in place** (owner decision): remove it with a pull reason
+  and add it again, so the kitchen gets a fresh ticket. Change exists only on an unsent line.
+- **Stock at close reads the SERVER snapshot, never the cart.** The cart's choices are built by the
+  till and carry no stock lines; `writeSalesEntries` reads `pos_order_item_options.ingredient_deltas`
+  per line key and stops (unposted, chased by the backfill) on a failed read.
+  `src/utils/orderLineIngredients.js` is the only place those lines become raw items.
+- **The guest menu calls `get_guest_menu_options` beside `get_guest_menu`**, and a `PGRST202` (the
+  function not deployed yet) reads as "no choices", not a warning to every guest.
 
 ## Closed in S575 (phase 8), for the record
 

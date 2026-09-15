@@ -38,6 +38,7 @@
 // so counting it as "out of stock" inflated that KPI by every dormant item in the master list.
 
 import { selectDepletingSales } from '../sales/salesDepletion'
+import { deltaItems } from '../../../utils/orderLineIngredients'
 
 const num = v => parseFloat(v) || 0
 
@@ -47,10 +48,18 @@ function sumBy(rows, key, valueKey) {
   return out
 }
 
-/** Sales × exploded recipe → per-item consumption for the period. */
-export function buildUsageMap(sales, breakdown) {
+/**
+ * Sales × exploded recipe → per-item consumption for the period.
+ *
+ * `explosion` (S758, Crest Customization) is loadDeltaExplosion()'s result for the rows'
+ * `ingredient_deltas`: a customized sale also consumes (or spares) its choices' stock lines, per
+ * plate. Omitted, or a row with no deltas, and this is exactly the recipe-only figure it always was.
+ * Callers that select sales rows for this must select `ingredient_deltas` too.
+ */
+export function buildUsageMap(sales, breakdown, explosion = null) {
+  const depleting = selectDepletingSales(sales || [])
   const soldMap = {}
-  selectDepletingSales(sales || []).forEach(s => {
+  depleting.forEach(s => {
     soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + num(s.qty_sold)
   })
   const usageMap = {}
@@ -58,6 +67,14 @@ export function buildUsageMap(sales, breakdown) {
     const sold = soldMap[recipeId] || 0
     if (sold <= 0) return
     rows.forEach(({ item_id, qty }) => { usageMap[item_id] = (usageMap[item_id] || 0) + sold * qty })
+  })
+  depleting.forEach(s => {
+    if (!s.ingredient_deltas) return
+    const n = num(s.qty_sold)
+    if (!n) return
+    deltaItems(s.ingredient_deltas, explosion).forEach(({ item_id, qty }) => {
+      usageMap[item_id] = (usageMap[item_id] || 0) + n * qty
+    })
   })
   return usageMap
 }
@@ -69,7 +86,7 @@ export function buildUsageMap(sales, breakdown) {
  * `pars` may be omitted by a caller that only wants on-hand; every reorder field then reads as
  * "no par". Items are taken as given: a caller that must exclude sub-recipes filters first.
  */
-export function buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars }) {
+export function buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion = null }) {
   const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = num(r.qty) })
   const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = num(r.physical_qty) })
   const wasteMap = sumBy(wastages, 'item_id', 'qty')
@@ -77,7 +94,7 @@ export function buildStockRows({ items, opening, closing, purchases, returns, wa
   const parMap = {}; (pars || []).forEach(r => { parMap[r.item_id] = num(r.par_qty) })
   const purchMap = sumBy(purchases, 'item_id', 'qty')
   ;(returns || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - num(r.qty) })
-  const usageMap = buildUsageMap(sales, breakdown)
+  const usageMap = buildUsageMap(sales, breakdown, explosion)
 
   return (items || []).map(item => {
     const openQty  = openMap[item.id] || 0

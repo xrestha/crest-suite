@@ -134,7 +134,7 @@ export default function CreditNotes() {
 
   async function reprintNote(note) {
     setBookMsg(null)
-    const { data: items, error: itemsErr } = await scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped').eq('order_id', note.order_id)
+    const { data: items, error: itemsErr } = await scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary').eq('order_id', note.order_id)
     // S754: a failed read here printed a numbered Credit Note with no lines on it, and still
     // advanced its copy counter. Refuse instead — nothing has printed, so a retry is safe.
     if (itemsErr) { setBookMsg(asActionError(itemsErr, 'operator')); return }

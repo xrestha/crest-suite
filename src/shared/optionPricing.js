@@ -73,6 +73,115 @@ export function optionsPriceDelta(chosen, groupsById) {
   return round2(total)
 }
 
+const byDisplayOrder = (a, b) =>
+  (a.sort ?? 0) - (b.sort ?? 0) || String(a.name || '').localeCompare(String(b.name || '')) || String(a.id).localeCompare(String(b.id))
+
+/**
+ * A selection as a cart line carries it before the server has priced it — the same shape
+ * save_pos_order_items returns, so the cart, the ticket and the bill read one thing either way.
+ * Ordered as the server orders its summary: the dish's group order, then the group's own, then the
+ * option's; the first `included_count` of each group are free and marked "(incl.)" when they had a price.
+ * @param {string[]} optionIds
+ * @param {{ optionsById, groupsById, attachByGroup }} catalog  attachByGroup: this dish's attachments by group id
+ * @returns {{ delta: number, summary: string, options: object[] }}
+ */
+export function describeSelection(optionIds, { optionsById, groupsById, attachByGroup = {} }) {
+  const chosen = (optionIds || []).map(id => optionsById?.[id]).filter(Boolean)
+  const byGroup = new Map()
+  for (const o of chosen) {
+    if (!byGroup.has(o.group_id)) byGroup.set(o.group_id, [])
+    byGroup.get(o.group_id).push(o)
+  }
+  const rows = []
+  for (const [groupId, opts] of byGroup) {
+    const g = groupsById?.[groupId] || {}
+    const included = g.included_count || 0
+    ;[...opts].sort(byDisplayOrder).forEach((o, i) => {
+      const free = i < included
+      rows.push({
+        groupSort: attachByGroup[groupId]?.sort ?? 0, gSort: g.sort ?? 0, oSort: o.sort ?? 0,
+        option_id: o.id, group_id: groupId, group_name: g.name || '', group_kind: g.kind || '',
+        option_name: o.name, kitchen_name: o.kitchen_name || null, is_removal: !!o.is_removal,
+        price_delta: free ? 0 : round2(o.price_delta), list_price_delta: round2(o.price_delta), included: free,
+      })
+    })
+  }
+  rows.sort((a, b) => a.groupSort - b.groupSort || a.gSort - b.gSort || a.oSort - b.oSort
+    || String(a.option_name).localeCompare(String(b.option_name)))
+  const options = rows.map(({ groupSort, gSort, oSort, ...r }) => ({ ...r, sort: groupSort * 1000 + oSort }))
+  return {
+    delta: round2(options.reduce((s, o) => s + o.price_delta, 0)),
+    summary: options.map(o => o.option_name + (o.included && o.list_price_delta !== 0 ? ' (incl.)' : '')).join(' · '),
+    options,
+  }
+}
+
+/**
+ * What a dish offers, in the order a guest sees it: its attached, active groups that have at least
+ * one active option, each with its effective rule and options. A group with nothing to pick is left
+ * out — the server skips it too, so it can never make a dish unorderable.
+ */
+export function groupsForDish(recipeId, { groups, options, attachments }) {
+  const optsByGroup = new Map()
+  for (const o of options || []) {
+    if (!o.is_active) continue
+    if (!optsByGroup.has(o.group_id)) optsByGroup.set(o.group_id, [])
+    optsByGroup.get(o.group_id).push(o)
+  }
+  const groupById = new Map((groups || []).map(g => [g.id, g]))
+  return (attachments || [])
+    .filter(a => a.recipe_id === recipeId)
+    .map(a => ({ attachment: a, group: groupById.get(a.group_id) }))
+    .filter(x => x.group?.is_active && optsByGroup.has(x.group.id))
+    .sort((a, b) => (a.attachment.sort ?? 0) - (b.attachment.sort ?? 0) || (a.group.sort ?? 0) - (b.group.sort ?? 0)
+      || String(a.group.name).localeCompare(String(b.group.name)))
+    .map(({ attachment, group }) => ({
+      group, attachment,
+      rule: effectiveRule(group, attachment),
+      options: [...optsByGroup.get(group.id)].sort(byDisplayOrder),
+    }))
+}
+
+/**
+ * The picks a dish starts with: the dish's own default for a group, else the options marked
+ * pre-selected, trimmed to the group's maximum.
+ */
+export function defaultSelection(dishGroups) {
+  const ids = []
+  for (const { group, attachment, rule, options } of dishGroups || []) {
+    let picks = attachment?.default_option_id && options.some(o => o.id === attachment.default_option_id)
+      ? [attachment.default_option_id]
+      : options.filter(o => o.is_default).map(o => o.id)
+    if (rule.max != null) picks = picks.slice(0, rule.max)
+    ids.push(...picks)
+    void group
+  }
+  return ids
+}
+
+/** Groups whose pick count breaks the rule — [{ group, count, rule }]. Empty means the selection is valid. */
+export function selectionProblems(dishGroups, optionIds) {
+  const chosen = new Set(optionIds || [])
+  return (dishGroups || [])
+    .map(({ group, rule, options }) => ({ group, rule, count: options.filter(o => chosen.has(o.id)).length }))
+    .filter(x => !countAllowed(x.count, x.rule))
+}
+
+/** The lowest price a dish can be ordered at — its cheapest valid size — for a "From NPR x" label. */
+export function lowestDishPrice(basePrice, dishGroups) {
+  let price = Number(basePrice) || 0
+  for (const { rule, options } of dishGroups || []) {
+    if (!(rule.min > 0)) continue
+    const deltas = options.map(o => Number(o.price_delta) || 0).sort((a, b) => a - b)
+    const need = deltas.slice(0, rule.min)
+    // Free picks only lower a price when the prices they waive are positive; a size group carries
+    // no free picks in practice, so the approximation errs to showing the plain sum.
+    const free = need.every(d => d >= 0) ? (rule.included || 0) : 0
+    price += need.slice(free).reduce((s, d) => s + d, 0)
+  }
+  return round2(price)
+}
+
 /** "+NPR 50", "−NPR 100", "" for zero — what a guest reads beside an option. */
 export function signedPrice(amount) {
   const n = Math.round(Number(amount) || 0)

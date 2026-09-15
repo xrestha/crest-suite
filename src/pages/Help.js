@@ -613,6 +613,20 @@ const POS_FEATURES = [
                   ],
                 },
                 {
+                  icon: '✚', name: 'Crest Customization', path: '/customization/groups',
+                  desc: 'A paid add-on to Crest POS that lets guests and waiters choose a dish\'s size, extras, "No …" requests and spice or cooking choices. Build a few shared groups once in Custom → Option Groups (Size, Extras, Remove, Spice), attach them to dishes there or with Customize on Menu Pricing, and every attached dish opens a choice window on the till and a choice sheet on the QR guest menu. The dish itself stays where it is — Recipe Costing or Menu Pricing.',
+                  tips: [
+                    'A size is entered as its full price (Half NPR 150, Full NPR 250); an extra as what it adds (+NPR 50). The bill shows one line per dish at the combined price, with the choices listed underneath',
+                    '"First N free" on an add-on group makes the first picks free and charges for the rest — the till, the guest sheet and the bill all agree because the price is always worked out by the server from the choices, never typed on a tablet',
+                    'The same dish with different choices is two lines: "Momo, Half" and "Momo, Full". A dish already sent to the kitchen cannot have its choices changed — remove it (with a reason, recorded as a pulled item) and add it again, which prints a fresh ticket',
+                    'Kitchen tickets and the Kitchen Display print each choice under the dish: "+ Extra cheese", and "NO onion" in bold. Fill in a choice\'s Kitchen ticket name if the kitchen uses a short name',
+                    'With Crest IMS, give a choice its stock lines (+30 g cheese, −20 g onion, −5 pcs for a Half) and a closed bill deducts the recipe plus or minus those lines. Stock Report, Reorder, Variance, Shrinkage, FIFO, Stock Ageing and the Monthly Owner Report all count them. A choice with no stock lines changes nothing in stock, and Option Groups flags it',
+                    'Guests see "From NPR x" on a dish with sizes, the veg/egg mark and any allergens on each choice, and can edit a dish\'s choices from their order before sending it',
+                    'Custom → Customization Report (Owner and managers) shows the most picked choices, how often each dish is customized, the most common "No …" requests and — with IMS — whether each paid choice earns more than its stock lines cost. Choice prices there are before VAT and before bill discounts',
+                    'Customization needs Crest POS switched on; switching POS off switches Customization off too. Works offline for order-taking like everything else on the till',
+                  ],
+                },
+                {
                   icon: '▥', name: 'Kitchen Display', path: '/pos/kds',
                   desc: 'An on-screen ticket board for the kitchen/bar, running alongside printed KOT/BOT tickets — sending a KOT/BOT from Order Taking still prints exactly as before; this just mirrors it live on a screen. Switch between Kitchen (KOT) and Bar (BOT) at the top — pick whichever this device sits at, it remembers your choice. Each ticket moves New → In Progress → Ready with a tap.',
                   tips: [

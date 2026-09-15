@@ -1103,6 +1103,23 @@ records is *explained* and therefore leaves the unexplained gap `ShrinkageReport
 report's own copy now says "unlogged theft" and names the consequence — the same rule as any other
 figure here: the sentence has to move when the arithmetic does.
 
+## A customized sale consumes its choices' stock lines too (S758)
+
+`sales_entries.ingredient_deltas` (nullable jsonb) carries a Crest Customization sale's choice stock
+lines per plate, signed — `{item_id, qty}` or `{sub_recipe_id, qty}` as written on the option ("+30 g
+cheese", "−5 pcs momo" for a Half). NULL on every ordinary sale, so a client without the module
+computes exactly as before. **Usage of a sales row is recipe × qty_sold + deltas × qty_sold**, and:
+
+- **`src/utils/orderLineIngredients.js` is the one conversion** — `loadDeltaExplosion` (item yields,
+  sub-recipes through the one `explodeRecipeIngredients` walk; throws on a failed read like the recipe
+  walk), `deltaItems`, `usageOfSalesRow`. `buildUsageMap`/`buildStockRows` take its `explosion`.
+- **A reader that turns sales into consumption selects `ingredient_deltas`** and loads the explosion
+  beside the recipe walk under the same error handling. Revenue readers do not need it.
+- **Nothing is clamped.** "No onion" on a dish whose recipe has no onion still takes onion off; a
+  negative total is a data-entry problem to show, not to hide.
+- **Stock Movements' Sub-Recipes tab and its reconciliation note are recipe-only in release 1**, and
+  say so; the raw ledger already includes choice usage from POS closes.
+
 ## The `settings` row, and the screens that write it
 
 Moved to `.claude/rules/settings-row.md` (S739), which auto-loads when editing `Settings.js`, the

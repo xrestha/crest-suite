@@ -1,10 +1,13 @@
 import { npr } from '../../../shared/nepalMoney'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { NUTRIENTS } from '../../../utils/nutrition'
 import Modal from '../../../components/Modal'
 import { guestOrderRefusal } from './guestOrderRefusal'
+import GuestOptionSheet from './GuestOptionSheet'
+import { groupsForDish, describeSelection, lowestDishPrice, selectionProblems, inclFromEx } from '../../../shared/optionPricing'
+import { selectionKeyOf } from '../orders/posOrdersConstants'
 // Scoped bone-and-pine palette for this surface only — see the header of guestMenu.css for why a
 // public menu must not read the global theme tokens.
 import './guestMenu.css'
@@ -90,10 +93,28 @@ const cartSessionKey = tableId => `guestCart:${tableId}`
 function loadStoredCart(tableId) {
   try {
     const raw = sessionStorage.getItem(cartSessionKey(tableId))
-    return raw ? JSON.parse(raw) : null
+    if (!raw) return null
+    const stored = JSON.parse(raw)
+    return stored ? { ...stored, cart: normalizeCart(stored.cart) } : null
   } catch {
     return null
   }
+}
+
+// The cart is { [lineKey]: { recipe_id, qty, option_ids } } since Crest Customization (S758): the
+// same dish with different choices is two lines. A cart saved by the page before that was
+// { recipe_id: qty } and is read as plain lines, so a guest mid-order across a deploy keeps it.
+const cartKey = (recipeId, optionIds) => {
+  const sel = selectionKeyOf(optionIds)
+  return sel ? `${recipeId}#${sel}` : recipeId
+}
+function normalizeCart(cart) {
+  const out = {}
+  for (const [key, v] of Object.entries(cart || {})) {
+    if (typeof v === 'number') { if (v > 0) out[key] = { recipe_id: key, qty: v, option_ids: [] } }
+    else if (v && v.recipe_id && Number(v.qty) > 0) out[key] = { recipe_id: v.recipe_id, qty: Number(v.qty), option_ids: v.option_ids || [] }
+  }
+  return out
 }
 
 // Fully public, unauthenticated page — reached by a guest scanning a table's QR code (see
@@ -115,7 +136,13 @@ export default function GuestMenu() {
   // with) so a guest is never shown a negative "your food is late" countdown.
   const [remainingMinutes, setRemainingMinutes] = useState(null)
 
-  const [cart, setCart] = useState(() => loadStoredCart(tableId)?.cart || {}) // recipe_id -> qty
+  const [cart, setCart] = useState(() => loadStoredCart(tableId)?.cart || {}) // lineKey -> { recipe_id, qty, option_ids }
+  // Crest Customization (S758): { groups, options, attachments } from get_guest_menu_options. A failed
+  // read keeps the menu and says so (optionsFailed); the server still refuses a dish that needed a choice.
+  const [optionCatalog, setOptionCatalog] = useState({ groups: [], options: [], attachments: [] })
+  const [optionsFailed, setOptionsFailed] = useState(false)
+  // { item, dishGroups, editKey?, initialIds? } while the choice sheet is open.
+  const [optionSheet, setOptionSheet] = useState(null)
   const [covers, setCovers] = useState(() => loadStoredCart(tableId)?.covers ?? 2)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [guestNote, setGuestNote] = useState(() => loadStoredCart(tableId)?.guestNote || '')
@@ -205,8 +232,37 @@ export default function GuestMenu() {
       if (err) { setError(true); setRows([]); return }
       setRows(data || [])
     })
+    loadOptions(() => cancelled)
     return () => { cancelled = true }
-  }, [tableId, retryToken])
+  }, [tableId, retryToken]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function loadOptions(isCancelled = () => false) {
+    return supabase.rpc('get_guest_menu_options', { p_table_id: tableId }).then(({ data, error: err }) => {
+      if (isCancelled()) return null
+      // PGRST202 is "no such function": the frontend deployed before migration 20260919140000. That
+      // is every outlet's menu, not a failed read of one, so it reads as "no choices" rather than
+      // putting a warning in front of every guest (the migration hot-path rule).
+      if (err?.code === 'PGRST202') { setOptionsFailed(false); return null }
+      if (err) { console.error('get_guest_menu_options failed', err); setOptionsFailed(true); return null }
+      setOptionsFailed(false)
+      const next = { groups: data?.groups || [], options: data?.options || [], attachments: data?.attachments || [] }
+      setOptionCatalog(next)
+      return next
+    })
+  }
+
+  const optionMaps = useMemo(() => ({
+    optionsById: Object.fromEntries(optionCatalog.options.map(o => [o.id, o])),
+    groupsById: Object.fromEntries(optionCatalog.groups.map(g => [g.id, g])),
+  }), [optionCatalog])
+  const dishGroupsByRecipe = useMemo(() => {
+    const out = {}
+    for (const rid of new Set(optionCatalog.attachments.map(a => a.recipe_id))) {
+      const dg = groupsForDish(rid, optionCatalog)
+      if (dg.length) out[rid] = dg
+    }
+    return out
+  }, [optionCatalog])
 
   // 5s poll while the guest has the menu open — same cadence as the staff floor-view badge.
   //
@@ -428,14 +484,57 @@ export default function GuestMenu() {
   const anyImages = rows.some(r => r.image_url)
 
   const cartLines = Object.entries(cart)
-    .filter(([, qty]) => qty > 0)
-    .map(([recipeId, qty]) => ({ item: byRecipe[recipeId], qty }))
-    .filter(l => l.item)
+    .filter(([, l]) => l.qty > 0)
+    .map(([key, l]) => {
+      const item = byRecipe[l.recipe_id]
+      if (!item) return null
+      const dishGroups = dishGroupsByRecipe[l.recipe_id] || []
+      const desc = l.option_ids?.length
+        ? describeSelection(l.option_ids, { ...optionMaps, attachByGroup: Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment])) })
+        : { delta: 0, summary: '', options: [] }
+      const unit = Math.round(inclFromEx((parseFloat(item.selling_price) || 0) + desc.delta, vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0))
+      return { key, item, qty: l.qty, option_ids: l.option_ids || [], summary: desc.summary, unit }
+    })
+    .filter(Boolean)
   const cartCount = cartLines.reduce((s, l) => s + l.qty, 0)
-  const cartTotal = cartLines.reduce((s, l) => s + priceIncVat(l.item, vatRegistered) * l.qty, 0)
+  const cartTotal = cartLines.reduce((s, l) => s + l.unit * l.qty, 0)
+  const qtyByRecipe = {}
+  for (const l of cartLines) qtyByRecipe[l.item.recipe_id] = (qtyByRecipe[l.item.recipe_id] || 0) + l.qty
 
-  function setQty(recipeId, qty) {
-    setCart(prev => ({ ...prev, [recipeId]: Math.max(0, Math.min(50, qty)) }))
+  function setQty(key, qty) {
+    setCart(prev => {
+      const line = prev[key]
+      if (!line) return prev
+      const next = { ...prev }
+      const q = Math.max(0, Math.min(50, qty))
+      if (q === 0) delete next[key]
+      else next[key] = { ...line, qty: q }
+      return next
+    })
+  }
+  // A plain dish's card stepper: its one plain line.
+  function setPlainQty(recipeId, qty) {
+    setCart(prev => {
+      const q = Math.max(0, Math.min(50, qty))
+      const next = { ...prev }
+      if (q === 0) delete next[recipeId]
+      else next[recipeId] = { recipe_id: recipeId, qty: q, option_ids: [] }
+      return next
+    })
+  }
+  // From the choice sheet. The same choices again add to that line; `editKey` replaces the line
+  // being edited (folding into an identical one if the new choices match it).
+  function addCustom(item, optionIds, editKey) {
+    const key = cartKey(item.recipe_id, optionIds)
+    setCart(prev => {
+      const next = { ...prev }
+      const editing = editKey ? prev[editKey] : null
+      if (editing) delete next[editKey]
+      const addQty = editing ? editing.qty : 1
+      const existing = next[key]
+      next[key] = { recipe_id: item.recipe_id, qty: Math.min(50, (existing?.qty || 0) + addQty), option_ids: [...optionIds] }
+      return next
+    })
   }
 
   async function placeOrder() {
@@ -445,8 +544,8 @@ export default function GuestMenu() {
     // (e.g. a guest immediately places a second order) — React bails out of the justPlaced
     // effect on a same-value update, which would otherwise silently skip the scroll/chime.
     setJustPlaced(false)
-    const payload = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty }))
-    const itemsSnapshot = cartLines.map(l => ({ name: l.item.name, qty: l.qty }))
+    const payload = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, ...(l.option_ids.length ? { options: l.option_ids } : {}) }))
+    const itemsSnapshot = cartLines.map(l => ({ name: l.summary ? `${l.item.name} (${l.summary})` : l.item.name, qty: l.qty }))
     const { data, error: err } = await supabase.rpc('submit_guest_order', {
       p_table_id: tableId, p_items: payload, p_notes: guestNote || null, p_covers: covers,
     })
@@ -465,15 +564,24 @@ export default function GuestMenu() {
       // retryLoadMenu, which blanks the page to its loading state and would close the review sheet
       // the guest needs to fix the order in. A failed re-read keeps the menu they have.
       if (refusal.refreshMenu) {
-        supabase.rpc('get_guest_menu', { p_table_id: tableId }).then(({ data: fresh, error: freshErr }) => {
+        Promise.all([supabase.rpc('get_guest_menu', { p_table_id: tableId }), loadOptions()]).then(([{ data: fresh, error: freshErr }, freshOptions]) => {
           if (freshErr || !Array.isArray(fresh)) return
           setRows(fresh)
           // A dish the fresh menu no longer carries would silently drop out of the review sheet
-          // (cartLines filters on the menu), so take it off the cart and SAY it was taken off.
+          // (cartLines filters on the menu), so take it off the cart and SAY it was taken off. Since
+          // S758 the same goes for a dish whose choices no longer fit what it offers.
           const onMenu = new Set(fresh.map(r => r.recipe_id))
-          const gone = Object.keys(cart).filter(id => cart[id] > 0 && !onMenu.has(id))
+          const cat = freshOptions || optionCatalog
+          const stillValid = l => {
+            if (!onMenu.has(l.recipe_id)) return false
+            const dg = groupsForDish(l.recipe_id, cat)
+            if (dg.length === 0) return !(l.option_ids?.length)
+            const offered = new Set(dg.flatMap(d => d.options.map(o => o.id)))
+            return (l.option_ids || []).every(id => offered.has(id)) && selectionProblems(dg, l.option_ids).length === 0
+          }
+          const gone = Object.keys(cart).filter(k => !stillValid(cart[k]))
           if (gone.length > 0) {
-            setCart(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => onMenu.has(id))))
+            setCart(prev => Object.fromEntries(Object.entries(prev).filter(([, l]) => stillValid(l))))
             if (refusal.removedText) setSubmitError(refusal.removedText)
           }
         })
@@ -542,6 +650,11 @@ export default function GuestMenu() {
           {/* get_guest_menu turns ordering off for a table marked inactive (S746). Without a line
               saying so, the only difference is the missing Add buttons, which reads as a broken
               page rather than a table that is not taking orders. */}
+          {orderingEnabled && optionsFailed && (
+            <p role="status" style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>
+              We couldn't load the choices for some dishes (like sizes or extras). You can still order, and if a dish needs a choice we'll tell you before it is sent.
+            </p>
+          )}
           {!orderingEnabled && (
             <p style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--theme-text2)' }}>
               Ordering from this table isn't available right now — please order with a member of staff.
@@ -629,8 +742,10 @@ export default function GuestMenu() {
                   key={item.recipe_id} item={item} nutritionEnabled={nutritionEnabled}
                   orderingEnabled={orderingEnabled} vatRegistered={vatRegistered}
                   showImageColumn={anyImages}
-                  qty={cart[item.recipe_id] || 0}
-                  onQtyChange={qty => setQty(item.recipe_id, qty)}
+                  qty={qtyByRecipe[item.recipe_id] || 0}
+                  onQtyChange={qty => setPlainQty(item.recipe_id, qty)}
+                  dishGroups={dishGroupsByRecipe[item.recipe_id]}
+                  onChoose={() => setOptionSheet({ item, dishGroups: dishGroupsByRecipe[item.recipe_id] })}
                 />
               ))}
             </div>
@@ -719,11 +834,24 @@ export default function GuestMenu() {
               </div>
             )}
             {cartLines.map(l => (
-              <div key={l.item.recipe_id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ flex: 1, fontSize: 14 }}>{l.item.name}</span>
-                <Stepper qty={l.qty} label={l.item.name} onChange={qty => setQty(l.item.recipe_id, qty)} />
+              <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ flex: 1, fontSize: 14, minWidth: 0 }}>
+                  {l.item.name}
+                  {l.summary && <span style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)' }}>{l.summary}</span>}
+                  {/* Edit from the order, not "remove and start again": the thing a guest most often
+                      wants to change is the choice they just made (S758). */}
+                  {dishGroupsByRecipe[l.item.recipe_id] && (
+                    <button
+                      type="button" className="btn btn-ghost"
+                      style={{ fontSize: 12, padding: '2px 10px', minHeight: 32, marginTop: 4 }}
+                      aria-label={`Change choices for ${l.item.name}`}
+                      onClick={() => setOptionSheet({ item: l.item, dishGroups: dishGroupsByRecipe[l.item.recipe_id], editKey: l.key, initialIds: l.option_ids })}
+                    >Edit choices</button>
+                  )}
+                </span>
+                <Stepper qty={l.qty} label={l.item.name} onChange={qty => setQty(l.key, qty)} />
                 <span style={{ width: 74, textAlign: 'right', fontSize: 13, color: 'var(--theme-text2)' }}>
-                  {fmtNpr(priceIncVat(l.item, vatRegistered) * l.qty)}
+                  {fmtNpr(l.unit * l.qty)}
                 </span>
               </div>
             ))}
@@ -788,6 +916,19 @@ export default function GuestMenu() {
             )}
           </div>
         </Modal>
+      )}
+
+      {optionSheet && (
+        <GuestOptionSheet
+          item={optionSheet.item}
+          dishGroups={optionSheet.dishGroups}
+          catalog={optionMaps}
+          vatRegistered={vatRegistered}
+          initialIds={optionSheet.initialIds}
+          editing={!!optionSheet.editKey}
+          onClose={() => setOptionSheet(null)}
+          onConfirm={ids => { addCustom(optionSheet.item, ids, optionSheet.editKey); setOptionSheet(null) }}
+        />
       )}
     </div>
   )
@@ -894,9 +1035,15 @@ function Stepper({ qty, onChange, label }) {
   )
 }
 
-function MenuItemCard({ item, nutritionEnabled, orderingEnabled, vatRegistered, showImageColumn, qty, onQtyChange }) {
+function MenuItemCard({ item, nutritionEnabled, orderingEnabled, vatRegistered, showImageColumn, qty, onQtyChange, dishGroups, onChoose }) {
   const [imgFailed, setImgFailed] = useState(false)
   const priceInc = priceIncVat(item, vatRegistered)
+  // A dish with choices shows "From" its cheapest valid version (owner decision, S758): Half at 150
+  // rather than Full at 250, with the exact price shown as the guest picks.
+  const fromPrice = dishGroups
+    ? Math.round(inclFromEx(lowestDishPrice(item.selling_price, dishGroups), vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0))
+    : null
+  const showFrom = fromPrice != null && fromPrice !== priceInc
   const hasImage = item.image_url && !imgFailed
 
   return (
@@ -944,7 +1091,9 @@ function MenuItemCard({ item, nutritionEnabled, orderingEnabled, vatRegistered, 
             )}
             <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--theme-text1)' }}>{item.name}</span>
           </div>
-          <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>{fmtNpr(priceInc)}</span>
+          <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>
+            {showFrom ? <><span style={{ fontWeight: 400, fontSize: 12 }}>From </span>{fmtNpr(fromPrice)}</> : fmtNpr(priceInc)}
+          </span>
         </div>
         {item.description && (
           <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.4 }}>{item.description}</p>
@@ -963,7 +1112,17 @@ function MenuItemCard({ item, nutritionEnabled, orderingEnabled, vatRegistered, 
             Allergens: {item.allergens.join(', ')}
           </p>
         )}
-        {orderingEnabled && (
+        {orderingEnabled && dishGroups && (
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: '4px 12px', minHeight: 44 }}
+              aria-label={`Choose options and add ${item.name} to your order`}
+              onClick={onChoose}
+            >{qty > 0 ? '+ Add another' : '+ Add'}</button>
+            {qty > 0 && <span style={{ fontSize: 12.5, color: 'var(--theme-text2)' }}>{qty} in your order</span>}
+          </div>
+        )}
+        {orderingEnabled && !dishGroups && (
           <div style={{ marginTop: 10 }}>
             {qty > 0 ? (
               <Stepper qty={qty} label={item.name} onChange={onQtyChange} />

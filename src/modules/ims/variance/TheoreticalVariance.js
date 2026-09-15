@@ -8,6 +8,7 @@ import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import { COGS_FORMULA, varianceBand, varianceFlagPct } from '../../../shared/imsFormulas'
 import { selectDepletingSales } from '../sales/salesDepletion'
+import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -184,7 +185,8 @@ export default function TheoreticalVariance() {
     const results = await Promise.all([
       // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup; paged so a busy
       // POS period's sales_entries can't truncate theoretical usage at 1000 rows.
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
+      // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
       // Every per-item-per-period read below is paged (S719). Each is one row per item per period,
       // so a client past 1000 items — or a multi-period window — truncates silently, and
       // truncation returns NO error for the firstError() check to catch. The direction is what
@@ -210,8 +212,22 @@ export default function TheoreticalVariance() {
     // rule so a client running POS *and* manual bulk entry doesn't double-count the same dish and
     // inflate theoretical usage (which masks real over-consumption). Kept identical to Variance.js,
     // which this page must agree with.
+    const depleting = selectDepletingSales(sales || [])
     const salesMap = {}
-    selectDepletingSales(sales || []).forEach(e => { salesMap[e.recipe_id] = (salesMap[e.recipe_id] || 0) + parseFloat(e.qty_sold || 0) })
+    depleting.forEach(e => { salesMap[e.recipe_id] = (salesMap[e.recipe_id] || 0) + parseFloat(e.qty_sold || 0) })
+
+    // A customized plate consumes its options' stock lines too (S758). Those deltas can name
+    // sub-recipes, which go through the ONE shared walk inside loadDeltaExplosion, not the local
+    // expandIngredients below. It throws on a failed read, and a missing explosion would read a
+    // Half plate as a whole one — so it fails the load like any other read here.
+    let explosion
+    try {
+      explosion = await loadDeltaExplosion(supabase, depleting.map(e => e.ingredient_deltas))
+    } catch (err) {
+      if (!periodReq.isCurrent(periodId)) return
+      setLoadError(err); setRows([]); return
+    }
+    if (!periodReq.isCurrent(periodId)) return
 
     // Theoretical consumption: item_id → qty
     const theoretical = {}
@@ -220,6 +236,15 @@ export default function TheoreticalVariance() {
       if (sold <= 0) return
       expandIngredients(recipe, allRecipes, itemList).forEach(({ item_id, qty }) => {
         theoretical[item_id] = (theoretical[item_id] || 0) + qty * sold
+      })
+    })
+    // Option deltas × qty sold, per surviving (depleting) row — signed, so "no onion" subtracts.
+    depleting.forEach(e => {
+      if (!e.ingredient_deltas) return
+      const n = parseFloat(e.qty_sold || 0)
+      if (!n) return
+      deltaItems(e.ingredient_deltas, explosion).forEach(({ item_id, qty }) => {
+        theoretical[item_id] = (theoretical[item_id] || 0) + qty * n
       })
     })
 

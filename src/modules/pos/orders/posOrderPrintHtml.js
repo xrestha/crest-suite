@@ -5,6 +5,16 @@ import { npr2 } from '../../../shared/nepalMoney'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 
+// A line's Crest Customization choices (S758), in either shape a caller holds them: the cart/server
+// snapshot ({ option_name, kitchen_name, is_removal }) or a logged ticket's ({ kitchen, is_removal }).
+// The kitchen reads its own short name where the owner set one; the bill reads the guest-facing name.
+const ticketOptionName = o => o.kitchen || o.kitchen_name || o.option_name || ''
+export function kotOptionLines(options) {
+  return (options || []).map(o => (o.is_removal
+    ? `<div class="opt b">NO ${esc(ticketOptionName(o).replace(/^no\s+/i, ''))}</div>`
+    : `<div class="opt">+ ${esc(ticketOptionName(o))}</div>`)).join('')
+}
+
 // Pure 80mm-thermal HTML builders for PosOrders.jsx — no React, no Supabase, no component state.
 // Everything they need (outlet/billing settings, table name, cashier name, HSC codes) is passed
 // in explicitly so the same functions back both the real print (printBill/printCompSlip) and the
@@ -33,6 +43,7 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
   .row { display:flex; justify-content:space-between; align-items:baseline; padding:3px 0; }
   .qty { font-weight:bold; font-size:15px; min-width:34px; text-align:right; }
   .note { font-size:11px; font-style:italic; color:#000; padding:0 0 3px 10px; }
+  .opt  { font-size:13px; color:#000; padding:0 0 1px 10px; }
 </style>
 </head><body>
   ${outletName ? `<div class="c b" style="font-size:14px">${esc(outletName)}</div>` : ''}
@@ -45,7 +56,7 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
   <hr>
   ${items.map(i => {
       const delta = (i.sent_qty || 0) > 0 ? i.qty - i.sent_qty : 0
-      const note  = i.notes ? `<div class="note">↳ ${esc(i.notes)}</div>` : ''
+      const note  = kotOptionLines(i.options) + (i.notes ? `<div class="note">↳ ${esc(i.notes)}</div>` : '')
       // Already sent, quantity unchanged — only the note moved (S754). This used to fall through to
       // "×qty", which a station reads as a fresh order and cooks again. It prints no quantity at all.
       if ((i.sent_qty || 0) > 0 && delta === 0) {
@@ -59,6 +70,20 @@ export function buildKotBotHtml({ station, items, ticketNo, outletName, tableNam
     }).join('')}
   <hr>
 </body></html>`
+}
+
+// One bill line per dish at its combined price, with the choices listed underneath (owner decision,
+// S758): a paid choice with what it added, a free one by name. The Rate column is still unit_price,
+// so nothing in the bill's arithmetic changes.
+function billOptionRow(i) {
+  if (!i.options?.length && !i.option_summary) return ''
+  const text = i.options?.length
+    ? i.options.map(o => {
+        const d = Math.round(Number(o.price_delta) || 0)
+        return esc(o.option_name || '') + (d ? ` ${d > 0 ? '+' : '−'}${Math.abs(d)}` : '')
+      }).join(', ')
+    : esc(i.option_summary)
+  return `<tr><td></td><td></td><td colspan="4" style="font-size:10px;padding-top:0">${text}</td></tr>`
 }
 
 export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmount, outletName, billingSettings, hscMap, tableName, cashierName }) {
@@ -131,7 +156,7 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   <table>
     <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
     <tbody>
-      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${npr2(i.unit_price)}</td><td>${npr2(i.qty * i.unit_price)}</td></tr>`).join('')}
+      ${items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${esc(hscMap[i.recipe_id] || '')}</td><td>${esc(i.name)}</td><td>${i.qty}</td><td>${npr2(i.unit_price)}</td><td>${npr2(i.qty * i.unit_price)}</td></tr>${billOptionRow(i)}`).join('')}
     </tbody>
   </table>
   <hr>
@@ -265,7 +290,7 @@ export function buildCompSlipHtml({ order, items, costMap, copyLabel, outletName
   <table>
     <thead><tr><th>Item</th><th>Qty</th><th>Cost</th></tr></thead>
     <tbody>
-      ${items.map(i => `<tr><td>${esc(i.name)}</td><td>${i.qty}</td><td>${npr2(i.qty * (costMap[i.recipe_id] || 0))}</td></tr>`).join('')}
+      ${items.map(i => `<tr><td>${esc(i.name)}${i.option_summary ? `<div style="font-size:10px">${esc(i.option_summary)}</div>` : ''}</td><td>${i.qty}</td><td>${npr2(i.qty * (costMap[i.recipe_id] || 0))}</td></tr>`).join('')}
     </tbody>
   </table>
   <hr>

@@ -99,6 +99,7 @@ const PosStaff = lazy(() => import('./modules/pos/staff/PosStaff'))
 const PosCustomers = lazy(() => import('./modules/pos/customers/PosCustomers'))
 const PosReservations = lazy(() => import('./modules/pos/reservations/PosReservations'))
 const OptionGroups = lazy(() => import('./modules/customization/OptionGroups'))
+const CustomizationReport = lazy(() => import('./modules/customization/CustomizationReport'))
 const GuestBooking = lazy(() => import('./modules/pos/booking/GuestBooking'))
 const PosParkingSlips = lazy(() => import('./modules/pos/parking/PosParkingSlips'))
 const PosExceptionReport = lazy(() => import('./modules/pos/reports/PosExceptionReport'))
@@ -324,6 +325,7 @@ export default function App() {
               {/* Crest Customization (S758) — gated on customization_enabled, which the database only
                   allows on a client with POS. The page carries its own rank guard (menu-price set). */}
               <Route path="/customization/groups" element={<ModuleGate module="customization"><OptionGroups /></ModuleGate>} />
+              <Route path="/customization/report" element={<ModuleGate module="customization"><CustomizationReport /></ModuleGate>} />
 
               {/* Admin only */}
               <Route path="/admin/clients"

@@ -6,7 +6,8 @@ import { varianceBand, varianceFlagPct, VARIANCE_MATERIALITY_NPR } from '../../.
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
-import { selectDepletingSales } from '../sales/salesDepletion'
+import { buildUsageMap } from '../stockcount/stockReportCalc'
+import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
@@ -125,7 +126,8 @@ export default function ShrinkageReport() {
       fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       // source + bs_day feed the per-period POS-supersedes-manual dedup below; paged because a
       // multi-period sales_entries read crosses the silent 1000-row cap readily.
-      fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
+      // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
+      fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, source, ingredient_deltas').in('period_id', periodIds).order('id')),
       scopedFrom('recipes', 'id'),
     ])
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
@@ -155,10 +157,14 @@ export default function ShrinkageReport() {
     // The recipe walk throws on a failed read (S695) — before, it walked an empty tree, theoretical
     // usage came out as zero, and every item read as fully shrunk.
     let ingredientBreakdown = {}
+    let explosion = null
     try {
-      ingredientBreakdown = shrinkRecipeIds.length > 0
-        ? await explodeRecipeIngredients(supabase, shrinkRecipeIds)
-        : {}
+      // The option-delta explosion (S758) shares this catch: a missing one would read a customized
+      // plate as its plain recipe, which is a wrong theoretical just like a failed recipe walk.
+      ;[ingredientBreakdown, explosion] = await Promise.all([
+        shrinkRecipeIds.length > 0 ? explodeRecipeIngredients(supabase, shrinkRecipeIds) : {},
+        loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+      ])
     } catch (err) {
       // The isCurrent guard belongs on the failure path too: without it a superseded load's
       // error replaces the report the reader is actually looking at with a red banner (S719).
@@ -210,25 +216,13 @@ export default function ShrinkageReport() {
       if (!salesByPeriod[s.period_id]) salesByPeriod[s.period_id] = []
       salesByPeriod[s.period_id].push(s)
     })
-    const soldMap = {}
-    Object.entries(salesByPeriod).forEach(([pid, rows]) => {
-      soldMap[pid] = {}
-      selectDepletingSales(rows).forEach(s => {
-        soldMap[pid][s.recipe_id] = (soldMap[pid][s.recipe_id] || 0) + parseFloat(s.qty_sold)
-      })
-    })
-    // breakdown[recipeId] is already yield_pct-adjusted, per-one-portion raw-ingredient qty
+    // breakdown[recipeId] is already yield_pct-adjusted, per-one-portion raw-ingredient qty.
+    // buildUsageMap runs selectDepletingSales on ONE period's rows at a time (the grouping above is
+    // what keeps the rule single-period), scales the breakdown by portions sold, and adds each
+    // surviving customized row's option deltas × qty (S758) — a Half plate uses less than a whole.
     const theorMap = {}
     periodIds.forEach(pid => {
-      theorMap[pid] = {}
-      const soldThisPeriod = soldMap[pid] || {}
-      Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
-        const sold = soldThisPeriod[recipeId] || 0
-        if (sold <= 0) return
-        rows.forEach(({ item_id, qty }) => {
-          theorMap[pid][item_id] = (theorMap[pid][item_id] || 0) + sold * qty
-        })
-      })
+      theorMap[pid] = buildUsageMap(salesByPeriod[pid] || [], ingredientBreakdown, explosion)
     })
 
     // Observations per item. A period is observed only when the item has recipe coverage AND a

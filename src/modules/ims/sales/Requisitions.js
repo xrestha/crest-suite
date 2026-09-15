@@ -16,6 +16,7 @@ import Fab from '../../../components/Fab'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { buildStockRows } from '../stockcount/stockReportCalc'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import RequisitionRejectModal from './RequisitionRejectModal'
@@ -210,7 +211,8 @@ export default function Requisitions() {
       fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       // source + bs_day feed the shared POS-supersedes-manual dedup (S695) — the same rule
       // Stock Report applies, so this guard and that page agree on "available".
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
+      // ingredient_deltas: a customized plate also consumes its options' stock lines (S758).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
       scopedFrom('recipes', 'id'),
       // Issued requisitions are deliberately NOT read here any more (S695, decided with Aashish):
       // what the store issued is consumed by the recipes the kitchen then cooks, and sales × recipe
@@ -226,9 +228,14 @@ export default function Requisitions() {
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
     // The recipe walk throws on a failed read (S695); same answer as any other failed read here.
+    // The option stock-line walk (S758) likewise: a failure means the check could not run.
     let breakdown = {}
+    let explosion = null
     try {
-      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+      ;[breakdown, explosion] = await Promise.all([
+        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+        loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+      ])
     } catch (_) {
       return null
     }
@@ -236,7 +243,7 @@ export default function Requisitions() {
     // The ONE on-hand calculation Stock Report and Reorder use (S696) — this guard kept a local
     // copy of the same arithmetic, which is how the two drift apart the next time either moves.
     const onHand = {}
-    buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals: staffMealsData, sales, breakdown })
+    buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals: staffMealsData, sales, breakdown, explosion })
       .forEach(r => { onHand[r.item.id] = r.onHand })
     return onHand
   }

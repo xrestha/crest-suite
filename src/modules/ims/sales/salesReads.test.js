@@ -101,7 +101,10 @@ const DEPLETION_FILES = [
 describe.each(DEPLETION_FILES)('%s runs sales through the shared depletion rule', (_name, file) => {
   const SRC = fs.readFileSync(file, 'utf8')
 
-  test('imports selectDepletingSales, or buildStockRows which applies it', () => {
-    expect(/selectDepletingSales|buildStockRows/.test(SRC)).toBe(true)
+  // Comments are stripped first: a comment naming the function is not a call to it.
+  test('imports selectDepletingSales, or buildStockRows / buildUsageMap which apply it', () => {
+    const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+    const IMPORTS_RULE = /import[^;]*\b(selectDepletingSales|selectDepletingSalesAcrossPeriods|buildStockRows|buildUsageMap)\b/
+    expect(IMPORTS_RULE.test(code)).toBe(true)
   })
 })

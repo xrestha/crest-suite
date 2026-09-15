@@ -88,7 +88,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     let cancelled = false
     ;(async () => {
       const results = await Promise.all([
-        scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped').eq('order_id', order.id),
+        scopedFrom('pos_order_items', 'recipe_id, name, qty, unit_price, vat_rate, comped, option_summary, pos_order_item_options(option_name, price_delta, ingredient_deltas, sort)').eq('order_id', order.id),
         supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(),
         supabase.from('clients').select('name').eq('id', clientId).single(),
       ])

@@ -527,7 +527,7 @@ export default function StockMovements() {
             <Tip text="A sub-recipe is never depleted as itself — recipe_ingredients stores it as a reference, so the ledger on the Raw Items tab only ever holds the raw ingredients at the bottom of the tree. This tab re-walks the same recipes against this period's sales to show the prep layer in between." width={320}>
               Derived from this period's sales entries
             </Tip>
-            {' '}— not a second set of ledger rows. The same ingredients appear on the Raw Items tab; this groups them by the prep item they passed through.
+            {' '}— not a second set of ledger rows. The same ingredients appear on the Raw Items tab; this groups them by the prep item they passed through. Choices on customized dishes (Crest Customization) are not included here.
           </p>
         </div>
 
@@ -555,7 +555,7 @@ export default function StockMovements() {
           <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 14, fontSize: 12, color: 'var(--theme-amber-text)' }}>
             These figures imply NPR {usage.derivedItemValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} of raw ingredients, but the ledger recorded NPR {ledgerTotalValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             {' '}({reconGap > 0 ? '+' : '−'}NPR {Math.abs(reconGap).toLocaleString('en-IN', { maximumFractionDigits: 0 })} difference).
-            {' '}Usual causes: a recipe edited after a sale — the ledger froze each depletion at the ingredients in force when it was sold, while this view re-walks the recipe as it stands today, so the two part ways permanently for anything sold before the edit; manual Sales Entry only started depleting stock on 2026-07-30 and earlier saves were never backfilled; POS credit notes reverse revenue but never restore stock; and recipes with no ingredients linked deplete nothing (see the banner above when that applies).
+            {' '}Usual causes: a recipe edited after a sale — the ledger froze each depletion at the ingredients in force when it was sold, while this view re-walks the recipe as it stands today, so the two part ways permanently for anything sold before the edit; manual Sales Entry only started depleting stock on 2026-07-30 and earlier saves were never backfilled; POS credit notes reverse revenue but never restore stock; choices on customized dishes (Crest Customization) change what a plate uses in the ledger but not in this recipe-only view; and recipes with no ingredients linked deplete nothing (see the banner above when that applies).
           </div>
         )}
 

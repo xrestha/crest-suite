@@ -14,6 +14,7 @@ import ReportPage from '../../../components/ReportPage'
 import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import { bsToAd, daysInBsMonth, BS_MONTHS } from '../../../utils/bsCalendar'
 import {
@@ -145,7 +146,7 @@ export default function StockAgeing() {
       // period_id: the depletion rule is applied PER PERIOD (S718) and consumption is now summed
       // per period for the count anchoring (S756).
       fetchAllRows(() => supabase.from('sales_entries')
-        .select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
+        .select('period_id, recipe_id, qty_sold, bs_day, source, ingredient_deltas').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('wastages')
         .select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('staff_meals')
@@ -208,9 +209,16 @@ export default function StockAgeing() {
 
     // The recipe walk throws on a failed read (S695).
     const recipeIds = (clientRecipes || []).map(r => r.id)
+    const depletingSales = selectDepletingSalesAcrossPeriods(sales || [])
     let breakdown = {}
+    let explosion = null
     try {
-      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+      // S758: option stock lines on customized sales are resolved alongside, under the same guard.
+      const [b, e] = await Promise.all([
+        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+        loadDeltaExplosion(supabase, depletingSales.map(s => s.ingredient_deltas)),
+      ])
+      breakdown = b; explosion = e
     } catch (err) {
       if (!periodReq.isCurrent(periodId)) return
       setLoadError(err); resetFigures(); return
@@ -220,8 +228,8 @@ export default function StockAgeing() {
     // Consumption per MONTH: recipe-exploded sales (through the shared POS-supersedes-manual rule,
     // partitioned by period — S718), wastage, staff meals, off-batch returns.
     const consumedByPeriod = sumConsumptionByPeriod({
-      sales: selectDepletingSalesAcrossPeriods(sales || []),
-      breakdown, wastages, staffMeals, returnsByPeriodItem: returnedByPeriodItem,
+      sales: depletingSales,
+      breakdown, explosion, wastages, staffMeals, returnsByPeriodItem: returnedByPeriodItem,
     })
 
     // Anchor to the counts (S756, D19) — see anchorToCounts for the walk.

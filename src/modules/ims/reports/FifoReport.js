@@ -12,6 +12,7 @@ import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import {
   daysUntilExpiry, asOfForWindow, splitReturns,
@@ -151,7 +152,7 @@ export default function FifoReport() {
       // past PostgREST's silent 1000-row cap — and a truncated read here understates the
       // consumption netted off each batch, overstating expiry exposure with no error to catch.
       fetchAllRows(() => supabase.from('sales_entries')
-        .select('period_id, recipe_id, qty_sold, bs_day, source').in('period_id', periodIds).order('id')),
+        .select('period_id, recipe_id, qty_sold, bs_day, source, ingredient_deltas').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('wastages')
         .select('period_id, item_id, qty').in('period_id', periodIds).order('id')),
       fetchAllRows(() => supabase.from('staff_meals')
@@ -225,8 +226,15 @@ export default function FifoReport() {
     // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
     // consumption figure below silently came out as wastage + staff meals only.
     let breakdown = {}
+    let explosion = null
     try {
-      breakdown = soldRecipeIds.length > 0 ? await explodeRecipeIngredients(supabase, soldRecipeIds) : {}
+      // S758: a customized plate's option stock lines ride on the sale row; their items/sub-recipes
+      // are read alongside the recipe walk and fail the same way.
+      const [b, e] = await Promise.all([
+        soldRecipeIds.length > 0 ? explodeRecipeIngredients(supabase, soldRecipeIds) : {},
+        loadDeltaExplosion(supabase, depleting.map(s => s.ingredient_deltas)),
+      ])
+      breakdown = b; explosion = e
     } catch (err) {
       // The isCurrent guard belongs on the failure path too: without it a superseded load's error
       // replaced the report the reader was actually looking at with a red banner (S717).
@@ -237,7 +245,7 @@ export default function FifoReport() {
 
     // Consumption per MONTH, so each month's count settles what came before it (S756, D19).
     const consumedByPeriod = sumConsumptionByPeriod({
-      sales: depleting, breakdown, wastages, staffMeals, returnsByPeriodItem: returnedByPeriodItem,
+      sales: depleting, breakdown, explosion, wastages, staffMeals, returnsByPeriodItem: returnedByPeriodItem,
     })
 
     // ONE shared walk, not a second copy — Stock Ageing solves the same problem the same way and

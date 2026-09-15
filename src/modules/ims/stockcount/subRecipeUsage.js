@@ -59,6 +59,9 @@ export async function loadSubRecipeUsage(supabase, scopedFrom, periodId) {
     unusedSubRecipes: subMaster.map(r => r.name).sort((a, b) => a.localeCompare(b)),
   })
 
+  // Recipes only (S758, release 1): a customized sale's option stock lines
+  // (sales_entries.ingredient_deltas) that name a sub-recipe are NOT walked here, and the tab says so.
+  // Their raw items still reach the Raw Items tab through stock_movements.
   const depleting = selectDepletingSales(salesRows || []).filter(r => r.recipe_id && Number(r.qty_sold) > 0)
   if (depleting.length === 0) return noneUsed()
 

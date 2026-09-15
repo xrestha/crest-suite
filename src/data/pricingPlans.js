@@ -139,7 +139,7 @@ export const POS_PRICING = {
 // its own ingredients when IMS is on. Cannot be bought without POS (the database refuses it). The
 // shipped price is a placeholder the admin reprices in Settings > Plan Pricing like every other line.
 export const CUSTOMIZATION_PRICING = {
-  monthly: 1500, annual: 1125,
+  monthly: 2000, annual: 1500,
   requiresLabel: 'Requires Crest POS',
   features: [
     'Sizes & portions with their own price (Half / Full, Small / Large)',

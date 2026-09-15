@@ -31,7 +31,7 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 const DEFAULT_IMS_PRICES: Record<string, number> = { starter: 2000, growth: 2600, pro: 3500 }
 const DEFAULT_HR_PRICE = 2600
 const DEFAULT_POS_PRICE = 2000
-const DEFAULT_CUSTOMIZATION_PRICE = 1500
+const DEFAULT_CUSTOMIZATION_PRICE = 2000
 const DEFAULT_SUITE_PRICE = 2000
 
 function monthlyRate(base: number, billingCycle: string | null) {

@@ -10,6 +10,7 @@ import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
+import { loadDeltaExplosion, deltaItems } from '../../utils/orderLineIngredients'
 
 export async function computeInventoryVariance(clientId, period) {
   const results = await Promise.all([
@@ -22,7 +23,8 @@ export async function computeInventoryVariance(clientId, period) {
     scopedFrom('recipes', clientId, 'id'),
     // Comps INCLUDED — this is a consumption figure, not a revenue one. See the same note in
     // computeInventoryShrinkageTrend.js; Variance.js (which this mirrors) has never filtered them.
-    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold').eq('period_id', period.id).order('id')),
+    // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, ingredient_deltas').eq('period_id', period.id).order('id')),
   ])
   // Throw on a failed read so the section is named as failed instead of freezing a variance
   // table built on zeros into the immutable snapshot (S612).
@@ -34,13 +36,26 @@ export async function computeInventoryVariance(clientId, period) {
   const wasteMap = sum(wastages, 'qty'), closeMap = sum(closing, 'physical_qty')
 
   const recipeIds = (recipes || []).map(r => r.id)
-  const ingredientBreakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+  // The option-delta explosion (S758) throws on a failed read exactly like the recipe walk, so a
+  // failure names this section as failed rather than freezing a customized plate as its plain recipe.
+  const [ingredientBreakdown, explosion] = await Promise.all([
+    recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+    loadDeltaExplosion(supabase, (salesData || []).map(s => s.ingredient_deltas)),
+  ])
   const soldMap = {}; (salesData || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold || 0) })
   const theoreticalMap = {}
   Object.entries(ingredientBreakdown).forEach(([recipeId, rows]) => {
     const sold = soldMap[recipeId] || 0
     if (sold <= 0) return
     rows.forEach(({ item_id, qty }) => { theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + sold * qty })
+  })
+  // A customized plate consumes its options' stock lines too (S758): deltas × qty sold, signed, over
+  // the same rows the recipe usage above counts.
+  ;(salesData || []).forEach(s => {
+    if (!s.ingredient_deltas) return
+    const n = parseFloat(s.qty_sold || 0)
+    if (!n) return
+    deltaItems(s.ingredient_deltas, explosion).forEach(({ item_id, qty }) => { theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + n * qty })
   })
 
   let totalActualUsed = 0, totalTheoreticalUsed = 0, totalVarianceValue = 0, flaggedCount = 0

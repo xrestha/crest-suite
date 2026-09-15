@@ -29,6 +29,7 @@
 
 import { bsToAd, adToBs, adToBsSafe, daysInBsMonth } from '../../../utils/bsCalendar'
 import { nepalCivilDate } from '../../../shared/nepalTime'
+import { deltaItems } from '../../../utils/orderLineIngredients'
 
 export const AGE_BANDS = [
   { key: '0-30', label: '0–30 days', min: 0, max: 30 },
@@ -184,9 +185,10 @@ export function rollingWindow(allPeriods, selected, months = 12) {
  *
  * `sales` must already have been through `selectDepletingSalesAcrossPeriods` (S718) and carry
  * `period_id`; `breakdown` is `explodeRecipeIngredients`' `{ recipeId: [{ item_id, qty }] }`;
- * `returnsByPeriodItem` is `splitReturns(...).byPeriodItem`.
+ * `returnsByPeriodItem` is `splitReturns(...).byPeriodItem`; `explosion` is
+ * `loadDeltaExplosion`'s result for the sales rows' `ingredient_deltas` (null when none carry any).
  */
-export function sumConsumptionByPeriod({ sales, breakdown, wastages, staffMeals, returnsByPeriodItem } = {}) {
+export function sumConsumptionByPeriod({ sales, breakdown, wastages, staffMeals, returnsByPeriodItem, explosion = null } = {}) {
   const out = {}
   const add = (pid, itemId, q) => {
     if (!itemId || !(q > 0)) return
@@ -195,16 +197,40 @@ export function sumConsumptionByPeriod({ sales, breakdown, wastages, staffMeals,
     out[key][itemId] = (out[key][itemId] || 0) + q
   }
   const soldByPeriodRecipe = {}
+  // Crest Customization (S758): a customized plate's option deltas are SIGNED ("Half" takes momo
+  // off), so sales usage is netted per item before `add` drops what is not positive — adding each
+  // term on its own would keep the recipe's +10 momo and discard the option's −5.
+  const deltaSoldByKey = {}
+  const salesUse = {}
+  const bump = (pid, itemId, q) => {
+    if (!itemId || !q) return
+    const key = pid || '_'
+    if (!salesUse[key]) salesUse[key] = {}
+    salesUse[key][itemId] = (salesUse[key][itemId] || 0) + q
+  }
   for (const s of sales || []) {
     if (!s.recipe_id) continue
     const key = `${s.period_id || '_'}|${s.recipe_id}`
     soldByPeriodRecipe[key] = (soldByPeriodRecipe[key] || 0) + (parseFloat(s.qty_sold) || 0)
+    if (s.ingredient_deltas) {
+      const dKey = `${key}|${JSON.stringify(s.ingredient_deltas)}`
+      const e = deltaSoldByKey[dKey] || (deltaSoldByKey[dKey] = { pid: s.period_id || '_', deltas: s.ingredient_deltas, sold: 0 })
+      e.sold += parseFloat(s.qty_sold) || 0
+    }
   }
   for (const [key, sold] of Object.entries(soldByPeriodRecipe)) {
     // A period's net sales of a dish can go negative through a credit note; it consumes nothing.
     if (!(sold > 0)) continue
     const [pid, recipeId] = key.split('|')
-    for (const { item_id, qty } of (breakdown || {})[recipeId] || []) add(pid, item_id, sold * (parseFloat(qty) || 0))
+    for (const { item_id, qty } of (breakdown || {})[recipeId] || []) bump(pid, item_id, sold * (parseFloat(qty) || 0))
+  }
+  // Same net-negative rule for the options, per dish + selection.
+  for (const { pid, deltas, sold } of Object.values(deltaSoldByKey)) {
+    if (!(sold > 0)) continue
+    for (const { item_id, qty } of deltaItems(deltas, explosion)) bump(pid, item_id, sold * qty)
+  }
+  for (const [pid, byItem] of Object.entries(salesUse)) {
+    for (const [itemId, q] of Object.entries(byItem)) add(pid, itemId, q)
   }
   for (const w of wastages || []) add(w.period_id, w.item_id, parseFloat(w.qty) || 0)
   for (const m of staffMeals || []) add(m.period_id, m.item_id, parseFloat(m.qty) || 0)

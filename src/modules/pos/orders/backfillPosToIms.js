@@ -1,4 +1,5 @@
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { lineIngredientDeltas, loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 import { fetchAllRows, fetchAllRowsChunked, runChunkedByIds } from '../../../shared/fetchAllRows'
 import { daysInBsMonth, adToBs, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 
@@ -52,7 +53,9 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
   // is not unique (two bills close in the same second).
   const { data: orders, error: oErr } = await fetchAllRows(() => scopedFrom(
     'pos_orders',
-    'id, close_type, closed_at, discount_amount, pos_order_items(recipe_id, qty, unit_price, vat_rate, comped)'
+    // selection_key + the options snapshot (S758): a customized line posts its choices' stock lines
+    // exactly as the live close does.
+    'id, close_type, closed_at, discount_amount, pos_order_items(recipe_id, qty, unit_price, vat_rate, comped, selection_key, pos_order_item_options(ingredient_deltas))'
   )
     .eq('status', 'billed')
     .is('ims_posted_at', null)
@@ -104,6 +107,9 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
   // One explosion for every recipe across every order, rather than per order.
   const recipeIds = [...new Set(list.flatMap(o => (o.pos_order_items || []).map(i => i.recipe_id).filter(Boolean)))]
   const breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+  const lineDeltas = i => (i.selection_key ? lineIngredientDeltas(i.pos_order_item_options) : null)
+  const allDeltas = list.flatMap(o => (o.pos_order_items || []).map(lineDeltas).filter(Boolean))
+  const explosion = allDeltas.length > 0 ? await loadDeltaExplosion(supabase, allDeltas) : null
 
   // Everything each bill contributes, derived up front so the write pass below is pure batching.
   // An order with no recipe lines (an all-non-recipe bill) has nothing to post and is stamped so
@@ -140,6 +146,7 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
         unit_price: isComp ? i.unit_price : i.unit_price * discRatio,
         vat_rate: i.vat_rate ?? 0,
         pos_order_id: o.id,
+        ...(lineDeltas(i) ? { ingredient_deltas: lineDeltas(i) } : {}),
       }
     })
 
@@ -147,7 +154,8 @@ export async function backfillPosOrdersToIms({ supabase, scopedFrom, scopedInser
     const agg = { pos_sale: {}, pos_comp: {} }
     items.forEach(i => {
       const bucket = (wholeComp || i.comped) ? 'pos_comp' : 'pos_sale'
-      ;(breakdown[i.recipe_id] || []).forEach(({ item_id, qty }) => {
+      const extra = lineDeltas(i) ? deltaItems(lineDeltas(i), explosion) : []
+      ;[...(breakdown[i.recipe_id] || []), ...extra].forEach(({ item_id, qty }) => {
         agg[bucket][item_id] = (agg[bucket][item_id] || 0) + qty * i.qty
       })
     })

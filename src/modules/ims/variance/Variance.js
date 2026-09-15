@@ -11,6 +11,8 @@ import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { selectDepletingSales } from '../sales/salesDepletion'
+import { buildUsageMap } from '../stockcount/stockReportCalc'
+import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -154,7 +156,8 @@ export default function Variance() {
       // source + bs_day are needed for selectDepletingSales' POS-supersedes-manual dedup below.
       // Paged: a POS-heavy period's sales_entries crosses PostgREST's silent 1000-row cap, which
       // would truncate theoretical usage into a believable-but-low figure (S528/S529 class).
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
+      // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
       scopedFrom('recipes', 'id')
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
@@ -181,8 +184,14 @@ export default function Variance() {
     // The recipe walk throws on a failed read (S695) — before, it walked an empty tree, theoretical
     // usage came out as zero, and every item read as over-consumed by its whole actual usage.
     let breakdown = {}
+    let explosion = null
     try {
-      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+      // The option-delta explosion (S758) fails the same way the recipe walk does: a missing one
+      // would read a customized plate as its plain recipe, so it shares this catch.
+      ;[breakdown, explosion] = await Promise.all([
+        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+        loadDeltaExplosion(supabase, (sales || []).map(r => r.ingredient_deltas)),
+      ])
     } catch (err) {
       // The isCurrent guard belongs on the failure path too: without it a superseded load's
       // error replaces the report the reader is actually looking at with a red banner (S719).
@@ -224,18 +233,17 @@ export default function Variance() {
     // Contribution): every POS sale counts (comps included — they consumed stock), a manual row
     // counts only where POS didn't already sell that recipe that day, and credit-note reversals
     // never add usage.
-    const soldMap = {}
-    selectDepletingSales(sales || []).forEach(s => { soldMap[s.recipe_id] = (soldMap[s.recipe_id] || 0) + parseFloat(s.qty_sold) })
-
     // breakdown[recipeId] is already yield_pct-adjusted, per-one-portion raw-ingredient qty
-    // (recursed through any sub-recipe nesting) — just scale by how many portions actually sold.
-    const theoreticalMap = {}
-    Object.entries(breakdown).forEach(([recipeId, rows]) => {
-      const sold = soldMap[recipeId] || 0
-      if (sold <= 0) return
-      rows.forEach(({ item_id, qty }) => {
-        theoreticalMap[item_id] = (theoreticalMap[item_id] || 0) + sold * qty
-      })
+    // (recursed through any sub-recipe nesting) — buildUsageMap scales it by portions sold over the
+    // depleting rows only, and adds each customized row's option deltas × qty (S758): a Half or an
+    // extra-cheese plate consumes its options' stock lines, not the plain recipe.
+    const theoreticalMap = buildUsageMap(sales || [], breakdown, explosion)
+
+    // An item reached only through an option (extra cheese on a dish whose recipe has none) is
+    // still something sales explain, so it is judged rather than parked as "no recipe linked" (S758).
+    selectDepletingSales(sales || []).forEach(s => {
+      if (!s.ingredient_deltas) return
+      deltaItems(s.ingredient_deltas, explosion).forEach(({ item_id }) => linkedItemIds.add(item_id))
     })
 
     const rows = (items || []).map(item => {

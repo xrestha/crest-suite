@@ -26,7 +26,7 @@ import {
   FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, LifeBuoy,
   History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart, ListPlus,
   LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree,
-  ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
+  ListChecks, ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
   Receipt, ReceiptText, RefreshCw, Scale, ScrollText, Search, Settings, Settings2,
   ShieldCheck, ShoppingCart, Sigma, SlidersHorizontal, Store, Tag, Tags, Target, Timer,
   Trash2, TrendingUp, TriangleAlert, Trophy, Truck, Undo2, UserCheck, Users, Users2,
@@ -179,10 +179,11 @@ const POS_GROUPS = [
 // Crest Customization (S758) — its own panel, an add-on that exists only on a client with POS.
 // Option Groups opens for the menu-price set (menuPricingAccess), the same people who may change a
 // dish's price, which is exactly who the database lets write these tables. The Customization
-// Report joins this list in stage 8.
+// Report is for the same set (owner decision: managers and the Owner).
 const CUSTOMIZATION_GROUPS = [
   { key: 'cust-setup', label: null, items: [
     { to: '/customization/groups', label: 'Option Groups', icon: ListPlus, menuPricingAccess: true },
+    { to: '/customization/report', label: 'Customization Report', icon: ListChecks, menuPricingAccess: true },
   ]},
 ]
 const HR_GROUPS = [

@@ -1,5 +1,6 @@
 import {
   exFromIncl, inclFromEx, effectiveRule, ruleText, countAllowed, optionsPriceDelta, signedPrice,
+  describeSelection, groupsForDish, defaultSelection, selectionProblems, lowestDishPrice,
 } from './optionPricing'
 
 describe('VAT conversion', () => {
@@ -63,5 +64,55 @@ describe('signedPrice', () => {
     expect(signedPrice(50)).toBe('+NPR 50')
     expect(signedPrice(-100)).toBe('−NPR 100')
     expect(signedPrice(0)).toBe('')
+  })
+})
+
+// The till's twin of save_pos_order_items v5 / pos_price_selection: same order, same free picks,
+// same "(incl.)" summary — so the price on the choice window is the price the bill will say.
+describe('the menu-side selection helpers (S758 stage 5)', () => {
+  const groups = [
+    { id: 'g-size', name: 'Size', kind: 'size', min_select: 1, max_select: 1, included_count: 0, sort: 0, is_active: true },
+    { id: 'g-extra', name: 'Extras', kind: 'addon', min_select: 0, max_select: 3, included_count: 1, sort: 1, is_active: true },
+    { id: 'g-empty', name: 'Empty', kind: 'choice', min_select: 1, max_select: 1, included_count: 0, sort: 2, is_active: true },
+  ]
+  const options = [
+    { id: 'half', group_id: 'g-size', name: 'Half', price_delta: -100, sort: 0, is_active: true },
+    { id: 'full', group_id: 'g-size', name: 'Full', price_delta: 0, sort: 1, is_active: true, is_default: true },
+    { id: 'egg', group_id: 'g-extra', name: 'Add egg', price_delta: 40, sort: 0, is_active: true },
+    { id: 'cheese', group_id: 'g-extra', name: 'Extra cheese', price_delta: 50, sort: 1, is_active: true },
+    { id: 'hidden', group_id: 'g-empty', name: 'Hidden', price_delta: 0, sort: 0, is_active: false },
+  ]
+  const attachments = [
+    { recipe_id: 'momo', group_id: 'g-extra', sort: 1 },
+    { recipe_id: 'momo', group_id: 'g-size', sort: 0 },
+    { recipe_id: 'momo', group_id: 'g-empty', sort: 2 },
+  ]
+  const catalog = { groups, options, attachments }
+  const dg = groupsForDish('momo', catalog)
+  const maps = {
+    optionsById: Object.fromEntries(options.map(o => [o.id, o])),
+    groupsById: Object.fromEntries(groups.map(g => [g.id, g])),
+    attachByGroup: Object.fromEntries(attachments.map(a => [a.group_id, a])),
+  }
+
+  it('offers only groups with something to pick, in the dish order', () => {
+    expect(dg.map(d => d.group.name)).toEqual(['Size', 'Extras'])
+  })
+
+  it('prices and summarises like the server: first extra free, marked (incl.)', () => {
+    const d = describeSelection(['cheese', 'half', 'egg'], maps)
+    expect(d.delta).toBe(-50)
+    expect(d.summary).toBe('Half · Add egg (incl.) · Extra cheese')
+    expect(d.options.map(o => o.price_delta)).toEqual([-100, 0, 50])
+  })
+
+  it('starts from the pre-selected choice and names a missing required pick', () => {
+    expect(defaultSelection(dg)).toEqual(['full'])
+    expect(selectionProblems(dg, ['egg']).map(p => p.group.name)).toEqual(['Size'])
+    expect(selectionProblems(dg, ['half', 'egg'])).toEqual([])
+  })
+
+  it('"From" is the cheapest valid version of the dish', () => {
+    expect(lowestDishPrice(250, dg)).toBe(150)
   })
 })

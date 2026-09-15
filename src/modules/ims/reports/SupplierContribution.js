@@ -29,6 +29,7 @@ import PeriodScope from '../../../components/PeriodScope'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import {
   vendorNetByItem, vendorNetTotals, attributeConsumption, NO_VENDOR, UNATTRIBUTED,
@@ -130,7 +131,7 @@ export default function SupplierContribution() {
       // sales_entries and purchase_entries are period-scoped, not client-scoped, so they stay on
       // raw supabase.from() — scopedDb deliberately rejects them.
       fetchAllRows(() => supabase.from('sales_entries')
-        .select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
+        .select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
       // `id` and `purchase_entry_id` are the join keys `returnBase` prices a return through, and
       // omitting either is a SILENT no-op rather than an error: `netFactors` keys on the purchase
       // row's `id`, so without it every factor lookup misses and every return falls back to its
@@ -196,8 +197,14 @@ export default function SupplierContribution() {
     // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and the
     // whole period's consumed value silently came out as NPR 0.
     let breakdown = {}
+    let explosion = null
     try {
-      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+      // S758: option stock lines on customized sales are resolved alongside, under the same guard.
+      const [b, e] = await Promise.all([
+        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+        loadDeltaExplosion(supabase, depleting.map(s => s.ingredient_deltas)),
+      ])
+      breakdown = b; explosion = e
     } catch (err) {
       if (!periodReq.isCurrent(periodId)) return
       setLoadError(err); setRows([]); setUnvalued({ items: 0, recipes: [] }); setTotals({ attributed: 0, consumed: 0, unattributed: 0 }); return
@@ -217,13 +224,26 @@ export default function SupplierContribution() {
     // filter. A rollup that cannot claim a row must say so (S567), and this one said nothing.
     const unvaluedItemIds = new Set()
     const unvaluedRecipeIds = new Set()
+    // Crest Customization (S758): a customized sale's signed option deltas join its dish's usage
+    // BEFORE valuing, so "Half" nets against the recipe's portion instead of being dropped or
+    // valued as a separate negative line.
+    const usedByRecipe = {}
     for (const [recipeId, ingredients] of Object.entries(breakdown)) {
       const sold = soldByRecipe[recipeId] || 0
       if (sold <= 0) continue
-      for (const { item_id, qty } of ingredients) {
+      const u = usedByRecipe[recipeId] = usedByRecipe[recipeId] || {}
+      for (const { item_id, qty } of ingredients) u[item_id] = (u[item_id] || 0) + sold * qty
+    }
+    for (const s of depleting) {
+      if (!s.ingredient_deltas || !((soldByRecipe[s.recipe_id] || 0) > 0)) continue
+      const n = parseFloat(s.qty_sold) || 0
+      const u = usedByRecipe[s.recipe_id] = usedByRecipe[s.recipe_id] || {}
+      for (const { item_id, qty } of deltaItems(s.ingredient_deltas, explosion)) u[item_id] = (u[item_id] || 0) + n * qty
+    }
+    for (const [recipeId, used] of Object.entries(usedByRecipe)) {
+      for (const [item_id, usedQty] of Object.entries(used)) {
         const item = itemById[item_id]
         if (!item) { unvaluedItemIds.add(item_id); unvaluedRecipeIds.add(recipeId); continue }
-        const usedQty = sold * qty
         const value = usedQty * (parseFloat(item.per_uom_rate) || 0)
         const c = consumedByItem[item_id] = consumedByItem[item_id] || { qty: 0, value: 0, byRecipe: {} }
         c.qty += usedQty

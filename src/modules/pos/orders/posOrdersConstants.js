@@ -45,11 +45,24 @@ export const lineOptionIds = i => {
 // (table tile, takeaway card, offline-conflict recovery) and the stale-order reload cannot drift on
 // what an order carries. items_version and sent_qty need migration 20260916100000.
 export const OPEN_ORDER_SELECT =
-  'id, order_no, covers, status, items_version, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes)'
+  'id, order_no, covers, status, items_version, pos_order_items(id, recipe_id, name, category, qty, unit_price, vat_rate, sent_to_kot, sent_qty, notes, ' +
+  // Crest Customization (S758, migration 20260919130000): the line's selection and its frozen choices.
+  'selection_key, base_unit_price, options_delta, option_summary, ' +
+  'pos_order_item_options(option_id, group_id, group_name, group_kind, option_name, kitchen_name, is_removal, price_delta, included, ingredient_deltas, sort))'
 
 // A stored line as the cart holds it. sent_qty is the stored count, falling back to the whole qty for
-// a line flagged sent before the column existed (its sent_qty defaulted to 0).
-export const cartLineFromStored = i => ({ ...i, sent_qty: i.sent_qty || (i.sent_to_kot ? i.qty : 0) })
+// a line flagged sent before the column existed (its sent_qty defaulted to 0). The embedded options
+// snapshot becomes `options` (in display order) and the selection key's ids `option_ids`, so a
+// reopened customized line is the same shape the choice window builds.
+export const cartLineFromStored = i => {
+  const { pos_order_item_options: snap, ...line } = i
+  const out = { ...line, sent_qty: i.sent_qty || (i.sent_to_kot ? i.qty : 0) }
+  if (line.selection_key) {
+    out.option_ids = String(line.selection_key).split('+').filter(Boolean)
+    out.options = [...(snap || line.options || [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+  }
+  return out
+}
 
 // The identity of a cart line, and the ONE place it is decided. A line is its recipe — unless it
 // carries a customization (Crest Customization, `selection_key` = the chosen option ids, sorted and

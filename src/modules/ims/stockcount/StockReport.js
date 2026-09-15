@@ -7,6 +7,7 @@ import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
+import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -93,7 +94,8 @@ export default function StockReport() {
       // buildStockRows — the same rule Variance, Theoretical Variance and Shrinkage apply. Read
       // raw, a day sold in both POS and manual entry consumed its ingredients twice here, and a
       // credit note (negative qty, 'pos_credit') put stock back on the shelf (S695).
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', periodId).order('id')),
+      // ingredient_deltas: a customized plate also consumes its options' stock lines (S758).
+      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
       // One row per item per client — a truncated read here silently turns "below par" into "no
       // par set" for the tail of the book, so Low Stock reads low on both this page and Reorder.
       fetchAllRows(() => scopedFrom('par_levels', 'item_id, par_qty').order('id')),
@@ -118,15 +120,20 @@ export default function StockReport() {
     // overstating the computed on-hand qty for any item with trim/prep loss. It THROWS on a
     // failed read (S695) — before that a dead recipe_ingredients read walked an empty tree, usage
     // came out as zero for every dish, and on-hand climbed to opening + purchases with no banner.
+    // The option stock-line walk (S758) throws the same way and fails the report the same way.
     let breakdown = {}
+    let explosion = null
     try {
-      breakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+      ;[breakdown, explosion] = await Promise.all([
+        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+        loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+      ])
     } catch (err) {
       if (!periodReq.isCurrent(periodId)) return
       setLoadError(err); setRows([]); return
     }
 
-    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars })
+    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion })
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setRows(built)

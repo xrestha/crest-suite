@@ -10,6 +10,7 @@ import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { calcAmount, hourlyRateOf, tallyAttendance, isSsfContributor } from '../hr/payroll/payrollCompute'
 import { SSF_CAP, SSF_EMPLOYER_PCT, OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
+import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts } from '../ims/reports/supplierAttribution'
 import { computeOrderAmounts, computeCategoryAmounts } from '../../utils/posBillingMath'
@@ -67,8 +68,9 @@ async function computeImsSection(clientId, period) {
     // reorder shortfall built on it below — silently understated by the comp volume, and the
     // section disagreed with the live Variance/Reorder pages, which have never filtered comps.
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount').eq('period_id', period.id).neq('source', 'pos_comp').order('id')),
-    // bs_day + source feed the shared depletion rule in buildStockRows (S696).
-    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source').eq('period_id', period.id).order('id')),
+    // bs_day + source feed the shared depletion rule in buildStockRows (S696); ingredient_deltas
+    // because a customized plate also consumes its options' stock lines (S758).
+    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
     scopedFrom('recipes', clientId, 'id, selling_price'),
     supabase.from('overheads').select('amount').eq('period_id', period.id).eq('bucket', 'overhead'),
     fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', period.id).order('id')),
@@ -129,7 +131,12 @@ async function computeImsSection(clientId, period) {
   })
 
   const recipeIds = (recipes || []).map(r => r.id)
-  const ingredientBreakdown = recipeIds.length > 0 ? await explodeRecipeIngredients(supabase, recipeIds) : {}
+  // Both walks throw on a failed read, so runSection records the IMS section as failed rather
+  // than freezing zero usage; the delta walk adds customized plates' option stock lines (S758).
+  const [ingredientBreakdown, deltaExplosion] = await Promise.all([
+    recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+    loadDeltaExplosion(supabase, (consumptionSales || []).map(s => s.ingredient_deltas)),
+  ])
   // consumptionSales, not salesData — comps consumed ingredients even though they earned nothing.
   // The on-hand / below-par figures come from the ONE calculation the live Reorder Report and
   // both dashboards use (S696, schema v4); v3 snapshots carried this section's own copy, which
@@ -138,7 +145,7 @@ async function computeImsSection(clientId, period) {
   const stockRows = buildStockRows({
     items: (items || []).filter(i => !i.is_sub_recipe), // items query is already filtered to is_active=true
     opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
-    sales: consumptionSales, breakdown: ingredientBreakdown, pars: parLevels,
+    sales: consumptionSales, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
   })
   const { count: reorderCount, estValueTotal: reorderEstValueTotal } = summarizeReorder(stockRows)
 
@@ -550,7 +557,12 @@ async function computeTrendSection(clientId, period, currentPartial) {
 // their bill's discounted rate — including returns against an earlier month's bill — rather than list
 // price, returns carry their own payment_method in the cash/credit split (every return had read as
 // Cash), and the returns read is paged. A v6 and a v7 vendor section for one month can differ.
-export const CURRENT_SCHEMA_VERSION = 7
+// 8 (S758, Crest Customization): no shape change; theoretical usage — and so the reorder figure,
+// item variance and shrinkage trend — now adds each customized plate's option stock lines
+// (sales_entries.ingredient_deltas: "+30 g cheese", "−5 pcs momo" for a Half). NULL on every sale
+// without options, so a month with no customized plates computes exactly as v7 did; a month with
+// them does not, and the version is the only trace of that.
+export const CURRENT_SCHEMA_VERSION = 8
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean
