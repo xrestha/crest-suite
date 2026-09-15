@@ -180,6 +180,7 @@ export default function AdminClients() {
       ims_enabled: true,
       hr_enabled: true,
       pos_enabled: true,
+      customization_enabled: true, // owner decision (S758): trials try Customization too
       is_trial: true,
       // Hand-onboarded by the admin creating it — approved by definition (S697). Without this
       // stamp getAccessState() would hold the new client on the "we will call you" screen.
@@ -693,6 +694,10 @@ export default function AdminClients() {
                       { key: 'IMS', enabled: c.ims_enabled !== false, plan: c.plan, color: 'var(--theme-accent-ink)', borderRgba: 'var(--theme-focus-ring)' },
                       { key: 'HR',  enabled: !!c.hr_enabled,          plan: null,   color: 'var(--theme-green-text)', borderRgba: 'color-mix(in srgb, var(--theme-green) 35%, transparent)' },
                       { key: 'POS', enabled: !!c.pos_enabled,         plan: null,   color: 'var(--theme-purple-text)', borderRgba: 'color-mix(in srgb, var(--theme-purple) 35%, transparent)' },
+                      // Customization (S758) is an add-on on POS — a billed axis, so it gets a
+                      // pill in the same row (access-control.md: what a client pays for is
+                      // visible on the screen that bills it). Reads as on only while POS is on.
+                      { key: 'CUSTOM', enabled: !!c.pos_enabled && !!c.customization_enabled, plan: null, color: 'var(--theme-amber-text)', borderRgba: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)' },
                     ].map(m => (
                       // minWidth + centred text so IMS/HR/POS line up as three columns down the
                       // list. Without it the pills are content-width, so "IMS · Starter" and

@@ -44,6 +44,7 @@ export function clientMrrBreakdown(c, planPrices) {
   const imsPrices = prices.ims || DEFAULT_PLAN_PRICES.ims
   const hrPrice   = prices.hr ?? DEFAULT_PLAN_PRICES.hr
   const posPrice  = prices.pos ?? DEFAULT_PLAN_PRICES.pos
+  const custPrice = prices.customization ?? DEFAULT_PLAN_PRICES.customization
   const suitePrice = prices.suite ?? DEFAULT_PLAN_PRICES.suite
 
   const imsEnd    = c.ims_ends_at || c.subscription_ends_at
@@ -70,8 +71,16 @@ export function clientMrrBreakdown(c, planPrices) {
   if (windowOpen(c.hr_enabled, c.hr_ends_at)) {
     lines.push({ key: 'hr', label: 'HR', amount: monthlyRate(hrPrice, c.billing_cycle) })
   }
-  if (windowOpen(c.pos_enabled, c.pos_ends_at)) {
+  const posActive = windowOpen(c.pos_enabled, c.pos_ends_at)
+  if (posActive) {
     lines.push({ key: 'pos', label: 'POS', amount: monthlyRate(posPrice, c.billing_cycle) })
+  }
+  // Customization (S758) is an add-on ON POS: it bills only while its own window is open AND POS
+  // is live. The database refuses the flag without pos_enabled, but the DATE is the admin's, and
+  // a lapsed POS with a future customization_ends_at must not keep billing a module nothing can
+  // reach.
+  if (posActive && windowOpen(c.customization_enabled, c.customization_ends_at)) {
+    lines.push({ key: 'customization', label: 'Customization', amount: monthlyRate(custPrice, c.billing_cycle) })
   }
   if (suiteActive) {
     // Suite is priced in Settings > Plan Pricing like the modules (S701) — it used to be the one

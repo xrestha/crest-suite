@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import SupportContactLine from './SupportContactLine'
 
-const MODULE_LABELS = { ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS' }
+const MODULE_LABELS = { ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS', customization: 'Crest Customization' }
 
 /**
  * What a reader sees on a page that belongs to a module their subscription does not include.

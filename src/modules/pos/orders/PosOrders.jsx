@@ -37,7 +37,7 @@ import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
   OPEN_ORDER_SELECT, cartLineFromStored, missingFromServer, mergeUnsentLines, menuDrift, withServerLineFields,
-  storedLinesMatchPayload,
+  storedLinesMatchPayload, lineKeyOf,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS,
 } from './posOrdersConstants'
@@ -230,14 +230,15 @@ export default function PosOrders() {
   // Item-level comp (Pay tab, Supervisor+) — { [recipe_id]: qty comped }, excluded from this bill
   // and printed on a separate mini Complimentary Slip instead, while the rest (the remaining qty
   // on that same line, if any) bills normally. Distinct from the whole-order Complimentary tab.
-  // Keyed by recipe_id, not the item row's own id — cart items freshly added this session (via
-  // addItem()) never carry a real pos_order_items.id until re-fetched from the DB, so keying on
-  // .id meant every item shared the same `undefined` key and toggling one ticked them all.
-  // recipe_id is safe: addItem() always merges a re-tapped recipe into its existing line, so it's
-  // unique per order regardless of whether the row has synced yet. A qty less than the line's
-  // full qty is a partial comp — closeOrder splits that line's DB row in two (paid remainder +
-  // a new comped row) rather than marking the whole thing comped.
-  const [compQtyByRecipe, setCompQtyByRecipe] = useState({})
+  // Keyed by lineKeyOf (recipe id, plus the customization when there is one), not the item row's
+  // own id — cart items freshly added this session (via addItem()) never carry a real
+  // pos_order_items.id until re-fetched from the DB, so keying on .id meant every item shared the
+  // same `undefined` key and toggling one ticked them all. The line key is safe: addItem() always
+  // merges a re-tapped line into its existing row, so it's unique per order regardless of whether
+  // the row has synced yet. A qty less than the line's full qty is a partial comp — closeOrder
+  // splits that line's DB row in two (paid remainder + a new comped row) rather than marking the
+  // whole thing comped.
+  const [compQtyByLine, setCompQtyByLine] = useState({})
   const [itemCompReason, setItemCompReason] = useState('')
   const [itemsExpanded,  setItemsExpanded]  = useState(false) // collapsed by default — see render site
   // Buyer details used to always render 4 fields on every single Cash payment, on top of the
@@ -505,11 +506,11 @@ export default function PosOrders() {
   // A line with a partial comp qty (less than its full qty) contributes to BOTH arrays below —
   // e.g. "3 x Veg Momo" with 1 comped becomes a comped row of qty 1 and a payable row of qty 2.
   const compedOrderItems = orderItems
-    .filter(i => (compQtyByRecipe[i.recipe_id] || 0) > 0)
-    .map(i => ({ ...i, qty: Math.min(compQtyByRecipe[i.recipe_id], i.qty) }))
+    .filter(i => (compQtyByLine[lineKeyOf(i)] || 0) > 0)
+    .map(i => ({ ...i, qty: Math.min(compQtyByLine[lineKeyOf(i)], i.qty) }))
   const payableOrderItems = orderItems
     .map(i => {
-      const compQty = Math.min(compQtyByRecipe[i.recipe_id] || 0, i.qty)
+      const compQty = Math.min(compQtyByLine[lineKeyOf(i)] || 0, i.qty)
       return compQty > 0 ? { ...i, qty: i.qty - compQty } : i
     })
     .filter(i => i.qty > 0)
@@ -966,12 +967,13 @@ export default function PosOrders() {
     } catch (_) { /* audio blocked or unsupported — visual banner still shows */ }
   }
 
-  // Merges one guest-requested item into the local cart, same dedup-by-recipe_id logic as
+  // Merges one guest-requested item into the local cart, same dedup-by-line-key logic as
   // addItem() — but at whatever qty the guest asked for (addItem always adds exactly 1), and
   // without triggering the upsell suggestion engine (this isn't a staff menu tap).
   function mergeGuestItem(it) {
     setOrderItems(prev => {
-      const idx = prev.findIndex(i => i.recipe_id === it.recipe_id)
+      const key = lineKeyOf(it)
+      const idx = prev.findIndex(i => lineKeyOf(i) === key)
       if (idx >= 0) {
         // The cart holds one line per recipe_id, so a guest's note ("no onion — allergy") has
         // nowhere to go but onto the existing line. It used to be dropped here outright (S754),
@@ -1473,11 +1475,11 @@ export default function PosOrders() {
     setMsg(''); setView('order'); loadMenu()
   }
 
-  // The cart as a comparable map, for the unsaved-changes check on ← (S754). Keyed by recipe_id
-  // (one line per recipe), and only what a save would change — qty and note, never the sent flag.
+  // The cart as a comparable map, for the unsaved-changes check on ← (S754). Keyed by line
+  // (recipe plus customization), and only what a save would change — qty and note, never the sent flag.
   function cartKeyMap(items) {
     const m = new Map()
-    for (const i of items || []) m.set(i.recipe_id || `name:${i.name}`, `${i.qty}|${(i.notes || '').trim()}`)
+    for (const i of items || []) m.set(lineKeyOf(i), `${i.qty}|${(i.notes || '').trim()}`)
     return m
   }
   function markCartSaved(items) { savedItemsRef.current = cartKeyMap(items) }
@@ -1630,7 +1632,8 @@ export default function PosOrders() {
   function addItem(recipe) {
     const vat = vatReg ? vatOf(recipe) : 0
     setOrderItems(prev => {
-      const idx = prev.findIndex(i => i.recipe_id === recipe.id)
+      // A plain tap is the un-customized line of this recipe — it never merges into a customized one.
+      const idx = prev.findIndex(i => lineKeyOf(i) === recipe.id)
       if (idx >= 0) {
         return prev.map((item, n) => n === idx
           ? {
@@ -1811,8 +1814,7 @@ export default function PosOrders() {
     const isNewOrder = !oid
 
     const snapshot = orderItems
-    const lineKey = i => i.recipe_id || `name:${i.name}`
-    const isSent = sendKeys === 'all' ? () => true : sendKeys ? i => sendKeys.has(lineKey(i)) : () => false
+    const isSent = sendKeys === 'all' ? () => true : sendKeys ? i => sendKeys.has(lineKeyOf(i)) : () => false
     const savedLines = snapshot.map(i => (isSent(i) ? { ...i, sent_to_kot: true, sent_qty: i.qty } : i))
     const itemsPayload = savedLines.map(toItemPayload)
 
@@ -2103,7 +2105,7 @@ export default function PosOrders() {
     const botItems = unsentItems.filter(i =>  botCategories.has(i.category || 'Other'))
     savingRef.current = true
     setSaving(true); setMsg('')
-    const saved = await performSave({ sendKeys: new Set(unsentItems.map(i => i.recipe_id || `name:${i.name}`)) })
+    const saved = await performSave({ sendKeys: new Set(unsentItems.map(lineKeyOf)) })
     if (!saved.ok) {
       savingRef.current = false; setSaving(false)
       // Nothing printed. Whether the save landed is not known on a dropped connection — pressing Send
@@ -2187,11 +2189,11 @@ export default function PosOrders() {
     if (savingRef.current) return
     savingRef.current = true
     setSaving(true); setMsg('')
-    // This station's unsent lines are marked sent IN the save (matched by recipe — one line per recipe
-    // on an order), so the print below is gated on the server holding them as sent, exactly as the
+    // This station's unsent lines are marked sent IN the save (matched by line key — recipe plus
+    // customization), so the print below is gated on the server holding them as sent, exactly as the
     // first-save auto-send is: a printed ticket the server does not consider sent is the shape that
     // gets a dish cooked twice. Online and offline alike — the queued payload is the same rows.
-    const saved = await performSave({ sendKeys: new Set(unsentItems.map(i => i.recipe_id || `name:${i.name}`)) })
+    const saved = await performSave({ sendKeys: new Set(unsentItems.map(lineKeyOf)) })
     if (!saved.ok) {
       savingRef.current = false; setSaving(false)
       if (!saved.handled) setMsg(`error:${station} did not go through — nothing printed. Press ${station} again. ${errorText(saved.error, 'staff')}`)
@@ -2213,16 +2215,15 @@ export default function PosOrders() {
       : `error:${station} sent to the station, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.`)
   }
 
-  // Flips the sent flag on exactly the lines that went out, matched by recipe AND the quantity and
+  // Flips the sent flag on exactly the lines that went out, matched by line key AND the quantity and
   // note that were sent (S754). This used to be `setOrderItems(snapshot.map(...))` after the
   // awaits, so a dish tapped in while Send was in flight simply vanished from the cart. A line
   // that changed meanwhile stays unsent, carrying what the station already has as its baseline —
   // so its next ticket reads "+1" (or a change) rather than the whole quantity again.
   function markLinesSent(sentLines) {
-    const keyOf = i => i.recipe_id || `name:${i.name}`
-    const sentByKey = new Map(sentLines.map(i => [keyOf(i), i]))
+    const sentByKey = new Map(sentLines.map(i => [lineKeyOf(i), i]))
     setOrderItems(prev => prev.map(i => {
-      const s = sentByKey.get(keyOf(i))
+      const s = sentByKey.get(lineKeyOf(i))
       if (!s) return i
       if (i.qty === s.qty && (i.notes || '') === (s.notes || '')) return { ...i, sent_to_kot: true, sent_qty: i.qty }
       return { ...i, sent_to_kot: false, sent_qty: s.qty }
@@ -2361,7 +2362,7 @@ export default function PosOrders() {
     setDiscountStr(''); setDiscountMode('amount'); setDiscountReason('')
     setCloseMsg('')
     setCompCostMap({})
-    setCompQtyByRecipe({}); setItemCompReason(''); setItemsExpanded(false)
+    setCompQtyByLine({}); setItemCompReason(''); setItemsExpanded(false)
     setHscMap({})
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
     setLoyaltyBalance(null); setRedeemStr(''); setLoyaltyLookupMsg('')
@@ -2507,7 +2508,7 @@ export default function PosOrders() {
   // amount with nothing on either page saying so. The bill must still close — refusing a sale
   // mid-service is not acceptable — but the caller now stamps ims_posted_at only on success, and
   // the floor view surfaces whatever didn't post so it can be backfilled from Periods.
-  async function writeSalesEntries(closeType, compQtyMap = compQtyByRecipe) {
+  async function writeSalesEntries(closeType, compQtyMap = compQtyByLine) {
     const { data: periods, error: perErr } = await scopedFrom('monthly_periods')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
     // Returning false is correct either way — the bill still closes and gets chased by the
@@ -2525,9 +2526,9 @@ export default function PosOrders() {
     const soldItems = orderItems.filter(i => i.recipe_id)
     // Split each line's qty into its sold and comped portions — a whole-order Complimentary
     // close (closeType==='writeoff') comps the entire qty; an otherwise-paid order only comps
-    // whatever the Pay tab's item-level comp picker recorded (compQtyMap, keyed by recipe_id).
+    // whatever the Pay tab's item-level comp picker recorded (compQtyMap, keyed by lineKeyOf).
     const qtySplit = soldItems.map(i => {
-      const compQty = closeType === 'writeoff' ? i.qty : Math.min(compQtyMap[i.recipe_id] || 0, i.qty)
+      const compQty = closeType === 'writeoff' ? i.qty : Math.min(compQtyMap[lineKeyOf(i)] || 0, i.qty)
       return { ...i, compQty, saleQty: i.qty - compQty }
     })
     // Recorded under separate sources (not both as 'pos') so revenue-facing IMS reports
@@ -2720,7 +2721,7 @@ export default function PosOrders() {
         const fullCompRecipeIds = []
         const partialComps = []
         for (const i of orderItems) {
-          const compQty = Math.min(compQtyByRecipe[i.recipe_id] || 0, i.qty)
+          const compQty = Math.min(compQtyByLine[lineKeyOf(i)] || 0, i.qty)
           if (compQty <= 0) continue
           if (compQty === i.qty) fullCompRecipeIds.push(i.recipe_id)
           else partialComps.push({
@@ -4045,11 +4046,12 @@ The tables were left occupied rather than freed with their orders still open.`)
                 <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: hasItemComp ? 10 : 0 }}>
                   {orderItems.map(i => {
-                    const compQty = Math.min(compQtyByRecipe[i.recipe_id] || 0, i.qty)
+                    const lk = lineKeyOf(i)
+                    const compQty = Math.min(compQtyByLine[lk] || 0, i.qty)
                     const comped = compQty > 0
-                    const setQty = next => setCompQtyByRecipe(prev => ({ ...prev, [i.recipe_id]: Math.max(0, Math.min(i.qty, next)) }))
+                    const setQty = next => setCompQtyByLine(prev => ({ ...prev, [lk]: Math.max(0, Math.min(i.qty, next)) }))
                     return (
-                      <div key={i.recipe_id} style={{
+                      <div key={lk} style={{
                         display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: '5px 8px', borderRadius: 'var(--radius-sm)',
                         background: comped ? 'var(--theme-input-bg)' : 'transparent',
                         color: comped ? 'var(--theme-amber-text)' : 'var(--theme-text2)',

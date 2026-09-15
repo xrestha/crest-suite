@@ -1,4 +1,4 @@
-import { resolvePricing, annualOf, IMS_TIERS, HR_PRICING, POS_PRICING, SUITE_ADDON, DEFAULT_PLAN_PRICES } from './pricingPlans'
+import { resolvePricing, annualOf, IMS_TIERS, HR_PRICING, POS_PRICING, CUSTOMIZATION_PRICING, SUITE_ADDON, DEFAULT_PLAN_PRICES } from './pricingPlans'
 
 // resolvePricing is what stands between the admin's Settings > Plan Pricing figures and every
 // screen that prints money — the public pricing page, Help's Plan & Pricing tab, the admin's own
@@ -14,6 +14,7 @@ describe('no override', () => {
     expect(tierOf(p, 'growth').monthly).toBe(IMS_TIERS[1].monthly)
     expect(p.hr.monthly).toBe(HR_PRICING.monthly)
     expect(p.pos.monthly).toBe(POS_PRICING.monthly)
+    expect(p.customization.monthly).toBe(CUSTOMIZATION_PRICING.monthly)
     expect(p.suite.monthly).toBe(SUITE_ADDON.monthly)
   })
 
@@ -57,6 +58,14 @@ describe('an override', () => {
     const p = resolvePricing({ suite: 3000 })
     expect(p.suite.monthly).toBe(3000)
     expect(p.suite.annual).toBe(2250)
+  })
+
+  it('prices the Customization add-on (S758) per field like the rest', () => {
+    const p = resolvePricing({ customization: 1000 })
+    expect(p.customization.monthly).toBe(1000)
+    expect(p.customization.annual).toBe(750)
+    expect(p.customization.features).toEqual(CUSTOMIZATION_PRICING.features)
+    expect(p.pos.monthly).toBe(POS_PRICING.monthly)
   })
 })
 
@@ -106,6 +115,7 @@ describe('annualOf', () => {
     IMS_TIERS.forEach(t => expect(t.annual).toBe(annualOf(t.monthly)))
     expect(HR_PRICING.annual).toBe(annualOf(HR_PRICING.monthly))
     expect(POS_PRICING.annual).toBe(annualOf(POS_PRICING.monthly))
+    expect(CUSTOMIZATION_PRICING.annual).toBe(annualOf(CUSTOMIZATION_PRICING.monthly))
     expect(SUITE_ADDON.annual).toBe(annualOf(SUITE_ADDON.monthly))
   })
 })

@@ -19,16 +19,18 @@ import { STATION_TEAM_HOME } from '../shared/posTeamAccess'
  * point for it. See shared/imsCountAccess.js.
  */
 export default function ModuleGate({ children, module, anyOf }) {
-  const { isAdmin, imsEnabled, hrEnabled, posEnabled, canReachPosPath } = useAuth()
+  const { isAdmin, imsEnabled, hrEnabled, posEnabled, customizationEnabled, canReachPosPath } = useAuth()
   const { pathname } = useLocation()
 
   if (isAdmin) return children
 
-  const enabled = { ims: imsEnabled, hr: hrEnabled, pos: posEnabled }
+  const enabled = { ims: imsEnabled, hr: hrEnabled, pos: posEnabled, customization: customizationEnabled }
   const modules = anyOf || [module]
   if (!modules.some(m => enabled[m])) return <Navigate to="/dashboard" replace />
 
-  if (modules.includes('pos') && !canReachPosPath(pathname)) return <Navigate to={STATION_TEAM_HOME} replace />
+  // Customization (S758) is POS-side work, so a station team is fenced from it exactly as from
+  // any POS route it is not allowlisted for.
+  if ((modules.includes('pos') || modules.includes('customization')) && !canReachPosPath(pathname)) return <Navigate to={STATION_TEAM_HOME} replace />
 
   return children
 }

@@ -18,10 +18,10 @@ import ModuleMissingCard from './ModuleMissingCard'
 // the module and both offer a way to act. This gate's own card used to say "Contact your
 // consultant" with no phone, email or link: the one gate not on useSupportContact().
 export default function SuiteGate({ children, featureKey, featureLabel = 'This feature', requireModules = ['ims', 'hr'] }) {
-  const { isAdmin, isOwner, imsEnabled, hrEnabled, posEnabled, suitePlan, hasFeature } = useAuth()
+  const { isAdmin, isOwner, imsEnabled, hrEnabled, posEnabled, customizationEnabled, suitePlan, hasFeature } = useAuth()
   const navigate = useNavigate()
 
-  const moduleState = { ims: imsEnabled, hr: hrEnabled, pos: posEnabled }
+  const moduleState = { ims: imsEnabled, hr: hrEnabled, pos: posEnabled, customization: customizationEnabled }
   const missingModules = requireModules.filter(m => !moduleState[m])
   const modulesOk = missingModules.length === 0
   const tierOk = isAdmin || suitePlan === 'pro'

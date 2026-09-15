@@ -66,6 +66,7 @@ export function getAccessState(client) {
     client.ims_ends_at,
     client.hr_ends_at,
     client.pos_ends_at,
+    client.customization_ends_at,
     client.suite_ends_at,
     client.subscription_ends_at,
   ].filter(Boolean).map(d => new Date(d).getTime())
@@ -117,6 +118,7 @@ export function getSubStatus(client) {
     client?.ims_ends_at,
     client?.hr_ends_at,
     client?.pos_ends_at,
+    client?.customization_ends_at,
     client?.suite_ends_at,
     client?.subscription_ends_at,
   ].filter(Boolean).map(d => new Date(d).getTime())

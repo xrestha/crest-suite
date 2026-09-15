@@ -19,5 +19,6 @@ export function useClientFeatures() {
     ims_enabled: isAdmin || !!client.id,
     pos_enabled: isAdmin || (client.pos_enabled ?? false),
     hr_enabled:  isAdmin || (client.hr_enabled  ?? false),
+    customization_enabled: isAdmin || ((client.pos_enabled ?? false) && (client.customization_enabled ?? false)),
   }
 }

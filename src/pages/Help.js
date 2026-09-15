@@ -1754,16 +1754,19 @@ export default function Help() {
             })}
           </div>
 
-          {/* Crest HR + Crest POS — flat modules */}
+          {/* Crest HR + Crest POS + Crest Customization — flat modules */}
           <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 10 }}>
             <span style={{ color: MODULE_INK.hr }}>Crest HR</span>
-            <span style={{ color: 'var(--theme-text3)' }}> &amp; </span>
+            <span style={{ color: 'var(--theme-text3)' }}>, </span>
             <span style={{ color: MODULE_INK.pos }}>Crest POS</span>
+            <span style={{ color: 'var(--theme-text3)' }}> &amp; </span>
+            <span style={{ color: MODULE_INK.customization }}>Crest Customization</span>
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginBottom: 24 }}>
             {[
               { key: 'hr',  name: 'Crest HR',  color: MODULE_INK.hr,  pricing: pricing.hr },
               { key: 'pos', name: 'Crest POS', color: MODULE_INK.pos, pricing: pricing.pos },
+              { key: 'customization', name: 'Crest Customization', color: MODULE_INK.customization, pricing: pricing.customization },
             ].map(mod => {
               const price = pricingAnnual ? mod.pricing.annual : mod.pricing.monthly
               return (

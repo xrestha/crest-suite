@@ -24,16 +24,21 @@
 // buyer, a page contradicting itself about a number is expensive out of proportion to the fix.
 export const TRIAL_DAYS = 7
 
+// Customization (S758) takes amber — the fourth and last distinct hue in the palette. As a MODULE
+// identity it is a categorical tag (a pill, a card heading, a tint), never a verdict, which is the
+// same footing HR's green and POS's purple already stand on.
 export const MODULE_COLORS = {
   ims: 'var(--theme-accent)',
   hr:  'var(--theme-green)',
   pos: 'var(--theme-purple)',
+  customization: 'var(--theme-amber)',
 }
 
 export const MODULE_INK = {
   ims: 'var(--theme-accent-ink)',
   hr:  'var(--theme-green-text)',
   pos: 'var(--theme-purple-text)',
+  customization: 'var(--theme-amber-text)',
 }
 
 // These are `var()` now, so the old `${MODULE_COLORS.ims}22` hex-alpha concatenation no longer
@@ -129,6 +134,24 @@ export const POS_PRICING = {
   ],
 }
 
+// Crest Customization (S758) — a flat add-on on top of Crest POS: sizes, add-ons, removals and
+// spice/prep choices on every dish, on the till and the guest QR menu, with each option carrying
+// its own ingredients when IMS is on. Cannot be bought without POS (the database refuses it). The
+// shipped price is a placeholder the admin reprices in Settings > Plan Pricing like every other line.
+export const CUSTOMIZATION_PRICING = {
+  monthly: 1500, annual: 1125,
+  requiresLabel: 'Requires Crest POS',
+  features: [
+    'Sizes & portions with their own price (Half / Full, Small / Large)',
+    'Add-ons & removals — extra cheese +Rs, no onion',
+    'Spice level & preparation choices, from a list not a note',
+    'Works on the till and the guest QR menu alike',
+    'Kitchen tickets print every option — bold NO for removals',
+    'Stock & food cost follow each option (with Crest IMS)',
+    'Modifier reports — attach rate, add-on revenue & margin, removals',
+  ],
+}
+
 // Crest Suite Pro — an ADD-ON bought on top of whatever modules a client already has, not a
 // bundle that contains them. It used to be three tiers priced at ~20% off the sum of all three
 // modules, which had two problems: Suite Starter unlocked no Suite feature at all (both
@@ -169,6 +192,7 @@ export const DEFAULT_PLAN_PRICES = {
   ims: Object.fromEntries(IMS_TIERS.map(t => [t.key, t.monthly])),
   hr: HR_PRICING.monthly,
   pos: POS_PRICING.monthly,
+  customization: CUSTOMIZATION_PRICING.monthly,
   // Suite is priced here too (S701). It used to be the one sellable thing with no override, so
   // the pricing page could track three of its four cards and printed a stale figure on the fourth.
   suite: SUITE_ADDON.monthly,
@@ -198,8 +222,9 @@ const withMonthly = (base, monthly) =>
  * Every sellable price, resolved and ready to print.
  * @param {object} [planPrices] `settings.plan_prices` from the platform row; anything absent or
  *                              non-numeric falls back to the constant above it.
- * @returns {{ imsTiers: object[], hr: object, pos: object, suite: object }} the same shapes as
- *          IMS_TIERS / HR_PRICING / POS_PRICING / SUITE_ADDON, features and labels included.
+ * @returns {{ imsTiers: object[], hr: object, pos: object, customization: object, suite: object }}
+ *          the same shapes as IMS_TIERS / HR_PRICING / POS_PRICING / CUSTOMIZATION_PRICING /
+ *          SUITE_ADDON, features and labels included.
  */
 export function resolvePricing(planPrices) {
   const p = planPrices || {}
@@ -208,6 +233,7 @@ export function resolvePricing(planPrices) {
     imsTiers: IMS_TIERS.map(tier => withMonthly(tier, ims[tier.key])),
     hr:    withMonthly(HR_PRICING, p.hr),
     pos:   withMonthly(POS_PRICING, p.pos),
+    customization: withMonthly(CUSTOMIZATION_PRICING, p.customization),
     suite: withMonthly(SUITE_ADDON, p.suite),
   }
 }

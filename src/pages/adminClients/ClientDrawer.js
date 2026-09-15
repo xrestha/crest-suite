@@ -148,6 +148,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [imsEnabled, setImsEnabled] = useState(client.ims_enabled !== false)
   const [hrEnabled,  setHrEnabled]  = useState(!!client.hr_enabled)
   const [posEnabled, setPosEnabled] = useState(!!client.pos_enabled)
+  // Crest Customization (S758): a yes/no add-on that sits ON POS. The database refuses it without
+  // pos_enabled and switches it off when POS goes off; the toggle below mirrors both.
+  const [customizationEnabled, setCustomizationEnabled] = useState(!!client.pos_enabled && !!client.customization_enabled)
   // No hrPlan/posPlan state: HR and POS are yes/no modules with no tiers, so there is nothing
   // to pick. Both used to default to 'starter' here and get written on every save.
   // Crest Suite Pro — a separate axis from the IMS plan. NULL = not subscribed at all.
@@ -162,6 +165,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [imsEndsAt, setImsEndsAt] = useState(client.ims_ends_at ? formatAd(new Date(client.ims_ends_at)) : _legacyEnd)
   const [hrEndsAt,  setHrEndsAt]  = useState(client.hr_ends_at  ? formatAd(new Date(client.hr_ends_at))  : '')
   const [posEndsAt, setPosEndsAt] = useState(client.pos_ends_at ? formatAd(new Date(client.pos_ends_at)) : '')
+  const [customizationEndsAt, setCustomizationEndsAt] = useState(client.customization_ends_at ? formatAd(new Date(client.customization_ends_at)) : '')
   const [suiteEndsAt, setSuiteEndsAt] = useState(client.suite_ends_at ? formatAd(new Date(client.suite_ends_at)) : '')
   const [billingCycle, setBillingCycle] = useState(client.billing_cycle || 'monthly')
   const [savingSub, setSavingSub] = useState(false)
@@ -580,7 +584,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
   const handleToggleIms = () => toggleModule('ims_enabled', 'Crest IMS', imsEnabled, setImsEnabled)
   const handleToggleHr  = () => toggleModule('hr_enabled',  'Crest HR',  hrEnabled,  setHrEnabled)
-  const handleTogglePos = () => toggleModule('pos_enabled', 'Crest POS', posEnabled, setPosEnabled)
+  // POS off takes Customization with it — the database trigger does the same, so the switch on
+  // screen follows what the row will hold rather than waiting for the next re-read.
+  const handleTogglePos = async () => {
+    const wasOn = posEnabled
+    await toggleModule('pos_enabled', 'Crest POS', posEnabled, setPosEnabled)
+    if (wasOn && customizationEnabled) setCustomizationEnabled(false)
+  }
+  const handleToggleCustomization = () => toggleModule('customization_enabled', 'Crest Customization', customizationEnabled, setCustomizationEnabled)
 
   // Crest Suite Pro is an add-on, so turning it on implies exactly one thing: IMS must be
   // enabled (SuiteGate's requireModules floor). It says nothing about HR, POS, or which IMS tier
@@ -638,9 +649,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       ims_enabled:   imsEnabled,
       hr_enabled:    hrEnabled,
       pos_enabled:   posEnabled,
+      customization_enabled: posEnabled && customizationEnabled,
       ims_ends_at:   imsEndsAt || null,
       hr_ends_at:    hrEndsAt  || null,
       pos_ends_at:   posEndsAt || null,
+      customization_ends_at: customizationEndsAt || null,
       suite_ends_at: suiteEndsAt || null,
       plan:          currentPlan,
       // hr_plan/pos_plan are deliberately not written. HR and POS are yes/no modules with no
@@ -1340,6 +1353,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     { key: 'ims', label: 'Crest IMS', sub: 'Inventory Management', enabled: imsEnabled, toggle: handleToggleIms },
                     { key: 'hr',  label: 'Crest HR',  sub: 'Human Resources',      enabled: hrEnabled,  toggle: handleToggleHr  },
                     { key: 'pos', label: 'Crest POS', sub: 'Point of Sale',        enabled: posEnabled, toggle: handleTogglePos  },
+                    // An add-on on POS: the switch is inert until POS is on, and says why.
+                    { key: 'customization', label: 'Crest Customization', sub: posEnabled ? 'Meal customization — sizes, add-ons, spice' : 'Needs Crest POS on first',
+                      enabled: customizationEnabled, toggle: handleToggleCustomization, disabled: !posEnabled },
                   ].map(mod => (
                     <div key={mod.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
                       <div>
@@ -1356,6 +1372,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         role="switch"
                         aria-checked={mod.enabled}
                         aria-label={`${mod.label} enabled`}
+                        disabled={mod.disabled || false}
                         onClick={mod.toggle}
                         style={{
                           position: 'relative', width: 38, height: 22, padding: 0,
@@ -1525,10 +1542,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   { key: 'ims', label: 'Crest IMS', enabled: imsEnabled, plan: currentPlan, setPlan: setCurrentPlan, endsAt: imsEndsAt, setEndsAt: setImsEndsAt },
                   { key: 'hr',  label: 'Crest HR',  enabled: hrEnabled,  plan: null, setPlan: null, endsAt: hrEndsAt,  setEndsAt: setHrEndsAt  },
                   { key: 'pos', label: 'Crest POS', enabled: posEnabled, plan: null, setPlan: null, endsAt: posEndsAt, setEndsAt: setPosEndsAt },
+                  { key: 'customization', label: 'Crest Customization', enabled: posEnabled && customizationEnabled, plan: null, setPlan: null, endsAt: customizationEndsAt, setEndsAt: setCustomizationEndsAt },
                 ].map(mod => {
                   if (!mod.enabled) return null
                   const s = getDateStatus(mod.endsAt)
-                  const flatPricing = mod.key === 'hr' ? pricing.hr : mod.key === 'pos' ? pricing.pos : null
+                  const flatPricing = mod.key === 'hr' ? pricing.hr : mod.key === 'pos' ? pricing.pos : mod.key === 'customization' ? pricing.customization : null
                   const accentInk  = MODULE_INK[mod.key]
                   // These sections used to be disabled whenever a Suite Bundle was selected,
                   // because the bundle replaced per-module pricing and dates entirely in

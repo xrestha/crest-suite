@@ -39,7 +39,7 @@ export default function AdminDashboardOverview() {
     const since24h = new Date(Date.now() - 86400000).toISOString()
     const results = await Promise.all([
       supabase.from('clients')
-        .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, is_trial, trial_approved_at, subscribe_requested, trial_expires_at')
+        .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, customization_enabled, is_trial, trial_approved_at, subscribe_requested, trial_expires_at')
         .order('name'),
       // Paged (S734). This is EVERY client's every period — one row per tenant per BS month, so
       // 30 properties two years in is already past PostgREST's 1000-row cap, and a bare select
@@ -594,6 +594,12 @@ export default function AdminDashboardOverview() {
                             )}
                             {c.pos_enabled && (
                               <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--theme-purple) 10%, transparent)', color: 'var(--theme-purple-text)', border: '1px solid color-mix(in srgb, var(--theme-purple) 20%, transparent)' }}>POS</span>
+                            )}
+                            {/* Customization (S758) is an add-on on POS and a billed line, so it
+                                gets a pill beside the module it sits on. Amber as a categorical
+                                module hue, never a warning (pricingPlans.js MODULE_COLORS). */}
+                            {c.pos_enabled && c.customization_enabled && (
+                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', color: 'var(--theme-amber-text)', border: '1px solid color-mix(in srgb, var(--theme-amber) 20%, transparent)' }}>CUSTOM</span>
                             )}
                             {/* Suite is an add-on ABOVE the modules, not a fourth one, so it takes
                                 the accent rather than a fourth hue — the star and the heavier fill

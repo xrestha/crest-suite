@@ -351,12 +351,13 @@ export default function Pricing() {
 
       {/* ── Crest HR + Crest POS — flat modules ── */}
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px' }}>
-        <SectionHeading color={MODULE_INK.hr} title="Crest HR & Crest POS" subtitle="Payroll and floor operations — buy either one on its own" />
+        <SectionHeading color={MODULE_INK.hr} title="Crest HR, Crest POS & Crest Customization" subtitle="Payroll and floor operations — buy either one on its own. Customization adds on to POS." />
       </div>
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: '0 24px 64px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
         {[
           { key: 'hr',  name: 'Crest HR',  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: pricing.hr },
           { key: 'pos', name: 'Crest POS', tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: pricing.pos },
+          { key: 'customization', name: 'Crest Customization', tagline: 'Let guests build their dish — sizes, add-ons, spice — on the till and the QR menu. Requires Crest POS.', pricing: pricing.customization },
         ].map(mod => {
           const price = annual ? mod.pricing.annual : mod.pricing.monthly
           return (

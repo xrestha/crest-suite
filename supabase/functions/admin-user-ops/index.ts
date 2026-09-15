@@ -548,6 +548,9 @@ Deno.serve(async (req) => {
           ims_enabled:       true,
           hr_enabled:        true,
           pos_enabled:       true,
+          // Owner decision (S758): a trial tries Crest Customization too. The column exists
+          // from migration 20260919100000; the trigger there refuses it without pos_enabled.
+          customization_enabled: true,
         })
         .select('id')
         .single()

@@ -126,6 +126,11 @@ const rules = [
     operator: 'Credit Note, settlement and close details can only be recorded on a closed bill, and this one is still open — nothing was changed.',
   },
   {
+    test: e => hasCode(e, 'customization_requires_pos'),
+    staff: 'Crest Customization needs Crest POS switched on. Nothing was changed.',
+    operator: 'Crest Customization sits on top of Crest POS, so it cannot be switched on for a client whose POS is off. Nothing was changed — switch POS on first, then Customization.',
+  },
+  {
     test: e => hasCode(e, 'line_not_on_menu'),
     staff: 'Something on this order is no longer on the menu. Nothing was saved — remove it and save again.',
     operator: 'A dish on this order is no longer on the menu (named in the detail below), so the order was not saved. Remove it from the order and save again — or put the dish back on the POS menu in Menu Pricing first.',

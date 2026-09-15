@@ -151,7 +151,8 @@ describe('what the tab shows', () => {
   // the two figures would come to disagree.
   it('offers no annual input to edit', () => {
     renderPlanPricing()
-    expect(screen.getAllByRole('spinbutton')).toHaveLength(6)
+    // 3 IMS tiers + HR + POS + Customization (S758) + Suite — one monthly box each, no annual box.
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(7)
   })
 })
 

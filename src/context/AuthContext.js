@@ -244,7 +244,7 @@ export function AuthProvider({ children }) {
         const [{ data: client }, { data: flags }, { data: siblings }] = await Promise.all([
           supabase
             .from('clients')
-            .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, ims_enabled, hr_enabled, pos_enabled, suite_plan, is_trial, trial_approved_at, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested, pan_no, contact_phone')
+            .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, ims_enabled, hr_enabled, pos_enabled, customization_enabled, suite_plan, is_trial, trial_approved_at, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested, pan_no, contact_phone')
             .eq('id', effectiveClientId)
             .single(),
           supabase
@@ -256,7 +256,7 @@ export function AuthProvider({ children }) {
           // client and exactly one row (their own) for everyone else — no group, no switcher.
           supabase
             .from('clients')
-            .select('id, name, location, group_id, is_active, suite_plan, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, subscription_ends_at, trial_ends_at, is_trial, trial_expires_at')
+            .select('id, name, location, group_id, is_active, suite_plan, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, subscription_ends_at, trial_ends_at, is_trial, trial_expires_at')
             .order('name'),
         ])
         if (mounted) {
@@ -376,6 +376,10 @@ export function AuthProvider({ children }) {
   const posEnabled = isAdmin || (profile?.clients?.pos_enabled ?? false)
   const imsEnabled = isAdmin || (profile?.clients?.ims_enabled ?? true)
   const hrEnabled  = isAdmin || (profile?.clients?.hr_enabled ?? false)
+  // Crest Customization (S758) is an add-on ON POS: the database refuses the flag without
+  // pos_enabled, and this mirrors it so a stale flag on a client whose POS was switched off can
+  // never light the module up here either.
+  const customizationEnabled = isAdmin || (posEnabled && (profile?.clients?.customization_enabled ?? false))
   // Admin gets 'manager'; owner (client with no pos_role/ims_role/hr_role) gets 'manager' on the
   // corresponding module when it's enabled; staff use their explicit pos_role/ims_role/hr_role. An
   // HR self-service account also has role 'client' with none of the four set — without excluding
@@ -502,16 +506,22 @@ export function AuthProvider({ children }) {
   // When admin "views as" a client, fetch that client's actual module subscription so the
   // sidebar + dashboard show ONLY their modules (admin's isAdmin bypass otherwise shows all).
   const [viewModules, setViewModules] = useState(null)
+  const MODULE_COLS = 'ims_enabled, hr_enabled, pos_enabled, customization_enabled'
+  const modulesOf = data => (data
+    ? { ims: data.ims_enabled !== false, hr: !!data.hr_enabled, pos: !!data.pos_enabled, customization: !!data.pos_enabled && !!data.customization_enabled }
+    : null)
   async function fetchViewModules(id) {
-    const { data } = await supabase.from('clients').select('ims_enabled, hr_enabled, pos_enabled').eq('id', id).single()
-    setViewModules(data ? { ims: data.ims_enabled !== false, hr: !!data.hr_enabled, pos: !!data.pos_enabled } : null)
+    const { data } = await supabase.from('clients').select(MODULE_COLS).eq('id', id).single()
+    setViewModules(modulesOf(data))
   }
   useEffect(() => {
     if (!isAdmin || !adminViewClientId) { setViewModules(null); return }
     let cancelled = false
-    supabase.from('clients').select('ims_enabled, hr_enabled, pos_enabled').eq('id', adminViewClientId).single()
-      .then(({ data }) => { if (!cancelled) setViewModules(data ? { ims: data.ims_enabled !== false, hr: !!data.hr_enabled, pos: !!data.pos_enabled } : null) })
+    supabase.from('clients').select(MODULE_COLS).eq('id', adminViewClientId).single()
+      .then(({ data }) => { if (!cancelled) setViewModules(modulesOf(data)) })
     return () => { cancelled = true }
+  // MODULE_COLS/modulesOf are module-level-stable helpers declared inline for locality.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, adminViewClientId])
 
   // Re-fetch on demand — the module toggles in AdminClients write straight to the DB (instant
@@ -524,11 +534,13 @@ export function AuthProvider({ children }) {
   // The DISPLAYED client's real module subscription (for nav visibility + dashboard sections).
   // Separate from imsEnabled/hrEnabled, which keep the admin route-access bypass.
   const cIms = profile?.clients?.ims_enabled, cHr = profile?.clients?.hr_enabled, cPos = profile?.clients?.pos_enabled
+  const cCust = profile?.clients?.customization_enabled
   const clientModules = useMemo(() => {
-    if (isAdmin && adminViewClientId) return viewModules || { ims: true, hr: false, pos: false }
-    if (isAdmin) return { ims: true, hr: true, pos: false } // admin's own view: full nav for management
-    return { ims: cIms ?? true, hr: cHr ?? false, pos: cPos ?? false }
-  }, [isAdmin, adminViewClientId, viewModules, cIms, cHr, cPos])
+    if (isAdmin && adminViewClientId) return viewModules || { ims: true, hr: false, pos: false, customization: false }
+    if (isAdmin) return { ims: true, hr: true, pos: false, customization: false } // admin's own view: full nav for management
+    const pos = cPos ?? false
+    return { ims: cIms ?? true, hr: cHr ?? false, pos, customization: pos && (cCust ?? false) }
+  }, [isAdmin, adminViewClientId, viewModules, cIms, cHr, cPos, cCust])
 
   // `plan` is the IMS plan and nothing else. It used to be the MAXIMUM across clients.plan,
   // ims_plan, hr_plan, pos_plan and is_premium — which was a revenue leak, found live while
@@ -641,6 +653,7 @@ export function AuthProvider({ children }) {
       imsEnabled,
       hrEnabled,
       posEnabled,
+      customizationEnabled,
       posRole,
       posTeam,
       isStationTeam: stationTeam,

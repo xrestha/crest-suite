@@ -109,6 +109,7 @@ const FIELD_LABELS = {
   ot_hours: 'OT Hours', ot_amount: 'OT Amount', ssf_employer: 'SSF (Employer)', ssf_employee: 'SSF (Employee)',
   bs_day: 'BS Day', bs_year: 'BS Year', bs_month: 'BS Month',
   ims_enabled: 'IMS Enabled', hr_enabled: 'HR Enabled', pos_enabled: 'POS Enabled',
+  customization_enabled: 'Customization Enabled', customization_ends_at: 'Customization Ends',
   suite_plan: 'Suite Plan', hr_plan: 'HR Plan', pos_plan: 'POS Plan',
   is_premium: 'Premium', is_trial: 'Trial',
   close_type: 'Close Type', close_reason: 'Close Reason', discount_amount: 'Discount',

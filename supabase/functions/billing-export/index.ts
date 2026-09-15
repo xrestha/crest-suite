@@ -31,6 +31,7 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 const DEFAULT_IMS_PRICES: Record<string, number> = { starter: 2000, growth: 2600, pro: 3500 }
 const DEFAULT_HR_PRICE = 2600
 const DEFAULT_POS_PRICE = 2000
+const DEFAULT_CUSTOMIZATION_PRICE = 1500
 const DEFAULT_SUITE_PRICE = 2000
 
 function monthlyRate(base: number, billingCycle: string | null) {
@@ -49,6 +50,7 @@ function computeBilling(c: any, planPrices: any) {
   const imsPrices = planPrices?.ims || DEFAULT_IMS_PRICES
   const hrPrice = planPrices?.hr ?? DEFAULT_HR_PRICE
   const posPrice = planPrices?.pos ?? DEFAULT_POS_PRICE
+  const custPrice = planPrices?.customization ?? DEFAULT_CUSTOMIZATION_PRICE
   const suitePrice = planPrices?.suite ?? DEFAULT_SUITE_PRICE
 
   const imsEnd = c.ims_ends_at || c.subscription_ends_at
@@ -63,16 +65,20 @@ function computeBilling(c: any, planPrices: any) {
   const hrActive = !!c.hr_enabled && !!c.hr_ends_at && hrD !== null && hrD > 0
   const posD = daysUntil(c.pos_ends_at)
   const posActive = !!c.pos_enabled && !!c.pos_ends_at && posD !== null && posD > 0
+  // Customization (S758) is an add-on ON POS — its own window AND a live POS, as clientMrr.js.
+  const custD = daysUntil(c.customization_ends_at)
+  const custActive = posActive && !!c.customization_enabled && !!c.customization_ends_at && custD !== null && custD > 0
 
   let monthlyAmount = 0
   let pricingBasis = 'none'
-  const breakdown: Record<string, number | null> = { ims: null, hr: null, pos: null, suite: null }
+  const breakdown: Record<string, number | null> = { ims: null, hr: null, pos: null, customization: null, suite: null }
 
   // Suite ADDS to the module sum — it never replaces it. A Starter tier priced at 0 is a real
   // configuration, so an active module is listed at whatever it costs rather than dropped.
   if (imsActive) { const v = monthlyRate(imsPrices[c.plan] || 0, c.billing_cycle); monthlyAmount += v; breakdown.ims = v }
   if (hrActive) { const v = monthlyRate(hrPrice, c.billing_cycle); monthlyAmount += v; breakdown.hr = v }
   if (posActive) { const v = monthlyRate(posPrice, c.billing_cycle); monthlyAmount += v; breakdown.pos = v }
+  if (custActive) { const v = monthlyRate(custPrice, c.billing_cycle); monthlyAmount += v; breakdown.customization = v }
   if (suiteActive) { const v = monthlyRate(suitePrice, c.billing_cycle); monthlyAmount += v; breakdown.suite = v }
   // 'suite_bundle' is retired and no longer emitted (S703). hss-suite only ever displayed this
   // string — it never branched on it — so the value simply stops appearing; the column comment in
@@ -86,6 +92,7 @@ function computeBilling(c: any, planPrices: any) {
   if (imsActive && imsEnd) candidates.push(imsEnd)
   if (hrActive) candidates.push(c.hr_ends_at)
   if (posActive) candidates.push(c.pos_ends_at)
+  if (custActive) candidates.push(c.customization_ends_at)
   if (suiteActive && suiteEnd) candidates.push(suiteEnd)
   const nextRenewalAt = candidates.length ? candidates.sort()[0] : null
 
@@ -129,8 +136,8 @@ Deno.serve(async (req) => {
       .from('clients')
       .select(
         'id, name, location, contact_person, contact_phone, is_active, is_premium, plan, ' +
-        'hr_enabled, hr_plan, ims_enabled, pos_enabled, pos_plan, suite_plan, billing_cycle, ' +
-        'is_trial, trial_expires_at, ims_ends_at, hr_ends_at, pos_ends_at, suite_ends_at, subscription_ends_at',
+        'hr_enabled, hr_plan, ims_enabled, pos_enabled, pos_plan, customization_enabled, suite_plan, billing_cycle, ' +
+        'is_trial, trial_expires_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, subscription_ends_at',
       )
     if (cErr) return json({ error: cErr.message }, 500)
 
@@ -165,11 +172,13 @@ Deno.serve(async (req) => {
         ims_enabled: c.ims_enabled,
         pos_enabled: c.pos_enabled,
         pos_plan: c.pos_plan,
+        customization_enabled: c.customization_enabled,
         suite_plan: c.suite_plan,
         billing_cycle: c.billing_cycle,
         ims_ends_at: c.ims_ends_at,
         hr_ends_at: c.hr_ends_at,
         pos_ends_at: c.pos_ends_at,
+        customization_ends_at: c.customization_ends_at,
         suite_ends_at: c.suite_ends_at,
         ...billing,
         buyer: s

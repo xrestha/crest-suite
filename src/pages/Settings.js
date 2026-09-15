@@ -145,6 +145,7 @@ function canonicalPrices(table) {
       .map(t => [t, storedIms[t]])),
     ...(typeof stored.hr === 'number' ? { hr: stored.hr } : {}),
     ...(typeof stored.pos === 'number' ? { pos: stored.pos } : {}),
+    ...(typeof stored.customization === 'number' ? { customization: stored.customization } : {}),
     ...(typeof stored.suite === 'number' ? { suite: stored.suite } : {}),
   }
 }
@@ -494,6 +495,7 @@ export default function Settings() {
     for (const t of ['starter', 'growth', 'pro']) if (pf.ims?.[t] === 0) out.push(`IMS ${t}`)
     if (pf.hr === 0) out.push('HR')
     if (pf.pos === 0) out.push('POS')
+    if (pf.customization === 0) out.push('Customization')
     if (pf.suite === 0) out.push('Crest Suite Pro')
     return out
   }
@@ -1619,6 +1621,8 @@ export default function Settings() {
         const flatCards = [
           { key: 'hr',    color: MODULE_INK.hr,  title: 'Crest HR' },
           { key: 'pos',   color: MODULE_INK.pos, title: 'Crest POS' },
+          // Customization (S758) is a flat add-on on POS, priced per outlet like HR and POS.
+          { key: 'customization', color: MODULE_INK.customization, title: 'Crest Customization' },
           // Suite is priced here too since S701. It is sold per outlet on top of the modules, so
           // its figure adds to a client's MRR rather than replacing any of the above.
           { key: 'suite', color: MODULE_INK.ims, title: 'Crest Suite Pro' },

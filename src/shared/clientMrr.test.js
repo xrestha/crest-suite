@@ -53,6 +53,44 @@ describe('module windows', () => {
   })
 })
 
+// Customization (S758) is an add-on ON POS. The flag alone is not enough: it bills only inside its
+// own window AND while POS itself is live, because the database only guards the flag, not the date.
+describe('Crest Customization is an add-on on POS', () => {
+  const withCust = { ...PRICES, customization: 900 }
+  const posOn = { pos_enabled: true, pos_ends_at: future }
+
+  it('bills when POS is live and its own window is open', () => {
+    const c = client({ ...posOn, customization_enabled: true, customization_ends_at: future })
+    expect(clientMRR(c, withCust)).toBe(5000 + 2000 + 900)
+  })
+
+  it('does NOT bill when POS is off, whatever its own flag and date say', () => {
+    const c = client({ pos_enabled: false, customization_enabled: true, customization_ends_at: future })
+    expect(clientMRR(c, withCust)).toBe(5000)
+  })
+
+  it('does NOT bill when POS has lapsed', () => {
+    const c = client({ pos_enabled: true, pos_ends_at: past, customization_enabled: true, customization_ends_at: future })
+    expect(clientMRR(c, withCust)).toBe(5000)
+  })
+
+  it('does NOT bill when its own date has passed or the flag is off', () => {
+    expect(clientMRR(client({ ...posOn, customization_enabled: true, customization_ends_at: past }), withCust)).toBe(7000)
+    expect(clientMRR(client({ ...posOn, customization_enabled: false, customization_ends_at: future }), withCust)).toBe(7000)
+  })
+
+  it('discounts annually and falls back to the shipped price', () => {
+    const c = client({ ...posOn, billing_cycle: 'annual', customization_enabled: true, customization_ends_at: future })
+    expect(clientMRR(c, withCust)).toBe(3750 + 1500 + 675)
+    expect(clientMRR({ ...c, billing_cycle: 'monthly' }, PRICES)).toBe(5000 + 2000 + DEFAULT_PLAN_PRICES.customization)
+  })
+
+  it('lists its own line, after POS', () => {
+    const c = client({ ...posOn, customization_enabled: true, customization_ends_at: future })
+    expect(clientMrrBreakdown(c, withCust).lines.map(l => l.key)).toEqual(['ims', 'pos', 'customization'])
+  })
+})
+
 describe('Crest Suite is an add-on, not a bundle', () => {
   it('adds to the module sum rather than replacing it', () => {
     const c = client({ suite_plan: 'pro', suite_ends_at: future })
@@ -195,11 +233,20 @@ describe('the billing-export copy keeps step with this file', () => {
     expect(CODE).toMatch(/breakdown\.suite = v/)
   })
 
-  it('reads every price from settings.plan_prices, Suite included', () => {
+  it('reads every price from settings.plan_prices, Suite and Customization included', () => {
     expect(CODE).toMatch(/planPrices\?\.ims/)
     expect(CODE).toMatch(/planPrices\?\.hr/)
     expect(CODE).toMatch(/planPrices\?\.pos/)
+    expect(CODE).toMatch(/planPrices\?\.customization/)
     expect(CODE).toMatch(/planPrices\?\.suite/)
+  })
+
+  // The add-on-on-POS rule above, on the copy hss-suite bills from: the customization line is
+  // gated on posActive, and the breakdown carries its own key.
+  it('bills Customization only on a live POS', () => {
+    expect(CODE).toMatch(/custActive = posActive &&/)
+    expect(CODE).toMatch(/breakdown\.customization = v/)
+    expect(CODE).toMatch(/customization_ends_at/)
   })
 
   // The fallbacks are the same shipped prices, hand-copied. Asserting the VALUES rather than their
@@ -207,6 +254,7 @@ describe('the billing-export copy keeps step with this file', () => {
   it('falls back to the same shipped prices this repo ships', () => {
     expect(shippedDefault('DEFAULT_HR_PRICE')).toBe(DEFAULT_PLAN_PRICES.hr)
     expect(shippedDefault('DEFAULT_POS_PRICE')).toBe(DEFAULT_PLAN_PRICES.pos)
+    expect(shippedDefault('DEFAULT_CUSTOMIZATION_PRICE')).toBe(DEFAULT_PLAN_PRICES.customization)
     expect(shippedDefault('DEFAULT_SUITE_PRICE')).toBe(DEFAULT_PLAN_PRICES.suite)
 
     const ims = CODE.match(/const DEFAULT_IMS_PRICES[^=]*= \{([^}]*)\}/)

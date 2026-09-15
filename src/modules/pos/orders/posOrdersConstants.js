@@ -40,7 +40,23 @@ export const OPEN_ORDER_SELECT =
 // a line flagged sent before the column existed (its sent_qty defaulted to 0).
 export const cartLineFromStored = i => ({ ...i, sent_qty: i.sent_qty || (i.sent_to_kot ? i.qty : 0) })
 
-const lineKeyOf = i => i.recipe_id || `name:${i.name}`
+// The identity of a cart line, and the ONE place it is decided. A line is its recipe — unless it
+// carries a customization (Crest Customization, `selection_key` = the chosen option ids, sorted and
+// joined with '+'), in which case "Momo, extra cheese" and "Momo, no onion" are two lines of one
+// recipe and must never merge. A line with no options has an empty selection_key and keys exactly
+// as it always did, so every caller below is byte-identical for a client without the module.
+// Mirrors the SQL in save_pos_order_items (line_key = recipe_id || '#' || selection_key).
+export const lineKeyOf = i => {
+  if (i.line_key) return i.line_key
+  const sel = i.selection_key || (Array.isArray(i.option_ids) ? selectionKeyOf(i.option_ids) : '')
+  if (i.recipe_id) return sel ? `${i.recipe_id}#${sel}` : i.recipe_id
+  return `name:${i.name}`
+}
+
+// The client twin of the server's selection key: sorted option uuids joined with '+', '' for none.
+// Order-independent on purpose — the same options ticked in a different order are the same line.
+export const selectionKeyOf = optionIds =>
+  (optionIds || []).filter(Boolean).map(String).sort().join('+')
 
 // Lines this device had that `serverLines` does not — by recipe and by quantity difference — as
 // UNSENT lines of just the difference. What a stale save (another tablet saved first) or a stale
@@ -55,18 +71,21 @@ export function missingFromServer(localLines, serverLines) {
       missing.push({
         recipe_id: i.recipe_id || null, name: i.name, category: i.category || 'Other', qty: diff,
         unit_price: i.unit_price, vat_rate: i.vat_rate, notes: i.notes || '', sent_to_kot: false, sent_qty: 0,
+        ...(i.selection_key ? { selection_key: i.selection_key, option_ids: i.option_ids, options: i.options } : {}),
       })
     }
   }
   return missing
 }
 
-// Puts `incoming` on top of `base` as UNSENT: a recipe already on the order gains the quantity, and
-// keeps what the station already has as its sent count, so only the addition goes on the next ticket.
+// Puts `incoming` on top of `base` as UNSENT: a line already on the order (same recipe, same
+// customization) gains the quantity, and keeps what the station already has as its sent count, so
+// only the addition goes on the next ticket.
 export function mergeUnsentLines(base, incoming) {
   const merged = (base || []).map(l => ({ ...l }))
   for (const inc of incoming || []) {
-    const at = inc.recipe_id ? merged.findIndex(l => l.recipe_id === inc.recipe_id) : -1
+    const key = lineKeyOf(inc)
+    const at = inc.recipe_id ? merged.findIndex(l => lineKeyOf(l) === key) : -1
     if (at >= 0) {
       const l = merged[at]
       merged[at] = {
@@ -89,7 +108,7 @@ export function mergeUnsentLines(base, incoming) {
 // success, not a conflict (S754).
 export function storedLinesMatchPayload(storedLines, payload) {
   const sig = rows => (rows || [])
-    .map(r => [r.recipe_id || '', Number(r.qty) || 0, r.sent_to_kot ? 1 : 0, Number(r.sent_qty) || 0, (r.notes || '').trim()].join(''))
+    .map(r => [r.recipe_id || '', r.selection_key || '', Number(r.qty) || 0, r.sent_to_kot ? 1 : 0, Number(r.sent_qty) || 0, (r.notes || '').trim()].join(''))
     .sort()
     .join('')
   return sig(storedLines) === sig(payload)
@@ -102,10 +121,10 @@ const SAME_NUMBER = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.
 // when only a name or category did, null when they agree or there is nothing to compare.
 export function menuDrift(localLines, serverItems) {
   if (!Array.isArray(serverItems)) return null
-  const byRecipe = new Map(serverItems.filter(s => s.recipe_id).map(s => [s.recipe_id, s]))
+  const byLine = new Map(serverItems.filter(s => s.recipe_id).map(s => [lineKeyOf(s), s]))
   let drift = null
   for (const i of localLines || []) {
-    const s = byRecipe.get(i.recipe_id)
+    const s = byLine.get(lineKeyOf(i))
     if (!s) continue
     if (!SAME_NUMBER(s.unit_price, i.unit_price) || !SAME_NUMBER(s.vat_rate, i.vat_rate)) return 'price'
     if ((s.name || '') !== (i.name || '') || (s.category || 'Other') !== (i.category || 'Other')) drift = 'label'
@@ -114,14 +133,14 @@ export function menuDrift(localLines, serverItems) {
 }
 
 // The cart with each line's price, VAT rate, name and category taken from the server's lines (by
-// recipe). Quantities, notes and sent flags are left alone, so a line tapped in while the save was in
-// flight is not disturbed. Returns the same array when nothing changed.
+// line key — recipe plus customization). Quantities, notes and sent flags are left alone, so a line
+// tapped in while the save was in flight is not disturbed. Returns the same array when nothing changed.
 export function withServerLineFields(localLines, serverItems) {
   if (!Array.isArray(serverItems) || !Array.isArray(localLines)) return localLines
-  const byRecipe = new Map(serverItems.filter(s => s.recipe_id).map(s => [s.recipe_id, s]))
+  const byLine = new Map(serverItems.filter(s => s.recipe_id).map(s => [lineKeyOf(s), s]))
   let changed = false
   const next = localLines.map(i => {
-    const s = byRecipe.get(i.recipe_id)
+    const s = byLine.get(lineKeyOf(i))
     if (!s) return i
     const category = s.category || 'Other'
     if (SAME_NUMBER(s.unit_price, i.unit_price) && SAME_NUMBER(s.vat_rate, i.vat_rate)
