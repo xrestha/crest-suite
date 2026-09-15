@@ -62,7 +62,7 @@ const FIELD_TAB = { opening: 'opening', closing: 'closing', wastage: 'wastage', 
 const fieldKeyOf = tab => FIELD_TAB[tab] || null
 
 export default function Stock() {
-  const { clientId, profile, loading: authLoading, isAdmin, hasFeature, hasImsAccess } = useAuth()
+  const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, hasFeature, hasImsAccess } = useAuth()
   const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
@@ -494,7 +494,7 @@ export default function Stock() {
     if (!isNetworkError(err?.supabase || err)) return false
     try {
       for (const e of entries) {
-        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId: e.itemId, fieldKey, qty: e.qty, countedBy: countedByFields() })
+        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId: e.itemId, fieldKey, qty: e.qty, countedBy: countedByFields(), ...queueLabels(e.itemId) })
       }
     } catch (_) {
       return false   // no local store either; fall through to the ordinary failure message
@@ -513,7 +513,7 @@ export default function Stock() {
       if (!navigator.onLine) {
         // `clientId` is what lets flushQueue() tell this outlet's counts from those of whoever
         // used the device before — see the note there.
-        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId, fieldKey, qty, countedBy: countedByFields() })
+        await enqueue({ clientId: effectiveClientId, periodId: selectedPeriod.id, itemId, fieldKey, qty, countedBy: countedByFields(), ...queueLabels(itemId) })
         setPendingSync(prev => prev + 1)
         setPendingItems(prev => new Set([...prev, itemId]))
         return true
@@ -546,6 +546,15 @@ export default function Stock() {
   // And it must not swallow the refusal. A count queued against a month that was closed while the
   // device was offline can never land; retrying it silently on every page load is not resilience,
   // it is a figure the counter believes is saved and is not.
+  // What a held figure was, in words — carried on the queued op (S756) because a replay runs before
+  // the page has read its items, and a refused figure the counter cannot identify is a lost one.
+  function queueLabels(itemId) {
+    return {
+      itemName: allItems.find(i => i.id === itemId)?.name || null,
+      periodLabel: selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : null,
+    }
+  }
+
   async function flushQueue() {
     let queue
     try {
@@ -563,6 +572,11 @@ export default function Stock() {
     let remaining = mine.length
     let failures = 0
     let lastErr = null
+    // A count for a month that was closed while this device was offline can never land: the
+    // database refuses it (period_closed, S756) for everyone but the account owner. Retrying it on
+    // every page load would hold it here for ever, so it leaves the queue — and the page names each
+    // figure, so the counter can hand it to the owner rather than lose it.
+    const refusedClosed = []
     for (const item of mine) {
       try {
         await persistValueDirect(item.periodId, item.itemId, item.fieldKey, item.qty, item.countedBy)
@@ -571,15 +585,34 @@ export default function Stock() {
         setPendingSync(remaining)
         setPendingItems(prev => { const next = new Set(prev); next.delete(item.itemId); return next })
       } catch (err) {
+        const e = err?.supabase || err
+        if (e?.hint === 'period_closed' || /period_closed/.test(e?.message || '')) {
+          refusedClosed.push(item)
+          try { await dequeue(item.id) } catch (_) { /* stays queued; the next replay refuses it again */ }
+          remaining--
+          setPendingSync(remaining)
+          setPendingItems(prev => { const next = new Set(prev); next.delete(item.itemId); return next })
+          continue
+        }
         failures++
         lastErr = err
       }
     }
     setSyncing(false)
+    if (refusedClosed.length > 0) {
+      const list = refusedClosed
+        .map(op => `${op.itemName || 'an item'} — ${FIELD_LABEL[op.fieldKey] || op.fieldKey} ${op.qty ?? 'blank'}`)
+        .join('; ')
+      const month = refusedClosed.find(op => op.periodLabel)?.periodLabel || 'that month'
+      setSyncFailed({
+        text: `${refusedClosed.length} figure${refusedClosed.length === 1 ? ' was' : 's were'} entered offline for ${month}, which was closed before ${refusedClosed.length === 1 ? 'it' : 'they'} reached the server, so ${refusedClosed.length === 1 ? 'it was' : 'they were'} not added. Write ${refusedClosed.length === 1 ? 'it' : 'these'} down and give ${refusedClosed.length === 1 ? 'it' : 'them'} to the account owner, who can still enter a closed month: ${list}.`,
+      })
+      return
+    }
     if (failures > 0) {
       const { text, detail } = asActionError(lastErr?.supabase || lastErr)
       setSyncFailed({
-        text: `${failures} count${failures === 1 ? '' : 's'} entered offline could not be saved and ${failures === 1 ? 'is' : 'are'} still waiting on this device. Re-enter ${failures === 1 ? 'it' : 'them'} on the right month and save again — a month that has since been closed has to be re-opened first. ${text}`,
+        text: `${failures} count${failures === 1 ? '' : 's'} entered offline could not be saved and ${failures === 1 ? 'is' : 'are'} still waiting on this device. Press Sync Now to try again once the connection is steady. ${text}`,
         detail,
       })
     }
@@ -992,7 +1025,8 @@ export default function Stock() {
   }
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
-  const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
+  // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
+  const isLocked = !canEditClosedPeriods && selectedPeriod?.status === 'closed'
 
   // Blind count (S737): a counter writes what is on the shelf rather than confirming what the
   // system expected, so the derived columns come off the Closing tab for a staff-rank account.

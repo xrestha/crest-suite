@@ -222,7 +222,10 @@ export function AuthProvider({ children }) {
         // tenant. Never noticed because no client has a group_id yet.
         // pos_email (the caller's own row only) is a staff marker in its own right: a PIN login whose
         // pos_role was cleared must never read as the Owner (S752) — see isOwner below.
-        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_email, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_job_title, hr_role, hr_job_title')
+        // ims_email likewise (S756): imsCountOnly below keys on it, and without it in this list the
+        // count-PIN fence was false for every session since S737 — a store-room tablet PIN reached
+        // every page an IMS staff login does.
+        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_email, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_email, ims_job_title, hr_role, hr_job_title')
         .eq('id', userId)
         .single()
 
@@ -402,6 +405,13 @@ export function AuthProvider({ children }) {
   // Enforced in ModuleGate, beside canReachPosPath. Hiding nav items would not be a guard: these
   // routes are typeable, and a sub-route has no nav item to hide in the first place.
   const imsCountOnly = !isAdmin && !!profile?.ims_email
+
+  // Who may write into a CLOSED month (S756, decided with the owner): admin, and now the Owner.
+  // Reopening cannot be the Owner's route — only one period may be open, and the next month is
+  // already open by the time a mistake turns up — so the Owner gets admin's edit-in-place instead.
+  // The database enforces the same pair (closed_period_guard, migration 20260918100000); every
+  // IMS entry page's lock reads this, never its own copy.
+  const canEditClosedPeriods = isAdmin || isOwner
 
   // ── Multi-outlet ──
   // An Owner reaches every outlet in the group. Anyone else reaches their home outlet plus
@@ -637,6 +647,7 @@ export function AuthProvider({ children }) {
       canReachPosPath,
       imsRole,
       imsCountOnly,
+      canEditClosedPeriods,
       hrRole,
       isOwner,
       hasPosAccess,

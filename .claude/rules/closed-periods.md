@@ -9,7 +9,7 @@ paths:
   - "src/modules/ims/reports/Overheads.js"
 ---
 
-# A closed period is read-only for the CLIENT and writable for ADMIN (S651)
+# A closed period is read-only for STAFF and writable for ADMIN and the OWNER (S651, S756)
 
 > Split out of the root CLAUDE.md so it loads only on the pages that carry the lock. The root file
 > keeps the one-open-period constraint itself, since that is reachable from anywhere.
@@ -17,13 +17,42 @@ paths:
 Every period-scoped entry page spells the same line:
 
 ```js
-const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
+const isLocked = !canEditClosedPeriods && selectedPeriod?.status === 'closed'
 ```
 
-`Purchases.js`, `PurchaseBillPage.jsx`, `Sales.js`, `Stock.js`, `Overheads.js` and — since S709 —
-`PurchaseOrders.js`: six copies, all agreeing. **The `!isAdmin` carve-out is the feature, not an
-oversight**: an admin correcting history is a real, expected job, and the alternative (reopen the
-month) is structurally unavailable.
+`canEditClosedPeriods` is `isAdmin || isOwner`, from `AuthContext` — never a local copy.
+`Purchases.js`, `PurchaseBillPage.jsx`, `Sales.js`, `Stock.js`, `Overheads.js`, `PurchaseOrders.js`
+and `Requisitions.js` (whose `periodClosed` had no carve-out at all until S756) read it. **The
+carve-out is the feature, not an oversight**: correcting history is a real, expected job, and the
+alternative (reopen the month) is structurally unavailable — see "Reopen is not the admin path".
+
+## The lock is in the database since S756, and the Owner is inside it
+
+Until S756 every half of this lock except `receive_purchase_order` was browser-only, so a tablet
+that synced late, or any login over REST, wrote straight into a closed month. Migration
+`20260918100000` put **`ims_closed_period_guard`** (BEFORE INSERT/UPDATE/DELETE) on
+`opening_stock`, `closing_stock`, `wastages`, `staff_meals`, `sales_entries`, `purchase_entries`,
+`vendor_returns`, `requisitions` and `requisition_lines` (through its requisition). Four things
+about it:
+
+- **The Owner joined admin, by the owner's decision.** "Let the Owner reopen" was asked for first;
+  it cannot work, because the next month is already open when a mistake turns up and only one
+  period may be open. So the Owner gets admin's edit-in-place, and the Owner's Periods rows carry
+  "Add missing bills" and "Resync Opening Stock"; Reopen stays admin. Regenerate Snapshot is the
+  Owner's too. `caller_can_edit_closed_period()` is the SQL twin of `canEditClosedPeriods`.
+- **One write is not editing the month: `purchase_entries.paid_at`.** Outstanding Payables settles
+  bills from any month; an UPDATE that changes only that column passes. Anything else on a closed
+  month's bill is refused.
+- **The period status is read past RLS** (`ims_period_is_closed`, DEFINER, boolean only) — an
+  INVOKER lookup subject to `monthly_periods`' policies can come back empty and read as "open".
+- **An offline count refused here leaves the queue and is NAMED.** `Stock.js`' `flushQueue()` drops
+  a `period_closed` refusal (retrying it for ever is the S731 defect) and lists each figure — item,
+  field, quantity, month, carried on the queued op — so the counter can hand it to the Owner.
+
+**Who may change the month row itself is enforced too** (`ims_monthly_periods_guard`): create or
+close — Owner, IMS supervisor/manager, admin; reopen or relabel — Owner or admin. The Dashboard's
+projection snapshots stay writable by any viewer (best-effort captures), and the Dashboard's
+"End month" button renders only for `isOwner || hasImsAccess('supervisor')` — it had no role check.
 
 ## The page that writes a locked table is not always the page that looks locked (S709)
 
@@ -37,10 +66,10 @@ page writes, not which shape it has.
 **S710 found the other half of that sentence still wrong.** Eight IMS surfaces carry the lock — `grep -rn "periodClosed\|isLocked" src/modules/ims` returns Purchases, PurchaseBillPage, ReturnsTab, PurchaseOrders, Sales, Stock, Overheads and Requisitions — while the Dashboard's close dialog and the module guide both enumerated **four** of them. Requisitions had locked since it was built and was named nowhere; Purchase Orders joined the list in S709 and the copy did not move with it. Periods.js is fine because it says "IMS entry pages lock" and enumerates nothing. **An enumeration in user-facing copy is a second definition of the lock set, and it rots the moment a page joins.** Prefer the generic phrasing; where a list is genuinely more useful, re-derive it from that grep whenever a page gains or loses `periodClosed`.
 
 It is also the first period lock with a **server-side** half: `receive_purchase_order()` refuses a
-closed period itself (`po_period_closed`), with the same `is_admin()` carve-out, wrapped in
-COALESCE. The other five remain browser-only, which is defensible while they are the only door to
-their tables — but the rule that made this one different is that a receipt is an RPC, and an RPC
-that can be called directly is a door the page does not control.
+closed period itself (`po_period_closed`), with the same carve-out (admin, and since S756 the
+Owner). The other five were browser-only until S756 put the lock on the tables themselves (top of
+this file) — "defensible while they are the only door" was never true: REST and a late offline
+replay were both doors.
 
 ## HR is deliberately NOT locked by the close, and the dialog must say so (S683)
 
@@ -202,7 +231,9 @@ to a route and left all four exits pointing at the default month.
 
 The same `!isAdmin` that unlocks the page also suppresses the red "this period is closed" banner, so
 before S651 an admin editing history saw a screen identical to the open month. Both Purchases
-screens now render an **amber** banner whenever `isAdmin && period.status === 'closed'`. Any page
+screens and Purchase Orders now render an **amber** banner whenever
+`canEditClosedPeriods && period.status === 'closed'` (the Owner sees it since S756). Sales, Stock
+Count, Overheads and Requisitions still do not — open in `IMS_TODO.md`. Any page
 that adopts the `isLocked` line owes its admin the same notice — the lock and the notice are the
 same fact, and only one of them was being shown.
 

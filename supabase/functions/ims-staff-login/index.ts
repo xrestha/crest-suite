@@ -83,6 +83,9 @@ Deno.serve(async (req) => {
       .from('profiles').select('ims_email')
       .eq('id', staff_id).eq('client_id', client_id)
       .not('ims_role', 'is', null).not('ims_email', 'is', null)
+      // A leaver whose Final Settlement blocked their logins is off the picker (S756, as S754 did
+      // for POS) and must not sign in by a remembered staff_id either.
+      .is('settlement_blocked_by', null)
       .maybeSingle()
 
     // Generic message shared with the wrong-PIN path below, and deliberately no recorded attempt:

@@ -41,7 +41,7 @@ const DEPARTMENTS = [
 ]
 
 export default function Requisitions() {
-  const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
+  const { clientId, profile, loading: authLoading, canEditClosedPeriods, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
@@ -446,7 +446,9 @@ ${text}`, detail })
   const periodLabel = selectedPeriod
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`
     : '—'
-  const periodClosed = selectedPeriod?.status === 'closed'
+  // Named for what it gates: whether THIS login may write the month. Admin and the Owner edit a
+  // closed month in place (S756), as on every other IMS entry page.
+  const periodClosed = !canEditClosedPeriods && selectedPeriod?.status === 'closed'
   const allDepts = [...new Set(reqs.map(r => r.department).filter(Boolean))].sort()
   const filteredReqs = filterDept === 'all' ? reqs : reqs.filter(r => r.department === filterDept)
   // The stat strip sits directly above the department tabs, so it counts what those tabs are

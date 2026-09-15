@@ -320,7 +320,9 @@ export default function MonthlyOwnerReport() {
               >
                 Print / Save as PDF
               </button>
-              {isAdmin && (
+              {/* The Owner regenerates too (S756): they now edit closed months in place, and a
+                  frozen report that only an operator could refresh would lag every such fix. */}
+              {(isAdmin || isOwner) && (
                 <button className="btn btn-ghost" onClick={() => setConfirmRegenerate(true)} disabled={regenerating}>
                   {regenerating ? 'Regenerating…' : 'Regenerate Snapshot'}
                 </button>

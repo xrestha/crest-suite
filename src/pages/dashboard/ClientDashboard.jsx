@@ -239,7 +239,7 @@ function targetLineValue(snap, day) {
 }
 
 export default function ClientDashboard() {
-  const { profile, clientId, isAdmin, isTrial, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
+  const { profile, clientId, isAdmin, isOwner, isTrial, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
   // 'kitchen'/'bar' pos_team accounts (S431) get kitchen-ops KPIs (open/late tickets, prep time)
   // instead of the front-of-house Revenue/Covers/Avg Check/Tables Occupied cards — they have no
   // more use for revenue figures on their landing dashboard than a POS-only staffer has for IMS's.
@@ -1093,6 +1093,11 @@ export default function ClientDashboard() {
   }
 
   const bsToday      = getBsToday()
+  // Who may end the month (S756, decided with the owner): the Owner, an IMS supervisor or manager,
+  // or admin — the Periods page's own guard. This banner used to offer the close to ANY login that
+  // reached the dashboard, so a storekeeper could freeze the month's report before counting. The
+  // database refuses the same writes (migration 20260918100000); this only stops offering them.
+  const canClosePeriod = isOwner || hasImsAccess('supervisor')
   const periodExpired = activePeriod && (
     activePeriod.bs_year < bsToday.year ||
     (activePeriod.bs_year === bsToday.year && activePeriod.bs_month < bsToday.month)
@@ -2582,14 +2587,16 @@ export default function ClientDashboard() {
               <p style={{ color: 'var(--theme-text2)', margin: '4px 0 0', fontSize: 12 }}>
                 {isAdmin
                   ? `Viewing as admin — go to Periods to close and advance for this property.`
-                  : `Finish your month-end stock count, then close this period and open ${BS_MONTHS[nextAdvMonth - 1]}.`}
+                  : canClosePeriod
+                    ? `Finish your month-end stock count, then close this period and open ${BS_MONTHS[nextAdvMonth - 1]}.`
+                    : `Your manager or the account owner closes the month once the stock count is finished.`}
               </p>
             </div>
             {isAdmin ? (
               <button className="amber-action-btn" onClick={() => navigate('/periods')}>
                 Go to Periods →
               </button>
-            ) : (
+            ) : canClosePeriod && (
               <button className="amber-action-btn" onClick={askPeriodClose} disabled={advancingPeriod || checkingClose}>
                 {checkingClose ? 'Checking…' : advancingPeriod ? 'Closing…' : `End ${BS_MONTHS[activePeriod.bs_month - 1]} & Start ${BS_MONTHS[nextAdvMonth - 1]} →`}
               </button>

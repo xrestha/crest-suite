@@ -373,6 +373,40 @@ const rules = [
   // genuinely does prove nothing landed, and saying so is what makes the delivery safe to re-enter.
   // That guarantee is the function's whole reason for existing (the old path wrote the bills first
   // and could stop before the quantities), so these messages are allowed to state it.
+  // ── The IMS guards (S756, migration 20260918100000) ───────────────────────────────────────────
+  // Each is raised by a BEFORE trigger on the row it names, so the statement that carried it did
+  // not change that row — but a page that writes several tables in a row (a bill, then its
+  // payment) may have landed the earlier ones, so none of these claims the whole action is undone.
+  {
+    test: e => hasCode(e, 'period_closed'),
+    staff: 'That month is closed, so it cannot be changed from your login. Ask the account owner if something in it needs fixing.',
+    operator: 'That month is closed, so this change was refused. Only the account owner (or a Crest operator) can change a closed month — open it from the owner\'s login, fix it there, then Regenerate Snapshot on that month\'s Monthly Report.',
+  },
+  {
+    test: e => hasCode(e, 'period_rank'),
+    staff: 'Starting or closing a month needs the account owner or an inventory supervisor. Nothing about the month was changed.',
+    operator: 'Only the account owner or an inventory supervisor or manager can start or close a month, and only the owner can reopen or rename one — so the month was not changed.',
+  },
+  {
+    test: e => hasCode(e, 'recipe_delete_rank'),
+    staff: 'Deleting a dish needs an inventory manager. Hide it instead, which takes it off the menu and keeps its history.',
+    operator: 'Deleting a dish needs an inventory manager or the account owner, so it is still there. Use Hide to take it off the menu and the till — its sales history stays intact.',
+  },
+  {
+    test: e => hasCode(e, 'recipe_hide_rank'),
+    staff: 'Hiding or showing a dish needs an inventory supervisor. The dish was not changed.',
+    operator: 'Hiding or showing a dish needs an inventory supervisor or manager, so the dish is still in the state it was.',
+  },
+  {
+    test: e => hasCode(e, 'ims_settings_rank'),
+    staff: 'The inventory thresholds can only be changed by an inventory manager or the account owner.',
+    operator: 'The food-cost and variance thresholds and the code prefixes can only be changed by an inventory manager or the account owner, so they were not changed.',
+  },
+  {
+    test: e => hasCode(e, 'ims_rank'),
+    staff: 'Your login does not have the inventory rank for this. Nothing was changed — ask your manager.',
+    operator: 'This needs a higher inventory rank than this login has, so it was refused. An inventory manager or the account owner can do it, or raise this login\'s role on IMS Staff.',
+  },
   {
     test: e => /po_period_closed/i.test(e.message || ''),
     staff: 'That month is closed, so this delivery cannot be recorded against it. Nothing was received — ask your manager.',

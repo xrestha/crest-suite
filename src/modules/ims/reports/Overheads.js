@@ -69,7 +69,7 @@ function seedBucket(key) {
 }
 
 export default function Overheads() {
-  const { profile, clientId, isAdmin, hasImsAccess, clientModules } = useAuth()
+  const { profile, clientId, canEditClosedPeriods, hasImsAccess, clientModules } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
   const hrOn = !!clientModules?.hr
@@ -489,7 +489,8 @@ export default function Overheads() {
   const isAboveBreakEven = breakEvenRev != null && revenue >= breakEvenRev
 
   const period  = periods.find(p => p.id === periodId)
-  const isLocked = !isAdmin && period?.status === 'closed'
+  // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
+  const isLocked = !canEditClosedPeriods && period?.status === 'closed'
   const cfg = BUCKET_CONFIG[activeBucket]
   const activeRows  = rows[activeBucket]
   const bucketTotal = totals[activeBucket]

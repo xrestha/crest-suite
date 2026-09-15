@@ -45,7 +45,7 @@ function StatusBadge({ status }) {
 }
 
 export default function PurchaseOrders() {
-  const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
+  const { clientId, profile, isAdmin, canEditClosedPeriods, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -256,8 +256,8 @@ export default function PurchaseOrders() {
     // The form is only reachable from controls the lock hides, so this is the case where the
     // period was closed in another tab while it sat open.
     const target = periods.find(p => p.id === poForm.period_id)
-    if (!isAdmin && target?.status === 'closed') {
-      setFormError(`${BS_MONTHS[target.bs_month - 1]} ${target.bs_year} is closed, so nothing can be saved into it. Nothing has changed. Pick the open period, or ask a Crest operator.`)
+    if (!canEditClosedPeriods && target?.status === 'closed') {
+      setFormError(`${BS_MONTHS[target.bs_month - 1]} ${target.bs_year} is closed, so nothing can be saved into it. Nothing has changed. Pick the open period, or ask the account owner.`)
       return
     }
     const validItems = poItems.filter(x => x.item_id && parseFloat(x.qty_ordered) > 0)
@@ -596,7 +596,8 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
   // so this page was the way around a close for anyone who knew it was here. The `!isAdmin`
   // carve-out is the feature: an operator entering a missed delivery into a closed month is a real
   // job, and the server now enforces exactly this rule rather than trusting the page to.
-  const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
+  // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
+  const isLocked = !canEditClosedPeriods && selectedPeriod?.status === 'closed'
 
   // The receive screen's own period — resolved from the PO rather than assumed to be the selected
   // one, because it is the PO's period the bill is filed into.
@@ -1071,9 +1072,9 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
           no signal at all that the month on screen was closed. Receiving writes purchase entries,
           so it moves the same figures a late bill does, and the frozen report needs the same
           regeneration afterwards. */}
-      {isAdmin && selectedPeriod?.status === 'closed' && (
+      {canEditClosedPeriods && selectedPeriod?.status === 'closed' && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          ✎ <strong>{periodLabel} is closed — you are editing it as admin.</strong> A delivery received here still creates its
+          ✎ <strong>{periodLabel} is closed — you are editing a closed month.</strong> A delivery received here still creates its
           purchase entries in this month, which is how a missed one gets into the period it belongs to. Afterwards, open{' '}
           <Link to="/owner-report" style={{ color: 'inherit', textDecoration: 'underline' }}>Monthly Report</Link>{' '}
           for this month and use <strong>Regenerate Snapshot</strong> — the report was frozen when the month closed and will

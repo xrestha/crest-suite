@@ -159,7 +159,9 @@ export default function ImsStaff() {
 
   // Logins whose stored level no longer matches the level their role carries.
   const mismatched = useMemo(() => staff.filter(p => {
-    if (!p.ims_job_title) return false
+    // A counting PIN is fixed at Staff by create_ims_pin_staff and refused any other rank by
+    // admin-user-ops (S756) — never offer to move one.
+    if (p.has_pin || !p.ims_job_title) return false
     const expected = effectiveRoles.find(r => r.label === p.ims_job_title)?.level
     return expected && expected !== p.ims_role
   }), [staff, effectiveRoles])
@@ -251,7 +253,7 @@ export default function ImsStaff() {
     // EVERY row that failed rather than silently dropping each error in turn. Sequencing these
     // never made them atomic: a failure mid-loop already left some staff moved and some not, with
     // nothing on screen to say which, so the manager saw the new level and believed it applied.
-    const affected = staff.filter(p => p.ims_job_title === changedLabel && p.ims_role !== level)
+    const affected = staff.filter(p => !p.has_pin && p.ims_job_title === changedLabel && p.ims_role !== level)
     const outcomes = await Promise.all(affected.map(async p => {
       const { data, error } = await supabase.functions.invoke('admin-user-ops', {
         body: { action: 'update_ims_role', userId: p.id, ims_role: level, ims_job_title: changedLabel },
@@ -590,6 +592,11 @@ export default function ImsStaff() {
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{p.email || '—'}</td>
                     <td>
+                      {p.has_pin ? (
+                        <Tip text="A counting PIN signs in on the store-room tablet and can only enter stock counts. Its access level is always Staff — to give this person more, add them as an email login instead.">
+                          <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Counting PIN</span>
+                        </Tip>
+                      ) : (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <select aria-label={`IMS role for ${p.full_name || p.email}`}
                           className="form-select"
@@ -612,6 +619,7 @@ export default function ImsStaff() {
                           </Tip>
                         )}
                       </div>
+                      )}
                     </td>
                     <td>
                       {p.ims_role

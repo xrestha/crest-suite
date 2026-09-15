@@ -1152,7 +1152,7 @@ export default function Periods() {
                                   sales_entries and stock_movements, and it was the one control
                                   on the page that let an Owner or an IMS supervisor write into a
                                   closed month (S738). */}
-                              {posEnabled && (isAdmin || p.status === 'open') && (
+                              {posEnabled && (isAdmin || isOwner || p.status === 'open') && (
                                 <Tip text="Posts POS bills from this month that closed while no Inventory period existed — their revenue and ingredient usage are missing from Inventory reports until this runs — and credit notes issued that month that could not take their bill's revenue back out. Safe to run more than once; anything already posted is skipped." width={300}>
                                   <button
                                     className="btn btn-ghost"
@@ -1164,8 +1164,10 @@ export default function Periods() {
                                   </button>
                                 </Tip>
                               )}
-                              {/* Close / Reopen / Resync — admin only */}
-                              {isAdmin && (p.status === 'open' ? (
+                              {/* Close / Reopen — admin. A closed month's Add missing bills and Resync
+                                  are the Owner's too (S756): the Owner now edits a closed month in
+                                  place, and a capability with no way in is not a capability. */}
+                              {(isAdmin || (isOwner && p.status !== 'open')) && (p.status === 'open' ? (
                                 <button
                                   className="btn btn-ghost"
                                   style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)' }}
@@ -1186,7 +1188,7 @@ export default function Periods() {
                                       writable for admin. All that was missing was a way in, since
                                       Purchases opens on the OPEN period by default. */}
                                   {clientModules?.ims && (
-                                    <Tip text="Opens Purchases on this month so a bill that was missed at the time can still be entered. Closed months stay editable for admin, so this needs no reopening — and it works even when a later month is already open, which Reopen cannot." width={300}>
+                                    <Tip text="Opens Purchases on this month so a bill that was missed at the time can still be entered. Closed months stay editable for the account owner and admin, so this needs no reopening — and it works even when a later month is already open." width={300}>
                                       <button
                                         className="btn btn-ghost"
                                         style={{ fontSize: 12, padding: '5px 12px' }}
@@ -1196,7 +1198,7 @@ export default function Periods() {
                                       </button>
                                     </Tip>
                                   )}
-                                  <Tip text="Fix a mistake in this closed period directly (Stock Count already lets admin edit a closed period), then use this to push the correction into the next period's opening stock — no reopening needed.">
+                                  <Tip text="Fix a mistake in this closed period directly (the account owner and admin can edit a closed month on Stock Count), then use this to push the corrected closing count into the next period's opening stock — no reopening needed.">
                                     <button
                                       className="btn btn-ghost"
                                       style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-accent-ink)', borderColor: 'color-mix(in srgb, var(--theme-accent) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' }}
@@ -1207,7 +1209,7 @@ export default function Periods() {
                                       {resyncBusy === p.id ? 'Resyncing…' : 'Resync Opening Stock →'}
                                     </button>
                                   </Tip>
-                                  <Tip text="Hands data entry for this month back to the CLIENT'S own logins — blocked whenever a later period is already open (only one period can be open per client). Admin does not need it: use Add missing bills for a purchase that was missed, or Resync Opening Stock for a corrected count." width={300}>
+                                  {isAdmin && <Tip text="Hands data entry for this month back to the CLIENT'S own logins — blocked whenever a later period is already open (only one period can be open per client). Admin does not need it: use Add missing bills for a purchase that was missed, or Resync Opening Stock for a corrected count." width={300}>
                                     <button
                                       className="btn btn-ghost"
                                       style={{ fontSize: 12, padding: '5px 12px', color: 'var(--theme-green-text)', borderColor: 'color-mix(in srgb, var(--theme-green) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-green) 7%, transparent)' }}
@@ -1215,7 +1217,7 @@ export default function Periods() {
                                     >
                                       Reopen
                                     </button>
-                                  </Tip>
+                                  </Tip>}
                                 </>
                               ))}
                             </div>

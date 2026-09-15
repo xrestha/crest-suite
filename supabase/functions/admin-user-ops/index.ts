@@ -50,9 +50,21 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
     .select('client_id, pos_legacy_key_retired_at')
   if (keyErr) throw new Error(`Failed to switch off this client's shared POS key: ${keyErr.message}`)
 
+  // The stock-count tablets hold a key of their own (S737), which this function used to leave
+  // alone — an archived or wiped client's store-room tablet still read the roster and signed
+  // counters in (S756). Rotating it is the whole revoke: every enrolled tablet's copy stops
+  // matching, and the enrol token goes with it so an open QR cannot re-issue the new one.
+  const { data: imsRotated, error: imsKeyErr } = await admin
+    .from('client_secrets')
+    .update({ ims_device_secret: crypto.randomUUID(), ims_enrol_token: null, ims_enrol_token_expires_at: null, updated_at: now })
+    .eq('client_id', clientId)
+    .select('client_id')
+  if (imsKeyErr) throw new Error(`Failed to sign out this client's stock-count tablets: ${imsKeyErr.message}`)
+  const imsTabletsSignedOut = (imsRotated || []).length > 0
+
   const devices = (revoked || []) as Array<Record<string, unknown>>
   const legacyRetired = (retired || []).length > 0
-  if (devices.length > 0 || legacyRetired) {
+  if (devices.length > 0 || legacyRetired || imsTabletsSignedOut) {
     const { data: cl } = await admin.from('clients').select('name').eq('id', clientId).maybeSingle()
     let userName: string | null = null
     if (actorId) {
@@ -71,12 +83,19 @@ async function revokeClientTablets(admin: ReturnType<typeof createClient>, clien
         old_data: { pos_legacy_key_retired_at: null },
         new_data: { pos_legacy_key_retired_at: now },
       }] : []),
+      // Never the key itself: client_secrets is unaudited precisely so a secret cannot reach
+      // audit_logs in plaintext.
+      ...(imsTabletsSignedOut ? [{
+        ...base, table_name: 'client_secrets', action: 'UPDATE', record_id: clientId,
+        old_data: null,
+        new_data: { ims_count_tablets_signed_out_at: now },
+      }] : []),
     ]
     const { error: auditErr } = await admin.from('audit_logs').insert(rows)
     if (auditErr) console.error('[admin-user-ops] tablet revocation audit insert failed:', auditErr.message)
   }
 
-  return { tablets_revoked: devices.length, legacy_key_retired: legacyRetired }
+  return { tablets_revoked: devices.length, legacy_key_retired: legacyRetired, ims_tablets_signed_out: imsTabletsSignedOut }
 }
 
 /**
@@ -811,7 +830,7 @@ Deno.serve(async (req) => {
     async function loadTarget(userId: string) {
       const { data } = await admin
         .from('profiles')
-        .select('id, role, client_id, pos_role, pos_email, ims_role, hr_role, hr_self_service')
+        .select('id, role, client_id, pos_role, pos_email, ims_role, ims_email, hr_role, hr_self_service')
         .eq('id', userId).single()
       return data as Record<string, unknown> | null
     }
@@ -1696,6 +1715,14 @@ Deno.serve(async (req) => {
       // silently failed. (Clearing a role is refused above since S752 — it minted an Owner.)
       if (ims_role && (targetProfile?.pos_role || targetProfile?.hr_self_service || targetProfile?.hr_role)) {
         return json({ error: 'This account already has POS, HR self-service, or HR staff access and cannot also be an IMS staff account' }, 400)
+      }
+      // A counting PIN is a 4–6 digit login on a shared store-room tablet. create_ims_pin_staff
+      // fixes its rank at 'staff' for that reason, and this action used to move it anywhere — a
+      // manager-rank PIN passes ims_can_manage_counts(), skips the count scope and recount guards,
+      // and satisfies isImsPrivileged here, i.e. creates logins and resets passwords (S756).
+      // Admin included: there is no support case for a tablet PIN with a manager's reach.
+      if (targetProfile.ims_email && ims_role !== 'staff') {
+        return json({ error: 'A counting PIN is always Staff. To give this person more access, add them as an email login instead.' }, 400)
       }
 
       const { error: updateErr } = await admin.from('profiles')

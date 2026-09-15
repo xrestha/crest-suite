@@ -8,6 +8,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import { IMS_COUNT_HOME } from '../../../shared/imsCountAccess'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 // Stock Count → Settings (S737). Manager-only; mounted by Stock.js as one tab body.
 //
@@ -57,6 +58,7 @@ export default function StockCountSettings({ clientId, categories, uncategorised
   // design, and persisting it across a reload would defeat the expiry.
   const [enrol, setEnrol] = useState(null)
   const [enrolBusy, setEnrolBusy] = useState(false)
+  const { ask: askConfirm, confirmEl } = useConfirm()
 
   const load = useCallback(async () => {
     if (!clientId) return
@@ -158,6 +160,31 @@ export default function StockCountSettings({ clientId, categories, uncategorised
     } finally {
       setEnrolBusy(false)
     }
+  }
+
+  // Every counting tablet shares one key per outlet (S737), so a lost tablet can only be cut off by
+  // changing that key for all of them (S756, the owner's choice over per-tablet keys). Each tablet
+  // then shows "signed out by your manager" and needs the QR once.
+  function signOutAllTablets() {
+    askConfirm({
+      title: 'Sign out every counting tablet?',
+      confirmLabel: 'Sign Out All Tablets', busyLabel: 'Signing out…', danger: true,
+      body: (
+        <p style={{ margin: 0 }}>
+          Every tablet and phone set up for counting stops working straight away, including ones
+          that are lost or stolen. To keep using a device, show the setup QR and scan it again.
+          Counts already saved are not affected.
+        </p>
+      ),
+      run: async () => {
+        setError(null)
+        setNotice('')
+        const { error: rpcErr } = await supabase.rpc('rotate_ims_device_secret', { p_client_id: clientId })
+        if (rpcErr) { setError(asActionError(rpcErr)); return }
+        setEnrol(null)
+        setNotice('Every counting tablet is signed out. Show the setup QR on the devices you still use.')
+      },
+    })
   }
 
   function copyUrl() {
@@ -347,7 +374,17 @@ export default function StockCountSettings({ clientId, categories, uncategorised
           A device that is already set up keeps working — hiding the code only stops new ones being added.
           The counting page itself is <code>{COUNT_PATH}</code>.
         </p>
+
+        <div style={{ borderTop: '1px solid var(--theme-border)', marginTop: 16, paddingTop: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={signOutAllTablets} disabled={enrolBusy}>
+            Sign out all counting tablets
+          </button>
+          <Tip text="Use this when a counting tablet or phone is lost, stolen or handed to someone who should no longer count. Every set-up device is signed out; the ones you still use need the setup QR scanned once more.">
+            <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>For a lost or stolen device</span>
+          </Tip>
+        </div>
       </div>
+      {confirmEl}
     </div>
   )
 }

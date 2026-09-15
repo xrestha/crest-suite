@@ -53,7 +53,7 @@ const isComp = row => row.source === 'pos_comp'
 const isPosRow = row => row.source === 'pos' || row.source === 'pos_credit'
 
 export default function Sales() {
-  const { clientId, profile, loading: authLoading, isAdmin, clientModules, hasImsAccess } = useAuth()
+  const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, clientModules, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   // Manual Sales Entry exists for IMS clients who do NOT run POS. Where both modules are on, POS
   // is the source of truth and supersedes manual entry entirely — a bill closed at the till
@@ -673,7 +673,8 @@ export default function Sales() {
   const TAB_LOAD_KEY = { bulk: 'sales', daily: 'daily', breakdown: 'monthly', summary: null }
   const loadError = loadErrors.init || loadErrors.allDay || loadErrors[TAB_LOAD_KEY[viewMode]] || null
 
-  const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
+  // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
+  const isLocked = !canEditClosedPeriods && selectedPeriod?.status === 'closed'
   // Both Save buttons sit ABOVE the "No active recipes" empty state, so an empty menu — whether the
   // client has none or the read failed — left a live Save over nothing. Both payload builders
   // iterate `recipes`, and save_sales_day reads an empty payload as "clear this day".

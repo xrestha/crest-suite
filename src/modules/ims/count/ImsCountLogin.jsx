@@ -29,6 +29,13 @@ function readStored(key) {
   try { return localStorage.getItem(key) } catch (_) { return null }
 }
 
+// A manager's "Sign out all counting tablets" rotates the key this device holds (S756). Forget it,
+// so the page falls through to the set-up screen instead of retrying a key that will never work.
+function forgetDevice() {
+  try { [LS_CLIENT, LS_NAME, LS_SECRET].forEach(k => localStorage.removeItem(k)) } catch (_) { /* nothing stored */ }
+}
+const SIGNED_OUT_TEXT = 'This tablet was signed out by your manager. Ask them to show the setup code again, then scan it.'
+
 export default function ImsCountLogin() {
   const navigate = useNavigate()
   const { colors } = useTheme()
@@ -93,7 +100,13 @@ export default function ImsCountLogin() {
         // A failed read is not an empty roster. Telling a counter "ask your manager to add staff"
         // when the connection dropped sends them to the wrong person to fix a problem that is not
         // theirs — the fix PosLogin already carries.
-        if (rpcErr) setLoadError("Couldn't reach the server. Check this device's connection and try again.")
+        // A dead key RAISES (S756) rather than returning an empty roster, which used to read as
+        // "no PINs set up yet" and sent the counter to fix the wrong thing.
+        if (rpcErr && String(rpcErr.message || '').includes('ims_device_not_active')) {
+          forgetDevice()
+          setDevice({ clientId: null, clientName: 'Crest Stock Count', secret: null })
+          setLoadError(SIGNED_OUT_TEXT)
+        } else if (rpcErr) setLoadError("Couldn't reach the server. Check this device's connection and try again.")
         else setStaff(data || [])
         setLoading(false)
       })
@@ -120,11 +133,24 @@ export default function ImsCountLogin() {
       })
 
       if (err || !data?.access_token) {
-        let lockedUntil = null
-        try { const b = await err?.context?.json(); lockedUntil = b?.locked ? b.locked_until : null } catch (_) { /* generic message */ }
-        setError(lockedUntil
-          ? `Too many incorrect attempts. Try again ${formatLockRemaining(lockedUntil)}, or ask your manager to reset your PIN.`
-          : 'Incorrect PIN. Try again.')
+        // Only a 401/423 from the function is an answer about the PIN. A dropped connection or a
+        // 5xx used to say "Incorrect PIN" too, and clearing the pad over a network fault teaches a
+        // counter their PIN is wrong (S756).
+        const status = err?.context?.status
+        let body = null
+        try { body = await err?.context?.json() } catch (_) { /* no body */ }
+        if (status === 401 && /not set up/i.test(body?.error || '')) {
+          forgetDevice()
+          setSelected(null)
+          setDevice({ clientId: null, clientName: 'Crest Stock Count', secret: null })
+          setLoadError(SIGNED_OUT_TEXT)
+        } else if (body?.locked) {
+          setError(`Too many incorrect attempts. Try again ${formatLockRemaining(body.locked_until)}, or ask your manager to reset your PIN.`)
+        } else if (status === 401) {
+          setError('Incorrect PIN. Try again.')
+        } else {
+          setError("Couldn't reach the server, so your PIN was not checked. Check this device's connection and try again.")
+        }
         setPin('')
         return
       }

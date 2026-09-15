@@ -23,7 +23,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 export default function Purchases() {
-  const { clientId, profile, loading: authLoading, isAdmin, hasImsAccess } = useAuth()
+  const { clientId, profile, loading: authLoading, canEditClosedPeriods, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -399,7 +399,8 @@ export default function Purchases() {
       s + calcBillTotals(lines, lines[0]?.discount_amount).grandTotal, 0), 0), [byDay])
 
   const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : '—'
-  const isLocked = !isAdmin && selectedPeriod?.status === 'closed'
+  // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
+  const isLocked = !canEditClosedPeriods && selectedPeriod?.status === 'closed'
   // Delete All wipes a whole month; Staff keeps single-bill add/edit/delete and loses only this
   // (decision, Aashish 2026-09-08). Admin and Owner resolve to 'manager' on every axis.
   const canDeleteAll = hasImsAccess('supervisor')
@@ -463,9 +464,9 @@ export default function Purchases() {
           every control looked like the open period's. Say it, and say what the entry does not do
           on its own: the Monthly Report was frozen at close and no longer matches once a bill
           lands here. */}
-      {isAdmin && selectedPeriod?.status === 'closed' && (
+      {canEditClosedPeriods && selectedPeriod?.status === 'closed' && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          ✎ <strong>{periodLabel} is closed — you are editing it as admin.</strong> Bills added here still save, which is how a
+          ✎ <strong>{periodLabel} is closed — you are editing a closed month.</strong> Bills added here still save, which is how a
           missed bill gets into the month it belongs to. Afterwards, open{' '}
           <Link to="/owner-report" style={{ color: 'inherit', textDecoration: 'underline' }}>Monthly Report</Link>{' '}
           for this month and use <strong>Regenerate Snapshot</strong> — the report was frozen when the month closed and will not

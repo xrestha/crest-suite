@@ -108,6 +108,7 @@ export default function Recipes() {
     writePageCache('recipes', section, clientId, value)
   }, [clientId])
   const [view, setView] = useState('list') // list | edit | detail
+  const canDeleteRecipe = hasImsAccess('manager')
   const [selectedRecipe, setSelectedRecipe] = useState(null)
   // Breadcrumb trail of recipes drilled through via a sub-recipe ingredient row (detail view
   // only) — "Back" pops one level instead of always returning to the list.
@@ -273,6 +274,13 @@ export default function Recipes() {
   }, [clientId, scopedFrom, setAndCache])
 
   useEffect(() => { if (clientId) init() }, [clientId, init])
+
+  // One `error` serves all three views. Until S756 it rendered only inside the edit view, so every
+  // refusal raised from the LIST — Delete's "has 42 sales records, hide it instead", a failed Hide,
+  // the database's rank refusals — was stored and never shown: the click did nothing at all. It
+  // renders in each view now, and a view change clears it so an edit-form error does not follow
+  // the reader back to the list.
+  useEffect(() => { setError('') }, [view])
 
   useEffect(() => {
     if (!printRecipe) return
@@ -1245,6 +1253,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
       {/* ── LIST VIEW ── */}
       {!loadError && view === 'list' && (
         <div className={printRecipe ? 'no-print' : ''}>
+          <ActionError error={error} className="action-error--top" />
           {/* Search bar */}
           <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 16, alignItems: 'center' }}>
             <input aria-label="Search recipes"
@@ -1429,7 +1438,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setPrintRecipe(recipe)}>🖶</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)}>Edit</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)}>{recipe.is_active ? 'Hide' : 'Show'}</button>
-                              <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)}>Del</button>
+                              {/* Deleting a dish is manager-rank (S756, decided with the owner); the
+                                  database refuses it below that. Hide stays with supervisors. */}
+                              {canDeleteRecipe && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)}>Del</button>}
                             </div>
                           </td>
                         </tr>
@@ -1511,7 +1522,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setPrintRecipe(recipe)}>🖶</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)}>Edit</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)}>{recipe.is_active ? 'Hide' : 'Show'}</button>
-                              <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)}>Del</button>
+                              {/* Deleting a dish is manager-rank (S756, decided with the owner); the
+                                  database refuses it below that. Hide stays with supervisors. */}
+                              {canDeleteRecipe && <button className="btn btn-danger" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => deleteRecipe(recipe)}>Del</button>}
                             </div>
                           </td>
                         </tr>
