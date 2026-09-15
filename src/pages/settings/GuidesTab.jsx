@@ -4,6 +4,7 @@ import { IMS_GUIDE_GROUPS } from './imsGuideData'
 import { HR_GUIDE_GROUPS } from './hrGuideData'
 import { POS_GUIDE_GROUPS } from './posGuideData'
 import { SUITE_GUIDE_GROUPS } from './suiteGuideData'
+import { CUSTOMIZATION_GUIDE_GROUPS } from './customizationGuideData'
 
 // Admin Settings → Guides: one deep per-page reference guide per module, switched by the pill
 // bar here. This wrapper (and everything it imports — the component plus all three data files)
@@ -25,6 +26,12 @@ const MODULES = [
     key: 'pos', label: 'Crest POS', groups: POS_GUIDE_GROUPS,
     docTitle: 'Crest POS — Module Guide',
     docSubtitle: 'Billing, floor & kitchen reference. Printed from Admin → Settings → Guides.',
+  },
+  // The POS add-on (S758/S759): sits beside POS because it exists only on a client with a till.
+  {
+    key: 'customization', label: 'Crest Customization', groups: CUSTOMIZATION_GUIDE_GROUPS,
+    docTitle: 'Crest Customization — Module Guide',
+    docSubtitle: 'Sizes, extras & "No …" choices reference. Printed from Admin → Settings → Guides.',
   },
   // Last, and not a module: Crest Suite Pro is the owner layer sold on top of the three, so it
   // reads across all of them. Its four pages belonged to no module guide and therefore sat in

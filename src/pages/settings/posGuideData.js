@@ -40,7 +40,7 @@ export const POS_GUIDE_GROUPS = [
           'S754\'s database changes (migrations 20260916100000/110000/120000) and its two Edge Function updates were written and tested but not yet applied when this guide was updated — until they are, the screens show the new rules but the database does not yet refuse the old ones.',
           'Offline covers order-taking only: menus, tables and order edits queue locally and sync on reconnect, but billing is hard-blocked offline — no money path exists without a live server.',
         ],
-        connections: 'POS feeds IMS (Sales Entry, Stock Movements, and everything downstream — Variance, COGS, Menu Engineering). Menu items come from recipes flagged On POS in Menu Pricing (documented in the Crest IMS guide). POS staff can be linked to HR employees so one person exists once.',
+        connections: 'POS feeds IMS (Sales Entry, Stock Movements, and everything downstream — Variance, COGS, Menu Engineering). Menu items come from recipes flagged On POS in Menu Pricing (documented in the Crest IMS guide). POS staff can be linked to HR employees so one person exists once. Sizes, extras and "No …" choices on a dish are the Crest Customization add-on, sold separately and documented in its own guide tab.',
       },
       {
         id: 'pos-setup',
