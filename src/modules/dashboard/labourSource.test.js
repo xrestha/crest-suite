@@ -78,6 +78,9 @@ describe('payrollLabourTotal', () => {
   test('gross + employer SSF, tolerant of strings and nulls', () => {
     expect(payrollLabourTotal([{ gross: '30000', ssf_employer: '2000' }, { gross: 10000, ssf_employer: null }])).toBe(42000)
   })
+  test('S756 owner decision: overtime is included, absence is not subtracted', () => {
+    expect(payrollLabourTotal([{ gross: '92000', ot_amount: '7323', ssf_employer: '0', absence_deduction: '500' }])).toBe(99323)
+  })
   test('null means no run; [] is a real zero', () => {
     expect(payrollLabourTotal(null)).toBeNull()
     expect(payrollLabourTotal([])).toBe(0)

@@ -207,7 +207,7 @@ export const SUITE_GUIDE_GROUPS = [
         formulas: [
           'Revenue (per outlet) = Σ qty × (price charged on the sale, else the recipe\'s price) − row discount. Comped dishes are left out; older rows with a blank source are kept. Same basis as the Owner Dashboard and Consolidated P&L.',
           'Net Purchases (per outlet) = Σ qty × rate − each supplier bill\'s discount counted ONCE − vendor returns, across every item. Same basis as the Owner Dashboard\'s Food Cost.',
-          'Payroll = finalized payroll runs only (gross + employer SSF). A month whose payroll is not finalized counts as zero here, not as an estimate.',
+          'Payroll = finalized payroll runs only (gross + overtime + employer SSF). A month whose payroll is not finalized counts as zero here, not as an estimate.',
           'Group Food Cost % = group net purchases ÷ group revenue × 100. Group Labour % = group payroll ÷ group revenue × 100. The page works both out from the raw figures above — the database sends no percentages.',
         ],
         gotchas: [

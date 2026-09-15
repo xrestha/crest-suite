@@ -11,7 +11,7 @@
 //   COGS     — computeUsed() valued at items.per_uom_rate (is_active, is_sub_recipe=false —
 //              MonthlySummary's convention; Stock Count includes prep, this page does not, and
 //              the on-page note names the difference like S575's disclosures do).
-//   Labour   — finalized HR payroll (gross + employer SSF, get_group_summary's definition) when a
+//   Labour   — finalized HR payroll (gross + overtime + employer SSF, get_group_summary's definition) when a
 //              finalized run exists; otherwise the overheads 'labor' bucket. NEVER both — the two
 //              labour sources are never meant to be summed (see .claude/rules/dashboards.md), and
 //              when both exist the ignored one is named on screen rather than silently dropped.
@@ -40,6 +40,7 @@ import ReportPage from '../../components/ReportPage'
 import { printWithTitle } from '../../utils/printTitle'
 import { computeUsed, COGS_FORMULA } from '../../shared/imsFormulas'
 import { BS_MONTHS } from '../../utils/bsCalendar'
+import { payrollLabourTotal } from '../../modules/dashboard/labourSource'
 
 const pctOf = (part, whole) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : '—')
 
@@ -56,7 +57,7 @@ const LINES = [
   { key: 'staffMealsVal', label: 'Staff Meals', cost: true,
     tip: 'Food consumed by staff, valued at cost — spent stock that earned no revenue, shown as its own line.' },
   { key: 'labour', label: 'Labour', cost: true,
-    tip: 'Finalized HR payroll for this period (gross pay + employer SSF) when a run exists; otherwise the manually-entered Labour bucket from Overheads. Never both — that would double-count.' },
+    tip: 'Finalized HR payroll for this period (gross pay + overtime + employer SSF) when a run exists; otherwise the manually-entered Labour bucket from Overheads. Never both — that would double-count.' },
   { key: 'overheads', label: 'Overheads', cost: true,
     tip: "The Overheads page's 'overhead' bucket — rent, utilities, and other fixed costs. Labour and Tax & Fees buckets are their own lines." },
   { key: 'taxFees', label: 'Tax & Fees', cost: true,
@@ -280,19 +281,19 @@ export default function ConsolidatedPnl() {
       buckets[b] += parseFloat(r.amount) || 0
     })
 
-    // Labour — finalized payroll (gross + employer SSF, the same definition get_group_summary
+    // Labour — finalized payroll (gross + overtime + employer SSF, the same definition get_group_summary
     // uses) when a finalized run exists for this period.
     let labourPayroll = null
     const runIds = (runs || []).map(r => r.id)
     if (runIds.length > 0) {
       const { data: slips, error: slipErr } = await supabase.from('hr_payslips')
-        .select('gross, ssf_employer').in('run_id', runIds)
+        .select('gross, ot_amount, ssf_employer').in('run_id', runIds)
       if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
       // A finalized run exists but its payslips could not be read — falling through to the
       // Overheads bucket here would quietly substitute a DIFFERENT labour source for the one this
       // statement says it used, so refuse rather than print a plausible number.
       if (slipErr) { setLoadError(slipErr.message); setPnl(null); return }
-      labourPayroll = (slips || []).reduce((s, ps) => s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
+      labourPayroll = payrollLabourTotal(slips || [])
     }
 
     // `empty` is `!pnl`, and this used to set a statement unconditionally — so `pnl` was never

@@ -32,14 +32,19 @@ export function isPayrollFenced({ hrOn, isAdmin, isOwner, imsRole }) {
 }
 
 /**
- * A finalized run's labour cost: gross pay + employer SSF, summed over its payslips — the definition
- * `get_group_summary`, `ConsolidatedPnl` and `Overheads.js` share, so no page disagrees about what
- * labour costs. Returns null when there are no payslips to sum, which the caller should only pass
+ * A finalized run's labour cost: gross pay + OVERTIME + employer SSF, summed over its payslips — the
+ * definition every labour-cost reader shares (Overheads.js, ClientDashboard, ConsolidatedPnl, the Owner
+ * Dashboard, the Monthly Owner Report, and `get_group_summary` / `get_group_pnl` since migration
+ * 20260918170000), so no page disagrees about what labour costs. `hr_payslips.gross` is basic +
+ * allowances only; overtime lives in `ot_amount`. Until S756 (owner decision, 2026-09-15) the first
+ * group left overtime out, so a busy month's labour read low exactly when overtime was highest.
+ * Absence deductions are NOT subtracted: this is the cost of labour, not cash paid (payrollCashCost). Returns null when there are no payslips to sum, which the caller should only pass
  * when no finalized run exists (a run with zero payslips is still a real zero — pass `[]` for that).
  */
 export function payrollLabourTotal(slips) {
   if (slips == null) return null
-  return slips.reduce((s, ps) => s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
+  return slips.reduce((s, ps) =>
+    s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ot_amount) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
 }
 
 /**
@@ -87,18 +92,11 @@ export function resolveLabour({ labourBucket, payroll, hrOn, fenced, readFailed 
  * a finalized run for the open period supersedes the prorated HR estimate, and the two are never
  * added. The Labor bucket stays out of it entirely, which is what keeps the three-bucket XOR true.
  *
- * WHY A SECOND TOTAL: `finalizedPayrollCost` is gross + OVERTIME + employer SSF, the Monthly Owner
- * Report's finalized-run figure (computeMonthlyReport.js), not `payrollLabourTotal`'s gross + SSF.
- * `hr_payslips.gross` excludes `ot_amount`, and this page's estimate INCLUDES overtime — so reusing
- * `payrollLabourTotal` would make Labor Cost % DROP by the month's OT the moment payroll is
- * finalized, and disagree with the frozen report the same month becomes. The page's own trend chart
- * reads those frozen reports, so the tile follows their definition.
+ * `finalizedPayrollCost` is the same total as `payrollLabourTotal` — the Monthly Owner Report's
+ * finalized-run figure. It was a separate function while the other pages left overtime out; kept as
+ * a name so the Owner Dashboard reads as what it means.
  */
-export function finalizedPayrollCost(slips) {
-  if (slips == null) return null
-  return slips.reduce((s, ps) =>
-    s + (parseFloat(ps.gross) || 0) + (parseFloat(ps.ot_amount) || 0) + (parseFloat(ps.ssf_employer) || 0), 0)
-}
+export const finalizedPayrollCost = payrollLabourTotal
 
 /**
  * @param {object}  a

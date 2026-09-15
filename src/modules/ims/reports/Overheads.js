@@ -299,7 +299,7 @@ export default function Overheads() {
       { data: runs }
     ] = results
 
-    // Finalized payroll for this period — gross + employer SSF, the same definition
+    // Finalized payroll for this period — gross + overtime + employer SSF, the same definition
     // get_group_summary and ConsolidatedPnl use, so the three never disagree about what labour
     // costs. A finalized run whose payslips cannot be read must REFUSE rather than fall through
     // to the Overheads bucket: that would quietly substitute a different labour source for the
@@ -311,7 +311,7 @@ export default function Overheads() {
       // silent truncation past 1000 payslips — a wage bill short by the rows past the cut, under a
       // label that says it came from payroll.
       const { data: slips, error: slipErr } = await fetchAllRowsChunked(runIds, chunk =>
-        scopedFrom('hr_payslips', 'gross, ssf_employer').in('run_id', chunk).order('id'))
+        scopedFrom('hr_payslips', 'gross, ot_amount, ssf_employer').in('run_id', chunk).order('id'))
       if (!periodReq.isCurrent(pid)) return
       if (slipErr) { setLoadError(slipErr.message); setPeriodData(null); return }
       labourPayroll = payrollLabourTotal(slips || [])
@@ -619,7 +619,7 @@ export default function Overheads() {
       lines.push({
         bucket: 'labor',
         category: 'Payroll',
-        description: 'Finalized HR payroll run — gross pay + employer SSF',
+        description: 'Finalized HR payroll run — gross pay + overtime + employer SSF',
         amount: labourPayroll,
       })
     }

@@ -67,7 +67,7 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 stage 4 — Stock Ageing count surpluses: kept cautious (owner decision, no change).
 - ⚪ Budget vs Actual's provisional line talks about spend rather than food cost — wording only.
 - ⚪ Dish photos uploaded to a NEW recipe that is then cancelled leave an unused file in storage.
-- ⚪ Three payroll-cost definitions exist: gross + employer SSF (Overheads, ClientDashboard, ConsolidatedPnl, `get_group_summary`), gross + OT + employer SSF (Monthly Owner Report, Owner Dashboard), gross − absence + OT + employer SSF (`payrollCashCost`). The first group likely understates labour by the overtime — owner decision.
+- ✅ S756 stage 4 — Payroll labour cost includes OVERTIME everywhere (owner decision): gross + overtime + employer SSF on Overheads, ClientDashboard, ConsolidatedPnl, Group Dashboard and the group P&L (migration `20260918170000`, applied live), matching the Owner Report and Owner Dashboard. `payrollCashCost` (absence subtracted) stays the cash-paid figure.
 - ⚪ `purchaseTaxSplit.js` keeps a private `mergeFactors`; `billPayables` could take prior bill lines directly (tidy-up).
 - ⚪ Owner Report vendor section: cash/credit split is pre-discount, and its aging total is compared against payments that include VAT.
 

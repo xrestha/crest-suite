@@ -66,7 +66,7 @@ export const IMS_GUIDE_GROUPS = [
           'Renders two KPI rows, then four chart cards — two of which carry two views behind an in-card tab: Spend by Category / Top Items by Spend, Daily Purchases vs Sales, Food Cost % monthly trend, and Revenue vs Cost Breakdown / Sales Mix.',
           'Below the charts: a Top Variance Items table and an Items to Reorder panel (both Growth+), each linking to their full report.',
           'If the open period\'s BS month has already passed, a banner offers a one-click "End <month> & Start <next>" shortcut to the client\'s own logins. An admin viewing the client gets a "Go to Periods" link there instead.',
-          'S756: labour for Fixed Costs % / Est. Net Margin comes from labourSource.js — a finalized payroll run (gross + employer SSF) supersedes the typed Labor bucket, never both; an IMS staff login on an HR client is told payroll cannot be read and gets no verdict.',
+          'S756: labour for Fixed Costs % / Est. Net Margin comes from labourSource.js — a finalized payroll run (gross + overtime + employer SSF) supersedes the typed Labor bucket, never both; an IMS staff login on an HR client is told payroll cannot be read and gets no verdict.',
         ],
         fields: [
           { label: 'Menu Health tile', desc: 'Count of recipes priced under their target_fc_pct, with an estimated monthly NPR opportunity if repriced to target — the same underlying calculation as Menu Repricing, just summarized to one number.' },
@@ -525,7 +525,7 @@ export const IMS_GUIDE_GROUPS = [
         ],
         formulas: [
           'Food Cost here (Purchase-Based) = Gross Purchases − Vendor Returns for the whole period — NOT the Stock Count "Used"/COGS figure. It ignores opening and closing stock, so a month where the client built stock reads worse than it was. This is the single biggest source of "why don\'t these two food-cost numbers agree" confusion; Monthly Summary uses the full opening+purchase−closing−wastage COGS formula instead. Always clarify which "food cost" a client means.',
-          'Labour = the finalized HR payroll run for the period (gross + employer SSF, the same definition Consolidated P&L and get_group_summary use) when one exists, otherwise the Labor bucket — never both added together (S716). The ignored one is named on screen with its amount.',
+          'Labour = the finalized HR payroll run for the period (gross + overtime + employer SSF, the same definition Consolidated P&L and get_group_summary use) when one exists, otherwise the Labor bucket — never both added together (S716). The ignored one is named on screen with its amount.',
           'Net Profit = Revenue − Purchase-Based Food Cost − Total Fixed Costs (only computed once revenue > 0). Total Fixed = Fixed Overheads + effective Labour + Tax & Fees.',
           'Break-even revenue = Total Fixed ÷ (1 − Food Cost %); Break-even dishes = Break-even Revenue ÷ Average Dish Price.',
           'Cost per Dish (Fixed OH, Labor, Tax & Fees, Total) = each bucket\'s total ÷ dishes sold.',

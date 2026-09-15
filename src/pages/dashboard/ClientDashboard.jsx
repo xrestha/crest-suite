@@ -513,7 +513,7 @@ export default function ClientDashboard() {
       { data: payrollRuns, error: payrollRunsErr }
     ] = dependentResults
 
-    // The run's payslips — gross + employer SSF, the definition Overheads, ConsolidatedPnl and
+    // The run's payslips — gross + overtime + employer SSF, the definition Overheads, ConsolidatedPnl and
     // get_group_summary share. One row per employee per run; paged and chunked all the same. A
     // failed read is carried as `labourReadFailed` and must NOT fall through to the typed Labor
     // bucket: that would quietly substitute a different labour source for the one the tile names.
@@ -522,7 +522,7 @@ export default function ClientDashboard() {
     const payrollRunIds = (payrollRuns || []).map(r => r.id)
     if (!labourReadFailed && payrollRunIds.length > 0) {
       const { data: slips, error: slipErr } = await fetchAllRowsChunked(payrollRunIds, ids =>
-        scopedFrom('hr_payslips', 'gross, ssf_employer').in('run_id', ids).order('id'))
+        scopedFrom('hr_payslips', 'gross, ot_amount, ssf_employer').in('run_id', ids).order('id'))
       if (loadIdRef.current !== myId) return // superseded during the payslip read
       if (slipErr) labourReadFailed = true
       else labourPayroll = payrollLabourTotal(slips || [])
@@ -1599,7 +1599,7 @@ export default function ClientDashboard() {
         {/* The tip used to say "Target: under 60% combined" while the colours banded at 50 and
             65 — so a 58% read amber under a sentence calling it on target. The card states the
             ladder it actually paints (S734). */}
-        <Tip text={`All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Labor is your finalized HR payroll run for the month when one exists (gross pay + employer SSF), otherwise what is typed on the Overheads Labor tab — never both added together, the same rule the Overheads page uses. Healthy up to ${FIXED_COST_WARN}%, worth watching to ${FIXED_COST_CRITICAL}%, too high above that. See the Overheads page for the full breakdown.`} width={280}>Fixed Costs % of Revenue</Tip>
+        <Tip text={`All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Labor is your finalized HR payroll run for the month when one exists (gross pay + overtime + employer SSF), otherwise what is typed on the Overheads Labor tab — never both added together, the same rule the Overheads page uses. Healthy up to ${FIXED_COST_WARN}%, worth watching to ${FIXED_COST_CRITICAL}%, too high above that. See the Overheads page for the full breakdown.`} width={280}>Fixed Costs % of Revenue</Tip>
       </div>
       {/* Carries the same settle guard as Food Cost % and Est. Net Margin % beside it (S734).
           It had none, and it is the LUMPIEST of the three: a month's rent is entered as one row
@@ -1629,7 +1629,7 @@ export default function ClientDashboard() {
   const netMarginCard = canOverheads ? (
     <div {...kpiCard(null)}>
       <div style={kpiLabelStyle}>
-        <Tip text="Revenue minus food cost, labor, overheads and tax & fees, as a % of revenue — what the business keeps after ingredient and fixed costs. Labor is your finalized HR payroll run for the month when one exists (gross pay + employer SSF); otherwise it is what is typed on the Overheads Labor tab. The two are never added together, so this matches the Overheads page for the same month. The line under the figure says which one was used. Healthy Nepal F&B target: ≥20%." width={280}>Est. Net Margin %</Tip>
+        <Tip text="Revenue minus food cost, labor, overheads and tax & fees, as a % of revenue — what the business keeps after ingredient and fixed costs. Labor is your finalized HR payroll run for the month when one exists (gross pay + overtime + employer SSF); otherwise it is what is typed on the Overheads Labor tab. The two are never added together, so this matches the Overheads page for the same month. The line under the figure says which one was used. Healthy Nepal F&B target: ≥20%." width={280}>Est. Net Margin %</Tip>
       </div>
       <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).color }} title={verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).title}>
         {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).text}

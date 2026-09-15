@@ -232,7 +232,7 @@ export default function GroupDashboard() {
                 <div className="stat-value" style={{ color: loading ? undefined : fcBandOf(groupFc).color }} title={loading ? undefined : bandFigure(groupFc, fcBandOf).title}>{loading ? <StatSkeleton /> : bandFigure(groupFc, fcBandOf).text}</div>
               </div>
               <div className="stat-card">
-                <div className="stat-label"><Tip text="Finalized payroll (gross + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate. Banded on the product's published 25–30% target, the same scale the Owner Dashboard and the Monthly Owner Report use.">Group Labour %</Tip></div>
+                <div className="stat-label"><Tip text="Finalized payroll (gross + overtime + employer SSF) ÷ revenue, across included outlets. Only payroll runs marked finalized count — an unfinalized month reads as zero rather than as an estimate. Banded on the product's published 25–30% target, the same scale the Owner Dashboard and the Monthly Owner Report use.">Group Labour %</Tip></div>
                 <div className="stat-value" style={{ color: loading ? undefined : lcBand(groupLabour).color }} title={loading ? undefined : bandFigure(groupLabour, lcBand).title}>{loading ? <StatSkeleton /> : bandFigure(groupLabour, lcBand).text}</div>
               </div>
               <div className="stat-card">
