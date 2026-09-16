@@ -118,6 +118,14 @@ that document, and a fourth copy of the gate model would drift from the three th
   is what Stock Count and POS order-taking have and nothing else does.
 - **Every session gets a changelog entry**, written into the newest `CHANGELOG/` range file. The
   convention, including when to start a new range, is in `CHANGELOG/README.md`.
+- **A PWA manifest field can be inert everywhere you test it and load-bearing where you don't.**
+  `public/manifest.json` declared `orientation: portrait-primary` for a year with nothing to show
+  for it, because desktop Chrome ignores manifest orientation and that is where the app is
+  developed, demoed and run on a Windows till. Under `display: standalone` on Android — a count
+  tablet or an Android POS terminal added to the home screen — Chrome honours it, and it would have
+  locked a bolted-down landscape screen to portrait with nothing in the app able to override it
+  (S764). There are **two manifests** and they serve different devices: `staff.webmanifest` is
+  phones only and keeps `portrait-primary`. `.claude/rules/staff-app.md` has the rest.
 - **A design token lives in four layers and only one of them ships.** `PRESETS` in
   `src/context/ThemeContext.js` is what a user sees; `DESIGN.md`'s frontmatter is the normative
   copy the `/impeccable` hook checks literals against; its prose is what gets read; and

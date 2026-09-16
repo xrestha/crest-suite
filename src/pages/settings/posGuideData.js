@@ -515,6 +515,7 @@ export const POS_GUIDE_GROUPS = [
           'A tablet whose key was revoked, or which still holds the shared key after it was switched off, shows a "this tablet needs activating again" screen — never an empty staff list.',
           'Tablet keys are NOT in a client backup and are not restored: after a restore each tablet is activated again, one tap each. Archiving a client, or clearing its data, revokes every tablet key and switches the shared key off (S755), so after a restore each tablet is activated again from POS Setup.',
           'Needs migration 20260916120000 and the new pos-staff-login to be live. Until then tablets keep signing in on the shared key.',
+          'An Android tablet or POS terminal added to the home screen now follows the device\'s own rotation (S764). It used to lock to portrait — harmless on a Windows till launched from the kiosk shortcut, which ignores the setting, but a bolted-down landscape screen installed as an app would have been stuck upright.',
         ],
         connections: 'Activation state gates the PIN Login screen and the idle lock. The key is verified again server-side on every PIN login, and every sign-in stamps the tablet\'s Last used.',
       },

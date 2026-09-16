@@ -30,6 +30,16 @@ is open (which is how the first draft shipped it).
 unauthenticated redirect goes to **that** PIN pad rather than `/login`, because the installed app's
 `start_url` is a fixed string and the company id exists nowhere else on the device.
 
+**The two manifests answer to different devices, so a value that is right in one is not evidence
+about the other.** `staff.webmanifest` is `orientation: portrait-primary` because Crest Staff only
+ever runs on an employee's own phone. `manifest.json` carried the same value for a year and it was
+wrong: the main app installs onto count tablets and Android POS terminals, which are landscape.
+**The reason it survived is that manifest `orientation` is inert on desktop** — the Windows till
+launched from the `--kiosk-printing` shortcut the Help page documents ignores it entirely — and
+load-bearing only under `display: standalone` on Android, which is the one configuration nobody
+here tests on. It is now `any` (S764). Before copying any field between these two files, ask which
+devices install that one.
+
 ## The shape, and why
 
 - **`SelfServiceShell.jsx`** — a 56px header and a fixed bottom tab bar (Home · Roster · Requests ·
