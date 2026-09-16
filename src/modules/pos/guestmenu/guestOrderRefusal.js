@@ -11,7 +11,9 @@
 // the request landed, so it says so. Resending is still safe — a table holds one waiting request
 // (the unique index behind `pending`), so a resend of an order that did land is refused, not doubled.
 
-const NETWORK_RE = /failed to fetch|networkerror|load failed|network request failed/i
+// `timed out` is withTimeout's own wording (S767): the page bounds the submit at 20 s, and a request
+// that outran it is exactly as unknown as one whose connection dropped.
+const NETWORK_RE = /failed to fetch|networkerror|load failed|network request failed|timed out/i
 
 // "Momo", "Momo and Thukpa", "Momo, Thukpa and Sel Roti".
 export function joinNames(names) {
@@ -78,16 +80,20 @@ export function guestOrderRefusal(err, outletName, { online = true } = {}) {
     case 'too_many_items':
       return { text: 'That order has more than 30 different dishes, so it was not sent. Send part of it now and the rest as a second order.', refreshMenu: false }
     case 'pending':
-      return { text: `This table already has an order waiting for ${who} to confirm, so this one was not sent. Please wait for that one to be accepted before sending another.`, refreshMenu: false }
+      return { text: `This table already has an order waiting for ${who} to accept, so this one was not sent. Please wait for that one first.`, refreshMenu: false }
     default:
       break
   }
 
+  // Held to the guest menu's copy rule (S767, PRODUCT.md): two short sentences, no subclause —
+  // most guests read English as a second or third language, and this is read mid-panic. Sending
+  // again stays safe without saying so: while the first order waits, a second is refused as
+  // `pending` above rather than doubled.
   if (!online || NETWORK_RE.test(err?.message || '')) {
     return {
-      text: "The connection dropped, so we can't tell whether your order was sent. Reconnect and send it again — while the first one is still waiting for staff, a second is refused rather than doubled. If in doubt, ask a staff member.",
+      text: "The connection dropped, so we can't tell if your order was sent. Try again, or ask a member of staff.",
       refreshMenu: false,
     }
   }
-  return { text: "We couldn't send that order. Please try again, or ask a staff member for help.", refreshMenu: false }
+  return { text: "We couldn't send that order. Try again, or ask a member of staff.", refreshMenu: false }
 }

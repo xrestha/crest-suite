@@ -213,6 +213,24 @@ function resolveColors(key) {
   return PRESETS[key] || PRESETS.dark
 }
 
+// The guest QR menu (/pos/menu/:tableId) and the public booking page (/pos/book/:clientId) are the
+// routes a restaurant's CUSTOMER sees, so they are PINNED to the app's default preset and never read
+// or write the saved theme (owner decisions, S767). The saved theme is a staff member's private
+// setting on a shared phone, and a guest opening a QR on that phone must not inherit it — which is
+// exactly what happened before those pages carried their own scoped palette. Pinning here, rather
+// than re-declaring tokens in each page's CSS, also covers the route's loading fallback, its error
+// states and the document ground, which render before or outside the page's own root.
+const PINNED_GUEST_PREFIXES = ['/pos/menu/', '/pos/book/']
+export function isPinnedGuestSurface(pathname) {
+  try {
+    const path = pathname ?? window.location.pathname
+    return typeof path === 'string' && PINNED_GUEST_PREFIXES.some(p => path.startsWith(p))
+  } catch {
+    return false
+  }
+}
+export const GUEST_SURFACE_KEY = 'dark'
+
 // Only the employee portal defaults to following the device. The admin app keeps its `dark`
 // default: silently re-theming every owner who has never opened Settings is a different change
 // from the one this was built for. An explicitly chosen preset always wins on both surfaces.
@@ -231,6 +249,7 @@ function defaultKeyForSurface() {
 const THEME_SCHEMA = 'modernist-1'
 
 function loadSaved() {
+  if (isPinnedGuestSurface()) return { key: GUEST_SURFACE_KEY, colors: resolveColors(GUEST_SURFACE_KEY) }
   try {
     const raw = localStorage.getItem('crest_theme')
     if (!raw) {
@@ -296,6 +315,9 @@ export function ThemeProvider({ children }) {
 
   function switchPreset(key) {
     if (key !== SYSTEM_KEY && !PRESETS[key]) return
+    // Nothing on the guest menu offers a theme control; this only stops a stray call from writing
+    // a staff member's saved theme from a diner's page.
+    if (isPinnedGuestSurface()) return
     const next = resolveColors(key)
     setThemeKey(key)
     setColors(next)
@@ -319,6 +341,7 @@ export function ThemeProvider({ children }) {
   }, [themeKey])
 
   function updateColor(colorKey, value) {
+    if (isPinnedGuestSurface()) return
     const updated = { ...colors, [colorKey]: value }
     // The accent is three tokens, not one. `colors` here is the RESOLVED object, so a plain spread
     // carried the PREVIOUS accent's `accentInk` into the custom theme as if it had been authored —

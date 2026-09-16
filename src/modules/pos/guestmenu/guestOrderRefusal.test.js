@@ -43,6 +43,17 @@ describe('guestOrderRefusal', () => {
     expect(guestOrderRefusal({ message: 'anything' }, 'X', { online: false }).text).toMatch(/can't tell/)
   })
 
+  it('reads a timed-out submit as an unknown outcome, not a refusal (S767)', () => {
+    const r = guestOrderRefusal(new Error('Sending your order timed out after 20s — check your connection and try again.'), 'X')
+    expect(r.text).toMatch(/can't tell/)
+    expect(r.text).not.toMatch(/was not sent/)
+  })
+
+  it('keeps the network sentence short enough to read mid-service (S767)', () => {
+    const words = guestOrderRefusal({ message: 'Failed to fetch' }, 'X').text.split(/\s+/).length
+    expect(words).toBeLessThanOrEqual(20)
+  })
+
   it('joins names the way a sentence does', () => {
     expect(joinNames(['A'])).toBe('A')
     expect(joinNames(['A', 'B', 'C'])).toBe('A, B and C')

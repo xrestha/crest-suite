@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams } from 'react-router-dom'
+import { Minus, Plus } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
+import { tidyName } from '../guestmenu/guestMenuHelpers'
+import { useGuestDocumentIdentity } from '../guestmenu/guestDocument'
 import { adToBsSafe, formatBsDay, BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
 import { nepalCivilDate, nepalTime, nepalBs, nepalDateLong } from '../../../shared/nepalTime'
 import { normalizePhone } from '../../../utils/phone'
@@ -167,13 +170,14 @@ export default function GuestBooking() {
     return () => { cancelled = true }
   }, [clientId])
 
-  useEffect(() => {
-    const outlet = page?.outlet_name || status?.outlet_name
-    if (!outlet) return
-    const prev = document.title
-    document.title = `Book a table — ${outlet}`
-    return () => { document.title = prev }
-  }, [page, status])
+  // The restaurant's own name and logo, as the Owner set them for the guest menu (POS Setup → Guest
+  // Menu; get_booking_page returns them since 20260921110000). With no name set, the account name —
+  // typed in capitals, read normally (owner decisions, S767). A function older than that migration
+  // returns neither column, which reads as "not set".
+  const outletName = (page?.menu_name && page.menu_name.trim()) || tidyName(page?.outlet_name || status?.outlet_name || '')
+  const logoUrl = page?.logo_url || null
+  // Title, address-bar colour and a saved home-screen shortcut belong to the restaurant (S767).
+  useGuestDocumentIdentity(outletName ? `Book a table — ${outletName}` : 'Book a table', outletName || 'Book a table', logoUrl)
 
   // Poll the guest's own request. Same visibility gating and same two-miss stale banner as the
   // guest menu: one dropped request on a cafe's wifi is normal, a flickering banner teaches the
@@ -252,7 +256,7 @@ export default function GuestBooking() {
     }
     const { data, error: err } = res
     setSubmitting(false)
-    const outlet = page?.outlet_name || ''
+    const outlet = outletName
     if (err) {
       // Never err.message on a public page (S604): a raw PostgREST string tells the guest nothing
       // they can act on and leaks schema detail. Offline is the one distinction worth drawing.
@@ -306,10 +310,11 @@ export default function GuestBooking() {
     const s = status?.status
     const stage = s === 'confirmed' || s === 'arrived' || s === 'seated' || s === 'completed' ? 'confirmed'
       : s === 'cancelled' || s === 'no_show' ? 'declined' : 'requested'
-    const outlet = status?.outlet_name || page?.outlet_name || ''
+    const outlet = (page?.menu_name && page.menu_name.trim()) || tidyName(status?.outlet_name || page?.outlet_name || '')
     return (
       <div className="guest-booking"><div className="gb-wrap">
         <header className="gb-head">
+          {logoUrl && <BookingLogo src={logoUrl} />}
           <h1 className="gb-outlet">{outlet}</h1>
           <p className="gb-tagline">Table booking</p>
         </header>
@@ -351,8 +356,9 @@ export default function GuestBooking() {
   return (
     <div className="guest-booking"><div className="gb-wrap">
       <header className="gb-head">
-        <h1 className="gb-outlet">{page.outlet_name}</h1>
-        <p className="gb-tagline">Book a table · {page.outlet_name} will confirm by message or call</p>
+        {logoUrl && <BookingLogo src={logoUrl} />}
+        <h1 className="gb-outlet">{outletName}</h1>
+        <p className="gb-tagline">Book a table · {outletName} will confirm by message or call</p>
         {page.page_notice && <p className="gb-notice">{page.page_notice}</p>}
       </header>
 
@@ -387,7 +393,7 @@ export default function GuestBooking() {
           {!dayIso ? (
             <p className="gb-note" style={{ margin: 0 }}>Pick a day first.</p>
           ) : visibleSlots.length === 0 ? (
-            <p className="gb-note" style={{ margin: 0 }}>No times left today — try another day, or call {page.outlet_name}.</p>
+            <p className="gb-note" style={{ margin: 0 }}>No times left today — try another day, or call {outletName}.</p>
           ) : (
             <>
               <div className="gb-chips gb-chips--wrap" role="group" aria-labelledby="gb-time-label">
@@ -405,7 +411,7 @@ export default function GuestBooking() {
                 })}
               </div>
               {allFull ? (
-                <p className="gb-note">Fully booked for {party} guest{party === 1 ? '' : 's'} on {selectedDay?.bsLong || 'that day'} — try another day, or call {page.outlet_name} to ask about a wait.</p>
+                <p className="gb-note">Fully booked for {party} guest{party === 1 ? '' : 's'} on {selectedDay?.bsLong || 'that day'} — try another day, or call {outletName} to ask about a wait.</p>
               ) : visibleSlots.some(isFull) ? (
                 <p className="gb-note">Greyed times cannot seat {party} guest{party === 1 ? '' : 's'} — change the number or pick another time.</p>
               ) : null}
@@ -417,12 +423,12 @@ export default function GuestBooking() {
         <div className="gb-card">
           <span className="gb-label" id="gb-party-label">Guests</span>
           <div className="gb-stepper" role="group" aria-labelledby="gb-party-label">
-            <button type="button" aria-label="Fewer guests" onClick={() => setParty(p => Math.max(1, p - 1))} disabled={party <= 1}>−</button>
+            <button type="button" aria-label="Fewer guests" onClick={() => setParty(p => Math.max(1, p - 1))} disabled={party <= 1}><Minus size={18} aria-hidden="true" /></button>
             <output aria-live="polite">{party}</output>
-            <button type="button" aria-label="More guests" onClick={() => setParty(p => Math.min(page.max_party_online || 20, p + 1))} disabled={party >= (page.max_party_online || 20)}>+</button>
+            <button type="button" aria-label="More guests" onClick={() => setParty(p => Math.min(page.max_party_online || 20, p + 1))} disabled={party >= (page.max_party_online || 20)}><Plus size={18} aria-hidden="true" /></button>
           </div>
           {party >= (page.max_party_online || 20) && (
-            <p className="gb-note">For a bigger group, please call or message {page.outlet_name}.</p>
+            <p className="gb-note">For a bigger group, please call or message {outletName}.</p>
           )}
         </div>
 
@@ -458,10 +464,20 @@ export default function GuestBooking() {
           {submitting ? 'Sending…' : 'Request this table'}
         </button>
         <p className="gb-note">
-          Your name and number go only to {page.outlet_name}, to confirm this booking. <a href="/legal/privacy" target="_blank" rel="noreferrer">Privacy</a>.
+          Your name and number go only to {outletName}, to confirm this booking. <a href="/legal/privacy" target="_blank" rel="noreferrer">Privacy</a>.
         </p>
       </form>
       <p className="gb-foot">Powered by Crest POS</p>
     </div></div>
   )
+}
+
+// The restaurant's logo, as on the guest menu (S767). Empty alt: the name is the heading directly
+// beneath it. A logo that fails to load is simply absent — a broken-image glyph above the name is
+// worse than no logo.
+function BookingLogo({ src }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => { setFailed(false) }, [src])
+  if (failed) return null
+  return <img className="gb-logo" src={src} alt="" onError={() => setFailed(true)} />
 }

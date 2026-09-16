@@ -138,6 +138,17 @@ that document, and a fourth copy of the gate model would drift from the three th
   applied to choosing a whole layout. Keep a narrow-width clause only so a desktop browser dragged
   narrow still behaves, and watch the media query as well as `resize` — a detachable tablet docked
   to a keyboard changes its primary pointer without changing its width.
+- **A page a restaurant's CUSTOMER sees must not inherit a staff member's saved theme.** The theme is
+  read from `localStorage` on whatever phone opens the page, and a shared phone may belong to staff.
+  The guest QR menu and the public booking page are pinned to the default preset in
+  `ThemeContext.js` (`isPinnedGuestSurface`, S767) — pinned at the provider, so the lazy-load
+  fallback and the error screens are covered too, which a per-page palette never was. A new public,
+  customer-facing route joins `PINNED_GUEST_PREFIXES`.
+- **A sticky element inside a padded scroll container is offset from the CONTENT box, not the edge.**
+  A sheet header pulled over the padding with negative margins needs `top: -<padding>`; at `top: 0`
+  Chrome pushed it down over the content beneath it (measured on the guest choices sheet, S767).
+  The bottom edge did not behave symmetrically, so the guest sheets' pinned footers cover the
+  padding strip with a same-colour shadow instead. Measure it; do not reason it.
 - **A design token lives in four layers and only one of them ships.** `PRESETS` in
   `src/context/ThemeContext.js` is what a user sees; `DESIGN.md`'s frontmatter is the normative
   copy the `/impeccable` hook checks literals against; its prose is what gets read; and

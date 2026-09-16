@@ -108,6 +108,11 @@ describe('downscalePhoto', () => {
     expect(out).toEqual({ type: 'image/jpeg', size: 300_000 })
     expect(e.ctx.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 1200, 900)
   })
+  it('shrinks further when asked for a smaller longest side (a guest-menu logo, S767)', async () => {
+    const e = env()
+    await downscalePhoto(big, { ...e, maxSide: 512 })
+    expect(e.ctx.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 512, 384)
+  })
   it('keeps PNG transparency by re-encoding as WebP', async () => {
     const out = await downscalePhoto({ type: 'image/png', size: 5_000_000 }, env())
     expect(out.type).toBe('image/webp')

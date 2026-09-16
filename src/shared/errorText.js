@@ -287,6 +287,12 @@ const rules = [
     staff: 'Only the owner can change the invoice and VAT details printed on bills. Nothing was saved.',
     operator: 'Only the Owner can change the invoice and VAT details printed on bills, so nothing was saved. They are read when any bill or Credit Note is printed — reprints of old ones included — which is why they are fenced.',
   },
+  // S767 (20260921100000): the restaurant's name and logo on its guest QR menu.
+  {
+    test: e => hasCode(e, 'guest_menu_brand_rank'),
+    staff: 'Only the owner can change the restaurant name and logo guests see. Nothing was saved.',
+    operator: 'Only the account Owner can change the restaurant name and logo on the guest menu, so nothing was saved. They are what every guest sees at the top of every table’s QR menu.',
+  },
   {
     test: e => hasCode(e, 'loyalty_enrol_rank'),
     staff: 'Only the owner or a POS manager can enrol a customer in a loyalty scheme. Nothing was changed.',

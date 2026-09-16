@@ -23,42 +23,6 @@
       },
       {
         "rule": "design-system-color",
-        "value": "#e7e3d8",
-        "createdAt": "2026-08-22T15:58:39.389Z",
-        "reason": "guest-ground; user specified the bone/pine pair, documented in DESIGN.md guest-* block. Duplicated literal in the html:has() overscroll rule on purpose (see file comment) so a no-:has browser loses only the ground, not the palette."
-      },
-      {
-        "rule": "design-system-color",
-        "value": "rgba(0,70,67,0.30)",
-        "createdAt": "2026-08-22T15:58:39.562Z",
-        "reason": "alpha tint of documented guest-pine #004643 (tab-btn hover border); Layout.css hardcodes brass there so a token swap cannot reach it"
-      },
-      {
-        "rule": "design-system-color",
-        "value": "rgba(0,70,67,0.45)",
-        "createdAt": "2026-08-22T15:58:39.745Z",
-        "reason": "alpha tint of documented guest-pine #004643 (order-confirmed glow keyframe)"
-      },
-      {
-        "rule": "design-system-color",
-        "value": "rgba(0,70,67,0.14)",
-        "createdAt": "2026-08-22T15:58:39.941Z",
-        "reason": "alpha tint of documented guest-pine #004643 (order-confirmed glow keyframe)"
-      },
-      {
-        "rule": "design-system-color",
-        "value": "rgba(47,107,42,0.11)",
-        "createdAt": "2026-08-22T15:58:40.096Z",
-        "reason": "alpha tint of documented guest-success #2F6B2A (badge fill on bone; Layout.css hardcodes the dark-theme tint)"
-      },
-      {
-        "rule": "design-system-color",
-        "value": "rgba(138,90,23,0.11)",
-        "createdAt": "2026-08-22T15:58:40.278Z",
-        "reason": "alpha tint of documented guest-warn #8A5A17 (badge fill on bone; Layout.css hardcodes the dark-theme tint)"
-      },
-      {
-        "rule": "design-system-color",
         "value": "#3b82f6",
         "createdAt": "2026-08-26T14:04:19.194Z",
         "reason": "DEFAULT_SHIFTS categorical fill palette (roster shift chips) - seed data, FILL-only per in-file comment; detector FP class confirmed by S613 assessment B"
@@ -131,30 +95,12 @@
       },
       {
         "rule": "design-system-radius",
-        "value": "8px",
-        "files": [
-          "src/modules/pos/guestmenu/guestMenu.css"
-        ],
-        "createdAt": "2026-09-15T13:24:09.467Z",
-        "reason": "DESIGN.md Shapes: scoped guest surface keeps its own shape language; value moved from GuestOptionSheet.jsx inline style into CSS (S759)"
-      },
-      {
-        "rule": "design-system-radius",
-        "value": "4px",
-        "files": [
-          "src/modules/pos/guestmenu/guestMenu.css"
-        ],
-        "createdAt": "2026-09-15T13:24:09.707Z",
-        "reason": "DESIGN.md Shapes: scoped guest surface keeps its own shape language; value moved from GuestOptionSheet.jsx inline style into CSS (S759)"
-      },
-      {
-        "rule": "design-system-radius",
-        "value": "*",
+        "value": "50%",
         "files": [
           "src/modules/pos/guestmenu/**"
         ],
-        "createdAt": "2026-09-16T03:47:42.722Z",
-        "reason": "DESIGN.md -> Shapes names .guest-menu as one of the two sanctioned radius exemptions: the scoped guest surfaces keep their own shape language for the same reason they keep their own palette. Directory-scoped because the hook reports the path as GuestMenu.css (derived from the component name) while the file is guestMenu.css, so the S759 per-basename entries never matched. A per-value ignore with no --file would have exempted 8px/4px product-wide and defeated the Modernist zero-radius rule."
+        "createdAt": "2026-09-16T14:05:42.458Z",
+        "reason": "S767 (owner moved the guest pages onto the default Modernist preset): the ONLY radius left in this directory is 50% on the veg / non-veg food mark dot (.gm-diet in guestMenu.css) - the market food-labelling symbol, named as a Shapes exemption in DESIGN.md. Value-specific (50% only, so any other corner here is still flagged) and directory-scoped because the hook reports this stylesheet as GuestMenu.css (derived from the component name) while the file is guestMenu.css, so a basename-scoped entry never matches (S763). Replaces the pre-S767 entries that exempted the whole bone-and-pine guest shape language."
       }
     ]
   }

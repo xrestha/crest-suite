@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-15 (S755 — five of the S754 known gaps closed in migration `20260917100000` and `admin-user-ops`; one new gap filed in A2)
+Last updated: 2026-09-16 (S767 — guest QR menu critique fixed in full and moved to POS_DECISIONS.md; the guest build-your-own steps pressed in a browser)
 
 ---
 
@@ -31,13 +31,14 @@ In this order. Service charge was offered and **not** chosen.
   - `computeInventoryVariance` / `computeInventoryShrinkageTrend` (owner report) still sum sales
     without the POS-supersedes-manual rule the live pages apply (pre-existing), so a dish entered
     both ways counts its choices twice there, as it already did its recipe.
-  - Not yet pressed on a real till after S759: the cart's choices line, the choice window's
-    scroll-to-short-group on a refused Add, and the guest sheet's sticky header.
+  - Not yet pressed on a real till after S759: the cart's choices line and the choice window's
+    scroll-to-short-group on a refused Add. (The guest sheet's sticky header WAS pressed in S767 —
+    it clipped the content under it, and was fixed.)
   - Release 2: combos / build-your-own bundles.
-  - **S760 build-your-own: applied live 2026-09-15, not yet pressed in a browser.** Still to do: the
-    headed-browser pass from the plan — the template on CASA ACAI CAFE, a Large bowl on the till and
-    through the guest steps, scaled stock at bill close, and the cost range on Recipe Costing and Menu
-    Pricing (IMS branch).
+  - **S760 build-your-own: applied live 2026-09-15.** The GUEST steps were pressed in a browser in
+    S767 on BHATTI CHOILA's VEG MOMO (size step, Review, Change back to Review). Still to do: the
+    template on CASA ACAI CAFE, a Large bowl on the till, scaled stock at bill close, and the cost
+    range on Recipe Costing and Menu Pricing (IMS branch).
   - `push_master_data` does not carry `recipes.is_build_your_own`, nor option groups at all, so a
     branch receives a build-your-own dish as an ordinary one.
   - The Complimentary slip and Menu Pricing's POS-only branch show no build-your-own cost range (the

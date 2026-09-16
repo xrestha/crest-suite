@@ -15,7 +15,8 @@ function mockBuilder(table) {
   const b = {}
   for (const op of ['select', 'eq', 'order', 'or']) b[op] = () => b
   b.single = () => b
-  b.then = (resolve, reject) => Promise.resolve({ data: mockData[table], error: null }).then(resolve, reject)
+  b.maybeSingle = () => b
+  b.then = (resolve, reject) => Promise.resolve({ data: mockData[table] ?? null, error: null }).then(resolve, reject)
   return b
 }
 
@@ -47,6 +48,18 @@ test('inactive tables stay listed, and selecting one explains that ordering is o
   renderPage()
   expect(await screen.findByRole('option', { name: 'Patio 1 (inactive)' })).toBeInTheDocument()
   expect(screen.getByText(/Patio 1 is marked inactive/)).toBeInTheDocument()
+})
+
+test('a menu with no name or logo of its own says so and names what guests see (S767)', async () => {
+  mockData = {
+    clients: { name: 'BHATTI CHOILA', pos_enabled: true },
+    pos_tables: [{ id: 't1', name: 'T1', status: 'available' }],
+    recipes: [{ id: 'r1', selling_price: 300, image_url: 'x', description: 'y', is_veg: true }],
+    settings: { guest_menu_name: null, guest_menu_logo_url: null },
+  }
+  renderPage()
+  expect(await screen.findByText(/opens with the account name and no logo/)).toBeInTheDocument()
+  expect(screen.getByText(/Guests see “Bhatti Choila”/)).toBeInTheDocument()
 })
 
 test('dishes with no selling price are counted as left off, and an all-unpriced menu is called empty', async () => {

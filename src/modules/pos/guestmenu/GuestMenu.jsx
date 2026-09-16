@@ -1,16 +1,25 @@
 import { npr } from '../../../shared/nepalMoney'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
+import { Plus, Minus, X, Search, SlidersHorizontal, ChevronRight } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
 import { NUTRIENTS } from '../../../utils/nutrition'
+import { withTimeout } from '../../../utils/withTimeout'
+import { DEFAULT_RECIPE_CATS } from '../../../context/SettingsContext'
 import Modal from '../../../components/Modal'
+import { useGuestDocumentIdentity } from './guestDocument'
 import { guestOrderRefusal } from './guestOrderRefusal'
 import GuestOptionSheet from './GuestOptionSheet'
 import { groupsForDish, describeSelection, lowestDishPrice, selectionProblems, inclFromEx } from '../../../shared/optionPricing'
 import { selectionKeyOf } from '../orders/posOrdersConstants'
 import { playChime } from '../posChime'
-// Scoped bone-and-pine palette for this surface only — see the header of guestMenu.css for why a
-// public menu must not read the global theme tokens.
+import {
+  tidyName, orderCategories, matchesSearch, SEARCH_THRESHOLD,
+  STAGES, STAGE_SHORT, stageFromProgress, laterStage,
+} from './guestMenuHelpers'
+// The page's structure, the order tracker, the choice sheet and the touch tier. Colour comes from the
+// app theme, which ThemeContext pins to the default preset on this route (S767) — see the header
+// of guestMenu.css.
 import './guestMenu.css'
 
 const fmtNpr = npr
@@ -27,30 +36,18 @@ const fmtNutrient = (def, value) => `${(Number(value) || 0).toFixed(def.dp)} ${d
 const priceIncVat = (item, vatRegistered) =>
   Math.round((parseFloat(item.selling_price) || 0) * (1 + (vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0)))
 
-// Same three stages + wording as the staff-side floor-view badge (PosOrders.jsx) and KDS board —
-// used as a fallback badge when this browser has no submitted-order snapshot of its own (e.g. a
-// guest who never ordered, just checking a table staff already opened manually).
-const KOT_STATUS_BADGE = { new: 'badge-red', in_progress: 'badge-amber', ready: 'badge-green' }
-const KOT_STATUS_LABEL = { new: 'Order sent to kitchen', in_progress: 'Being prepared', ready: 'Ready to serve' }
+// A guest who never ordered from this phone but sits at a table staff opened still sees what the
+// kitchen is doing with the table's order. Neutral for "sent" — it is the normal state of every order
+// ever taken, and the danger colour it used to wear read as something having gone wrong (S767).
+const KOT_STATUS_BADGE = { new: 'badge-gray', in_progress: 'badge-gray', ready: 'badge-green' }
+const KOT_STATUS_LABEL = { new: 'Your table’s order is with the kitchen', in_progress: 'Your table’s order is being prepared', ready: 'Your table’s order is ready' }
 
-// Unified 5-stage view of the guest's own order, combining pos_guest_order_requests.status
-// (whether staff has even Accepted yet) with the table's pos_kot_log status (once the accepted
-// items are actually sent to the kitchen) — kotStatus supersedes requestStatus once it exists,
-// same precedence the small pre-redesign badge used.
-const STAGES = ['placed', 'confirmed', 'kot_sent', 'preparing', 'ready']
 const STAGE_LABEL = {
-  placed: 'Order placed. Waiting for staff to confirm…',
-  confirmed: 'Confirmed by staff, heading to the kitchen',
-  kot_sent: 'Sent to kitchen',
-  preparing: 'Being prepared',
-  ready: 'Ready to serve',
-}
-function computeStage(requestStatus, kotStatus) {
-  if (kotStatus === 'ready') return 'ready'
-  if (kotStatus === 'in_progress') return 'preparing'
-  if (kotStatus === 'new') return 'kot_sent'
-  if (requestStatus === 'accepted') return 'confirmed'
-  return 'placed'
+  placed: 'Order sent. Waiting for staff to accept it.',
+  confirmed: 'Accepted. It goes to the kitchen next.',
+  kot_sent: 'With the kitchen.',
+  preparing: 'Being prepared.',
+  ready: 'Ready to serve.',
 }
 
 // Ascending, where the staff-side alert descends, so it reads as "your order updated" rather than
@@ -59,6 +56,10 @@ function computeStage(requestStatus, kotStatus) {
 // guest whose order walks Placed → Confirmed → Sent → Preparing → Ready is five of the six Chrome
 // allows before it stops making any sound.
 function playStageChangeChime() { playChime([660, 880], 0.15) }
+
+// The submit is bounded. A stalled call used to leave "Placing order…" on screen indefinitely with
+// no way out (measured past 25 s in the critique); the booking page already bounds its submit at 20.
+const SUBMIT_TIMEOUT_MS = 20000
 
 const sessionKey = tableId => `guestOrderReq:${tableId}`
 function loadStoredRequest(tableId) {
@@ -101,6 +102,54 @@ function normalizeCart(cart) {
   return out
 }
 
+// `UNCATEGORISED` is a sentinel, not a heading. An item with no category used to land in a section
+// literally titled "OTHER" on a paying customer's screen — a database default reaching a diner. It
+// renders with no heading at all when it is the only group, and as "More" beside real ones.
+// Built with fromCharCode rather than written as an escape: a scripted edit collapsed the backslash
+// once already and embedded a literal NUL byte in this file, which makes the whole source read as
+// BINARY to grep, ripgrep and every review tool. Keep the source plain text.
+const UNCATEGORISED = String.fromCharCode(0) + 'uncategorised'
+
+const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+// ── Back closes the sheet ────────────────────────────────────────────────────────────────────────
+// A phone's Back gesture with a sheet open used to leave the menu altogether (measured: the URL
+// changed to the previous page). Opening a sheet pushes one history entry; Back pops it and closes
+// the TOPMOST sheet only; closing with a control takes the entry off again. One module-level stack,
+// because the choice sheet opens on top of the order sheet ("Edit choices"). The removal is deferred
+// a tick so React StrictMode's mount-unmount-mount in development does not pop the entry it re-adds.
+const sheetStack = []
+function hasGuard() {
+  try { return !!window.history.state?.guestSheet } catch { return false }
+}
+function pushGuard() {
+  try { window.history.pushState({ ...(window.history.state || {}), guestSheet: true }, '') } catch { /* history unavailable */ }
+}
+function onGuestPopState() {
+  const top = sheetStack[sheetStack.length - 1]
+  if (!top) return
+  top.onCloseRef.current()
+  // A sheet is still open underneath: give Back something to close it with too.
+  if (sheetStack.length > 1) pushGuard()
+}
+function useBackToClose(open, onClose, enabled = true) {
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  useEffect(() => {
+    if (!open || !enabled) return undefined
+    const entry = { onCloseRef }
+    sheetStack.push(entry)
+    if (sheetStack.length === 1) window.addEventListener('popstate', onGuestPopState)
+    if (!hasGuard()) pushGuard()
+    return () => {
+      const i = sheetStack.indexOf(entry)
+      if (i !== -1) sheetStack.splice(i, 1)
+      if (sheetStack.length === 0) window.removeEventListener('popstate', onGuestPopState)
+      setTimeout(() => { if (sheetStack.length === 0 && hasGuard()) window.history.back() }, 0)
+    }
+  }, [open, enabled])
+}
+
 // Fully public, unauthenticated page — reached by a guest scanning a table's QR code (see
 // PosTableManagement.jsx's "Print QR" action). Shows the live POS menu for that table's client;
 // guest ordering comes with the POS module (S632) and is off only at a table marked inactive
@@ -113,12 +162,8 @@ export default function GuestMenu() {
   const { tableId } = useParams()
   const [rows, setRows] = useState(null) // null = loading, [] = loaded-but-empty
   const [error, setError] = useState(false)
-  const [kotStatus, setKotStatus] = useState(null) // null = no open order / nothing sent yet
-  // Minutes until the kitchen's estimated ready time (get_guest_table_status), only ever set
-  // while kotStatus === 'in_progress' and at least one in-progress ticket has an estimate on it —
-  // NULL otherwise, including once it goes non-positive (see the >0 guards below this is used
-  // with) so a guest is never shown a negative "your food is late" countdown.
-  const [remainingMinutes, setRemainingMinutes] = useState(null)
+  // Table-level kitchen status, for a guest with no order of their own on this phone (the badge).
+  const [tableKot, setTableKot] = useState(null) // { kotStatus, remainingMinutes } | null
 
   const [cart, setCart] = useState(() => loadStoredCart(tableId)?.cart || {}) // lineKey -> { recipe_id, qty, option_ids }
   // Crest Customization (S758): { groups, options, attachments } from get_guest_menu_options. A failed
@@ -141,38 +186,44 @@ export default function GuestMenu() {
     try { return window.self !== window.top } catch { return true }
   })
   const [requestId, setRequestId] = useState(() => loadStoredRequest(tableId)?.requestId || null)
-  // { items: [{name, qty}], covers } — kept alongside the request id so the confirmation card can
-  // show what was actually ordered even after items/cart are cleared, and survives a page reload.
+  // { items: [{name, qty}], lines: [{recipe_id, qty, option_ids}], covers } — kept alongside the
+  // request id so the tracker can show what was ordered after the cart is cleared, survive a reload,
+  // and put a refused order back in the cart.
   const [requestSnapshot, setRequestSnapshot] = useState(() => {
     const stored = loadStoredRequest(tableId)
-    return stored ? { items: stored.items || [], covers: stored.covers || 1 } : null
+    return stored ? { items: stored.items || [], lines: stored.lines || [], covers: stored.covers || 1 } : null
   })
-  const [requestStatus, setRequestStatus] = useState(null)
-  const prevStageRef = useRef(null)
+  // What the server says about this guest's own order (get_guest_order_progress).
+  const [progress, setProgress] = useState({ requestStatus: null, kotStatus: null, remainingMinutes: null, orderClosed: false })
+  // The stage on screen. Never moves backwards (laterStage) and is reset for each new order.
+  const [stage, setStage] = useState(null)
+  const stageRef = useRef(null)
+  const [statusStale, setStatusStale] = useState(false)
   // True for a few seconds right after this guest's own placeOrder() call succeeds — separate
   // from the stage-change chime below, which deliberately stays silent on mount/reload so a
-  // returning guest isn't chimed at for an order they placed minutes ago. This one always fires,
-  // including the very first order, because it's tied to an explicit action just taken, not to
-  // detecting a change since last render.
+  // returning guest isn't chimed at for an order they placed minutes ago.
   const [justPlaced, setJustPlaced] = useState(false)
   const statusCardRef = useRef(null)
+  const [restoreNote, setRestoreNote] = useState('')
 
   const [activeCategory, setActiveCategory] = useState(null)
   const categoryRefs = useRef({}) // category name -> section DOM node, populated during render
+  const chipRefs = useRef({})
+  const chipBarRef = useRef(null)
+  const navRef = useRef(null)
+  const [navHeight, setNavHeight] = useState(0)
   // The page's own scrollport (guestMenu.css gives `.guest-menu` height:100dvh + overflow-y:auto).
-  // The IntersectionObserver below must be rooted on it: with a scrolling ANCESTOR rather than the
-  // document, a null root measures against the viewport, which only happens to agree while the
-  // container is exactly viewport-height — it stops agreeing the moment anything is laid out
-  // around it, and the failure is a chip bar that highlights the wrong section rather than an error.
   const scrollRootRef = useRef(null)
+  // Set when a chip is tapped: that chip stays highlighted until the guest scrolls by hand. A
+  // section near the end of the menu cannot scroll to the top of the screen, so a position-based
+  // highlight used to light the section above the one just tapped.
+  const tappedCategoryRef = useRef(null)
 
-  // Veg-only + allergen-exclusion filters — Veg/Non-Veg is the primary dietary distinction in
-  // this market (already tagged per-item via is_veg for the veg/non-veg dot), and allergens are
-  // already collected per item for the info line below each dish; this just turns both into an
-  // actual filter instead of read-only display text.
+  // Veg-only + allergen-exclusion filters, and the dish search on a long menu.
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [vegOnly, setVegOnly] = useState(false)
   const [excludedAllergens, setExcludedAllergens] = useState([])
+  const [query, setQuery] = useState('')
 
   // requestId/requestSnapshot above are only seeded once, via a lazy useState initializer that
   // runs on mount — if tableId changes without a full remount (client-side back/forward between
@@ -183,20 +234,18 @@ export default function GuestMenu() {
   useEffect(() => {
     const stored = loadStoredRequest(tableId)
     setRequestId(stored?.requestId || null)
-    setRequestSnapshot(stored ? { items: stored.items || [], covers: stored.covers || 1 } : null)
-    setRequestStatus(null)
-    prevStageRef.current = null
+    setRequestSnapshot(stored ? { items: stored.items || [], lines: stored.lines || [], covers: stored.covers || 1 } : null)
     const storedCart = loadStoredCart(tableId)
     setCart(storedCart?.cart || {})
     setCovers(storedCart?.covers ?? 2)
     setGuestNote(storedCart?.guestNote || '')
     setSubmitError('')
     setReviewOpen(false)
+    setQuery('')
   }, [tableId])
 
   // Persist the in-progress cart on every change so a phone lock, incoming call, or accidental
-  // tab switch doesn't silently wipe it — the same protection the submitted-request snapshot
-  // above already had via sessionStorage, just extended to the pre-submission cart.
+  // tab switch doesn't silently wipe it.
   useEffect(() => {
     try {
       sessionStorage.setItem(cartSessionKey(tableId), JSON.stringify({ cart, covers, guestNote }))
@@ -204,8 +253,7 @@ export default function GuestMenu() {
   }, [tableId, cart, covers, guestNote])
 
   // retryToken bumps on a manual Retry click, forcing the effect below to re-run against the
-  // same tableId — same effect this ran on mount, just re-triggerable from a button instead of
-  // only from a tableId change.
+  // same tableId.
   const [retryToken, setRetryToken] = useState(0)
   const retryLoadMenu = () => { setRows(null); setError(false); setRetryToken(t => t + 1) }
 
@@ -253,67 +301,72 @@ export default function GuestMenu() {
     return out
   }, [optionCatalog])
 
-  // 5s poll while the guest has the menu open — same cadence as the staff floor-view badge.
+  // ── Polls ─────────────────────────────────────────────────────────────────────────────────────
+  // Both polls run only while the page is visible (a phone with its screen off does not need a
+  // status it cannot show) and poll once on becoming visible again. Two consecutive failures before
+  // saying anything: one dropped request on a cafe's wifi is normal, and a banner that flickers on
+  // every blip teaches the guest to ignore it. A failed read KEEPS the last known state — a stale but
+  // true stage beats a confident wrong one (S604).
   //
-  // Two things this used to get wrong. It destructured `{ data }` and dropped `error`, so a failed
-  // read — an RLS rejection, a dead connection, a PostgREST schema-cache miss — resolved to
-  // `data: null` and rendered as "no open order": the S594 rule (a failed read is not an empty
-  // period) on the guest surface, where the consequence is a diner watching a status card that
-  // silently stopped tracking their food. The last known status is now KEPT on a failed poll
-  // rather than being cleared to null, because a stale-but-true stage beats a confident wrong one,
-  // and a run of failures says so out loud.
-  //
-  // And it never paused: ~55 requests were observed in one sitting, i.e. 720/hr per open tab, on a
-  // page that is left open on a table for an hour. A phone with the screen off, or the browser
-  // backgrounded, does not need a status it cannot display — so the interval only runs while the
-  // document is visible, and polls once immediately on becoming visible again so a guest returning
-  // to the tab sees the current stage rather than waiting up to 5s for it.
-  const [statusStale, setStatusStale] = useState(false)
+  // With an order of their own on this phone, the guest's tracker reads get_guest_order_progress:
+  // the bill that took THIS order, its tickets sent after the order was placed, and whether that bill
+  // has closed (S767). Before that function existed the tracker read the TABLE's kitchen status, so a
+  // second round showed the first round's "Ready", and a paid bill fell back to "heading to the
+  // kitchen". A 404 on the function (frontend ahead of the migration) falls back to the old two reads,
+  // with the backwards steps still refused by laterStage.
   useEffect(() => {
     let cancelled = false
     let failures = 0
     let id = null
-    const poll = () => supabase.rpc('get_guest_table_status', { p_table_id: tableId }).then(({ data, error: err }) => {
-      if (cancelled) return
-      if (err) {
-        // Two consecutive misses before saying anything: one dropped request on a cafe's wifi is
-        // normal and a banner that flickers on every blip teaches the guest to ignore it.
-        failures += 1
-        if (failures >= 2) setStatusStale(true)
-        return
-      }
-      failures = 0
-      setStatusStale(false)
-      const row = data?.[0]
-      setKotStatus(row?.has_open_order ? row.kot_status : null)
-      setRemainingMinutes(row?.has_open_order ? (row.remaining_minutes ?? null) : null)
-    })
-    const start = () => { if (id === null) { poll(); id = setInterval(poll, 5000) } }
-    const stop = () => { if (id !== null) { clearInterval(id); id = null } }
-    const onVisibility = () => (document.visibilityState === 'visible' ? start() : stop())
-    onVisibility()
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      cancelled = true
-      stop()
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [tableId])
+    let legacy = false
+    let sawOpenOrder = false
 
-  // Poll the guest's own submitted request, if any, for staff Accept/Dismiss. Same visibility
-  // gating and same failure handling as the table-status poll above — this one already kept its
-  // last value on a missing row (`if (row)`), so a failed read was less damaging here, but it
-  // still counts toward the same "we've lost touch" banner rather than being silently absorbed.
-  useEffect(() => {
-    if (!requestId) return
-    let cancelled = false
-    let id = null
-    const poll = () => supabase.rpc('get_guest_order_request_status', { p_request_id: requestId }).then(({ data, error: err }) => {
+    const fail = () => { failures += 1; if (failures >= 2) setStatusStale(true) }
+    const ok = () => { failures = 0; setStatusStale(false) }
+
+    const pollTable = () => supabase.rpc('get_guest_table_status', { p_table_id: tableId })
+    const pollOwn = async () => {
+      if (!legacy) {
+        const { data, error: err } = await supabase.rpc('get_guest_order_progress', { p_request_id: requestId })
+        if (cancelled) return
+        if (err?.code === 'PGRST202') { legacy = true }
+        else if (err) { fail(); return }
+        else {
+          ok()
+          const row = data?.[0]
+          // No row: the request no longer exists (a restore, or POS switched off). Keep what we had.
+          if (!row) return
+          setProgress({ requestStatus: row.status, kotStatus: row.kot_status, remainingMinutes: row.remaining_minutes ?? null, orderClosed: !!row.order_closed })
+          return
+        }
+      }
+      const [{ data: req, error: reqErr }, { data: tbl, error: tblErr }] = await Promise.all([
+        supabase.rpc('get_guest_order_request_status', { p_request_id: requestId }),
+        pollTable(),
+      ])
       if (cancelled) return
-      if (err) return
-      const row = data?.[0]
-      if (row) setRequestStatus(row.status)
-    })
+      if (reqErr || tblErr) { fail(); return }
+      ok()
+      const r = req?.[0]
+      const t = tbl?.[0]
+      if (t?.has_open_order) sawOpenOrder = true
+      setProgress(prev => ({
+        requestStatus: r?.status ?? prev.requestStatus,
+        kotStatus: t?.has_open_order ? t.kot_status : null,
+        remainingMinutes: t?.has_open_order ? (t.remaining_minutes ?? null) : null,
+        orderClosed: (r?.status ?? prev.requestStatus) === 'accepted' && sawOpenOrder && !t?.has_open_order,
+      }))
+    }
+    const pollBadge = async () => {
+      const { data, error: err } = await pollTable()
+      if (cancelled) return
+      if (err) { fail(); return }
+      ok()
+      const t = data?.[0]
+      setTableKot(t?.has_open_order && t.kot_status ? { kotStatus: t.kot_status, remainingMinutes: t.remaining_minutes ?? null } : null)
+    }
+    const poll = requestId ? pollOwn : pollBadge
+
     const start = () => { if (id === null) { poll(); id = setInterval(poll, 5000) } }
     const stop = () => { if (id !== null) { clearInterval(id); id = null } }
     const onVisibility = () => (document.visibilityState === 'visible' ? start() : stop())
@@ -324,111 +377,144 @@ export default function GuestMenu() {
       stop()
       document.removeEventListener('visibilitychange', onVisibility)
     }
+  }, [tableId, requestId])
+
+  // A new order (or none) starts its tracker from nothing. `requestStatus: null` rather than a
+  // presumed 'pending': the first REAL reading must be the one that seeds the stage, or a reload of
+  // an order that is already ready would chime as though it had just become ready.
+  useEffect(() => {
+    stageRef.current = null
+    setStage(null)
+    setStatusStale(false)
+    setProgress({ requestStatus: null, kotStatus: null, remainingMinutes: null, orderClosed: false })
   }, [requestId])
 
-  // The document title is "Crest Suite" from index.html, so a restaurant sharing its own QR link
-  // previewed their supplier's B2B inventory software to a diner — the one place in the product
-  // where the Crest brand is actively wrong. Set from the data rather than hardcoded, and restored
-  // on unmount so an admin previewing this in an iframe does not leave the admin tab renamed.
+  // Advance the stage — only forwards — and chime once per real step. Silent on the first reading
+  // after a mount or reload, so a returning guest isn't chimed at for an order placed minutes ago.
   useEffect(() => {
-    const outlet = rows?.[0]?.outlet_name
-    if (!outlet) return
-    const previous = document.title
-    document.title = `${outlet} — Menu`
-    return () => { document.title = previous }
-  }, [rows])
+    if (!requestId || !progress.requestStatus) return
+    const next = laterStage(stageRef.current, stageFromProgress(progress))
+    if (stageRef.current !== null && next !== stageRef.current) playStageChangeChime()
+    stageRef.current = next
+    setStage(next)
+  }, [requestId, progress])
 
-  // Chime once whenever the guest's own order actually advances a stage (placed → confirmed →
-  // sent to kitchen → preparing → ready, or dismissed) — not on every 5s poll that finds no
-  // change. null on first render (nothing to compare against yet) so mounting never chimes.
-  useEffect(() => {
-    if (!requestId) return
-    const stage = requestStatus === 'dismissed' ? 'dismissed' : computeStage(requestStatus, kotStatus)
-    if (prevStageRef.current !== null && prevStageRef.current !== stage) {
-      playStageChangeChime()
-    }
-    prevStageRef.current = stage
-  }, [requestId, requestStatus, kotStatus])
-
-  // Scroll the confirmation card into view and chime the instant an order is placed — the
-  // review modal has just closed, so without this the guest lands back on a menu list with no
-  // visible sign anything happened. Runs once per justPlaced=true, then clears itself; the pulse
-  // classes (guest-order-glow/guest-order-banner) fade back to a normal card after ~2.8s (two
-  // animation cycles) rather than looping forever on a page the guest may sit on.
+  // Scroll the tracker into view and chime the instant an order is placed — the order sheet has
+  // just closed, so without this the guest lands back on a menu list with no visible sign anything
+  // happened. The glow fades after two cycles rather than looping on a page the guest may sit on.
   useEffect(() => {
     if (!justPlaced) return
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    statusCardRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+    statusCardRef.current?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' })
     playStageChangeChime()
-    const id = setTimeout(() => setJustPlaced(false), 2800)
-    return () => clearTimeout(id)
+    const t = setTimeout(() => setJustPlaced(false), 2800)
+    return () => clearTimeout(t)
   }, [justPlaced])
 
-  // Computed unconditionally (safe on the loading/error/empty renders too, via the `rows || []`
-  // fallback) so the category-nav effect right below — a hook, which can't follow a conditional
-  // early return — has something stable to key off of.
-  const byRecipe = Object.fromEntries((rows || []).map(r => [r.recipe_id, r]))
+  // ── Menu derivations ──────────────────────────────────────────────────────────────────────────
+  // Computed unconditionally (safe on the loading/error/empty renders too) so the hooks below have
+  // something stable to key off of.
+  const meta = rows?.[0] || null
+  const displayName = (meta?.menu_name && meta.menu_name.trim()) || tidyName(meta?.outlet_name || '') || 'Menu'
+  const logoUrl = meta?.logo_url || null
+  const byRecipe = useMemo(() => Object.fromEntries((rows || []).map(r => [r.recipe_id, r])), [rows])
 
-  // Every distinct allergen across the whole menu (not just the currently-filtered view) so the
-  // filter sheet's checklist doesn't shrink as items get excluded.
-  const allAllergens = Array.from(new Set((rows || []).flatMap(r => r.allergens || []))).sort()
-  const filteredRows = (rows || []).filter(r =>
+  const allAllergens = useMemo(() => Array.from(new Set((rows || []).flatMap(r => r.allergens || []))).sort(), [rows])
+  const hasVegMarks = (rows || []).some(r => r.is_veg != null)
+  const searchable = (rows || []).length > SEARCH_THRESHOLD
+  const trimmedQuery = searchable ? query.trim() : ''
+
+  const filteredRows = useMemo(() => (rows || []).filter(r =>
     (!vegOnly || r.is_veg) &&
-    (excludedAllergens.length === 0 || !(r.allergens || []).some(a => excludedAllergens.includes(a)))
-  )
+    (excludedAllergens.length === 0 || !(r.allergens || []).some(a => excludedAllergens.includes(a))) &&
+    matchesSearch({ name: tidyName(r.name), description: r.description, category: r.category }, trimmedQuery)
+  ), [rows, vegOnly, excludedAllergens, trimmedQuery])
   const activeFilterCount = (vegOnly ? 1 : 0) + excludedAllergens.length
 
-  // `UNCATEGORISED` is a sentinel, not a heading. An item with no category used to land in a
-  // section literally titled "OTHER" on a paying customer's screen — a database default reaching
-  // a diner. It now renders with no heading at all when it is the only group (there is nothing to
-  // distinguish it FROM), and as "More" when it sits alongside real ones.
-  // A value no real category can equal. Built with fromCharCode rather than written as an
-  // escape: a scripted edit collapsed the backslash once already and embedded a literal NUL
-  // byte in this file, which compiles and runs fine and makes the whole source read as
-  // BINARY to grep, ripgrep and every review tool. Keep the source plain text.
-  const UNCATEGORISED = String.fromCharCode(0) + 'uncategorised'
-  const categories = []
-  const byCategory = {}
-  for (const r of filteredRows) {
-    const cat = r.category || UNCATEGORISED
-    if (!byCategory[cat]) { byCategory[cat] = []; categories.push(cat) }
-    byCategory[cat].push(r)
-  }
-  const categoryLabel = cat => (cat === UNCATEGORISED ? 'More' : cat)
+  const { categories, byCategory } = useMemo(() => {
+    const present = []
+    const groups = {}
+    for (const r of filteredRows) {
+      const cat = r.category || UNCATEGORISED
+      if (!groups[cat]) { groups[cat] = []; present.push(cat) }
+      groups[cat].push(r)
+    }
+    return { categories: orderCategories(present, meta?.category_order, DEFAULT_RECIPE_CATS, UNCATEGORISED), byCategory: groups }
+  }, [filteredRows, meta])
+  const categoryKey = categories.join('|')
+  const categoryLabel = cat => (cat === UNCATEGORISED ? 'More' : tidyName(cat))
 
-  // Default the highlighted chip to the first category before the guest has scrolled at all —
-  // otherwise the bar renders with no active chip until the observer's first callback fires.
-  useEffect(() => {
-    if (categories.length > 0 && activeCategory === null) setActiveCategory(categories[0])
-  }, [categories.join('|'), activeCategory]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The tab, the address-bar colour and a saved home-screen shortcut belong to the restaurant, in
+  // every state including loading and failure (guestDocument.js).
+  useGuestDocumentIdentity(rows && rows.length > 0 ? `${displayName} — Menu` : 'Menu', rows && rows.length > 0 ? displayName : 'Menu', logoUrl)
 
-  // Track which category section is currently in view so the sticky chip bar can highlight it —
-  // only meaningful (and only wired up) once there's more than one category to navigate between.
+  // The sticky bar's real height (it holds a search field on a long menu, and the chips are 44px on
+  // a touch screen). A section jumped to lands BELOW it: the page used a fixed 52px while the bar
+  // measured 65, so a tapped section's heading sat 13px under the bar.
   useEffect(() => {
-    if (categories.length < 2) return
-    const targets = categories.map(cat => categoryRefs.current[cat]).filter(Boolean)
-    if (targets.length === 0) return
-    const observer = new IntersectionObserver(
-      entries => {
-        const visible = entries.filter(e => e.isIntersecting)
-        if (visible.length === 0) return
-        // Topmost visible section wins — matches "which category am I looking at" better than
-        // largest-intersection-ratio when a short category is fully visible alongside a long one.
-        const top = visible.reduce((a, b) => (a.boundingClientRect.top < b.boundingClientRect.top ? a : b))
-        const cat = categories.find(c => categoryRefs.current[c] === top.target)
-        if (cat) setActiveCategory(cat)
-      },
-      // root: the page's own scrollport, not the viewport — see scrollRootRef above.
-      { root: scrollRootRef.current, rootMargin: '-60px 0px -70% 0px', threshold: 0 } // -60px ~= sticky nav bar height (52px) + a small buffer
-    )
-    targets.forEach(el => observer.observe(el))
-    return () => observer.disconnect()
-  }, [categories.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
+    const el = navRef.current
+    if (!el) { setNavHeight(0); return undefined }
+    const measure = () => setNavHeight(Math.ceil(el.getBoundingClientRect().height))
+    measure()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [categoryKey, searchable, rows])
+
+  // Which section is in view. A scroll listener on the page's own scrollport rather than an
+  // IntersectionObserver: the observer's banded margins could not light the first section again at
+  // the very top, nor the last one at the very bottom (both measured). A tapped chip holds until the
+  // guest scrolls by hand.
+  useEffect(() => {
+    const root = scrollRootRef.current
+    if (!root || categories.length < 2) return undefined
+    let frame = 0
+    const compute = () => {
+      frame = 0
+      if (tappedCategoryRef.current) { setActiveCategory(tappedCategoryRef.current); return }
+      const rootTop = root.getBoundingClientRect().top
+      const line = rootTop + navHeight + 16
+      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) { setActiveCategory(categories[categories.length - 1]); return }
+      let current = categories[0]
+      for (const cat of categories) {
+        const el = categoryRefs.current[cat]
+        if (el && el.getBoundingClientRect().top <= line) current = cat
+      }
+      setActiveCategory(current)
+    }
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(compute) }
+    const release = () => { tappedCategoryRef.current = null }
+    root.addEventListener('scroll', onScroll, { passive: true })
+    root.addEventListener('wheel', release, { passive: true })
+    root.addEventListener('touchstart', release, { passive: true })
+    root.addEventListener('keydown', release)
+    compute()
+    return () => {
+      root.removeEventListener('scroll', onScroll)
+      root.removeEventListener('wheel', release)
+      root.removeEventListener('touchstart', release)
+      root.removeEventListener('keydown', release)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [categoryKey, navHeight]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep the highlighted chip visible inside the bar. It used to highlight a chip scrolled far off
+  // the right edge ("Desserts" at x=968 in a bar ending at 340). Scrolls the BAR only, never the page.
+  useEffect(() => {
+    const bar = chipBarRef.current
+    const chip = chipRefs.current[activeCategory]
+    if (!bar || !chip) return
+    const left = chip.offsetLeft - bar.offsetLeft
+    const right = left + chip.offsetWidth
+    if (left < bar.scrollLeft + 8 || right > bar.scrollLeft + bar.clientWidth - 8) {
+      bar.scrollTo({ left: Math.max(0, left - 16), behavior: reduceMotion() ? 'auto' : 'smooth' })
+    }
+  }, [activeCategory])
 
   function scrollToCategory(cat) {
+    tappedCategoryRef.current = cat
     setActiveCategory(cat)
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    categoryRefs.current[cat]?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+    categoryRefs.current[cat]?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' })
   }
 
   function toggleAllergen(a) {
@@ -439,38 +525,65 @@ export default function GuestMenu() {
     setExcludedAllergens([])
   }
 
+  useBackToClose(reviewOpen, () => setReviewOpen(false), !inPreview)
+  useBackToClose(filtersOpen, () => setFiltersOpen(false), !inPreview)
+  useBackToClose(!!optionSheet, () => setOptionSheet(null), !inPreview)
+
+  // ── The three states before a menu ────────────────────────────────────────────────────────────
+  // All three render inside the page's own shell and theme. They used to render outside it, in the
+  // staff app's palette with a red button — the first thing a guest on a slow connection saw.
   if (rows === null) {
-    return <CenteredMessage>Loading menu…</CenteredMessage>
+    return (
+      <GuestShell>
+        <div className="gm-page" role="status" aria-live="polite" aria-busy="true">
+          <span className="sr-only">Loading the menu…</span>
+          <div aria-hidden="true">
+            <div className="skeleton gm-skel-title" />
+            <div className="skeleton gm-skel-meta" />
+            <div className="gm-skel-chips">
+              <div className="skeleton" /><div className="skeleton" /><div className="skeleton" />
+            </div>
+            {[0, 1, 2, 3, 4].map(i => (
+              <div key={i} className="gm-skel-row">
+                <div className="skeleton gm-skel-name" />
+                <div className="skeleton gm-skel-price" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </GuestShell>
+    )
   }
   if (error) {
     return (
-      <CenteredMessage>
-        <p style={{ margin: '0 0 14px' }}>We couldn't reach the menu. Check your connection and try again.</p>
-        <button type="button" className="btn btn-primary" onClick={retryLoadMenu}>Try again</button>
-      </CenteredMessage>
+      <GuestShell>
+        <div className="gm-page gm-state">
+          <h1 className="gm-state-title">We couldn’t load the menu</h1>
+          <p className="gm-state-text">Check your internet connection, then try again.</p>
+          <button type="button" className="btn btn-primary" onClick={retryLoadMenu}>Try again</button>
+        </div>
+      </GuestShell>
     )
   }
   if (rows.length === 0) {
-    return <CenteredMessage>
-      This menu isn't available right now. Please ask staff for assistance.
-    </CenteredMessage>
+    return (
+      <GuestShell>
+        <div className="gm-page gm-state">
+          <h1 className="gm-state-title">This menu isn’t available</h1>
+          <p className="gm-state-text">Please ask a member of staff for a menu.</p>
+        </div>
+      </GuestShell>
+    )
   }
 
-  const outletName = rows[0].outlet_name
-  const tableName = rows[0].table_name
-  const nutritionEnabled = rows[0].nutrition_enabled
-  const orderingEnabled = rows[0].guest_ordering_enabled
+  const tableName = meta.table_name
+  const nutritionEnabled = meta.nutrition_enabled
+  const orderingEnabled = meta.guest_ordering_enabled
   // `?? true` matches the column default and every other JS caller, so a client whose RPC
   // predates migration 20260823100000 keeps today's behaviour instead of silently dropping VAT
-  // off a registered outlet's menu — this page applies migrations by hand, so that window is real.
-  const vatRegistered = rows[0].is_vat_registered ?? true
+  // off a registered outlet's menu.
+  const vatRegistered = meta.is_vat_registered ?? true
   const vatApplies = vatRegistered && rows.some(r => (parseFloat(r.vat_rate) || 0) > 0)
-  // A menu where SOME dishes have a photo and others don't renders ragged — an 84px thumbnail on
-  // one card and none on the next, so the text starts at two different left edges down the list.
-  // The fix is per-menu, not per-item: once any dish has an image, every card reserves the column.
-  // A menu with no photography at all (which is most of them today) keeps the clean text-only
-  // card, which is a legitimate printed-menu shape and not a broken one.
-  const anyImages = rows.some(r => r.image_url)
 
   const cartLines = Object.entries(cart)
     .filter(([, l]) => l.qty > 0)
@@ -482,7 +595,7 @@ export default function GuestMenu() {
         ? describeSelection(l.option_ids, { ...optionMaps, attachByGroup: Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment])) })
         : { delta: 0, summary: '', options: [] }
       const unit = Math.round(inclFromEx((parseFloat(item.selling_price) || 0) + desc.delta, vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0))
-      return { key, item, qty: l.qty, option_ids: l.option_ids || [], summary: desc.summary, unit }
+      return { key, item, name: tidyName(item.name), qty: l.qty, option_ids: l.option_ids || [], summary: tidyName(desc.summary), unit }
     })
     .filter(Boolean)
   const cartCount = cartLines.reduce((s, l) => s + l.qty, 0)
@@ -501,7 +614,7 @@ export default function GuestMenu() {
       return next
     })
   }
-  // A plain dish's card stepper: its one plain line.
+  // A plain dish's row stepper: its one plain line.
   function setPlainQty(recipeId, qty) {
     setCart(prev => {
       const q = Math.max(0, Math.min(50, qty))
@@ -527,36 +640,41 @@ export default function GuestMenu() {
   }
 
   async function placeOrder() {
+    if (submitting) return
     setSubmitting(true)
     setSubmitError('')
-    // Force a false->true transition even if a previous order's pulse hasn't finished yet
-    // (e.g. a guest immediately places a second order) — React bails out of the justPlaced
-    // effect on a same-value update, which would otherwise silently skip the scroll/chime.
+    // Force a false->true transition even if a previous order's pulse hasn't finished yet — React
+    // bails out of the justPlaced effect on a same-value update.
     setJustPlaced(false)
     const payload = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, ...(l.option_ids.length ? { options: l.option_ids } : {}) }))
-    const itemsSnapshot = cartLines.map(l => ({ name: l.summary ? `${l.item.name} (${l.summary})` : l.item.name, qty: l.qty }))
-    const { data, error: err } = await supabase.rpc('submit_guest_order', {
-      p_table_id: tableId, p_items: payload, p_notes: guestNote || null, p_covers: covers,
-    })
+    const itemsSnapshot = cartLines.map(l => ({ name: l.summary ? `${l.name} (${l.summary})` : l.name, qty: l.qty }))
+    const linesSnapshot = cartLines.map(l => ({ recipe_id: l.item.recipe_id, qty: l.qty, option_ids: l.option_ids }))
+    let data, err
+    try {
+      ;({ data, error: err } = await withTimeout(
+        supabase.rpc('submit_guest_order', { p_table_id: tableId, p_items: payload, p_notes: guestNote || null, p_covers: covers }),
+        SUBMIT_TIMEOUT_MS, 'Sending your order',
+      ))
+    } catch (e) {
+      err = e
+    }
     setSubmitting(false)
     if (err) {
       // Never `err.message`. This is an anonymous member of the public on their own phone, and a
-      // raw PostgREST/Postgres string ("new row violates row-level security policy for table
-      // ...") tells them nothing they can act on while leaking schema detail to an unauthenticated
-      // surface. S754: the server now raises a stable code in `err.hint` for every refusal, so each
-      // gets its own sentence (guestOrderRefusal.js) — including the dishes that went off the menu,
-      // by name, since the whole order is refused when any one of them is unavailable.
+      // raw PostgREST/Postgres string tells them nothing they can act on while leaking schema
+      // detail to an unauthenticated surface. S754: the server raises a stable code in `err.hint`
+      // for every refusal, so each gets its own sentence (guestOrderRefusal.js).
       console.error('submit_guest_order failed', err)
-      const refusal = guestOrderRefusal(err, rows?.[0]?.outlet_name, { online: navigator.onLine !== false })
+      const refusal = guestOrderRefusal(err, displayName, { online: navigator.onLine !== false })
       setSubmitError(refusal.text)
       // The menu on screen offered a dish the server no longer has. Re-read it in place — not via
-      // retryLoadMenu, which blanks the page to its loading state and would close the review sheet
-      // the guest needs to fix the order in. A failed re-read keeps the menu they have.
+      // retryLoadMenu, which blanks the page to its loading state and would close the sheet the
+      // guest needs to fix the order in. A failed re-read keeps the menu they have.
       if (refusal.refreshMenu) {
         Promise.all([supabase.rpc('get_guest_menu', { p_table_id: tableId }), loadOptions()]).then(([{ data: fresh, error: freshErr }, freshOptions]) => {
           if (freshErr || !Array.isArray(fresh)) return
           setRows(fresh)
-          // A dish the fresh menu no longer carries would silently drop out of the review sheet
+          // A dish the fresh menu no longer carries would silently drop out of the order sheet
           // (cartLines filters on the menu), so take it off the cart and SAY it was taken off. Since
           // S758 the same goes for a dish whose choices no longer fit what it offers.
           const onMenu = new Set(fresh.map(r => r.recipe_id))
@@ -577,229 +695,235 @@ export default function GuestMenu() {
       }
       return
     }
-    sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: data, items: itemsSnapshot, covers }))
+    try {
+      sessionStorage.setItem(sessionKey(tableId), JSON.stringify({ requestId: data, items: itemsSnapshot, lines: linesSnapshot, covers }))
+    } catch { /* the tracker still works for this session */ }
     setRequestId(data)
-    setRequestSnapshot({ items: itemsSnapshot, covers })
-    setRequestStatus('pending')
+    setRequestSnapshot({ items: itemsSnapshot, lines: linesSnapshot, covers })
     setCart({})
     setGuestNote('')
-    setCovers(2)
+    // Covers are kept: a second round is the same table of people, and resetting to 2 recorded a
+    // party of five as two on every later order (S767).
     setReviewOpen(false)
+    setRestoreNote('')
     setJustPlaced(true)
   }
 
-  function orderAgain() {
-    sessionStorage.removeItem(sessionKey(tableId))
+  function clearTracker() {
+    try { sessionStorage.removeItem(sessionKey(tableId)) } catch { /* nothing stored */ }
     setRequestId(null)
     setRequestSnapshot(null)
-    setRequestStatus(null)
-    // Without this, prevStageRef stays at 'dismissed' — the next order's first 'placed' stage
-    // would then look like a change from mount's perspective and chime immediately, when it
-    // should stay silent just like a fresh page load does.
-    prevStageRef.current = null
   }
 
-  return (
-    // The inline `minHeight: 100vh` this used to carry had to go: guestMenu.css now makes this
-    // element its own scrollport at `height: 100dvh`, and a min-height of 100vh (always >= 100dvh)
-    // would push it taller than that scrollport, handing the scroll back to the body — which is
-    // precisely the condition that stopped the category bar sticking in the first place.
-    <div className="guest-menu" ref={scrollRootRef} style={{ background: 'var(--theme-bg)', color: 'var(--theme-text1)' }}>
-      <div style={{ maxWidth: 640, margin: '0 auto', padding: '28px 20px 100px', '--guest-menu-nav-h': '52px' }}>
-        {/* This is the one page PRODUCT.md names as the deliberate brand-facing exception — a
-            guest's own leisurely browsing moment, not an ops screen — so the outlet name gets the
-            same Georgia serif signature the sidebar wordmark and login screen use, rather than
-            reading identically to every staff tool in the app. */}
-        <div style={{ textAlign: 'center', marginBottom: 26 }}>
-          <h1 className="gm-wordmark" style={{ margin: '0 0 10px', fontSize: 30, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.01em' }}>{outletName}</h1>
-          {/* A short brass rule — the one restrained brand signature on this, the sole brand-facing
-              page (PRODUCT.md), giving a diner's menu a touch more identity than a staff tool without
-              breaking the One Accent Rule. */}
-          <div aria-hidden="true" style={{ width: 34, height: 2, borderRadius: 1, background: 'var(--theme-accent)', margin: '0 auto 10px' }} />
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>{tableName}</p>
-          {/* Nothing on this page previously said what a price included, which is the other half
-              of the VAT bug: even once the arithmetic is right, "NPR 500" is a promise the guest
-              cannot check. This line is that promise, and it is safe to make because there is no
-              service charge anywhere in the product — a bill is items + VAT (if registered)
-              - discount, rounded. If a service charge is ever added, this line has to change too.
+  // "Order again" after staff could not take an order puts that order back in the cart and opens it,
+  // where it used to clear the card and leave the guest to build it again from memory. A dish that
+  // has since left the menu cannot come back, and is named.
+  function restoreRefusedOrder() {
+    const lines = requestSnapshot?.lines || []
+    const missing = []
+    setCart(prev => {
+      const next = { ...prev }
+      lines.forEach((l, i) => {
+        if (!byRecipe[l.recipe_id]) { missing.push(requestSnapshot.items?.[i]?.name || 'A dish'); return }
+        const key = cartKey(l.recipe_id, l.option_ids || [])
+        next[key] = { recipe_id: l.recipe_id, qty: Math.min(50, (next[key]?.qty || 0) + (Number(l.qty) || 1)), option_ids: [...(l.option_ids || [])] }
+      })
+      return next
+    })
+    setRestoreNote(missing.length ? `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} no longer on the menu.` : '')
+    clearTracker()
+    if (lines.length > missing.length) setReviewOpen(true)
+  }
 
-              Shown ONLY for a VAT-registered outlet, and the asymmetry is deliberate. Plenty of
+  const showNav = categories.length > 1 || searchable
+  const firstCategory = categories[0]
+  const showFilters = hasVegMarks || allAllergens.length > 0
+
+  return (
+    <GuestShell scrollRef={scrollRootRef} style={{ '--gm-nav-h': `${navHeight}px` }}>
+      <div className="gm-page">
+        <header className="gm-mast">
+          {logoUrl && <GuestLogo src={logoUrl} name={displayName} />}
+          <h1 className="gm-name">{displayName}</h1>
+          <div className="gm-meta">
+            <p className="gm-table">{tableName}</p>
+            {showFilters && (
+              <button type="button" className="btn btn-ghost btn-sm gm-filter-btn" onClick={() => setFiltersOpen(true)}>
+                <SlidersHorizontal size={15} aria-hidden="true" />
+                {activeFilterCount > 0 ? `Filters (${activeFilterCount})` : 'Filters'}
+              </button>
+            )}
+          </div>
+          {/* Shown ONLY for a VAT-registered outlet, and the asymmetry is deliberate. Plenty of
               restaurants here add 13% at the till, so a diner genuinely cannot tell whether a menu
               price is the final price — stating the inclusion removes a real doubt. The
-              non-registered case has no such doubt to remove: the price shown is simply the price.
-              Spelling that out as "no VAT is added" would answer a question nobody asked and, on
-              the one page a restaurant's customers ever see, volunteer that the business is not
-              VAT-registered. Absence of a claim is neutral; an explicit absence is a disclosure,
-              and it is not this software's to make on a client's behalf. */}
-          {vatApplies && (
-            <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--theme-text3)' }}>
-              All prices are inclusive of VAT.
-            </p>
-          )}
+              non-registered case has no such doubt to remove, and spelling it out would volunteer a
+              client's tax status on the one page their customers see. Safe to state because there is
+              no service charge anywhere in the product; if one is added, this line has to change. */}
+          {vatApplies && <p className="gm-note">Prices include VAT.</p>}
           {/* get_guest_menu turns ordering off for a table marked inactive (S746). Without a line
-              saying so, the only difference is the missing Add buttons, which reads as a broken
-              page rather than a table that is not taking orders. */}
-          {orderingEnabled && optionsFailed && (
-            <p role="status" style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>
-              We couldn't load the choices for some dishes (like sizes or extras). You can still order, and if a dish needs a choice we'll tell you before it is sent.
-            </p>
-          )}
+              saying so, the only difference is the missing Add buttons, which reads as a broken page. */}
           {!orderingEnabled && (
-            <p style={{ margin: '10px 0 0', fontSize: 13, color: 'var(--theme-text2)' }}>
-              Ordering from this table isn't available right now — please order with a member of staff.
+            <p className="gm-note">Ordering from this table is off right now. Please order with a member of staff.</p>
+          )}
+          {orderingEnabled && optionsFailed && (
+            <p role="status" className="gm-note gm-note--warn">
+              Sizes and extras didn’t load. You can still order, and we’ll tell you if a dish needs a choice.
             </p>
           )}
-        </div>
+        </header>
 
-        {(rows.some(r => r.is_veg != null) || allAllergens.length > 0) && (
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
-            <button
-              type="button" onClick={() => setFiltersOpen(true)}
-              className="btn btn-ghost"
-              style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
-            >
-              ⚙ Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-            </button>
-          </div>
-        )}
+        {restoreNote && <p role="status" className="gm-note gm-note--warn">{restoreNote}</p>}
 
-        {categories.length > 1 && (
-          <div
-            className="tab-bar tab-bar--scroll"
-            style={{
-              position: 'sticky', top: 0, zIndex: 40, marginBottom: 20,
-              padding: '10px 0', background: 'var(--theme-bg)', borderBottom: '1px solid var(--theme-border)',
-            }}
-          >
-            {categories.map(cat => (
-              <button
-                key={cat} type="button"
-                className={`tab-btn${activeCategory === cat ? ' tab-btn--active' : ''}`}
-                aria-current={activeCategory === cat ? 'true' : undefined}
-                onClick={() => scrollToCategory(cat)}
-              >
-                {categoryLabel(cat)}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {requestSnapshot ? (
-          <div
-            ref={statusCardRef} className={justPlaced ? 'guest-order-glow' : undefined}
-            style={{ borderRadius: 10, scrollMarginTop: categories.length > 1 ? 'var(--guest-menu-nav-h)' : 0 }}
-            aria-live="polite"
-          >
+        {requestSnapshot && requestId ? (
+          <div ref={statusCardRef} className={`gm-status-wrap${justPlaced ? ' guest-order-glow' : ''}`}>
             <OrderStatusCard
-              requestStatus={requestStatus} kotStatus={kotStatus} remainingMinutes={remainingMinutes}
+              stage={stage || 'placed'} progress={progress}
               items={requestSnapshot.items} covers={requestSnapshot.covers}
               tableName={tableName} statusStale={statusStale}
-              onOrderAgain={orderAgain}
+              onRestore={restoreRefusedOrder} onClear={clearTracker}
             />
           </div>
-        ) : kotStatus && (
-          <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <span className={`badge ${KOT_STATUS_BADGE[kotStatus]}`} style={{ display: 'inline-block', fontSize: 11 }}>
-              {KOT_STATUS_LABEL[kotStatus]}
-              {kotStatus === 'in_progress' && remainingMinutes > 0 && ` — about ${remainingMinutes} min left`}
+        ) : tableKot && (
+          <p role="status" className="gm-table-kot">
+            <span className={`badge badge-sentence ${KOT_STATUS_BADGE[tableKot.kotStatus] || 'badge-gray'}`}>
+              {KOT_STATUS_LABEL[tableKot.kotStatus] || KOT_STATUS_LABEL.new}
+              {tableKot.kotStatus === 'in_progress' && tableKot.remainingMinutes > 0 && ` · about ${tableKot.remainingMinutes} min`}
             </span>
-          </div>
+          </p>
         )}
 
-        {categories.length === 0 && activeFilterCount > 0 && (
-          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--theme-text3)', fontSize: 13 }}>
-            <p style={{ margin: '0 0 10px' }}>No items match your filters.</p>
-            <button type="button" className="btn btn-ghost" style={{ fontSize: 12.5 }} onClick={clearFilters}>Clear filters</button>
-          </div>
-        )}
-
-        {categories.map(cat => (
-          <div
-            key={cat} ref={el => { categoryRefs.current[cat] = el }}
-            style={{ marginBottom: 28, scrollMarginTop: 'var(--guest-menu-nav-h)' }}
-          >
-            {!(cat === UNCATEGORISED && categories.length === 1) && (
-              <h2 style={{
-                fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
-                color: 'var(--theme-accent-ink)', margin: '0 0 12px', paddingBottom: 6,
-                borderBottom: '1px solid var(--theme-border)',
-              }}>{categoryLabel(cat)}</h2>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {byCategory[cat].map(item => (
-                <MenuItemCard
-                  key={item.recipe_id} item={item} nutritionEnabled={nutritionEnabled}
-                  orderingEnabled={orderingEnabled} vatRegistered={vatRegistered}
-                  showImageColumn={anyImages}
-                  qty={qtyByRecipe[item.recipe_id] || 0}
-                  onQtyChange={qty => setPlainQty(item.recipe_id, qty)}
-                  dishGroups={dishGroupsByRecipe[item.recipe_id]}
-                  onChoose={() => setOptionSheet({ item, dishGroups: dishGroupsByRecipe[item.recipe_id] })}
+        {showNav && (
+          <nav ref={navRef} className="gm-nav" aria-label="Menu sections">
+            {searchable && (
+              <div className="gm-search">
+                <Search size={16} aria-hidden="true" className="gm-search-icon" />
+                <input
+                  type="search" className="form-input" enterKeyHint="search"
+                  aria-label="Search the menu" placeholder="Search dishes"
+                  value={query} onChange={e => setQuery(e.target.value)}
+                  autoComplete="off" spellCheck="false"
                 />
-              ))}
+              </div>
+            )}
+            {categories.length > 1 && (
+              <div ref={chipBarRef} className="tab-bar tab-bar--scroll gm-chips">
+                {categories.map(cat => (
+                  <button
+                    key={cat} type="button"
+                    ref={el => { chipRefs.current[cat] = el }}
+                    className={`tab-btn${activeCategory === cat || (!activeCategory && cat === firstCategory) ? ' tab-btn--active' : ''}`}
+                    aria-current={activeCategory === cat ? 'true' : undefined}
+                    onClick={() => scrollToCategory(cat)}
+                  >
+                    {categoryLabel(cat)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </nav>
+        )}
+
+        {trimmedQuery && (
+          <p role="status" className="gm-search-count">
+            {filteredRows.length === 0 ? '' : `${filteredRows.length} ${filteredRows.length === 1 ? 'dish matches' : 'dishes match'} “${trimmedQuery}”`}
+          </p>
+        )}
+
+        <main>
+          {categories.length === 0 && (
+            <div className="gm-empty">
+              {trimmedQuery ? (
+                <>
+                  <p>No dish matches “{trimmedQuery}”.</p>
+                  <button type="button" className="btn btn-ghost" onClick={() => setQuery('')}>Clear search</button>
+                </>
+              ) : activeFilterCount > 0 ? (
+                <>
+                  <p>No dish matches your filters.</p>
+                  <button type="button" className="btn btn-ghost" onClick={clearFilters}>Clear filters</button>
+                </>
+              ) : null}
             </div>
-          </div>
-        ))}
+          )}
+
+          {categories.map(cat => (
+            <section
+              key={cat} ref={el => { categoryRefs.current[cat] = el }}
+              className="gm-section" aria-label={cat === UNCATEGORISED && categories.length === 1 ? 'Menu' : undefined}
+              aria-labelledby={cat === UNCATEGORISED && categories.length === 1 ? undefined : `gm-sec-${categories.indexOf(cat)}`}
+            >
+              {!(cat === UNCATEGORISED && categories.length === 1) && (
+                <h2 id={`gm-sec-${categories.indexOf(cat)}`} className="gm-section-title">{categoryLabel(cat)}</h2>
+              )}
+              <ul className="gm-list">
+                {byCategory[cat].map(item => (
+                  <MenuItemRow
+                    key={item.recipe_id} item={item} nutritionEnabled={nutritionEnabled}
+                    orderingEnabled={orderingEnabled} vatRegistered={vatRegistered}
+                    qty={qtyByRecipe[item.recipe_id] || 0}
+                    onQtyChange={qty => setPlainQty(item.recipe_id, qty)}
+                    dishGroups={dishGroupsByRecipe[item.recipe_id]}
+                    onChoose={() => setOptionSheet({ item, dishGroups: dishGroupsByRecipe[item.recipe_id] })}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </main>
       </div>
 
+      {/* The order total, announced. The bar's count changed on every add and a screen reader heard
+          nothing, because the bar is a button whose name only changes. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {cartCount > 0 ? `${cartCount} ${cartCount === 1 ? 'item' : 'items'} in your order, ${fmtNpr(cartTotal)}` : ''}
+      </p>
+
       {orderingEnabled && cartCount > 0 && (
-        <button
-          onClick={() => setReviewOpen(true)}
-          style={{
-            position: 'fixed', left: 16, right: 16, zIndex: 50,
-            // viewport-fit=cover ships on this page, so `bottom: 16` put the primary call to
-            // action inside the iPhone home-indicator gesture strip — a swipe up to submit an
-            // order dismisses the app instead. The inset is 0 on every device without one.
-            bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
-            minHeight: 44,
-            maxWidth: 608, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '14px 18px', borderRadius: 10, border: 'none', cursor: 'pointer',
-            background: 'var(--theme-accent)', color: 'var(--theme-accent-text)', fontSize: 14, fontWeight: 700,
-            boxShadow: '0 6px 20px -6px rgba(0,70,67,0.38)',
-          }}
-        >
-          <span>{cartCount} item{cartCount > 1 ? 's' : ''} · {fmtNpr(cartTotal)}</span>
-          <span>View Order →</span>
-        </button>
+        <div className="gm-cartbar no-print">
+          <button type="button" className="gm-cartbar-btn" onClick={() => setReviewOpen(true)}>
+            <span className="gm-cartbar-count">{cartCount} {cartCount === 1 ? 'item' : 'items'} · {fmtNpr(cartTotal)}</span>
+            <span className="gm-cartbar-go">Review order <ChevronRight size={18} aria-hidden="true" /></span>
+          </button>
+        </div>
       )}
 
       {filtersOpen && (
-        <Modal title="Filter Menu" onClose={() => setFiltersOpen(false)} maxWidth={420}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {rows.some(r => r.is_veg != null) && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, cursor: 'pointer' }}>
+        <Modal variant="sheet" title="Filter the menu" onClose={() => setFiltersOpen(false)}>
+          <SheetHeader title="Filter the menu" onClose={() => setFiltersOpen(false)} />
+          <div className="gm-filter-body">
+            {hasVegMarks && (
+              <label className="gm-check">
                 <input type="checkbox" checked={vegOnly} onChange={e => setVegOnly(e.target.checked)} />
-                Vegetarian only
+                <span>Vegetarian dishes only</span>
               </label>
             )}
             {allAllergens.length > 0 && (
-              <div>
-                <p style={{ margin: '0 0 8px', fontSize: 12.5, color: 'var(--theme-text2)' }}>Hide items containing:</p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <div role="group" aria-labelledby="gm-allergen-label">
+                <p id="gm-allergen-label" className="gm-filter-label">Hide dishes that contain:</p>
+                <div className="gm-allergen-chips">
                   {allAllergens.map(a => (
                     <button
                       key={a} type="button" onClick={() => toggleAllergen(a)}
-                      // A toggle must say whether it is on. Without aria-pressed the only signal
-                      // that an allergen is excluded is the red border, i.e. colour alone.
+                      // A toggle must say whether it is on, not only by colour.
                       aria-pressed={excludedAllergens.includes(a)}
-                      className="gm-chip"
-                      style={{
-                        padding: '8px 14px', minHeight: 44, borderRadius: 20, fontSize: 12.5, textTransform: 'capitalize', cursor: 'pointer',
-                        border: `1px solid ${excludedAllergens.includes(a) ? 'var(--theme-red)' : 'var(--theme-border)'}`,
-                        background: excludedAllergens.includes(a) ? 'var(--gm-danger-tint)' : 'var(--theme-input-bg)',
-                        color: excludedAllergens.includes(a) ? 'var(--theme-red-text)' : 'var(--theme-text2)',
-                      }}
+                      className="gm-chip gm-allergen"
                     >
+                      {excludedAllergens.includes(a) && <X size={14} aria-hidden="true" />}
                       {a}
                     </button>
                   ))}
                 </div>
+                {/* Decision S767: allergens reach every restaurant's guests. What they are built from
+                    is the ingredients the restaurant has recorded, and the page must not let a missing
+                    record read as "free of it". */}
+                <p className="gm-note">Based on the ingredients the restaurant has recorded. If you have a serious allergy, please ask a member of staff.</p>
               </div>
             )}
-            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-              <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={clearFilters}>Clear</button>
-              <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => setFiltersOpen(false)}>
-                Show {filteredRows.length} item{filteredRows.length === 1 ? '' : 's'}
+            <div className="gm-sheet-actions">
+              <button type="button" className="btn btn-ghost" onClick={clearFilters}>Clear</button>
+              <button type="button" className="btn btn-primary" onClick={() => setFiltersOpen(false)}>
+                Show {filteredRows.length} {filteredRows.length === 1 ? 'dish' : 'dishes'}
               </button>
             </div>
           </div>
@@ -807,103 +931,85 @@ export default function GuestMenu() {
       )}
 
       {reviewOpen && (
-        <Modal title="Your Order" onClose={() => setReviewOpen(false)} maxWidth={480}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {/* Emptying the cart from inside this modal used to leave a single sentence and no
-                way forward — the guest had to find the backdrop or the × to get back to the menu
-                they were trying to order from. */}
-            {cartLines.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '8px 0 4px' }}>
-                <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
-                  Nothing in your order yet.
-                </p>
-                <button type="button" className="btn btn-primary" onClick={() => setReviewOpen(false)}>
-                  Back to the menu
-                </button>
+        <Modal variant="sheet" title="Your order" onClose={() => { if (!submitting) setReviewOpen(false) }}>
+          <SheetHeader title="Your order" onClose={() => { if (!submitting) setReviewOpen(false) }} />
+          {/* Emptying the cart from inside this sheet used to leave a single sentence and no way
+              forward. */}
+          {cartLines.length === 0 ? (
+            <div className="gm-empty">
+              <p>Nothing in your order yet.</p>
+              <button type="button" className="btn btn-primary" onClick={() => setReviewOpen(false)}>Back to the menu</button>
+            </div>
+          ) : (
+            // Locked while the order is sending: an edit made then was silently not sent.
+            <fieldset className="gm-fieldset" disabled={submitting}>
+              <legend className="sr-only">Your order</legend>
+              <ul className="gm-review-lines">
+                {cartLines.map(l => (
+                  <li key={l.key} className="gm-review-line">
+                    <div className="gm-review-line-name">
+                      <span className="gm-dish-name">{l.name}</span>
+                      {l.summary && <span className="gm-review-line-summary">{l.summary}</span>}
+                      {/* Edit from the order, not "remove and start again": the thing a guest most
+                          often wants to change is the choice they just made (S758). */}
+                      {dishGroupsByRecipe[l.item.recipe_id] && (
+                        <button
+                          type="button" className="btn btn-ghost btn-sm gm-edit-choices"
+                          aria-label={`Change choices for ${l.name}`}
+                          onClick={() => setOptionSheet({ item: l.item, dishGroups: dishGroupsByRecipe[l.item.recipe_id], editKey: l.key, initialIds: l.option_ids })}
+                        >Change choices</button>
+                      )}
+                    </div>
+                    <Stepper qty={l.qty} label={l.name} onChange={qty => setQty(l.key, qty)} />
+                    <span className="gm-review-line-total">{fmtNpr(l.unit * l.qty)}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="gm-review-total">
+                <span>Total</span>
+                <span>{fmtNpr(cartTotal)}</span>
               </div>
-            )}
-            {cartLines.map(l => (
-              <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ flex: 1, fontSize: 14, minWidth: 0 }}>
-                  {l.item.name}
-                  {l.summary && <span style={{ display: 'block', fontSize: 12, color: 'var(--theme-text3)' }}>{l.summary}</span>}
-                  {/* Edit from the order, not "remove and start again": the thing a guest most often
-                      wants to change is the choice they just made (S758). */}
-                  {dishGroupsByRecipe[l.item.recipe_id] && (
-                    <button
-                      type="button" className="btn btn-ghost"
-                      style={{ fontSize: 12, padding: '2px 10px', minHeight: 32, marginTop: 4 }}
-                      aria-label={`Change choices for ${l.item.name}`}
-                      onClick={() => setOptionSheet({ item: l.item, dishGroups: dishGroupsByRecipe[l.item.recipe_id], editKey: l.key, initialIds: l.option_ids })}
-                    >Edit choices</button>
-                  )}
-                </span>
-                <Stepper qty={l.qty} label={l.item.name} onChange={qty => setQty(l.key, qty)} />
-                <span style={{ width: 74, textAlign: 'right', fontSize: 13, color: 'var(--theme-text2)' }}>
-                  {fmtNpr(l.unit * l.qty)}
-                </span>
+              <p className="gm-note">
+                {vatApplies ? 'Includes VAT. ' : ''}Staff accept your order before the kitchen starts. You pay at the table.
+              </p>
+              <div className="gm-covers">
+                <span>How many of you are eating?</span>
+                <Stepper qty={covers} label="people eating" onChange={n => setCovers(Math.max(1, Math.min(50, n)))} />
               </div>
-            ))}
-            {cartLines.length > 0 && (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 15, marginTop: 6, paddingTop: 10, borderTop: '1px solid var(--theme-border)' }}>
-                  <span>Total</span>
-                  <span>{fmtNpr(cartTotal)}</span>
-                </div>
-                <p style={{ margin: '2px 0 0', fontSize: 11.5, color: 'var(--theme-text3)' }}>
-                  {vatApplies ? 'Inclusive of VAT. ' : ''}Staff confirm this order before the kitchen starts; you pay at the table.
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                  <span style={{ fontSize: 13 }}>How many of you are dining?</span>
-                  <Stepper qty={covers} label="guests dining" onChange={n => setCovers(Math.max(1, Math.min(50, n)))} />
-                </div>
-                {/* This had no accessible name whatsoever — a placeholder is not a label, and it
-                    disappears the moment anyone types into it. `.form-input` also brings the 16px
-                    coarse-pointer floor, below which iOS Safari zooms the viewport and never
-                    zooms back; at 13px this box did exactly that, mid-order. */}
-                <label htmlFor="guest-note" className="sr-only">Notes for the kitchen (optional)</label>
-                <textarea
-                  id="guest-note"
-                  className="form-input"
-                  value={guestNote} onChange={e => setGuestNote(e.target.value)}
-                  placeholder="Any notes for the kitchen? (optional)"
-                  rows={2}
-                  style={{
-                    marginTop: 8, width: '100%', resize: 'vertical', borderRadius: 6,
-                    border: '1px solid var(--theme-border-lt)', background: 'var(--theme-input-bg)',
-                    color: 'var(--theme-text1)', padding: '8px 10px', fontSize: 13, boxSizing: 'border-box',
-                  }}
-                />
-                {submitError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12.5, margin: 0 }}>{submitError}</p>}
-                {/* The last thing read before committing. A QR sticker that has been moved, or a
-                    guest who scanned the code on the next table, is only catchable here — and the
-                    modal did not name the table at all. */}
-                <p style={{
-                  margin: '6px 0 0', fontSize: 13, fontWeight: 600, color: 'var(--theme-accent-ink)',
-                  textAlign: 'center',
-                }}>
-                  Sending to {tableName}
-                </p>
-                {inPreview ? (
-                  <>
-                    <button type="button" className="btn btn-primary" disabled style={{ marginTop: 4 }}>
-                      Place Order · {fmtNpr(cartTotal)}
-                    </button>
-                    <p role="note" style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)', textAlign: 'center' }}>
-                      Ordering is off in the admin preview. Open the menu in a new tab to place a real order.
-                    </p>
-                  </>
-                ) : (
-                  <button
-                    type="button" className="btn btn-primary" disabled={submitting} onClick={placeOrder}
-                    style={{ marginTop: 4 }}
-                  >
-                    {submitting ? 'Placing order…' : `Place Order · ${fmtNpr(cartTotal)}`}
+              {/* `.form-input` brings the 16px coarse-pointer floor, below which iOS Safari zooms
+                  the viewport and never zooms back. */}
+              <label htmlFor="guest-note" className="gm-filter-label">Note for the kitchen (optional)</label>
+              <textarea
+                id="guest-note" className="form-input gm-note-input"
+                value={guestNote} onChange={e => setGuestNote(e.target.value)}
+                placeholder="For example: no onion, less spicy"
+                rows={2} maxLength={500}
+              />
+            </fieldset>
+          )}
+          {cartLines.length > 0 && (
+            <div className="gm-place">
+              {submitError && <p role="alert" className="gm-error">{submitError}</p>}
+              {/* The last thing read before committing. A QR sticker that has been moved, or a guest
+                  who scanned the code on the next table, is only catchable here. */}
+              <p className="gm-sending-to">Sending to {tableName}</p>
+              {inPreview ? (
+                <>
+                  <button type="button" className="btn btn-primary gm-place-btn" disabled>
+                    Place order · {fmtNpr(cartTotal)}
                   </button>
-                )}
-              </>
-            )}
-          </div>
+                  <p role="note" className="gm-note">Ordering is off in the admin preview. Open the menu in a new tab to place a real order.</p>
+                </>
+              ) : (
+                <button
+                  type="button" className="btn btn-primary gm-place-btn"
+                  aria-busy={submitting ? 'true' : undefined} onClick={placeOrder}
+                >
+                  {submitting ? 'Sending your order…' : `Place order · ${fmtNpr(cartTotal)}`}
+                </button>
+              )}
+            </div>
+          )}
         </Modal>
       )}
 
@@ -920,223 +1026,223 @@ export default function GuestMenu() {
           onConfirm={ids => { addCustom(optionSheet.item, ids, optionSheet.editKey); setOptionSheet(null) }}
         />
       )}
+    </GuestShell>
+  )
+}
+
+// The page's own scrollport and theme scope, shared by the loading, error and menu states so none of
+// them can render outside it.
+function GuestShell({ children, scrollRef, style }) {
+  return (
+    <div className="guest-menu" ref={scrollRef} style={style}>
+      {children}
     </div>
   )
 }
 
-function OrderStatusCard({ requestStatus, kotStatus, remainingMinutes, items, covers, tableName, statusStale, onOrderAgain }) {
-  if (requestStatus === 'dismissed') {
+// The restaurant's logo, if the owner set one. A logo that fails to load is simply absent — a broken
+// image glyph above the restaurant's name is worse than no logo.
+function GuestLogo({ src, name }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => { setFailed(false) }, [src])
+  if (failed) return null
+  // Empty alt: the restaurant's name is the heading directly beneath, and "Bhatti Choila logo,
+  // Bhatti Choila" is the same fact read twice.
+  return <img className="gm-logo" src={src} alt="" data-name={name} onError={() => setFailed(true)} />
+}
+
+function SheetHeader({ title, onClose }) {
+  return (
+    <div className="gm-sheet-head">
+      <h2 className="gm-sheet-title">{title}</h2>
+      <button type="button" className="btn btn-ghost btn-icon gm-close" onClick={onClose} aria-label="Close" title="Close">
+        <X size={20} aria-hidden="true" />
+      </button>
+    </div>
+  )
+}
+
+function OrderStatusCard({ stage, progress, items, covers, tableName, statusStale, onRestore, onClear }) {
+  const list = items?.length > 0 && (
+    <ul className="gm-status-items">
+      {items.map((it, i) => <li key={i}>{it.qty} × {tidyName(it.name)}</li>)}
+      <li className="gm-status-sub">
+        {covers > 0 ? `${covers} ${covers === 1 ? 'person' : 'people'} · ` : ''}{tableName}
+      </li>
+    </ul>
+  )
+
+  if (stage === 'dismissed') {
     return (
-      <div className="card" style={{ padding: 16, marginBottom: 24, borderColor: 'var(--theme-red)' }}>
-        <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--theme-red-text)' }}>
-          Staff couldn't take this order
-        </p>
-        <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--theme-text2)' }}>
-          Please ask a staff member for assistance.
-        </p>
-        <button className="btn btn-ghost" style={{ marginTop: 10, fontSize: 12 }} onClick={onOrderAgain}>Order again</button>
-      </div>
+      <section className="gm-status gm-status--refused" aria-labelledby="gm-status-title">
+        <h2 id="gm-status-title" className="gm-status-title">Staff couldn’t take this order</h2>
+        <p className="gm-status-text">Please ask a member of staff. You can send it again from your order.</p>
+        {list}
+        <div className="gm-status-actions">
+          <button type="button" className="btn btn-primary" onClick={onRestore}>Put it back in my order</button>
+          <button type="button" className="btn btn-ghost" onClick={onClear}>Close</button>
+        </div>
+      </section>
     )
   }
 
-  const stage = computeStage(requestStatus, kotStatus)
-  const stageIdx = STAGES.indexOf(stage)
-  // "About" rather than a bare countdown — this is the kitchen's own estimate, not a measured
-  // time, so the wording deliberately avoids reading as a precise promise. Omitted once it's
-  // no longer positive rather than showing a negative/overdue number to a paying guest.
-  const stageLabel = stage === 'preparing' && remainingMinutes > 0
-    ? `Being prepared — about ${remainingMinutes} min left`
-    : STAGE_LABEL[stage]
+  if (stage === 'done') {
+    return (
+      <section className="gm-status" aria-labelledby="gm-status-title">
+        <h2 id="gm-status-title" className="gm-status-title">Your bill is closed. Thank you!</h2>
+        <p className="gm-status-text">We hope you enjoyed your meal.</p>
+        {list}
+        <div className="gm-status-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClear}>Close</button>
+        </div>
+      </section>
+    )
+  }
+
+  const stageIdx = Math.max(0, STAGES.indexOf(stage))
+  // "About" rather than a bare countdown — this is the kitchen's own estimate, not a measured time.
+  // Omitted once it's no longer positive rather than showing a negative number to a paying guest.
+  const minutes = stage === 'preparing' && progress.kotStatus === 'in_progress' && progress.remainingMinutes > 0 ? progress.remainingMinutes : null
 
   return (
-    <div className="card" style={{ padding: 16, marginBottom: 24, borderColor: 'var(--theme-accent)' }}>
-      <p style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>
-        {stageLabel}
-      </p>
-      {/* A stalled poll is not a stage. Saying so keeps the tracker honest: the dots below are
-          still showing the last stage we actually heard, and a guest who knows that will ask a
-          member of staff instead of waiting on a card that has quietly stopped moving. */}
+    <section className="gm-status" aria-labelledby="gm-status-title">
+      <h2 id="gm-status-title" className="gm-status-title" aria-live="polite">
+        {STAGE_LABEL[stage] || STAGE_LABEL.placed}
+        {minutes != null && <span className="gm-status-minutes"> About {minutes} min.</span>}
+      </h2>
+      {/* A stalled poll is not a stage. Saying so keeps the tracker honest: the steps below are still
+          the last stage we actually heard. */}
       {statusStale && (
-        <p role="status" style={{ margin: '-8px 0 14px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-          Can't reach the kitchen right now — this is the last update we received. Trying again…
-        </p>
+        <p role="status" className="gm-note gm-note--warn">Lost touch with the restaurant. Showing the last update. Trying again…</p>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+      {/* Five labelled steps. The dots used to carry no label, so only the sentence said where the
+          order was. */}
+      <ol className="gm-track" aria-label="Order progress">
         {STAGES.map((s, i) => (
-          <div key={s} style={{ display: 'flex', alignItems: 'center', flex: i < STAGES.length - 1 ? 1 : '0 0 auto' }}>
-            <div style={{
-              width: 11, height: 11, borderRadius: '50%', flexShrink: 0,
-              background: i <= stageIdx ? 'var(--theme-accent)' : 'var(--theme-border)',
-              transition: 'background 0.2s',
-            }} />
-            {i < STAGES.length - 1 && (
-              <div style={{
-                flex: 1, height: 2, margin: '0 2px',
-                background: i < stageIdx ? 'var(--theme-accent)' : 'var(--theme-border)',
-                transition: 'background 0.2s',
-              }} />
-            )}
-          </div>
+          <li
+            key={s}
+            className={`gm-track-step${i < stageIdx ? ' is-done' : ''}${i === stageIdx ? ' is-current' : ''}`}
+            aria-current={i === stageIdx ? 'step' : undefined}
+          >
+            <span className="gm-track-bar" aria-hidden="true" />
+            <span className="gm-track-label">{STAGE_SHORT[s]}</span>
+          </li>
         ))}
-      </div>
-      {items?.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 10, borderTop: '1px solid var(--theme-border)' }}>
-          {items.map((it, i) => (
-            <span key={i} style={{ fontSize: 13, color: 'var(--theme-text2)' }}>{it.qty}× {it.name}</span>
-          ))}
-          {covers > 0 && (
-            <span style={{ fontSize: 11.5, color: 'var(--theme-text3)', marginTop: 4 }}>{covers} guest{covers > 1 ? 's' : ''}</span>
-          )}
-          {/* QR stickers get moved, and guests scan the code on the next table over. The table
-              appeared exactly once on this page, as 13px tertiary text under the outlet name, and
-              never again — so an order could be placed against the wrong table with nothing on
-              screen that would have caught it. Repeated here, where it is a statement of fact
-              about food already on its way. */}
-          {tableName && (
-            <span style={{ fontSize: 11.5, color: 'var(--theme-text3)' }}>Going to {tableName}</span>
-          )}
-        </div>
-      )}
-    </div>
+      </ol>
+      {list}
+    </section>
   )
 }
 
-// `label` names what is being counted. Without it a menu of N dishes renders 2N buttons all
-// announcing "Decrease quantity", and the covers stepper announces the same thing again — four
-// steppers sharing two labels, which tells a screen-reader user the control's verb and never its
-// subject. DESIGN.md's template-aria-label rule (a control inside a .map() names its row).
-function Stepper({ qty, onChange, label }) {
-  // 44, not the 40 this copied from posOrdersConstants.js's btnSm. That size is tuned for a dense
-  // staff side panel on a fixed till; this is a diner's own phone, held one-handed, and 44 is
-  // WCAG 2.2 SC 2.5.8's touch target — on the one surface in the product that is 100% touch,
-  // there is no competing density argument for going under it.
-  const btn = {
-    width: 44, height: 44, borderRadius: 8, border: '1px solid var(--theme-border-lt)',
-    background: 'var(--theme-input-bg)', color: 'var(--theme-text1)', cursor: 'pointer',
-    fontSize: 18, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-  }
+// `label` names what is being counted, so a menu of N dishes does not render 2N buttons all
+// announcing "Decrease quantity" (DESIGN.md's template-aria-label rule).
+function Stepper({ qty, onChange, label, plusRef, minusRef }) {
   const what = label ? ` of ${label}` : ''
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <button type="button" style={btn} aria-label={`Decrease quantity${what}`} onClick={() => onChange(qty - 1)}>−</button>
-      <span style={{ minWidth: 24, textAlign: 'center', fontSize: 14 }} aria-live="polite">{qty}</span>
-      <button type="button" style={btn} aria-label={`Increase quantity${what}`} onClick={() => onChange(qty + 1)}>+</button>
+    <div className="gm-stepper">
+      <button type="button" ref={minusRef} className="gm-step-btn" aria-label={`Decrease quantity${what}`} onClick={() => onChange(qty - 1)}>
+        <Minus size={16} aria-hidden="true" />
+      </button>
+      <span className="gm-step-qty" aria-live="polite">{qty}</span>
+      <button type="button" ref={plusRef} className="gm-step-btn" aria-label={`Increase quantity${what}`} onClick={() => onChange(qty + 1)}>
+        <Plus size={16} aria-hidden="true" />
+      </button>
     </div>
   )
 }
 
-function MenuItemCard({ item, nutritionEnabled, orderingEnabled, vatRegistered, showImageColumn, qty, onQtyChange, dishGroups, onChoose }) {
+// Veg / non-veg: the market's own labelling symbol — an outlined square with a filled dot, green or
+// red. The dot stays round deliberately: this is a food-labelling mark whose shape IS its meaning,
+// not an interface control, so the Modernist zero-radius rule does not reshape it (DESIGN.md).
+function VegMark({ isVeg }) {
+  return (
+    <span role="img" aria-label={isVeg ? 'Vegetarian' : 'Non-vegetarian'} title={isVeg ? 'Veg' : 'Non-veg'}
+      className={`gm-diet ${isVeg ? 'gm-diet--veg' : 'gm-diet--nonveg'}`}>
+      <span aria-hidden="true" />
+    </span>
+  )
+}
+
+function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, qty, onQtyChange, dishGroups, onChoose }) {
   const [imgFailed, setImgFailed] = useState(false)
+  const plusRef = useRef(null)
+  const addRef = useRef(null)
+  const focusAfter = useRef(null) // 'plus' | 'add' — where focus goes once the control it needs exists
+  const name = tidyName(item.name)
   const priceInc = priceIncVat(item, vatRegistered)
-  // A dish with choices shows "From" its cheapest valid version (owner decision, S758): Half at 150
-  // rather than Full at 250, with the exact price shown as the guest picks.
+  // A dish with choices shows "From" its cheapest valid version (owner decision, S758).
   const fromPrice = dishGroups
     ? Math.round(inclFromEx(lowestDishPrice(item.selling_price, dishGroups), vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0))
     : null
   const showFrom = fromPrice != null && fromPrice !== priceInc
   const hasImage = item.image_url && !imgFailed
+  const allergens = item.allergens || []
+  const showNutrition = nutritionEnabled && item.has_nutrition
+  // A dish with nothing but a name and a price is one line: the printed-menu row. A card per dish
+  // with the Add button on a row of its own made a 120-dish menu 24–31 phone screens long.
+  const compact = !hasImage && !item.description && allergens.length === 0 && !showNutrition
+
+  // Pressing "+ Add" replaces it with the stepper, and focus used to fall to the page. It moves to
+  // the new "+"; taking the dish back to 0 returns it to "+ Add".
+  useEffect(() => {
+    if (focusAfter.current === 'plus' && qty > 0) plusRef.current?.focus()
+    if (focusAfter.current === 'add' && qty === 0) addRef.current?.focus()
+    focusAfter.current = null
+  }, [qty])
 
   return (
-    <div className="card" style={{ display: 'flex', gap: 14, padding: 14 }}>
+    <li className={`gm-row${compact ? ' gm-row--compact' : ''}${hasImage ? ' gm-row--image' : ''}`}>
       {hasImage && (
         <img
-          src={item.image_url} alt={item.name} onError={() => setImgFailed(true)}
+          className="gm-thumb" src={item.image_url} alt={name} onError={() => setImgFailed(true)}
           loading="lazy" decoding="async"
-          style={{ width: 84, height: 84, borderRadius: 8, objectFit: 'cover', flexShrink: 0, background: 'var(--theme-input-bg)' }}
         />
       )}
-      {/* Only on a menu that HAS photography — see anyImages. A monogram tile rather than a broken
-          -image glyph or an empty grey box: it holds the column so the list stays aligned, and it
-          reads as a deliberate plate mark rather than as something that failed to load. */}
-      {!hasImage && showImageColumn && (
-        <div
-          aria-hidden="true"
-          style={{
-            width: 84, height: 84, borderRadius: 8, flexShrink: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border-lt)',
-            color: 'var(--theme-text3)', fontFamily: 'Georgia, serif', fontSize: 26, lineHeight: 1,
-          }}
-        >
-          {(item.name || '?').trim().charAt(0).toUpperCase()}
-        </div>
-      )}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            {item.is_veg != null && (
-              <span
-                role="img"
-                aria-label={item.is_veg ? 'Vegetarian' : 'Non-vegetarian'}
-                title={item.is_veg ? 'Veg' : 'Non-Veg'}
-                style={{
-                  display: 'inline-block', width: 12, height: 12, borderRadius: 2, flexShrink: 0,
-                  border: `1.5px solid ${item.is_veg ? 'var(--theme-green)' : 'var(--theme-red)'}`,
-                }}>
-                <span aria-hidden="true" style={{
-                  display: 'block', width: 6, height: 6, margin: '2px auto', borderRadius: '50%',
-                  background: item.is_veg ? 'var(--theme-green)' : 'var(--theme-red)',
-                }} />
-              </span>
-            )}
-            <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--theme-text1)' }}>{item.name}</span>
-          </div>
-          <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap' }}>
-            {showFrom ? <><span style={{ fontWeight: 400, fontSize: 12 }}>From </span>{fmtNpr(fromPrice)}</> : fmtNpr(priceInc)}
-          </span>
-        </div>
-        {item.description && (
-          <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.4 }}>{item.description}</p>
+      <div className="gm-row-main">
+        <p className="gm-name-line">
+          {item.is_veg != null && <VegMark isVeg={item.is_veg} />}
+          <span className="gm-dish-name">{name}</span>
+        </p>
+        {item.description && <p className="gm-desc">{item.description}</p>}
+        {allergens.length > 0 && (
+          <p className="gm-allergens">Contains: {allergens.join(', ')}</p>
         )}
-        {nutritionEnabled && item.has_nutrition && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
-            {NUTRIENTS.map(def => (
-              <span key={def.key} style={{ fontSize: 10.5, color: 'var(--theme-text3)' }}>
-                {def.label} {fmtNutrient(def, item[def.key])}
-              </span>
-            ))}
-          </div>
-        )}
-        {nutritionEnabled && item.has_nutrition && item.allergens?.length > 0 && (
-          <p style={{ margin: '4px 0 0', fontSize: 10.5, color: 'var(--theme-amber-text)', textTransform: 'capitalize' }}>
-            Allergens: {item.allergens.join(', ')}
+        {showNutrition && (
+          <p className="gm-nutrition">
+            {NUTRIENTS.map(def => `${def.label} ${fmtNutrient(def, item[def.key])}`).join(' · ')}
           </p>
         )}
+      </div>
+      <div className="gm-row-side">
+        <span className="gm-price">
+          {showFrom ? <><span className="gm-from">From </span>{fmtNpr(fromPrice)}</> : fmtNpr(priceInc)}
+        </span>
         {orderingEnabled && dishGroups && (
-          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <button
-              type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: '4px 12px', minHeight: 44 }}
-              aria-label={`Choose options and add ${item.name} to your order`}
-              onClick={onChoose}
-            >{qty > 0 ? '+ Add another' : '+ Add'}</button>
-            {qty > 0 && <span style={{ fontSize: 12.5, color: 'var(--theme-text2)' }}>{qty} in your order</span>}
-          </div>
+          <button
+            type="button" className="btn btn-ghost btn-sm gm-add"
+            aria-label={`Choose options and add ${name} to your order`}
+            onClick={onChoose}
+          >
+            <Plus size={15} aria-hidden="true" />{qty > 0 ? `Add another (${qty})` : 'Add'}
+          </button>
         )}
         {orderingEnabled && !dishGroups && (
-          <div style={{ marginTop: 10 }}>
-            {qty > 0 ? (
-              <Stepper qty={qty} label={item.name} onChange={onQtyChange} />
-            ) : (
-              <button
-                type="button" className="btn btn-ghost" style={{ fontSize: 12.5, padding: '4px 12px', minHeight: 44 }}
-                aria-label={`Add ${item.name} to your order`}
-                onClick={() => onQtyChange(1)}
-              >+ Add</button>
-            )}
-          </div>
+          qty > 0 ? (
+            <Stepper
+              qty={qty} label={name} plusRef={plusRef}
+              onChange={n => { if (n === 0) focusAfter.current = 'add'; onQtyChange(n) }}
+            />
+          ) : (
+            <button
+              type="button" ref={addRef} className="btn btn-ghost btn-sm gm-add"
+              aria-label={`Add ${name} to your order`}
+              onClick={() => { focusAfter.current = 'plus'; onQtyChange(1) }}
+            >
+              <Plus size={15} aria-hidden="true" />Add
+            </button>
+          )
         )}
       </div>
-    </div>
-  )
-}
-
-function CenteredMessage({ children }) {
-  return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'var(--theme-bg)', color: 'var(--theme-text2)', fontSize: 14, padding: 24, textAlign: 'center',
-    }}>
-      {children}
-    </div>
+    </li>
   )
 }

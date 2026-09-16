@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import ReportLoadError from '../components/ReportLoadError'
+import { tidyName } from '../modules/pos/guestmenu/guestMenuHelpers'
 
 // Crest Admin utility: preview the currently-viewed client's guest QR menu (GuestMenu.jsx,
 // /pos/menu/:tableId) without needing to scan a printed QR code or ask the client for one.
@@ -51,6 +52,7 @@ export default function AdminGuestMenu() {
   // What the guest menu actually has to work with, counted over exactly the rows get_guest_menu
   // considers. null = the read failed, and a failed read is not zero coverage.
   const [coverage, setCoverage] = useState(null)
+  const [brand, setBrand] = useState(null) // { name, logo } | null when unread
 
   useEffect(() => () => clearTimeout(copyTimer.current), [])
 
@@ -72,7 +74,9 @@ export default function AdminGuestMenu() {
       supabase.from('recipes').select('id, selling_price, image_url, description, is_veg')
         .eq('client_id', adminViewClientId).eq('is_active', true).eq('pos_enabled', true)
         .or('category.is.null,category.neq.Sub-Recipe'),
-    ]).then(([{ data: c, error: cErr }, { data: rows, error: tErr }, { data: recipes, error: rErr }]) => {
+      // S767: the name and logo the menu opens with. A failed read only drops the nudge below.
+      supabase.from('settings').select('guest_menu_name, guest_menu_logo_url').eq('client_id', adminViewClientId).maybeSingle(),
+    ]).then(([{ data: c, error: cErr }, { data: rows, error: tErr }, { data: recipes, error: rErr }, { data: s, error: sErr }]) => {
       if (cancelled) return
       // A failed read is not an empty client — "no tables set up yet" on a dropped connection
       // sends someone off to create tables the client already has.
@@ -95,6 +99,7 @@ export default function AdminGuestMenu() {
           vegMarks: served.filter(r => r.is_veg != null).length,
         })
       }
+      setBrand(sErr ? null : { name: (s?.guest_menu_name || '').trim(), logo: !!s?.guest_menu_logo_url })
       setClient(c || null)
       setTables(all)
       // Open on a table that takes orders when there is one: the inactive case is the exception
@@ -227,6 +232,19 @@ export default function AdminGuestMenu() {
           Its QR code still shows the menu, but guests cannot order from it — the POS floor cannot open an
           inactive table, so an order sent from it would have nowhere to go.{' '}
           <Link to="/pos/tables" style={linkStyle}>Change table status in Table Management →</Link>
+        </div>
+      )}
+
+      {/* S767: a menu opening with the account name and no logo looks finished from inside the
+          frame, so say where the owner changes it. */}
+      {brand && (!brand.name || !brand.logo) && (
+        <div className="card" style={{ padding: '12px 16px', marginBottom: 14, fontSize: 12.5, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--theme-text1)' }}>
+            {!brand.name && !brand.logo ? 'The menu opens with the account name and no logo.' : !brand.name ? 'The menu opens with the account name.' : 'The menu has no logo.'}
+          </strong>{' '}
+          {!brand.name && <>Guests see “{tidyName(clientName)}”. </>}
+          The owner sets the restaurant’s own name and logo in POS Setup → Guest Menu.{' '}
+          <Link to="/pos/tables" style={linkStyle}>Open POS Setup →</Link>
         </div>
       )}
 

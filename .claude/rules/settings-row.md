@@ -118,6 +118,11 @@ over REST, a POS PIN waiter included, and `payment_qr_data` is the merchant QR a
 - **POS manager or Owner:** the till-setup columns `pos_bot_categories`, `pos_note_presets`,
   `pos_discount_reasons`, `pos_delivery_partners`, `pos_reservation_settings`, `pos_open_time`,
   `pos_close_time`, `pos_loyalty_point_value`.
+- **Owner only, since S767** (`20260921100000`, hint `guest_menu_brand_rank`, admin exempt):
+  `guest_menu_name`, `guest_menu_logo_url` — the restaurant name and logo every guest sees on every
+  table's QR menu. POS Setup → Guest Menu shows them read-only to a POS manager rather than offering a
+  Save the database refuses. `recipe_categories` is NOT guarded: its order is also the guest menu's
+  section order, and a POS manager may move it from that same tab.
 
 On INSERT a column counts as set only when it differs from its column DEFAULT (`c_insert_base`).
 The old body compared against NULL, so a POS manager writing a trial client's FIRST settings row

@@ -62,24 +62,9 @@ colors:
   # Recharts axis ticks, labels and reference lines. A literal because var() does not resolve in
   # an SVG presentation attribute — the same exemption the chart series palette relies on.
   chart-tick: "#6b7280"
-  # ── The guest menu: bone and pine, the one surface a paying customer sees ────────────────────
-  # A scoped token set, not a preset. `.guest-menu` re-declares the --theme-* properties for its
-  # own subtree, so every shared class the page borrows re-skins from these. Nothing here may be
-  # reached for from a staff screen. See the Colors prose for why it exists at all.
-  guest-paper: "#F0EDE5"
-  guest-ground: "#E7E3D8"
-  guest-pine: "#004643"
-  guest-pine-deep: "#00312F"
-  guest-ink: "#1C1B17"
-  guest-sage: "#4A5C58"
-  guest-sage-lt: "#566762"
-  guest-rule: "#D3CCBC"
-  guest-control: "#4A7A75"
-  guest-veg: "#4C7A2E"
-  guest-nonveg: "#A63A2B"
-  guest-success: "#2F6B2A"
-  guest-warn: "#8A5A17"
-  guest-danger: "#A03328"
+  # The guest QR menu and the public booking page carried a scoped bone-and-pine palette here
+  # (guest-*) until S767, when the owner moved both onto the default preset above. They have no
+  # tokens of their own now; see "The guest pages" in the Colors prose.
 typography:
   # The prose Hierarchy below names the nine roles a designer reasons in. This block is the
   # COMPLETE ramp, because it is also what tooling checks a literal against — measured across the
@@ -177,7 +162,7 @@ rounded:
   # This repudiates the old Proportional Corner Rule, which sized a corner to its box. There is
   # no longer a corner to size. The Closed-Scale Rule survives and is stricter: 0 is the only
   # value on the scale, so any non-zero radius in the product is drift by definition — except
-  # the two exemptions named in Shapes (print templates, and the scoped guest surfaces).
+  # the two exemptions named in Shapes (print templates, and the veg / non-veg food mark's dot).
   xs: "0"
   sm: "0"
   md: "0"
@@ -303,8 +288,8 @@ its average letter).
 - Colour is never the only carrier: a band ships a `✓`/`△`/`▲` mark, a state ships a word.
 - Flat, tinted chips over solid fills; a card's elevation is uniform policy, not a highlight.
 - Five surfaces, one system: the app shell, the signed-out pages, the Crest Staff phone app, the
-  guest menu and paper. They do not share a density or, in two cases, a palette — and they must
-  not leak into each other.
+  guest pages and paper. They do not share a density, and paper does not share the palette — and
+  they must not leak into each other.
 - Every value is a `--theme-*` custom property, so the whole product re-tones from one place.
 
 ## Colors
@@ -410,30 +395,37 @@ low — measured alone it composited to 1.15:1, 2.6x below WCAG 2.2's 3:1 floor 
 indicator. `focus-outline` is the solid 2px indicator that actually satisfies that floor. A new
 focusable control pairs the two; the ring alone is not a focus indicator.
 
-### The guest menu — a scoped palette, not a preset
+### The guest pages — the default preset, pinned
 
-The QR menu is the only surface in the product a paying customer ever sees, and it is the one
-deliberate brand-facing exception in the system: **bone and pine**, a printed menu card rather than
-a back-office instrument. It had to stop reading the global tokens for two reasons, and the second
-is the sharp one — the theme is read from `localStorage` *before* the per-surface default applies,
-so a phone that had ever opened the admin app rendered a restaurant's public menu in whatever
-preset that staff member had picked. A restaurant's customer-facing surface was inheriting a
-private staff setting.
+The guest QR menu (`/pos/menu/:tableId`) and the public booking page (`/pos/book/:clientId`) are
+the only surfaces a restaurant's customers see. From S604 to S767 they carried a scoped
+**bone-and-pine** palette of their own; S767 (owner decision, 2026-09-16) moved both onto
+**Modernist Night**, the app's default, with **the restaurant's own name and logo** at the top of
+both pages (`settings.guest_menu_name` / `guest_menu_logo_url`, set by the Owner in POS Setup → Guest
+Menu). Two things the old palette had not covered decided it: the loading screen, every error state,
+the address bar and the document ground were already the app's theme, so a guest on a slow
+connection met the staff palette first and the menu's own palette second.
 
-`.guest-menu` re-declares the `--theme-*` properties for its own subtree, which wins over
-`applyTheme`'s inline style on `<html>` (specificity only contests declarations on the *same*
-element), so every shared class the page borrows re-skins with no change to `Layout.css` and no
-possible leak into the admin app. Bone (`#F0EDE5`) is the paper the dish is read on and the ground
-sits one step behind it, so a card lifts off the page the way a menu card lifts off a table; pine
-(`#004643`) is rationed to brand, price, category and every call to action, at 9.17:1 against bone
-— AAA in both directions. Body copy is a warm ink, not pine: **the ink does the reading, the colour
-does the pointing**, which is how a printed menu actually works. Veg/non-veg stay green and red
-because that is a market convention rather than a palette choice, retuned to sit on bone. Contrast
-is measured on the **ground**, not the paper — the ground is the tighter of the two surfaces, and
-measuring only the paper is how one role shipped at 4.39:1 reading as if it passed everywhere it
-was checked. One inversion is deliberate and scoped: `--theme-border-lt` is the *stronger* rule
-here, because it is what `.btn-ghost` borders with and every ghost button on this page is a control
-a thumb must find. Do not carry that anywhere else.
+**What makes the app's tokens safe on a public page is the pin, not the palette.** The theme is read
+from `localStorage` *before* the per-surface default applies, so a phone that had ever opened the
+admin app would render a customer's page in whatever preset that staff member picked — a private
+staff setting reaching a customer, which is the reason the scoped palette existed at all.
+`isPinnedGuestSurface()` in `ThemeContext.js` makes `/pos/menu/*` and `/pos/book/*` ignore the saved
+theme and apply `dark`, and never write it. Pinning at the provider, rather than re-declaring tokens
+in a stylesheet, reaches the route's lazy-load fallback and error screens too, which render before
+or outside the page's own root. **A new public, customer-facing route joins
+`PINNED_GUEST_PREFIXES`**, or it inherits the viewer's staff theme.
+
+Three consequences to keep:
+
+- **Neither stylesheet carries literal fallbacks** (`var(--theme-x, #hex)`). The tokens are always set
+  on these routes, and a fallback is how an undocumented colour gets back in.
+- **The restaurant's brand is the name and logo, never a colour.** The accent stays Signal Red: a
+  per-client accent was considered and not built, because an owner-picked hue on a dark ground has no
+  AA guarantee and a guest page is where a failure is least likely to be reported.
+- **A logo is shown on the card ground** (`--theme-card`, one step lighter than the page, with a 1px
+  border), so a dark logo on a transparent PNG is not lost on the night ground; POS Setup previews it
+  on that same ground before a guest sees it.
 
 ### Named Rules
 
@@ -531,7 +523,7 @@ second hue anywhere, only more and less of the one that was already there.
 **Body Font:** Archivo (Google Font, 400/500/600/700/800), falling back to
 `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`.
 **Signature Font:** Georgia, serif — the wordmark, the two full-page interstitials (`PremiumGate`,
-`SubscriptionLock`), the guest menu's brand line, and every print letterhead (gate pass, purchase
+`SubscriptionLock`), and every print letterhead (gate pass, purchase
 bill, PO, recipe cost card, vendor balance confirmation).
 **Mono:** `source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace` — scoped to `<code>`
 and to `.action-error-detail`. Monospace is for code, data and measurement here; it is not
@@ -859,12 +851,13 @@ withdrawn. Status dots, toggle knobs, avatars, step markers and PIN dots are all
 signal that is round in a system where nothing else is round reads as a leftover, not as a signal,
 and the dot already carries its meaning in colour and position.
 
-**The two exemptions are both outside the app's own surfaces.** Print templates (`@media print` and
+**The two exemptions are both outside the interface itself.** Print templates (`@media print` and
 the generated print-HTML strings) keep whatever they had, because `Layout.css`'s print block already
 forces `border-radius: 0` on the classed elements and the rest never sees an app stylesheet. And the
-**scoped guest surfaces** — `.guest-menu` and the public booking page — keep their own shape
-language, for the same reason they keep their own bone-and-pine palette: a diner is not looking at
-the staff product, and nothing there may be reached for from a staff screen.
+**veg / non-veg food mark** — an outlined square holding a filled dot, green or red — keeps its
+round dot: it is the market's food-labelling symbol, whose shape IS its meaning, not a status dot
+the system drew (`.gm-diet` in `guestMenu.css`). The guest pages were an exemption too, with their
+own shape language, until S767 moved them onto the default preset; they are square now.
 
 **Borders carry structure, and now they carry ALL of it.** With the corner gone, the rule weight is
 the only thing left describing hierarchy, so the two weights matter more than they did and are not
@@ -888,7 +881,7 @@ corner to size.
 
 **The Closed-Scale Rule.** A radius, a type size or a spacing value that is not on its scale is
 drift. The radius scale is now a single value, which makes the rule easier rather than harder: any
-non-zero radius inside `src/` that is not in a print template or a scoped guest surface is drift by
+non-zero radius inside `src/` that is not in a print template or the food mark's dot is drift by
 definition, and the `/impeccable` hook will say so. The rule still runs the other way too — if the
 system is genuinely missing a step, add it here first, then use it.
 
@@ -971,8 +964,10 @@ four of which live on the class and none of which announce their absence.
 
 An option a guest or waiter PICKS — a size, an extra, a spice level — is a `<button role="radio">`
 or `role="checkbox"` wearing `.choice-chip` (Layout.css; `.kind-card` for the three "what is it?"
-cards in the option-group dialog; `.gm-option` on the guest menu, which keeps its own palette and
-shape). The rule the class exists for: **a checked chip must not change size.** The checked state
+cards in the option-group dialog; `.gm-option` on the guest menu, the same states in
+`guestMenu.css`, with a square mark that is filled for a checkbox and holds an inner square for a
+radio, since there is no corner left to tell them apart). The rule the class exists for: **a checked
+chip must not change size.** The checked state
 is a 1px accent border plus a 1px inset ring, never a 2px border, so a grid of chips does not
 reflow by 2px on every tap. Every chip carries the product's focus pair, and a group is ONE Tab
 stop with arrow keys between its members (`src/shared/rovingFocus.js`). A pick that is free under a
@@ -992,11 +987,19 @@ same reason: the press names what is missing, which a dead button cannot. And th
 **Review** of the whole bowl, every group with its picks and a Change button, because a guest who has
 answered five questions has no other way to see what they built before paying for it.
 
-The bar is a flat pine fill on the border tint with a 160ms width transition, switched off under
-reduced motion; it carries `role="progressbar"` and the step label is the focus target on each step,
-so the position is announced rather than only drawn. The label is not a heading — it is the same
-12.5px `--theme-text2` the sheet's other supporting lines use, because the dish name above it is
-already the heading and two competing titles on a phone is one too many.
+The bar is a flat accent fill on the border tint, squeezed with `transform: scaleX` (never `width`),
+switched off under reduced motion; it carries `role="progressbar"` and the step label is the focus
+target on each step, so the position is announced rather than only drawn. The label is not a heading
+— 13px `--theme-text2`, "Step 2 of 4" and nothing more, because the group's own name is the heading
+directly below it. **Both sit inside the pinned sheet header** (S767), where they cannot scroll under
+it; a sticky offset resolves against the sheet's content box, so that header is `top: -18px`, not 0.
+
+Four price rules on the guest sheet (S767), each from a guest doing sums: a **size** shows the whole
+dish's price at that size ("Half · NPR 160"), never a difference from a base price the sheet never
+shows; **no price is quoted before a required size is picked** — the button reads "Choose a size";
+the guest sheet's `aria-disabled` primary is **not dimmed** (the app's 0.6 measured 3.36:1 on the most
+important words on the sheet), because its label already says what is missing; and a group rule's
+maximum is capped at the choices offered ("Pick 2 to 3", never "Pick 2 to 10" over three).
 
 The till does NOT step (owner decision, S760): a cashier mid-queue needs one screen, and the one-tap
 default stays for every dish that is not build-your-own.

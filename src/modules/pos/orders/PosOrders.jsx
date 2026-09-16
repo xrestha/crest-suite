@@ -2136,9 +2136,14 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (pendingAcceptedGuestReqIds.size > 0) {
       const ids = Array.from(pendingAcceptedGuestReqIds)
       setPendingAcceptedGuestReqIds(new Set())
-      const { error: gErr } = await scopedUpdate('pos_guest_order_requests', {
-        status: 'accepted', decided_at: new Date().toISOString(), decided_by: profile?.id || null,
-      }).in('id', ids)
+      const accepted = { status: 'accepted', decided_at: new Date().toISOString(), decided_by: profile?.id || null }
+      // S767: `order_id` is the bill this guest order went onto — the guest's own tracker reads it
+      // (get_guest_order_progress) so it can follow THIS order rather than the table's, and end when
+      // this bill closes. A till running ahead of migration 20260921100000 gets PGRST204 for the
+      // unknown column; the accept is retried without it, because refusing an accept mid-service
+      // over a tracker detail is the wrong trade (the migration hot-path rule).
+      let { error: gErr } = await scopedUpdate('pos_guest_order_requests', { ...accepted, order_id: oid }).in('id', ids)
+      if (gErr?.code === 'PGRST204') ({ error: gErr } = await scopedUpdate('pos_guest_order_requests', accepted).in('id', ids))
       // Non-fatal as described above — the request simply stays 'pending' and can be Accepted
       // again on the next save. Same correction as the two blocks above: the try/catch it
       // replaces never fired, so this failure had no trace at all.

@@ -18,6 +18,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import GuestMenuSetup from './GuestMenuSetup'
 
 const STATUS_CYCLE = ['available', 'reserved', 'occupied', 'inactive']
 // This file used to carry its own byte-identical copy of the status badge/label/colour maps, which
@@ -779,7 +780,20 @@ export default function PosTableManagement() {
             onClick={openReservationsTab}
           >Reservations</button>
         </Tip>
+        <Tip text="What guests see at the top of every table's QR menu and your online booking page — the restaurant name and logo (the owner sets these) — and the order of the menu's sections">
+          <button
+            className={`tab-btn${mainTab === 'guestmenu' ? ' tab-btn--active' : ''}`}
+            onClick={() => setMainTab('guestmenu')}
+          >Guest Menu</button>
+        </Tip>
       </div>
+
+      {/* ══ GUEST MENU TAB (S767) ══ — its own component: it loads and saves on its own, and a
+          client switch remounts it through the key, so nothing here can carry the previous client's
+          name or logo into the next one's Save. */}
+      {mainTab === 'guestmenu' && (
+        <GuestMenuSetup key={clientId || 'none'} clientId={clientId} tables={tables} />
+      )}
 
       {/* ══ TICKET ROUTING TAB ══ */}
       {mainTab === 'routing' && (

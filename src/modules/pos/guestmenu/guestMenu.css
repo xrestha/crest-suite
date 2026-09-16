@@ -1,241 +1,756 @@
 /* ============================================================================================
-   GUEST MENU — the printed-card palette
+   GUEST MENU — the one page a restaurant's customer sees
    ============================================================================================
-   This is the only surface in the product a paying customer ever sees, and PRODUCT.md names it
-   the one deliberate brand-facing exception. Until now it rendered in `var(--theme-*)`, which
-   meant two things that were both wrong for a public page:
+   S767, owner decision: the menu wears the APP'S DEFAULT theme (Modernist Night) — square corners,
+   structure by rule weight, the one signal red — with the restaurant's own logo and name at the top.
+   It had its own scoped bone-and-pine palette from S604 to S767; that palette covered the menu and
+   none of the states around it, so the loading screen, every error and the address bar were already
+   the app's theme while the menu itself was not.
 
-     1. ThemeContext's defaultKeyForSurface() returns 'dark' for anything that is not
-        /hr/self-service, so every restaurant's QR menu was Crest's back-office charcoal-and-gold
-        — a diner in a bright cafe reading an ops-tool palette off a phone at noon.
-     2. Worse, the theme is read from localStorage BEFORE that default applies. A phone that had
-        ever opened the admin app — the owner's, a manager's, any staff device used to check the
-        QR — rendered the public menu in whatever preset that person had picked. The restaurant's
-        customer-facing surface inherited a private staff setting.
+   Every colour below is a --theme-* token. What makes that safe on a PUBLIC page is ThemeContext:
+   on /pos/menu/* it ignores the saved theme and applies the default preset (isPinnedGuestSurface),
+   so a phone that once opened the admin app still shows a diner the menu as designed. That pin — not
+   this file — is the reason a staff member's private theme can never reach a customer. Do not add
+   `var(--theme-x, #literal)` fallbacks here: the tokens are always set on this route.
 
-   Both are fixed by scoping the token set here rather than reading the global one. `applyTheme`
-   writes the --theme-* properties as inline style on <html>; a rule on `.guest-menu` re-declares
-   them for its own subtree, which wins for every descendant regardless of that inline style
-   (specificity only contests declarations on the SAME element — these are two different ones).
-   The upshot is that every shared class the page borrows (.card / .btn / .tab-btn / .badge) and
-   every inline `var(--theme-*)` in GuestMenu.jsx re-skins from the block below, with no change
-   to Layout.css and no possible leak into the admin app.
-
-   Nothing here may be reached for from a staff screen. This is a menu card, not a theme.
+   Nothing here may be reached for from a staff screen: every selector is scoped to `.guest-menu`.
    ============================================================================================ */
 
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   THE PAGE IS ITS OWN SCROLL CONTAINER — this is what makes the section bar stick
+   ══════════════════════════════════════════════════════════════════════════════════════════════
+   `src/index.css` sets `html, body { overflow-x: hidden }` as an app-wide horizontal-overflow guard.
+   Because `html`'s overflow is then not `visible`, it stops propagating to the viewport, `body`
+   becomes its own scroll container sized exactly to its content, and a `position: sticky` child of
+   the body has a scrollport that never scrolls — measured, the bar moved 1:1 with the content.
+   Every screen in the app shell is immune because the shell scrolls its own div; this page renders
+   straight into the body, so it gives itself a scrollport (S604).
+
+   `100dvh`, not `100vh`: on a phone `100vh` is the tallest the viewport ever gets, so with the URL
+   bar showing, the bottom of the page — where the order bar lives — sits below the fold.
+   `overscroll-behavior: contain` stops a flick at the end of the menu chaining into a pull-to-
+   refresh, which on a page a guest is mid-order on would throw away an unsent cart. */
 .guest-menu {
-  /* ── The two anchors ──────────────────────────────────────────────────────────────────────
-     Bone and pine, measured at 9.17:1 — AAA in both directions, so the pairing is safe whichever
-     one carries text. Bone is the PAPER (the item cards, where the food is actually read) and
-     the page sits one step behind it, so a card lifts off the page the way a menu card lifts off
-     a table. Putting bone on the page instead would have left the cards with nowhere to go. */
-  --gm-paper:      #F0EDE5;  /* card / input ground — the dish is read on this */
-  --gm-ground:     #E7E3D8;  /* page, one step behind the paper */
-  --gm-pine:       #004643;  /* brand, price, category, active chip, every call to action */
-  --gm-pine-deep:  #00312F;  /* pressed/hover state of a pine fill */
-
-  /* ── The ink ramp ─────────────────────────────────────────────────────────────────────────
-     Two colours alone read flat, so the type ramp is derived rather than literal. Pine is
-     RATIONED as the accent (brand / price / navigation / action) and body copy is a warm ink,
-     which is how a printed menu actually works — the ink does the reading, the colour does the
-     pointing. Measured on --gm-GROUND, not --gm-paper: the ground is a step darker, so it is the
-     tighter of the two surfaces, and --gm-sage-lt lands on BOTH (the covers line sits on a card,
-     the table name under the wordmark sits on the page). Measuring only the paper is how the
-     first pass shipped that one at 4.39:1 — it read as passing everywhere it was checked. */
-  --gm-ink:        #1C1B17;  /* 14.8:1 — dish names, body-strength text */
-  --gm-sage:       #4A5C58;  /*  6.1:1 — dish descriptions */
-  --gm-sage-lt:    #566762;  /*  4.7:1 — nutrition tags, covers line, table name, smallest meta */
-
-  /* ── Structure vs. actionability ──────────────────────────────────────────────────────────
-     Two border weights, and which one an element gets is a semantic decision, not a visual one:
-     a quiet rule for structure (section rules, card edges, the unreached dots on the order
-     tracker) and a pine outline for anything a thumb is meant to hit. That is what carries the
-     +Add / stepper / textarea over WCAG 1.4.11's 3:1 non-text floor — 4.1:1 measured — while
-     keeping the page from looking boxed-in. */
-  --gm-rule:       #D3CCBC;  /* structural hairline — recedes on purpose */
-  --gm-control:    #4A7A75;  /* 4.1:1 on paper — outlines a tappable control */
-
-  /* ── Signals ──────────────────────────────────────────────────────────────────────────────
-     Veg/non-veg is a market convention, not a palette choice, so those two stay green and red —
-     but retuned to sit on bone instead of charcoal, and warmed so they read as part of the same
-     printed world. All four measured on --gm-paper; the two dots clear the 3:1 graphic floor and
-     the two text roles clear 4.5:1. */
-  --gm-veg:        #4C7A2E;  /* 4.3:1 — veg mark */
-  --gm-nonveg:     #A63A2B;  /* 5.5:1 — non-veg mark */
-  --gm-success:    #2F6B2A;  /* 5.5:1 — ready to serve */
-  --gm-warn:       #8A5A17;  /* 5.1:1 — allergens; a safety line, so it is not allowed to be faint */
-  --gm-danger:     #A03328;  /* 6.0:1 — order dismissed, submit failed */
-  --gm-danger-tint: rgba(166,58,43,0.10);
-
-  /* ── Re-point the app's tokens at the palette above ───────────────────────────────────────
-     NOTE the one deliberate inversion: --theme-border-lt is the LIGHTER rule everywhere else in
-     the product, and here it is the STRONGER one. It is the token .btn-ghost borders with, and
-     on this surface every ghost button (+Add, Filters, Clear, Order again) is a control a thumb
-     has to find — so it takes the pine outline while --theme-border keeps the quiet structural
-     rule. Scoped to this file; do not carry the inversion anywhere else. */
-  --theme-bg:            var(--gm-ground);
-  --theme-card:          var(--gm-paper);
-  --theme-input-bg:      var(--gm-paper);
-  --theme-border:        var(--gm-rule);
-  --theme-border-lt:     var(--gm-control);
-  --theme-text1:         var(--gm-ink);
-  --theme-text2:         var(--gm-sage);
-  --theme-text3:         var(--gm-sage-lt);
-  --theme-accent:        var(--gm-pine);
-  --theme-accent-hover:  var(--gm-pine-deep);
-  --theme-accent-text:   var(--gm-paper);
-  --theme-accent-ink:    var(--gm-pine);
-  --theme-green:         var(--gm-veg);
-  --theme-green-text:    var(--gm-success);
-  --theme-red:           var(--gm-nonveg);
-  --theme-red-text:      var(--gm-danger);
-  --theme-amber:         var(--gm-warn);
-  --theme-amber-text:    var(--gm-warn);
-  --theme-table-hover:   rgba(0,70,67,0.04);
-  --theme-focus-ring:    rgba(0,70,67,0.12);
-  --theme-focus-outline: var(--gm-pine);
-  /* Paper casts a soft shadow, not the dark theme's 55%-black drop. Tinted pine so the shade
-     under a card is the same family as the ink on it, never a grey bruise on a warm ground. */
-  --theme-card-shadow:   0 1px 2px rgba(0,70,67,0.05), 0 10px 24px -10px rgba(0,70,67,0.13);
-
-  /* Without this the OS dark preference styles the filter sheet's checkbox and the kitchen-notes
-     textarea as dark native controls sitting in the middle of a bone card. */
-  color-scheme: light;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--theme-bg);
+  color: var(--theme-text1);
+  -webkit-tap-highlight-color: transparent;
+}
+@supports not (height: 100dvh) {
+  .guest-menu { height: 100vh; }
+}
+.guest-menu ::selection {
+  background: color-mix(in srgb, var(--theme-accent) 35%, transparent);
+  color: var(--theme-text1);
 }
 
-/* The page is minHeight:100vh, but iOS rubber-band overscroll exposes whatever is behind it —
-   which is <html>'s inline background from applyTheme, i.e. Crest's charcoal. Repainting the
-   document ground means a guest who flicks past the end of the menu sees paper, not a flash of
-   the admin app.
-
-   The literal is deliberately a second copy of --gm-ground rather than a var() reference: the
-   palette is declared on .guest-menu, not on :root, so that a browser without :has() still gets
-   the whole menu correctly and loses only the overscroll ground. Hoisting the tokens up to
-   html:has(...) would remove the duplication and make the ENTIRE surface fall back to Crest
-   charcoal on that browser, which is much the worse failure. */
-html:has(.guest-menu),
-body:has(.guest-menu) {
-  background: #E7E3D8;
+.guest-menu .gm-page {
+  max-width: 640px;
+  margin: 0 auto;
+  /* Bottom: the fixed order bar (52px + 16px) and the home indicator, so the last dish is never
+     under it. */
+  padding: 28px 16px calc(112px + env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
 }
 
-/* The outlet name is the one moment this page belongs to the restaurant rather than to Crest, so
-   it takes full-strength pine while the dishes below it stay ink. Georgia is set inline in the
-   component (shared with the sidebar wordmark and the login screen); only the colour is here. */
-.guest-menu .gm-wordmark {
-  color: var(--gm-pine);
+
+/* ── The masthead: the restaurant, not Crest ───────────────────────────────────────────────── */
+.guest-menu .gm-mast {
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--theme-border);
+}
+/* A logo sits on the card ground, one step lighter than the page, so a dark logo on a transparent
+   background is not lost on the night ground — POS Setup's preview says the same. */
+.guest-menu .gm-logo {
+  display: block;
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  margin: 0 0 16px;
+  padding: 6px;
+  box-sizing: border-box;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+}
+.guest-menu .gm-name {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+.guest-menu .gm-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+.guest-menu .gm-table {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-filter-btn {
+  flex-shrink: 0;
+}
+.guest-menu .gm-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-note--warn {
+  color: var(--theme-amber-text);
+}
+.guest-menu .gm-error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--theme-red-text);
 }
 
-/* ── Overrides for values Layout.css hardcodes ────────────────────────────────────────────────
-   These rules exist only because the shared classes below bake in a literal Aged-Brass or
-   charcoal rgba rather than reading --theme-accent. A token swap alone cannot reach them, so a
-   brass border would have leaked onto the active category chip and a brass halo onto the
-   confirmation card. If those literals are ever tokenised in Layout.css, delete this block. */
 
-.guest-menu .tab-btn:hover {
-  border-color: rgba(0,70,67,0.30);
+/* ── Section bar ──────────────────────────────────────────────────────────────────────────────── */
+.guest-menu .gm-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  margin: 12px -16px 0;
+  padding: 10px 16px;
+  background: var(--theme-bg);
+  border-bottom: 1px solid var(--theme-border);
+}
+.guest-menu .gm-nav .gm-search + .gm-chips {
+  margin-top: 10px;
+}
+.guest-menu .gm-search {
+  position: relative;
+}
+.guest-menu .gm-search .form-input {
+  width: 100%;
+  padding-left: 36px;
+  box-sizing: border-box;
+}
+.guest-menu .gm-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--theme-text3);
+  pointer-events: none;
+}
+.guest-menu .gm-search-count {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--theme-text2);
+}
+/* On a touch screen a tapped chip keeps `:hover` until the next tap elsewhere, so the chip just
+   left read as half-selected (measured). Hover is for a mouse. */
+@media (hover: none) {
+  .guest-menu .tab-btn:not(.tab-btn--active):hover {
+    color: var(--theme-text2);
+    border-color: var(--theme-border);
+  }
 }
 
-/* The one place the accent goes solid. A tinted chip is the app's convention and it is correct
-   on a dense staff screen, but this bar is how a diner moves around a menu one-handed at arm's
-   length — it needs to answer "where am I" in a glance, not on inspection. Bone on pine is the
-   same 9.17:1 the page is built on. */
-.guest-menu .tab-btn--active {
-  background: var(--gm-pine);
-  border-color: var(--gm-pine);
-  color: var(--gm-paper);
+
+/* ── Sections and dish rows ───────────────────────────────────────────────────────────────────── */
+.guest-menu .gm-section {
+  margin-top: 28px;
+  /* Lands below the sticky bar, whose height is MEASURED into --gm-nav-h. A fixed 52px here put a
+     tapped section's heading 13px under a 65px bar. */
+  scroll-margin-top: calc(var(--gm-nav-h, 0px) + 8px);
+}
+.guest-menu .gm-section-title {
+  margin: 0;
+  padding-bottom: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  border-bottom: 2px solid var(--theme-border);
+}
+.guest-menu .gm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
-.guest-menu .badge-green { background: rgba(47,107,42,0.11); }
-.guest-menu .badge-amber { background: rgba(138,90,23,0.11); }
-.guest-menu .badge-red   { background: var(--gm-danger-tint); }
+/* One row per dish, separated by a hairline — a printed menu's row, not a card per dish. */
+.guest-menu .gm-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--theme-border-lt);
+}
+.guest-menu .gm-row--image {
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+}
+.guest-menu .gm-row--compact {
+  align-items: center;
+  padding: 10px 0;
+}
+.guest-menu .gm-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  background: var(--theme-input-bg);
+  border: 1px solid var(--theme-border);
+  box-sizing: border-box;
+}
+.guest-menu .gm-row-main {
+  min-width: 0;
+}
+.guest-menu .gm-name-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+.guest-menu .gm-dish-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--theme-text1);
+  overflow-wrap: anywhere;
+}
+.guest-menu .gm-desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-allergens {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--theme-amber-text);
+  text-transform: capitalize;
+}
+.guest-menu .gm-nutrition {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--theme-text3);
+}
+.guest-menu .gm-row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.guest-menu .gm-row--compact .gm-row-side {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.guest-menu .gm-price {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--theme-text1);
+}
+.guest-menu .gm-from {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-add {
+  white-space: nowrap;
+}
+
+/* Veg / non-veg / egg: the market's labelling symbol, an outlined square with a filled dot. The dot
+   is round on purpose — see VegMark in GuestMenu.jsx and DESIGN.md → Shapes. */
+.guest-menu .gm-diet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  box-sizing: border-box;
+  vertical-align: -1px;
+  margin-right: 2px;
+}
+.guest-menu .gm-diet > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.guest-menu .gm-diet--veg    { color: var(--theme-green); }
+.guest-menu .gm-diet--nonveg { color: var(--theme-red); }
+.guest-menu .gm-diet--egg    { color: var(--theme-amber); }
+
+/* Quantity stepper: one outlined control, square, 32px on a mouse and 44px under a thumb. */
+.guest-menu .gm-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--theme-border);
+  background: var(--theme-input-bg);
+}
+.guest-menu .gm-step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--theme-text1);
+  cursor: pointer;
+  font-family: inherit;
+}
+.guest-menu .gm-step-btn:hover {
+  background: var(--theme-table-hover);
+}
+.guest-menu .gm-step-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--theme-focus-outline);
+}
+.guest-menu .gm-step-qty {
+  min-width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.guest-menu .gm-empty {
+  margin: 32px 0;
+  text-align: center;
+  font-size: 15px;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-empty p {
+  margin: 0 0 12px;
+}
+
+
+/* ── The order bar ────────────────────────────────────────────────────────────────────────────── */
+.guest-menu .gm-cartbar {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  /* viewport-fit=cover ships on this page, so a plain 16px put the primary action inside the iPhone
+     home-indicator strip, where a swipe up dismisses the browser. */
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 50;
+  max-width: 608px;
+  margin: 0 auto;
+}
+.guest-menu .gm-cartbar-btn {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  border: none;
+  background: var(--theme-accent);
+  color: var(--theme-accent-text);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.55), 0 3px 8px -3px rgba(0, 0, 0, 0.4);
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+.guest-menu .gm-cartbar-btn:hover {
+  background: var(--theme-accent-hover);
+}
+.guest-menu .gm-cartbar-btn:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 3px;
+}
+.guest-menu .gm-cartbar-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+
+/* ── The order tracker ────────────────────────────────────────────────────────────────────────── */
+.guest-menu .gm-status-wrap {
+  margin-top: 16px;
+  scroll-margin-top: 16px;
+}
+.guest-menu .gm-status {
+  padding: 16px;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+}
+.guest-menu .gm-status--refused {
+  border-color: color-mix(in srgb, var(--theme-red) 55%, transparent);
+}
+.guest-menu .gm-status-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.guest-menu .gm-status-minutes {
+  font-weight: 600;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-status-text {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-status-items {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--theme-border-lt);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-status-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--theme-text3);
+}
+.guest-menu .gm-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.guest-menu .gm-track {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+.guest-menu .gm-track-step {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.guest-menu .gm-track-bar {
+  display: block;
+  height: 4px;
+  background: var(--theme-border);
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+.guest-menu .gm-track-step.is-done .gm-track-bar,
+.guest-menu .gm-track-step.is-current .gm-track-bar {
+  background: var(--theme-accent);
+}
+.guest-menu .gm-track-label {
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--theme-text3);
+  overflow-wrap: anywhere;
+}
+.guest-menu .gm-track-step.is-done .gm-track-label {
+  color: var(--theme-text2);
+}
+.guest-menu .gm-track-step.is-current .gm-track-label {
+  color: var(--theme-text1);
+  font-weight: 600;
+}
+.guest-menu .gm-table-kot {
+  margin: 16px 0 0;
+}
 
 @keyframes gm-order-glow-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(0,70,67,0.45); }
-  50%      { box-shadow: 0 0 0 6px rgba(0,70,67,0.14); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--theme-accent) 45%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--theme-accent) 14%, transparent); }
 }
 /* Name only — Layout.css's prefers-reduced-motion block still kills this with
    `animation: none !important`, which it could not do if this re-declared the shorthand. */
 .guest-menu .guest-order-glow {
   animation-name: gm-order-glow-pulse;
+  animation-duration: 1.4s;
+  animation-iteration-count: 2;
+  animation-timing-function: var(--ease-standard);
 }
 
 
-/* ══════════════════════════════════════════════════════════════════════════════════════════════
-   THE PAGE IS ITS OWN SCROLL CONTAINER — this is what makes the category bar stick
-   ══════════════════════════════════════════════════════════════════════════════════════════════
-   The sticky category bar had never worked, in production, since it was written. Measured twice
-   independently: as the page scrolls, the bar's viewport `top` goes 131 -> -219 -> -284. It moves
-   1:1 with the content, i.e. it is not sticky at all — and it is the only navigation a long menu
-   has, so the IntersectionObserver, the -60px rootMargin and `--guest-menu-nav-h` were all paying
-   for a feature that did not run.
-
-   The cause is not on this page. `src/index.css` sets `html, body { overflow-x: hidden }` as an
-   app-wide horizontal-overflow guard. Because `html`'s overflow is then not `visible`, it stops
-   propagating to the viewport, `body` becomes its own scroll container sized exactly to its
-   content (measured: `scrollHeight 1259`, computed `overflow: hidden auto` on both), and a
-   `position: sticky` child's scrollport is therefore something that never itself scrolls. Every
-   other screen in the product is immune because the app shell scrolls its own div; this is the one
-   page that puts a sticky element directly in the body flow.
-
-   Fixing it here rather than by relaxing the body rule for this route (`html:has(.guest-menu)`,
-   one line) is deliberate: that would drop the app-wide horizontal guard on this page and has no
-   fallback in a browser without `:has()`. Giving this page its own scrollport is local, explicit,
-   and works everywhere.
-
-   `100dvh`, not `100vh`: on a phone `100vh` is the tallest the viewport ever gets, so with the URL
-   bar showing, the bottom of the page — where the cart button lives — sits below the fold.
-
-   `overscroll-behavior: contain` stops a flick at the end of the menu chaining into a pull-to-
-   refresh, which on a page a guest is mid-order on would throw away an unsent cart.
-   ══════════════════════════════════════════════════════════════════════════════════════════════ */
-.guest-menu {
-  height: 100dvh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+/* ── Sheets (order, filters, choices) ─────────────────────────────────────────────────────────── */
+/* The dish name / title and ✕ stay pinned while a long sheet scrolls. `.modal-sheet` pads 18px 16px,
+   so the header pulls itself back over that padding and re-pads, or content would scroll past in the
+   gap above it. */
+/* `top: -18px`, not 0, and measured rather than reasoned: Chrome resolves a sticky offset against the
+   scroll container's CONTENT box, i.e. inside `.modal-sheet`'s 18px padding. With `top: 0` the
+   header was pushed 18px down from its natural place and sat over the first 4px of the content under
+   it — the clipped "Step 1 of 4" the critique measured, and a clipped group name after S767 moved the
+   step count into this header. */
+.guest-menu .gm-sheet-head {
+  position: sticky;
+  top: -18px;
+  z-index: 1;
+  margin: -18px -16px 14px;
+  padding: 18px 16px 12px;
+  background: var(--theme-card);
+  border-bottom: 1px solid var(--theme-border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.guest-menu .gm-sheet-head--dish {
+  display: block;
+}
+.guest-menu .gm-sheet-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.guest-menu .gm-sheet-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.guest-menu .gm-sheet-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-close {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+}
+.guest-menu .gm-close svg {
+  width: 20px;
+  height: 20px;
+}
+.guest-menu .gm-sheet-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.guest-menu .gm-sheet-actions .btn {
+  flex: 1;
+  justify-content: center;
 }
 
-/* Older engines with no dvh support fall back to the tallest-viewport value rather than to no
-   height at all — the bar still sticks, the bottom is just occasionally under the URL bar. */
-@supports not (height: 100dvh) {
-  .guest-menu { height: 100vh; }
+.guest-menu .gm-fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.guest-menu .gm-review-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.guest-menu .gm-review-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name total" "name stepper";
+  align-items: start;
+  gap: 8px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--theme-border-lt);
+}
+.guest-menu .gm-review-line-name {
+  grid-area: name;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.guest-menu .gm-review-line-summary {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-review-line .gm-stepper {
+  grid-area: stepper;
+  justify-self: end;
+}
+.guest-menu .gm-review-line-total {
+  grid-area: total;
+  justify-self: end;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.guest-menu .gm-review-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 2px solid var(--theme-border);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.guest-menu .gm-covers {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0;
+  font-size: 15px;
+}
+.guest-menu .gm-filter-label {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-note-input {
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.guest-menu .gm-sending-to {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-place-btn,
+.guest-menu .gm-sheet-primary {
+  width: 100%;
+  min-height: 52px;
+  justify-content: center;
+}
+/* A primary action that must stay pressable so the press can say what is missing (the choice sheet's
+   Next / Add) is NOT dimmed here. The app dims it to 0.6 (Layout.css), which on this page measured
+   3.36:1 — under AA on the most important words on the sheet. The label itself carries the state:
+   "Choose a size", and pressing it names what is short. */
+.guest-menu .btn[aria-disabled="true"] {
+  opacity: 1;
 }
 
-/* ── Touch, on the one surface that is 100% touch ──────────────────────────────────────────────
-   Layout.css tunes `.tab-btn` to a 32px coarse-pointer floor, which is right for a filter pill on
-   a staff screen where a dozen of them share a toolbar. Here the same class is the ONLY navigation
-   a long menu has, tapped one-handed at arm's length in a dim room, so it takes WCAG 2.2 SC 2.5.8's
-   44px target instead. Scoped to `.guest-menu` — this is a claim about this page's context, not a
-   correction to the shared component. */
-@media (pointer: coarse) {
-  .guest-menu .tab-btn {
-    min-height: 44px;
-  }
+.guest-menu .gm-filter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
-
-/* Inline-styled buttons on this page carried no class, so they fell through to whatever focus ring
-   the UA draws — on a bone card that is frequently nothing visible at all. `.gm-chip` gives the
-   allergen toggles the same solid-outline pairing S574 established app-wide, in this page's own
-   pine rather than the admin accent. */
+.guest-menu .gm-check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  font-size: 15px;
+  cursor: pointer;
+}
+.guest-menu .gm-allergen-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.guest-menu .gm-allergen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  text-transform: capitalize;
+  cursor: pointer;
+  border: 1px solid var(--theme-border);
+  background: var(--theme-input-bg);
+  color: var(--theme-text2);
+}
+.guest-menu .gm-allergen[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--theme-red) 55%, transparent);
+  background: color-mix(in srgb, var(--theme-red) 12%, transparent);
+  color: var(--theme-red-text);
+}
+/* Inline-styled buttons fell through to whatever focus ring the UA draws. `.gm-chip` gives the
+   toggles the product's solid-outline pairing. */
 .guest-menu .gm-chip:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--gm-pine), 0 0 0 5px rgba(0,70,67,0.16);
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
-/* ── The choice sheet (GuestOptionSheet) ──────────────────────────────────────────────────────
-   An option chip is a radio or checkbox drawn as a 48px row. Both states live here, not inline,
-   so the checked state is a class rule the focus ring above composes with, and so that
-   `[aria-checked="true"]` is the one place "chosen" is painted. `.gm-option` is a modifier on
-   `.gm-chip` rather than a base rule on it, because the allergen toggles on the menu wear
-   `.gm-chip` too, with their own pill shape. */
+
+/* ── The choice sheet (GuestOptionSheet) ──────────────────────────────────────────────────────── */
+.guest-menu .gm-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 8px;
+}
+.guest-menu .gm-group {
+  outline: none;
+}
+.guest-menu .gm-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.guest-menu .gm-group-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+.guest-menu .gm-group-rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--theme-text3);
+}
+.guest-menu .gm-group-rule.is-short {
+  color: var(--theme-red-text);
+}
+.guest-menu .gm-group-free {
+  margin: -4px 0 8px;
+  font-size: 12px;
+  color: var(--theme-text3);
+}
+.guest-menu .gm-group-free.is-used {
+  color: var(--theme-text2);
+}
+.guest-menu .gm-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* An option chip is a radio or checkbox drawn as a 48px row. Both states live here, not inline, so
+   the checked state is a class rule the focus ring composes with. The box keeps its size checked or
+   not: the second accent pixel is an inset shadow, not a wider border. */
 .guest-menu .gm-option {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   min-height: 48px;
   padding: 10px 12px;
-  border-radius: 8px;
   text-align: left;
   font-family: inherit;
   cursor: pointer;
@@ -245,66 +760,94 @@ body:has(.guest-menu) {
   transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 .guest-menu .gm-option[aria-checked="true"] {
-  border: 2px solid var(--theme-accent);
+  border-color: var(--theme-accent);
+  box-shadow: inset 0 0 0 1px var(--theme-accent);
   background: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card));
 }
-/* A chip the group's maximum has shut is told why in its price slot ("Max 3"), so it keeps most
-   of its opacity — dimming to half was the only signal and read as a rendering fault. */
-.guest-menu .gm-option:disabled,
-.guest-menu .gm-option[aria-disabled="true"] {
+/* A chip the group's maximum has shut is told why in its price slot ("Max 3"). */
+.guest-menu .gm-option:disabled {
   cursor: not-allowed;
   opacity: 0.7;
 }
 .guest-menu .gm-option-mark {
-  width: 18px;
-  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
-  border: 2px solid var(--theme-border-lt);
-  background: transparent;
+  box-sizing: border-box;
+  border: 2px solid var(--theme-text3);
+  color: var(--theme-accent-text);
 }
 .guest-menu .gm-option[aria-checked="true"] .gm-option-mark {
   border-color: var(--theme-accent);
   background: var(--theme-accent);
 }
-/* "Required" beside a group's rule: a categorical tag in the page's own pine tint, sized to sit
-   on the 12px rule text. */
+/* A radio's chosen state is an inner square on the card ground, so a radio and a checkbox still read
+   differently with no corner to tell them apart. */
+.guest-menu .gm-option[aria-checked="true"] .gm-option-mark--radio {
+  background: transparent;
+}
+.guest-menu .gm-option[aria-checked="true"] .gm-option-mark--radio::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  background: var(--theme-accent);
+}
+.guest-menu .gm-option-body {
+  flex: 1;
+  min-width: 0;
+}
+.guest-menu .gm-option-name {
+  display: block;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.guest-menu .gm-option-name.is-on {
+  font-weight: 600;
+}
+.guest-menu .gm-option-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--theme-text3);
+}
+.guest-menu .gm-option-price {
+  font-size: 13px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-option-price.is-strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--theme-text1);
+}
+.guest-menu .gm-option-price s {
+  margin-left: 4px;
+  color: var(--theme-text3);
+}
+/* "Required" beside a group's rule: a categorical tag, on the type ramp's 11px step. */
 .guest-menu .gm-required {
   display: inline-block;
   padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--gm-pine);
-  background: rgba(0,70,67,0.10);
-}
-/* The dish name and ✕ stay pinned while a long sheet scrolls. `.modal-sheet` pads 18px 16px, so
-   the header pulls itself back over that padding and re-pads, or the content would scroll past
-   in the gap above it. */
-.guest-menu .gm-sheet-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin: -18px -16px 14px;
-  padding: 18px 16px 10px;
-  background: var(--theme-card);
-  border-bottom: 1px solid var(--theme-border);
+  color: var(--theme-accent-ink);
+  background: var(--theme-focus-ring);
 }
 
-/* S760: a build-your-own dish walks its groups one per step. The label is the step's accessible
-   heading (focused on each step change so a screen reader hears where it is); the bar is a plain
-   pine fill on the border tint — progress, not a signal. */
+/* S760: a build-your-own dish walks its groups one per step. The step count lives in the pinned
+   header (S767), where it can no longer scroll underneath it. */
 .guest-menu .gm-steps {
-  margin: 0 0 16px;
+  margin: 12px 0 0;
 }
 .guest-menu .gm-steps-label {
   margin: 0 0 6px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--theme-text2);
   outline: none;
@@ -314,34 +857,27 @@ body:has(.guest-menu) {
   background: var(--theme-border);
   overflow: hidden;
 }
-/* scaleX, not width (S763). Animating width lays out on every frame; a transform is composited, and
-   this bar runs on a guest's own phone, which in this market is the slowest device the product ever
-   renders on. The fill is drawn full-width and squeezed from the left, so the JSX sets
-   `transform: scaleX(fraction)` where it used to set a width percentage. */
+/* scaleX, not width (S763): animating width lays out on every frame, and this bar runs on a guest's
+   own phone, the slowest device the product renders on. */
 .guest-menu .gm-steps-bar > span {
   display: block;
   height: 100%;
   width: 100%;
   transform-origin: left center;
-  background: var(--gm-pine);
-  transition: transform var(--motion-fast, 160ms) var(--ease-standard, ease);
-}
-@media (prefers-reduced-motion: reduce) {
-  .guest-menu .gm-steps-bar > span { transition: none; }
+  background: var(--theme-accent);
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 .guest-menu .gm-review {
   list-style: none;
   margin: 0 0 8px;
   padding: 0;
-  display: flex;
-  flex-direction: column;
 }
 .guest-menu .gm-review-row {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--theme-border);
+  border-bottom: 1px solid var(--theme-border-lt);
 }
 .guest-menu .gm-review-group {
   display: block;
@@ -351,4 +887,125 @@ body:has(.guest-menu) {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--theme-text3);
+}
+.guest-menu .gm-review-none {
+  display: block;
+  font-size: 15px;
+  color: var(--theme-text3);
+}
+.guest-menu .gm-review-pick {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 15px;
+}
+.guest-menu .gm-review-price {
+  white-space: nowrap;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-review-change {
+  flex-shrink: 0;
+}
+/* The primary action stays in reach while a long sheet scrolls: pinned to the bottom of the sheet's
+   content box, full-bleed over its side padding. It sticks 18px + the home-indicator inset ABOVE the
+   sheet's edge (sticky offsets resolve against the content box, as above) — a negative `bottom` did
+   not carry it down on the bottom edge the way `top: -18px` does at the top (measured: the kitchen
+   note scrolled through the strip beneath the button). So the strip is covered instead, by a shadow
+   in the sheet's own ground offset straight down: invisible (card on card), and unlike a pseudo-
+   element it adds nothing to the sheet's scrollable height. It is a mask, not a depth cue. */
+.guest-menu .gm-sheet-foot,
+.guest-menu .gm-place {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 8px -16px 0;
+  padding: 12px 16px 0;
+  box-shadow: 0 calc(48px + env(safe-area-inset-bottom, 0px)) 0 0 var(--theme-card);
+  background: var(--theme-card);
+  border-top: 1px solid var(--theme-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.guest-menu .gm-sheet-foot-row {
+  display: flex;
+  gap: 8px;
+}
+.guest-menu .gm-sheet-back {
+  min-height: 52px;
+  justify-content: center;
+}
+
+
+/* ── Before the menu: loading skeleton, error, unavailable ────────────────────────────────────── */
+.guest-menu .gm-state {
+  padding-top: 64px;
+}
+.guest-menu .gm-state-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.guest-menu .gm-state-text {
+  margin: 8px 0 20px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--theme-text2);
+}
+.guest-menu .gm-skel-title { width: 62%; height: 32px; }
+.guest-menu .gm-skel-meta  { width: 28%; height: 14px; margin-top: 14px; }
+.guest-menu .gm-skel-chips {
+  display: flex;
+  gap: 8px;
+  margin: 28px 0 20px;
+}
+.guest-menu .gm-skel-chips > .skeleton { width: 76px; height: 32px; }
+.guest-menu .gm-skel-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--theme-border-lt);
+}
+.guest-menu .gm-skel-name  { width: 46%; height: 16px; }
+.guest-menu .gm-skel-price { width: 18%; height: 16px; }
+
+
+/* ── Touch, on the one surface that is 100% touch ─────────────────────────────────────────────────
+   Layout.css tunes `.tab-btn` and `.btn-sm` to a 32px coarse-pointer floor, which is right for a
+   filter pill on a staff screen where a dozen share a toolbar. Here the same classes are the only
+   navigation and the Add buttons on a menu tapped one-handed, so they take WCAG 2.2's 44px target.
+   Scoped to `.guest-menu` — a claim about this page's context, not a correction to the component. */
+@media (pointer: coarse) {
+  .guest-menu .tab-btn,
+  .guest-menu .btn-sm {
+    min-height: 44px;
+  }
+  .guest-menu .gm-step-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guest-menu .gm-steps-bar > span,
+  .guest-menu .gm-track-bar,
+  .guest-menu .gm-cartbar-btn,
+  .guest-menu .gm-option {
+    transition: none;
+  }
+}
+
+/* A very narrow phone (320–360px): the compact row's price and control wrap under the name rather
+   than squeezing it to a column one word wide. */
+@media (max-width: 359px) {
+  .guest-menu .gm-row--compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .guest-menu .gm-row--compact .gm-row-side {
+    justify-content: space-between;
+  }
 }

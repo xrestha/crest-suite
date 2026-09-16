@@ -104,10 +104,12 @@ export async function downscalePhoto(file, env = {}) {
   const createBitmap = env.createImageBitmap ?? (typeof createImageBitmap === 'function' ? createImageBitmap : null)
   const doc = env.document ?? (typeof document !== 'undefined' ? document : null)
   if (!file || !PHOTO_EXT[file.type] || !createBitmap || !doc) return file
+  // `env.maxSide`: a guest-menu logo is drawn at 64px, so it is shrunk further than a dish photo (S767).
+  const maxSide = Number(env.maxSide) > 0 ? Number(env.maxSide) : MAX_PHOTO_SIDE
   let bitmap
   try {
     bitmap = await createBitmap(file)
-    const fit = fitWithin(bitmap.width, bitmap.height)
+    const fit = fitWithin(bitmap.width, bitmap.height, maxSide)
     if (!fit.scaled) return file
     const canvas = doc.createElement('canvas')
     canvas.width = fit.width

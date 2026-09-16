@@ -32,8 +32,9 @@ per-file audit worth repeating rather than treating as done.
   a matching file is open. Up ~50k in the ten days since the previous line was written, all of it
   into existing files rather than new ones, which is the direction T11 intends.
 - **`.claude/skills/new-feature-checklist/SKILL.md`** — the nine-step ship checklist.
-- **`DESIGN.md`** (86,722 chars) — full design system: token set for both presets, the scoped guest
-  menu palette, print ramp, typography, layout, components, do/don't. Nothing auto-loads it
+- **`DESIGN.md`** (86,722 chars) — full design system: token set for both presets, the guest pages
+  (on the default preset since S767, which retired their scoped palette), print ramp, typography,
+  layout, components, do/don't. Nothing auto-loads it
   (confirmed under T11), and `.impeccable/design.json` is its generated sidecar.
 - **`PRODUCT.md`** (6,377 chars) — platform, users (owner/manager primary, accountant secondary),
   purpose, competitive positioning, brand personality, anti-references, design principles, data

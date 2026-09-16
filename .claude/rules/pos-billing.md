@@ -590,6 +590,42 @@ Recorded so they aren't rediscovered from scratch:
   The admin page states every one of these above the frame, because a menu that is switched off,
   empty, or order-less looks identical to a broken one from inside it.
 
+  **S767 was the guest menu's third critique (24/40), fixed in full — decisions taken with Aashish.**
+  Migration `20260921100000` (applied live 2026-09-16). Rules to keep:
+  - **The tracker follows THIS guest's order, never the table's.** `get_guest_order_progress(request)`
+    reads the bill that took the request (`pos_guest_order_requests.order_id`, written by
+    `PosOrders.jsx` performSave on accept, with a `PGRST204` retry without the column for a stale
+    till), only tickets sent after the request was made that carry one of its dishes, and whether that
+    bill is closed. It used to combine the request status with `get_guest_table_status` — the least
+    advanced ticket on the table's CURRENT bill — so a second-round order nobody had accepted showed
+    the first round's "Ready", and a paid bill fell back to "heading to the kitchen" and chimed. The
+    page never moves a stage backwards (`laterStage`) and ends on "Your bill is closed" when
+    `order_closed`. A cancelled ticket is excluded; the table read counted it as 'new' forever.
+    `get_guest_table_status` stays for a guest who never ordered from this phone.
+  - **A new accept path must write `order_id` too**, or its guest's tracker falls back to the
+    table-based lookup (the earliest bill on the table still open when the request was created).
+  - **The restaurant's name and logo are the Owner's**: `settings.guest_menu_name` /
+    `guest_menu_logo_url`, set in POS Setup → Guest Menu (`GuestMenuSetup.jsx`), fenced by
+    `settings_guard_staff_roles` (`guest_menu_brand_rank`). The logo uploads into `dish-photos` under
+    `<client>/guest-menu-logo-<epoch>`; that bucket's policies already admit the Owner. Unset, the
+    menu shows `clients.name` through `tidyName` (all-capitals → normal capitals). **The public
+    booking page shows the same name and logo** — `get_booking_page` returns `menu_name` /
+    `logo_url` since `20260921110000`. A new public page that names the restaurant reads them too,
+    rather than `clients.name`.
+  - **Allergen warnings reach every client's guests** (no longer gated on the Nutrition flag);
+    nutrient figures still are. The filter sheet says the list is built from recorded ingredients and
+    to ask staff about a serious allergy — a missing record must not read as "free of it".
+  - **Menu sections follow `settings.recipe_categories`** (or `DEFAULT_RECIPE_CATS`), editable in
+    Settings → Recipe Categories and in POS Setup → Guest Menu, which a POS-only client without Recipe
+    Costing can reach.
+  - **Both guest pages wear the default preset**, pinned in `ThemeContext` (`isPinnedGuestSurface`,
+    `/pos/menu/` and `/pos/book/`) — see DESIGN.md → "The guest pages". A new public customer route
+    joins that list.
+  - **The submit is bounded** (`withTimeout`, 20 s) and a timeout reads as "can't tell if it was
+    sent", the same as a dropped connection; the order sheet locks while sending.
+  - **Back closes a sheet** (`useBackToClose` in `GuestMenu.jsx`: one history entry per open stack,
+    popped for the topmost sheet only; off inside the admin preview frame).
+
   **S603's pass was the input classes.** POS carried 20 of the 62 text controls in the product that
   were wearing `className="form-select"` — a `<select>` class, so `cursor: pointer`, so a text box
   announcing itself as a menu — across `PosTableManagement`, `PosShifts`, `PosStaff`,

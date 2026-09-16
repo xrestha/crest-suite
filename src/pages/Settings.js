@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { ArrowUp, ArrowDown } from 'lucide-react'
 import { useSettings } from '../context/SettingsContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
@@ -329,6 +330,18 @@ export default function Settings() {
     if (name.toLowerCase() === SUB_RECIPE_CATEGORY.toLowerCase()) { setCatMsg('error:Sub-Recipe is managed by the app and is always available in the recipe form — it cannot be added here.'); return }
     setCats(prev => [...prev, name])
     setNewCat('')
+    setCatMsg('')
+  }
+
+  // S767: the list's order is also the order of sections on the guest QR menu, so it can be moved.
+  function moveCat(i, delta) {
+    setCats(prev => {
+      const j = i + delta
+      if (j < 0 || j >= prev.length) return prev
+      const next = [...prev]
+      ;[next[i], next[j]] = [next[j], next[i]]
+      return next
+    })
     setCatMsg('')
   }
 
@@ -1284,6 +1297,7 @@ export default function Settings() {
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
             These appear in the recipe form dropdown and as filter tabs in Recipe Costing. <strong>Sub-Recipe / Prep Item</strong> is managed by the app and is always there.
             A category's first three letters also make its Product Codes (Beverage → BEV-001).
+            The order here is the order of sections on your guest QR menu.
           </p>
 
           <ActionError error={catUsageErr && { text: 'Could not check which categories your recipes use, so a category in use can be removed here without warning.', detail: catUsageErr.detail }} />
@@ -1299,6 +1313,22 @@ export default function Settings() {
                       {n ? `${n} recipe${n === 1 ? '' : 's'}` : 'unused'}
                     </span>
                   )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon"
+                    onClick={() => moveCat(i, -1)}
+                    disabled={i === 0}
+                    aria-label={`Move "${cat}" up`}
+                    title={`Move "${cat}" up`}
+                  ><ArrowUp aria-hidden="true" /></button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon"
+                    onClick={() => moveCat(i, 1)}
+                    disabled={i === cats.length - 1}
+                    aria-label={`Move "${cat}" down`}
+                    title={`Move "${cat}" down`}
+                  ><ArrowDown aria-hidden="true" /></button>
                   {/* A named control, not a bare glyph dimmed to 0.7 on red text (S682): title is
                       the last-resort naming mechanism and announces nothing on touch. */}
                   <button

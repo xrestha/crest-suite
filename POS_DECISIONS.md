@@ -180,6 +180,23 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~The guest QR menu, third critique (24/40)~~ — **shipped S767, 2026-09-16; every finding
+  fixed, each product question decided by Aashish in plain words.** Migrations `20260921100000`
+  and `20260921110000`, both applied live after rolled-back trial runs. Owner decisions: (1) the
+  guest menu **and** the public booking page wear the app's default dark theme, pinned so a staff
+  member's saved theme can never reach a customer — the bone-and-pine palette is retired; (2) the
+  **Owner** sets the restaurant's name and logo shown on both pages (POS Setup → Guest Menu; the
+  database refuses anyone below the Owner); (3) dish, choice and category names typed in ALL
+  CAPITALS read in normal capitals on guest pages only; (4) allergen warnings reach every client's
+  guests, no longer behind the Nutrition feature; (5) menu sections follow the Recipe Categories
+  order, movable from Settings and from the new tab. The live bug behind the P1: the order tracker
+  followed the TABLE's kitchen status, so a second-round order showed the first round's "Ready" and
+  a paid bill fell back to "heading to the kitchen" — accepting a guest order now records the bill it
+  went onto and `get_guest_order_progress` answers about that order alone. Also: loading and error
+  screens inside the page, search past 30 dishes, one-line rows, absolute size prices, a bounded
+  submit, Back closes a sheet, "Order again" restores the refused dishes. Full reasoning in the S767
+  changelog entry.
+
 - [x] ~~An arrival nobody is told about~~ — **shipped S763, 2026-09-16, reported by Aashish from
   the IMS module.** A test guest order came in from the QR menu and nothing sounded or appeared.
   The code was correct: `loadPendingGuestOrders` lives inside `PosOrders.jsx` and polls only while
