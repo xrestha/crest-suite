@@ -7,6 +7,9 @@ import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
 import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor } from '../posSignals'
+import { playGuestAlert } from '../posChime'
+import ArrivalAlert from '../../../components/ArrivalAlert'
+import { REPEAT_MS, MUTE_MS } from '../../../shared/hooks/useGuestOrderAlerts'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { nepalTime, serviceDayStartIso } from '../../../shared/nepalTime'
 
@@ -152,6 +155,9 @@ export default function KitchenDisplay() {
   const [tickets, setTickets] = useState([])
   const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(() => Date.now()) // ticks every 30s to redraw elapsed-time labels/colors
+  // Silences the standing alert for five minutes. The banner stays — the tickets are still
+  // unstarted, and a control that removes the evidence is how this gets missed a second time.
+  const [alertMutedUntil, setAlertMutedUntil] = useState(0)
   // Ticket ids with an advance() write in flight — a rapid double-tap on greasy kitchen
   // touchscreens could otherwise fire two overlapping updates whose responses arrive out of
   // order, leaving the row reverted to an earlier stage than what was actually tapped.
@@ -235,28 +241,15 @@ export default function KitchenDisplay() {
   }, [scopedFrom, station])
 
   // A wall-mounted KDS screen is the one place in POS most likely to not be looked at
-  // continuously — the same two-tone Web Audio beep PosOrders.jsx/GuestMenu.jsx already use for
-  // their own new-arrival events, so a new ticket doesn't rely on someone glancing at the board.
-  function playNewTicketChime() {
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext
-      if (!Ctx) return
-      const ctx = new Ctx()
-      const now = ctx.currentTime
-      ;[880, 660].forEach((freq, i) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.type = 'sine'
-        osc.frequency.value = freq
-        gain.gain.setValueAtTime(0.0001, now + i * 0.18)
-        gain.gain.exponentialRampToValueAtTime(0.3, now + i * 0.18 + 0.02)
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.18 + 0.16)
-        osc.connect(gain); gain.connect(ctx.destination)
-        osc.start(now + i * 0.18)
-        osc.stop(now + i * 0.18 + 0.18)
-      })
-    } catch (_) { /* audio blocked or unsupported — visual board still shows the new ticket */ }
-  }
+  // continuously, and until S763 it said so with one quiet two-tone beep — the same beep the floor
+  // and the guest menu use for events a person is already sitting in front of. It is
+  // `playGuestAlert` now: three rising notes, played twice, at roughly double the gain.
+  //
+  // The inline copy this replaces also built a NEW AudioContext per ticket and never closed one.
+  // Chrome caps a document at ~6, and this board is opened once and left running for a whole
+  // service — so on a busy night the seventh ticket onward made no sound at all, on the screen
+  // furthest from anyone who would notice. The shared context in posChime.js is the fix.
+  function playNewTicketChime() { playGuestAlert() }
 
   // Switching stations is a real context switch, not a fresh arrival on the station just left —
   // without this, the first load after toggling KOT→BOT would chime for every ticket already
@@ -322,6 +315,34 @@ export default function KitchenDisplay() {
     advance(ticket, 'in_progress', minutes)
   }
 
+  // The STANDING alert (S763), distinct from the arrival chime above. A ticket chimes once when it
+  // lands; this is for one that has then sat in New with nobody starting it.
+  //
+  // The repeat threshold is WARN_MS, not "any unstarted ticket", and that is the whole judgement:
+  // a kitchen working through a queue has several tickets legitimately sitting in New at any
+  // moment, and an alert that fires every 20 seconds through normal service is one that gets muted
+  // on the first night and never unmuted. Past the 8-minute mark nobody has picked it up, which is
+  // a different fact. Past LATE_MS it escalates to the red, harder-timbre form — the same two
+  // thresholds the card strip and the ▲/△ marks already use, so the banner cannot disagree with
+  // the board underneath it.
+  const staleNew = tickets
+    .filter(t => t.status === 'new' && now - new Date(t.sent_at).getTime() > WARN_MS)
+    .sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime())
+  const oldestStaleMs = staleNew.length > 0 ? now - new Date(staleNew[0].sent_at).getTime() : 0
+  const alertUrgent = oldestStaleMs > LATE_MS
+  const alertMuted = alertMutedUntil > now
+  const alertOn = staleNew.length > 0
+
+  // Sounds while the board has a ticket nobody has started past the warn mark, and keeps sounding.
+  // The board is already showing them; this is for the screen nobody is looking at, which is the
+  // whole reason a KDS has audio at all.
+  useEffect(() => {
+    if (!alertOn || alertMuted) return
+    playGuestAlert({ urgent: alertUrgent })
+    const id = setInterval(() => playGuestAlert({ urgent: alertUrgent }), REPEAT_MS)
+    return () => clearInterval(id)
+  }, [alertOn, alertMuted, alertUrgent])
+
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
 
   const visible = tickets.filter(t => {
@@ -337,7 +358,22 @@ export default function KitchenDisplay() {
     // Full-bleed (no maxWidth cap) so a wide kitchen monitor shows more of the board, not a
     // centered column with wasted space on either side.
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--theme-bg)', display: 'flex', flexDirection: 'column', padding: '20px 28px', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0 }}>
+      {/* ArrivalAlert is position: fixed at z-index 3000, so it paints OVER this 1000 layer rather
+          than inside it — the board keeps its full height and nothing below shifts. The padding
+          here is what stops the Exit button sitting underneath it. */}
+      {alertOn && (
+        <ArrivalAlert
+          icon={alertUrgent ? '▲' : '🔔'}
+          urgent={alertUrgent}
+          muted={alertMuted}
+          onMute={() => setAlertMutedUntil(Date.now() + MUTE_MS)}
+          title={staleNew.length === 1
+            ? `Not started — #${staleNew[0].order_no}${staleNew[0].table_name ? ` · ${staleNew[0].table_name}` : ''}`
+            : `${staleNew.length} tickets not started`}
+          detail={`Oldest sent ${Math.floor(oldestStaleMs / 60000)} min ago. Tap Start on the card to take it.`}
+        />
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0, paddingTop: alertOn ? 76 : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {/* '/pos/orders' was every POS staffer's home before kitchen/bar teams (S431) existed —
               a locked-team account doesn't have Orders in its sidebar at all, so exiting there

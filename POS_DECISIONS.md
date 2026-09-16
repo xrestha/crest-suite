@@ -180,6 +180,26 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~An arrival nobody is told about~~ — **shipped S763, 2026-09-16, reported by Aashish from
+  the IMS module.** A test guest order came in from the QR menu and nothing sounded or appeared.
+  The code was correct: `loadPendingGuestOrders` lives inside `PosOrders.jsx` and polls only while
+  the floor or order view is showing, so on any other page it is not quiet — it is **not mounted**.
+  S686 had found the identical complaint for BOOKING requests and answered it with a rail dot,
+  which is the right weight for a table next Tuesday and the wrong one for food a guest is waiting
+  for. Two owner decisions taken before building: (1) the alert **repeats until acted on** rather
+  than sounding once, because a single chime into an empty room is the failure being fixed; (2) it
+  polls at **15 s app-wide**, not the 60 s the rail badges use nor the 5 s the floor uses, since it
+  is the one badge query every signed-in session pays on every page. Built as a shell-level banner
+  (`ArrivalAlert`, fixed, `role="alert"`, never a modal — a cashier mid-bill and a chef
+  mid-service both have something in their hands) plus `playGuestAlert`, three rising notes twice at
+  double gain, escalating past three minutes. **The Kitchen Display got the same treatment for its
+  own event**, on the 8- and 15-minute marks its card strip already uses — deliberately not on
+  "any unstarted ticket", which in a working kitchen is most of them. One real bug fell out:
+  `playChime` built a new `AudioContext` per call and never closed one, and Chrome caps a document
+  at ~6 — so a wall-mounted board opened once for a whole service went **silent from the seventh
+  ticket**, on the screen furthest from anyone who would notice. Full reasoning in the S763
+  changelog entry.
+
 - [x] ~~A direct way into billing, for a cashier who is not the waiter~~ — **shipped S762,
   2026-09-16, asked for by Aashish.** Never on this list: the only way to take payment was floor
   plan → tap the table → order screen → Charge, which is the right shape for a waiter standing at

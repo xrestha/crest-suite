@@ -992,6 +992,16 @@ are load-bearing, each with the reason it exists:
   phone keep only their inline error, because those fields sit right above the button. The
   submit RPC goes through `withTimeout(…, 20000)` — a stalled call on a public page leaves the
   button on "Sending…" with no way back but a reload.
+- **Anything that waits for a human Accept must feed `useNavBadgeCounts` (S686) — and a badge is
+  not enough for food (S763).** The rail dot is the right weight for a booking next Tuesday. A guest
+  QR ORDER is a person sitting at a table waiting to eat, and its alert lived inside
+  `PosOrders.jsx`'s floor view, which does not merely go quiet on another page — it is not mounted,
+  so the poll does not run. Reported from the IMS module as "no notification at all", which is
+  exactly what S686 was reported as. The shell now polls it (`useGuestOrderAlerts`, 15 s, from
+  `Layout.js`) and raises `ArrivalAlert`: a fixed banner with an Open Orders button, plus
+  `playGuestAlert` re-sounding every 20 s until someone acts, escalating past three minutes.
+  **Ask of any new waiting-for-a-human state which of the two it is** — a number someone will see
+  when they next look, or a person who is waiting now.
 - **Anything that waits for a human Accept must feed `useNavBadgeCounts` (S686).** The rail's
   amber dot on the HR/POS icon and the per-route `navCounts` chip in `Layout.js` are the shell's
   only alert visible from every page; a count shown on the page the item lands on, or on a
@@ -1007,6 +1017,54 @@ are load-bearing, each with the reason it exists:
   since you last looked" stamp is per device (`src/shared/reservationSeen.js`); the page and
   `useNavBadgeCounts` must keep counting from the SAME stamp with the SAME predicate, or the
   nav chip and the tab disagree.
+
+## The alert that repeats, and the AudioContext that silenced it (S763)
+
+`src/modules/pos/posChime.js` now has two exports and they are not interchangeable.
+**`playChime` is for an event a person is already sitting in front of** — the guest menu's status
+change, the floor's own arrival. **`playGuestAlert` is for an alert that has to carry across a room
+and then REPEAT**: three rising notes played twice at roughly double the gain, `urgent` adding a
+third round and a harder timbre.
+
+**`playChime` builds a new `AudioContext` on every call and never closes one, and that is a real
+bug the moment anything repeats.** Chrome caps a document at about six concurrent contexts. The
+Kitchen Display carried an inline copy of it and is opened once and left running for a whole
+service, so on a busy night the **seventh ticket onward made no sound at all** — on the screen
+furthest from anyone who would notice, and with nothing on it to say so. `playGuestAlert` keeps one
+module-level context and `resume()`s it, because a context created before a user gesture starts
+suspended and a tab left alone can have one suspended under it. Verified by counting: 9 oscillators
+in a 24-second window, **0 contexts created**. Anything that plays a sound more than once uses the
+shared context.
+
+`src/components/ArrivalAlert.jsx` is the banner both alerts render, and four of its properties are
+load-bearing:
+
+- **It is not a `Modal`.** A cashier mid-bill and a chef mid-service both have something in their
+  hands; an alert that traps focus or blocks the screen is worse than the miss it prevents. It is
+  `role="alert"` and the page behind it stays fully usable.
+- **Mute silences the sound and leaves the banner standing.** The thing is still waiting, and a
+  control that removes the evidence is how it gets missed a second time.
+- **It reserves its own MEASURED height** (`--arrival-alert-h`, via a `ResizeObserver` — the height
+  changes when the TEXT changes, which no window event reports) and `.layout-root` pads by it.
+  Without that it simply covered the module nav: un-missable and un-actionable at once.
+  `.app-topnav` stays `top: 0`, because a sticky offset is measured from the scrollport's CONTENT
+  box and is therefore already inside that padding; repeating the variable there double-counts it
+  and leaves a banner-height gap (measured, not reasoned).
+- **The pulse is a class**, never an inline `animation`, which is unreachable from
+  `prefers-reduced-motion`.
+
+**Two routes suppress the shell banner**, and the reason is who can act rather than what is on
+screen: `/pos/orders` answers it better already, and `/pos/kds` because the kitchen cannot Accept a
+guest order and a kitchen-team login cannot even reach Orders
+(`KITCHEN_TEAM_ALLOWED_PATHS`), so the button would be a dead end.
+
+**The KDS's own standing alert fires on WARN_MS, not on "any unstarted ticket".** A kitchen working
+through a queue always has several sitting in New; an alert firing every 20 seconds through normal
+service is one that gets muted on the first night and never unmuted. Past 8 minutes nobody has
+picked it up, which is a different fact, and past `LATE_MS` it escalates — **the same two
+thresholds the card strip and the ▲/△ marks already use**, so the banner cannot disagree with the
+board underneath it. A new alert on this board reuses those constants rather than choosing its own.
+
 
 ## Server-assigned numbers, the offline queue, and `settings` RLS
 

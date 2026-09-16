@@ -13,6 +13,9 @@ import AppErrorBoundary from './AppErrorBoundary'
 import QuickCalculator from './Calculator'
 import { usePosIdleLock } from '../modules/pos/usePosIdleLock'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
+import { useGuestOrderAlerts, REPEAT_MS } from '../shared/hooks/useGuestOrderAlerts'
+import ArrivalAlert from './ArrivalAlert'
+import { playGuestAlert } from '../modules/pos/posChime'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
 import { colorTint } from '../data/pricingPlans'
@@ -796,6 +799,30 @@ export default function Layout() {
   const panel = panelOrder.includes(activePanel) ? activePanel : panelOrder[0]
   const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS', customization: 'Crest Customization' }
   const { hrPending, posPending, posRequests, posNew } = useNavBadgeCounts(hrVisible, posVisible)
+
+  // A guest QR order arriving is the loudest thing this shell has to say (S763). It used to be
+  // announced only INSIDE PosOrders.jsx's floor view — one quiet chime and a banner on a page you
+  // had to already be looking at — so an owner working in IMS, which is where an owner mostly is,
+  // was told nothing at all. That is the whole bug: the alert lived on the page, not in the app.
+  //
+  // Two routes suppress it, and both already answer it better than a banner could:
+  //   /pos/orders — has the floor banner, the per-table 🔔 chip and its own chime.
+  //   /pos/kds    — the kitchen cannot Accept a guest order, and a kitchen-team login cannot even
+  //                 reach Orders (KITCHEN_TEAM_ALLOWED_PATHS), so the button would be a dead end.
+  //                 That board raises its own loud alert for the thing the kitchen CAN act on.
+  const guestAlertRoute = location.pathname !== '/pos/orders' && location.pathname !== '/pos/kds'
+  const guestAlerts = useGuestOrderAlerts(posVisible)
+  const guestAlertOn = guestAlertRoute && guestAlerts.requests.length > 0
+  useEffect(() => {
+    if (!guestAlertOn || guestAlerts.muted) return
+    // Sound immediately, then keep sounding. A guest order nobody accepts is food nobody is
+    // cooking, so one chime into an empty room is exactly the failure this replaces.
+    playGuestAlert({ urgent: guestAlerts.urgent })
+    const id = setInterval(() => playGuestAlert({ urgent: guestAlerts.urgent }), REPEAT_MS)
+    return () => clearInterval(id)
+  }, [guestAlertOn, guestAlerts.muted, guestAlerts.urgent])
+  const guestAlertTables = [...new Set(guestAlerts.requests.map(r => r.tableName))]
+  const guestWaitMins = Math.floor(guestAlerts.waitedMs / 60000)
   // Per-route counts rendered on the nav row itself, so a number waiting on one page is visible
   // from every other page in the module. Keyed by route because NAV is a module-level constant.
   // Amber while something needs a decision (a request); grey when it is only news (S687).
@@ -1128,6 +1155,22 @@ export default function Layout() {
 
   return (
     <div className="layout-root">
+      {guestAlertOn && (
+        <ArrivalAlert
+          reserveSpace
+          urgent={guestAlerts.urgent}
+          muted={guestAlerts.muted}
+          onMute={guestAlerts.mute}
+          title={guestAlerts.requests.length === 1
+            ? `New guest order — ${guestAlertTables[0]}`
+            : `${guestAlerts.requests.length} new guest orders — ${guestAlertTables.join(', ')}`}
+          detail={guestWaitMins < 1
+            ? 'Just in. Nothing reaches the kitchen until a staff member accepts it.'
+            : `Waiting ${guestWaitMins} min. Nothing reaches the kitchen until a staff member accepts it.`}
+          actionLabel="Open Orders"
+          onAction={() => navigate('/pos/orders')}
+        />
+      )}
       {/* WCAG 2.4.1 — 41 sidebar controls precede the first control in <main> on every route. */}
       <a href="#main-content" className="skip-link">Skip to content</a>
       {mobileSidebarOpen && <div className="sidebar-overlay" onClick={() => setMobileSidebarOpen(false)} />}

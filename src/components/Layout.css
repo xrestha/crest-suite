@@ -393,6 +393,12 @@ textarea,
   height: 100dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
+
+  /* Room for the arrival alert (S763), published by ArrivalAlert itself as its measured height and
+     0 whenever no alert is up. The banner is position: fixed so it survives a scroll on the one
+     screen that must not be able to scroll it away; without this reservation it simply covered the
+     module nav, leaving a reader who cannot be missed and cannot act. */
+  padding-top: var(--arrival-alert-h, 0px);
 }
 
 /* ── APP SHELL: THE DESKTOP TOP BAR ──────────────────────────────────────────────────────────
@@ -405,6 +411,10 @@ textarea,
   background: var(--theme-sidebar);
   border-bottom: 1px solid var(--theme-border);
   position: sticky;
+  /* Stays 0. The arrival-alert reservation is `padding-top` on .layout-root, which is this
+     element's scroll container — a sticky offset is measured from the scrollport's CONTENT box,
+     i.e. already inside that padding, so repeating the variable here double-counts it and parks
+     the bar one banner-height below the banner. Measured, not reasoned: it left a 62px gap. */
   top: 0;
   /* Above .main-content and its cards; below Modal (100+) and the POS full-screen layers (1000),
      which are meant to cover the shell rather than sit under it. */
