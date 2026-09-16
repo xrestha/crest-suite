@@ -120,6 +120,14 @@ when these were filed. Every item below assumes they are.
   just as unreliable on the floor as it is in the storeroom, and `save_pos_order_items` is an
   atomic RPC, so a network failure around it is as safe to re-queue as Stock Count's upserts.
   Closes the POS half of `DOCS-REMEDIATION.md` T6 item 3.
+- [ ] 🟢 **The Crest Suite tab's UNENTITLED branch was never seen (S763).** `suiteEntitled` is
+  `isAdmin || suitePlan === 'pro'`, so an admin session is entitled by definition and cannot reach
+  the other path. Verified on a Suite client: the tab renders, its panel carries the five reachable
+  items, every Suite path selects it, and the Crest Suite group is gone from the module panels.
+  **Unverified:** that a client WITHOUT Suite still sees the PRO-badged group in each module panel
+  and no top-row tab, in both the bar and the phone drawer. One sign-in as a non-Suite client's
+  Owner answers it — the code path is `suiteUpsellInPanels`.
+
 - [ ] 🟢 **Two guards on the Billing station (S762) were never clicked.** The list, both Bill
   paths (a table and a takeaway), the payment window opening on the right order and ← returning to
   the list were all verified live on BHATTI CHOILA. Two were not, for want of a second actor:

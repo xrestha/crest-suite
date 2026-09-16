@@ -465,6 +465,14 @@ export default function Layout() {
     navigate('/dashboard')
   }
 
+  // Suite ENTITLEMENT only — the reachability half (`suiteVisible`) needs `unlockedItems` and is
+  // derived further down. Declared here because the panel-routing effect above reads it, and it
+  // needs nothing but `useAuth`. Admin counts as entitled because SuiteGate exempts admin outright,
+  // which is also why the group's PRO badge has always been `isAdmin || suitePlan === 'pro'`.
+  const suiteEntitled = isAdmin || suitePlan === 'pro'
+  // Where the upsell lives for everyone else: unchanged, inside each module panel.
+  const suiteUpsellInPanels = !suiteEntitled
+
   // Collapsible nav groups: defaults — Operations/Costing/HR open, report groups collapsed.
   const [openGroups, setOpenGroups] = useState(() => {
     try { return JSON.parse(localStorage.getItem('crest_nav_groups')) || {} } catch { return {} }
@@ -495,6 +503,10 @@ export default function Layout() {
   useEffect(() => {
     const p = location.pathname
     if (p === '/menu-pricing') { setActivePanel(prev => (prev === 'pos' || prev === 'customization') ? prev : 'ims'); return } // shared IMS/POS/Customization route — don't yank the user to another panel
+    // A Suite destination selects the Suite panel — but only for a client that HAS the tab. Without
+    // it these pages are still reachable (the gate is per page), and switching to a panel with no
+    // tab in the row would leave the bar with nothing selected.
+    if (suiteEntitled && SUITE_NAV.some(i => p === i.to)) { setActivePanel('suite'); return }
     if (p.startsWith('/customization')) setActivePanel('customization')
     else if (p.startsWith('/pos')) setActivePanel('pos')
     else if (p.startsWith('/hr')) setActivePanel('hr')
@@ -504,7 +516,7 @@ export default function Layout() {
       setActivePanel(prev => (prev === 'admin' && (p === '/periods' || p === '/settings')) ? 'admin' : 'ims')
     }
     // any other route (/help, /pricing, …) keeps the current panel
-  }, [location.pathname])
+  }, [location.pathname, suiteEntitled])
 
   // Every top-bar disclosure closes on navigation. Without this, clicking a link inside a panel
   // leaves that panel open over the page it just opened — the drawer has had the equivalent
@@ -599,6 +611,12 @@ export default function Layout() {
   function unlockedItems(items) {
     return items.filter(isItemVisible)
   }
+
+  const suiteNavItems = SUITE_NAV.filter(i => !i.needsGroup || outlets.length > 1)
+  // Entitled AND able to reach something. `unlockedItems` applies the per-item gates (ownerOnly,
+  // minImsRole) that `suiteNavItems` deliberately does not, so a tab can never render empty — an
+  // IMS supervisor on a Suite client sees a two-item tab, and a POS-only staff login sees none.
+  const suiteVisible = suiteEntitled && unlockedItems(suiteNavItems).length > 0
 
   const MAX_PINS = 8
   function togglePin(e, to) {
@@ -830,9 +848,10 @@ export default function Layout() {
     hrVisible && 'hr',
     posVisible && 'pos',
     customizationVisible && 'customization',
+    suiteVisible && 'suite',
   ].filter(Boolean)
   const panel = panelOrder.includes(activePanel) ? activePanel : panelOrder[0]
-  const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS', customization: 'Crest Customization' }
+  const PANEL_TITLES = { admin: 'Admin', ims: 'Crest IMS', hr: 'Crest HR', pos: 'Crest POS', customization: 'Crest Customization', suite: 'Crest Suite' }
   const { hrPending, posPending, posRequests, posNew } = useNavBadgeCounts(hrVisible, posVisible)
 
   // A guest QR order arriving is the loudest thing this shell has to say (S763). It used to be
@@ -888,7 +907,6 @@ export default function Layout() {
   // Group Console is the one Suite row whose visibility depends on session state rather than on a
   // role, so it is dropped here rather than inside SUITE_NAV. Both the sidebar group and the
   // command palette read this, so neither can offer a console for a group that doesn't exist.
-  const suiteNavItems = SUITE_NAV.filter(i => !i.needsGroup || outlets.length > 1)
 
   // ── Command palette — flat search across every destination, gated by the exact same
   // isItemVisible() predicate the rendered nav uses (defined below; hoisted, safe to reference
@@ -1127,6 +1145,16 @@ export default function Layout() {
         : 'Crest POS',
     },
     customizationVisible && { key: 'customization', label: 'Custom', icon: Blend, tip: 'Crest Customization', dot: null },
+    // Crest Suite is a top-row tab only for a client that HAS it (S763, owner decision). It earned
+    // the row for the same reason Custom did — separately sold, its own gate axis
+    // (`clients.suite_plan`), its own set of destinations — and because the group was being
+    // rendered into all five panels by hand, with a comment saying so: a group that belongs in
+    // every panel belongs to none of them.
+    //
+    // A client WITHOUT it keeps the PRO-badged group inside the module panels instead
+    // (`suiteUpsellInPanels`). Promoting the upsell to a permanent fifth product tab would have
+    // advertised from the one row that is supposed to answer "where am I", for everyone, always.
+    suiteVisible && { key: 'suite', label: 'Suite', icon: Crown, tip: 'Crest Suite', dot: null },
   ].filter(Boolean)
   const totalTabCount = (adminTab ? 1 : 0) + moduleTabs.length
 
@@ -1492,14 +1520,14 @@ export default function Layout() {
               {renderNavItem({ to: '/admin/guest-menu', label: 'Guest Menu', icon: QrCode })}
               {renderNavItem({ to: '/admin/audit', label: 'Audit Log', icon: History })}
               {renderNavItem({ to: '/settings', label: 'Settings', icon: Settings })}
-              {renderSuiteGroup()}
+              {suiteUpsellInPanels && renderSuiteGroup()}
             </>
           )}
 
           {panel === 'ims' && imsVisible && (
             <>
               {renderDashboardRow()}
-              {renderSuiteGroup()}
+              {suiteUpsellInPanels && renderSuiteGroup()}
               {renderPinnedGroup()}
               {IMS_GROUPS.map(renderGroup)}
 
@@ -1516,7 +1544,7 @@ export default function Layout() {
           {panel === 'hr' && hrVisible && (
             <>
               {renderDashboardRow()}
-              {renderSuiteGroup()}
+              {suiteUpsellInPanels && renderSuiteGroup()}
               {renderPinnedGroup()}
               {isItemVisible(HR_DASHBOARD) && renderNavItem(HR_DASHBOARD)}
               {HR_GROUPS.map(renderGroup)}
@@ -1526,7 +1554,7 @@ export default function Layout() {
           {panel === 'pos' && posVisible && (
             <>
               {renderDashboardRow()}
-              {renderSuiteGroup()}
+              {suiteUpsellInPanels && renderSuiteGroup()}
               {renderPinnedGroup()}
               {POS_GROUPS.map(group => renderGroup({ ...group, items: group.items.filter(isItemVisible) }))}
             </>
@@ -1535,9 +1563,19 @@ export default function Layout() {
           {panel === 'customization' && customizationVisible && (
             <>
               {renderDashboardRow()}
-              {renderSuiteGroup()}
+              {suiteUpsellInPanels && renderSuiteGroup()}
               {renderPinnedGroup()}
               {CUSTOMIZATION_GROUPS.map(group => renderGroup({ ...group, items: group.items.filter(isItemVisible) }))}
+            </>
+          )}
+
+          {/* Flat rows, not a "Crest Suite" group inside the Crest Suite panel — a disclosure whose
+              label repeats the tab above it. The bar panel does the same with flat pills. */}
+          {panel === 'suite' && suiteVisible && (
+            <>
+              {renderDashboardRow()}
+              {renderPinnedGroup()}
+              {unlockedItems(suiteNavItems).map(i => renderNavItem(i))}
             </>
           )}
         </nav>
@@ -1805,7 +1843,7 @@ export default function Layout() {
 
           {panel === 'ims' && imsVisible && (
             <>
-              {renderBarGroup(suiteGroup())}
+              {suiteUpsellInPanels && renderBarGroup(suiteGroup())}
               {IMS_GROUPS.map(renderBarGroup)}
               {!isAdmin && hasFeature('settings') && hasImsAccess('manager') &&
                 renderBarPill({ to: '/settings', label: 'Settings', icon: Settings })}
@@ -1814,7 +1852,7 @@ export default function Layout() {
 
           {panel === 'hr' && hrVisible && (
             <>
-              {renderBarGroup(suiteGroup())}
+              {suiteUpsellInPanels && renderBarGroup(suiteGroup())}
               {isItemVisible(HR_DASHBOARD) && renderBarPill(HR_DASHBOARD)}
               {HR_GROUPS.map(renderBarGroup)}
             </>
@@ -1822,17 +1860,22 @@ export default function Layout() {
 
           {panel === 'pos' && posVisible && (
             <>
-              {renderBarGroup(suiteGroup())}
+              {suiteUpsellInPanels && renderBarGroup(suiteGroup())}
               {POS_GROUPS.map(renderBarGroup)}
             </>
           )}
 
           {panel === 'customization' && customizationVisible && (
             <>
-              {renderBarGroup(suiteGroup())}
+              {suiteUpsellInPanels && renderBarGroup(suiteGroup())}
               {CUSTOMIZATION_GROUPS.map(renderBarGroup)}
             </>
           )}
+
+          {/* Flat pills, not a dropdown: on its own panel the Suite items ARE the row, and wrapping
+              them in a "Crest Suite" disclosure inside the Crest Suite tab would be a menu whose
+              label repeats the tab above it. Same shape the admin panel uses for its own pills. */}
+          {panel === 'suite' && suiteVisible && unlockedItems(suiteNavItems).map(i => renderBarPill(i))}
         </nav>
       </header>
 

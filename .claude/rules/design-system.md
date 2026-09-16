@@ -296,6 +296,17 @@ Gating the Crest Suite group owner-only would have revoked Demand Forecast and F
 every IMS supervisor who has them; `renderGroup` already returns `null` when nothing inside is
 reachable, so per-item gating degrades correctly on its own.
 
+**A group rendered into EVERY panel is a panel (S763).** `renderBarGroup(suiteGroup())` was written
+out five times, once per module panel, under a comment saying it renders everywhere — which is the
+tell: a group that belongs in every panel belongs to none of them, and the top row is what "none of
+them" looks like. Crest Suite is a top-row tab now for a client that has it, with its items as flat
+pills (a `Crest Suite` disclosure *inside* the Crest Suite tab is a menu whose label repeats the tab
+above it). **The entitlement split is the part worth copying**: the tab appears only for a client who
+owns the thing, and the PRO-badged upsell group stays inside the module panels for everyone else —
+promoting an upsell into the row that answers "where am I" advertises to every user on every screen
+forever. Same question for the next add-on: does this belong to a panel, or does it keep having to be
+copied into all of them?
+
 ### "You are here" is a longest-prefix match, not a prefix match (S763)
 
 `NavLink`'s `isActive` prefix-matches by default. That is right for an item with sub-routes
