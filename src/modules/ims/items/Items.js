@@ -96,7 +96,7 @@ export default function Items() {
   const { ask: askConfirm, confirmEl } = useConfirm()
   // Seeded from the short-lived session cache so a revisit paints the last-known list instantly
   // while the fresh reads reload quietly underneath (S460 pattern). Safe here: saves on this page
-  // write only the one item being edited; the delete guard's usageMap is never cached — it always
+  // write only the one item being edited; the delete guard's refMap is never cached — it always
   // comes from the live reads.
   const [cachedItems] = useState(() => readPageCache('items', 'items', clientId))
   const [items, setItems] = useState(cachedItems ?? [])
@@ -124,12 +124,10 @@ export default function Items() {
   const [search, setSearch] = useState('')
   const [sortConvFirst, setSortConvFirst] = useState(false)
   const [initingCats, setInitingCats] = useState(false)
-  // TWO maps out of one set of reads, because the badge and the delete guard ask different
-  // questions. `usageMap` is live usage (qty > 0 where the table has a qty) and drives the chip and
-  // the Used In filter. `refMap` is any referencing row at all, and is the only thing the delete
-  // guard may consult — three of the eleven tables cascade, so a zero-quantity row that does not
-  // earn a badge still gets destroyed by a delete that thinks the item is unreferenced.
-  const [usageMap, setUsageMap] = useState({})
+  // Every referencing row, whatever its quantity — `{ [itemId]: ['CS', 'P'] }`. ONE map drives the
+  // Used In chip, the Used In filters and the delete guard, so the column can never show "—" for an
+  // item the guard will refuse. There were two until S766: the chip skipped zero-quantity rows, and
+  // PANEER showed "—" beside a Del that refused it for a Closing Stock count of 0.
   const [refMap, setRefMap] = useState({})
   // S756 (D5): the same rows as `refMap`, counted per badge code — `{ [itemId]: { OS: 3, W: 12 } }`.
   // Built in the same pass, so the price-change warning can say how many past records a new price
@@ -184,7 +182,7 @@ export default function Items() {
       const cached = readPageCache('items', 'items', clientId)
       setItems(cached ?? [])
       setCategories(readPageCache('items', 'categories', clientId) ?? [])
-      setUsageMap({}); setRefMap({}); setRefCounts({}); setUsageScan({ ok: false, failed: [] }); setBook(null)
+      setRefMap({}); setRefCounts({}); setUsageScan({ ok: false, failed: [] }); setBook(null)
       setLoadError(null); setPageError(null)
       setLoading(!cached)
     } else if (items.length === 0) {
@@ -229,7 +227,7 @@ export default function Items() {
 
     const myItemIds = (myItems || []).map(i => i.id)
     if (myItemIds.length === 0) {
-      setUsageMap({}); setRefMap({}); setRefCounts({}); setUsageScan({ ok: true, failed: [] }); return
+      setRefMap({}); setRefCounts({}); setUsageScan({ ok: true, failed: [] }); return
     }
 
     // CHUNKED, not one big `.in()`. A `.in()` list is spelled out in the request URL and a uuid
@@ -240,17 +238,18 @@ export default function Items() {
     //
     // The reads are independent of each other, so they run together rather than as one round trip
     // per table on the critical path of every page load.
-    const results = await Promise.all(ITEM_REF_TABLES.map(({ table, qtyCol }) =>
+    const results = await Promise.all(ITEM_REF_TABLES.map(({ table }) =>
       fetchAllRowsChunked(myItemIds, ids => supabase.from(table)
-        .select(qtyCol ? `item_id, ${qtyCol}` : 'item_id').in('item_id', ids).order('id'))
+        .select('item_id').in('item_id', ids).order('id'))
         .catch(err => ({ data: null, error: err }))))
     if (loadedClientRef.current !== forClient) return
 
-    const map = {}      // live usage — the badge
-    const refs = {}     // any reference at all — the delete guard
+    // A row counts whatever its quantity: a Closing Stock count of 0 is a count (S695), a staff meal
+    // defaults to qty 0, and every one of them blocks a delete, so every one of them earns the chip.
+    const refs = {}     // any reference at all — the chip, the filters and the delete guard
     const counts = {}   // the same rows, counted per code — the price-change warning (S756)
     const failed = []
-    ITEM_REF_TABLES.forEach(({ label, name, qtyCol }, idx) => {
+    ITEM_REF_TABLES.forEach(({ label, name }, idx) => {
       const { data, error } = results[idx]
       // A table that could not be read is NOT a table with no rows. Name it, so the guard can say
       // what it was unable to check rather than silently treating it as clear.
@@ -261,12 +260,8 @@ export default function Items() {
         if (!refs[row.item_id].includes(label)) refs[row.item_id].push(label)
         if (!counts[row.item_id]) counts[row.item_id] = {}
         counts[row.item_id][label] = (counts[row.item_id][label] || 0) + 1
-        if (qtyCol && (!row[qtyCol] || parseFloat(row[qtyCol]) <= 0)) return
-        if (!map[row.item_id]) map[row.item_id] = []
-        if (!map[row.item_id].includes(label)) map[row.item_id].push(label)
       })
     })
-    setUsageMap(map)
     setRefMap(refs)
     setRefCounts(counts)
     setUsageScan({ ok: failed.length === 0, failed })
@@ -274,7 +269,6 @@ export default function Items() {
 
   async function deleteItem(item) {
     setPageError(null)
-    // The guard reads refMap, not usageMap: a zero-quantity row earns no badge and still cascades.
     const refs = refMap[item.id] || []
     // And it refuses outright when the scan did not answer. Three of the eleven referencing tables
     // are ON DELETE CASCADE, so "the database will stop me" is true for five of them and false for
@@ -290,7 +284,15 @@ export default function Items() {
     if (refs.length > 0) {
       const fullNames = refs.map(code => USAGE_LABELS[code] || code).join(', ')
       if (!isAdmin) {
-        setPageError(`"${item.name}" can't be deleted — it already appears in ${fullNames}, and deleting it would take those records with it. ${HIDE_INSTEAD}`)
+        // "Deleting it would take those records with it" is only true of the tables that CASCADE.
+        // A Closing Stock count or a purchase line refuses the delete rather than going with it, so
+        // the message claims erasure only for the tables where it would really happen (S766).
+        const erased = ITEM_REF_TABLES.filter(t => t.cascades && refs.includes(t.label)).map(t => t.name)
+        setPageError(
+          `"${item.name}" can't be deleted — it has records in ${fullNames}, and an item stays in Item Master for as long as any record names it.` +
+          (erased.length ? ` Deleting it would also erase its ${erased.join(', ')} records.` : '') +
+          ` ${HIDE_INSTEAD}`
+        )
         return
       }
       // Admin: offer to force-delete (removes the referencing records too). The most destructive
@@ -812,7 +814,7 @@ export default function Items() {
     const searchMatched = []
     items.forEach(item => {
       const matchSearch = item.name.toLowerCase().includes(s) || (item.item_code || '').toLowerCase().includes(s)
-      const usage = usageMap[item.id] || []
+      const usage = refMap[item.id] || []
       const matchUsage =
         filterUsage === 'all'    ? true :
         filterUsage === 'unused' ? usage.length === 0 :
@@ -831,7 +833,7 @@ export default function Items() {
         return bHas - aHas
       })
     return { filtered, tabCounts }
-  }, [items, search, usageMap, filterUsage, filterCat, sortConvFirst])
+  }, [items, search, refMap, filterUsage, filterCat, sortConvFirst])
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -1319,9 +1321,9 @@ export default function Items() {
                         </span>
                       </td>
                       <td>
-                        {usageMap[item.id]?.length > 0 ? (
-                          <UsageChip codes={usageMap[item.id]}
-                            text={`Has records in: ${usageMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} />
+                        {refMap[item.id]?.length > 0 ? (
+                          <UsageChip codes={refMap[item.id]}
+                            text={`Has records in: ${refMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} />
                         ) : !usageScan.ok ? (
                           // The chip must never be able to mean two things: with the scan
                           // unanswered, a dash would read as "no records" when it means "we could

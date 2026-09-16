@@ -16,30 +16,31 @@
  * silently takes those records with it. Five of eleven would have been refused; three would have
  * destroyed history in the name of "nothing references this item".
  *
- * `qtyCol` is a BADGE filter only — "does this item have live usage" — and deliberately does not
- * reach the delete guard, which counts any row at all. `staff_meals.qty` DEFAULTS TO 0, so a
- * zero-quantity staff meal never badged and cascaded away on delete.
+ * The badge and the guard count the SAME rows — any row at all, whatever its quantity. They used to
+ * differ: a `qtyCol` per table made the badge skip zero-quantity rows while the guard counted them,
+ * so an item could show "—" in Used In and still be refused a delete (S766, found live on a Closing
+ * Stock count of 0 — which S695 made a real row on purpose). The column's own tooltip says an item
+ * with any of these can't be deleted, so a badge that knows fewer rows than the guard is a badge
+ * that contradicts the button beside it. `staff_meals.qty` defaulting to 0 was the earlier instance.
  *
  * `itemRefTables.test.js` reads the migrations and fails if this list stops matching the schema —
  * adding a table with an `item_id` FK has to reach here, and nothing else would say so.
  */
 export const ITEM_REF_TABLES = [
-  { table: 'vendor_returns',       label: 'VR',  name: 'Vendor Returns',    qtyCol: 'qty',          cascades: true  },
-  { table: 'recipe_ingredients',   label: 'R',   name: 'Recipes',           qtyCol: null,           cascades: false },
-  // Crest Customization (S758): an option's stock line ("Extra cheese adds 30 GM"). Signed qty, so
-  // no badge filter — any line is usage. Plain FK: a delete is refused, never cascaded.
-  { table: 'pos_option_ingredients', label: 'OPT', name: 'Customization Options', qtyCol: null,   cascades: false },
-  { table: 'requisition_lines',    label: 'RQ',  name: 'Requisitions',      qtyCol: null,           cascades: true  },
-  { table: 'staff_meals',          label: 'SM',  name: 'Staff Meals',       qtyCol: 'qty',          cascades: true  },
-  { table: 'wastages',             label: 'W',   name: 'Wastage',           qtyCol: 'qty',          cascades: false },
-  { table: 'opening_stock',        label: 'OS',  name: 'Opening Stock',     qtyCol: 'qty',          cascades: false },
-  { table: 'closing_stock',        label: 'CS',  name: 'Closing Stock',     qtyCol: 'physical_qty', cascades: false },
-  { table: 'par_levels',           label: 'PAR', name: 'Par Levels',        qtyCol: null,           cascades: false },
-  { table: 'purchase_order_items', label: 'PO',  name: 'Purchase Orders',   qtyCol: 'qty_ordered',  cascades: false },
-  // qty is signed here — a depletion is negative — so a `> 0` filter would hide exactly the POS
-  // movements this row exists to report. Any movement row is usage.
-  { table: 'stock_movements',      label: 'MV',  name: 'Stock Movements',   qtyCol: null,           cascades: false },
-  { table: 'purchase_entries',     label: 'P',   name: 'Purchases',         qtyCol: 'qty',          cascades: false },
+  { table: 'vendor_returns',       label: 'VR',  name: 'Vendor Returns',    cascades: true  },
+  { table: 'recipe_ingredients',   label: 'R',   name: 'Recipes',           cascades: false },
+  // Crest Customization (S758): an option's stock line ("Extra cheese adds 30 GM"). Plain FK: a
+  // delete is refused, never cascaded.
+  { table: 'pos_option_ingredients', label: 'OPT', name: 'Customization Options', cascades: false },
+  { table: 'requisition_lines',    label: 'RQ',  name: 'Requisitions',      cascades: true  },
+  { table: 'staff_meals',          label: 'SM',  name: 'Staff Meals',       cascades: true  },
+  { table: 'wastages',             label: 'W',   name: 'Wastage',           cascades: false },
+  { table: 'opening_stock',        label: 'OS',  name: 'Opening Stock',     cascades: false },
+  { table: 'closing_stock',        label: 'CS',  name: 'Closing Stock',     cascades: false },
+  { table: 'par_levels',           label: 'PAR', name: 'Par Levels',        cascades: false },
+  { table: 'purchase_order_items', label: 'PO',  name: 'Purchase Orders',   cascades: false },
+  { table: 'stock_movements',      label: 'MV',  name: 'Stock Movements',   cascades: false },
+  { table: 'purchase_entries',     label: 'P',   name: 'Purchases',         cascades: false },
 ]
 
 /** Badge code → the name a reader sees ("SM" → "Staff Meals"). */

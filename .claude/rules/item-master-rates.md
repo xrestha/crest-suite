@@ -103,14 +103,24 @@ where the consequence is destroyed history rather than a refused click: for thos
 database will stop me" is simply false. A delete the guard failed to warn about is not refused; it
 succeeds and takes the rows with it, and nothing errors.
 
-So the guard fails CLOSED, in three specific ways that each shipped as a live bug:
+So the guard fails CLOSED, and each rule below shipped as a live bug first:
 
-- **The badge map is not the guard map.** `usageMap` only counts a row when `qty > 0`, which is
-  right for a chip that means "does this item have live usage" and catastrophic for a delete guard,
-  because **`staff_meals.qty` DEFAULTS TO 0**. A zero-quantity staff meal earned no badge, passed
-  the guard, and cascaded away under a confirm dialog reading *"Nothing references this item, so no
-  purchase, count or recipe changes."* One set of reads builds two maps now: `usageMap` for the
-  chip, `refMap` (any row at all) for the guard. Never point the guard at the badge.
+- **The guard counts every row, whatever its quantity — and so does the chip.** S706 found a
+  `usageMap` that only counted `qty > 0` feeding the guard, and **`staff_meals.qty` DEFAULTS TO
+  0**: a zero-quantity staff meal earned no badge, passed the guard, and cascaded away under a
+  confirm dialog reading *"Nothing references this item"*. S706's fix pointed the guard at a second,
+  unfiltered `refMap` and left the chip on `usageMap` — which fixed the delete and made the SCREEN
+  disagree with itself. Reported live in S766: PANEER's Used In read "—" while Del refused it for
+  "Closing Stock", its only record being a count of 0 (a real row since S695). The column's own
+  tooltip says an item with any of these can't be deleted, so **the chip, the Used In filters and
+  the guard now read the one `refMap`**, `qtyCol` is gone from `ITEM_REF_TABLES`, and the Unused
+  filter lists exactly the deletable items. Vendors' chip had always counted any row. Do not
+  reintroduce a "live usage" filter on the chip: an absent chip beside a refused Del is the same
+  two-meanings defect as a chip rendered over a failed scan.
+- **The refusal names erasure only where it would happen (S766).** It had said deleting "would take
+  those records with it" for every table; only the three `cascades: true` tables go with the item —
+  a count or a purchase line refuses the delete instead. The message derives the erased set from
+  `ITEM_REF_TABLES`.
 - **A scan that could not run must not read as a scan that found nothing.** `usageScan.ok` is what
   separates "no records" from "we could not check". With it false the column says **"not checked"**
   rather than a dash, a banner names the tables that failed, and the delete refuses outright — the
