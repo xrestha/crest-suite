@@ -40,6 +40,19 @@ a real state and says why** ("Not billing", never `NPR 0`, which reads as a pric
 unbilled module is **omitted** from the breakdown rather than listed at zero — except a *live*
 module priced at zero, whose line stays, because dropping it would read as the module being off.
 
+**Selling Crest Customization as a PACKAGE was considered and dropped (S760, 2026-09-15).** The
+question was whether "Crest Customization" should become a product of its own — POS + IMS +
+Customization under one price, or a slimmed-down edition showing only the build-your-own slice.
+Dropped for two reasons worth keeping: a bundle price that REPLACES the module sum is the exact
+shape S552/S703 had to undo on Suite (the billing export and hss-suite disagreed for months), and
+the "slice" is not small — a build-your-own dish's numbers need item rates, purchases, periods,
+recipes and counts, i.e. most of Starter plus Growth. A slim edition would also need a new gate in
+every route guard, the sidebar and the command palette, and would break the tier rule that a feature
+must be able to produce a number on its own tier's data. Customization stays a flat add-on on POS,
+priced in Settings → Plan Pricing. **Its build-your-own cost range needs IMS at Growth**, because
+Recipe Costing is a Growth feature; a client below that keeps the till and guest behaviour without
+the range.
+
 **Suite has ONE tier** (S548): `suite_plan` is `NULL | 'pro'`. It was `starter|growth|pro`, but both call sites were `minTier="growth"` — so Suite Starter unlocked nothing at all and Suite Pro added nothing over Suite Growth on its own axis. It is also an **add-on priced per outlet on top of a client's modules**, not a bundle containing them: turning it on implies only that IMS is enabled (`requireModules`' floor) and says nothing about HR, POS, or which IMS tier the client is on. `requireModules` (array, default `['ims','hr']` — Owner Dashboard's original behavior) varies per feature; Monthly Owner Report, Demand Forecast and Fixed Assets pass `['ims']`. Don't assume every caller needs Owner Dashboard's set.
 
 ## A price is printed from the resolver, and read from the PLATFORM row (S701)

@@ -136,6 +136,31 @@ Two things were wrong the moment a third level existed, both fixed:
 
 **Two different sub-recipe counts exist and both are correct** — a recurring "why don't these match" question. `Recipes.js`'s `subRecipes` memo counts the **master list** (`category === 'Sub-Recipe'` over an unfiltered fetch: no period, no usage, not even `is_active`), while Stock Movements' Sub-Recipes tab counts only what a **period's sales actually consumed**. The difference is prep items nothing sold touched, surfaced explicitly on that tab ("9 of your 57 …") rather than left to a cross-check. The one case where they genuinely cannot reconcile: a recipe referenced via `sub_recipe_id` whose own `category` was never set to `'Sub-Recipe'` — counted by the walk but not by the category filter, so used + unused would exceed the master total. That is a data-entry problem on the recipe, and the tab names the offenders instead of silently producing numbers that don't add up.
 
+## A build-your-own dish has no ingredient list, and is costed from its choices (S760)
+
+`recipes.is_build_your_own` is a MARK, not a category — an acai bowl stays Food, so ticket routing,
+the product code prefix and every category split are untouched. Two consequences for this file's
+subject matter:
+
+- **Recipe Costing lets a marked dish save with NO ingredient rows**, and suppresses its "No BOM"
+  flag. Its plate is the guest's choices, whose stock lines live on `pos_option_ingredients` and
+  reach stock through `sales_entries.ingredient_deltas` — not through `recipe_ingredients`. Every
+  walk in this file therefore costs such a dish at its FIXED part only, which is correct: that is
+  what the recipe is.
+- **The dish's real cost is a RANGE**, and it lives outside the two cost engines on purpose.
+  `src/shared/buildCost.js` (pure) prices the cheapest and the typical build per size on top of the
+  fixed cost, valuing the choices' lines through `orderLineIngredients.deltaItems` — the same
+  explosion the stock posting uses, so a plate is costed from the raw items it actually depletes.
+  `useBuildCostRanges` is the one loader; Recipe Costing and Menu Pricing's IMS branch both render
+  it. **Do not teach `calcRecipeCost`/`recipeCost.js` about options** — every other reader of a
+  recipe's cost (Menu Engineering, Best Sellers, Recipe Margin, the owner report) means the fixed
+  part, and a third engine is how the same dish comes to cost two amounts on two screens.
+
+A sub-recipe can be a choice's stock line, so deleting one is refused by
+`pos_option_ingredients.sub_recipe_id` as well — `deleteRecipe`'s pre-check still only looks at
+`recipe_ingredients.sub_recipe_id`, so that refusal arrives with a generic message (open in
+POS_TODO.md).
+
 ## The walk is a PAGED read, and its seed list is the client's whole recipe book (S711)
 
 `explodeRecipeTree`'s two reads and `computeRecipeCosts`' two reads all go through

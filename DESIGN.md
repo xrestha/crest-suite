@@ -981,6 +981,26 @@ is never printed as if they will. The Add button under a group that is still sho
 (`.btn[aria-disabled="true"]`, opacity 0.6): the press names the group, scrolls to it and focuses
 its first chip, which a dead button cannot do.
 
+### The guest stepper (S760)
+
+A **build-your-own** dish — an acai bowl, a pizza — is picked one group per step on the guest sheet
+rather than in one scrolling list (`.gm-steps`, `.gm-steps-bar`, `.gm-review` in `guestMenu.css`).
+Three rules it exists for. **The size step comes first**, because every later price is the price at
+that size, so a topping never re-prices under the reader's thumb after they have accepted it.
+**Next stays pressable while the step is short** — the same `aria-disabled` treatment as Add, for the
+same reason: the press names what is missing, which a dead button cannot. And the last step is a
+**Review** of the whole bowl, every group with its picks and a Change button, because a guest who has
+answered five questions has no other way to see what they built before paying for it.
+
+The bar is a flat pine fill on the border tint with a 160ms width transition, switched off under
+reduced motion; it carries `role="progressbar"` and the step label is the focus target on each step,
+so the position is announced rather than only drawn. The label is not a heading — it is the same
+12.5px `--theme-text2` the sheet's other supporting lines use, because the dish name above it is
+already the heading and two competing titles on a phone is one too many.
+
+The till does NOT step (owner decision, S760): a cashier mid-queue needs one screen, and the one-tap
+default stays for every dish that is not build-your-own.
+
 ### Badges / Status Chips
 
 - **Shape:** square, `2px 8px`, 11px/500, capitalized.
