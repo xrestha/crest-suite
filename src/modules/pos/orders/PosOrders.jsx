@@ -35,6 +35,7 @@ import {
   clearCachedPosOrderForTable, enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
 } from '../../../utils/offlineQueue'
 import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
+import BillingStation from './BillingStation'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { errorText } from '../../../shared/errorText'
 import {
@@ -69,7 +70,11 @@ const HINT = {
 // sentence after it.
 const stripCodeWord = (msg, word) => String(msg || '').replace(new RegExp(`^(pos_orders|pos_order_items|${word}):\\s*`), '')
 
-export default function PosOrders() {
+// `billingStation` is the /pos/billing route (S762) — the SAME component, entered on a third view
+// that lists the open bills instead of the floor plan. Deliberately not a separate page: billing is
+// ~1,500 lines of interlocked state in this file (tenders, splits, comps, discount caps, loyalty,
+// the print pipeline), and a second copy of any of it is exactly the failure CLAUDE.md warns about.
+export default function PosOrders({ billingStation = false } = {}) {
   const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature, customizationEnabled } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   // Rendered in BOTH returns (this file has two — S578). One pending ask at a time, drawn by
@@ -103,7 +108,10 @@ export default function PosOrders() {
   const allowMeFilter     = imsAvailable
 
   /* ── view ── */
-  const [view, setView] = useState('floor')
+  // 'floor' | 'bills' | 'order'. 'bills' exists only on the /pos/billing route; from it, tapping a
+  // bill goes through the normal open-an-order path and lands on 'order' with the payment window
+  // already up, and ← comes back here rather than to the floor plan.
+  const [view, setView] = useState(billingStation ? 'bills' : 'floor')
 
   /* ── floor ── */
   const [tables,      setTables]      = useState([])
@@ -369,6 +377,14 @@ export default function PosOrders() {
   // can enter performSave twice with orderId still null and insert two pos_orders rows. A ref for
   // the same reason as closingRef above: it needs to be readable/settable synchronously mid-call.
   const savingRef = useRef(false)
+  // Billing station handoff (S762). billOnOpenRef is armed by billOrder() and consumed inside
+  // showLoadedOrder — the ONE funnel every "put an existing order on screen" path goes through, so
+  // no branch of openTable/openOrderById can arm it by accident. It is a ref (read/written
+  // synchronously mid-call) that hands off to a state flag, because openBilling() reads orderItems
+  // and that state has not committed yet at the moment showLoadedOrder runs; the effect below fires
+  // once it has.
+  const billOnOpenRef = useRef(false)
+  const [billOnLoad, setBillOnLoad] = useState(false)
 
   useEffect(() => {
     if (!clientId) return
@@ -436,7 +452,7 @@ export default function PosOrders() {
   const floorViewSeen = useRef(false)
   const loadFloorRef = useRef(null)
   useEffect(() => {
-    if (view !== 'floor' || !clientId) return
+    if ((view !== 'floor' && view !== 'bills') || !clientId) return
     // Through a ref, not the closure: this interval lives for the whole floor visit, and a loadFloor
     // captured at mount would compute tile totals with the default VAT flag before settings load.
     if (floorViewSeen.current && navigator.onLine && Date.now() - lastFloorLoadAt.current > 2000) loadFloorRef.current?.({ quiet: true })
@@ -444,6 +460,25 @@ export default function PosOrders() {
     const poll = setInterval(() => { if (navigator.onLine) loadFloorRef.current?.({ quiet: true }) }, 15000)
     return () => clearInterval(poll)
   }, [view, clientId]) // eslint-disable-line
+
+  // "open 18 min" on the Billing list has to move on its own — the floor poll's setIfChanged
+  // suppresses a re-render when nothing in the DATA changed, and the clock is not in the data.
+  useEffect(() => {
+    if (view !== 'bills') return
+    const tick = setInterval(() => setKotNow(Date.now()), 30000)
+    return () => clearInterval(tick)
+  }, [view])
+
+  // The second half of the Billing station handoff: the order is on screen and its items have
+  // committed, so the payment window can open on the real cart (openBilling reads orderItems for
+  // the HSC codes that print on the Tax Invoice — called a tick earlier it would read an empty one
+  // and the bill would go out short with nothing saying so).
+  useEffect(() => {
+    if (!billOnLoad) return
+    if (view !== 'order' || !orderId) return
+    setBillOnLoad(false)
+    openBilling()
+  }, [billOnLoad, view, orderId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keeps each cart line's KOT/BOT timer live while the order screen for a saved order is open.
   // A brand-new, not-yet-sent order (orderId still null) has no tickets to poll for.
@@ -777,6 +812,10 @@ export default function PosOrders() {
   }, [optionCatalog, customizationEnabled])
 
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
+  // The Floor → Billing nav item is Supervisor+; a nav item is not a guard and /pos/billing is a
+  // plain URL, so the page says no itself. Back to Orders rather than /pos: a staff PIN that got
+  // here by typing (or an old bookmark) still has somewhere legitimate to be.
+  if (billingStation && !hasPosAccess('supervisor')) return <Navigate to="/pos/orders" replace />
 
   /* ── data loaders ── */
 
@@ -806,8 +845,8 @@ export default function PosOrders() {
   // What the floor draws, as signatures — a quiet poll that comes back identical must not
   // re-render the whole floor (setIfChanged). Every field a tile or takeaway card renders is here.
   const tablesSig    = list => rowsSignature(list, ['id', 'name', 'section', 'status', 'capacity'])
-  const floorOrdSig  = m => mapSignature(m, o => [o.orderId, o.itemCount, o.total, o.covers, o.pending, o.offlinePending ? 1 : 0].join(':'))
-  const takeawaysSig = list => rowsSignature(list, ['orderId', 'orderNo', 'itemCount', 'total', 'pending', 'offlinePending'])
+  const floorOrdSig  = m => mapSignature(m, o => [o.orderId, o.itemCount, o.total, o.covers, o.pending, o.openedAt || '', o.offlinePending ? 1 : 0].join(':'))
+  const takeawaysSig = list => rowsSignature(list, ['orderId', 'orderNo', 'itemCount', 'total', 'pending', 'openedAt', 'offlinePending'])
 
   // A queued entry that was surfaced as a conflict belongs to a bill another device closed — never
   // an open order to paint or reopen (S754).
@@ -843,7 +882,7 @@ export default function PosOrders() {
     const [tblRes, ordRes, { count: unposted, error: unpostedErr }, { count: notesWaiting, error: notesErr }] = await Promise.all([
       scopedFrom('pos_tables')
         .order('sort_order').order('name'),
-      scopedFrom('pos_orders', 'id, order_no, table_id, covers, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
+      scopedFrom('pos_orders', 'id, order_no, table_id, covers, opened_at, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
         .eq('status', 'open'),
       // head:true — a count, not rows, so the 1000-row cap cannot apply. Backed by the partial
       // index idx_pos_orders_unposted, so it stays cheap however large the table gets.
@@ -879,6 +918,7 @@ export default function PosOrders() {
       const items = o.pos_order_items || []
       const overlay = {
         orderId:   o.id,
+        openedAt:  o.opened_at || null,
         itemCount: items.reduce((s, i) => s + i.qty, 0),
         total:     items.reduce((s, i) => s + i.qty * i.unit_price * (1 + (vatReg ? (i.vat_rate ?? 0) : 0)), 0),
         covers:    o.covers,
@@ -1561,6 +1601,10 @@ export default function PosOrders() {
     setOrderItems(lines)
     markCartSaved(lines)
     setMsg(''); setView('order'); loadMenu()
+    // Armed by billOrder() only, and only ever consumed here — the one place an EXISTING order
+    // reaches the screen. A path that never gets here (a fresh table, a refused read) therefore
+    // cannot leave the flag armed for whatever order is opened next.
+    if (billOnOpenRef.current) { billOnOpenRef.current = false; setBillOnLoad(true) }
     return lines
   }
 
@@ -1591,7 +1635,7 @@ export default function PosOrders() {
     showLoadedOrder(null, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version })
   }
 
-  async function openTable(table) {
+  async function openTable(table, { existingOnly = false } = {}) {
     setFloorMsg('')
 
     if (!navigator.onLine) {
@@ -1615,6 +1659,10 @@ export default function PosOrders() {
       // items — block rather than risk a full item replace that silently deletes what's really there.
       if (table.status === 'occupied' || table.status === 'reserved') {
         setFloorMsg(`error:${table.name} has an order that hasn't been loaded on this device yet — reconnect to open it.`)
+        return
+      }
+      if (existingOnly) {
+        setFloorMsg(`error:${table.name}'s bill has not been loaded on this device — reconnect to bill it.`)
         return
       }
       // No known order on this table — safe to start fresh, same as the online empty-table path.
@@ -1647,6 +1695,12 @@ export default function PosOrders() {
       seatReservationRef.current = null
       const items = showLoadedOrder(table, { id: existing.id, orderNo: existing.order_no, covers: existing.covers, items: existing.pos_order_items, itemsVersion: existing.items_version })
       cachePosOrderForTable(table.id, { orderId: existing.id, orderNo: existing.order_no || null, covers: existing.covers || 1, items, itemsVersion: Number.isInteger(existing.items_version) ? existing.items_version : null })
+    } else if (existingOnly) {
+      // Came from the Billing list, where this table was listed as having an open bill. It does
+      // not any more — another till closed it. Never fall through to starting a fresh order: the
+      // cashier asked to BILL, and the covers numpad would be a baffling answer.
+      setFloorMsg('error:That bill was already closed on another device.')
+      loadFloor({ quiet: true })
     } else {
       // An explicit handoff from the Reservations page seats straight away; a table whose
       // booking is due offers the party by name before falling back to the numpad.
@@ -1655,6 +1709,38 @@ export default function PosOrders() {
       const due = dueReservationFor(table.id)
       if (due) { setSeatPrompt({ table, reservation: due }); loadMenu(); return }
       startFreshOrder(table)
+    }
+  }
+
+  // Billing station: open a listed bill and go straight to the payment window. Everything about
+  // WHICH order and what is on it comes from the paths the floor already uses (openTable /
+  // openOrderById), including their refusals — this only arms the flag and lets them run.
+  async function billOrder(row) {
+    setFloorMsg('')
+    if (!navigator.onLine) {
+      setFloorMsg('error:Billing needs a connection — a bill takes its invoice number from the server. Orders can still be taken offline from the Orders screen.')
+      return
+    }
+    if (row.offlinePending) {
+      setFloorMsg('error:That order has not uploaded yet — it has no invoice number to bill against. It will sync on its own; try again in a moment.')
+      return
+    }
+    billOnOpenRef.current = true
+    try {
+      if (row.kind === 'table') {
+        const table = tables.find(t => t.id === row.tableId)
+        if (!table) {
+          setFloorMsg('error:That table is no longer on the floor plan — open the order from the Orders screen instead.')
+          return
+        }
+        await openTable(table, { existingOnly: true })
+      } else {
+        await openOrderById(row.orderId)
+      }
+    } finally {
+      // showLoadedOrder disarms it the moment an order actually lands on screen; this covers every
+      // path that refused instead, so a later tap on Orders never opens the till drawer by itself.
+      billOnOpenRef.current = false
     }
   }
 
@@ -3477,7 +3563,10 @@ The tables were left occupied rather than freed with their orders still open.`)
   }
 
   function backToFloor() {
-    setView('floor'); setActiveTable(null); setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); setMsg('')
+    // On /pos/billing the cashier never saw the floor plan — dropping them onto it would be a
+    // different screen than the one they left.
+    setBillOnLoad(false)
+    setView(billingStation ? 'bills' : 'floor'); setActiveTable(null); setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); setMsg('')
     setSuggestions([])
     setMenuLoaded(false)
     setMenuLoadError('')
@@ -3542,6 +3631,64 @@ The tables were left occupied rather than freed with their orders still open.`)
       )}
     </div>
   )
+
+  /* ══════════════════════════════════════════ BILLING STATION (S762)
+
+     The /pos/billing landing view. Rows are built from the same floor data the Orders screen
+     draws — tableOrders keyed by table, plus the table-less open orders in takeawayOrders — so
+     "open bill" means exactly here what it means there, and the 15 s floor poll keeps both live.
+     Tapping Bill leaves this view for `order` with the payment window already up (billOrder). */
+
+  if (view === 'bills') {
+    const billRows = [
+      ...tables
+        .filter(t => tableOrders[t.id])
+        .map(t => {
+          const o = tableOrders[t.id]
+          return {
+            key: `table:${t.id}`, kind: 'table', tableId: t.id, orderId: o.orderId,
+            label: t.name, section: t.section || '',
+            covers: o.covers || 1, itemCount: o.itemCount, total: o.total,
+            pending: o.pending, openedAt: o.openedAt || null, offlinePending: !!o.offlinePending,
+          }
+        }),
+      ...takeawayOrders.map(t => ({
+        key: `takeaway:${t.orderId}`, kind: 'takeaway', tableId: null, orderId: t.orderId,
+        label: t.orderNo ? `Takeaway #${t.orderNo}` : 'Takeaway (not synced)', section: '',
+        covers: t.covers || 1, itemCount: t.itemCount, total: t.total,
+        pending: t.pending, openedAt: t.openedAt || null, offlinePending: !!t.offlinePending,
+      })),
+    ]
+    // Longest-open first: the table that has been sitting an hour is the one about to ask for the
+    // bill. An order with no opened_at (queued offline, never synced) sorts last — it cannot be
+    // billed yet anyway.
+    billRows.sort((a, b) => (a.openedAt ? new Date(a.openedAt).getTime() : Infinity) - (b.openedAt ? new Date(b.openedAt).getTime() : Infinity))
+    return (
+      <>
+        {floorMsg && (
+          <div role="alert" style={{
+            background: floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 8%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
+            border: `1px solid ${floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 25%, transparent)' : 'color-mix(in srgb, var(--theme-green) 25%, transparent)'}`,
+            borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
+            color: floorMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)',
+          }}>
+            {floorMsg.replace(/^(error|ok):/, '')}
+          </div>
+        )}
+        <BillingStation
+          rows={billRows}
+          loading={floorLoad}
+          loadError={floorLoadError}
+          onRetry={() => loadFloor()}
+          onBill={billOrder}
+          isOnline={isOnline}
+          now={kotNow}
+          canVoid={isAdmin || isOwner || !!profile?.pos_allow_void}
+        />
+        {confirmEl}
+      </>
+    )
+  }
 
   /* ══════════════════════════════════════════ ORDER SCREEN */
 

@@ -309,6 +309,10 @@ export default function App() {
               {/* Crest POS — gated on pos_enabled */}
               <Route path="/pos"        element={<ModuleGate module="pos"><Pos /></ModuleGate>} />
               <Route path="/pos/orders" element={<ModuleGate module="pos"><PosOrders /></ModuleGate>} />
+              {/* Billing station (S762) — the same component on its third view: a list of open
+                  bills instead of the floor plan. Supervisor+ is enforced inside PosOrders, since a
+                  nav item is not a guard and this URL is typeable. */}
+              <Route path="/pos/billing" element={<ModuleGate module="pos"><PosOrders billingStation /></ModuleGate>} />
               <Route path="/pos/tables" element={<ModuleGate module="pos"><PosTableManagement /></ModuleGate>} />
               <Route path="/pos/customers" element={<ModuleGate module="pos"><PosCustomers /></ModuleGate>} />
               <Route path="/pos/parking" element={<ModuleGate module="pos"><PosParkingSlips /></ModuleGate>} />

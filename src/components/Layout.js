@@ -155,6 +155,10 @@ const POS_GROUPS = [
   ]},
   { key: 'pos-floor', label: 'Floor', items: [
     { to: '/pos/orders', label: 'Orders', icon: ConciergeBell, minPosRole: 'staff' },
+    // S762: the cashier's own way in — straight to the open-bills list and the payment window,
+    // without walking through the floor plan and the order screen. Supervisor+ because that is
+    // already who may Pay/Void/Complimentary; PosOrders re-checks it (a nav item is not a guard).
+    { to: '/pos/billing', label: 'Billing', icon: Banknote, minPosRole: 'supervisor' },
     { to: '/pos/kds', label: 'Kitchen Display', icon: Utensils, minPosRole: 'staff' },
     { to: '/pos/parking', label: 'Parking Slips', icon: ParkingSquare, minPosRole: 'staff' },
     { to: '/pos/reservations', label: 'Reservations', icon: CalendarCheck, minPosRole: 'staff' },

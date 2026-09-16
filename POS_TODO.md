@@ -120,6 +120,15 @@ when these were filed. Every item below assumes they are.
   just as unreliable on the floor as it is in the storeroom, and `save_pos_order_items` is an
   atomic RPC, so a network failure around it is as safe to re-queue as Stock Count's upserts.
   Closes the POS half of `DOCS-REMEDIATION.md` T6 item 3.
+- [ ] 🟢 **Two guards on the Billing station (S762) were never clicked.** The list, both Bill
+  paths (a table and a takeaway), the payment window opening on the right order and ← returning to
+  the list were all verified live on BHATTI CHOILA. Two were not, for want of a second actor:
+  (1) a Staff-rank PIN typing `/pos/billing` should land back on `/pos/orders` — the component
+  carries `if (billingStation && !hasPosAccess('supervisor'))`, read but not exercised; (2) the
+  `existingOnly` refusal, where a bill listed here was settled on another till between the load and
+  the tap, should say so and refresh rather than open the covers numpad. Both are single clicks
+  once a staff PIN and a second device are to hand.
+
 - [ ] 🟡 `PosOrders.jsx` has no breakpoint — a two-panel flex with a fixed 320px cart, so below
   ~600px the menu side collapses to almost nothing. Deferred rather than missed: restructuring the
   live billing screen is not a layout-pass change, and the till is a tablet/desktop device today.

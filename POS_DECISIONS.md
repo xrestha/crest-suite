@@ -180,6 +180,23 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## Shipped (for reference — moved here once complete)
 
+- [x] ~~A direct way into billing, for a cashier who is not the waiter~~ — **shipped S762,
+  2026-09-16, asked for by Aashish.** Never on this list: the only way to take payment was floor
+  plan → tap the table → order screen → Charge, which is the right shape for a waiter standing at
+  the table and the wrong one for someone on the counter holding a guest who just asked for the
+  bill. **Floor → Billing (`/pos/billing`, Supervisor+)** lists every open bill — tables and
+  takeaways, covers, items, running total, how long it has been open — longest-open first, and one
+  tap on Bill opens that order with the payment window already up. Two decisions taken before
+  building: (1) a **list, not a second floor plan** — the person using it is looking for the bill a
+  guest asked for, not for a table in the room, and a list can carry the total and the age in one
+  readable line; (2) **Supervisor+**, matching who may already Pay/Void/Complimentary, so a waiter
+  on a staff PIN sees nothing new. Deliberately **not** a separate page: billing is ~1,500 lines of
+  interlocked state in `PosOrders.jsx` (tenders, splits, comps, the discount cap, loyalty, the print
+  pipeline), so this is the same component on a third view, and the Bill button goes through the
+  floor's own open-order paths. Equally deliberately, it **cannot take orders** — an `⚠ N unsent`
+  pill sends the cashier to Orders rather than letting them bill food nobody is cooking. Full
+  reasoning in the S762 changelog entry.
+
 - [x] ~~Build-your-own dishes~~ — **shipped S760 (2026-09-15), from Aashish's handwritten sketch.
   Migration `20260920100000` applied live the same day after a live diff and a rolled-back dry run;
   the browser pass is still open in POS_TODO.md.** Acai bowl, pizza, salad: size → base → sauces → toppings → checkout.

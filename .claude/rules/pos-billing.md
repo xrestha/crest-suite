@@ -329,11 +329,13 @@ name against it.
   a stale bundle keep working via the parameter default. **S754 did the same to the 3-arg form**
   when it added `p_expected_version`, for the same reason.
 
-## PosOrders.jsx has TWO returns, and a modal put in the wrong one is invisible
+## PosOrders.jsx has THREE returns, and a modal put in the wrong one is invisible
 
 Worth its own heading because it cost a real bug (S578) and nothing static catches it. The file
-early-returns the **order screen** (`if (view === 'order') return (...)`) and then falls through to
-the **floor view** (`return (<>...</>)`). They render completely different trees.
+early-returns the **billing station** (`if (view === 'bills')`, S762 — the `/pos/billing` route,
+which renders `BillingStation.jsx`), then the **order screen** (`if (view === 'order') return (...)`),
+and then falls through to the **floor view** (`return (<>...</>)`). They render completely different
+trees.
 
 The KOT-pull prompt was placed beside the credit-note modal at the tail of the file — i.e. in the
 floor view — while `setQty` only ever runs on the order screen. Pressing × on an already-fired item
@@ -344,6 +346,37 @@ correctly in review. Only pressing the button in a browser found it.
 Before adding a modal here, check which return the handler that opens it lives in. Nothing about a
 misplaced one fails loudly, and the failure mode — a button that silently does nothing — is the one
 a cashier reports as "the till is broken" rather than as a bug you can search for.
+
+**The `bills` return is the narrowest of the three and should stay that way.** It renders the list,
+the shared `floorMsg` banner and `confirmEl` — nothing else. Every refusal it can produce (a bill
+closed on another till, a table gone from the floor plan, offline, an unsynced order) goes through
+`floorMsg`, deliberately, rather than the floor view's `window.alert`s: this screen has a banner, so
+the reason those alerts exist does not apply here.
+
+## The Billing station is a third VIEW, never a second implementation (S762)
+
+`/pos/billing` renders the same `PosOrders` with `billingStation`. The Bill button does not open a
+bill — it runs the floor's own `openTable`/`openOrderById` and lets `openBilling()` fire afterwards.
+Three properties hold it together, and each is load-bearing:
+
+- **The arm/consume pair has exactly one consumer.** `billOrder` sets `billOnOpenRef`, and only
+  `showLoadedOrder` — the single funnel every "put an existing order on screen" path goes through —
+  clears it and hands off. A path that refuses instead never reaches it, so a refusal cannot leave
+  the flag armed for whatever order is opened next. Adding a fourth way to reach the order screen
+  means routing it through `showLoadedOrder` too, or it will silently not bill.
+- **The handoff is a state flag, not an inline call.** `openBilling()` reads `orderItems` for the
+  HSC codes that print on the Tax Invoice; called synchronously from `showLoadedOrder` it reads the
+  pre-commit cart and the bill goes out short with nothing saying so. The effect waits for
+  `view === 'order' && orderId`.
+- **`openTable(table, { existingOnly: true })` must not fall through to a fresh order.** A row is on
+  the Billing list because the floor said that table had an open bill; if it does not any more,
+  another till closed it, and the covers numpad is a baffling answer to "bill this".
+
+The list itself is derived from `tables`/`tableOrders`/`takeawayOrders` at render — the same floor
+read, the same 15 s poll — so "open bill" cannot come to mean two different things on the two
+screens. `pos_orders.opened_at` rides in that read and is in **both** floor signatures; a field the
+list renders that is missing from a signature means a quiet poll that changed only that field never
+repaints.
 
 Note also that neither branch needs an explicit `zIndex` on a child dialog: the order screen is
 `position: fixed` at 1000 and therefore its own stacking context, so a nested overlay at the default

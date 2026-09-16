@@ -8,7 +8,7 @@ web
 
 Primary: restaurant and hotel owners and managers in Nepal, tracking cost, stock, and staff day to day, mostly across the IMS and HR modules and now POS. They're in the app to make operational calls, not to audit numbers line by line.
 
-Tertiary: floor and store staff — a waiter on the till, an employee checking a payslip, a store-keeper counting a shelf. They reach the product on a shared device with a 4-digit PIN, do one task, and are the only users who never chose it. Design for the thumb, the interruption and the person who will not report a bug: a control they cannot use is not a smaller problem than a wrong number, it is the same problem arriving as "the app is broken".
+Tertiary: floor and store staff — a waiter on the till, a cashier on the counter, an employee checking a payslip, a store-keeper counting a shelf. They reach the product on a shared device with a 4-digit PIN, do one task, and are the only users who never chose it. The waiter and the cashier are not one person in a busy outlet and their screens should not be one screen — the waiter is standing at a table with the order open, the cashier is holding a guest who just asked for the bill (S762). Design for the thumb, the interruption and the person who will not report a bug: a control they cannot use is not a smaller problem than a wrong number, it is the same problem arriving as "the app is broken".
 
 Secondary: accountants and bookkeepers doing reconciliation and compliance, verifying purchase entries, vendor payables, TDS/SSF figures, and payroll accuracy rather than making operational decisions. Same data, different intent: they need to trust the exact figure, not just the trend.
 

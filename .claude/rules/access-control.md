@@ -136,6 +136,17 @@ each named route has a matching early return in its own component.** The general
 in `.claude/rules/design-system.md` — put the condition on the nav ITEM, where every consumer reads
 it, rather than hand-writing it at each render site.
 
+**A route that is a MODE of an existing page still needs its own check (S762).** `/pos/billing`
+renders the same `PosOrders` component as `/pos/orders` with `billingStation` set, landing it on a
+third view. The nav item is `minPosRole: 'supervisor'` because that is who may Pay/Void/Complimentary
+— but the component's own guard was `hasPosAccess('staff')`, which is right for the route it was
+written for and wrong for the new one. So it carries a second line,
+`if (billingStation && !hasPosAccess('supervisor')) return <Navigate to="/pos/orders" replace />`,
+placed beside the first. **Reusing a component under a second route means re-reading the guard it
+already has against the rank the NEW route implies** — the grep above finds the nav item and the
+component, sees a guard, and moves on. Note also where the refusal goes: back to `/pos/orders`,
+somewhere a staff PIN can legitimately be, not to `/pos`, which is manager-only.
+
 **A SUB-route has no nav item to audit, and inherits nothing from its parent page (S647).**
 `/purchases/new` and `/purchases/:groupId/edit` are reached from a button on `/purchases`, so
 neither appears in `Layout.js` and the grep above cannot find them — but they are typeable, and

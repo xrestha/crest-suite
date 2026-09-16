@@ -144,6 +144,33 @@ export const POS_GUIDE_GROUPS = [
         connections: 'Closing posts revenue to IMS Sales Entry and depletion to Stock Movements. Tickets land in the KOT Log and on the Kitchen Display. Buyer identities build Customers; credit bills appear there for settlement. Exceptions, Sales Report and Covers all read what this screen writes.',
       },
       {
+        id: 'billing-station',
+        title: 'Billing (the cashier station)',
+        route: '/pos/billing',
+        plan: 'Supervisor+ — the same rank that may take payment anywhere else',
+        summary:
+          'The same Pay / Void / Complimentary window as Orders, reached without walking through the floor plan. Floor → Billing lists every open bill in the outlet — covers, item count, running total, how long the table has been sitting — longest-open first, with the uncollected total on the floor in the header. One tap on Bill opens that order and the payment window together. Added S762 for the outlet that puts a cashier on the counter and waiters on the floor: those two people were sharing one screen shaped for the waiter.',
+        workflow: [
+          'Open Floor → Billing. The list refreshes itself every 15 seconds, the same poll the floor grid uses, so a bill settled on another till leaves it on its own.',
+          'Tap Bill on a row → that order opens with the payment window already up. Everything inside it — tenders, split, discount cap, item comp, loyalty, the live preview — is the Orders billing window, unchanged; there is no second copy of any of it.',
+          '← comes back to this list, not to the floor plan.',
+        ],
+        fields: [
+          { label: 'What the list holds', desc: 'Every OPEN order: tables by name and section, takeaways by their order number. It is built from the same floor read the Orders grid uses, so "open" cannot mean two different things on the two screens.' },
+          { label: 'The header figure', desc: 'The sum of every bill still open right now — what is sitting on tables uncollected. Not takings: today\'s money is the Sales Report.' },
+          { label: '⚠ N unsent', desc: 'That bill carries lines never sent to the kitchen or bar. Billing anyway charges a guest for food nobody is cooking. Open it from Orders to send them, or take them off — this screen deliberately cannot.' },
+        ],
+        gotchas: [
+          'This screen bills; it does not take orders. There is no way from here to add a dish or edit a note — that is Orders.',
+          'Offline the Bill buttons are disabled and the list says why: an invoice number is assigned by the server and Nepal\'s sequence cannot be issued offline. Order-taking on Orders keeps working.',
+          'An order queued offline on this device has no invoice number yet and cannot be billed until it syncs; it is listed with a 📵 not-synced chip and its button off.',
+          'If a bill was settled on another tablet between the list loading and the tap, it says so and refreshes — it never falls through to starting a fresh order on that table.',
+          'A shift must be open to take payment, exactly as from Orders.',
+          'Supervisor+ is enforced by the page itself, not only by the menu — a Staff PIN typing /pos/billing is sent back to Orders.',
+        ],
+        connections: 'Same open-order read as the Orders floor (one poll, one truth); the payment window, its print pipeline and everything it posts to IMS are literally the Orders ones. Recent Bills, Exceptions and the Sales Report read what closes here exactly as if it had closed from Orders.',
+      },
+      {
         id: 'kds',
         title: 'Kitchen Display',
         route: '/pos/kds',
