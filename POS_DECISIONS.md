@@ -200,10 +200,13 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   mid-service both have something in their hands) plus `playGuestAlert`, three rising notes twice at
   double gain, escalating past three minutes. **The Kitchen Display got the same treatment for its
   own event**, on the 8- and 15-minute marks its card strip already uses — deliberately not on
-  "any unstarted ticket", which in a working kitchen is most of them. One real bug fell out:
-  `playChime` built a new `AudioContext` per call and never closed one, and Chrome caps a document
-  at ~6 — so a wall-mounted board opened once for a whole service went **silent from the seventh
-  ticket**, on the screen furthest from anyone who would notice. Full reasoning in the S763
+  "any unstarted ticket", which in a working kitchen is most of them. One real bug fell out, in all
+  four places POS makes a sound: every chime built a new `AudioContext` per call and never closed
+  one, and Chrome caps a document at ~6 — so the kitchen board, the floor, Reservations and a
+  guest's own phone each went **silent from the seventh event**, with nothing on screen to say so.
+  `posChime.js`'s own header had listed three of those copies and waved them through (*"none of them
+  is wrong"*); all three were wrong the same way, and it took building something that REPEATS to see
+  it. Every caller lives in that file now. Full reasoning in the S763
   changelog entry.
 
 - [x] ~~A direct way into billing, for a cashier who is not the waiter~~ — **shipped S762,

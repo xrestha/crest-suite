@@ -8,6 +8,7 @@ import { guestOrderRefusal } from './guestOrderRefusal'
 import GuestOptionSheet from './GuestOptionSheet'
 import { groupsForDish, describeSelection, lowestDishPrice, selectionProblems, inclFromEx } from '../../../shared/optionPricing'
 import { selectionKeyOf } from '../orders/posOrdersConstants'
+import { playChime } from '../posChime'
 // Scoped bone-and-pine palette for this surface only — see the header of guestMenu.css for why a
 // public menu must not read the global theme tokens.
 import './guestMenu.css'
@@ -52,29 +53,12 @@ function computeStage(requestStatus, kotStatus) {
   return 'placed'
 }
 
-// Short ascending two-tone chime — same Web Audio synthesis approach as the staff-side alert in
-// PosOrders.jsx (no audio asset to ship), just pitched the other way round so it reads as a
-// distinct "your order updated" cue rather than the staff's "new order arrived" one.
-function playStageChangeChime() {
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext
-    if (!Ctx) return
-    const ctx = new Ctx()
-    const now = ctx.currentTime
-    ;[660, 880].forEach((freq, i) => {
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'sine'
-      osc.frequency.value = freq
-      gain.gain.setValueAtTime(0.0001, now + i * 0.15)
-      gain.gain.exponentialRampToValueAtTime(0.25, now + i * 0.15 + 0.02)
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.15 + 0.14)
-      osc.connect(gain); gain.connect(ctx.destination)
-      osc.start(now + i * 0.15)
-      osc.stop(now + i * 0.15 + 0.15)
-    })
-  } catch (_) { /* audio blocked or unsupported — the status card still updates visually */ }
-}
+// Ascending, where the staff-side alert descends, so it reads as "your order updated" rather than
+// the staff's "new order arrived". It is `playChime` with the tones reversed since S763 — the
+// inline copy this replaces built a new AudioContext per stage change and never closed one, and a
+// guest whose order walks Placed → Confirmed → Sent → Preparing → Ready is five of the six Chrome
+// allows before it stops making any sound.
+function playStageChangeChime() { playChime([660, 880], 0.15) }
 
 const sessionKey = tableId => `guestOrderReq:${tableId}`
 function loadStoredRequest(tableId) {

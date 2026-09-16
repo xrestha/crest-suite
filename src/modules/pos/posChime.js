@@ -1,18 +1,19 @@
 // A short two-tone chime synthesized with the Web Audio API — no audio asset to host or ship.
 //
-// PosOrders.jsx (guest order arrived), GuestMenu.jsx (your order moved) and the Kitchen Display
-// each carry their own inline copy of this; the Reservations page is the fourth caller, and a
-// fourth inline copy is where a decision made three times becomes a file (staffLevelBadge.js,
-// operatingBands.js). The existing three are left in place rather than migrated in the same
-// change — each is on a live service screen and none of them is wrong.
+// **Every caller is now in this file** (S763). PosOrders.jsx, GuestMenu.jsx and the Kitchen Display
+// each carried their own inline copy, left in place when this file was created on the reasoning
+// that "each is on a live service screen and none of them is wrong". All three WERE wrong, in the
+// same way, and it took building a repeating alert to see it: each built a new `AudioContext` per
+// call and never closed one. Chrome caps a document at about six, so on any screen that is opened
+// once and left running — the kitchen board, the floor, the reservations page — the seventh event
+// of a service made **no sound at all**, silently. `getCtx()` below keeps one and reuses it.
 //
 // Browsers block audio before any user gesture on the page; staff reach these screens through a
 // PIN login or a tap, so in practice the gesture has already happened.
 export function playChime(tones = [880, 660], step = 0.18) {
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext
-    if (!Ctx) return
-    const ctx = new Ctx()
+    const ctx = getCtx()
+    if (!ctx) return
     const now = ctx.currentTime
     tones.forEach((freq, i) => {
       const osc = ctx.createOscillator()

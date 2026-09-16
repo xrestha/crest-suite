@@ -37,6 +37,7 @@ import {
 import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml } from './posOrderPrintHtml'
 import BillingStation from './BillingStation'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
+import { playChime } from '../posChime'
 import { errorText } from '../../../shared/errorText'
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
@@ -1013,30 +1014,11 @@ export default function PosOrders({ billingStation = false } = {}) {
     setIfChanged(setPendingGuestOrders, map, m => mapSignature(m, list => (list || []).map(r => r.id).join(',')))
   }
 
-  // Short two-tone beep synthesized via the Web Audio API — no audio asset to host/ship. Browsers
-  // block audio before any user gesture on the page; staff have already interacted with the page
-  // via PIN login by the time they reach the floor view, so this is a low-impact caveat in
-  // practice rather than a real gap.
-  function playGuestOrderChime() {
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext
-      if (!Ctx) return
-      const ctx = new Ctx()
-      const now = ctx.currentTime
-      ;[880, 660].forEach((freq, i) => {
-        const osc = ctx.createOscillator()
-        const gain = ctx.createGain()
-        osc.type = 'sine'
-        osc.frequency.value = freq
-        gain.gain.setValueAtTime(0.0001, now + i * 0.18)
-        gain.gain.exponentialRampToValueAtTime(0.3, now + i * 0.18 + 0.02)
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.18 + 0.16)
-        osc.connect(gain); gain.connect(ctx.destination)
-        osc.start(now + i * 0.18)
-        osc.stop(now + i * 0.18 + 0.18)
-      })
-    } catch (_) { /* audio blocked or unsupported — visual banner still shows */ }
-  }
+  // The shared chime (S763), not the inline copy this file used to carry. That copy built a new
+  // AudioContext per guest order and never closed one, and Chrome caps a document at about six —
+  // so a floor screen left open through a service went silent from the seventh guest order of the
+  // night, with nothing to say so. Identical tones and timing; the only change is the context.
+  function playGuestOrderChime() { playChime() }
 
   // Merges one guest-requested item into the local cart, same dedup-by-line-key logic as
   // addItem() — but at whatever qty the guest asked for (addItem always adds exactly 1), and

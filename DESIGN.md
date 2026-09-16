@@ -1253,6 +1253,32 @@ Red says you cannot; amber says you can, but this is not the usual case. An ambe
 admin editing a closed month gets — the action is permitted and the notice must not read as a
 block.
 
+### The arrival alert — the one thing louder than a page (S763)
+
+`ArrivalAlert` is the product's only app-level interruption: something arrived that a person has to
+act on and nobody has — a guest QR order waiting for Accept, a kitchen ticket nobody has started.
+Amber at 22% over the card with a 3px bottom rule, red and pulsing once it escalates, fixed at the
+top at z-index **3000** — above the POS till layers (1000) and the Quick Calculator (2500), below
+`Tip` (9999).
+
+Four properties are the design, not the implementation:
+
+- **It is not a modal.** No scrim, no focus trap, no `aria-modal`. A cashier mid-bill and a chef
+  mid-service both have something in their hands, and an alert that takes the keyboard is worse than
+  the miss it prevents. It is `role="alert"` and the page behind it stays fully usable — the same
+  reasoning as the Quick Calculator's scrim rule under Components → Buttons.
+- **Mute silences the sound and leaves the banner.** The thing is still waiting. A control that
+  removes the evidence is how it gets missed a second time.
+- **It reserves its own measured height** rather than covering the module nav. Un-missable and
+  un-actionable at once is the worst of both.
+- **Its escalation is a hue AND a shape**, per the One Signal Meaning Rule: the icon goes 🔔 → △ →
+  ▲ on the same two thresholds the surface underneath it already uses, so the banner can never
+  disagree with the board or floor it sits over.
+
+The sound is `playChime` / `playGuestAlert` (`src/modules/pos/posChime.js`), which keep **one**
+shared `AudioContext` — a per-call context silently stops producing sound after about six, which is
+fatal on the screens this exists for.
+
 ### Empty states
 
 `.empty-state` is centred slate at `48px 24px` with a 32px glyph. It must never stand in for a

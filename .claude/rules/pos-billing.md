@@ -1026,15 +1026,24 @@ change, the floor's own arrival. **`playGuestAlert` is for an alert that has to 
 and then REPEAT**: three rising notes played twice at roughly double the gain, `urgent` adding a
 third round and a harder timbre.
 
-**`playChime` builds a new `AudioContext` on every call and never closes one, and that is a real
-bug the moment anything repeats.** Chrome caps a document at about six concurrent contexts. The
-Kitchen Display carried an inline copy of it and is opened once and left running for a whole
-service, so on a busy night the **seventh ticket onward made no sound at all** — on the screen
-furthest from anyone who would notice, and with nothing on it to say so. `playGuestAlert` keeps one
-module-level context and `resume()`s it, because a context created before a user gesture starts
-suspended and a tab left alone can have one suspended under it. Verified by counting: 9 oscillators
-in a 24-second window, **0 contexts created**. Anything that plays a sound more than once uses the
-shared context.
+**A chime that builds a new `AudioContext` per call and never closes one goes SILENT after about
+six, and every chime in this product did.** Chrome caps a document at roughly six concurrent
+contexts. Four call sites — the Kitchen Display, the POS floor's guest-order chime, Reservations,
+and the guest's own phone — each on a screen that is opened once and left running, so the seventh
+event of a service made no sound at all, with nothing on screen to say so. A guest's order walking
+Placed → Confirmed → Sent → Preparing → Ready is five of the six on its own.
+
+`getCtx()` keeps one module-level context and `resume()`s it, because a context created before a
+user gesture starts suspended and a tab left alone can have one suspended under it. Verified by
+counting: 9 oscillators in a 24-second window, **0 contexts created**. **Every caller now lives in
+`posChime.js`** — no new inline copy, and anything that plays a sound goes through it.
+
+**The instructive part is how long it hid.** `posChime.js`'s own header comment had enumerated the
+three inline copies and explicitly declined to migrate them: *"each is on a live service screen and
+none of them is wrong."* All three were wrong, identically, and it took building something that
+repeats to notice. **A note saying "these duplicates are fine" is a claim about the duplicates that
+nobody has re-checked since it was written** — when you find one, check the copies rather than the
+comment.
 
 `src/components/ArrivalAlert.jsx` is the banner both alerts render, and four of its properties are
 load-bearing:
