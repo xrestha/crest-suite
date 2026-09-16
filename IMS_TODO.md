@@ -67,6 +67,16 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 stage 4 — Stock Ageing count surpluses: kept cautious (owner decision, no change).
 - ⚪ Budget vs Actual's provisional line talks about spend rather than food cost — wording only.
 - ⚪ Dish photos uploaded to a NEW recipe that is then cancelled leave an unused file in storage.
+- ⚪ **S761 left the counter trim as a DISPLAY control, and the owner knows.** Only `closing_stock`
+  carries counter-scoped RESTRICTIVE policies (`ims_count_scope_*`, migration `20260910120000`);
+  `opening_stock`, `wastages` and `staff_meals` have none, so a count PIN's JWT can still write
+  them over REST even though the tabs are gone. Blind count and section scoping already carry the
+  same caveat and say so on the Settings tab. Making it a real boundary is a migration and a
+  separate owner decision — not started.
+- ⚪ **S761 was not click-verified as a count account.** The PIN is hashed, so the trimmed page was
+  checked by build, lint, the full suite and by hand-checking the header/body/footer column counts
+  across all four `hideValues` × `blindCount` combinations — not by signing in on a phone. Worth a
+  real look on a storeroom handset before the next month-end count.
 - ✅ S756 stage 4 — Payroll labour cost includes OVERTIME everywhere (owner decision): gross + overtime + employer SSF on Overheads, ClientDashboard, ConsolidatedPnl, Group Dashboard and the group P&L (migration `20260918170000`, applied live), matching the Owner Report and Owner Dashboard. `payrollCashCost` (absence subtracted) stays the cash-paid figure.
 - ⚪ `purchaseTaxSplit.js` keeps a private `mergeFactors`; `billPayables` could take prior bill lines directly (tidy-up).
 - ⚪ Owner Report vendor section: cash/credit split is pre-discount, and its aging total is compared against payments that include VAT.
@@ -105,6 +115,7 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 
 ### 2c. Frontend — security/access
 - ✅ S756 — `AuthContext.js:225` profile select lacks `ims_email` → `imsCountOnly` always false; count PIN reaches everything staff can.
+- ✅ S761 — the other half of that one, found from a photo of a counter's phone, not from the audit: `imsCountOnly` fences the ROUTE and nothing inside it, so a count PIN opened `/stock` to all seven tabs — Opening Stock (an entry grid over the month's starting basis) as the DEFAULT, Summary with COGS/purchase value/Excel export of the cost base, and Print Sheet + Summary making `ims_count_blind` readable in two taps. Now one tab (Closing Stock), no NPR per line for any Staff-rank counter, and blind count covering all three screens. **Display control only** — see below.
 - ✅ S756 — `ImsStaff.jsx:594/245/167` hide rank select for PIN rows; exclude from job-title sync.
 - ✅ S756 — `ClientDashboard.jsx:2574-2596` End Period button role check (D2).
 - ✅ S756 — `Overheads.js:210+` IMS-role login can't read payroll → says "no payroll run" and green Net Profit; say labour unreadable, withhold verdict.

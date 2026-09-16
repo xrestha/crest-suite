@@ -70,7 +70,7 @@ const FIELD_TAB = { opening: 'opening', closing: 'closing', wastage: 'wastage', 
 const fieldKeyOf = tab => FIELD_TAB[tab] || null
 
 export default function Stock() {
-  const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, hasFeature, hasImsAccess } = useAuth()
+  const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, hasFeature, hasImsAccess, imsCountOnly } = useAuth()
   // The export's letterhead (S756, owner decision): the one extra read this page makes for it.
   const biz = useBizInfo()
   const { settings } = useSettings()
@@ -86,11 +86,48 @@ export default function Stock() {
   // 'manager' on every axis, which makes the RESOLVED rank the wrong test for "is this a counter".
   const [myCategoryIds, setMyCategoryIds] = useState(null)
 
+  // "Is this account a counter", asked once. A RAW ims_role of 'staff' on purpose: admin and the
+  // Owner resolve to 'manager' on every axis, so the resolved rank is the wrong test (CLAUDE.md).
+  // Three rules key off it — scoping, blind count, and hiding value — and they were three separate
+  // spellings of this expression before S761.
+  const isCounter = !isAdmin && profile?.ims_role === 'staff'
+
   // The scope is DERIVED rather than applied at load, so it settles correctly when the settings
   // row arrives after the first read. It is a display rule only: the lock that actually holds is
   // the RESTRICTIVE policy on closing_stock writes (migration 20260910120000). Showing an item a
   // counter may not save would just move the refusal to the Save button.
-  const scopeOn = !isAdmin && profile?.ims_role === 'staff' && !!settings?.ims_count_scope_enforced
+  const scopeOn = isCounter && !!settings?.ims_count_scope_enforced
+
+  // Manager-only, and last on the bar: it configures the page rather than being part of counting
+  // it. Same conditional shape the staff_meals tab uses.
+  const canManageCounts = isAdmin || hasImsAccess('manager')
+
+  // What a PIN count account is handed (S761, owner decision). It exists to do ONE job on a shared
+  // store-room phone or tablet — enter a closing count — so it gets one tab. The rest were not
+  // merely clutter: Opening Stock is a live entry grid with its own Save All and was the DEFAULT
+  // tab, so the first thing a counter saw was the screen that rewrites the month's starting basis;
+  // Summary prints COGS, purchase value and an Excel export of the client's cost base; Print Sheet
+  // is a paper artefact for a desktop, and it and Summary between them made `ims_count_blind`
+  // peekable in two taps.
+  //
+  // Keyed on `imsCountOnly` (a PIN account), not on `isCounter`, so a store keeper you gave a real
+  // email login to keeps the full page. Like the blind/scope rules this is a DISPLAY control —
+  // only `closing_stock` carries a counter-scoped RESTRICTIVE policy; `opening_stock`, `wastages`
+  // and `staff_meals` do not, so the browser could still be made to write them.
+  const TABS = imsCountOnly
+    ? [{ id: 'closing', label: 'Closing Stock', desc: 'Physical count at month end' }]
+    : [
+      { id: 'opening',    label: 'Opening Stock', desc: 'Stock at start of month' },
+      { id: 'closing',    label: 'Closing Stock', desc: 'Physical count at month end' },
+      { id: 'wastage',    label: 'Wastage',       desc: 'Monthly catch-all total — quick single figure per item (daily detail goes in the Daily Wastage tab)' },
+      { id: 'daily_wastage', label: 'Daily Wastage', desc: 'Log wastage by day with a reason — rolls into the period total and COGS' },
+      ...(hasFeature('staff_meals') ? [{ id: 'staff_meal', label: 'Staff Meals', desc: 'Staff & complimentary consumption — tracked separately from wastage' }] : []),
+      { id: 'summary',    label: 'Summary',       desc: 'Full picture per item' },
+      { id: 'print',      label: 'Print Sheet',   desc: 'Physical count sheet for the floor' },
+      ...(canManageCounts && hasFeature('stock_count_assignment')
+        ? [{ id: 'settings', label: 'Settings', desc: 'Who counts what, blind counting, recount protection and the count-page QR' }]
+        : []),
+    ]
   // Fail CLOSED while the assignment read is still outstanding: an empty list is the honest
   // rendering of "we do not yet know what is yours", and the server would refuse those writes.
   const items = useMemo(
@@ -125,7 +162,12 @@ export default function Stock() {
   const [wBusy, setWBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState({})
-  const [activeTab, setActiveTab] = useState('opening')
+  // DERIVED, not stored (S761): `profile` arrives after the first render, so a count account's
+  // stored default would be 'opening' for a beat — and `imsCountOnly` flipping later would leave
+  // a tab selected that is no longer on the bar. Falling back to the first available tab makes
+  // "not on the bar" and "not reachable" the same fact, whenever the answer settles.
+  const [tabChoice, setActiveTab] = useState('opening')
+  const activeTab = TABS.some(t => t.id === tabChoice) ? tabChoice : TABS[0].id
   const [filterCat, setFilterCat] = useState('all')
   const [search, setSearch] = useState('')
   const [saveAllLoading, setSaveAllLoading] = useState(false)
@@ -300,7 +342,6 @@ export default function Stock() {
     // The assignment read is issued for a staff-rank account whether or not scoping is switched on
     // — `settings` may not have landed yet, and a second read fired later would be a waterfall on
     // the one page a month is counted on. It is a handful of rows.
-    const isCounter = !isAdmin && profile?.ims_role === 'staff'
     const initResults = await Promise.all([
       scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
       // Paged (S756): past 1000 items the count sheet silently had no rows for the tail of the
@@ -1235,32 +1276,27 @@ export default function Stock() {
   const isLocked = !canEditClosedPeriods && selectedPeriod?.status === 'closed'
 
   // Blind count (S737): a counter writes what is on the shelf rather than confirming what the
-  // system expected, so the derived columns come off the Closing tab for a staff-rank account.
-  // Closing ONLY — opening, wastage and staff meals are not the count being blinded, and hiding
-  // the reference figures there would just make those tabs harder to use.
+  // system expected, so the reference quantities come off the screen for a staff-rank account.
+  //
+  // Widened in S761 from `activeTab === 'closing'` to every screen that carries the same figures.
+  // Hiding Purchased/Returned on the Closing tab while Print Sheet printed System Ref Qty and
+  // Summary printed the whole register meant the control could be walked around in two taps — a
+  // counting-discipline rule nobody had to keep. Opening, wastage and staff meals are still not
+  // the count being blinded, so `blindCount` (the entry grid's columns) stays scoped to Closing;
+  // `blindOn` is the account-level fact the other two tabs ask.
   //
   // This is a DISPLAY rule and the settings tab says so where it is switched on: the figures still
   // reach the browser. Making it a real boundary would mean a second read path for scoped
   // accounts, which is not worth it for a control whose purpose is counting discipline.
-  const blindCount = !isAdmin && profile?.ims_role === 'staff'
-    && !!settings?.ims_count_blind && activeTab === 'closing'
+  const blindOn = isCounter && !!settings?.ims_count_blind
+  const blindCount = blindOn && activeTab === 'closing'
 
-  // Manager-only, and last: it configures the page rather than being part of counting it. Same
-  // conditional shape the staff_meals tab already uses on this array.
-  const canManageCounts = isAdmin || hasImsAccess('manager')
-
-  const TABS = [
-    { id: 'opening',    label: 'Opening Stock', desc: 'Stock at start of month' },
-    { id: 'closing',    label: 'Closing Stock', desc: 'Physical count at month end' },
-    { id: 'wastage',    label: 'Wastage',       desc: 'Monthly catch-all total — quick single figure per item (daily detail goes in the Daily Wastage tab)' },
-    { id: 'daily_wastage', label: 'Daily Wastage', desc: 'Log wastage by day with a reason — rolls into the period total and COGS' },
-    ...(hasFeature('staff_meals') ? [{ id: 'staff_meal', label: 'Staff Meals', desc: 'Staff & complimentary consumption — tracked separately from wastage' }] : []),
-    { id: 'summary',    label: 'Summary',       desc: 'Full picture per item' },
-    { id: 'print',      label: 'Print Sheet',   desc: 'Physical count sheet for the floor' },
-    ...(canManageCounts && hasFeature('stock_count_assignment')
-      ? [{ id: 'settings', label: 'Settings', desc: 'Who counts what, blind counting, recount protection and the count-page QR' }]
-      : []),
-  ]
+  // Money on a counter's screen (S761, owner decision). Counting an item needs its name, its unit
+  // and a box to type into; what the shelf is worth is the owner's business, and on a phone the
+  // NPR column is competing for width with the thing being counted. Separate from `blindCount`
+  // because they hide different facts — that one hides reference QUANTITIES and only while blind
+  // counting is switched on; this hides VALUE, always, for anyone counting.
+  const hideValues = isCounter
 
   // Floor tier, matching every other IMS page's guard (S417 convention). This page had none, so
   // the route was reachable by any account at an ims_enabled client regardless of ims_role.
@@ -1274,7 +1310,9 @@ export default function Stock() {
       <div className="page-header page-header--split no-print">
         <div>
           <h1 className="page-title">Stock Count</h1>
-          <p className="page-subtitle">Opening stock, physical closing count &amp; wastage</p>
+          {/* A count account has only the closing tab, so the full subtitle named two screens it
+              cannot reach — the first thing it would look for and not find. */}
+          <p className="page-subtitle">{imsCountOnly ? 'Physical closing count for the month' : 'Opening stock, physical closing count & wastage'}</p>
           <div className="page-scope-row">
             <PeriodScope label={periodLabel} status={selectedPeriod?.status} />
           </div>
@@ -1357,8 +1395,12 @@ export default function Stock() {
       {/* Nothing below the error card while a read has failed: every tab either shows figures the
           page does not have or saves on-screen state back to the server. */}
       {!loadError && <>
-      {/* Seven tabs (eight with Staff Meals) in a row that had no flexWrap — the shape that hid
-          ClientDrawer's last tab. .panel-tab-bar wraps instead, so "Print Sheet" cannot vanish. */}
+      {/* Up to eight tabs (nine with Settings) in a row that had no flexWrap — the shape that hid
+          ClientDrawer's last tab. .panel-tab-bar wraps instead, so "Print Sheet" cannot vanish.
+          A PIN count account gets one tab (see TABS), which is also what takes the bar on a phone
+          back from three wrapped rows to none. The bar is still rendered for it: one tab reads as
+          a heading for the screen below, and hiding it would make the single-tab case a different
+          layout to maintain. */}
       <div className="no-print panel-tab-bar" role="tablist" aria-label="Stock count sections">
         {TABS.map(tab => (
           <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id}
@@ -1368,7 +1410,22 @@ export default function Stock() {
       </div>
 
       {/* Summary Tab */}
-      {activeTab === 'summary' && (
+      {activeTab === 'summary' && blindOn && (
+        /* Blind counting is on and this tab is the whole register — opening, purchases, closing
+           and the value of each — for every item this account can see (S761). Withholding the
+           reference figures on the Closing tab and then printing them here is not a control.
+           The tab stays on the bar rather than disappearing: a counter who was using it should
+           be told why it is empty, not left looking for it. */
+        <div className="card" style={{ padding: 28, textAlign: 'center' }}>
+          <p style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>Hidden while blind counting is on</p>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
+            This month's summary carries the expected quantities your count is meant to be
+            independent of. Your manager can see it, and it opens to you once the count is taken
+            and blind counting is switched off.
+          </p>
+        </div>
+      )}
+      {activeTab === 'summary' && !blindOn && (
         <div>
           {(() => {
               const summary = getSummary()
@@ -1623,7 +1680,9 @@ export default function Stock() {
           </div>
 
           <div style={{ background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-accent-ink)' }} className="no-print">
-            System Ref Qty = Opening Stock + Purchases − Returns recorded this period. ★ marks high-value, fast-moving items — count these first and double-check the figures.
+            {blindOn
+              ? 'Blind counting is on, so this sheet prints without the expected quantities — write what is on the shelf. ★ marks high-value, fast-moving items; count these first and double-check the figures.'
+              : 'System Ref Qty = Opening Stock + Purchases − Returns recorded this period. ★ marks high-value, fast-moving items — count these first and double-check the figures.'}
           </div>
 
           <div className="card print-sheet">
@@ -1656,7 +1715,11 @@ export default function Stock() {
                         <th style={{ width: 40 }}><Tip text="High-value, fast-moving items. Count these first — errors here have the biggest financial impact." width={220}>★</Tip></th>
                         <th>Item</th>
                         <th>UOM</th>
-                        <th style={{ textAlign: 'right' }}><Tip text="Opening Stock + Purchases − Returns recorded this period. Use as a reference — your physical count may differ due to usage or shrinkage." width={250}>System Ref Qty</Tip></th>
+                        {/* The reference quantity is the whole thing blind counting hides (S761).
+                            Printing it here handed a blinded counter the figure the Closing tab
+                            had just withheld — on paper, which is worse, because it leaves the
+                            store room. */}
+                        {!blindOn && <th style={{ textAlign: 'right' }}><Tip text="Opening Stock + Purchases − Returns recorded this period. Use as a reference — your physical count may differ due to usage or shrinkage." width={250}>System Ref Qty</Tip></th>}
                         <th style={{ textAlign: 'right' }}>Physical Count</th>
                       </tr>
                     </thead>
@@ -1666,7 +1729,7 @@ export default function Stock() {
                           <td style={{ textAlign: 'center', color: 'var(--theme-accent-ink)' }}>{flagged.has(item.id) ? '★' : ''}</td>
                           <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{item.name}</td>
                           <td style={{ color: 'var(--theme-text2)' }}>{item.uom}</td>
-                          <td style={{ textAlign: 'right' }}>{Number(getSystemRefQty(item.id)).toLocaleString('en-IN')}</td>
+                          {!blindOn && <td style={{ textAlign: 'right' }}>{Number(getSystemRefQty(item.id)).toLocaleString('en-IN')}</td>}
                           <td className="print-sheet-blank"></td>
                         </tr>
                       ))}
@@ -1930,7 +1993,7 @@ export default function Stock() {
                           wrapperStyle={{ flex: 1, minWidth: 0 }}
                         />
                         <span className="mobile-stock-unit">{item.uom}</span>
-                        {!blindCount && lineValue != null && (
+                        {!hideValues && !blindCount && lineValue != null && (
                           <span className="mobile-stock-value">NPR {lineValue.toLocaleString('en-IN')}</span>
                         )}
                         {saving[item.id] && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>…</span>}
@@ -1943,7 +2006,7 @@ export default function Stock() {
                 <span style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Total — {visible.length} item{visible.length !== 1 ? 's' : ''}</span>
                 <span style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
                   <span style={{ color: 'var(--theme-text1)', fontSize: 13 }}>{totalQty > 0 ? Number(totalQty).toLocaleString('en-IN') : '—'}</span>
-                  {!blindCount && <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>{totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}</span>}
+                  {!hideValues && !blindCount && <span style={{ color: 'var(--theme-accent-ink)', fontSize: 14 }}>{totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}</span>}
                 </span>
               </div>
               </>
@@ -1964,7 +2027,7 @@ export default function Stock() {
                           </th>
                           {!blindCount && <th style={{ textAlign: 'right' }}>Purchased</th>}
                           {!blindCount && <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>Returned</th>}
-                          {!blindCount && (
+                          {!hideValues && !blindCount && (
                             <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
                               <Tip text="Qty entered × unit rate (per_uom_rate). Gives the NPR value of this item's stock entry." width={220}>Value (NPR)</Tip>
                             </th>
@@ -2021,7 +2084,7 @@ export default function Stock() {
                                   {returned > 0 ? `−${Number(returned).toLocaleString('en-IN')} ${item.uom}` : '—'}
                                 </td>
                               )}
-                              {!blindCount && (
+                              {!hideValues && !blindCount && (
                                 <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 13, fontWeight: lineValue ? 600 : 400 }}>
                                   {lineValue != null ? `NPR ${lineValue.toLocaleString('en-IN')}` : '—'}
                                 </td>
@@ -2042,7 +2105,7 @@ export default function Stock() {
                             {totalQty > 0 ? Number(totalQty).toLocaleString('en-IN') : '—'}
                           </td>
                           {!blindCount && <td colSpan={2}></td>}
-                          {!blindCount && (
+                          {!hideValues && !blindCount && (
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-accent-ink)', fontSize: 14, paddingTop: 12 }}>
                               {totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}
                             </td>

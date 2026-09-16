@@ -208,6 +208,16 @@ sidebar and the command palette all read. **Ask which choke point actually cover
 route before choosing where a new account-level guard goes** — "every module route" is not "every
 route".
 
+**And a guard at the route says nothing about the page (S761).** `/stock` was the one page that
+allowlist opened, and inside it a count PIN got the full seven-tab Stock Count for 24 sessions:
+Opening Stock (an entry grid over the month's starting basis, and the DEFAULT tab), Summary (COGS,
+purchase value, an Excel export of the cost base) and Print Sheet, which together made
+`ims_count_blind` readable in two taps. `ProtectedRoute` had done exactly what it was written to
+do. **A route allowlist is a statement about pages; a page's tabs, sub-views, export buttons and
+in-page role checks are a separate audit** — the same reason a sub-route inherits nothing from its
+parent (S647) and a nav allowlist is not a guard (S683). Detail in
+`.claude/rules/accounts-and-logins.md`.
+
 ## Four gates, one grammar for "you cannot have this" (S683)
 
 The critique found four gates with four grammars. `ModuleGate` was three silent
