@@ -43,32 +43,6 @@ export const POS_GUIDE_GROUPS = [
         connections: 'POS feeds IMS (Sales Entry, Stock Movements, and everything downstream — Variance, COGS, Menu Engineering). Menu items come from recipes flagged On POS in Menu Pricing (documented in the Crest IMS guide). POS staff can be linked to HR employees so one person exists once. Sizes, extras and "No …" choices on a dish are the Crest Customization add-on, sold separately and documented in its own guide tab.',
       },
       {
-        id: 'pos-setup',
-        title: 'POS Setup',
-        route: '/pos',
-        plan: 'Manager only',
-        summary:
-          'Where each till tablet is activated and managed. Activation gives THAT tablet its own key (S754), which is what lets the PIN login screen list staff before anyone is signed in. The Tablets list shows every activated tablet, who activated it, when it was last used, and a Revoke button. Also the jumping-off link to the PIN screen.',
-        workflow: [
-          'On each till tablet, a Manager (or the Owner) signs in once at the main login, opens POS Setup, names the tablet ("Front counter", "Bar") and presses Activate. From then on the tablet boots straight to the PIN picker.',
-          'Lost, sold or broken tablet: press Revoke beside it in the Tablets list. It stops at the PIN screen on its very next sign-in; every other tablet keeps working.',
-          'Moving from the old shared key: tablets activated before S754 all share one restaurant-wide key. An amber panel says the shared key is still on and when a tablet last used it. Re-activate each old tablet so it appears in the list, then press "Switch it off" — that cannot be undone.',
-          'Deactivate before rebinding a machine to a different outlet — a device bound to another client refuses to simply switch. Deactivating a tablet that has its own key also revokes that key.',
-        ],
-        fields: [
-          { label: 'Tablet key', desc: 'A long random key per tablet, stored on that tablet at activation. The server keeps only a one-way fingerprint of it, so nobody — admin included — can read a tablet\'s key back. The pre-login staff roster is only served to a tablet presenting a live key, so a random visitor to the login URL sees nothing.' },
-          { label: 'Last used', desc: 'The last time the tablet reached the staff sign-in with its key — any PIN attempt, right or wrong. A tablet not used for weeks is worth checking on.' },
-          { label: 'Shared key (legacy)', desc: 'The one restaurant-wide key every tablet used before S754. It keeps working so no floor was locked out by the update, but it cannot be revoked for one tablet alone. Switching it off replaces it with a value no tablet holds.' },
-        ],
-        formulas: [],
-        gotchas: [
-          'A tablet whose key was revoked, or which still holds the shared key after it was switched off, shows a "this tablet needs activating again" screen — never an empty staff list.',
-          'Tablet keys are NOT in a client backup and are not restored: after a restore each tablet is activated again, one tap each. Archiving a client, or clearing its data, revokes every tablet key and switches the shared key off (S755), so after a restore each tablet is activated again from POS Setup.',
-          'Needs migration 20260916120000 and the new pos-staff-login to be live. Until then tablets keep signing in on the shared key.',
-        ],
-        connections: 'Activation state gates the PIN Login screen and the idle lock. The key is verified again server-side on every PIN login, and every sign-in stamps the tablet\'s Last used.',
-      },
-      {
         id: 'pos-login',
         title: 'PIN Login',
         route: '/pos/login',
@@ -518,6 +492,32 @@ export const POS_GUIDE_GROUPS = [
     key: 'pos-admin',
     label: 'Admin',
     sections: [
+      {
+        id: 'pos-setup',
+        title: 'POS Setup',
+        route: '/pos',
+        plan: 'Manager only',
+        summary:
+          'Where each till tablet is activated and managed. Activation gives THAT tablet its own key (S754), which is what lets the PIN login screen list staff before anyone is signed in. The Tablets list shows every activated tablet, who activated it, when it was last used, and a Revoke button. Also the jumping-off link to the PIN screen.',
+        workflow: [
+          'On each till tablet, a Manager (or the Owner) signs in once at the main login, opens POS Setup, names the tablet ("Front counter", "Bar") and presses Activate. From then on the tablet boots straight to the PIN picker.',
+          'Lost, sold or broken tablet: press Revoke beside it in the Tablets list. It stops at the PIN screen on its very next sign-in; every other tablet keeps working.',
+          'Moving from the old shared key: tablets activated before S754 all share one restaurant-wide key. An amber panel says the shared key is still on and when a tablet last used it. Re-activate each old tablet so it appears in the list, then press "Switch it off" — that cannot be undone.',
+          'Deactivate before rebinding a machine to a different outlet — a device bound to another client refuses to simply switch. Deactivating a tablet that has its own key also revokes that key.',
+        ],
+        fields: [
+          { label: 'Tablet key', desc: 'A long random key per tablet, stored on that tablet at activation. The server keeps only a one-way fingerprint of it, so nobody — admin included — can read a tablet\'s key back. The pre-login staff roster is only served to a tablet presenting a live key, so a random visitor to the login URL sees nothing.' },
+          { label: 'Last used', desc: 'The last time the tablet reached the staff sign-in with its key — any PIN attempt, right or wrong. A tablet not used for weeks is worth checking on.' },
+          { label: 'Shared key (legacy)', desc: 'The one restaurant-wide key every tablet used before S754. It keeps working so no floor was locked out by the update, but it cannot be revoked for one tablet alone. Switching it off replaces it with a value no tablet holds.' },
+        ],
+        formulas: [],
+        gotchas: [
+          'A tablet whose key was revoked, or which still holds the shared key after it was switched off, shows a "this tablet needs activating again" screen — never an empty staff list.',
+          'Tablet keys are NOT in a client backup and are not restored: after a restore each tablet is activated again, one tap each. Archiving a client, or clearing its data, revokes every tablet key and switches the shared key off (S755), so after a restore each tablet is activated again from POS Setup.',
+          'Needs migration 20260916120000 and the new pos-staff-login to be live. Until then tablets keep signing in on the shared key.',
+        ],
+        connections: 'Activation state gates the PIN Login screen and the idle lock. The key is verified again server-side on every PIN login, and every sign-in stamps the tablet\'s Last used.',
+      },
       {
         id: 'pos-staff',
         title: 'POS Staff & the role system',

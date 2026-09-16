@@ -152,10 +152,11 @@ const IMS_GROUPS = [
 ]
 const HR_DASHBOARD = { to: '/hr/dashboard', label: 'HR Dashboard', icon: LayoutDashboard, minHrRole: 'supervisor' }
 
+// POS Setup lives in the Admin group with POS Staff, not as a bare pill of its own (S763, owner
+// decision). Both are manager-only configuration reached a handful of times per outlet — a standing
+// top-level pill for one of them, right of Dashboard, gave the least-used POS page the most
+// prominent position in the bar and left Admin holding a single row.
 const POS_GROUPS = [
-  { key: 'pos-setup', label: null, items: [
-    { to: '/pos', label: 'POS Setup', icon: Settings2, minPosRole: 'manager' },
-  ]},
   { key: 'pos-floor', label: 'Floor', items: [
     { to: '/pos/orders', label: 'Orders', icon: ConciergeBell, minPosRole: 'staff' },
     // S762: the cashier's own way in — straight to the open-bills list and the payment window,
@@ -180,6 +181,7 @@ const POS_GROUPS = [
     { to: '/pos/covers-report', label: 'Covers Report', icon: UtensilsCrossed, minPosRole: 'manager' },
   ]},
   { key: 'pos-admin', label: 'Admin', items: [
+    { to: '/pos', label: 'POS Setup', icon: Settings2, minPosRole: 'manager' },
     { to: '/pos/staff', label: 'POS Staff', icon: Users2, minPosRole: 'manager' },
   ]},
 ]
