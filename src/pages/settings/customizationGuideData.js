@@ -27,9 +27,12 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'Sold flat, per client, at the price saved on Admin → Settings → Plan Pricing (NPR 2,000 a month is the shipped default). Admin switches it on from Admin → Clients; a trial gets it on with every other module. Switching POS off switches it off too — nothing here exists without a till.',
           'Setup, in order: build a few shared groups on Custom → Option Groups (Size, Extras, Spice), add each group\'s options, then PUT EACH GROUP ON ITS DISHES. A group that is on no dish offers nothing, and the page says so in amber until it is.',
           'Service: a dish with choices either adds in one tap (when its pre-selected defaults already satisfy every rule) or opens the choice window; the guest menu shows the same choices on a phone sheet. The server prices every line from the option ids alone.',
+          'Build-your-own dishes (S760): an acai bowl, a pizza, a salad — a dish the guest assembles. Tick Build-your-own on the dish (Recipe Costing, or ⋯ on the Dishes tab), or let the Build-your-own template create its Size, Base, Sauces and Toppings in one go. The till always opens its choices, the QR menu walks the guest through one step at a time, and with IMS the dish is costed as a RANGE rather than from its few fixed ingredients.',
           'Reading it back: Custom → Customization Report — what the extras earned, what sizes took off, what is most added, how often each dish is customized, the most common "No …" requests, and (with IMS) whether a paid choice earns more than its stock lines cost.',
         ],
         fields: [
+          { label: 'Build-your-own (S760)', desc: 'A MARK on the dish (recipes.is_build_your_own), never a category — an acai bowl stays Food, so kitchen/bar ticket routing, its product code and every category split are untouched. It changes three things: the till always opens the choice window (no one-tap default), the guest sheet becomes a stepper, and Recipe Costing / Menu Pricing cost the dish as a range. A marked dish with no groups is flagged in amber — guests would have nothing to build.' },
+          { label: 'Portion and size scaling (S760)', desc: 'A Size option carries a Portion (Small 0.75, Medium 1, Large 1.5), and every OTHER group says what a bigger size does to its picks: nothing, more stock, or more stock and a higher price. So one topping row serves all three sizes: chicken popcorn at 60 g and +NPR 120 becomes 90 g and +NPR 180 on a Large. A size\'s own stock lines are never scaled — they are the size\'s own adjustment.' },
           { label: 'Who can edit', desc: 'Admin, the Owner, a POS manager or an IMS manager — the same set that may set a menu price, tested on the raw pos_role / ims_role columns because the database (caller_can_set_menu_price) tests the same. A POS supervisor or waiter is sent to the dashboard by URL as well as by nav.' },
           { label: 'Group, option, attachment', desc: 'A GROUP is a question ("Size?", "Extras?") with a pick rule. An OPTION is one answer with a price, a kitchen name, a diet mark, allergens and (with IMS) stock lines. An ATTACHMENT is a group put on one dish, carrying that dish\'s own overrides — a stricter min/max and a pre-selected option for that dish only.' },
           { label: 'Three kinds', desc: 'Size — the guest picks exactly one and each size sets the whole dish price. Add-ons — the guest can pick several and each can add to the price (a "No onion" is an add-on marked as TAKING SOMETHING OFF, always free, printed as NO onion). Choice — a pick from a list, usually free (Mild / Medium / Hot). Only Size behaves differently in the editor: its price is entered as the full menu price of that size.' },
@@ -37,10 +40,12 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
         ],
         formulas: [
           'Line price = dish selling price + Σ price_delta of the picked options, with the first included_count picks of each group free — "first" meaning earliest in the group\'s display order among what was picked, not the cheapest.',
+          'Size factor = the product of the chosen Size options\' Portion (blank = 1). A pick in a scaling group is then charged round(price × factor, 2) and consumes qty × factor. The free-picks rule runs FIRST, so a pick that is free stays free at every size. One rule in three places: the till RPC, the guest pricer and optionPricing.js.',
           'A line\'s identity = recipe + selection: "Momo, Half + cheese" and "Momo" are two lines on the same bill and never merge. A line with no picks keys exactly as a plain dish did before the module existed.',
         ],
         gotchas: [
           'Order is a fact the owner sets. Options move within a group and groups move on the page (Move up / Move down), and a dish\'s groups reorder in its Choices dialog. Guests see options in that order, and it is also what decides which picks are free under a first-N deal.',
+          'The scaled amount is frozen onto the bill line when it is saved, so no report multiplies anything later and editing a Portion never rewrites a sale already rung. Change a Portion and only NEW lines follow it.',
           'A choice with no stock lines changes NOTHING in stock or food cost. Fine for spice level; wrong for "Extra cheese". Option Groups flags every such option in amber under the Stock column.',
           'Nothing is clamped. "No onion" on a dish whose recipe has no onion still takes onion off in the ledger; a negative usage is a data-entry problem the Stock Movements page shows, not one the module hides.',
           'A dish already sent to the kitchen cannot have its choices changed — remove it (with a reason, recorded as a pulled item) and add it again, which prints a fresh ticket. Change exists only on an unsent line.',
@@ -138,6 +143,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
         summary:
           'Tapping a dish that has choices does one of two things. If every required group already has a pre-selected default, the dish is added in ONE TAP with those defaults (a Full momo goes on at once). If something still has to be chosen — a size with no default — the choice window opens: one section per group in the dish\'s order, chips for the options, a running price, a quantity stepper, Cancel and Add pinned at the bottom. Either way the cart line shows the choices under the dish name with a Choices / Change button.',
         workflow: [
+          'A BUILD-YOUR-OWN dish (S760) always opens the window, even when its defaults would cover every rule — building it is the order. Every chip price reads at the size picked so far, so a topping shows its Large price once Large is chosen.',
           'Tap the dish. One-tap add, or pick in the window: a group that allows one pick behaves as a radio (a new pick replaces the old), a group that allows several as checkboxes that stop at the maximum and say "Max 3" on the rest.',
           'Set the quantity with − / + in the footer (4 Full momo is one line of 4), press Add. "Same as last: Half · cheese" at the top restores what this dish was last added with on this till.',
           'Press Add while a group is short and the button does not go dead: the window names the group, scrolls to it and puts the cursor on its first chip.',
@@ -151,7 +157,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           { label: 'Kitchen note', desc: 'The free-text note under the line is for what options cannot say ("serve after starters"). It no longer suggests "no onion" — a note reaches the kitchen but not the bill, stock or any report; the option does all four.' },
         ],
         formulas: [
-          'One tap adds when selectionProblems(defaultSelection(groups)) is empty; the window opens otherwise. A dish with only optional groups therefore always adds in one tap, and Choices on the cart line is where its extras are added.',
+          'One tap adds when the dish is NOT build-your-own and selectionProblems(defaultSelection(groups)) is empty; the window opens otherwise. A dish with only optional groups therefore always adds in one tap, and Choices on the cart line is where its extras are added.',
           'Same choices tapped again add to the same line; different choices are a new line; Change on a line replaces it (or folds it into an identical line already on the order).',
         ],
         gotchas: [
@@ -228,6 +234,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'A failed read is a failed report: the tiles and tables do not render over a read that did not complete, and the Margin tab can fail alone (stock lines or item rates unreadable) while the three sales tabs stand.',
           'The Margin tab appears only on a client WITH IMS — an admin viewing a POS-only client does not see it.',
           'The report reads the snapshot on each bill line, so a choice renamed or deleted since still appears under the name it was sold as.',
+          'Extras earned and Cost / plate are already at the size that was sold (S760): a topping picked on a Large bowl contributes its scaled price and its scaled stock, because both were frozen on the line. There is no separate by-size tab — Recipe Costing\'s cost range is where a dish is compared size by size.',
         ],
         connections: 'Reads pos_orders (paid, closed in range), pos_order_items, pos_order_item_options, pos_recipe_option_groups (who is customizable today), and the option catalog (kind and list price per option). With IMS, the ingredient explosion and items.per_uom_rate for cost.',
       },
