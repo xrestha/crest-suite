@@ -143,6 +143,15 @@
         ],
         "createdAt": "2026-09-15T13:24:09.707Z",
         "reason": "DESIGN.md Shapes: scoped guest surface keeps its own shape language; value moved from GuestOptionSheet.jsx inline style into CSS (S759)"
+      },
+      {
+        "rule": "design-system-radius",
+        "value": "*",
+        "files": [
+          "src/modules/pos/guestmenu/**"
+        ],
+        "createdAt": "2026-09-16T03:47:42.722Z",
+        "reason": "DESIGN.md -> Shapes names .guest-menu as one of the two sanctioned radius exemptions: the scoped guest surfaces keep their own shape language for the same reason they keep their own palette. Directory-scoped because the hook reports the path as GuestMenu.css (derived from the component name) while the file is guestMenu.css, so the S759 per-basename entries never matched. A per-value ignore with no --file would have exempted 8px/4px product-wide and defeated the Modernist zero-radius rule."
       }
     ]
   }

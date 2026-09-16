@@ -307,6 +307,31 @@ promoting an upsell into the row that answers "where am I" advertises to every u
 forever. Same question for the next add-on: does this belong to a panel, or does it keep having to be
 copied into all of them?
 
+### A file-scoped hook ignore must match the path the HOOK prints, not the file on disk (S763)
+
+The design hook reported two radius findings in `src/modules/pos/guestmenu/GuestMenu.css` — **a file
+that does not exist**. The real one is `guestMenu.css`, lowercase, in git and in the `import`; the
+hook derives the stylesheet path from the component name (`GuestMenu.jsx` → `GuestMenu.css`), and a
+case-insensitive Windows filesystem happily opens the real file under that spelling. It had even
+printed the same finding twice, once per casing, which is the tell.
+
+The consequence is quiet and lasting: **S759 had already added ignores for exactly those two values**,
+correctly reasoned and correctly scoped — to the real lowercase filename. They never matched, so the
+finding was re-raised in every session that touched the guest menu, and each one triaged it again
+from scratch. An ignore that does not match is indistinguishable from an ignore nobody wrote.
+
+Two rules:
+
+- **Scope to the DIRECTORY with a wildcard** (`src/modules/pos/guestmenu/**`), not to a basename. It
+  is immune to the casing the hook happens to print, and it is what the sanctioned exception actually
+  is — DESIGN.md → Shapes exempts *the scoped guest surface*, not two individual pixel values.
+- **Never take the per-value form for a file-scoped exception.** `ignore-value design-system-radius
+  8px` with no `--file` exempts 8px **product-wide** and quietly defeats the Modernist zero-radius
+  rule everywhere. The narrowest ignore is the one scoped to the thing that is genuinely exempt.
+
+After adding one, confirm the finding actually stops — a config entry is not evidence that the
+matcher agreed with it.
+
 ### "You are here" is a longest-prefix match, not a prefix match (S763)
 
 `NavLink`'s `isActive` prefix-matches by default. That is right for an item with sub-routes
