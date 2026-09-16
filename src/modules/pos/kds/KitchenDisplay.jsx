@@ -315,30 +315,31 @@ export default function KitchenDisplay() {
     advance(ticket, 'in_progress', minutes)
   }
 
-  // The STANDING alert (S763), distinct from the arrival chime above. A ticket chimes once when it
-  // lands; this is for one that has then sat in New with nobody starting it.
+  // The STANDING alert (S763). It is up for as long as ANY ticket sits in New — owner decision,
+  // revised the same session: the first build only raised it past the 8-minute warn mark, on the
+  // reasoning that a kitchen working a queue always has tickets in New and a banner up all service
+  // gets muted on the first night. Aashish sent a real ticket through, looked for the alert and
+  // found nothing, and chose arrival. A kitchen that has not yet touched a ticket is the state
+  // worth shouting about, and the cost of shouting early is a banner a busy kitchen sees a lot of.
   //
-  // The repeat threshold is WARN_MS, not "any unstarted ticket", and that is the whole judgement:
-  // a kitchen working through a queue has several tickets legitimately sitting in New at any
-  // moment, and an alert that fires every 20 seconds through normal service is one that gets muted
-  // on the first night and never unmuted. Past the 8-minute mark nobody has picked it up, which is
-  // a different fact. Past LATE_MS it escalates to the red, harder-timbre form — the same two
-  // thresholds the card strip and the ▲/△ marks already use, so the banner cannot disagree with
-  // the board underneath it.
-  const staleNew = tickets
-    .filter(t => t.status === 'new' && now - new Date(t.sent_at).getTime() > WARN_MS)
+  // WARN_MS/LATE_MS did not go away — they now drive the ESCALATION rather than the trigger, so the
+  // banner still hardens on the same two marks the card strip and the ▲/△ readout use and the two
+  // cannot disagree.
+  const newTickets = tickets
+    .filter(t => t.status === 'new')
     .sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime())
-  const oldestStaleMs = staleNew.length > 0 ? now - new Date(staleNew[0].sent_at).getTime() : 0
-  const alertUrgent = oldestStaleMs > LATE_MS
+  const oldestNewMs = newTickets.length > 0 ? Math.max(0, now - new Date(newTickets[0].sent_at).getTime()) : 0
+  const alertWarn = oldestNewMs > WARN_MS
+  const alertUrgent = oldestNewMs > LATE_MS
   const alertMuted = alertMutedUntil > now
-  const alertOn = staleNew.length > 0
+  const alertOn = newTickets.length > 0
 
-  // Sounds while the board has a ticket nobody has started past the warn mark, and keeps sounding.
-  // The board is already showing them; this is for the screen nobody is looking at, which is the
-  // whole reason a KDS has audio at all.
+  // The REPEAT. A genuinely new arrival is chimed by playNewTicketChime inside load(), which is
+  // what knows an id it has not seen before — so this one deliberately does NOT sound immediately,
+  // or every arrival would double-chime. It is the "still nobody has pressed Start" reminder, and
+  // it stops the moment the last New ticket is started.
   useEffect(() => {
     if (!alertOn || alertMuted) return
-    playGuestAlert({ urgent: alertUrgent })
     const id = setInterval(() => playGuestAlert({ urgent: alertUrgent }), REPEAT_MS)
     return () => clearInterval(id)
   }, [alertOn, alertMuted, alertUrgent])
@@ -361,16 +362,21 @@ export default function KitchenDisplay() {
       {/* ArrivalAlert is position: fixed at z-index 3000, so it paints OVER this 1000 layer rather
           than inside it — the board keeps its full height and nothing below shifts. The padding
           here is what stops the Exit button sitting underneath it. */}
+      {/* The elapsed figure below is Math.ROUND, matching the card's own `elapsedMin` — at 3.5
+          minutes a banner saying 3 over a card saying 4 is two answers to one question on one
+          screen, and this banner's whole claim is that it agrees with the board underneath it. */}
       {alertOn && (
         <ArrivalAlert
-          icon={alertUrgent ? '▲' : '🔔'}
+          icon={alertUrgent ? '▲' : alertWarn ? '△' : '🔔'}
           urgent={alertUrgent}
           muted={alertMuted}
           onMute={() => setAlertMutedUntil(Date.now() + MUTE_MS)}
-          title={staleNew.length === 1
-            ? `Not started — #${staleNew[0].order_no}${staleNew[0].table_name ? ` · ${staleNew[0].table_name}` : ''}`
-            : `${staleNew.length} tickets not started`}
-          detail={`Oldest sent ${Math.floor(oldestStaleMs / 60000)} min ago. Tap Start on the card to take it.`}
+          title={newTickets.length === 1
+            ? `New ticket — #${newTickets[0].order_no}${newTickets[0].table_name ? ` · ${newTickets[0].table_name}` : ''}`
+            : `${newTickets.length} tickets waiting to start`}
+          detail={oldestNewMs < 30000
+            ? 'Just in. Tap Start on the card to take it.'
+            : `Oldest sent ${Math.round(oldestNewMs / 60000)} min ago. Tap Start on the card to take it.`}
         />
       )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0, paddingTop: alertOn ? 76 : 0 }}>

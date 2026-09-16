@@ -1058,12 +1058,22 @@ screen: `/pos/orders` answers it better already, and `/pos/kds` because the kitc
 guest order and a kitchen-team login cannot even reach Orders
 (`KITCHEN_TEAM_ALLOWED_PATHS`), so the button would be a dead end.
 
-**The KDS's own standing alert fires on WARN_MS, not on "any unstarted ticket".** A kitchen working
-through a queue always has several sitting in New; an alert firing every 20 seconds through normal
-service is one that gets muted on the first night and never unmuted. Past 8 minutes nobody has
-picked it up, which is a different fact, and past `LATE_MS` it escalates — **the same two
-thresholds the card strip and the ▲/△ marks already use**, so the banner cannot disagree with the
-board underneath it. A new alert on this board reuses those constants rather than choosing its own.
+**The KDS's own standing alert fires on ANY ticket in New, and clears on Start** (owner decision).
+It hardens on `WARN_MS` and again on `LATE_MS` — **the same two thresholds the card strip and the
+▲/△ marks already use** — so the banner cannot disagree with the board underneath it, and its
+elapsed figure rounds the way the card's own label rounds for the same reason. A new alert on this
+board reuses those constants rather than choosing its own.
+
+**That trigger was WARN_MS for about an hour, and why it changed is the rule worth keeping.** The
+argument for the higher threshold was real and still is: a kitchen working through a queue always
+has several tickets in New, and an alert firing every 20 seconds through normal service gets muted
+on the first night and never unmuted. What it missed is that **a threshold chosen to avoid annoying
+the reader is a window in which the product says nothing** — and the person who asked for the alert
+sent a real ticket through, went to look, and found a board with a ticket on it and no alert, which
+is the same experience that opened the session one screen along. Before quieting an alert with a
+delay, ask what the reader sees during the delay; if the answer is "the thing they are waiting for,
+with nothing saying so", the delay is the bug. Loudness is the owner's call to spend, and Mute is
+the release valve.
 
 
 ## Server-assigned numbers, the offline queue, and `settings` RLS

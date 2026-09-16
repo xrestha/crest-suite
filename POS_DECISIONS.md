@@ -189,7 +189,13 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   for. Two owner decisions taken before building: (1) the alert **repeats until acted on** rather
   than sounding once, because a single chime into an empty room is the failure being fixed; (2) it
   polls at **15 s app-wide**, not the 60 s the rail badges use nor the 5 s the floor uses, since it
-  is the one badge query every signed-in session pays on every page. Built as a shell-level banner
+  is the one badge query every signed-in session pays on every page. **A third was taken an hour
+  later, after looking at the result**: the Kitchen Display's banner was built to fire only past the
+  8-minute warn mark, to keep a working kitchen quiet — Aashish sent a real ticket through, went to
+  check, and found a board with a ticket on it and nothing saying so, which is the complaint that
+  opened the session one screen along. It now fires the moment a ticket lands and clears on Start;
+  the two thresholds became the escalation instead. **A delay chosen to avoid annoying the reader is
+  still a window in which the product says nothing.** Built as a shell-level banner
   (`ArrivalAlert`, fixed, `role="alert"`, never a modal — a cashier mid-bill and a chef
   mid-service both have something in their hands) plus `playGuestAlert`, three rising notes twice at
   double gain, escalating past three minutes. **The Kitchen Display got the same treatment for its
