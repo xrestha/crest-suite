@@ -174,3 +174,51 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 — Hand-built sheets without `sheetWithLetterhead`: Variance, TheoreticalVariance, AnnualSummary (money as text), DemandForecast, 1L.
 - ✅ S756 (VendorReport/SupplierContribution finished in stage 3) — `provisionalWhenOpen` missing on VatReport, NonVatReport, VendorReport; stale tooltips (# Bills, "Gross"); VAT export disabled on returns-only months.
 - ✅ S756 — `counted_by` shown nowhere; `Stock.js:885` retyped `computeUsed`; `Stock.js:1369` locale date.
+
+---
+
+## 3. From the S765 design critique (`/impeccable critique ims module`, 29/40)
+
+Snapshot: `.impeccable/critique/2026-09-16T07-48-04Z__src-modules-ims.md`. Everything in the P0/P1/P2
+tiers shipped in S765; what is listed here is only what did not.
+
+- ✅ S765 — The touch stock-count screen was gated on `window.innerWidth < 768`, exactly
+  iPad-portrait width, so NO tablet had ever reached it. Now `(pointer: coarse)`.
+- ✅ S765 — The count card's "done" cue fired on keystroke, so typed and saved looked identical on a
+  shared tablet. Four states now, each carrying a word as well as a colour.
+- ✅ S765 — `Tabs`/`FilterChips` (`src/components/Tabs.jsx`): `aria-controls`, `role="tabpanel"` and
+  roving `tabIndex` each appeared ZERO times across the module; 15 of 24 chip rows had no
+  `aria-pressed`.
+- ✅ S765 — Sales Entry's KPI strip rendered 95 lines above its own `loading` guard, so `NPR 0` in the
+  accent stayed painted above "could not load" on the revenue denominator for every food-cost figure
+  in the product. Overheads' bucket cards claimed "Not entered yet" during every load.
+- ✅ S765 — Outstanding Payables' bill drilldown was a frozen `rgba(10,12,18,0.7)`, ~2.0:1 on
+  Modernist Light, plus seven sibling literals.
+- ✅ S765 — Eight live `window.confirm` and one `alert()`, including the stock-shortfall warning.
+- ✅ S765 — `ClosedPeriodBanner`: five copies, four byte-identical and one already drifted.
+- ✅ S765 — The `.impeccable/config.json` `26px` ignore carried no `files:` key, so it suppressed that
+  size product-wide while its reason named one print template.
+
+**Open after S765:**
+
+- ⚪ **`26px` outside IMS is still off-ramp** — `PosLogin.jsx`, `GuestMenu.jsx`, `Pricing.js` (×3),
+  `Settings.js`, `ClientDrawer.js`, `ArrivalAlert.css`. Left deliberately: these are brand-facing
+  surfaces where a type size is a design decision, not a cleanup, and they were outside the scope of
+  an IMS critique. Note the detector cannot see most of them anyway (next item).
+- ⚪ **The design detector reads only a QUOTED font size.** Probed in S765: `fontSize: '26px'` is
+  flagged, `fontSize: 26` is not — and this codebase is ~3,450 inline style blocks. Measured across
+  1,233 numeric sizes in IMS, exactly one was off-ramp, so IMS is clean behind the blind spot; the
+  rest of the product has not been measured this way.
+- ⚪ **`tabular-nums` does not reach the 13 hand-rolled `<table>`s**, including the purchase-bill line
+  table — the product's most-used money entry form renders in proportional figures. `Layout.css`
+  scopes the rule to `table.data-table td` and `.stat-value`.
+- ⚪ **Three report pages still have no empty branch at all** — `PaymentReport`, `Overheads`,
+  `BudgetVsActual` — and seven more hand-roll one instead of `.empty-state`.
+- ⚪ **Stock Count, Overheads and Requisitions still render no closed-period banner**, which
+  `closed-periods.md` has flagged since S651. `ClosedPeriodBanner` now exists for them.
+- 🔵 **The Starter tier's nav deletes locked rows rather than upselling** — raised by the critique as
+  an inconsistency with the Crest Suite group, which stays visible with a PRO chip. Settled as
+  deliberate (owner decision, 2026-09-16) and recorded in `.impeccable/critique/ignore.md` so a
+  future critique does not re-raise it. The group-LABEL question is explicitly left open there: a
+  "Costing" group whose only surviving member is a price list is a labelling problem that survives
+  the decision.

@@ -17,6 +17,7 @@ import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import { bsToAd, daysInBsMonth, BS_MONTHS } from '../../../utils/bsCalendar'
+import { FilterChips } from '../../../components/Tabs'
 import {
   AGE_BANDS, ageAllocated, ageInDays, asOfForWindow, splitReturns,
   anchorToCounts, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods, periodMonthIndex,
@@ -437,14 +438,17 @@ export default function StockAgeing() {
   const filters = (
     <>
       <div className="no-print" style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div className="tab-bar" role="radiogroup" aria-label="Filter by age band">
-          <button className={`tab-btn${filterBand === 'all' ? ' tab-btn--active' : ''}`}
-            aria-pressed={filterBand === 'all'} onClick={() => setFilterBand('all')}>All Ages</button>
-          {AGE_BANDS.map(b => (
-            <button key={b.key} className={`tab-btn${filterBand === b.key ? ' tab-btn--active' : ''}`}
-              aria-pressed={filterBand === b.key} onClick={() => setFilterBand(b.key)}>{b.label}</button>
-          ))}
-        </div>
+        {/* S765: this was role="radiogroup" over plain <button>s carrying aria-pressed — an
+            invalid pairing. A radiogroup's children must be role="radio" with aria-checked, so a
+            screen reader was told to expect radios, found none, and the aria-pressed it did find
+            belongs to a toggle button rather than to a radio. `role="group"` + `aria-pressed` is
+            the honest description of what these actually are. */}
+        <FilterChips
+          label="Filter by age band"
+          options={[{ key: 'all', label: 'All Ages' }, ...AGE_BANDS.map(b => ({ key: b.key, label: b.label }))]}
+          active={filterBand}
+          onChange={setFilterBand}
+        />
         <select aria-label="Filter by category" className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
           <option value="all">All Categories</option>
           {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}

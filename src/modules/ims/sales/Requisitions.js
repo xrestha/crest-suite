@@ -21,6 +21,9 @@ import { buildStockRows } from '../stockcount/stockReportCalc'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import RequisitionRejectModal from './RequisitionRejectModal'
 import { statusMeta, trailParts } from './requisitionTrail'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { chipKeys } from '../../../shared/rovingFocus'
+import { FilterChips } from '../../../components/Tabs'
 
 const DEPARTMENTS = [
   'Kitchen',
@@ -45,6 +48,10 @@ const DEPARTMENTS = [
 
 export default function Requisitions() {
   const { clientId, profile, loading: authLoading, canEditClosedPeriods, hasImsAccess } = useAuth()
+  // S765: the three window.confirm()s this page carried included the STOCK-SHORTFALL warning —
+  // "you are issuing more than is on hand" — handed to the browser's own dialog on the one action
+  // that costs real stock.
+  const { ask: askConfirm, confirmEl } = useConfirm()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
@@ -308,9 +315,26 @@ export default function Requisitions() {
         qty_issued: l.qty_issued !== '' ? l.qty_issued : l.qty_requested,
       }))
       const warning = await checkStockShortfall(selectedPeriod.id, checkLines)
-      if (warning && !window.confirm(warning)) { setSaving(false); return }
+      if (warning) {
+        // The write is split out below rather than inlined here: useConfirm takes a `run`
+        // callback, and the shortfall is the one thing on this page worth stopping for.
+        setSaving(false)
+        askConfirm({
+          title: 'Not enough stock on hand',
+          body: <p style={{ margin: 0, whiteSpace: 'pre-line' }}>{warning}</p>,
+          confirmLabel: 'Issue anyway',
+          danger: true,
+          run: async () => { setSaving(true); await saveReqNow(statusOverride, validLines) },
+        })
+        return
+      }
     }
 
+    await saveReqNow(statusOverride, validLines)
+  }
+
+  // The write half of saveReq. Assumes `saving` is already true and owns clearing it.
+  async function saveReqNow(statusOverride, validLines) {
     const { data: header, error: hErr } = await scopedInsert('requisitions', {
       period_id: selectedPeriod.id,
       bs_day: parseInt(formDay),
@@ -361,12 +385,27 @@ ${text}`, detail })
     setSaving(false)
   }
 
-  async function deleteReq(reqId, status) {
-    if (!window.confirm(status === 'issued'
-      ? 'Delete this ISSUED requisition? Its quantities will stop counting towards the Requisitioned column in Stock Count.'
-      : status === 'rejected'
-        ? 'Delete this REJECTED requisition? The record that it was refused, and why, goes with it.'
-        : 'Delete this draft requisition?')) return
+  function deleteReq(reqId, status) {
+    askConfirm({
+      title: status === 'issued' ? 'Delete this issued requisition?'
+        : status === 'rejected' ? 'Delete this rejected requisition?'
+        : 'Delete this draft requisition?',
+      body: (
+        <p style={{ margin: 0 }}>
+          {status === 'issued'
+            ? 'Its quantities stop counting towards the Requisitioned column in Stock Count.'
+            : status === 'rejected'
+              ? 'The record that it was refused, and why, goes with it.'
+              : 'Nothing has been issued against it, so nothing else changes.'}
+        </p>
+      ),
+      confirmLabel: 'Delete',
+      danger: true,
+      run: () => deleteReqNow(reqId),
+    })
+  }
+
+  async function deleteReqNow(reqId) {
     // A bare `await scopedDelete(...)` discarded the only evidence the delete failed: supabase-js
     // RESOLVES with { data, error } rather than throwing, so an RLS refusal reloaded the list and
     // the row simply reappeared, with nothing on screen to say why (S654).
@@ -425,8 +464,23 @@ ${text}`, detail })
     setSaving(true)
     setActionError('')
     const warning = await checkStockShortfall(selectedPeriod.id, issueLines)
-    if (warning && !window.confirm(warning)) { setSaving(false); return }
+    if (warning) {
+      setSaving(false)
+      askConfirm({
+        title: 'Not enough stock on hand',
+        body: <p style={{ margin: 0, whiteSpace: 'pre-line' }}>{warning}</p>,
+        confirmLabel: correcting ? 'Save anyway' : 'Issue anyway',
+        danger: true,
+        run: async () => { setSaving(true); await confirmIssueNow(correcting) },
+      })
+      return
+    }
 
+    await confirmIssueNow(correcting)
+  }
+
+  // The write half of confirmIssue. Assumes `saving` is already true and owns clearing it.
+  async function confirmIssueNow(correcting) {
     // LINES FIRST, THEN THE STATUS. The other order flipped the header to `issued` and then fired
     // per-line updates whose errors were discarded entirely — not destructured at all — so a
     // failure there left a requisition reading ISSUED with qty_issued = 0 on every line: worth
@@ -1005,23 +1059,17 @@ ${text}`, detail })
 
           {/* Filters */}
           {allDepts.length > 1 && (
-            <div className="tab-bar" style={{ marginBottom: 16 }}>
-              <button
-                onClick={() => setFilterDept('all')}
-                className={`tab-btn${filterDept === 'all' ? ' tab-btn--active' : ''}`}
-              >All</button>
-              {allDepts.map(d => (
-                <button
-                  key={d}
-                  onClick={() => setFilterDept(d)}
-                  className={`tab-btn${filterDept === d ? ' tab-btn--active' : ''}`}
-                >{d}</button>
-              ))}
-            </div>
+            <FilterChips
+              label="Filter by department"
+              style={{ marginBottom: 16 }}
+              options={[{ key: 'all', label: 'All' }, ...allDepts.map(d => ({ key: d, label: d }))]}
+              active={filterDept}
+              onChange={setFilterDept}
+            />
           )}
 
           {filteredReqs.length > 0 && (
-            <div className="tab-bar" role="group" aria-label="Filter by status" style={{ marginBottom: 16 }}>
+            <div className="tab-bar" role="group" aria-label="Filter by status" style={{ marginBottom: 16 }} onKeyDown={chipKeys}>
               {statusTabs.map(t => (
                 <button
                   key={t.key}
@@ -1123,6 +1171,7 @@ ${text}`, detail })
           onCancel={() => setRejecting(null)}
         />
       )}
+      {confirmEl}
     </div>
   )
 }

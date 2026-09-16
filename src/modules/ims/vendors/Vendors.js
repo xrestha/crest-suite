@@ -332,14 +332,27 @@ export default function Vendors() {
   // The answer for a vendor that HAS been bought from. The row leaves this page and every vendor
   // picker; the row itself stays, which is the only reason its name still resolves on the purchase
   // bills, returns and reports that reference it — those store `vendor_id` and nothing else.
-  async function archiveVendor(vendor) {
+  // S765: was window.confirm, four lines from a Delete that has used the product's own
+  // ConfirmModal since S682 — so the two neighbouring actions on one row asked in two different
+  // dialogs, one of them the browser's. The copy below could not render as written in an OS box
+  // either: it is three paragraphs, and `\n\n` is collapsed there.
+  function archiveVendor(vendor) {
     const attached = usagePhrase(usage.map[vendor.id] || {})
     const what = attached ? `Its ${attached.text} keep this name on every report.` : 'Its history keeps this name on every report.'
-    if (!window.confirm(`Remove "${vendor.name}" from the Vendors page?
+    askConfirm({
+      title: `Remove "${vendor.name}" from the Vendors page?`,
+      body: (
+        <>
+          <p style={{ margin: '0 0 10px' }}>{what} This only takes it off this page and out of the vendor dropdowns.</p>
+          <p style={{ margin: 0, color: 'var(--theme-text2)' }}>You can put it back from “Show archived”.</p>
+        </>
+      ),
+      confirmLabel: 'Remove from list',
+      run: () => archiveVendorNow(vendor),
+    })
+  }
 
-${what} This only takes it off this page and out of the vendor dropdowns.
-
-You can put it back from "Show archived".`)) return
+  async function archiveVendorNow(vendor) {
     setListError(null)
     setDeleting(vendor.id)
     // is_active goes with it: the DB CHECK requires it, and `is_active` is what every picker

@@ -25,6 +25,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import {
   BS_MONTHS, bsToAd, daysInBsMonth, formatBsDay,
 } from '../../../utils/bsCalendar'
+import { FilterChips } from '../../../components/Tabs'
 
 const bsLabel = bs => (bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : '—')
 const monthLabel = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '—')
@@ -479,13 +480,17 @@ export default function FifoReport() {
 
       {!loading && (
       <div className="no-print" style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div className="tab-bar">
-          {['all', 'expired', 'warning', 'ok'].map(f => (
-            <button key={f} onClick={() => setFilterFlag(f)} className={`tab-btn${filterFlag === f ? ' tab-btn--active' : ''}`}>
-              {f === 'all' ? 'All' : f === 'warning' ? 'Expiring Soon' : f === 'ok' ? 'In date' : 'Expired'}
-            </button>
-          ))}
-        </div>
+        <FilterChips
+          label="Filter by expiry state"
+          options={[
+            { key: 'all', label: 'All' },
+            { key: 'expired', label: 'Expired' },
+            { key: 'warning', label: 'Expiring Soon' },
+            { key: 'ok', label: 'In date' },
+          ]}
+          active={filterFlag}
+          onChange={setFilterFlag}
+        />
         <select aria-label="Filter by category" className="form-select" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
           <option value="all">All Categories</option>
           {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}

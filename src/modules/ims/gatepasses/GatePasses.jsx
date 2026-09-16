@@ -17,6 +17,7 @@ import NewGatePassModal from './NewGatePassModal'
 // serviceDayStartIso is the POS parking day helper, reused rather than copied (S756, D27) — see
 // gatePassDayStartMs. It lives in shared/nepalTime.js, not in a POS modal file.
 import { nepalTime, nepalBs, serviceDayStartIso } from '../../../shared/nepalTime'
+import { FilterChips } from '../../../components/Tabs'
 
 const PURPOSE_LABELS = { delivery: 'Delivery', pickup: 'Pickup', maintenance: 'Maintenance', other: 'Other' }
 
@@ -241,10 +242,13 @@ export default function GatePasses() {
         </div>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 20 }}>
-        <button className={`tab-btn${filter === 'open' ? ' tab-btn--active' : ''}`} onClick={() => setFilter('open')}>Open</button>
-        <button className={`tab-btn${filter === 'all' ? ' tab-btn--active' : ''}`} onClick={() => setFilter('all')}>All</button>
-      </div>
+      <FilterChips
+        label="Filter gate passes"
+        style={{ marginBottom: 20 }}
+        options={[{ key: 'open', label: 'Open' }, { key: 'all', label: 'All' }]}
+        active={filter}
+        onChange={setFilter}
+      />
 
       <ActionError error={actionError} className="action-error--top" />
       {!loading && !loadError && sweepFailed && (

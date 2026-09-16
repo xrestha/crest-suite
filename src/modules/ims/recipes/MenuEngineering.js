@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
+import Tabs from '../../../components/Tabs'
 import PeriodScope from '../../../components/PeriodScope'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcBand, recipeCostOf } from '../../../shared/imsFormulas'
@@ -45,11 +46,17 @@ const UNRATED = {
   desc: 'No price or no costed ingredients',
 }
 
-// Hex colors for Recharts SVG (CSS vars don't resolve inside SVG presentation attributes)
-const Q_HEX = { Star: '#34d399', Plowhorse: '#a78bfa', Puzzle: '#f59e0b', Dog: '#f87171' }
+// Hex colors for Recharts SVG (CSS vars don't resolve inside SVG presentation attributes).
+// These are the four signal tokens' own values, so the dots match the quadrant tiles beside them.
+// S765: Puzzle was #f59e0b — a SECOND amber, not --theme-amber (#fbbf24) — so the Puzzle dots did
+// not match the Puzzle tile they sit next to, which is tinted from the token. Layout.js carries a
+// comment recording that this exact value was already found and removed there; the sweep never
+// reached IMS. The unrated fallback was '#888', documented nowhere; it is chart-tick now.
+const Q_HEX = { Star: '#34d399', Plowhorse: '#a78bfa', Puzzle: '#fbbf24', Dog: '#f87171' }
+const Q_HEX_UNRATED = '#6b7280'   // DESIGN.md → chart-tick
 
 function ScatterDot({ cx, cy, payload }) {
-  const color = Q_HEX[payload.quadrant] || '#888'
+  const color = Q_HEX[payload.quadrant] || Q_HEX_UNRATED
   return <circle cx={cx} cy={cy} r={5} fill={color} fillOpacity={0.85} stroke={color} strokeWidth={1} />
 }
 
@@ -416,11 +423,17 @@ export default function MenuEngineering() {
             {periods.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
           {/* View toggle */}
-          <div className="tab-bar">
-            <button className={`tab-btn${viewMode === 'table'  ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('table')}>☰ Table</button>
-            <button className={`tab-btn${viewMode === 'matrix' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('matrix')}>⊞ Matrix</button>
-            <button className={`tab-btn${viewMode === 'charts' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('charts')}>◉ Charts</button>
-          </div>
+          <Tabs
+            idBase="menu-eng"
+            label="Menu engineering views"
+            tabs={[
+              { key: 'table', label: '☰ Table' },
+              { key: 'matrix', label: '⊞ Matrix' },
+              { key: 'charts', label: '◉ Charts' },
+            ]}
+            active={viewMode}
+            onChange={setViewMode}
+          />
         </div>
       </div>
 
@@ -605,7 +618,9 @@ export default function MenuEngineering() {
                   <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)', cursor: 'default' }}>?</span>
                 </Tip>
               </div>
-              <div style={{ overflowX: 'auto' }}>
+              {/* `.table-wrap` rather than an inline overflowX (S765): the class is what the print
+                  block, the scrollbar rules and `--fab-clear` are all written against. */}
+              <div className="table-wrap">
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr>

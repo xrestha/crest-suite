@@ -14,6 +14,7 @@ import ActionError from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { Link, Navigate } from 'react-router-dom'
+import { chipKeys } from '../../../shared/rovingFocus'
 
 const fmtNpr = npr
 const WINDOW_OPTIONS = [30, 90, 180]
@@ -227,7 +228,7 @@ export default function ComboBuilder() {
         </div>
         <div>
           <span style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>Window</span>
-          <div role="group" aria-label="Look-back window" className="tab-bar" style={{ marginBottom: 0 }}>
+          <div role="group" aria-label="Look-back window" className="tab-bar" style={{ marginBottom: 0 }} onKeyDown={chipKeys}>
             {WINDOW_OPTIONS.map(d => (
               <button key={d} aria-pressed={days === d} className={`tab-btn${days === d ? ' tab-btn--active' : ''}`} onClick={() => setDays(d)}>{d}d</button>
             ))}

@@ -12,6 +12,8 @@ import { Navigate, Link } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
+import { FilterChips } from '../../../components/Tabs'
+import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 import { firstError } from '../../../shared/queryError'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { withTimeout } from '../../../utils/withTimeout'
@@ -717,8 +719,12 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
                   const rem = Math.max(0, round3(l.qty_ordered - l.qty_received))
                   const val = round3(l.receiving) * l.unit_price
                   const isFullyReceived = rem <= 0
+                  // S765: this row carried `opacity: 0.4` when fully received. It already says
+                  // "✓ Done" in the Receiving cell and prints its remaining as a green 0, so the
+                  // dim carried no information the row did not — it only took the ordered and
+                  // received quantities below AA. DESIGN.md: label the state, never dim the row.
                   return (
-                    <tr key={l.id} style={{ opacity: isFullyReceived ? 0.4 : 1 }}>
+                    <tr key={l.id}>
                       <td style={tdStyle}>
                         <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{l.name}</div>
                         <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{l.uom}</div>
@@ -1062,9 +1068,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
 
       {/* Locked banner — the same wording the other four IMS entry pages carry. */}
       {isLocked && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
-          🔒 <strong>This period is closed.</strong> Orders here are read-only and no delivery can be received into it. Contact your admin to re-open if needed.
-        </div>
+        <ClosedPeriodBanner note="No delivery can be received into it." />
       )}
 
       {/* The admin counterpart: `isLocked` carves admin out of the lock, which is what makes
@@ -1086,13 +1090,17 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
       {loadError && <ReportLoadError error={loadError} />}
 
       {/* Status filter pills */}
-      <div className="tab-bar" style={{ marginBottom: 20 }}>
-        {[['all', 'All', pos.length], ...Object.entries(STATUS_META).map(([k, m]) => [k, m.label, statusCounts[k] || 0])].map(([key, label, count]) => (
-          <button key={key} onClick={() => setFilterStatus(key)} className={`tab-btn${filterStatus === key ? ' tab-btn--active' : ''}`}>
-            {label} {count > 0 && <span style={{ opacity: 0.7 }}>({count})</span>}
-          </button>
-        ))}
-      </div>
+      <FilterChips
+        label="Filter by status"
+        style={{ marginBottom: 20 }}
+        options={[['all', 'All', pos.length], ...Object.entries(STATUS_META).map(([k, m]) => [k, m.label, statusCounts[k] || 0])]
+          .map(([key, label, count]) => ({
+            key,
+            label: <>{label}{count > 0 && <span style={{ color: 'var(--theme-text3)' }}> ({count})</span>}</>,
+          }))}
+        active={filterStatus}
+        onChange={setFilterStatus}
+      />
 
       {loadError ? null : filteredPos.length === 0 ? (
         <div className="empty-state">

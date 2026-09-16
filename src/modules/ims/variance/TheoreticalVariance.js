@@ -443,9 +443,13 @@ export default function TheoreticalVariance() {
         Settings → Thresholds; ≈ marks a gap too small in rupees to be worth chasing.
       </div>
 
-      {/* Stat cards */}
+      {/* Stat cards.
+          S765: `.stat-grid` rather than a hand-rolled grid at a 180px floor. The floor was raised
+          to 200px product-wide precisely because a Nepali-grouped `NPR 12,48,650` wraps below it —
+          and these three figures ARE that shape, on the page that tells an owner money went
+          missing. The class also brings `tabular-nums`, so the figures line up digit for digit. */}
       {!loading && !computing && rows.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
+        <div className="stat-grid" style={{ marginBottom: 24 }}>
           {[
             { label: 'Theoretical Cost',  value: fmtNPR(totalTheorVal),    sub: 'Based on recipes × sales',      color: 'var(--theme-text3)' },
             { label: 'Actual Cost',        value: fmtNPR(totalActualVal),   sub: 'From stock movements',          color: 'var(--theme-text1)' },
@@ -461,11 +465,15 @@ export default function TheoreticalVariance() {
               value: hasClosing ? overCount : '—',
               sub:   hasClosing ? `${underCount} under tolerance` : 'Needs closing count',
               color: !hasClosing ? 'var(--theme-text2)' : overCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' },
+          // `.stat-card`/`.stat-label`/`.stat-value`/`.stat-sub` — the product's own tile. The
+          // hand-rolled copy sat at fontSize 22 (off the 24px figure step) with letterSpacing
+          // 0.06em against `.stat-label`'s 0.1em, and inherited none of the class's later fixes.
+          // Only `color` genuinely varies here, so only `color` stays inline.
           ].map(card => (
-            <div key={card.label} className="card" style={{ padding: '16px 20px' }}>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{card.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: card.color, marginBottom: 4 }}>{card.value}</div>
-              <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{card.sub}</div>
+            <div key={card.label} className="stat-card">
+              <div className="stat-label">{card.label}</div>
+              <div className="stat-value" style={{ color: card.color }}>{card.value}</div>
+              <div className="stat-sub">{card.sub}</div>
             </div>
           ))}
         </div>

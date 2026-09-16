@@ -14,6 +14,7 @@ import { fcFigure, menuFcPct, recipeCostOf, unratedReason } from '../../../share
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { FilterChips } from '../../../components/Tabs'
 
 // vat_rate may be 0 (No VAT); null/undefined falls back to 13%.
 function vatOf(r) {
@@ -279,13 +280,16 @@ export default function MenuRepricing() {
       {/* Sort + filter bar */}
       <div className="no-print" style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Sort:</span>
-        {[
-          ['opportunity', 'Monthly Opportunity'],
-          ['gap',         'Price Gap'],
-          ['fc',          'Most over target'],
-        ].map(([key, label]) => (
-          <button key={key} className={`tab-btn${sortBy === key ? ' tab-btn--active' : ''}`} onClick={() => setSortBy(key)}>{label}</button>
-        ))}
+        <FilterChips
+          label="Sort by"
+          options={[
+            { key: 'opportunity', label: 'Monthly Opportunity' },
+            { key: 'gap', label: 'Price Gap' },
+            { key: 'fc', label: 'Most over target' },
+          ]}
+          active={sortBy}
+          onChange={setSortBy}
+        />
         <label style={{ marginLeft: 12, fontSize: 12, color: 'var(--theme-text2)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={onlyUnderpriced} onChange={e => setOnlyUnderpriced(e.target.checked)} />
           Only underpriced
@@ -297,11 +301,14 @@ export default function MenuRepricing() {
       </div>
 
       {categories.length > 2 && (
-        <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
-          {categories.map(c => (
-            <button key={c} className={`tab-btn${catFilter === c ? ' tab-btn--active' : ''}`} onClick={() => setCatFilter(c)}>{c}</button>
-          ))}
-        </div>
+        <FilterChips
+          label="Filter by category"
+          className="no-print"
+          style={{ marginBottom: 16 }}
+          options={categories.map(c => ({ key: c, label: c }))}
+          active={catFilter}
+          onChange={setCatFilter}
+        />
       )}
 
       {loading ? (

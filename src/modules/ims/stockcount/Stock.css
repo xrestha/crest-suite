@@ -1,32 +1,10 @@
 /* ── Mobile Stock Count UX ───────────────────────────────────────────────── */
 
-/* Category tab strip */
-.mobile-cat-strip {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.mobile-cat-strip::-webkit-scrollbar { display: none; }
-.mobile-cat-btn {
-  flex-shrink: 0;
-  background: var(--theme-card);
-  border: 1px solid var(--theme-border);
-  border-radius: var(--radius-md);
-  color: var(--theme-text3);
-  font-size: 12px;
-  padding: 6px 14px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.mobile-cat-btn.active {
-  background: var(--theme-focus-ring);
-  border-color: var(--theme-accent);
-  color: var(--theme-accent);
-  font-weight: 600;
-}
+/* The category strip used to live here as .mobile-cat-strip/.mobile-cat-btn — a hand-rolled copy of
+   .tab-bar--scroll/.tab-btn that had drifted: its active state painted --theme-accent as TEXT on a
+   --theme-focus-ring fill (~2.8:1 on Modernist Light), which is precisely the pairing .tab-btn--active
+   uses --theme-accent-ink to avoid, and it carried no :focus-visible rule and no coarse-pointer
+   floor. Deleted in S765; the markup uses the shared classes now. Do not reintroduce a local copy. */
 
 /* Progress bar */
 .mobile-progress {
@@ -39,11 +17,20 @@
   margin-bottom: 12px;
 }
 .mobile-progress-bar {
+  /* Drawn full width and SQUEEZED with scaleX from --count-scale (a 0–1 fraction set in JSX).
+     It used to take an inline `width` and declare a `transition: transform`, so the transition was
+     unreachable (nothing animated transform) AND beaten by the inline style anyway — dead CSS
+     either way. Animating `width` instead would run layout on every keystroke of a 200-item count,
+     on a tablet; transform composites (DESIGN.md → the S682 layout-property rule). */
   width: 100%;
   height: 100%;
   background: color-mix(in srgb, var(--theme-accent) 25%, transparent);
+  transform: scaleX(var(--count-scale, 0));
   transform-origin: left;
-  transition: transform 0.3s ease;
+  transition: transform var(--motion-slow) var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-progress-bar { transition: none; }
 }
 .mobile-progress-label {
   position: absolute;
@@ -52,7 +39,9 @@
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  color: var(--theme-accent);
+  /* accent-ink, not accent: this is TYPE on a normal ground, and the base accent measured ~3.5:1
+     on Modernist Light here (DESIGN.md → The Text-vs-Fill Rule). */
+  color: var(--theme-accent-ink);
   font-weight: 600;
 }
 
@@ -69,13 +58,32 @@
   border-radius: var(--radius-md);
   padding: 14px;
 }
-.mobile-stock-card.has-value {
+/* Four states, and the distinction that matters is stored-vs-typed. `has-value` alone used to carry
+   the accent border the moment a digit was entered, so a figure sitting unsaved in the box looked
+   exactly like one the server had accepted. Green = the server holds it; amber = something is still
+   required of someone (a Save, or a connection) — the product's standing signal vocabulary. */
+.mobile-stock-card.stored {
+  border-color: color-mix(in srgb, var(--theme-green) 45%, transparent);
+}
+.mobile-stock-card.unsaved {
+  border-color: color-mix(in srgb, var(--theme-amber) 55%, transparent);
+}
+.mobile-stock-card.saving {
   border-color: color-mix(in srgb, var(--theme-accent) 35%, transparent);
 }
 .mobile-stock-card.pending {
   border-color: color-mix(in srgb, var(--theme-amber) 50%, transparent);
   border-style: dashed;
 }
+.mobile-stock-state {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.mobile-stock-state--stored { color: var(--theme-green-text); }
+.mobile-stock-state--unsaved,
+.mobile-stock-state--queued { color: var(--theme-amber-text); }
+.mobile-stock-state--saving { color: var(--theme-text2); font-weight: 500; }
 .mobile-stock-card-header {
   display: flex;
   justify-content: space-between;
@@ -132,7 +140,8 @@
 }
 .mobile-stock-value {
   font-size: 13px;
-  color: var(--theme-accent);
+  /* Type on a card ground — the *-text/ink variant, not the fill token. */
+  color: var(--theme-accent-ink);
   font-weight: 600;
   white-space: nowrap;
 }

@@ -76,8 +76,12 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+        {/* S765: was a bare className="btn" — the BOX with no colour variant, so it fell through to
+            the UA's own chrome (#f0f0f0 fill, black label) wherever `armed` was false and the
+            inline overrides below did not apply. `.btn` declares no background and no colour;
+            `btn-danger` supplies both, in the tint-plus-red-text form this was hand-painting. */}
         <button
-          className="btn"
+          className="btn btn-danger"
           onClick={onConfirm}
           disabled={!armed}
           style={{

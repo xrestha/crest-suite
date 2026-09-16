@@ -214,7 +214,10 @@ export default function ImsCountLogin() {
       <div className="card" style={{ padding: '40px 36px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: 540 }}>
 
         <div style={{ marginBottom: 36, textAlign: 'center' }}>
-          <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.02em', color: 'var(--theme-text1)', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
+          {/* 24, not 26: 26 is off the DESIGN.md type ramp (…22, 24, 32). It was invisible to the
+              design detector because a NUMERIC fontSize is not scanned — only a quoted '26px' is —
+              so nothing had ever reported it. */}
+          <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.02em', color: 'var(--theme-text1)', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
             {device.clientName}
           </div>
           <div style={{ fontSize: selected ? 18 : 14, fontWeight: selected ? 600 : 400, color: selected ? 'var(--theme-text1)' : 'var(--theme-text3)', marginTop: 10, letterSpacing: 0.2 }}>

@@ -123,8 +123,11 @@
       {
         "rule": "design-system-font-size",
         "value": "26px",
+        "files": [
+          "src/modules/pos/parking/parkingSlipHtml.js"
+        ],
         "createdAt": "2026-09-14T13:49:33.162Z",
-        "reason": "80mm thermal parking-slip print template (parkingSlipHtml.js) - vehicle number sized for a printed token; print templates are the documented allowed class, value predates S754"
+        "reason": "80mm thermal parking-slip print template (parkingSlipHtml.js) - vehicle number sized for a printed token; print templates are the documented allowed class, value predates S754. S765 ADDED the files: key - without it this was a GLOBAL value suppression while its reason named one file, so it silently exempted 26px on eight on-screen sites (ImsCountLogin, PosLogin, GuestMenu, Pricing x3, Settings, ClientDrawer, ArrivalAlert.css) and the detector read as passing on all of them. An ignore is scoped to the thing that is genuinely exempt."
       },
       {
         "rule": "design-system-radius",

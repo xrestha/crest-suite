@@ -10,6 +10,7 @@ import DisposalReportTab from './DisposalReportTab'
 import TaxPoolTab from './TaxPoolTab'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
+import Tabs, { TabPanel } from '../../../components/Tabs'
 
 const TABS = [
   { key: 'register',   label: 'Register' },
@@ -79,18 +80,20 @@ export default function FixedAssets() {
       </div>
 
       <SuiteGate featureKey="fixed_asset_register" featureLabel="Fixed Assets" requireModules={['ims']}>
-      <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
-        {TABS.map(t => (
-          <button
-            key={t.key}
-            className={`tab-btn${activeTab === t.key ? ' tab-btn--active' : ''}`}
-            onClick={() => setActiveTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* S765: five real sub-views with no tab semantics at all — no tablist, no tabpanel, and
+          five separate Tab stops. */}
+      <Tabs
+        idBase="fixed-assets"
+        hasPanel
+        label="Fixed asset sections"
+        className="no-print"
+        style={{ marginBottom: 16 }}
+        tabs={TABS}
+        active={activeTab}
+        onChange={setActiveTab}
+      />
 
+      <TabPanel idBase="fixed-assets" active={activeTab}>
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
       ) : loadError ? (
@@ -117,6 +120,7 @@ export default function FixedAssets() {
           )}
         </>
       )}
+      </TabPanel>
       </SuiteGate>
     </div>
   )

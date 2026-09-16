@@ -13,6 +13,7 @@ import {
   computeDepreciationPreview, latestPostedByAsset, effectiveDepreciation,
   regularOverrideError, adjustmentOverrideError,
 } from './depreciationCompute'
+import { chipKeys } from '../../../shared/rovingFocus'
 
 const fmt = nprInt
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
@@ -277,7 +278,7 @@ ${text}`, detail })
 
   return (
     <div>
-      <div className="tab-bar" style={{ marginBottom: 12 }} role="group" aria-label="Run type">
+      <div className="tab-bar" style={{ marginBottom: 12 }} role="group" aria-label="Run type" onKeyDown={chipKeys}>
         <button type="button" className={`tab-btn${mode === 'regular' ? ' tab-btn--active' : ''}`} aria-pressed={mode === 'regular'} onClick={() => switchMode('regular')}>Depreciation run</button>
         <Tip text="Reverses a posted run that was wrong. Posted runs can never be edited, so the correction is a new run that writes the depreciation back — then post the right figures as a normal run." width={300}>
           <button type="button" className={`tab-btn${mode === 'adjust' ? ' tab-btn--active' : ''}`} aria-pressed={mode === 'adjust'} onClick={() => switchMode('adjust')}>Adjustment (reverse a run)</button>

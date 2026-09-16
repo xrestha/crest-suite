@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Tip from '../../../components/Tip'
 import { BS_MONTHS, adToBs } from '../../../utils/bsCalendar'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 const norm = s => String(s ?? '').trim()
 const lc = s => norm(s).toLowerCase()
@@ -149,6 +150,7 @@ export function dateMismatchWarning(dateRange, selected) {
 // them into the same local qty/discount state the Daily Entry inputs already write to. No Supabase
 // calls happen here; nothing is persisted until the parent's existing Save Day button is clicked.
 export default function SalesImportButton({ recipes, onMatched, disabled, selectedDate }) {
+  const { ask: askConfirm, confirmEl } = useConfirm()   // S765: the overwrite warning was a window.confirm
   const [importSummary, setImportSummary] = useState(null)
   const [importError, setImportError] = useState('')
 
@@ -195,11 +197,31 @@ export default function SalesImportButton({ recipes, onMatched, disabled, select
         // D28: the date is checked and SAID, in the confirm the user is already reading, and kept
         // under the summary afterwards — never a silent refusal.
         const dateWarning = dateMismatchWarning(dateRange, selectedDate)
-        if (!window.confirm(`${dateWarning ? `⚠ ${dateWarning}\n\n` : ''}This will fill in qty${discountMap.size > 0 ? ' and discount' : ''} for ${matched} matched menu item${matched !== 1 ? 's' : ''} on the currently selected day, overwriting any value already entered for those items. Continue?`)) {
-          return
-        }
-        onMatched(qtyMap, discountMap)
-        setImportSummary({ matched, total: rows.length, unmatchedNames: [...new Set(unmatchedNames)], dateWarning })
+        // S765: was window.confirm. The date warning is the whole point of this dialog (D28 — the
+        // mismatch is SAID rather than silently refused), and in an OS box it was a `⚠` prefix
+        // glued to the body by a `\n\n` that Chrome collapses. Here it is its own amber line above
+        // the consequence, which is the order the reader needs it in.
+        askConfirm({
+          title: `Fill in ${matched} matched menu item${matched !== 1 ? 's' : ''}?`,
+          body: (
+            <>
+              {dateWarning && (
+                <p style={{ margin: '0 0 10px', color: 'var(--theme-amber-text)', fontWeight: 600 }}>△ {dateWarning}</p>
+              )}
+              <p style={{ margin: 0 }}>
+                This fills in qty{discountMap.size > 0 ? ' and discount' : ''} on the day currently
+                selected, overwriting any value already entered for those items. Nothing is saved
+                until you press Save.
+              </p>
+            </>
+          ),
+          confirmLabel: 'Fill in',
+          danger: !!dateWarning,
+          run: () => {
+            onMatched(qtyMap, discountMap)
+            setImportSummary({ matched, total: rows.length, unmatchedNames: [...new Set(unmatchedNames)], dateWarning })
+          },
+        })
       } catch (err) {
         setImportError('Could not read the file — make sure it is a valid .xlsx. (' + err.message + ')')
       }
@@ -234,6 +256,7 @@ export default function SalesImportButton({ recipes, onMatched, disabled, select
           )}
         </div>
       )}
+      {confirmEl}
     </>
   )
 }

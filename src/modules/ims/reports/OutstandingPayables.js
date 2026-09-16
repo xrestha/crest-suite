@@ -21,6 +21,7 @@ import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Modal from '../../../components/Modal'
 import { Navigate } from 'react-router-dom'
+import Tabs from '../../../components/Tabs'
 
 // Today in NEPAL, evaluated when it is asked for. This was a module-level
 // `new Date().toISOString().split('T')[0]`, which is wrong twice over (S723): `.toISOString()` is
@@ -855,10 +856,14 @@ export default function OutstandingPayables() {
         </div>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 24 }}>
-        <button className={`tab-btn${activeTab === 'outstanding' ? ' tab-btn--active' : ''}`} onClick={() => switchTab('outstanding')}>Outstanding</button>
-        <button className={`tab-btn${activeTab === 'paid'        ? ' tab-btn--active' : ''}`} onClick={() => switchTab('paid')}>Paid History</button>
-      </div>
+      <Tabs
+        idBase="payables"
+        label="Payables views"
+        style={{ marginBottom: 24 }}
+        tabs={[{ key: 'outstanding', label: 'Outstanding' }, { key: 'paid', label: 'Paid History' }]}
+        active={activeTab}
+        onChange={switchTab}
+      />
 
       {settleWarn && <ActionError error={settleWarn} className="action-error--top" />}
 
@@ -1140,7 +1145,13 @@ export default function OutstandingPayables() {
 
                             {isExpanded && (
                               <tr id={`bill-detail-${b.key}`}>
-                                <td colSpan={cols} style={{ padding: 0, background: 'rgba(10,12,18,0.7)' }}>
+                                {/* S765: was a frozen rgba(10,12,18,0.7) — a near-black overlay
+                                    filled with var(--theme-text1)/text2/text3. On Modernist Light
+                                    that composites to ~#4D4E53 and puts the ink at ~2.0:1, on the
+                                    ACCOUNTANT's screen, in the panel holding the item lines, rates,
+                                    totals and payment history. Its near-identical twin in
+                                    VendorReport.js has always used the token. */}
+                                <td colSpan={cols} style={{ padding: 0, background: 'var(--theme-bg)' }}>
                                   <div style={{ padding: '16px 20px' }}>
 
                                     {/* Line items in this bill */}

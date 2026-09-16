@@ -19,6 +19,7 @@ import { depreciationInWindow } from '../assets/depreciationCompute'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { disabledStyle } from '../../../shared/inlineFieldState'
+import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 
 // labor's blue has no dedicated theme token — accent/green/red/amber/purple are already spoken
 // for by food/overhead/profit-loss/target-warning/tax elsewhere on this page, so it stays a fixed
@@ -686,9 +687,7 @@ export default function Overheads() {
       <ActionError error={saveError} className="action-error--top" />
 
       {isLocked && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
-          🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
-        </div>
+        <ClosedPeriodBanner />
       )}
 
       {/* The rows below are another month's saved figures copied as a starting point, and nothing
@@ -713,8 +712,12 @@ export default function Overheads() {
         </div>
       )}
 
-      {/* KPI cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
+      {/* KPI cards.
+          S765: this grid had no `loading` guard, so during every load each bucket reported
+          "Not entered yet" — a POSITIVE claim about data the page had not read. The empty-bucket
+          copy below is exactly right once the read has landed and is a lie before it. */}
+      {!loading && (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 24 }}>
         {[
           {
             // An empty bucket reads "Not entered yet", never "NPR 0 · 0.0% of revenue" — the
@@ -764,6 +767,7 @@ export default function Overheads() {
           </div>
         ))}
       </div>
+      )}
 
       {/* Entry card — tabs + table */}
       <div className="card" style={{ marginBottom: 20 }}>
@@ -870,8 +874,15 @@ export default function Overheads() {
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     {!isLocked && (
+                      /* S765: an icon has no accessible name, so this read to a screen reader as an
+                         unlabelled button — on the control that REMOVES a cost line. It also
+                         hand-rolled its own box instead of wearing .btn, so it had no focus ring,
+                         no :disabled treatment and no coarse-pointer touch floor. */
                       <button onClick={() => removeRow(activeBucket, idx)}
-                        style={{ background: 'none', border: 'none', color: 'var(--theme-red-text)', cursor: 'pointer', fontSize: 16, padding: '4px 8px' }}>×</button>
+                        className="btn btn-icon btn-danger"
+                        aria-label={`Remove ${row.description || row.category || 'this cost line'}`}
+                        title={`Remove ${row.description || row.category || 'this cost line'}`}
+                      >×</button>
                     )}
                   </td>
                 </tr>

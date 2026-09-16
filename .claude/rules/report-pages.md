@@ -18,6 +18,16 @@ paths:
   # `firstError`, `ReportLoadError`, `useLatestRequest` and an Excel letterhead, which is this
   # file's entire subject, and it loaded for none of them.
   - "src/modules/ims/variance/**"
+  # Added S765, and this is the fourth time the same omission has been recorded. S699 wrote the
+  # rule that a failed read on an ENTRY page is a data-loss shape rather than a display bug, using
+  # Sales.js as its worked example — and this file's paths never matched `sales/`, so the rule
+  # about that page could not load on that page. The unconditional KPI strip found in S765 (NPR 0
+  # in the accent, 95 lines above the loading guard, on the revenue denominator for every
+  # food-cost figure in the product) is what that gap cost. Entry pages read and render exactly
+  # like reports and belong here.
+  - "src/modules/ims/sales/**"
+  - "src/modules/ims/purchases/**"
+  - "src/modules/ims/items/**"
   - "src/modules/pos/reports/**"
   - "src/modules/hr/reports/**"
   - "src/pages/dashboard/**"

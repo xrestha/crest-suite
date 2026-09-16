@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { FilterChips } from '../../../components/Tabs'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import SearchableSelect from '../../../components/SearchableSelect'
@@ -60,10 +61,16 @@ export default function NewGatePassModal({ vendors, onClose, onSaved }) {
               Vendor / Company
             </Tip>
           </label>
-          <div className="tab-bar" style={{ marginBottom: 8 }}>
-            <button type="button" className={`tab-btn${useExisting ? ' tab-btn--active' : ''}`} onClick={() => setUseExisting(true)}>Existing Vendor</button>
-            <button type="button" className={`tab-btn${!useExisting ? ' tab-btn--active' : ''}`} onClick={() => setUseExisting(false)}>Other / Company Name</button>
-          </div>
+          <FilterChips
+            label="How the visitor is identified"
+            style={{ marginBottom: 8 }}
+            options={[
+              { key: 'existing', label: 'Existing Vendor' },
+              { key: 'other', label: 'Other / Company Name' },
+            ]}
+            active={useExisting ? 'existing' : 'other'}
+            onChange={k => setUseExisting(k === 'existing')}
+          />
           {useExisting ? (
             <SearchableSelect id="newgat-f5" value={vendorId} onChange={v => { setFieldErr(f => ({ ...f, vendor: '' })); setVendorId(v) }} options={vendorOptions} placeholder="— Select vendor —" />
           ) : (

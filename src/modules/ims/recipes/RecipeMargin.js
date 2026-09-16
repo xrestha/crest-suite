@@ -14,6 +14,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { FilterChips } from '../../../components/Tabs'
 
 export default function RecipeMargin() {
   const { clientId, profile, hasImsAccess } = useAuth()
@@ -297,13 +298,16 @@ export default function RecipeMargin() {
       {/* Sort + filter bar */}
       <div className="no-print" style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Sort:</span>
-        {[
-          ['contribution', 'Total Contribution'],
-          ['margin',       'Margin / Portion'],
-          ['fc',           'FC% (best first)'],
-        ].map(([key, label]) => (
-          <button key={key} className={`tab-btn${sortBy === key ? ' tab-btn--active' : ''}`} onClick={() => setSortBy(key)}>{label}</button>
-        ))}
+        <FilterChips
+          label="Sort by"
+          options={[
+            { key: 'contribution', label: 'Total Contribution' },
+            { key: 'margin', label: 'Margin / Portion' },
+            { key: 'fc', label: 'FC% (best first)' },
+          ]}
+          active={sortBy}
+          onChange={setSortBy}
+        />
         <label style={{ marginLeft: 12, fontSize: 12, color: 'var(--theme-text2)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={onlyWithSales} onChange={e => setOnlyWithSales(e.target.checked)} />
           Only recipes with sales
@@ -311,11 +315,14 @@ export default function RecipeMargin() {
       </div>
 
       {categories.length > 2 && (
-        <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
-          {categories.map(c => (
-            <button key={c} className={`tab-btn${catFilter === c ? ' tab-btn--active' : ''}`} onClick={() => setCatFilter(c)}>{c}</button>
-          ))}
-        </div>
+        <FilterChips
+          label="Filter by category"
+          className="no-print"
+          style={{ marginBottom: 16 }}
+          options={categories.map(c => ({ key: c, label: c }))}
+          active={catFilter}
+          onChange={setCatFilter}
+        />
       )}
 
       {loading ? (
@@ -357,8 +364,13 @@ export default function RecipeMargin() {
                 // One rendered form for the banded figure — colour, ✓/△/▲ and band name together —
                 // so a null cannot be handed to `toFixed` and a band cannot arrive colour-only.
                 const fcFig = fcFigure(r.fcPct, settings)
+                // S765: this row carried `opacity: 0.45` when a dish had sold nothing. Opacity
+                // multiplies through the text colour (~2.8:1 on Night), and on a MARGIN report a
+                // dish with no sales is among the rows most worth reading — so it dimmed exactly
+                // the wrong ones. The Sold column already prints a dash; DESIGN.md: label the
+                // state, never dim the row.
                 return (
-                <tr key={r.id} style={{ opacity: r.qty === 0 ? 0.45 : 1 }}>
+                <tr key={r.id}>
                   <td style={{ color: 'var(--theme-text2)' }}>{i + 1}</td>
                   <td><strong>{r.name}</strong></td>
                   <td>{r.category}</td>

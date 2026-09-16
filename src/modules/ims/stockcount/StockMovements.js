@@ -14,6 +14,7 @@ import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import Tabs from '../../../components/Tabs'
 
 // Module scope so the memoized derivation below can reference them without them becoming
 // unstable dependencies (they're pure column definitions).
@@ -417,14 +418,18 @@ export default function StockMovements() {
       </div>
       ))}
 
-      <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
-        <button className={`tab-btn ${tab === 'items' ? 'tab-btn--active' : ''}`} onClick={() => setTab('items')}>
-          Raw Items
-        </button>
-        <button className={`tab-btn ${tab === 'subs' ? 'tab-btn--active' : ''}`} onClick={() => setTab('subs')}>
-          Sub-Recipes {usage.rows.length > 0 && `(${usage.rows.length})`}
-        </button>
-      </div>
+      <Tabs
+        idBase="stock-movements"
+        label="Stock movement views"
+        className="no-print"
+        style={{ marginBottom: 16 }}
+        tabs={[
+          { key: 'items', label: 'Raw Items' },
+          { key: 'subs', label: `Sub-Recipes${usage.rows.length > 0 ? ` (${usage.rows.length})` : ''}` },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
       {noBomRecipes.length > 0 && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>

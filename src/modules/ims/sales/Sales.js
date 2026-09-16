@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
+import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -14,12 +15,14 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { persistSalesDay, findSupersededRows, depleteManualSales, repostSupersededMovements, SAVE_TIMEOUT_MS } from './persistSalesDay'
 import { isManualSource } from './salesDepletion'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
 // purpose and is deliberately GONE (S458): an 8s gate is *tighter* than the 15s cap that
@@ -89,6 +92,7 @@ function storedPriceMap(rows) {
 
 export default function Sales() {
   const { clientId, profile, loading: authLoading, isAdmin, canEditClosedPeriods, clientModules, hasImsAccess } = useAuth()
+  const { ask: askConfirm, confirmEl } = useConfirm()   // S765: Clear All was a window.confirm
   const effectiveClientId = clientId || profile?.client_id
   // Manual Sales Entry exists for IMS clients who do NOT run POS. Where both modules are on, POS
   // is the source of truth and supersedes manual entry entirely — a bill closed at the till
@@ -906,9 +910,7 @@ export default function Sales() {
 
       {/* Period locked banner */}
       {isLocked && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
-          🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
-        </div>
+        <ClosedPeriodBanner />
       )}
       {/* The same fact, told to the people the lock lets through (S756, closed-periods.md → "Admin
           must be TOLD the month is closed"). Same amber shape as Purchases.js's banner. */}
@@ -928,7 +930,15 @@ export default function Sales() {
           🛈 <span><strong>Sales come from Crest POS.</strong> Every bill closed at the till posts its own sales automatically, so Bulk Entry and Daily Entry are disabled — manual figures would duplicate or contradict the till. These views stay live and read-only.</span>
         </div>
       )}
-      {/* Stat cards */}
+      {/* Stat cards.
+          S765: this strip was UNCONDITIONAL, 95 lines above the `loading` guard below — so every
+          visit and every period change painted `Items Sold 0`, `0 of 0 active recipes` and
+          `Period Revenue NPR 0` in the accent, and on a failed read those three STAYED, permanently,
+          directly above "could not load". This page produces the revenue denominator for every
+          food-cost figure in the product, so an owner glancing at it on a slow connection read
+          "we sold nothing this month". DESIGN.md → Report shell: the KPI strip does not render
+          while loading or after a failure. */}
+      {!loading && !loadError && (
       <div className="stat-grid no-print">
         <div className="stat-card">
           {/* Was labelled "Total Covers" — this is Σ qty_sold across recipes, i.e. dishes, not
@@ -952,10 +962,18 @@ export default function Sales() {
           <div className="stat-sub">Excl. VAT</div>
         </div>
       </div>
+      )}
 
       {/* Tabs */}
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 4 }} role="tablist" aria-label="Sales entry views">
+        {/* S765: deliberately NOT migrated to <Tabs>. Every other tab row in IMS moved onto the
+            shared component, but this one wraps its locked tabs in a Tip and relies on
+            `aria-disabled` rather than `disabled` (see the comment below), which the shared
+            component has no way to express. What it was missing — aria-controls, a roving tabIndex
+            and arrow keys — is added here instead; `moveRovingFocus` skips aria-disabled members,
+            so a locked tab is passed over rather than trapping the arrow. */}
+        <div style={{ display: 'flex', gap: 4 }} role="tablist" aria-label="Sales entry views"
+          onKeyDown={e => { moveRovingFocus(e, '[role="tab"]')?.click() }}>
           {Object.entries(TAB_LABELS).map(([key, label]) => {
             const tabDisabled = posOwnsSales && ENTRY_TABS.includes(key)
             // aria-disabled, NOT the disabled attribute: a disabled <button> swallows mouse events
@@ -963,6 +981,8 @@ export default function Sales() {
             // never fire and the user would get a greyed-out tab with no way to find out why.
             const btn = (
               <button key={key} type="button" role="tab" aria-selected={viewMode === key}
+                id={`sales-tab-${key}`}
+                aria-controls="sales-panel" tabIndex={rovingTabIndex(viewMode === key)}
                 onClick={() => { if (!tabDisabled) setViewMode(key) }} aria-disabled={tabDisabled}
                 className={`panel-tab${viewMode === key ? ' panel-tab--active' : ''}`}
                 style={tabDisabled ? { cursor: 'not-allowed', color: 'var(--theme-text3)' } : undefined}
@@ -1024,6 +1044,7 @@ export default function Sales() {
         )}
       </div>
 
+      <div id="sales-panel" role="tabpanel" aria-labelledby={`sales-tab-${viewMode}`} tabIndex={0}>
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p></div>
       ) : (
@@ -1044,12 +1065,16 @@ export default function Sales() {
                     <button
                       className="btn btn-ghost"
                       disabled={isLocked}
-                      onClick={() => {
-                        if (!window.confirm('Clear all qty sold fields? This does not delete saved data until you Save.')) return
-                        const cleared = {}
-                        recipes.forEach(r => { cleared[r.id] = '' })
-                        setBulkForm(cleared)
-                      }}
+                      onClick={() => askConfirm({
+                        title: 'Clear every quantity on this form?',
+                        body: <p style={{ margin: 0 }}>Nothing saved is deleted — the figures already recorded for this period stay exactly as they are until you press Save.</p>,
+                        confirmLabel: 'Clear the form',
+                        run: () => {
+                          const cleared = {}
+                          recipes.forEach(r => { cleared[r.id] = '' })
+                          setBulkForm(cleared)
+                        },
+                      })}
                       style={{ fontSize: 13, color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
                     >
                       Clear All
@@ -1540,6 +1565,7 @@ export default function Sales() {
           })()}
         </>
       )}
+      </div>
 
       {pendingSave && (
         <SupersedeConfirmModal
@@ -1550,6 +1576,7 @@ export default function Sales() {
           onConfirm={confirmPendingSave}
         />
       )}
+      {confirmEl}
     </div>
   )
 }

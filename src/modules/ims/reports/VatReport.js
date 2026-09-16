@@ -16,6 +16,7 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { VAT_RATE, splitPurchaseVat, buildVendorSummary, billWiseVat, summariseUnlinkedReturns, returnLinesOutsidePeriod } from './purchaseTaxSplit'
+import Tabs from '../../../components/Tabs'
 
 function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -422,10 +423,14 @@ export default function VatReport() {
 
       {/* Tabs */}
       {!loadError && (
-      <div className="tab-bar" style={{ marginBottom: 20 }}>
-        <button className={`tab-btn${tab === 'entries' ? ' tab-btn--active' : ''}`} onClick={() => setTab('entries')}>Entries</button>
-        <button className={`tab-btn${tab === 'ca' ? ' tab-btn--active' : ''}`} onClick={() => setTab('ca')}>CA Summary</button>
-      </div>
+      <Tabs
+        idBase="vat-report"
+        label="VAT report sections"
+        style={{ marginBottom: 20 }}
+        tabs={[{ key: 'entries', label: 'Entries' }, { key: 'ca', label: 'CA Summary' }]}
+        active={tab}
+        onChange={setTab}
+      />
       )}
 
       {/* ── ENTRIES TAB ── */}

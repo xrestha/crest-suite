@@ -14,6 +14,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { FilterChips } from '../../../components/Tabs'
 
 export default function WastageReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
@@ -238,11 +239,14 @@ export default function WastageReport() {
 
       {/* Category filter tabs */}
       {categories.length > 2 && (
-        <div className="tab-bar no-print" style={{ marginBottom: 16 }}>
-          {categories.map(c => (
-            <button key={c} className={`tab-btn${catFilter === c ? ' tab-btn--active' : ''}`} onClick={() => setCatFilter(c)}>{c}</button>
-          ))}
-        </div>
+        <FilterChips
+          label="Filter by category"
+          className="no-print"
+          style={{ marginBottom: 16 }}
+          options={categories.map(c => ({ key: c, label: c }))}
+          active={catFilter}
+          onChange={setCatFilter}
+        />
       )}
 
       {loading ? (

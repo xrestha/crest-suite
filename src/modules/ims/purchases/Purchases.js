@@ -21,6 +21,9 @@ import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import Tabs from '../../../components/Tabs'
+import { chipKeys } from '../../../shared/rovingFocus'
+import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 
 export default function Purchases() {
   const { clientId, profile, loading: authLoading, canEditClosedPeriods, hasImsAccess } = useAuth()
@@ -514,9 +517,7 @@ export default function Purchases() {
 
       {/* Locked banner */}
       {isLocked && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
-          🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
-        </div>
+        <ClosedPeriodBanner />
       )}
 
       {/* The admin counterpart of the banner above. `isLocked` carves admin out of the read-only
@@ -611,20 +612,20 @@ export default function Purchases() {
 
       {/* Tabs */}
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid var(--theme-border)', marginBottom: 24 }}>
-        <div style={{ display: 'flex', gap: 4 }} role="tablist" aria-label="Purchases views">
-          {[
-            { id: 'purchases', label: `Purchases (${purchases.length})` },
-            { id: 'returns',   label: `Returns (${returns.length})` },
-            { id: 'register',  label: 'Daily Register' },
-          ].map(tab => (
-            <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id}
-              className={`panel-tab${activeTab === tab.id ? ' panel-tab--active' : ''}`}
-              onClick={() => {
-                // Switching tabs unmounts ReturnsTab, which resets its own form state naturally.
-                setActiveTab(tab.id)
-              }}>{tab.label}</button>
-          ))}
-        </div>
+        {/* Switching tabs unmounts ReturnsTab, which resets its own form state naturally. */}
+        <Tabs
+          idBase="purchases"
+          variant="panel"
+          label="Purchases views"
+          style={{ gap: 4 }}
+          tabs={[
+            { key: 'purchases', label: `Purchases (${purchases.length})` },
+            { key: 'returns', label: `Returns (${returns.length})` },
+            { key: 'register', label: 'Daily Register' },
+          ]}
+          active={activeTab}
+          onChange={setActiveTab}
+        />
         {/* An INCLUSION test, not `activeTab !== 'register'` (S737c). This is a Delete All button
             gated by an exclusion list, with a target resolved by a ternary whose last arm is
             'returns' — the exact shape that put a wastage-writing Save All under Stock Count's new
@@ -651,9 +652,12 @@ export default function Purchases() {
           {/* Filters */}
           <div className="no-print" style={{ marginBottom: 16 }}>
             {/* Day pill strip — wraps to additional rows instead of scrolling off-screen */}
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+            <div role="group" aria-label="Filter by day" onKeyDown={chipKeys}
+              style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
               <button
                 className={`tab-btn${filterDay === 'all' ? ' tab-btn--active' : ''}`}
+                aria-pressed={filterDay === 'all'}
+                tabIndex={filterDay === 'all' ? 0 : -1}
                 onClick={() => setFilterDay('all')}
                 style={{ padding: '2px 7px', fontSize: 11 }}
               >
@@ -663,6 +667,8 @@ export default function Purchases() {
                 <button
                   key={d}
                   className={`tab-btn${filterDay === String(d) ? ' tab-btn--active' : ''}`}
+                  aria-pressed={filterDay === String(d)}
+                  tabIndex={filterDay === String(d) ? 0 : -1}
                   onClick={() => setFilterDay(String(d))}
                   style={{ whiteSpace: 'nowrap', padding: '2px 7px', fontSize: 11 }}
                 >
@@ -925,8 +931,12 @@ export default function Purchases() {
                             {actionsCell}
                           </tr>,
                           // Item sub-rows
+                          // S765: the sub-row background was rgba(0,0,0,0.12) — a frozen black wash
+                          // that reads as a recessed row on Night and as an arbitrary grey band on
+                          // Light. The canonical neutral tint derives from the token, so it
+                          // re-tones with the preset (design-system.md).
                           ...groupEntries.map(entry => (
-                            <tr key={entry.id} style={{ background: 'rgba(0,0,0,0.12)', borderBottom: '1px solid var(--theme-card)' }}>
+                            <tr key={entry.id} style={{ background: 'color-mix(in srgb, var(--theme-text2) 9%, transparent)', borderBottom: '1px solid var(--theme-card)' }}>
                               <td></td>
                               <td style={{ fontWeight: 500, color: 'var(--theme-text2)', paddingLeft: 20, fontSize: 13 }}>
                                 {entry.items?.name}
@@ -1130,9 +1140,15 @@ export default function Purchases() {
                           // The sticky Total cell needs a fully opaque background (unlike the row's own
                           // translucent stripe tint) so horizontally-scrolled-away cells don't show through
                           // underneath it — layering the tint over the opaque card color bakes them into one paint.
-                          const rowBg = idx % 2 === 0 ? 'var(--theme-card)' : 'linear-gradient(rgba(255,255,255,0.03), rgba(255,255,255,0.03)), var(--theme-card)'
+                          // S765: both halves were white-alpha literals — invisible on Modernist
+                          // Light, where the ground is already near-white — and they disagreed with
+                          // each other (0.03 on the sticky cell, 0.015 on the row), so the Total
+                          // column was a different shade from the row it belonged to on every
+                          // preset. ONE tint, derived from the token, used in both places.
+                          const stripe = 'color-mix(in srgb, var(--theme-text2) 7%, transparent)'
+                          const rowBg = idx % 2 === 0 ? 'var(--theme-card)' : `linear-gradient(${stripe}, ${stripe}), var(--theme-card)`
                           return (
-                            <tr key={item.id} style={{ background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)' }}>
+                            <tr key={item.id} style={{ background: idx % 2 === 0 ? 'transparent' : stripe }}>
                               <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--theme-text3)' }}>{idx + 1}</td>
                               <td style={{ ...tdStyle, textAlign: 'left', color: 'var(--theme-text1)', fontWeight: 500 }}>
                                 {item.name}

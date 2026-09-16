@@ -30,6 +30,7 @@ import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fcBand, fcThresholds, fcFigure, recipeCostOf, menuFcPct, unratedReason } from '../../../shared/imsFormulas'
 import { bandFigure, nmBand } from '../../../shared/operatingBands'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { chipKeys } from '../../../shared/rovingFocus'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
 import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
@@ -536,11 +537,32 @@ export default function Recipes() {
       return
     }
 
-    const msg = `Auto-fill nutrition for ${seedTargets.length} ingredient(s) from the regional library (DFTQC Nepal / IFCT 2017 / USDA)?`
-      + (unmatchedItems.length ? `\n\n${unmatchedItems.length} have no local match: ${unmatchedItems.map(i => i.name).join(', ')}. Left for manual entry or a separate USDA lookup.` : '')
-      + `\n\nValues are reference estimates — you can edit any afterward.`
-    if (!window.confirm(msg)) return
+    // S765: was window.confirm(msg). That copy is three paragraphs with a comma-separated
+    // ingredient list in the middle — an OS dialog collapses the \n\n and renders it as a run-on.
+    askConfirm({
+      title: `Auto-fill nutrition for ${seedTargets.length} ingredient${seedTargets.length === 1 ? '' : 's'}?`,
+      body: (
+        <>
+          <p style={{ margin: '0 0 10px' }}>
+            Values come from the regional library (DFTQC Nepal / IFCT 2017 / USDA). They are
+            reference estimates — you can edit any of them afterward.
+          </p>
+          {unmatchedItems.length > 0 && (
+            <p style={{ margin: 0, color: 'var(--theme-text2)' }}>
+              {unmatchedItems.length} have no local match and are left for manual entry or a
+              separate USDA lookup: {unmatchedItems.map(i => i.name).join(', ')}.
+            </p>
+          )}
+        </>
+      ),
+      confirmLabel: 'Auto-fill',
+      run: () => autoFillNutritionNow(seedTargets, unmatchedItems),
+    })
+  }
 
+  // `unmatchedItems` is passed rather than closed over: the write half is a separate function now,
+  // so the list it reports on has to travel with the targets it was computed alongside.
+  async function autoFillNutritionNow(seedTargets, unmatchedItems) {
     setAutoFillBusy(true)
     const { filled, failed } = await saveNutritionTargets(seedTargets)
     setAutoFillBusy(false)
@@ -568,11 +590,29 @@ export default function Recipes() {
       return
     }
 
-    const msg = `Fetch nutrition from USDA FoodData Central for ${usdaTargets.length} ingredient(s)?\n${usdaTargets.map(t => t.it.name).join(', ')}`
-      + (stillUnmatched.length ? `\n\nNo USDA match for: ${stillUnmatched.join(', ')} — add these manually.` : '')
-      + `\n\nUSDA values are US-sourced estimates — verify against a regional source for local dishes if possible.`
-    if (!window.confirm(msg)) return
+    // S765: was window.confirm(msg), same reason as the regional auto-fill above.
+    askConfirm({
+      title: `Fetch USDA nutrition for ${usdaTargets.length} ingredient${usdaTargets.length === 1 ? '' : 's'}?`,
+      body: (
+        <>
+          <p style={{ margin: '0 0 10px' }}>{usdaTargets.map(t => t.it.name).join(', ')}</p>
+          <p style={{ margin: stillUnmatched.length ? '0 0 10px' : 0, color: 'var(--theme-text2)' }}>
+            USDA values are US-sourced estimates — verify against a regional source for local
+            dishes where you can.
+          </p>
+          {stillUnmatched.length > 0 && (
+            <p style={{ margin: 0, color: 'var(--theme-text2)' }}>
+              No USDA match for: {stillUnmatched.join(', ')} — add these manually.
+            </p>
+          )}
+        </>
+      ),
+      confirmLabel: 'Fetch from USDA',
+      run: () => usdaFillNow(usdaTargets),
+    })
+  }
 
+  async function usdaFillNow(usdaTargets) {
     setUsdaFillBusy(true)
     const { filled, failed } = await saveNutritionTargets(usdaTargets)
     setUsdaFillBusy(false)
@@ -1443,7 +1483,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
           )}
 
           {/* FC% filter pills */}
-          <div className="no-print" style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 14 }}>
+          <div className="no-print" role="group" aria-label="Filter by food cost band" onKeyDown={chipKeys}
+            style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 14 }}>
             <span style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginRight: 2, flexShrink: 0 }}>FC %</span>
             {[
               { key: 'all',   label: 'All',                                  color: null },
@@ -1454,6 +1495,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
               <button
                 key={pill.key}
                 onClick={() => setFcFilter(pill.key)}
+                aria-pressed={fcFilter === pill.key}
+                tabIndex={fcFilter === pill.key ? 0 : -1}
                 className={`tab-btn${fcFilter === pill.key ? ' tab-btn--active' : ''}`}
                 style={fcFilter === pill.key && pill.color ? { color: pill.color, borderColor: pill.color } : {}}
               >
@@ -1565,8 +1608,13 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           <td style={{ color: 'var(--theme-accent-ink)', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
                             {recipe.recipe_code || '—'}
                           </td>
-                          <td style={{ fontWeight: 600, color: 'var(--theme-accent-ink)', cursor: 'pointer' }} onClick={() => openDetail(recipe)}>
-                            ⚙ {recipe.name}
+                          {/* S765: `.btn-linklike` — the documented class for a cell whose IDENTITY
+                              is the action. The bare `<td onClick>` was mouse-only, and this is the
+                              only way into a sub-recipe's detail from this tab. */}
+                          <td style={{ fontWeight: 600 }}>
+                            <button type="button" className="btn-linklike" onClick={() => openDetail(recipe)}>
+                              ⚙ {recipe.name}
+                            </button>
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>{(recipe.recipe_ingredients || []).length} items</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>NPR {cost.toFixed(2)}</td>
@@ -1581,7 +1629,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           </td>
                           <td className="no-print" style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setPrintRecipe(recipe)}>🖶</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} aria-label={`Print cost card for ${recipe.name}`} title={`Print cost card for ${recipe.name}`} onClick={() => setPrintRecipe(recipe)}>🖶</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)}>Edit</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)}>{recipe.is_active ? 'Hide' : 'Show'}</button>
                               {/* Deleting a dish is manager-rank (S756, decided with the owner); the
@@ -1641,12 +1689,16 @@ Check the recipe list before saving again — if it timed out after the recipe w
                             <input type="checkbox" checked={selectedIds.has(recipe.id)} onChange={() => toggleSelectRecipe(recipe.id)}
                               aria-label={`Select ${recipe.name}`} />
                           </td>
-                          <td style={{ fontWeight: 600, color: 'var(--theme-text1)', cursor: 'pointer' }} onClick={() => openDetail(recipe)}>
+                          {/* S765: the dish NAME is the control (`.btn-linklike`), not the whole
+                              cell — the RowDisclosure and the badges beside it are their own
+                              things and must not be swallowed by the open-detail click. The bare
+                              `<td onClick>` was mouse-only. */}
+                          <td style={{ fontWeight: 600 }}>
                             {byo && !byo.empty && (
                               <RowDisclosure expanded={byoOpen} onToggle={toggleByo} controls={`byo-cost-${recipe.id}`}
                                 label={`Cost by size for ${recipe.name}`} />
                             )}
-                            {recipe.name}
+                            <button type="button" className="btn-linklike" onClick={() => openDetail(recipe)}>{recipe.name}</button>
                             {subIngCount > 0 && <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)', marginLeft: 6 }}>⚙ {subIngCount} sub</span>}
                             {recipe.is_build_your_own && <span className="badge badge-yellow" style={{ marginLeft: 6, fontSize: 10 }}>Build-your-own</span>}
                           </td>
@@ -1697,7 +1749,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                           </td>
                           <td className="no-print" style={{ textAlign: 'right' }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setPrintRecipe(recipe)}>🖶</button>
+                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} aria-label={`Print cost card for ${recipe.name}`} title={`Print cost card for ${recipe.name}`} onClick={() => setPrintRecipe(recipe)}>🖶</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => openEdit(recipe)}>Edit</button>
                               <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => toggleActive(recipe)}>{recipe.is_active ? 'Hide' : 'Show'}</button>
                               {/* Deleting a dish is manager-rank (S756, decided with the owner); the

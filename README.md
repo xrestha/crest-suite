@@ -126,6 +126,18 @@ that document, and a fourth copy of the gate model would drift from the three th
   locked a bolted-down landscape screen to portrait with nothing in the app able to override it
   (S764). There are **two manifests** and they serve different devices: `staff.webmanifest` is
   phones only and keeps `portrait-primary`. `.claude/rules/staff-app.md` has the rest.
+- **A width test is not a touch test, and 768 is exactly the width it excludes.** Stock Count chose
+  its touch screen — per-item cards, a big right-aligned number box, a fixed save bar, all built for
+  a store-keeper counting a shelf — with `window.innerWidth < 768`. iPad portrait *is* 768, so `<`
+  excluded it; landscape is 1024+, a 10" Android is ~800. **No tablet had ever reached the one
+  screen in the product designed for a tablet**, and it went unnoticed for as long as it existed
+  because the phone branch worked and the desktop branch worked (S765). Decide by INPUT METHOD:
+  `matchMedia('(pointer: coarse)')` reads the primary pointer, so a touchscreen laptop driven by a
+  mouse correctly keeps the dense screen — which a width test can never express. That is already
+  the documented rule for touch SIZING (`@media (pointer: coarse)`, S603); this is the same rule
+  applied to choosing a whole layout. Keep a narrow-width clause only so a desktop browser dragged
+  narrow still behaves, and watch the media query as well as `resize` — a detachable tablet docked
+  to a keyboard changes its primary pointer without changing its width.
 - **A design token lives in four layers and only one of them ships.** `PRESETS` in
   `src/context/ThemeContext.js` is what a user sees; `DESIGN.md`'s frontmatter is the normative
   copy the `/impeccable` hook checks literals against; its prose is what gets read; and

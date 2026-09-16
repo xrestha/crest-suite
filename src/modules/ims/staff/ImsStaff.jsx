@@ -11,6 +11,7 @@ import { STAFF_LEVEL_BADGE as LEVEL_BADGE, STAFF_LEVEL_BADGE_NONE } from '../../
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
+import { chipKeys } from '../../../shared/rovingFocus'
 
 // Mirrors src/modules/pos/staff/PosStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for real email+password login instead of a
@@ -773,7 +774,7 @@ export default function ImsStaff() {
             {/* Always rendered: Count PIN is offered whatever else this client has (S737), so there
                 are always at least two ways in. It used to appear only for a client with HR or a
                 spare login. */}
-            <div className="tab-bar" role="group" aria-label="How to add this staff member" style={{ marginBottom: 16 }}>
+            <div className="tab-bar" role="group" aria-label="How to add this staff member" style={{ marginBottom: 16 }} onKeyDown={chipKeys}>
               {hrEnabled && (
                 <button aria-pressed={addMode === 'hr'} className={`tab-btn${addMode === 'hr' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('hr')}>HR Employee</button>
               )}

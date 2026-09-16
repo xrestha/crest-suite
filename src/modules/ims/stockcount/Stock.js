@@ -32,6 +32,16 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { WASTAGE_REASON_GROUPS, DEFAULT_WASTAGE_REASON } from '../../../shared/constants/wastageReasons'
 import StockCountSettings from './StockCountSettings'
 import { findUncountedItems, gapNote, UncountedItemsBanner } from '../../../shared/uncountedItems'
+import Tabs, { TabPanel, FilterChips } from '../../../components/Tabs'
+import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
+
+// The touch count screen's gate. Exported-in-spirit rather than inlined so the initial state, the
+// resize handler and the media-query listener below cannot drift to three different thresholds —
+// which is the shape of the bug this replaces.
+const COARSE_POINTER = '(pointer: coarse)'
+function isTouchCount() {
+  return (window.matchMedia?.(COARSE_POINTER)?.matches ?? false) || window.innerWidth < 768
+}
 
 function dispPurch(baseQty, item) {
   const cf = parseFloat(item.conversion_factor) || 1
@@ -184,7 +194,16 @@ export default function Stock() {
   // Shared ConfirmModal for the page's bulk writes (S575 rule; these three ran on window.confirm
   // until S612): { title, body, confirmLabel, danger, run }.
   const [pendingConfirm, setPendingConfirm] = useState(null)
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
+  // S765: the touch count screen is chosen by INPUT METHOD, not by width. `window.innerWidth < 768`
+  // is exactly iPad-portrait width, so `< 768` excluded it — and landscape is 1024+, a 10" Android
+  // is ~800 portrait. No tablet had ever reached the card list, the progress bar or the fixed save
+  // bar built for it, and every one of them got the desktop table with a ~38px QtyInput instead:
+  // the one piece of scene-specific design in IMS, and the scene never received it.
+  // `(pointer: coarse)` is the product's documented rule for touch sizing (DESIGN.md → Layout), and
+  // it reads the PRIMARY pointer — a touchscreen laptop driven by a mouse still reports `fine` and
+  // correctly keeps the table. The width clause is kept only so a desktop browser dragged narrow
+  // still behaves, which is also how this branch gets tested.
+  const [isMobile, setIsMobile] = useState(() => isTouchCount())
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
   const [pendingSync, setPendingSync] = useState(0)
   const [syncing, setSyncing] = useState(false)
@@ -235,10 +254,18 @@ export default function Stock() {
     return !sameStored(fieldKey, toQty(value), storedRef.current.cells[itemId]?.[fieldKey] ?? null)
   }
 
+  // Both signals have to be watched: `resize` catches the narrow-window clause, and the media query
+  // itself fires when the primary pointer changes (a detachable tablet docked to a keyboard, or
+  // devtools device emulation being toggled).
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768)
+    const handler = () => setIsMobile(isTouchCount())
+    const mq = window.matchMedia?.(COARSE_POINTER)
     window.addEventListener('resize', handler)
-    return () => window.removeEventListener('resize', handler)
+    mq?.addEventListener?.('change', handler)
+    return () => {
+      window.removeEventListener('resize', handler)
+      mq?.removeEventListener?.('change', handler)
+    }
   }, [])
 
   useEffect(() => {
@@ -1355,9 +1382,7 @@ export default function Stock() {
       )}
 
       {isLocked && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
-          🔒 <strong>This period is closed.</strong> Data is read-only. Contact your admin to re-open if needed.
-        </div>
+        <ClosedPeriodBanner />
       )}
 
       {!isOnline && (
@@ -1401,14 +1426,21 @@ export default function Stock() {
           back from three wrapped rows to none. The bar is still rendered for it: one tab reads as
           a heading for the screen below, and hiding it would make the single-tab case a different
           layout to maintain. */}
-      <div className="no-print panel-tab-bar" role="tablist" aria-label="Stock count sections">
-        {TABS.map(tab => (
-          <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id}
-            className={`panel-tab${activeTab === tab.id ? ' panel-tab--active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}>{tab.label}</button>
-        ))}
-      </div>
+      {/* S765: this row declared role="tablist"/"tab"/aria-selected and delivered no aria-controls,
+          no tabpanel and no roving tabIndex — so reaching Settings, the 9th tab, cost nine Tab
+          presses, and Settings is where blind counting and recount protection live. */}
+      <Tabs
+        idBase="stock"
+        hasPanel
+        variant="panel"
+        label="Stock count sections"
+        className="no-print"
+        tabs={TABS.map(tab => ({ key: tab.id, label: tab.label }))}
+        active={activeTab}
+        onChange={setActiveTab}
+      />
 
+      <TabPanel idBase="stock" active={activeTab}>
       {/* Summary Tab */}
       {activeTab === 'summary' && blindOn && (
         /* Blind counting is on and this tab is the whole register — opening, purchases, closing
@@ -1903,12 +1935,17 @@ export default function Stock() {
                   style={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none', width: '100%', marginBottom: 10 }}
                   placeholder="Search items…" value={search} onChange={e => setSearch(e.target.value)}
                 />
-                <div className="mobile-cat-strip">
-                  <button className={`mobile-cat-btn${filterCat === 'all' ? ' active' : ''}`} onClick={() => setFilterCat('all')}>All</button>
-                  {categories.map(c => (
-                    <button key={c.id} className={`mobile-cat-btn${filterCat === c.id ? ' active' : ''}`} onClick={() => setFilterCat(c.id)}>{c.name}</button>
-                  ))}
-                </div>
+                {/* S765: was .mobile-cat-strip/.mobile-cat-btn, a hand-rolled copy of .tab-btn that
+                    kept the bug the real class was fixed for — accent-as-text on its own focus-ring
+                    tint, ~2.8:1 on Modernist Light. The shared classes bring accent-ink, the focus
+                    pair and the coarse-pointer touch floor, none of which Stock.css ever had. */}
+                <FilterChips
+                  label="Filter by category"
+                  className="tab-bar--scroll"
+                  options={[{ key: 'all', label: 'All' }, ...categories.map(c => ({ key: c.id, label: c.name }))]}
+                  active={filterCat}
+                  onChange={setFilterCat}
+                />
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1948,8 +1985,13 @@ export default function Stock() {
             )}
 
             {isMobile && (
-              <div className="mobile-progress">
-                <div className="mobile-progress-bar" style={{ width: `${pct}%` }} />
+              <div className="mobile-progress" role="progressbar" aria-valuenow={counted} aria-valuemin={0}
+                aria-valuemax={visible.length} aria-label={`${counted} of ${visible.length} items counted`}>
+                {/* A 0–1 fraction, not a width: the bar is drawn full width and squeezed with
+                    scaleX, so the transition composites instead of running layout. An inline
+                    `width` also beat the stylesheet outright, leaving a declared transition that
+                    had never once run. */}
+                <div className="mobile-progress-bar" style={{ '--count-scale': pct / 100 }} />
                 <span className="mobile-progress-label">{counted} / {visible.length} counted</span>
               </div>
             )}
@@ -1964,8 +2006,19 @@ export default function Stock() {
                   const rate = parseFloat(item.per_uom_rate || 0)
                   const qty = parseFloat(val || 0)
                   const lineValue = rate > 0 && qty > 0 ? Math.round(qty * rate) : null
+                  // S765: `has-value` fired on the first KEYSTROKE, so "I typed it" and "the server
+                  // has it" were the same border. On a shared tablet — two people counting, one
+                  // offline queue — that is the single fact the counter needs and the only one the
+                  // card would not tell them. `isChanged` already knows what the server holds, so
+                  // the three states are free: saving, typed-not-stored, stored.
+                  const isSavingRow = !!saving[item.id]
+                  const isQueued = pendingItems.has(item.id)
+                  const hasVal = val !== '' && val !== null && val !== undefined
+                  const isStored = hasVal && !isQueued && !isSavingRow && !isChanged(item.id, fieldKey, val)
+                  const isUnsaved = hasVal && !isQueued && !isSavingRow && !isStored
+                  const stateCls = isQueued ? ' pending' : isSavingRow ? ' saving' : isStored ? ' stored' : isUnsaved ? ' unsaved' : ''
                   return (
-                    <div key={item.id} className={`mobile-stock-card${val > 0 ? ' has-value' : ''}${pendingItems.has(item.id) ? ' pending' : ''}`}>
+                    <div key={item.id} className={`mobile-stock-card${hasVal ? ' has-value' : ''}${stateCls}`}>
                       <div className="mobile-stock-card-header">
                         <span className="mobile-stock-item-name">{item.name}</span>
                         <span className="badge badge-yellow">{item.categories?.name}</span>
@@ -1996,8 +2049,18 @@ export default function Stock() {
                         {!hideValues && !blindCount && lineValue != null && (
                           <span className="mobile-stock-value">NPR {lineValue.toLocaleString('en-IN')}</span>
                         )}
-                        {saving[item.id] && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>…</span>}
                       </div>
+                      {/* The state ships a WORD, not only a border colour — the counter on a shared
+                          tablet is the reader, and a border they have to remember the meaning of is
+                          not an answer. `aria-live` so it is announced rather than only drawn. */}
+                      {hasVal && (
+                        <div className="mobile-stock-state" aria-live="polite">
+                          {isSavingRow ? <span className="mobile-stock-state--saving">Saving…</span>
+                            : isQueued ? <span className="mobile-stock-state--queued">△ Saved on this device — waiting for a connection</span>
+                            : isStored ? <span className="mobile-stock-state--stored">✓ Saved</span>
+                            : <span className="mobile-stock-state--unsaved">△ Not saved yet</span>}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -2134,6 +2197,7 @@ export default function Stock() {
           </>
         )
       })()}
+      </TabPanel>
       </>}
       {pendingConfirm && (
         <ConfirmModal

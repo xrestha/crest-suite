@@ -1126,6 +1126,15 @@ whether their bill saved.
   a **roving `tabIndex`** so the row is one stop with arrows (plus Home/End) moving inside it.
   Without the roving index, reaching the eighth tab costs eight Tab presses — and the eighth tab is
   where the destructive actions live.
+- **That contract is `src/components/Tabs.jsx` now, and it is TWO components, because `.tab-btn` is
+  two things.** A section switcher is `<Tabs>` (tablist, one swapped `<TabPanel>`); a row of filter
+  or sort chips is `<FilterChips>` (`role="group"` + `aria-pressed`). Reaching for the tablist on a
+  filter row is a new defect rather than a fix — nothing there opens a panel, and it suppresses the
+  pressed/not-pressed reading that is the only thing the control communicates. Measured across IMS
+  before the sweep (S765): `aria-controls` **0** occurrences, `role="tabpanel"` **0**, roving
+  `tabIndex` **0**, and 15 of 24 chip rows with no `aria-pressed` — so the applied filter was
+  carried by colour alone. `aria-controls` is opt-in (`hasPanel`) on purpose: it must name an
+  element that exists, and a dangling reference is worse than an absent one.
 
 ### Navigation
 

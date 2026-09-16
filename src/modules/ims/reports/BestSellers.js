@@ -16,6 +16,7 @@ import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { recipeCostOf, unratedReason } from '../../../shared/imsFormulas'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { FilterChips } from '../../../components/Tabs'
 
 // Recharts SVG props (fill, tick) don't resolve CSS vars — these fixed hexes back only
 // the two chart call sites below; everything else uses the theme-token constants beneath.
@@ -253,11 +254,16 @@ export default function BestSellers() {
             </select>
           )}
         </div>
-        <div className="tab-bar">
-          <button className={`tab-btn${sortBy === 'revenue' ? ' tab-btn--active' : ''}`} onClick={() => setSortBy('revenue')}>By Revenue</button>
-          <button className={`tab-btn${sortBy === 'qty'     ? ' tab-btn--active' : ''}`} onClick={() => setSortBy('qty')}>By Volume</button>
-          <button className={`tab-btn${sortBy === 'margin'  ? ' tab-btn--active' : ''}`} onClick={() => setSortBy('margin')}>By Margin %</button>
-        </div>
+        <FilterChips
+          label="Sort by"
+          options={[
+            { key: 'revenue', label: 'By Revenue' },
+            { key: 'qty', label: 'By Volume' },
+            { key: 'margin', label: 'By Margin %' },
+          ]}
+          active={sortBy}
+          onChange={setSortBy}
+        />
         {!loading && filteredRows.length > 0 && (
           <span style={{ fontSize: 13, color: MUTED, marginLeft: 'auto' }}>{filteredRows.length} items sold this period</span>
         )}

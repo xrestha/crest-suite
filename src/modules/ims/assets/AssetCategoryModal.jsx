@@ -114,7 +114,11 @@ ${text}`, detail })
                   </Tip>
                 </td>
                 <td style={{ textAlign: 'center' }}>
-                  <button className="btn btn-ghost" style={{ fontSize: 16, padding: '2px 8px' }} onClick={() => removeRow(idx)}>×</button>
+                  {/* S765: aria-label — an icon has no accessible name, and this one deletes a row. */}
+                  <button className="btn btn-icon btn-ghost"
+                    aria-label={`Remove ${row.name || 'this category'}`}
+                    title={`Remove ${row.name || 'this category'}`}
+                    onClick={() => removeRow(idx)}>×</button>
                 </td>
               </tr>
             ))}

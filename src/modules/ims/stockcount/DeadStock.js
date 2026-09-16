@@ -17,6 +17,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate, Link } from 'react-router-dom'
 import { BS_MONTHS, bsToAd, formatBsDay } from '../../../utils/bsCalendar'
 import { asOfForWindow, periodMonthIndex } from '../reports/stockAgeingCalc'
+import { FilterChips } from '../../../components/Tabs'
 import {
   judgeItemPeriod, classifyItem, suggestNextStep,
   DEAD_AFTER_MONTHS, SLOW_THRESHOLD,
@@ -388,20 +389,24 @@ export default function DeadStock() {
       {/* Filters — gated exactly like the KPI strip (S720): counts are figures too. */}
       {!loading && !loadError && assessable > 0 && (
       <div className="no-print" style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        {['All', 'Dead', 'Slow'].map(s => (
-          <button
-            key={s}
-            className={`tab-btn${statusFilter === s ? ' tab-btn--active' : ''}`}
-            onClick={() => setStatusFilter(s)}
-          >
-            {s} ({s === 'All' ? rows.length : s === 'Dead' ? deadCount : slowCount})
-          </button>
-        ))}
+        <FilterChips
+          label="Filter by movement"
+          options={[
+            { key: 'All', label: `All (${rows.length})` },
+            { key: 'Dead', label: `Dead (${deadCount})` },
+            { key: 'Slow', label: `Slow (${slowCount})` },
+          ]}
+          active={statusFilter}
+          onChange={setStatusFilter}
+        />
         {categories.length > 2 && (
-          <div style={{ marginLeft: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {categories.map(c => (
-              <button key={c} className={`tab-btn${catFilter === c ? ' tab-btn--active' : ''}`} onClick={() => setCatFilter(c)}>{c}</button>
-            ))}
+          <div style={{ marginLeft: 12 }}>
+            <FilterChips
+              label="Filter by category"
+              options={categories.map(c => ({ key: c, label: c }))}
+              active={catFilter}
+              onChange={setCatFilter}
+            />
           </div>
         )}
       </div>

@@ -107,6 +107,8 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
   const [importPreview, setImportPreview] = useState(null) // { recipes:[...], summary } | null
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState('')
+  // The success state of a bulk import, shown in the page rather than in an OS dialog (S765).
+  const [importDone, setImportDone] = useState('')
 
   async function downloadRecipeTemplate() {
     const XLSX = await import('xlsx')
@@ -193,7 +195,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
   }
 
   function handleImportFile(e) {
-    setImportError('')
+    setImportError(''); setImportDone('')
     const file = e.target.files?.[0]
     e.target.value = '' // allow re-selecting the same file
     if (!file) return
@@ -276,7 +278,11 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
       if (created > 0) {
         setImportPreview(null)
         await onImported()
-        alert(`Imported ${created} recipe${created !== 1 ? 's' : ''}.`)
+        // S765: was alert(). You have just imported your whole recipe book and the celebration was
+        // an OS dialog you have to dismiss before you can look at what landed — and on a tablet it
+        // reads as "crest-suite.vercel.app says…", which is the shape of a security warning. The
+        // page has a notice slot; the result belongs in it, next to the thing that changed.
+        setImportDone(`Imported ${created} recipe${created !== 1 ? 's' : ''}.`)
       }
     }
   }
@@ -296,6 +302,7 @@ export default function RecipeImportButton({ items, subRecipes, recipes, exportR
         </Tip>
       )}
       {importError && <span style={{ fontSize: 11, color: 'var(--theme-red-text)' }}>{importError}</span>}
+      {importDone && <span role="status" style={{ fontSize: 11, color: 'var(--theme-green-text)', fontWeight: 600 }}>✓ {importDone}</span>}
 
       {importPreview && (
         <Modal onClose={() => { if (!importBusy) { setImportPreview(null); setImportError('') } }} title="Import Recipes — Preview" maxWidth={760}>

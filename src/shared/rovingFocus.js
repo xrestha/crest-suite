@@ -33,3 +33,14 @@ export function moveRovingFocus(e, selector) {
 export function rovingTabIndex(isActive) {
   return isActive ? 0 : -1
 }
+
+// The ready-made keydown handler for a row of filter/sort chips — `onKeyDown={chipKeys}` on the
+// `role="group"` container. Added S765, when an IMS sweep found 15 of 24 such rows carrying no
+// keyboard movement and no `aria-pressed` at all, so which filter was applied was visible only as
+// a colour. Named rather than inlined because the selector is the part worth getting right once:
+// it skips disabled AND aria-disabled members, so a chip that is present-but-not-pressable (the
+// product's documented pattern for "the press tells you what is missing") is stepped over rather
+// than trapping the arrow key on it.
+export function chipKeys(e) {
+  moveRovingFocus(e, 'button:not([disabled]):not([aria-disabled="true"])')
+}

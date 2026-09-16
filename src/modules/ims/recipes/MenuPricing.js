@@ -20,6 +20,7 @@ import { loadOptionCatalog } from '../../customization/customizationData'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
 import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
+import { FilterChips } from '../../../components/Tabs'
 
 
 function vatOf(r) {
@@ -518,16 +519,16 @@ export default function MenuPricing() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <div className="tab-bar" style={{ marginBottom: 0 }}>
-          {tabs.map(t => {
-            const count = t === 'All' ? recipes.length : (tabCounts[t] || 0)
-            return (
-              <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => setCatTab(t)}>
-                {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>
-              </button>
-            )
-          })}
-        </div>
+        <FilterChips
+          label="Filter by category"
+          style={{ marginBottom: 0 }}
+          options={tabs.map(t => ({
+            key: t,
+            label: <>{t} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{t === 'All' ? recipes.length : (tabCounts[t] || 0)}</span></>,
+          }))}
+          active={catTab}
+          onChange={setCatTab}
+        />
         {search.trim() && !loading && (
           <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
             {display.length} of {recipes.length} item{recipes.length !== 1 ? 's' : ''}
@@ -882,16 +883,16 @@ export default function MenuPricing() {
           value={search}
           onChange={e => { setSearch(e.target.value); setFrozenIds(null) }}
         />
-        <div className="tab-bar" style={{ marginBottom: 0 }}>
-          {tabs.map(t => {
-            const count = t === 'All' ? recipes.length : (tabCounts[t] || 0)
-            return (
-              <button key={t} className={`tab-btn${catTab === t ? ' tab-btn--active' : ''}`} onClick={() => { setCatTab(t); setFrozenIds(null) }}>
-                {t} <span style={{ fontSize: 11, opacity: 0.65, marginLeft: 4 }}>{count}</span>
-              </button>
-            )
-          })}
-        </div>
+        <FilterChips
+          label="Filter by category"
+          style={{ marginBottom: 0 }}
+          options={tabs.map(t => ({
+            key: t,
+            label: <>{t} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{t === 'All' ? recipes.length : (tabCounts[t] || 0)}</span></>,
+          }))}
+          active={catTab}
+          onChange={t => { setCatTab(t); setFrozenIds(null) }}
+        />
         {/* The tab counts above count the whole category, so once a search narrows the table they
             stop describing what is on screen — this says what is actually showing. */}
         {search.trim() && !loading && (
@@ -952,13 +953,20 @@ export default function MenuPricing() {
                 const newFcPct   = !isByo && draftExVat > 0 && r.cost > 0 ? (r.cost / draftExVat) * 100 : null
                 const diff       = draftNum !== null && r.inclVat > 0 ? draftNum - r.inclVat : null
                 const changed    = hasDraft && draftNum !== r.inclVat
-                const dimmed     = !r.pos_enabled
                 const fcFig      = fcFigure(r.fcPct, settings)
                 const newFcFig   = fcFigure(newFcPct, settings)
 
                 return (
                   <Fragment key={r.id}>
-                  <tr style={{ opacity: dimmed ? 0.45 : 1, background: changed ? 'rgba(245,158,11,0.05)' : undefined }}>
+                  {/* S765, two fixes on one line.
+                      `rgba(245,158,11,…)` is #f59e0b — a SECOND amber, not --theme-amber (#fbbf24).
+                      Layout.js carries a comment saying this exact value was already found and
+                      removed there; the sweep never reached IMS.
+                      And `opacity: 0.45` multiplies through the text colour, taking it to ~2.8:1 —
+                      DESIGN.md forbids dimming a row that way precisely because the rows worth
+                      reading are the ones it makes unreadable. The state is LABELLED instead: the
+                      Not on POS menu column already says so, so the row just keeps its ink. */}
+                  <tr style={{ background: changed ? 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' : undefined }}>
                     <td style={{ color: 'var(--theme-text2)' }}>{i + 1}</td>
                     <td style={{ textAlign: 'center' }}>
                       <input

@@ -21,6 +21,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { errorText } from '../../../shared/errorText'
 import SuiteGate from '../../../components/SuiteGate'
 import { Navigate } from 'react-router-dom'
+import { FilterChips } from '../../../components/Tabs'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const WEEKDAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -349,13 +350,18 @@ export default function DemandForecast() {
       </div>
 
       <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', marginBottom: 12 }}>
-        <div className="tab-bar">
-          {/* Off while recomputing (S756): handleRecompute runs the horizon it started with and
-              then reloads through the NEW horizon's loader, so a switch mid-run showed the other
-              horizon's stored rows under a "Forecast rebuilt" message about this one. */}
-          <button className={`tab-btn${horizon === 7 ? ' tab-btn--active' : ''}`} disabled={recomputing} onClick={() => setHorizon(7)}>Next 7 Days</button>
-          <button className={`tab-btn${horizon === 30 ? ' tab-btn--active' : ''}`} disabled={recomputing} onClick={() => setHorizon(30)}>Next 30 Days</button>
-        </div>
+        {/* Off while recomputing (S756): handleRecompute runs the horizon it started with and
+            then reloads through the NEW horizon's loader, so a switch mid-run showed the other
+            horizon's stored rows under a "Forecast rebuilt" message about this one. */}
+        <FilterChips
+          label="Forecast horizon"
+          options={[
+            { key: 7, label: 'Next 7 Days', disabled: recomputing },
+            { key: 30, label: 'Next 30 Days', disabled: recomputing },
+          ]}
+          active={horizon}
+          onChange={setHorizon}
+        />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Tip text="Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically.">
             <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing}>

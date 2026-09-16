@@ -143,7 +143,28 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     }))
   }
 
-  function addBillLine() { setBillLines(prev => [...prev, newLine()]) }
+  // S765 — the keyboard path through the highest-frequency form in the product.
+  //
+  // This file had ZERO onKeyDown, zero autoFocus and zero refs. "+ Add Item" was reachable only by
+  // tabbing past every field of every existing line (or by mouse), nothing focused the new row, and
+  // nothing committed a row on Enter — so a bookkeeper entering a 15-line supplier bill off paper
+  // crossed ~135 tab stops, and adding line 16 meant traversing all of them again.
+  //
+  // Focus moves on the NEXT frame because the row does not exist in the DOM until React has
+  // committed the state update that creates it.
+  function addBillLine() {
+    const line = newLine()
+    setBillLines(prev => [...prev, line])
+    requestAnimationFrame(() => document.getElementById(`bill-item-${line._key}`)?.focus())
+  }
+
+  // Enter on the row's LAST field (Days) means "this line is done" — add the next one and put the
+  // cursor in its item picker. Shift+Enter is left alone so it can never fight a form submit.
+  function lineKeyDown(e) {
+    if (e.key !== 'Enter' || e.shiftKey) return
+    e.preventDefault()
+    addBillLine()
+  }
   function removeBillLine(key) { setBillLines(prev => prev.length > 1 ? prev.filter(l => l._key !== key) : prev) }
 
   // Has this vendor's bill number been entered before? Two people keying the same paper bill is
@@ -487,6 +508,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                   <tr key={line._key} style={{ borderBottom: '1px solid var(--theme-card)' }}>
                     <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'middle' }}>
                       <SearchableSelect
+                        id={`bill-item-${line._key}`}
                         value={line.item_id}
                         onChange={v => updateBillLine(line._key, 'item_id', v)}
                         options={itemOptions}
@@ -526,7 +548,10 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                         onChange={() => updateBillLine(line._key, 'vat_inclusive', !line.vat_inclusive)}
                         style={{ cursor: 'pointer', width: 15, height: 15, accentColor: 'var(--theme-amber)' }}
                       />
-                      {line.vat_inclusive && <div style={{ fontSize: 9, color: 'var(--theme-amber-text)', marginTop: 2, fontWeight: 700 }}>13%</div>}
+                      {/* 10px, not 9: 9 is the chevron GLYPH step on the type ramp and 10 is the
+                          floor for real text (DESIGN.md → Typography). This is a live VAT marker
+                          on a money row, not a decorative caret. */}
+                      {line.vat_inclusive && <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2, fontWeight: 700 }}>13%</div>}
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
                       <input
@@ -560,7 +585,8 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                     <td style={{ padding: '6px 8px 6px', verticalAlign: 'middle' }}>
                       <input type="number" min="0" aria-label={`Shelf life in days for ${selItem?.name || 'new line'}`} value={line.shelf_life} placeholder="Days"
                         onChange={e => updateBillLine(line._key, 'shelf_life', e.target.value)}
-                        title="Enter days to auto-fill expiry date"
+                        onKeyDown={lineKeyDown}
+                        title="Enter days to auto-fill expiry date. Press Enter to start the next line."
                         style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 8px', fontSize: 12, color: 'var(--theme-text2)', outline: 'none', width: '100%', textAlign: 'right' }} />
                     </td>
                     <td style={{ padding: '6px 0 6px', verticalAlign: 'middle', textAlign: 'right' }}>
