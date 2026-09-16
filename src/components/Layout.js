@@ -223,6 +223,39 @@ const HR_GROUPS = [
   ]},
 ]
 
+// ── "You are here" ───────────────────────────────────────────────────────────────────────────
+//
+// react-router's `NavLink` marks itself active on a PREFIX match by default, and exactly one
+// destination in this model is a parent of other destinations: `/pos` (POS Setup) sits above
+// `/pos/orders`, `/pos/billing`, `/pos/kds` and eight more. So POS Setup was highlighted — and
+// carried `aria-current="page"` — on every single POS page. Live since the module shipped, in
+// every screenshot of the till, reported on the Billing page (S763).
+//
+// **`end` on every link is not the fix**: an item with genuine sub-routes must stay lit while one
+// is open (`/purchases` while `/purchases/new` is on screen). The rule is LONGEST PREFIX WINS, and
+// it is DERIVED rather than flagged per item — a path needs the exact test precisely when another
+// nav destination lives underneath it. Add `/pos/anything` tomorrow and this keeps working; add a
+// second parent path and it covers that too, with nothing to remember.
+const ALL_NAV_PATHS = [...new Set([
+  ...NAV.map(i => i.to),
+  ...REPORTS.map(i => i.to),
+  ...IMS_GROUPS.flatMap(g => g.items.map(i => i.to)),
+  ...POS_GROUPS.flatMap(g => g.items.map(i => i.to)),
+  ...HR_GROUPS.flatMap(g => g.items.map(i => i.to)),
+  ...CUSTOMIZATION_GROUPS.flatMap(g => g.items.map(i => i.to)),
+  ...SUITE_NAV.map(i => i.to),
+  HR_DASHBOARD.to,
+])]
+const NAV_PARENT_PATHS = new Set(
+  ALL_NAV_PATHS.filter(to => ALL_NAV_PATHS.some(p => p !== to && p.startsWith(to + '/'))))
+
+// Pass to `NavLink`'s `end`, so the fix reaches `aria-current` and not only the highlight — a
+// screen reader announcing two current pages is the same defect wearing the other hat.
+const navEnd = to => NAV_PARENT_PATHS.has(to)
+// The non-NavLink form, for a group trigger that has to decide for a whole list at once.
+const navPathActive = (pathname, to) =>
+  pathname === to || (!navEnd(to) && pathname.startsWith(to + '/'))
+
 // The bar pill's shape is `.topbar-pill` in Layout.css — a complete class, not an inline style
 // object, so a pill can never fall through to the UA's own button/link chrome (S678). `pillClass`
 // is the only thing JSX decides: which state it is in.
@@ -582,7 +615,7 @@ export default function Layout() {
     const nc = navCounts[item.to]
     const count = nc?.count || 0
     return (
-      <NavLink key={item.to} to={item.to}
+      <NavLink key={item.to} to={item.to} end={navEnd(item.to)}
         className={({ isActive }) => `sidebar-link${isActive ? ' sidebar-link--active' : ''}`}
         style={style}
         onClick={() => setMobileSidebarOpen(false)}>
@@ -679,7 +712,7 @@ export default function Layout() {
     // pass options through — which `pinnable` now needs.
     const renderItems = () => items.map(i => renderNavItem(i, { pinnable: group.pinnable !== false }))
     if (!group.label) return <div key={group.key}>{renderItems()}</div> // unlabeled groups render flat, no header
-    const hasActive = items.some(i => location.pathname === i.to || location.pathname.startsWith(i.to + '/'))
+    const hasActive = items.some(i => navPathActive(location.pathname, i.to))
     const open = groupOpen(group.key) || hasActive
     return (
       <div key={group.key}>
@@ -729,7 +762,7 @@ export default function Layout() {
     const nc = navCounts[item.to]
     const count = nc?.count || 0
     return (
-      <NavLink key={item.to} to={item.to} className={({ isActive }) => pillClass(isActive)}>
+      <NavLink key={item.to} to={item.to} end={navEnd(item.to)} className={({ isActive }) => pillClass(isActive)}>
         <item.icon size={15} strokeWidth={1.75} aria-hidden="true" style={{ flexShrink: 0 }} />
         {label || item.label}
         {count > 0 && (
@@ -745,7 +778,7 @@ export default function Layout() {
     if (items.length === 0) return null
     // An unlabelled group has no header to hang a disclosure on — flat pills, same as the drawer.
     if (!group.label) return items.map(i => renderBarPill(i))
-    const current = items.some(i => location.pathname === i.to || location.pathname.startsWith(i.to + '/'))
+    const current = items.some(i => navPathActive(location.pathname, i.to))
     const count = items.reduce((t, i) => t + (navCounts[i.to]?.count || 0), 0)
     const id = `topnav-${group.key}`
     return (

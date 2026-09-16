@@ -314,11 +314,17 @@ body:has(.guest-menu) {
   background: var(--theme-border);
   overflow: hidden;
 }
+/* scaleX, not width (S763). Animating width lays out on every frame; a transform is composited, and
+   this bar runs on a guest's own phone, which in this market is the slowest device the product ever
+   renders on. The fill is drawn full-width and squeezed from the left, so the JSX sets
+   `transform: scaleX(fraction)` where it used to set a width percentage. */
 .guest-menu .gm-steps-bar > span {
   display: block;
   height: 100%;
+  width: 100%;
+  transform-origin: left center;
   background: var(--gm-pine);
-  transition: width var(--motion-fast, 160ms) var(--ease-standard, ease);
+  transition: transform var(--motion-fast, 160ms) var(--ease-standard, ease);
 }
 @media (prefers-reduced-motion: reduce) {
   .guest-menu .gm-steps-bar > span { transition: none; }

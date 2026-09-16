@@ -177,7 +177,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
           </p>
           <div className="gm-steps-bar" role="progressbar" aria-label="Your progress"
             aria-valuemin={1} aria-valuemax={steps.length + 1} aria-valuenow={Math.min(step, steps.length) + 1}>
-            <span style={{ width: `${((Math.min(step, steps.length) + 1) / (steps.length + 1)) * 100}%` }} />
+            <span style={{ transform: `scaleX(${(Math.min(step, steps.length) + 1) / (steps.length + 1)})` }} />
           </div>
         </div>
       )}

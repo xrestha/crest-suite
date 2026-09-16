@@ -296,6 +296,26 @@ Gating the Crest Suite group owner-only would have revoked Demand Forecast and F
 every IMS supervisor who has them; `renderGroup` already returns `null` when nothing inside is
 reachable, so per-item gating degrades correctly on its own.
 
+### "You are here" is a longest-prefix match, not a prefix match (S763)
+
+`NavLink`'s `isActive` prefix-matches by default. That is right for an item with sub-routes
+(`/purchases` stays lit while `/purchases/new` is open) and wrong for an item that is a PARENT of
+other nav destinations — and this model has exactly one: **`/pos` sits above `/pos/orders`,
+`/pos/billing`, `/pos/kds` and eight more**, so POS Setup was highlighted on every POS page, with
+`aria-current="page"` on it, since the module shipped. Nobody reported it for months; it was noticed
+in a screenshot of a different change.
+
+**`end` on every link is not the fix** — it breaks the legitimate case. `NAV_PARENT_PATHS` in
+`Layout.js` is **derived from the nav model** (a path needs the exact test precisely when another
+destination starts with it plus `/`), so no item carries a flag and a new sub-path is covered
+automatically. `navEnd(to)` feeds `NavLink`'s `end`, which matters because it fixes `aria-current`
+and not only the highlight; `navPathActive(pathname, to)` is the same rule for a group trigger that
+has to decide for a whole list.
+
+**Check both surfaces and both signals.** The bar pill, the drawer link and the group triggers each
+decide this separately, and a visual fix that leaves `aria-current` on two links has told a screen
+reader there are two current pages. Verified by reading `aria-current` per route, not by looking.
+
 ### A nav icon is unique per route, because the command palette flattens the modules (S606)
 
 `CommandPalette.js:134` renders each nav item's `icon` and lists **every module's items in one
@@ -642,6 +662,14 @@ rule** — re-derive it when you touch the block, or state where it came from so
 ## An inline style is how a rule stops reaching the elements that need it (S682)
 
 Two instances found in one pass, opposite directions, same cause.
+
+**A transition on a LAYOUT property is the same family, and the guest surface is where it costs
+most (S763).** The build-your-own stepper's progress bar transitioned `width`, so every step ran
+layout instead of compositing — on the one screen in the product that renders on a guest's own
+phone, which in this market is the slowest device it ever meets. A progress fill is drawn at
+`width: 100%` and squeezed with `transform: scaleX(fraction)` from a `left` origin; the JSX sets the
+transform where it used to set a percentage width. Same rule for a drawer, a bar or a meter: move
+`transform`/`opacity`, never `width`/`height`/`padding`/`margin`.
 
 **An inline `animation` cannot be switched off by a media query.** The rule was already written
 here for `ChartCard`; the admin client list had `style={{ animation: 'pulse-dot 1.5s infinite' }}`
