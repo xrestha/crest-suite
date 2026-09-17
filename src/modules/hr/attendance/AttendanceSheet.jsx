@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -6,21 +6,22 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
 import ConfirmModal from '../../../components/ConfirmModal'
+import FieldError, { fieldAria } from '../../../components/FieldError'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 import { buildAttendanceFromRoster } from './attendanceFromRoster'
-import { isNonWorking, withStatus, fillBlankCells, attendanceRowFor } from './attendanceRules'
+import { isNonWorking, withStatus, fillBlankCells, attendanceRowFor, unsavedKeys, carryUnsavedEdits, splitCellKey } from './attendanceRules'
 import { calcHours, shiftHours, shiftRegularHours } from '../roster/laborForecast'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
 const STATUS_MAP = Object.fromEntries(ATTENDANCE_STATUSES.map(s => [s.key, s]))
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-const inp = {
-  background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 0,
-  padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none',
-  fontFamily: 'inherit',
-}
+// The grid's controls wear `.form-input` / `.form-select` (S768) so a locked month's boxes take the
+// shared `:disabled` treatment, an invalid time takes the `[aria-invalid]` border, and a tablet gets
+// the coarse-pointer 16px floor. Only the padding differs from the class: a row per employee is a
+// dense ledger, and the class's 9px/12px would add ~4px to every row of a 40-person sheet.
+const CELL_PAD = '7px 10px'
 
 // The product's amber banner — PayrollRun's stale-draft card and LeaveManagement's gap banner
 // wear exactly this, the whole border tinted and an 8% fill (design-system.md, S741).
@@ -56,6 +57,13 @@ function parseTimeInput(raw) {
   return null
 }
 
+// What `cellSignature` compares a clock time by: the canonical "H:MM", or — for something that does
+// not parse yet — the text as typed, so a half-typed time still counts as an unsaved edit.
+function timeKey(raw) {
+  const parsed = parseTimeInput(raw)
+  return parsed === null ? String(raw).trim() : parsed
+}
+
 // `lenient` (the field is currently focused / mid-typing) treats 1-3 bare digits as still-in-
 // progress rather than flashing red before the admin has finished typing a 4-digit HHMM entry.
 function isValidTimeStr(s, lenient) {
@@ -72,6 +80,12 @@ export default function AttendanceSheet() {
   const [period,    setPeriod]    = useState(null)
   const [employees, setEmployees] = useState([])
   const [records,   setRecords]   = useState({})   // `${employee_id}:${bs_day}` -> row
+  // What the database held at the last read. `records` minus this is the reader's unsaved work,
+  // across every day of the month (S768) — the ref is the same map for the async reload paths.
+  const [savedRecords, setSavedRecords] = useState({})
+  const savedRef = useRef({})
+  // A period switch waiting on "discard N unsaved changes?".
+  const [pendingPeriodId, setPendingPeriodId] = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [tab,       setTab]       = useState('mark')
   const [selectedDay, setSelectedDay] = useState(getBsToday().day)
@@ -197,7 +211,16 @@ export default function AttendanceSheet() {
     return gap >= SHORTFALL_FLAG_HOURS ? { gap, measured } : null
   }
 
-  const loadAttendance = useCallback(async (periodId) => {
+  // The message for a Start/End box, or null. `activeKey` is the box being typed in, where 1–3 bare
+  // digits are still a time in progress rather than a mistake.
+  function timeError(value, activeKey) {
+    return isValidTimeStr(value, activeTimeKey === activeKey) ? null : 'Invalid — use HH:MM or 0800'
+  }
+
+  // `carry` keeps the reader's unsaved edits through the reload (every write on the sheet reloads
+  // the month, and used to wipe them); `drop(key)` names cells the write just deleted on purpose.
+  // A period switch passes neither — another month's edits must not follow the reader into this one.
+  const loadAttendance = useCallback(async (periodId, { carry = false, drop } = {}) => {
     // Paged: one row per employee per day, so the grid itself silently loses whole employees'
     // rows past the 1000-row cap at ~34 staff — and this sheet is what payroll then reads (S529).
     // The payroll run rides along: a finalized month is read-only (S749).
@@ -220,7 +243,10 @@ export default function AttendanceSheet() {
         end_time:   parseTimeInput(r.end_time)   || r.end_time,
       }
     })
-    setRecords(map)
+    const prevSaved = savedRef.current
+    savedRef.current = map
+    setSavedRecords(map)
+    setRecords(current => carry ? carryUnsavedEdits(map, current, prevSaved, timeKey, drop) : map)
   }, [scopedFrom, periodReq])
 
   function applyPeriod(p) {
@@ -254,7 +280,15 @@ export default function AttendanceSheet() {
     load()
   }, [clientId, scopedFrom, loadAttendance, periodReq])
 
-  async function handlePeriodChange(id) {
+  // Switching month discards unsaved edits, so it asks first. Switching DAY or TAB does not: both
+  // tabs read and write the same `records`, and an edit on Day 3 is still there on Day 4 (S768).
+  function handlePeriodChange(id) {
+    if (id === period?.id) return
+    if (unsaved.length > 0) { setPendingPeriodId(id); return }
+    switchPeriod(id)
+  }
+  async function switchPeriod(id) {
+    setPendingPeriodId(null)
     const p = periods.find(x => x.id === id)
     if (!p) return
     periodReq.begin(id)
@@ -324,6 +358,15 @@ export default function AttendanceSheet() {
       // The cell was cleared optimistically; put it back so the sheet shows what is stored.
       if (before) setRecords(m => ({ ...m, [key]: before }))
       setSavedMsg(`error:Day ${day} may not have been cleared — reload to see what is stored. ` + errorLine(error))
+      return
+    }
+    // The row is gone, so it leaves the saved copy too — or marking the same day again would
+    // compare equal to a row that no longer exists and never be saved.
+    if (key in savedRef.current) {
+      const nextSaved = { ...savedRef.current }
+      delete nextSaved[key]
+      savedRef.current = nextSaved
+      setSavedRecords(nextSaved)
     }
   }
   // Unpaid break/lunch minutes are subtracted from the raw Start-to-End span to give Hours Worked
@@ -444,30 +487,27 @@ export default function AttendanceSheet() {
     })
   }
 
-  async function saveDay() {
+  // ONE save for the whole sheet (S768). It used to be Save Day on one tab and Save Month on the
+  // other, each writing only its own slice while the grid happily held edits for every day — so a
+  // day marked and then left for another day was never written, and the next save's reload wiped
+  // it from the screen too. For daily and hourly staff a blank day pays nothing. Now every unsaved
+  // cell goes in one upsert, whichever tab or day the reader happens to be on.
+  async function saveChanges() {
     if (!period || refuseIfLocked()) return
-    setSaving(true); setSavedMsg('')
-    // Only staff whose cell was actually touched (status changed, a time/hours/OT/note typed)
-    // get written — an employee nobody clicked on for this day is skipped entirely rather than
-    // silently persisted as Present. cellFor() returns undefined until setCell/setTimeCell has
-    // run at least once for that key. attendanceRowFor() also drops hours/OT from a non-working
-    // day, so a row loaded carrying them is corrected when its day is saved (S749).
-    const rows = employees
-      .map(emp => {
-        const rec = cellFor(emp.id, selectedDay)
-        if (!rec) return null
-        return attendanceRowFor(rec, { employeeId: emp.id, periodId: period.id, day: selectedDay, isValidTime: s => isValidTimeStr(s) })
-      })
-      .filter(Boolean)
-    if (rows.length === 0) {
-      setSavedMsg('ok:Nothing to save — no changes were made for Day ' + selectedDay)
-      setSaving(false)
+    const keys = unsaved
+    if (keys.length === 0) {
+      setSavedMsg('ok:Nothing to save — every mark on this sheet is already saved.')
       return
     }
+    setSaving(true); setSavedMsg('')
+    const rows = keys.map(key => {
+      const { employeeId, day } = splitCellKey(key)
+      return attendanceRowFor(records[key], { employeeId, periodId: period.id, day, isValidTime: s => isValidTimeStr(s) })
+    })
     const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
-    if (error) { setSavedMsg(`error:Day ${selectedDay} may not have saved. What you entered is still on screen — press Save Day again (saving twice is safe). ` + errorLine(error)); setSaving(false); return }
-    await loadAttendance(period.id)
-    setSavedMsg(`ok:Saved Day ${selectedDay} (${rows.length} of ${employees.length} staff)`)
+    if (error) { setSavedMsg(`error:${describeChanges(keys)} may not have saved. What you entered is still on screen — press Save again (saving twice is safe). ` + errorLine(error)); setSaving(false); return }
+    await loadAttendance(period.id, { carry: true })
+    setSavedMsg(`ok:Saved ${describeChanges(keys)}`)
     setSaving(false)
   }
 
@@ -494,7 +534,8 @@ export default function AttendanceSheet() {
     const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).eq('bs_day', selectedDay)
       .in('employee_id', employees.map(e => e.id))
     if (error) { setSavedMsg(`error:Day ${selectedDay} may not have been cleared — reload to see what is stored. ` + errorLine(error)); setSaving(false); return }
-    await loadAttendance(period.id)
+    const listed = new Set(employees.map(e => e.id))
+    await loadAttendance(period.id, { carry: true, drop: key => { const k = splitCellKey(key); return k.day === selectedDay && listed.has(k.employeeId) } })
     setSavedMsg(`ok:Cleared Day ${selectedDay}`)
     setSaving(false)
   }
@@ -534,38 +575,13 @@ export default function AttendanceSheet() {
     const { error } = await scopedUpsert('hr_attendance', plan.rows, { onConflict: 'employee_id,period_id,bs_day' })
     setPendingGenerate(null)
     if (error) { setSavedMsg('error:The roster days may not have been written — reload to see what is stored, then generate again (it never overwrites a day that already has a mark). ' + errorLine(error)); setGenerating(false); return }
-    await loadAttendance(period.id)
+    await loadAttendance(period.id, { carry: true })
     setSavedMsg(`ok:Generated ${plan.rows.length} entr${plan.rows.length === 1 ? 'y' : 'ies'} from roster`)
     setGenerating(false)
   }
 
-  // ── By Employee tab: same idea as saveDay/generateFromRoster, but one employee × every day
-  // of the month instead of every employee × one day. ─────────────────────────────────────────
-  async function saveEmployeeMonth(empId) {
-    if (!period || !empId || refuseIfLocked()) return
-    setSaving(true); setSavedMsg('')
-    // Only days actually touched for this employee get written — an untouched day is skipped
-    // entirely rather than silently persisted as Present (same rule as saveDay()).
-    const rows = days
-      .map(d => {
-        const rec = cellFor(empId, d)
-        if (!rec) return null
-        return attendanceRowFor(rec, { employeeId: empId, periodId: period.id, day: d, isValidTime: s => isValidTimeStr(s) })
-      })
-      .filter(Boolean)
-    const name = employees.find(e => e.id === empId)?.full_name || 'employee'
-    if (rows.length === 0) {
-      setSavedMsg(`ok:Nothing to save — no changes were made for ${name}`)
-      setSaving(false)
-      return
-    }
-    const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
-    if (error) { setSavedMsg(`error:${name}'s month may not have saved. What you entered is still on screen — press Save Month again (saving twice is safe). ` + errorLine(error)); setSaving(false); return }
-    await loadAttendance(period.id)
-    setSavedMsg(`ok:Saved ${rows.length} day${rows.length === 1 ? '' : 's'} for ${name}`)
-    setSaving(false)
-  }
-
+  // ── By Employee tab: one employee × every day of the month, instead of every employee × one day.
+  // Saving is the shared saveChanges() above. ─────────────────────────────────────────────────────
   // Deletes every record for this employee, this whole period — e.g. to wipe a month that was
   // wrongly bulk-marked before the save-behavior fix and re-enter it clean. Destructive, asks
   // first — via ConfirmModal, same reasoning as requestClearDay.
@@ -586,7 +602,7 @@ export default function AttendanceSheet() {
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('employee_id', empId).eq('period_id', period.id)
     if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
-    await loadAttendance(period.id)
+    await loadAttendance(period.id, { carry: true, drop: key => splitCellKey(key).employeeId === empId })
     setSavedMsg(`ok:Cleared ${name}'s records for ${periodLabel}`)
     setSaving(false)
   }
@@ -624,7 +640,8 @@ export default function AttendanceSheet() {
     setSaving(true); setSavedMsg('')
     const { error } = await scopedDelete('hr_attendance').eq('period_id', period.id).in('employee_id', employees.map(e => e.id))
     if (error) { setSavedMsg('error:' + errorLine(error)); setSaving(false); return }
-    await loadAttendance(period.id)
+    const listed = new Set(employees.map(e => e.id))
+    await loadAttendance(period.id, { carry: true, drop: key => listed.has(splitCellKey(key).employeeId) })
     setSavedMsg(`ok:Cleared ${periodLabel} for all ${employees.length} listed staff`)
     setSaving(false)
   }
@@ -651,6 +668,40 @@ export default function AttendanceSheet() {
   // ── Month summary aggregation ──────────────────────────────────────────────
   const dayCount = period ? daysInBsMonth(period.bs_year, period.bs_month) : 0
   const days = Array.from({ length: dayCount }, (_, i) => i + 1)
+
+  // ── Unsaved work ───────────────────────────────────────────────────────────
+  // Recomputed per keystroke over at most employees × days cells — a string join each, well under a
+  // millisecond at 40 staff — which is what lets every marker below be exact rather than a flag
+  // that one code path forgot to set.
+  const unsaved = useMemo(() => unsavedKeys(records, savedRecords, timeKey), [records, savedRecords])
+  const unsavedDays = useMemo(() => new Set(unsaved.map(k => splitCellKey(k).day)), [unsaved])
+  const unsavedEmployees = useMemo(() => new Set(unsaved.map(k => splitCellKey(k).employeeId)), [unsaved])
+  const unsavedSet = useMemo(() => new Set(unsaved), [unsaved])
+  // "3 changes on 5th Bhadra and 6th Bhadra" — the days named, because the day is what a reader goes
+  // back to.
+  function describeChanges(keys) {
+    const ds = [...new Set(keys.map(k => splitCellKey(k).day))].sort((a, b) => a - b)
+    const n = keys.length
+    const what = `${n} change${n === 1 ? '' : 's'}`
+    if (ds.length === 0) return what
+    if (ds.length <= 3) {
+      const named = ds.map(d => formatBsDay(d, period?.bs_month))
+      return `${what} on ${named.length === 1 ? named[0] : named.slice(0, -1).join(', ') + ' and ' + named[named.length - 1]}`
+    }
+    return `${what} across ${ds.length} days`
+  }
+  const saveLabel = unsaved.length === 0
+    ? 'All saved'
+    : `Save ${unsaved.length} change${unsaved.length === 1 ? '' : 's'}${unsavedDays.size > 1 ? ` · ${unsavedDays.size} days` : ''}`
+
+  // Closing or reloading the tab with unsaved marks asks first. In-app navigation cannot be held
+  // here (a plain BrowserRouter has no blocker), which is why the banner above the grid says so.
+  useEffect(() => {
+    if (unsaved.length === 0) return
+    const onBeforeUnload = e => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [unsaved.length])
 
   function summaryFor(emp) {
     const counts = {
@@ -777,8 +828,8 @@ export default function AttendanceSheet() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <label htmlFor="att-day" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Day</label>
-                <select id="att-day" style={inp} value={selectedDay} onChange={e => setSelectedDay(parseInt(e.target.value, 10))}>
-                  {days.map(d => <option key={d} value={d}>{d} · {weekdayOf(period, d)}</option>)}
+                <select id="att-day" className="form-select" style={{ padding: CELL_PAD }} value={selectedDay} onChange={e => setSelectedDay(parseInt(e.target.value, 10))}>
+                  {days.map(d => <option key={d} value={d}>{d} · {weekdayOf(period, d)}{unsavedDays.has(d) ? ' — unsaved' : ''}</option>)}
                 </select>
               </div>
               <Tip text="Marks only the staff who have nothing marked for this day yet. Leave, absences and anything already marked are left as they are — change those one at a time." width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
@@ -795,7 +846,7 @@ export default function AttendanceSheet() {
                 <Tip text="Feeds both 'Apply Break' buttons on this page — change it once to use a different default." width={220}>
                   <label htmlFor="att-default-break" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Default break</label>
                 </Tip>
-                <input id="att-default-break" type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
+                <input id="att-default-break" type="number" min="0" step="5" className="form-input form-input--auto" style={{ width: 60, textAlign: 'right', padding: CELL_PAD }}
                   value={defaultBreakMin} onChange={e => setDefaultBreakMin(parseInt(e.target.value, 10) || 0)} />
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>min</span>
                 <Tip text="Fills the default break into every already-marked employee's blank Break cell for this day. Never overwrites a Break value already entered, and never marks an untouched employee." width={260}>
@@ -810,9 +861,11 @@ export default function AttendanceSheet() {
                 {savedMsg.split(':').slice(1).join(':')}
               </span>
             )}
-            <button className="btn btn-primary" onClick={saveDay} disabled={saving || locked} style={{ fontSize: 13 }}>
-              {saving ? 'Saving…' : 'Save Day'}
-            </button>
+            <Tip text="Saves every unsaved mark on this sheet — every day and every employee, on either tab — in one go." width={240}>
+              <button className="btn btn-primary" onClick={saveChanges} disabled={saving || locked || unsaved.length === 0}>
+                {saving ? 'Saving…' : saveLabel}
+              </button>
+            </Tip>
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes the saved record of every employee listed on this sheet for this day — the day reverts to blank for them. Staff who have left are not touched. Can't be undone.">
                 <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={requestClearDay} disabled={saving || locked}>
@@ -821,6 +874,15 @@ export default function AttendanceSheet() {
               </Tip>
             </div>
           </div>
+
+          {unsaved.length > 0 && !locked && (
+            <div className="card" style={amberBanner}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>{describeChanges(unsaved)} not saved yet</strong>
+              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4, lineHeight: 1.6 }}>
+                Marks stay on screen while you move between days and tabs, but nothing reaches payroll until you press Save. Leaving this page from the menu discards them — and for daily- and hourly-paid staff an unsaved day pays nothing.
+              </div>
+            </div>
+          )}
 
           <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
             Only the days you actually mark are saved — an untouched day stays blank and is never assumed Present or Off. For daily- and hourly-paid staff a blank day pays nothing, so mark every day of the month (Present/Off/Holiday/Leave) before payroll runs.{' '}
@@ -868,15 +930,16 @@ export default function AttendanceSheet() {
                       <tr key={emp.id}>
                         <td>
                           <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
-                          <div style={{ fontSize: 10, color: 'var(--theme-text2)' }}>
+                          <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
                             {emp.employee_code || ''}{emp.pay_basis && emp.pay_basis !== 'monthly' ? ` · ${emp.pay_basis}` : ''}
                           </div>
+                          {unsavedSet.has(`${emp.id}:${selectedDay}`) && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-amber-text)' }}>Unsaved</div>}
                         </td>
                         <td>
                           <select
                             id={`att-status-${emp.id}`}
                             aria-label={`${emp.full_name} — status`}
-                            style={{ ...inp, color: sc?.textColor || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
+                            className="form-select" style={{ padding: CELL_PAD, color: sc?.textColor || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
                             value={status || ''} disabled={locked}
                             onChange={e => e.target.value ? setCell(emp.id, selectedDay, 'status', e.target.value) : clearCell(emp.id, selectedDay)}
                           >
@@ -887,39 +950,41 @@ export default function AttendanceSheet() {
                         <td>
                           <input type="text" placeholder="--:--" id={`att-start-${emp.id}`} aria-label={`${emp.full_name} — start time`}
                             disabled={noClock} title={clockTitle}
-                            style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time, activeTimeKey === `${emp.id}:${selectedDay}:start_time`) ? 'var(--theme-red)' : undefined }}
+                            className="form-input form-input--auto" style={{ width: 92, padding: CELL_PAD }}
+                            {...fieldAria(`att-start-${emp.id}`, timeError(rec?.start_time, `${emp.id}:${selectedDay}:start_time`))}
                             value={rec?.start_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'start_time', e.target.value)}
                             onFocus={() => setActiveTimeKey(`${emp.id}:${selectedDay}:start_time`)}
                             onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'start_time'); setActiveTimeKey('') }} />
-                          {!isValidTimeStr(rec?.start_time, activeTimeKey === `${emp.id}:${selectedDay}:start_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                          <FieldError id={`att-start-${emp.id}`} message={timeError(rec?.start_time, `${emp.id}:${selectedDay}:start_time`)} />
                         </td>
                         <td>
                           <input type="text" placeholder="--:--" id={`att-end-${emp.id}`} aria-label={`${emp.full_name} — end time`}
                             disabled={noClock} title={clockTitle}
-                            style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) ? 'var(--theme-red)' : undefined }}
+                            className="form-input form-input--auto" style={{ width: 92, padding: CELL_PAD }}
+                            {...fieldAria(`att-end-${emp.id}`, timeError(rec?.end_time, `${emp.id}:${selectedDay}:end_time`))}
                             value={rec?.end_time || ''} onChange={e => setTimeCell(emp.id, selectedDay, 'end_time', e.target.value)}
                             onFocus={() => setActiveTimeKey(`${emp.id}:${selectedDay}:end_time`)}
                             onBlur={() => { normalizeTimeCell(emp.id, selectedDay, 'end_time'); setActiveTimeKey('') }} />
-                          {!isValidTimeStr(rec?.end_time, activeTimeKey === `${emp.id}:${selectedDay}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                          <FieldError id={`att-end-${emp.id}`} message={timeError(rec?.end_time, `${emp.id}:${selectedDay}:end_time`)} />
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <input type="number" min="0" step="5" id={`att-break-${emp.id}`} aria-label={`${emp.full_name} — unpaid break minutes`}
                             disabled={noClock} title={clockTitle}
-                            style={{ ...inp, width: 60, textAlign: 'right' }}
+                            className="form-input form-input--auto" style={{ width: 60, textAlign: 'right', padding: CELL_PAD }}
                             value={rec?.break_minutes ?? ''} onChange={e => setBreakCell(emp.id, selectedDay, e.target.value)} placeholder="0" />
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {emp.pay_basis === 'hourly' ? (
                             <input type="number" min="0" step="0.5" id={`att-hours-${emp.id}`} aria-label={`${emp.full_name} — hours worked`}
                               disabled={noClock} title={clockTitle}
-                              style={{ ...inp, width: 80, textAlign: 'right' }}
+                              className="form-input form-input--auto" style={{ width: 80, textAlign: 'right', padding: CELL_PAD }}
                               value={rec?.hours_worked ?? ''} onChange={e => setCell(emp.id, selectedDay, 'hours_worked', e.target.value)} placeholder="0" />
                           ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <input type="number" min="0" step="0.5" id={`att-ot-${emp.id}`} aria-label={`${emp.full_name} — overtime hours`}
                             disabled={noClock} title={clockTitle}
-                            style={{ ...inp, width: 80, textAlign: 'right' }}
+                            className="form-input form-input--auto" style={{ width: 80, textAlign: 'right', padding: CELL_PAD }}
                             value={rec?.ot_hours ?? ''} onChange={e => setCell(emp.id, selectedDay, 'ot_hours', e.target.value)} placeholder="0" />
                           {(() => {
                             const short = shortfallFor(rec, emp.id, selectedDay)
@@ -932,7 +997,7 @@ export default function AttendanceSheet() {
                         </td>
                         <td>
                           <input id={`att-note-${emp.id}`} aria-label={`${emp.full_name} — note`} disabled={locked}
-                            style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(emp.id, selectedDay, 'note', e.target.value)} placeholder="—" />
+                            className="form-input" style={{ padding: CELL_PAD }} value={rec?.note ?? ''} onChange={e => setCell(emp.id, selectedDay, 'note', e.target.value)} placeholder="—" />
                         </td>
                         <td>
                           {rec && !locked && (
@@ -963,8 +1028,8 @@ export default function AttendanceSheet() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <label htmlFor="att-emp" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Employee</label>
-                <select id="att-emp" style={inp} value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)}>
-                  {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.full_name}</option>)}
+                <select id="att-emp" className="form-select" style={{ padding: CELL_PAD }} value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)}>
+                  {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.full_name}{unsavedEmployees.has(emp.id) ? ' — unsaved' : ''}</option>)}
                 </select>
               </div>
               <Tip text="Marks only this employee's days that have nothing marked yet. Leave, absences and anything already marked are left as they are — change those one at a time." width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
@@ -981,7 +1046,7 @@ export default function AttendanceSheet() {
                 <Tip text="Feeds both 'Apply Break' buttons on this page — change it once to use a different default." width={220}>
                   <label htmlFor="att-emp-default-break" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Default break</label>
                 </Tip>
-                <input id="att-emp-default-break" type="number" min="0" step="5" style={{ ...inp, width: 60, textAlign: 'right' }}
+                <input id="att-emp-default-break" type="number" min="0" step="5" className="form-input form-input--auto" style={{ width: 60, textAlign: 'right', padding: CELL_PAD }}
                   value={defaultBreakMin} onChange={e => setDefaultBreakMin(parseInt(e.target.value, 10) || 0)} />
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>min</span>
                 <Tip text="Fills the default break into every already-marked day's blank Break cell for this employee. Never overwrites a Break value already entered, and never marks an untouched day." width={260}>
@@ -996,9 +1061,11 @@ export default function AttendanceSheet() {
                 {savedMsg.split(':').slice(1).join(':')}
               </span>
             )}
-            <button className="btn btn-primary" onClick={() => saveEmployeeMonth(selectedEmployeeId)} disabled={saving || locked} style={{ fontSize: 13 }}>
-              {saving ? 'Saving…' : 'Save Month'}
-            </button>
+            <Tip text="Saves every unsaved mark on this sheet — every day and every employee, on either tab — in one go." width={240}>
+              <button className="btn btn-primary" onClick={saveChanges} disabled={saving || locked || unsaved.length === 0}>
+                {saving ? 'Saving…' : saveLabel}
+              </button>
+            </Tip>
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid var(--theme-border)' }}>
               <Tip text="Deletes every saved record for this employee, this whole month — reverts it back to genuinely blank. Can't be undone.">
                 <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => requestClearEmployeeMonth(selectedEmployeeId)} disabled={saving || locked}>
@@ -1008,8 +1075,17 @@ export default function AttendanceSheet() {
             </div>
           </div>
 
+          {unsaved.length > 0 && !locked && (
+            <div className="card" style={amberBanner}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>{describeChanges(unsaved)} not saved yet</strong>
+              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4, lineHeight: 1.6 }}>
+                Marks stay on screen while you move between days and tabs, but nothing reaches payroll until you press Save. Leaving this page from the menu discards them — and for daily- and hourly-paid staff an unsaved day pays nothing.
+              </div>
+            </div>
+          )}
+
           <div style={{ marginBottom: 14, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            Fill in this one employee's whole month here, day by day, instead of switching days on the Mark Attendance tab. Same data either way — both tabs read and write the same records.
+            Fill in this one employee's whole month here, day by day, instead of switching days on the Mark Attendance tab. Same data either way — both tabs read and write the same records, and one Save covers both.
           </div>
 
           <div className="card" style={{ padding: 0 }}>
@@ -1051,12 +1127,15 @@ export default function AttendanceSheet() {
                       const clockTitle = !locked && isNonWorking(status) ? `${sc?.label || 'This status'} is not a working day, so it takes no hours or overtime` : undefined
                       return (
                         <tr key={d}>
-                          <td style={{ color: 'var(--theme-text1)', fontWeight: 600, fontSize: 13 }}>{d} · {weekdayOf(period, d)}</td>
+                          <td style={{ color: 'var(--theme-text1)', fontWeight: 600, fontSize: 13 }}>
+                            {d} · {weekdayOf(period, d)}
+                            {unsavedSet.has(`${selectedEmployeeId}:${d}`) && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-amber-text)' }}>Unsaved</div>}
+                          </td>
                           <td>
                             <select
                               id={`att-emp-status-${d}`}
                               aria-label={`Day ${d} — status`}
-                              style={{ ...inp, color: sc?.textColor || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
+                              className="form-select" style={{ padding: CELL_PAD, color: sc?.textColor || 'var(--theme-text3)', fontWeight: sc ? 600 : 400, width: '100%' }}
                               value={status || ''} disabled={locked}
                               onChange={e => e.target.value ? setCell(selectedEmployeeId, d, 'status', e.target.value) : clearCell(selectedEmployeeId, d)}
                             >
@@ -1067,39 +1146,41 @@ export default function AttendanceSheet() {
                           <td>
                             <input type="text" placeholder="--:--" id={`att-emp-start-${d}`} aria-label={`Day ${d} — start time`}
                               disabled={noClock} title={clockTitle}
-                              style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.start_time, activeTimeKey === `${selectedEmployeeId}:${d}:start_time`) ? 'var(--theme-red)' : undefined }}
+                              className="form-input form-input--auto" style={{ width: 92, padding: CELL_PAD }}
+                              {...fieldAria(`att-emp-start-${d}`, timeError(rec?.start_time, `${selectedEmployeeId}:${d}:start_time`))}
                               value={rec?.start_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'start_time', e.target.value)}
                               onFocus={() => setActiveTimeKey(`${selectedEmployeeId}:${d}:start_time`)}
                               onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'start_time'); setActiveTimeKey('') }} />
-                            {!isValidTimeStr(rec?.start_time, activeTimeKey === `${selectedEmployeeId}:${d}:start_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                            <FieldError id={`att-emp-start-${d}`} message={timeError(rec?.start_time, `${selectedEmployeeId}:${d}:start_time`)} />
                           </td>
                           <td>
                             <input type="text" placeholder="--:--" id={`att-emp-end-${d}`} aria-label={`Day ${d} — end time`}
                               disabled={noClock} title={clockTitle}
-                              style={{ ...inp, width: 92, borderColor: !isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) ? 'var(--theme-red)' : undefined }}
+                              className="form-input form-input--auto" style={{ width: 92, padding: CELL_PAD }}
+                              {...fieldAria(`att-emp-end-${d}`, timeError(rec?.end_time, `${selectedEmployeeId}:${d}:end_time`))}
                               value={rec?.end_time || ''} onChange={e => setTimeCell(selectedEmployeeId, d, 'end_time', e.target.value)}
                               onFocus={() => setActiveTimeKey(`${selectedEmployeeId}:${d}:end_time`)}
                               onBlur={() => { normalizeTimeCell(selectedEmployeeId, d, 'end_time'); setActiveTimeKey('') }} />
-                            {!isValidTimeStr(rec?.end_time, activeTimeKey === `${selectedEmployeeId}:${d}:end_time`) && <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 2 }}>invalid — use HH:MM or 0800</div>}
+                            <FieldError id={`att-emp-end-${d}`} message={timeError(rec?.end_time, `${selectedEmployeeId}:${d}:end_time`)} />
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <input type="number" min="0" step="5" id={`att-emp-break-${d}`} aria-label={`Day ${d} — unpaid break minutes`}
                               disabled={noClock} title={clockTitle}
-                              style={{ ...inp, width: 60, textAlign: 'right' }}
+                              className="form-input form-input--auto" style={{ width: 60, textAlign: 'right', padding: CELL_PAD }}
                               value={rec?.break_minutes ?? ''} onChange={e => setBreakCell(selectedEmployeeId, d, e.target.value)} placeholder="0" />
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {emp?.pay_basis === 'hourly' ? (
                               <input type="number" min="0" step="0.5" id={`att-emp-hours-${d}`} aria-label={`Day ${d} — hours worked`}
                                 disabled={noClock} title={clockTitle}
-                                style={{ ...inp, width: 80, textAlign: 'right' }}
+                                className="form-input form-input--auto" style={{ width: 80, textAlign: 'right', padding: CELL_PAD }}
                                 value={rec?.hours_worked ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'hours_worked', e.target.value)} placeholder="0" />
                             ) : <span style={{ color: 'var(--theme-text2)' }}>—</span>}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <input type="number" min="0" step="0.5" id={`att-emp-ot-${d}`} aria-label={`Day ${d} — overtime hours`}
                               disabled={noClock} title={clockTitle}
-                              style={{ ...inp, width: 80, textAlign: 'right' }}
+                              className="form-input form-input--auto" style={{ width: 80, textAlign: 'right', padding: CELL_PAD }}
                               value={rec?.ot_hours ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'ot_hours', e.target.value)} placeholder="0" />
                             {(() => {
                               const short = shortfallFor(rec, selectedEmployeeId, d)
@@ -1112,7 +1193,7 @@ export default function AttendanceSheet() {
                           </td>
                           <td>
                             <input id={`att-emp-note-${d}`} aria-label={`Day ${d} — note`} disabled={locked}
-                              style={{ ...inp, width: '100%' }} value={rec?.note ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'note', e.target.value)} placeholder="—" />
+                              className="form-input" style={{ padding: CELL_PAD }} value={rec?.note ?? ''} onChange={e => setCell(selectedEmployeeId, d, 'note', e.target.value)} placeholder="—" />
                           </td>
                           <td>
                             {rec && !locked && (
@@ -1149,6 +1230,16 @@ export default function AttendanceSheet() {
       ) : (
         /* ── MONTH SUMMARY ── */
         <div>
+          {/* The summary counts what is on screen, unsaved marks included — so it says when that is
+              not what payroll will read. */}
+          {unsaved.length > 0 && !locked && (
+            <div className="card" style={amberBanner}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>{describeChanges(unsaved)} not saved yet — these totals include them</strong>
+              <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4, lineHeight: 1.6 }}>
+                Payroll reads only what is saved. Go back to Mark Attendance or By Employee and press Save.
+              </div>
+            </div>
+          )}
           {/* Legend */}
           <div className="card" style={{ marginBottom: 14, display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Legend</span>
@@ -1247,6 +1338,23 @@ export default function AttendanceSheet() {
         </div>
       )}
 
+      {pendingPeriodId && (
+        <ConfirmModal
+          title={`Discard ${unsaved.length} unsaved change${unsaved.length === 1 ? '' : 's'}?`}
+          confirmLabel="Discard and switch month"
+          danger
+          onConfirm={() => switchPeriod(pendingPeriodId)}
+          onCancel={() => setPendingPeriodId(null)}
+        >
+          <p style={{ margin: '0 0 10px' }}>
+            {describeChanges(unsaved)} in {periodLabel} {unsaved.length === 1 ? 'has' : 'have'} not been saved. Switching month now throws {unsaved.length === 1 ? 'it' : 'them'} away.
+          </p>
+          <p style={{ margin: 0 }}>
+            To keep {unsaved.length === 1 ? 'it' : 'them'}, cancel and press Save first. For daily- and hourly-paid staff an unsaved day pays nothing.
+          </p>
+        </ConfirmModal>
+      )}
+
       {pendingGenerate && (() => {
         const n = pendingGenerate.rows.length
         const count = st => pendingGenerate.rows.filter(r => r.status === st).length
@@ -1291,7 +1399,7 @@ export default function AttendanceSheet() {
         >
           <p style={{ margin: '0 0 10px' }}>
             {confirmClear.kind === 'day'
-              ? <>All <strong>{confirmClear.count}</strong> attendance record{confirmClear.count === 1 ? '' : 's'} for {formatBsDay(selectedDay, period?.bs_month)} will be deleted — the day reverts to blank for every employee listed on this sheet. Staff who have left are not touched.</>
+              ? <>All <strong>{confirmClear.count}</strong> attendance record{confirmClear.count === 1 ? '' : 's'} for {formatBsDay(selectedDay, period?.bs_month)} will be deleted, and any unsaved marks on that day with them — the day reverts to blank for every employee listed on this sheet. Staff who have left are not touched.</>
               : confirmClear.kind === 'month'
                 ? <>All <strong>{confirmClear.count}</strong> attendance record{confirmClear.count === 1 ? '' : 's'} for {periodLabel} will be deleted, for all {employees.length} staff listed on this sheet — including approved leave days, which Leave → Mark approved leave puts back.</>
                 : <>All <strong>{confirmClear.count}</strong> of {confirmClear.name}&apos;s attendance record{confirmClear.count === 1 ? '' : 's'} this month will be deleted.</>}
