@@ -2,6 +2,7 @@ import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect } from 'react'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
 import {
@@ -200,13 +201,7 @@ export default function PayForm({ employee, onSave, onClose }) {
 
         {/* Tabs */}
         <div style={{ padding: '0 24px', borderBottom: '1px solid var(--theme-border)' }}>
-          <div className="tab-bar" style={{ marginBottom: 0 }}>
-            {TABS.map(t => (
-              <button key={t.key} className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.key)}>
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <Tabs idBase="pay-form" label="Pay setup sections" tabs={TABS} active={tab} onChange={setTab} style={{ marginBottom: 0 }} />
         </div>
 
         {/* Body */}

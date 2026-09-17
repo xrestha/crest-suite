@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import { BS_MONTHS, getBsToday, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
@@ -382,13 +383,26 @@ export default function Overtime() {
 
       {/* Stat cards */}
       <div className="stat-grid">
-        <div className="stat-card" style={pendingCount > 0 ? { cursor: 'pointer' } : undefined} onClick={() => pendingCount > 0 && setStatusTab('pending')}>
+        <div className="stat-card">
           <div className="stat-label">
-            <Tip text="OT entries logged but not yet approved or rejected. Click to filter." width={240}>
+            <Tip text="OT entries logged but not yet approved or rejected. Select the number to show only those." width={240}>
               Pending Approval
             </Tip>
           </div>
-          <div className="stat-value" style={{ color: pendingCount > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-green-text)' }}>{pendingCount}</div>
+          {/* Amber, the module's "open, something still required" colour (payrollConstants.js) —
+              it was the accent here and amber on the HR Dashboard for the same count. The filter is
+              a real button: the card used to be a clickable div, unreachable by keyboard. */}
+          {pendingCount > 0 ? (
+            <div className="stat-value">
+              <button type="button" className="btn-linklike" aria-pressed={statusTab === 'pending'}
+                aria-label={`${pendingCount} pending — show only pending entries`}
+                style={{ color: 'var(--theme-amber-text)' }} onClick={() => setStatusTab('pending')}>
+                {pendingCount}
+              </button>
+            </div>
+          ) : (
+            <div className="stat-value" style={{ color: 'var(--theme-text2)' }}>0</div>
+          )}
           <div className="stat-sub">{periodLabel}</div>
         </div>
         <div className="stat-card">
@@ -423,18 +437,11 @@ export default function Overtime() {
       </div>
 
       {/* Status filter */}
-      <div className="tab-bar" style={{ marginBottom: 16 }}>
-        {['all', 'pending', 'approved', 'rejected'].map(s => (
-          <button key={s} className={`tab-btn${statusTab === s ? ' tab-btn--active' : ''}`} onClick={() => setStatusTab(s)}>
-            {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-            {s !== 'all' && (
-              <span style={{ marginLeft: 5, fontSize: 11, color: 'var(--theme-text3)' }}>
-                ({entries.filter(e => e.status === s).length})
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <FilterChips label="Filter overtime by status" active={statusTab} onChange={setStatusTab} style={{ marginBottom: 16 }}
+        options={['all', 'pending', 'approved', 'rejected'].map(s => ({
+          key: s,
+          label: <>{s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}{s !== 'all' && <span style={{ marginLeft: 5, fontSize: 11, color: 'var(--theme-text3)' }}>({entries.filter(e => e.status === s).length})</span>}</>,
+        }))} />
 
       {/* Table */}
       {loading ? (

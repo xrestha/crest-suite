@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import SearchableSelect from '../../../components/SearchableSelect'
 import Modal from '../../../components/Modal'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -770,15 +771,12 @@ export default function HrStaff() {
           <div>
 
             {(unlinkedEmployees.length > 0 || (privileged && eligibleUsers.length > 0)) && (
-              <div className="tab-bar" style={{ marginBottom: 16 }}>
-                {unlinkedEmployees.length > 0 && (
-                  <button className={`tab-btn${addMode === 'hr' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('hr')}>HR Employee</button>
-                )}
-                {privileged && eligibleUsers.length > 0 && (
-                  <button className={`tab-btn${addMode === 'existing' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('existing')}>Existing User</button>
-                )}
-                <button className={`tab-btn${addMode === 'manual' ? ' tab-btn--active' : ''}`} onClick={() => setAddMode('manual')}>HR-only Staff</button>
-              </div>
+              <Tabs idBase="hr-staff-add" label="Add a login for" active={addMode} onChange={setAddMode} style={{ marginBottom: 16 }}
+                tabs={[
+                  unlinkedEmployees.length > 0 && { key: 'hr', label: 'HR Employee' },
+                  privileged && eligibleUsers.length > 0 && { key: 'existing', label: 'Existing User' },
+                  { key: 'manual', label: 'HR-only Staff' },
+                ].filter(Boolean)} />
             )}
 
             {addMode === 'hr' && (

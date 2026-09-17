@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorLine } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import ConfirmModal from '../../../components/ConfirmModal'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
@@ -773,11 +774,8 @@ export default function AttendanceSheet() {
       </div>
 
       {/* Tabs */}
-      <div className="tab-bar" style={{ marginBottom: 18 }}>
-        {[{ id: 'mark', label: 'Mark Attendance' }, { id: 'employee', label: 'By Employee' }, { id: 'summary', label: 'Month Summary' }].map(t => (
-          <button key={t.id} className={`tab-btn${tab === t.id ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
-        ))}
-      </div>
+      <Tabs idBase="att" label="Attendance views" active={tab} onChange={setTab} style={{ marginBottom: 18 }}
+        tabs={[{ key: 'mark', label: 'Mark Attendance' }, { key: 'employee', label: 'By Employee' }, { key: 'summary', label: 'Month Summary' }]} />
 
       {/* A paid month is read-only (S749). Amber, the product's banner shape (PayrollRun's
           stale-draft card): the whole border tinted, never a side rule. */}

@@ -8,6 +8,7 @@ import { errorText } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import Fab from '../../../components/Fab'
 import Modal from '../../../components/Modal'
 import EmployeeForm from './EmployeeForm'
@@ -428,17 +429,8 @@ export default function EmployeeList() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <div className="tab-bar" style={{ marginBottom: 0 }}>
-          {['all','active','probation','resigned','terminated','inactive'].map(s => (
-            <button
-              key={s}
-              className={`tab-btn${statusFilter === s ? ' tab-btn--active' : ''}`}
-              onClick={() => setStatus(s)}
-            >
-              {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-            </button>
-          ))}
-        </div>
+        <FilterChips label="Filter by employment status" active={statusFilter} onChange={setStatus} style={{ marginBottom: 0 }}
+          options={['all', 'active', 'probation', 'resigned', 'terminated', 'inactive'].map(s => ({ key: s, label: s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1) }))} />
         {supervisorList.length > 0 && (
           <select
             className="form-select"
@@ -453,8 +445,10 @@ export default function EmployeeList() {
           </select>
         )}
         <button
+          type="button"
           className={`tab-btn${retiringOnly ? ' tab-btn--active' : ''}`}
           onClick={() => setRetiringOnly(v => !v)}
+          aria-pressed={retiringOnly}
           title="Show only employees retiring within 180 days"
         >
           Retiring soon

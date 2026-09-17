@@ -1,5 +1,5 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { Lock } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
@@ -8,6 +8,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -120,6 +121,22 @@ export default function Advances() {
   const [filterType,   setFilterType]   = useState('all')    // all | advance | loan
   const [filterStatus, setFilterStatus] = useState('active') // active | settled | written_off | all
   const [selected,   setSelected]   = useState(null)  // advance id for detail panel
+  // The detail panel renders BELOW the whole table, so opening it from a long list used to change
+  // nothing a reader could see. Opening scrolls it into view, and opening it from the keyboard moves
+  // focus into it — where its actions are (S768).
+  const detailRef = useRef(null)
+  const focusDetailRef = useRef(false)
+  function toggleSelected(id, fromKeyboard = false) {
+    const opening = selected !== id
+    focusDetailRef.current = opening && fromKeyboard
+    setSelected(opening ? id : null)
+  }
+  useEffect(() => {
+    if (!selected || !detailRef.current) return
+    if (focusDetailRef.current) detailRef.current.focus({ preventScroll: true })
+    focusDetailRef.current = false
+    detailRef.current.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }, [selected])
   const [showAdd,    setShowAdd]    = useState(false)
   const [showRepay,  setShowRepay]  = useState(false)
   const [addForm,    setAddForm]    = useState(EMPTY_ADD)
@@ -449,10 +466,6 @@ export default function Advances() {
   const selectedOutstanding = selectedAdv ? Math.max(0, parseFloat(selectedAdv.amount) - selectedRepaid) : 0
   const selectedNextCut = selectedAdv?.status === 'active' ? cutFor(selectedAdv.issued_date) : null
 
-  const tabBtn = (val, cur, set, label) => (
-    <button className={`tab-btn${cur === val ? ' tab-btn--active' : ''}`}
-      onClick={() => set(val)}>{label}</button>
-  )
 
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
   if (!loadError && loadedFor !== clientId) return <div style={{ padding: 32, color: 'var(--theme-text3)' }}>Loading…</div>
@@ -509,17 +522,10 @@ export default function Advances() {
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div className="tab-bar">
-          {tabBtn('all',     filterType,   setFilterType,   'All')}
-          {tabBtn('advance', filterType,   setFilterType,   'One-time')}
-          {tabBtn('loan',    filterType,   setFilterType,   'In instalments')}
-        </div>
-        <div className="tab-bar">
-          {tabBtn('active',      filterStatus, setFilterStatus, 'Active')}
-          {tabBtn('settled',     filterStatus, setFilterStatus, 'Settled')}
-          {tabBtn('written_off', filterStatus, setFilterStatus, 'Written off')}
-          {tabBtn('all',         filterStatus, setFilterStatus, 'All')}
-        </div>
+        <FilterChips label="Filter by type" active={filterType} onChange={setFilterType}
+          options={[{ key: 'all', label: 'All' }, { key: 'advance', label: 'One-time' }, { key: 'loan', label: 'In instalments' }]} />
+        <FilterChips label="Filter by status" active={filterStatus} onChange={setFilterStatus}
+          options={[{ key: 'active', label: 'Active' }, { key: 'settled', label: 'Settled' }, { key: 'written_off', label: 'Written off' }, { key: 'all', label: 'All' }]} />
       </div>
 
       {/* Main table */}
@@ -552,11 +558,19 @@ export default function Advances() {
               const isSel    = selected === a.id
               return (
                 <tr key={a.id}
-                  onClick={() => setSelected(isSel ? null : a.id)}
+                  onClick={() => toggleSelected(a.id)}
                   style={{ cursor: 'pointer', background: isSel ? 'color-mix(in srgb, var(--theme-accent) 7%, transparent)' : undefined }}
                 >
                   <td>
-                    <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{emp.full_name || '—'}</div>
+                    {/* The row click stays for the mouse. The NAME is the keyboard and screen-reader
+                        path (S768): Record Repayment, Write off, Settle, Reactivate and Delete all live
+                        in the panel this opens, and a bare <tr onClick> had put every one of them out
+                        of reach of anyone not holding a mouse. */}
+                    <button type="button" className="btn-linklike" style={{ fontWeight: 600, color: 'var(--theme-text1)' }}
+                      aria-expanded={isSel} aria-controls="advance-detail"
+                      onClick={e => { e.stopPropagation(); toggleSelected(a.id, true) }}>
+                      {emp.full_name || '—'}
+                    </button>
                     {emp.employee_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{emp.employee_code}</div>}
                   </td>
                   <td style={{ color: 'var(--theme-text2)', fontSize: 13 }}>{TYPE_LABEL[a.type] || a.type}</td>
@@ -565,7 +579,7 @@ export default function Advances() {
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                     {a.installment_amount ? fmt(a.installment_amount) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                   </td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{fmt(repaid)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(repaid)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 600, color: outstanding > OWED_EPS ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                     {a.status === 'written_off' ? '—' : fmt(outstanding)}
                   </td>
@@ -587,7 +601,9 @@ export default function Advances() {
 
       {/* Detail panel */}
       {selectedAdv && (
-        <div className="card" style={{ padding: 20, marginBottom: 24 }}>
+        <div id="advance-detail" ref={detailRef} tabIndex={-1} role="region"
+          aria-label={`${empMap[selectedAdv.employee_id]?.full_name || 'Advance'} — details and actions`}
+          className="card" style={{ padding: 20, marginBottom: 24 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)' }}>
@@ -668,7 +684,6 @@ export default function Advances() {
                 transform: `scaleX(${Math.min(100, (selectedRepaid / parseFloat(selectedAdv.amount)) * 100) / 100})`,
                 transformOrigin: 'left',
                 background: selectedOutstanding <= OWED_EPS ? 'var(--theme-green)' : 'var(--theme-accent)',
-                transition: 'transform 0.3s',
               }} />
             </div>
           </div>
@@ -694,7 +709,7 @@ export default function Advances() {
                     return (
                       <tr key={r.id}>
                         <td style={{ whiteSpace: 'nowrap' }}>{fmtD(r.repaid_date)}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontWeight: 600, whiteSpace: 'nowrap' }}>NPR {fmt(r.amount)}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600, whiteSpace: 'nowrap' }}>NPR {fmt(r.amount)}</td>
                         <td style={{ color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{SOURCE_LABEL[src]}</td>
                         <td style={{ color: 'var(--theme-text3)' }}>{r.notes || '—'}</td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>

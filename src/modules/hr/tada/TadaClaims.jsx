@@ -5,6 +5,7 @@ import { useAuth } from '../../../context/AuthContext'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import Modal from '../../../components/Modal'
 import SearchableSelect from '../../../components/SearchableSelect'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -564,9 +565,6 @@ export default function TadaClaims() {
     )
   }
 
-  const tabBtn = (val, label) => (
-    <button className={`tab-btn${filterStatus === val ? ' tab-btn--active' : ''}`} onClick={() => setFilterStatus(val)}>{label}</button>
-  )
 
   if (!hasHrAccess('supervisor')) return <Navigate to="/dashboard" replace />
   // No rows and no actions until the rows on screen belong to the client being viewed.
@@ -630,13 +628,14 @@ export default function TadaClaims() {
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div className="tab-bar" style={{ marginBottom: 0 }}>
-              {tabBtn('pending',  `Pending (${pendingCount})`)}
-              {tabBtn('approved', `Approved (${approvedCount})`)}
-              {tabBtn('paid',     'Paid')}
-              {tabBtn('rejected', 'Rejected')}
-              {tabBtn('all',      'All')}
-            </div>
+            <FilterChips label="Filter claims by status" active={filterStatus} onChange={setFilterStatus} style={{ marginBottom: 0 }}
+              options={[
+                { key: 'pending', label: `Pending (${pendingCount})` },
+                { key: 'approved', label: `Approved (${approvedCount})` },
+                { key: 'paid', label: 'Paid' },
+                { key: 'rejected', label: 'Rejected' },
+                { key: 'all', label: 'All' },
+              ]} />
             {monthApplies ? (
               <Tip text="Filters claims by the BS month their trip started. Pick All Months to see full history.">
                 <select className="form-select" aria-label="Filter claims by month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}>

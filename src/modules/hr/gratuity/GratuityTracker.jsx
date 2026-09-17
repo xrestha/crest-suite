@@ -4,6 +4,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import { calcGratuity } from './gratuityCompute'
 import { fetchSsfContributions, ssfFundedFor } from './ssfEnrolment'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -218,15 +219,12 @@ export default function GratuityTracker() {
 
           {/* Filters */}
           <div style={{ display: 'flex', gap: 16, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }} className="no-print">
-            <div className="tab-bar">
-              {[
+            <FilterChips label="Filter by vesting" active={filter} onChange={setFilter}
+              options={[
                 { key: 'all',     label: `All (${allRows.length})` },
                 { key: 'vested',  label: `Vested ${VEST}+ mo (${allRows.filter(r => r.g.vested).length})` },
                 { key: 'vesting', label: `Under ${VEST} mo (${allRows.filter(r => !r.g.vested).length})` },
-              ].map(f => (
-                <button key={f.key} className={`tab-btn${filter === f.key ? ' tab-btn--active' : ''}`} onClick={() => setFilter(f.key)}>{f.label}</button>
-              ))}
-            </div>
+              ]} />
             {depts.length > 0 && (
               <select aria-label="Filter by department" className="form-select" style={{ fontSize: 12 }} value={dept} onChange={e => setDept(e.target.value)}>
                 <option value="all">All Departments</option>

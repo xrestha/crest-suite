@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { adToBs, adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { DEFAULT_LEAVE_TYPES, LEAVE_STATUSES, DAY_TYPES, workingDaysInRange, leaveDayCount, publicHolidayKeys } from './leaveConstants'
@@ -581,11 +582,8 @@ export default function LeaveManagement() {
         )
       })() : null}
 
-      <div className="tab-bar" style={{ marginBottom: 18 }}>
-        {[{ id: 'requests', label: 'Requests' }, { id: 'balances', label: 'Balances' }, { id: 'types', label: 'Leave Types' }].map(t => (
-          <button key={t.id} className={`tab-btn${tab === t.id ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
-        ))}
-      </div>
+      <Tabs idBase="leave" label="Leave views" active={tab} onChange={setTab} style={{ marginBottom: 18 }}
+        tabs={[{ key: 'requests', label: 'Requests' }, { key: 'balances', label: 'Balances' }, { key: 'types', label: 'Leave Types' }]} />
 
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>

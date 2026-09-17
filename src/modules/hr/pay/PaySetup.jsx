@@ -7,6 +7,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { errorText } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, SSF_EMPLOYER_PCT, PAY_BASES, EMPLOYEE_STATUS_COLORS as STATUS_COLORS } from '../payrollConstants'
 import { calcAmount, isSsfContributor } from '../payroll/payrollCompute'
 import PayForm from './PayForm'
@@ -167,16 +168,11 @@ export default function PaySetup() {
       </div>}
 
       {/* Status filter */}
-      <div className="tab-bar" style={{ marginBottom: 16 }}>
-        {tabs.map(t => (
-          <button key={t.key} className={`tab-btn${statusFilter === t.key ? ' tab-btn--active' : ''}`} onClick={() => setStatusFilter(t.key)} title={t.tip}>
-            {t.label}
-            <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>
-              {employees.filter(TAB_MATCH[t.key]).length}
-            </span>
-          </button>
-        ))}
-      </div>
+      <FilterChips label="Filter by payroll status" active={statusFilter} onChange={setStatusFilter} style={{ marginBottom: 16 }}
+        options={tabs.map(t => ({
+          key: t.key, title: t.tip,
+          label: <>{t.label}<span style={{ marginLeft: 6, fontSize: 11, color: 'var(--theme-text3)' }}>{employees.filter(TAB_MATCH[t.key]).length}</span></>,
+        }))} />
 
       <div className="card" style={{ padding: 0 }}>
         {loading ? (

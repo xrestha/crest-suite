@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import Modal from '../../../components/Modal'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
@@ -292,13 +293,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
 
         {/* Header */}
         <div style={{ borderBottom: '1px solid var(--theme-border)', marginBottom: 20 }}>
-          <div className="tab-bar" style={{ marginBottom: 0 }}>
-            {TABS.map(t => (
-              <button key={t.key} className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.key)}>
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <Tabs idBase="emp-form" label="Employee record sections" tabs={TABS} active={tab} onChange={setTab} style={{ marginBottom: 0 }} />
         </div>
 
         {/* Body */}

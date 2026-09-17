@@ -9,6 +9,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { adToBs, adToBsSafe, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd, formatBsDay, bsDiffDays, bsDayBoundaryIso } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import Tip from '../../../components/Tip'
+import Tabs, { FilterChips } from '../../../components/Tabs'
 import ConfirmModal from '../../../components/ConfirmModal'
 import { printWithTitle } from '../../../utils/printTitle'
 import {
@@ -93,6 +94,39 @@ const stickyCol = {
   background: 'var(--theme-card)',
 }
 const STICKY_CLS = 'roster-sticky'
+
+// Roving focus for the board's day cells (S768). The cells' tabIndex PROP is -1 everywhere but the
+// first cell of each chunk, and focus moves the 0 imperatively: React only writes an attribute when
+// its prop changes, so the DOM value set here survives re-renders — which matters, because a drag
+// across the board re-renders it on every cell the pointer crosses. Leaving the grid by Tab then
+// goes to whatever follows it, from any cell.
+function rosterCellFocus(e) {
+  const table = e.currentTarget.closest('table')
+  if (!table) return
+  table.querySelectorAll('.roster-cell[tabindex="0"]').forEach(el => { if (el !== e.currentTarget) el.tabIndex = -1 })
+  e.currentTarget.tabIndex = 0
+}
+function rosterCellKeyDown(e) {
+  const MOVES = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }
+  const btn = e.currentTarget
+  const table = btn.closest('table')
+  if (!table) return
+  const r = Number(btn.dataset.r), c = Number(btn.dataset.c)
+  let target = null
+  if (MOVES[e.key]) {
+    const [dr, dc] = MOVES[e.key]
+    target = table.querySelector(`.roster-cell[data-r="${r + dr}"][data-c="${c + dc}"]`)
+  } else if (e.key === 'Home') {
+    target = table.querySelector(`.roster-cell[data-r="${r}"][data-c="0"]`)
+  } else if (e.key === 'End') {
+    const row = table.querySelectorAll(`.roster-cell[data-r="${r}"]`)
+    target = row[row.length - 1] || null
+  } else {
+    return
+  }
+  e.preventDefault()
+  if (target) target.focus()
+}
 const round1 = n => (n == null ? '' : parseFloat(n.toFixed(1)))
 // The muted second line under a figure in the Labor Forecast table — what was planned, what the
 // day needs, or which basis a number came from. One definition, used by the rows and the footer.
@@ -1215,20 +1249,18 @@ export default function Roster() {
           Approved-leave conflicts cannot be checked right now — the leave requests could not be loaded. Reload to try again.
         </p>
       )}
-      <div className="tab-bar no-print" style={{ marginBottom: 20 }}>
-        <button className={`tab-btn${tab === 'board'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('board')}>Roster Board</button>
-        <button className={`tab-btn${tab === 'shifts' ? ' tab-btn--active' : ''}`} onClick={() => setTab('shifts')}>Shift Types</button>
-        <button className={`tab-btn${tab === 'labor'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('labor')}>Labor Forecast</button>
-        {/* The count rides on the button because this tab holds an action queue: pending swaps
-            used to sit on the board where they couldn't be missed, and a tab with nothing on its
-            face is exactly how an approval waits a week. */}
-        <button className={`tab-btn${tab === 'swaps'  ? ' tab-btn--active' : ''}`} onClick={() => setTab('swaps')}>
-          Shift Swaps
-          {pendingSwaps === null
+      {/* The count rides on the Shift Swaps tab because that tab holds an action queue: pending
+          swaps used to sit on the board where they couldn't be missed, and a tab with nothing on its
+          face is exactly how an approval waits a week. */}
+      <Tabs idBase="roster" label="Roster views" className="no-print" style={{ marginBottom: 20 }} active={tab} onChange={setTab}
+        tabs={[
+          { key: 'board', label: 'Roster Board' },
+          { key: 'shifts', label: 'Shift Types' },
+          { key: 'labor', label: 'Labor Forecast' },
+          { key: 'swaps', label: <>Shift Swaps{pendingSwaps === null
             ? <span className="badge-gray" style={{ fontSize: 10, marginLeft: 6 }} title="The number of swaps waiting could not be read — open the tab to see them">?</span>
-            : pendingSwaps > 0 && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>{pendingSwaps}</span>}
-        </button>
-      </div>
+            : pendingSwaps > 0 && <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }} aria-label={`${pendingSwaps} waiting`}>{pendingSwaps}</span>}</> },
+        ]} />
 
       {/* ── Shift Settings tab ── */}
       {tab === 'shifts' && (
@@ -1264,10 +1296,8 @@ export default function Roster() {
             {/* View mode + date navigation — one temporal-control cluster, kept tight since
                 picking a mode and stepping through it are the same action-in-progress. */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <div className="tab-bar">
-                <button className={`tab-btn${viewMode === 'weekly'  ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('weekly')}>Weekly</button>
-                <button className={`tab-btn${viewMode === 'monthly' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('monthly')}>Monthly</button>
-              </div>
+              <FilterChips label="Board range" active={viewMode} onChange={setViewMode}
+                options={[{ key: 'weekly', label: 'Weekly' }, { key: 'monthly', label: 'Monthly' }]} />
 
               {viewMode === 'weekly' ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1448,7 +1478,8 @@ export default function Roster() {
                                       </span>
                                     </Tip>
                                     {short && (
-                                      <button onClick={e => openSuggest(e, col)} title="Suggest who to schedule"
+                                      <button type="button" onClick={e => openSuggest(e, col)} title="Suggest who to schedule"
+                                        aria-label={`Suggest who to schedule on ${formatBsDay(col.bsDay, col.bsMonth)}`}
                                         style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 11, padding: 0, lineHeight: 1 }}>
                                         ✨
                                       </button>
@@ -1469,14 +1500,16 @@ export default function Roster() {
                         <tbody>
                           {filteredEmps.map((emp, ri) => (
                             <tr key={emp.id} style={{ borderBottom: '1px solid var(--theme-border-lt)' }}>
-                              <td className={STICKY_CLS} style={{ ...stickyCol, padding: '8px 14px', borderRight: '2px solid var(--theme-border)' }}>
+                              {/* A row header, so a screen reader moving across the day cells hears whose
+                                  row it is in (S768); it was a plain <td>. */}
+                              <th scope="row" className={STICKY_CLS} style={{ ...stickyCol, padding: '8px 14px', borderRight: '2px solid var(--theme-border)', textAlign: 'left', fontWeight: 400 }}>
                                 <div style={{ fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap', fontSize: 13 }}>
                                   {emp.full_name}
                                 </div>
                                 {emp.department && (
                                   <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{emp.department}</div>
                                 )}
-                              </td>
+                              </th>
 
                               {cols.map((col, ci) => {
                                 const key   = rKey(col.bsYear, col.bsMonth, col.bsDay, emp.id)
@@ -1494,7 +1527,17 @@ export default function Roster() {
                                     borderRight: '1px solid var(--theme-border-lt)',
                                   }}>
                                     <button
+                                      type="button"
                                       className={`roster-cell${shift ? ' filled' : ''}`}
+                                      data-r={ri} data-c={ci}
+                                      // One Tab stop per board chunk, arrow keys inside it (S768). Every cell used to
+                                      // be its own Tab stop — ~960 on a monthly board — with no way across but Tab.
+                                      tabIndex={ri === 0 && ci === 0 ? 0 : -1}
+                                      onFocus={rosterCellFocus}
+                                      onKeyDown={rosterCellKeyDown}
+                                      aria-label={`${emp.full_name}, ${viewMode === 'weekly' ? `${col.label} ` : ''}${formatBsDay(col.bsDay, col.bsMonth)}: ${shift
+                                        ? `${shift.name}${shift.start_time ? `, ${fmtTime(shift.start_time)} to ${fmtTime(shift.end_time)}` : ''}${hrs != null ? `, ${hrs} hours` : ''}`
+                                        : 'no shift'}${onLeave ? ' — on approved leave' : ''}`}
                                       title={onLeave
                                         ? `⚠ On approved leave${shift ? ` — but still scheduled for ${shift.name}` : ''}`
                                         : shift
@@ -1750,10 +1793,8 @@ export default function Roster() {
       {tab === 'labor' && (
         <div className="no-print">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-            <div className="tab-bar" style={{ marginBottom: 0 }}>
-              <button className={`tab-btn${viewMode === 'weekly'  ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('weekly')}>Weekly</button>
-              <button className={`tab-btn${viewMode === 'monthly' ? ' tab-btn--active' : ''}`} onClick={() => setViewMode('monthly')}>Monthly</button>
-            </div>
+            <FilterChips label="Forecast range" active={viewMode} onChange={setViewMode} style={{ marginBottom: 0 }}
+              options={[{ key: 'weekly', label: 'Weekly' }, { key: 'monthly', label: 'Monthly' }]} />
 
             {viewMode === 'weekly' ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

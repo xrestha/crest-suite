@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import RunStatusBadge from '../payroll/RunStatusBadge'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
@@ -456,11 +457,8 @@ export default function HrReports() {
         <ReportLoadError error={loadError} />
       ) : (
         <>
-          <div className="tab-bar no-print" style={{ marginBottom: 18 }}>
-            {TABS.map(t => (
-              <button key={t.id} className={`tab-btn${tab === t.id ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
-            ))}
-          </div>
+          <Tabs idBase="hr-reports" label="HR reports" className="no-print" style={{ marginBottom: 18 }}
+            tabs={TABS.map(t => ({ key: t.id, label: t.label }))} active={tab} onChange={setTab} />
 
           {/* ── TDS CERTIFICATE (independent of any period/run) ── */}
           {tab === 'cert' && (
@@ -517,7 +515,7 @@ export default function HrReports() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} className="no-print">
-                  <button className={`tab-btn${rosterRetiringOnly ? ' tab-btn--active' : ''}`} onClick={() => setRosterRetiringOnly(v => !v)}>Retiring soon</button>
+                  <button type="button" className={`tab-btn${rosterRetiringOnly ? ' tab-btn--active' : ''}`} aria-pressed={rosterRetiringOnly} onClick={() => setRosterRetiringOnly(v => !v)}>Retiring soon</button>
                   <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => downloadSheet(
                     rosterRows.map(e => ({
                       Code: e.employee_code || '', Name: e.full_name, Department: e.department || '', Designation: e.designation || '',
