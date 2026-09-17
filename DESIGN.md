@@ -1280,6 +1280,24 @@ Red says you cannot; amber says you can, but this is not the usual case. An ambe
 admin editing a closed month gets — the action is permitted and the notice must not read as a
 block.
 
+### Where a month stands, and a decision taken in bulk (S768)
+
+**`.month-status` is a summary card, not a banner.** Payroll and the HR Dashboard open on four
+steps — Attendance, Approvals, Payroll, SSF deposit — each an 11px uppercase label, a mark with a
+sentence, and a link to the page that moves that step. The mark is the only colour: `✓` in
+green-text when the step is done, `△` in amber-text when it needs someone, `—` in fog when there
+is nothing to say or it could not be read. The sentence always carries the state on its own, so
+the strip reads in greyscale. **No step is ever red**, because nothing on it is a failure the app
+can prove: deposits are not recorded, so a passed SSF date says what *was due*, not that it was
+missed; and a step whose read failed says "Could not check" rather than falling back to `✓`.
+
+**`.bulk-approve` is a strip at the head of a queue's card, not a toolbar button**, so it reads as
+belonging to the rows under it. It appears from two pending rows, states the count and the total
+(hours, rupees) before anyone presses, and confirms once. Its button — like every per-row
+Approve / Reject pair — is a neutral `btn-ghost btn-sm`: approving is routine work rather than
+the page's primary act, and the outcome is shown by the row's status badge afterwards, not by the
+colour of the button that caused it.
+
 ### The arrival alert — the one thing louder than a page (S763)
 
 `ArrivalAlert` is the product's only app-level interruption: something arrived that a person has to

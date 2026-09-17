@@ -131,6 +131,9 @@ has the same effect, and those fire faster than typing:
   — 2.75 ms → 0.19 ms per render once memoized, measured at 40 staff.
 - **A row disclosure.** `PayrollCalculation`'s only interactive state is `expandedId`, and expanding
   one employee's detail panel re-ran `computePayslip` plus a TDS slab walk for *every* employee.
+  That page became Payroll's expandable row in S768, and the shape moved with it: `PayrollRun`'s
+  `liveRows` is a `useMemo` that does not list `expandedId`, so opening a working reads the row
+  already computed instead of re-running the engine.
 - **A status message or a busy flag.** `PayrollRun`'s freshness check was a bare render-body IIFE
   running the whole payroll engine, so `setMsg`, `setBusy` and opening the Finalize confirm each
   re-ran it. None of those move any of its inputs.

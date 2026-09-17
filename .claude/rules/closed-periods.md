@@ -77,8 +77,10 @@ replay were both doors.
 not a gap. HR does its month's work AFTER the stock month closes — the count is on the 1st, OT is
 approved and payroll finalized by the 5th — so an IMS-style `isLocked` on Attendance, Overtime or
 Payroll Run would block every HR client's payroll for the month just ended. **HR's lock is Payroll
-Run's own finalize**, and an attendance edit after that is surfaced as `⚠ Stale` on
-`/hr/calculation`, not prevented.
+Run's own finalize**, and since S749 a finalized month's attendance sheet is read-only until the run
+is reopened. An attendance edit made while the run is still a draft is surfaced, not prevented:
+Payroll's out-of-date banner, and the row's working naming what moved (S768 — this was `⚠ Stale`
+on `/hr/calculation`, which now redirects to Payroll).
 
 What was wrong was the sentence. Both close dialogs said *"entry pages become read-only"* with no
 qualifier, so the frozen Monthly Report's labour figure could move after a month the Owner had

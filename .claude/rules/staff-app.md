@@ -101,7 +101,7 @@ devices install that one.
 `SYSTEM_KEY` in `ThemeContext.js` resolves `prefers-color-scheme`, tracks the OS live while (and
 only while) the mode is `system`, and persists **the key only** — storing resolved colours would
 replay the last scheme instead of re-asking the device. The pair is `dark` ↔ `light` deliberately
-(the same design in two schemes, both gold-accented); pairing with another light preset would swap
+(the same design in two schemes, one accent hue — red since S689, gold before); pairing with another light preset would swap
 the accent hue at sunset and read as a different app. `system` is **not** a member of `PRESETS`,
 which stays a map of real hex palettes. It is the default **only** for a session with no stored
 preference on a `/hr/self-service` path — the admin app keeps `dark`.
