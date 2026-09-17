@@ -261,7 +261,7 @@ export default function HolidayCalendar() {
                 ＋ Seed {fyLabel(fyYear)}
               </button>
             </Tip>
-            <button className="btn btn-primary" onClick={openAdd} style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+            <button className="btn btn-primary" onClick={openAdd} style={{ whiteSpace: 'nowrap' }}>
               + Add Holiday
             </button>
           </div>

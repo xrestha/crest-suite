@@ -640,7 +640,7 @@ export default function LeaveManagement() {
                     : 'Pick a date range'}
                 </Tip>
               </span>
-              <button className="btn btn-primary" onClick={submitRequest} disabled={busy} style={{ fontSize: 13 }}>{busy ? 'Saving…' : 'Submit Request'}</button>
+              <button className="btn btn-primary" onClick={submitRequest} disabled={busy}>{busy ? 'Saving…' : 'Submit Request'}</button>
             </div>
           </div>
 

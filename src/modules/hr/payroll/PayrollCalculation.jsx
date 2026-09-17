@@ -36,7 +36,7 @@ const chipStyle = (token, textToken) => ({
 function Section({ title, children }) {
   return (
     <div className="calc-section" style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{title}</div>
       {children}
     </div>
   )
@@ -143,7 +143,7 @@ function CalcDetail({ row, monthDays, advances, ytd }) {
             {earningComps.map(c => (
               <Line key={c.id} label={c.name || 'Allowance'} op="+" value={`NPR ${fmt(calcAmount(c, emp.basic_salary))}`} />
             ))}
-            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong color="var(--theme-accent-ink)" hint="The full month's salary before anything is taken off." />
+            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong hint="The full month's salary before anything is taken off." />
           </Section>
         )}
         {b.basis === 'daily' && (
@@ -156,7 +156,7 @@ function CalcDetail({ row, monthDays, advances, ytd }) {
             <Line label="Worked Days" op="=" value={`${b.workedDays.toFixed(2)} days`} strong />
             <Line label="Daily Rate" value={`NPR ${fmt(b.dailyRate)}`} />
             <Line label="Worked Days" op="×" value={`${b.workedDays.toFixed(2)} days`} />
-            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong color="var(--theme-accent-ink)" />
+            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong />
           </Section>
         )}
         {b.basis === 'hourly' && (
@@ -169,7 +169,7 @@ function CalcDetail({ row, monthDays, advances, ytd }) {
             <Line label="Paid Hours" op="=" value={`${b.paidHours.toFixed(2)} hrs`} strong />
             <Line label="Hourly Rate" value={`NPR ${fmt(b.hourlyRate)}`} />
             <Line label="Paid Hours" op="×" value={`${b.paidHours.toFixed(2)} hrs`} />
-            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong color="var(--theme-accent-ink)" />
+            <Line label="Gross" op="=" value={`NPR ${fmt(slip.gross)}`} strong />
           </Section>
         )}
 
@@ -187,7 +187,7 @@ function CalcDetail({ row, monthDays, advances, ytd }) {
             <Line label="Per-Day Rate" op="=" value={`NPR ${fmt(b.perDay)}`} strong />
             <Line label="Per-Day Rate" value={`NPR ${fmt(b.perDay)}`} />
             <Line label="Unpaid Days" op="×" value={`${b.unpaidDays.toFixed(2)} days`} />
-            <Line label="Absence Deduction" op="=" value={`− NPR ${fmt(slip.absence_deduction)}`} strong color="var(--theme-red-text)" />
+            <Line label="Absence Deduction" op="=" value={`− NPR ${fmt(slip.absence_deduction)}`} strong />
           </Section>
         )}
 
@@ -202,13 +202,13 @@ function CalcDetail({ row, monthDays, advances, ytd }) {
           )}
           <Line label="Hourly Rate" op="×" value={`NPR ${fmt(b.hourlyRate)}`} />
           <Line label="OT Multiplier" op="×" value={`${OT_MULTIPLIER}×`} />
-          <Line label="Attendance OT Amount" op="=" value={`NPR ${fmt(b.otAttendanceAmt)}`} strong color="var(--theme-green-text)" />
+          <Line label="Attendance OT Amount" op="=" value={`NPR ${fmt(b.otAttendanceAmt)}`} strong />
         </Section>
 
         <Section title="Overtime — Approved Entries (Overtime module)">
           <Line label="Approved OT Hours" value={`${(b.otApprovedHrs || 0).toFixed(1)}h`} hint="From the Overtime module's approval workflow. Where a day appears in both places this is the figure that gets paid, and it is the only route to the holiday 2× rate." />
-          <Line label="Approved OT Amount" op="=" value={`NPR ${fmt(b.otApprovedAmt)}`} strong color="var(--theme-green-text)" />
-          <Line label="Total OT paid" value={`${((b.otAttendanceHrs || 0) + (b.otApprovedHrs || 0)).toFixed(1)}h → NPR ${fmt(slip.ot_amount)}`} strong color="var(--theme-green-text)" />
+          <Line label="Approved OT Amount" op="=" value={`NPR ${fmt(b.otApprovedAmt)}`} strong />
+          <Line label="Total OT paid" value={`${((b.otAttendanceHrs || 0) + (b.otApprovedHrs || 0)).toFixed(1)}h → NPR ${fmt(slip.ot_amount)}`} strong />
         </Section>
       </div>
 
@@ -226,7 +226,7 @@ function CalcDetail({ row, monthDays, advances, ytd }) {
             )}
             <Line label="SSF Base" op={b.basis === 'monthly' ? '=' : undefined} value={`NPR ${fmt(b.ssfBase)}`} hint={`Capped at NPR ${fmt(SSF_CAP)}`} />
             <Line label="Employee Rate" op="×" value="11%" />
-            <Line label="Employee SSF" op="=" value={`− NPR ${fmt(slip.ssf_employee)}`} strong color="var(--theme-red-text)" />
+            <Line label="Employee SSF" op="=" value={`− NPR ${fmt(slip.ssf_employee)}`} strong />
             <Line label="Employer SSF (20%)" value={`NPR ${fmt(slip.ssf_employer)}`} color="var(--theme-text2)" hint="Paid by the business on top of salary — not taken from the employee's pay." />
           </Section>
         ) : emp.ssf_enrolled ? (
@@ -272,10 +272,10 @@ function CalcDetail({ row, monthDays, advances, ytd }) {
             value={`NPR ${fmt(tdsBreakdown.ytdWithheld)}`}
             hint={ytdBonusWithheld > 0 ? `incl. NPR ${fmt(ytdBonusWithheld)} withheld on festival/bonus payments.` : undefined}
           />
-          <Line label="This month's income tax (TDS)" op="=" value={`− NPR ${fmt(tdsBreakdown.tds)}`} strong color="var(--theme-red-text)" />
+          <Line label="This month's income tax (TDS)" op="=" value={`− NPR ${fmt(tdsBreakdown.tds)}`} strong />
           {tdsCapped > 0 && (
             <Line
-              label="Withheld this month" value={`− NPR ${fmt(slip.tds)}`} strong color="var(--theme-red-text)"
+              label="Withheld this month" value={`− NPR ${fmt(slip.tds)}`} strong
               hint={`Pay left after SSF and fixed deductions only covered NPR ${fmt(slip.tds)}. The NPR ${fmt(tdsCapped)} not withheld is picked up by later months' tax.`}
             />
           )}
@@ -285,29 +285,29 @@ function CalcDetail({ row, monthDays, advances, ytd }) {
           <Line label="Advances in recovery this month" value={empAdvances.length} hint="Recovery starts the month after an advance is issued" />
           <Line label="Advance cut due" value={`NPR ${fmt(advanceDue)}`} hint="Each advance's instalment, or what is left of it if less." />
           <Line
-            label="Advance cut taken" value={`− NPR ${fmt(slip.advance_deduction)}`} color="var(--theme-red-text)"
+            label="Advance cut taken" value={`− NPR ${fmt(slip.advance_deduction)}`}
             hint={advanceOwed > 0 ? `NPR ${fmt(advanceOwed)} of the advance cut is still owed — taken by later cuts. Pay left after tax was not enough for the whole instalment.` : undefined}
           />
           <Line label="Travel claims paid by this payroll" value={tada.ids.length} hint="Approved claims whose trip ended by the end of this month." />
-          <Line label="TADA Reimbursement" value={`+ NPR ${fmt(slip.tada_amount)}`} color="var(--theme-green-text)" />
+          <Line label="TADA Reimbursement" value={`+ NPR ${fmt(slip.tada_amount)}`} />
         </Section>
 
         <Section title="Net Pay">
           <Line label="Gross" value={`NPR ${fmt(slip.gross)}`} />
-          <Line label="OT" op="+" value={`NPR ${fmt(slip.ot_amount)}`} color="var(--theme-green-text)" />
-          <Line label="Absence" op="−" value={`NPR ${fmt(slip.absence_deduction)}`} color="var(--theme-red-text)" />
-          <Line label="SSF" op="−" value={`NPR ${fmt(slip.ssf_employee)}`} color="var(--theme-red-text)" />
+          <Line label="OT" op="+" value={`NPR ${fmt(slip.ot_amount)}`} />
+          <Line label="Absence" op="−" value={`NPR ${fmt(slip.absence_deduction)}`} />
+          <Line label="SSF" op="−" value={`NPR ${fmt(slip.ssf_employee)}`} />
           <Line
-            label="Other Deductions" op="−" value={`NPR ${fmt(slip.other_deductions)}`} color="var(--theme-red-text)"
+            label="Other Deductions" op="−" value={`NPR ${fmt(slip.other_deductions)}`}
             hint={[
               slip.retirement_contribution > 0 ? `incl. CIT / provident fund NPR ${fmt(slip.retirement_contribution)}` : null,
               cut > 0 ? `The fixed deductions (NPR ${fmt(slip.other_deductions + cut)}) were reduced by NPR ${fmt(cut)} so take-home pay did not go below zero.` : null,
             ].filter(Boolean).join('. ') || undefined}
           />
-          <Line label="Income tax (TDS)" op="−" value={`NPR ${fmt(slip.tds)}`} color="var(--theme-red-text)" />
-          <Line label="Advance" op="−" value={`NPR ${fmt(slip.advance_deduction)}`} color="var(--theme-red-text)" />
-          <Line label="TADA" op="+" value={`NPR ${fmt(slip.tada_amount)}`} color="var(--theme-green-text)" />
-          <Line label="Net Pay" op="=" value={`NPR ${fmt(slip.net_pay)}`} strong color="var(--theme-accent-ink)" />
+          <Line label="Income tax (TDS)" op="−" value={`NPR ${fmt(slip.tds)}`} />
+          <Line label="Advance" op="−" value={`NPR ${fmt(slip.advance_deduction)}`} />
+          <Line label="TADA" op="+" value={`NPR ${fmt(slip.tada_amount)}`} />
+          <Line label="Net Pay" op="=" value={`NPR ${fmt(slip.net_pay)}`} strong />
         </Section>
       </div>
     </div>
@@ -333,10 +333,10 @@ function StoredDetail({ slip, intro }) {
         <div>
           <Section title="Pay">
             <Line label="Gross" value={`NPR ${fmt(num(slip.gross))}`} strong hint={grossHint} />
-            <Line label="Overtime" op="+" value={`NPR ${fmt(num(slip.ot_amount))}`} color="var(--theme-green-text)" hint={num(slip.ot_hours) > 0 ? `${num(slip.ot_hours).toFixed(1)} hours of overtime.` : 'No overtime paid.'} />
+            <Line label="Overtime" op="+" value={`NPR ${fmt(num(slip.ot_amount))}`} hint={num(slip.ot_hours) > 0 ? `${num(slip.ot_hours).toFixed(1)} hours of overtime.` : 'No overtime paid.'} />
             {basis === 'monthly' && (
               <Line
-                label="Absence" op="−" value={`NPR ${fmt(num(slip.absence_deduction))}`} color="var(--theme-red-text)"
+                label="Absence" op="−" value={`NPR ${fmt(num(slip.absence_deduction))}`}
                 hint={slip.unpaid_days != null
                   ? `${num(slip.unpaid_days).toFixed(2)} unpaid days (absences, unpaid leave, half days, and days not yet joined or after leaving) at the month's per-day rate.`
                   : 'Paid before the number of unpaid days was recorded, so no day count is stored.'}
@@ -348,26 +348,26 @@ function StoredDetail({ slip, intro }) {
         <div>
           <Section title="Deductions & take-home">
             <Line
-              label="SSF (11%)" op="−" value={`NPR ${fmt(num(slip.ssf_employee))}`} color="var(--theme-red-text)"
+              label="SSF (11%)" op="−" value={`NPR ${fmt(num(slip.ssf_employee))}`}
               hint={num(slip.ssf_employee) > 0
                 ? `The employee's Social Security Fund contribution. The business added NPR ${fmt(num(slip.ssf_employer))} (20%) on top, which was not taken from pay.`
                 : 'No SSF taken — not enrolled, or no SSF number on file when this was paid.'}
             />
             <Line
-              label="Other deductions" op="−" value={`NPR ${fmt(num(slip.other_deductions))}`} color="var(--theme-red-text)"
+              label="Other deductions" op="−" value={`NPR ${fmt(num(slip.other_deductions))}`}
               hint={retirement > 0
                 ? `Fixed deductions from Pay Setup, incl. CIT / provident fund NPR ${fmt(retirement)}, which also lowered taxable income.`
                 : 'Fixed deductions from Pay Setup.'}
             />
             <Line
-              label="Income tax (TDS)" op="−" value={`NPR ${fmt(num(slip.tds))}`} color="var(--theme-red-text)"
+              label="Income tax (TDS)" op="−" value={`NPR ${fmt(num(slip.tds))}`}
               hint={slip.tds_overridden
                 ? 'Typed by hand on the Payroll page before the month was finalized.'
                 : 'Withheld from this month\'s pay, based on the employee\'s expected income for the year.'}
             />
-            <Line label="Advance cut" op="−" value={`NPR ${fmt(num(slip.advance_deduction))}`} color="var(--theme-red-text)" hint="Recovered towards an advance or loan." />
-            <Line label="TADA" op="+" value={`NPR ${fmt(num(slip.tada_amount))}`} color="var(--theme-green-text)" hint={claims > 0 ? `${claims} travel claim${claims === 1 ? '' : 's'} reimbursed — not taxed.` : 'No travel claims on this payslip.'} />
-            <Line label="Net pay" op="=" value={`NPR ${fmt(num(slip.net_pay))}`} strong color="var(--theme-accent-ink)" />
+            <Line label="Advance cut" op="−" value={`NPR ${fmt(num(slip.advance_deduction))}`} hint="Recovered towards an advance or loan." />
+            <Line label="TADA" op="+" value={`NPR ${fmt(num(slip.tada_amount))}`} hint={claims > 0 ? `${claims} travel claim${claims === 1 ? '' : 's'} reimbursed — not taxed.` : 'No travel claims on this payslip.'} />
+            <Line label="Net pay" op="=" value={`NPR ${fmt(num(slip.net_pay))}`} strong />
           </Section>
         </div>
       </div>
@@ -611,13 +611,13 @@ export default function PayrollCalculation() {
   const cardMsg = text => <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>{text}</div>
   const colCount = isFinalized ? 10 : 11
   const statCards = isFinalized ? [
-    { label: 'Total Gross', value: `NPR ${fmt(totals.gross)}`, color: 'var(--theme-accent-ink)', tip: 'Sum of gross on the finalized payslips — what was paid, not a recalculation.' },
-    { label: 'Total Net Pay', value: `NPR ${fmt(totals.net)}`, color: 'var(--theme-green-text)', tip: 'Sum of net pay on the finalized payslips — the take-home that was paid.' },
+    { label: 'Total Gross', value: `NPR ${fmt(totals.gross)}`, color: 'var(--theme-text1)', tip: 'Sum of gross on the finalized payslips — what was paid, not a recalculation.' },
+    { label: 'Total Net Pay', value: `NPR ${fmt(totals.net)}`, color: 'var(--theme-text1)', tip: 'Sum of net pay on the finalized payslips — the take-home that was paid.' },
     { label: 'Payslips', value: rows.length, color: 'var(--theme-text1)', tip: 'Payslips in the finalized run for this month.' },
     { label: 'Payroll Run Status', value: runStatusLabel, color: 'var(--theme-text1)', tip: 'This month is locked. Figures are shown as paid; to change them, reopen the run on the Payroll page.' },
   ] : [
-    { label: 'Total Gross', value: `NPR ${fmt(totals.gross)}`, color: 'var(--theme-accent-ink)', tip: 'Sum of gross calculated now, across everyone on this month\'s payroll.' },
-    { label: 'Total Net Pay', value: `NPR ${fmt(totals.net)}`, color: 'var(--theme-green-text)', tip: 'Sum of take-home calculated now — compare against Payroll Run\'s Net Payable.' },
+    { label: 'Total Gross', value: `NPR ${fmt(totals.gross)}`, color: 'var(--theme-text1)', tip: 'Sum of gross calculated now, across everyone on this month\'s payroll.' },
+    { label: 'Total Net Pay', value: `NPR ${fmt(totals.net)}`, color: 'var(--theme-text1)', tip: 'Sum of take-home calculated now — compare against Payroll Run\'s Net Payable.' },
     { label: 'Flagged for Review', value: flaggedCount, color: flaggedCount > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)', tip: 'Employees whose stored Payroll payslip no longer matches this calculation, who have no payslip in the run, or whose payslip is for someone no longer on this month\'s payroll.' },
     { label: 'Payroll Run Status', value: runStatusLabel, color: 'var(--theme-text1)', tip: 'Whether a Payroll run exists for this month, and whether it still matches what is calculated here.' },
   ]
@@ -688,7 +688,7 @@ export default function PayrollCalculation() {
                     <th style={{ textAlign: 'right' }}><Tip text="Income tax (TDS) — withheld from this month's pay, based on the employee's expected income for the year." width={280}>TDS</Tip></th>
                     <th style={{ textAlign: 'right' }}>Advance</th>
                     <th style={{ textAlign: 'right' }}><Tip text="Travel & Daily Allowance — trip expenses reimbursed on this payslip. Not taxed." width={270}>TADA</Tip></th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>{isFinalized ? 'Net Pay (as paid)' : 'Net Pay (now)'}</th>
+                    <th style={{ textAlign: 'right' }}>{isFinalized ? 'Net Pay (as paid)' : 'Net Pay (now)'}</th>
                     {!isFinalized && <th><Tip text="The net pay stored on the Payroll page's draft run for this employee." width={240}>Payroll Page</Tip></th>}
                   </tr>
                 </thead>
@@ -699,8 +699,9 @@ export default function PayrollCalculation() {
                     const name = emp?.full_name || 'Employee record not found'
                     const expanded = expandedId === row.key
                     const toggle = () => setExpandedId(expanded ? null : row.key)
-                    const cell = (value, sign, colorToken) => (
-                      <td style={{ textAlign: 'right', color: f && value > 0 ? `var(${colorToken})` : 'var(--theme-text2)' }}>
+                    // Figures in plain ink, the sign carrying direction (S768) — see PayrollRun's moneyCell.
+                    const cell = (value, sign) => (
+                      <td style={{ textAlign: 'right', color: f && value > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
                         {f && value > 0 ? `${sign}${fmt(value)}` : '—'}
                       </td>
                     )
@@ -724,7 +725,7 @@ export default function PayrollCalculation() {
                               )}
                               {kind === 'live' && row.missing && (
                                 <Tip style={TIP_CHIP} text="This employee has no payslip in the current Payroll run for this month — Regenerate to include them before finalizing." width={280}>
-                                  <span style={chipStyle('--theme-red', '--theme-red-text')}>⚠ Missing</span>
+                                  <span style={chipStyle('--theme-amber', '--theme-amber-text')}>⚠ Missing</span>
                                 </Tip>
                               )}
                               {kind === 'live' && row.stale && (
@@ -734,7 +735,7 @@ export default function PayrollCalculation() {
                                     ? `Net pay still comes out the same (NPR ${fmt(num(stored.net_pay))}), but the figures inside it do not — Regenerate so the payslip shows the right split.`
                                     : `Net pay: NPR ${fmt(num(stored.net_pay))} stored on the Payroll page, NPR ${fmt(row.slip.net_pay)} now — Regenerate to update it.`}`}
                                 >
-                                  <span style={chipStyle('--theme-red', '--theme-red-text')}>⚠ Stale</span>
+                                  <span style={chipStyle('--theme-amber', '--theme-amber-text')}>⚠ Stale</span>
                                 </Tip>
                               )}
                               {/* Not a warning: the stored TDS was typed by hand on the Payroll page
@@ -761,13 +762,13 @@ export default function PayrollCalculation() {
                           ) : (
                             <td style={{ textAlign: 'right' }}>{fmt(num(f.gross))}</td>
                           )}
-                          {cell(num(f?.ot_amount), '+', '--theme-green-text')}
-                          {cell(num(f?.absence_deduction), '−', '--theme-red-text')}
-                          {cell(num(f?.ssf_employee), '−', '--theme-red-text')}
-                          {cell(num(f?.tds), '−', '--theme-red-text')}
-                          {cell(num(f?.advance_deduction), '−', '--theme-purple-text')}
-                          {cell(num(f?.tada_amount), '+', '--theme-green-text')}
-                          <td style={{ textAlign: 'right', color: f ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', fontWeight: 700 }}>{f ? fmt(num(f.net_pay)) : '—'}</td>
+                          {cell(num(f?.ot_amount), '+')}
+                          {cell(num(f?.absence_deduction), '−')}
+                          {cell(num(f?.ssf_employee), '−')}
+                          {cell(num(f?.tds), '−')}
+                          {cell(num(f?.advance_deduction), '−')}
+                          {cell(num(f?.tada_amount), '+')}
+                          <td style={{ textAlign: 'right', color: f ? 'var(--theme-text1)' : 'var(--theme-text2)', fontWeight: 700 }}>{f ? fmt(num(f.net_pay)) : '—'}</td>
                           {!isFinalized && (
                             <td style={{ fontSize: 11, color: stored ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>{stored ? `NPR ${fmt(num(stored.net_pay))}` : 'not generated'}</td>
                           )}
@@ -776,7 +777,7 @@ export default function PayrollCalculation() {
                           <tr>
                             <td colSpan={colCount} style={{ padding: 0 }}>
                               <div style={{ padding: '10px 22px 0', background: 'var(--theme-bg)', borderTop: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'flex-end' }}>
-                                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => handlePrint(row)}>🖨 Print</button>
+                                <button className="btn btn-ghost btn-sm" onClick={() => handlePrint(row)}>🖨 Print</button>
                               </div>
                               {renderDetail(row)}
                             </td>
@@ -791,13 +792,13 @@ export default function PayrollCalculation() {
                     <td />
                     <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Total — {isFinalized ? rows.length : rows.filter(r => r.kind === 'live').length}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
-                    <td style={{ textAlign: 'right', color: totals.ot > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{totals.ot > 0 ? `+${fmt(totals.ot)}` : '—'}</td>
-                    <td style={{ textAlign: 'right', color: totals.absence > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{totals.absence > 0 ? `−${fmt(totals.absence)}` : '—'}</td>
-                    <td style={{ textAlign: 'right', color: totals.ssf > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{totals.ssf > 0 ? `−${fmt(totals.ssf)}` : '—'}</td>
-                    <td style={{ textAlign: 'right', color: totals.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{totals.tds > 0 ? `−${fmt(totals.tds)}` : '—'}</td>
-                    <td style={{ textAlign: 'right', color: totals.advance > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>{totals.advance > 0 ? `−${fmt(totals.advance)}` : '—'}</td>
-                    <td style={{ textAlign: 'right', color: totals.tada > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{totals.tada > 0 ? `+${fmt(totals.tada)}` : '—'}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(totals.net)}</td>
+                    <td style={{ textAlign: 'right', color: totals.ot > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{totals.ot > 0 ? `+${fmt(totals.ot)}` : '—'}</td>
+                    <td style={{ textAlign: 'right', color: totals.absence > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{totals.absence > 0 ? `−${fmt(totals.absence)}` : '—'}</td>
+                    <td style={{ textAlign: 'right', color: totals.ssf > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{totals.ssf > 0 ? `−${fmt(totals.ssf)}` : '—'}</td>
+                    <td style={{ textAlign: 'right', color: totals.tds > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{totals.tds > 0 ? `−${fmt(totals.tds)}` : '—'}</td>
+                    <td style={{ textAlign: 'right', color: totals.advance > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{totals.advance > 0 ? `−${fmt(totals.advance)}` : '—'}</td>
+                    <td style={{ textAlign: 'right', color: totals.tada > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{totals.tada > 0 ? `+${fmt(totals.tada)}` : '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(totals.net)}</td>
                     {!isFinalized && (
                       <td style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{totalStored !== null ? `NPR ${fmt(totalStored)}` : '—'}</td>
                     )}

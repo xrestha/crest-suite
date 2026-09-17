@@ -717,9 +717,11 @@ export default function FinalSettlement() {
               <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginBottom: 4 }}>NET SETTLEMENT AMOUNT</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)' }}>Gross NPR {fmt(statement.gross)} − Deductions NPR {fmt(statement.totalDeductions)}</div>
             </div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: statement.net >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+            {/* A payout is a figure, so it takes the ink. The one state that asks something of someone —
+                the employee owing the business — is amber with a mark and words, never colour alone (S768). */}
+            <div style={{ fontSize: 24, fontWeight: 800, color: statement.net >= 0 ? 'var(--theme-text1)' : 'var(--theme-amber-text)' }}>
               NPR {npr2(Math.abs(statement.net))}
-              {statement.net < 0 && <span style={{ fontSize: 13, marginLeft: 8, color: 'var(--theme-red-text)' }}>(owed by the employee)</span>}
+              {statement.net < 0 && <span style={{ fontSize: 13, marginLeft: 8, color: 'var(--theme-amber-text)' }}>△ owed by the employee</span>}
             </div>
           </div>
 
@@ -919,7 +921,7 @@ function StatementTable({ title, lines, totalLabel, total, tone }) {
               <tr key={l.key}>
                 <td><Tip text={l.tip} width={300}>{l.label}</Tip></td>
                 <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12 }}>{l.formula}</td>
-                <td style={{ textAlign: 'right', fontWeight: 600, color: tone === 'red' ? 'var(--theme-red-text)' : undefined }}>{fmt(l.amount)}</td>
+                <td style={{ textAlign: 'right', fontWeight: 600 }}>{tone === 'red' ? '− ' : ''}{fmt(l.amount)}</td>
               </tr>
             ))}
           </tbody>
@@ -927,7 +929,7 @@ function StatementTable({ title, lines, totalLabel, total, tone }) {
             <tr>
               <td>{totalLabel}</td>
               <td></td>
-              <td style={{ textAlign: 'right', fontSize: 15, color: tone === 'red' ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{fmt(total)}</td>
+              <td style={{ textAlign: 'right', fontSize: 15 }}>{tone === 'red' ? '− ' : ''}{fmt(total)}</td>
             </tr>
           </tfoot>
         </table>

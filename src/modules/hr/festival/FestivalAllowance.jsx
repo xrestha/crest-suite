@@ -4,6 +4,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import RunStatusBadge from '../payroll/RunStatusBadge'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, daysInBsMonth, formatAd, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
@@ -634,9 +635,7 @@ export default function FestivalAllowance() {
           <p className="page-subtitle">
             Dashain allowance (चाडपर्व खर्च) — {festival || 'unnamed'} {bsYear}, paid in {monthName}
             {rows.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
-                {finalized ? 'Finalized' : 'Draft'}
-              </span>
+              <RunStatusBadge finalized={finalized} />
             )}
           </p>
         </div>
@@ -732,9 +731,9 @@ export default function FestivalAllowance() {
           {/* KPI cards */}
           <div className="stat-grid">
             {[
-              { label: 'Gross Payout',     value: fmt(total),            color: 'var(--theme-accent-ink)', tip: 'Total festival allowance before income tax is taken off.' },
-              { label: 'Income Tax (TDS)', value: fmt(totalTds),         color: 'var(--theme-red-text)',   tip: 'Income tax held back from the allowance and paid to the tax office. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so the allowance is taxed at the rate the employee actually falls in.' },
-              { label: 'Net Payout',       value: fmt(total - totalTds), color: 'var(--theme-green-text)', tip: 'What actually reaches staff bank accounts: gross minus income tax.' },
+              { label: 'Gross Payout',     value: fmt(total),            color: 'var(--theme-text1)', tip: 'Total festival allowance before income tax is taken off.' },
+              { label: 'Income Tax (TDS)', value: fmt(totalTds),         color: 'var(--theme-text1)',   tip: 'Income tax held back from the allowance and paid to the tax office. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so the allowance is taxed at the rate the employee actually falls in.' },
+              { label: 'Net Payout',       value: fmt(total - totalTds), color: 'var(--theme-text1)', tip: 'What actually reaches staff bank accounts: gross minus income tax.' },
               { label: 'Employees',        value: payRows.length,        color: 'var(--theme-text1)',      tip: 'People in this run, not counting anyone marked Excluded.' },
               { label: 'Average Gross',    value: fmt(payRows.length ? total / payRows.length : 0), color: 'var(--theme-text3)', tip: 'Gross payout ÷ people in the run (excluded staff not counted).' },
             ].map(s => (
@@ -804,15 +803,15 @@ export default function FestivalAllowance() {
 
           {/* Action bar */}
           <div className="card no-print" style={{ marginBottom: 14, display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportRegister} disabled={busy}>⬇ Register</button>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel</button>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('csv')} disabled={busy}>⬇ Bank CSV</button>
-            {!finalized && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={regenerate} disabled={busy || typing}>↻ Recompute</button>}
-            {!finalized && <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => setStatus('finalized')} disabled={!canFinalize}>Finalize</button>}
+            <button className="btn btn-ghost" onClick={exportRegister} disabled={busy}>⬇ Register</button>
+            <button className="btn btn-ghost" onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel</button>
+            <button className="btn btn-ghost" onClick={() => exportBank('csv')} disabled={busy}>⬇ Bank CSV</button>
+            {!finalized && <button className="btn btn-ghost" onClick={regenerate} disabled={busy || typing}>↻ Recompute</button>}
+            {!finalized && <button className="btn btn-primary" onClick={() => setStatus('finalized')} disabled={!canFinalize}>Finalize</button>}
             {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform operator, while
                 the tenant's own Owner is `isOwner` — both resolve hrRole to 'manager'. Gating this on
                 isAdmin made a client contact support to reopen their own finalized run. */}
-            {anyFinalized && hasHrAccess('manager') && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setStatus('draft')} disabled={busy || typing}>Reopen</button>}
+            {anyFinalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={() => setStatus('draft')} disabled={busy || typing}>Reopen</button>}
           </div>
 
           {/* Table */}
@@ -828,13 +827,13 @@ export default function FestivalAllowance() {
                     <th style={{ textAlign: 'right' }}>
                       <Tip text={`Completed months worked up to the festival (15 ${monthName}, max 12). Allowance = basic × months ÷ 12 for monthly staff — someone who joined 6 months before gets half a month's basic.`} width={290}>Months</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
+                    <th style={{ textAlign: 'right' }}>
                       <Tip text="The festival allowance before tax. Editable while draft. Daily and hourly staff have no monthly basic to share out, so type their amount by hand." width={260}>Gross</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
+                    <th style={{ textAlign: 'right' }}>
                       <Tip text="Income tax held back from this allowance. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so a cook who already earns into a higher band pays that band's rate on the allowance too. Worked out again when you change the amount; you can also type it while draft." width={320}>Income tax (TDS)</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>
+                    <th style={{ textAlign: 'right' }}>
                       <Tip text="Net amount to transfer (gross − income tax). This is the bank transfer amount." width={240}>Net</Tip>
                     </th>
                     <th>Note</th>
@@ -870,15 +869,15 @@ export default function FestivalAllowance() {
                           </div>
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(r.basic)}</td>
-                        <td style={{ textAlign: 'right', color: r.months_worked < 12 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>{r.months_worked}</td>
+                        <td style={{ textAlign: 'right', color: r.months_worked < 12 ? 'var(--theme-text1)' : 'var(--theme-text3)', fontWeight: r.months_worked < 12 ? 600 : 400 }}>{r.months_worked}</td>
                         <td style={{ textAlign: 'right' }}>
                           {!editable
-                            ? <span style={{ color: excluded ? 'var(--theme-text3)' : 'var(--theme-accent-ink)', fontWeight: 700 }}>{excluded ? '—' : fmt(r.amount)}</span>
-                            : <MoneyInput key={`${r.id}:amount`} aria-label={`Gross festival allowance for ${nameOf(r.employee_id)}`} value={r.amount} onCommit={(raw, reset) => updateAmount(r, raw, reset)} disabled={busy} style={{ ...inp, width: 110, textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }} />}
+                            ? <span style={{ color: excluded ? 'var(--theme-text3)' : 'var(--theme-text1)', fontWeight: 700 }}>{excluded ? '—' : fmt(r.amount)}</span>
+                            : <MoneyInput key={`${r.id}:amount`} aria-label={`Gross festival allowance for ${nameOf(r.employee_id)}`} value={r.amount} onCommit={(raw, reset) => updateAmount(r, raw, reset)} disabled={busy} style={{ ...inp, width: 110, textAlign: 'right', fontWeight: 600 }} />}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {!editable
-                            ? <span style={{ color: r.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
+                            ? <span style={{ color: r.tds > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
                             : <MoneyInput key={`${r.id}:tds`} aria-label={`Income tax for ${nameOf(r.employee_id)}`} value={r.tds} onCommit={(raw, reset) => updateTds(r, raw, reset)} disabled={busy} style={{ ...inp, width: 90, textAlign: 'right' }} />}
                           {estimate && (
                             <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginTop: 2 }}>
@@ -886,7 +885,7 @@ export default function FestivalAllowance() {
                             </div>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right', color: net > 0 ? 'var(--theme-green-text)' : 'var(--theme-text3)', fontWeight: 600 }}>
+                        <td style={{ textAlign: 'right', color: net > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)', fontWeight: 600 }}>
                           {net > 0 ? fmt(net) : '—'}
                         </td>
                         <td>
@@ -911,9 +910,9 @@ export default function FestivalAllowance() {
                 <tfoot>
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                     <td colSpan={3} style={{ color: 'var(--theme-text2)' }}>Total — {payRows.length}{excludedRows.length ? ` (+${excludedRows.length} excluded)` : ''}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(total)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 15 }}>{totalTds > 0 ? fmt(totalTds) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontSize: 15 }}>{fmt(total - totalTds)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(total)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{totalTds > 0 ? fmt(totalTds) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(total - totalTds)}</td>
                     <td></td>
                     {!finalized && <td className="no-print"></td>}
                   </tr>

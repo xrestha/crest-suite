@@ -170,28 +170,28 @@ export default function GratuityTracker() {
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text="Gratuity still owed in cash for active monthly-paid employees: the Labour Act accrual (basic ÷ 12 × completed months of service) minus what their employer SSF contributions have already funded. The gross accrual before that is shown underneath." width={280}>Total Liability</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {fmt(totalNet)}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {fmt(totalNet)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Gross accrued: NPR {fmt(totalAccrued)}</div>
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text="Monthly accrual rate — how fast the total gratuity pool is growing. Sum of (basic ÷ 12) across all monthly employees." width={280}>Monthly Accrual</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-accent-ink)' }}>NPR {fmt(totalMonthly)}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {fmt(totalMonthly)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>Added to liability per month</div>
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text={`Employees who have completed ${VEST} months of service, commonly treated as eligible for gratuity payment on departure. This threshold is not confirmed in the current Labour Act 2074 text (which reads as day-1 accrual with no explicit vesting gate) — verify with an accountant before relying on it for an actual payout.`} width={320}>Vested Employees</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-green-text)' }}>{vestedCount}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)' }}>{vestedCount}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>{rows.length - vestedCount} still vesting</div>
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 <Tip text="The gratuity share of the employer SSF actually contributed this spell of service — 3.33 out of every 20 the employer paid, summed from finalized payslips and settlements. A raise, an unpaid month or a month with no payroll is counted as it really was." width={300}>SSF Funded</Tip>
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-purple-text)' }}>NPR {fmt(totalSsf)}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {fmt(totalSsf)}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>from contributions actually paid</div>
             </div>
           </div>
@@ -258,7 +258,7 @@ export default function GratuityTracker() {
                     <th style={{ textAlign: 'right' }}>
                       <Tip text="The gratuity share of the employer SSF actually contributed during this spell of service (3.33 of every 20 paid), from finalized payslips. Blank when nothing has been contributed." width={300}>SSF Funded</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
+                    <th style={{ textAlign: 'right' }}>
                       <Tip text="Estimated additional cash liability beyond the SSF fund. Labour Act Total − SSF Covered. This is what you may need to pay in addition to SSF on departure." width={300}>Net Liability</Tip>
                     </th>
                   </tr>
@@ -274,17 +274,17 @@ export default function GratuityTracker() {
                       <td style={{ textAlign: 'center', color: 'var(--theme-text1)' }}>{fmtService(r.g.months)}</td>
                       <td style={{ textAlign: 'center' }}>
                         {r.g.vested
-                          ? <span className="badge-green">Vested</span>
-                          : <span className="badge-amber">Vesting · {VEST - r.g.months} mo left</span>}
+                          ? <span className="badge badge-gray">Vested</span>
+                          : <span className="badge badge-gray">Vesting · {VEST - r.g.months} mo left</span>}
                       </td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(r.g.monthlyAccrual)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{fmt(r.g.totalAccrued)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                         {r.g.coveredMonths > 0
                           ? <>{fmt(r.g.ssfCovered)}<span style={{ display: 'block', fontSize: 10, color: 'var(--theme-text2)' }}>{r.g.coveredMonths} mo</span></>
                           : <span style={{ color: 'var(--theme-text2)', fontSize: 11 }}>{r.g.enrolled ? 'No contributions yet' : 'Not enrolled'}</span>}
                       </td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontWeight: 700 }}>{fmt(r.g.netLiability)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700 }}>{fmt(r.g.netLiability)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -293,8 +293,8 @@ export default function GratuityTracker() {
                     <td colSpan={4} style={{ color: 'var(--theme-text2)' }}>Total — {rows.length} employees</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{fmt(totalMonthly)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totalAccrued)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-purple-text)' }}>{fmt(totalSsf)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 15 }}>{fmt(totalNet)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totalSsf)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(totalNet)}</td>
                   </tr>
                 </tfoot>
               </table>

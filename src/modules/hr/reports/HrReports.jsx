@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import RunStatusBadge from '../payroll/RunStatusBadge'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf, retirementRelief } from '../payroll/tds'
@@ -441,7 +442,7 @@ export default function HrReports() {
           <h1 className="page-title">HR Reports</h1>
           <p className="page-subtitle">
             Payroll filing & disbursement — {periodLabel}
-            {run && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>{finalized ? 'Finalized' : 'Draft'}</span>}
+            {run && <RunStatusBadge finalized={finalized} />}
           </p>
         </div>
         <select aria-label="Period" className="form-select no-print" value={period?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
@@ -485,7 +486,7 @@ export default function HrReports() {
                   </div>
                 </div>
                 {(certSlips.length > 0 || certBonuses.length > 0 || certSettlements.length > 0) && !certLoading && !certError && !clientInfoError && (
-                  <button className="btn btn-primary" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => printWithTitle(`TDS Certificate - ${empMap[certEmpId]?.full_name || ''} - FY ${certFy.label}`)}>🖨 Print Certificate</button>
+                  <button className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => printWithTitle(`TDS Certificate - ${empMap[certEmpId]?.full_name || ''} - FY ${certFy.label}`)}>🖨 Print Certificate</button>
                 )}
               </div>
               {(!certFy || !certEmpId) ? (

@@ -6,6 +6,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import RunStatusBadge from './RunStatusBadge'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -646,7 +647,12 @@ export default function PayrollRun() {
   if (!hasHrAccess('manager')) return <Navigate to="/dashboard" replace />
 
   const showActions = run && !loading && !loadError
-  const negCell = v => <td style={{ textAlign: 'right', color: v > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{v > 0 ? `−${fmt(v)}` : '—'}</td>
+  // A deduction is a correct figure, not a problem, so it is printed in the ink every other figure
+  // uses and the − sign carries the direction (S768). Red here spent the product's "something is
+  // wrong" colour up to five times per row, and the one real warning on the page — ⚠ SSF no.
+  // missing, in the name cell — was lost among them. Colour on this register is for flags only.
+  const moneyCell = (v, sign) => <td style={{ textAlign: 'right', color: v > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{v > 0 ? `${sign}${fmt(v)}` : '—'}</td>
+  const negCell = v => moneyCell(v, '−')
 
   return (
     <div>
@@ -656,7 +662,7 @@ export default function PayrollRun() {
             <h1 className="page-title">Payroll</h1>
             <p className="page-subtitle">
               Monthly payroll run — {periodLabel}
-              {run && !loading && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 0 }}>{finalized ? 'Finalized' : 'Draft'}</span>}
+              {run && !loading && <RunStatusBadge finalized={finalized} />}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -667,12 +673,12 @@ export default function PayrollRun() {
                 payslips the page could not show — the old outlet's, after a client switch. */}
             {showActions && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button className="btn btn-ghost" onClick={exportExcel} disabled={busy} style={{ fontSize: 12 }}>⬇ Export</button>
-                {!finalized && !freshness.empty && <button className="btn btn-ghost" onClick={() => setConfirmAction('regenerate')} disabled={busy} style={{ fontSize: 12 }}>↻ Regenerate</button>}
-                {!finalized && !freshness.empty && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy} style={{ fontSize: 12 }}>Finalize</button>}
+                <button className="btn btn-ghost" onClick={exportExcel} disabled={busy}>⬇ Export</button>
+                {!finalized && !freshness.empty && <button className="btn btn-ghost" onClick={() => setConfirmAction('regenerate')} disabled={busy}>↻ Regenerate</button>}
+                {!finalized && !freshness.empty && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy}>Finalize</button>}
                 {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform OPERATOR, while
                     the tenant's own Owner is `isOwner`; both resolve hrRole to 'manager' (S620). */}
-                {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={() => setConfirmAction('reopen')} disabled={busy} style={{ fontSize: 12 }}>Reopen</button>}
+                {finalized && hasHrAccess('manager') && <button className="btn btn-ghost" onClick={() => setConfirmAction('reopen')} disabled={busy}>Reopen</button>}
               </div>
             )}
             {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
@@ -765,9 +771,9 @@ export default function PayrollRun() {
             {/* Stat cards */}
             <div className="stat-grid">
               {[
-                { label: 'Total Gross',  value: totals.gross, color: 'var(--theme-accent-ink)', tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
-                { label: 'Deductions',   value: totalDeductions, color: 'var(--theme-red-text)', tip: 'Everything taken off pay: unpaid days, SSF (11%), other deductions such as CIT, advance recovery, and income tax (TDS).' },
-                { label: 'Net Payable',  value: totals.net, color: 'var(--theme-green-text)', tip: 'Total take-home pay to disburse this period, TADA reimbursements included.' },
+                { label: 'Total Gross',  value: totals.gross, color: 'var(--theme-text1)', tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
+                { label: 'Deductions',   value: totalDeductions, color: 'var(--theme-text1)', tip: 'Everything taken off pay: unpaid days, SSF (11%), other deductions such as CIT, advance recovery, and income tax (TDS).' },
+                { label: 'Net Payable',  value: totals.net, color: 'var(--theme-text1)', tip: 'Total take-home pay to disburse this period, TADA reimbursements included.' },
                 { label: 'Employer SSF', value: totals.ssfEmpr, color: 'var(--theme-text2)', tip: '20% SSF the company pays on top — not part of net payable.' },
                 {
                   label: 'Cost to Business', value: cost.total, color: 'var(--theme-text1)',
@@ -800,7 +806,7 @@ export default function PayrollRun() {
                       <th style={{ textAlign: 'right' }}><Tip text="Advance or loan instalment recovered this month from Advances & Loans. Recovery starts with the payroll of the month after an advance was issued, and never takes pay below zero — whatever this month cannot cover stays owed. Repayment rows are written on Finalize." width={300}>Advance</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Income tax, worked out from the fiscal-year tax slabs. You can type over it while this is a draft — a typed figure is kept when you Finalize, and ↺ puts back the calculated one." width={280}>TDS</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Travel/Daily Allowance reimbursement — the total of approved claims whose trip was over by the end of the month. Added after income tax and not taxed. To change it, change the claim in TADA Claims." width={290}>TADA</Tip></th>
-                      <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>Net Pay</th>
+                      <th style={{ textAlign: 'right' }}>Net Pay</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -842,14 +848,14 @@ export default function PayrollRun() {
                             </div>
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(s.gross)}</td>
-                          <td style={{ textAlign: 'right', color: s.ot_amount > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{s.ot_amount > 0 ? `+${fmt(s.ot_amount)}` : '—'}</td>
+                          {moneyCell(num(s.ot_amount), '+')}
                           {negCell(num(s.absence_deduction))}
                           {negCell(num(s.ssf_employee))}
                           {negCell(num(s.other_deductions))}
-                          <td style={{ textAlign: 'right', color: advDed > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>{advDed > 0 ? `−${fmt(advDed)}` : '—'}</td>
+                          {negCell(advDed)}
                           <td style={{ textAlign: 'right' }}>
                             {finalized ? (
-                              <span style={{ color: s.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{s.tds > 0 ? `−${fmt(s.tds)}` : '—'}</span>
+                              <span style={{ color: s.tds > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{s.tds > 0 ? `−${fmt(s.tds)}` : '—'}</span>
                             ) : (
                               <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
                                 {s.tds_overridden && live && (
@@ -885,12 +891,12 @@ export default function PayrollRun() {
                                   <span style={{ fontSize: 10, cursor: 'help' }}>🔗</span>
                                 </Tip>
                               )}
-                              <span style={{ color: tada > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{tada > 0 ? `+${fmt(tada)}` : '—'}</span>
+                              <span style={{ color: tada > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{tada > 0 ? `+${fmt(tada)}` : '—'}</span>
                             </div>
                           </td>
-                          <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>
                           <td style={{ textAlign: 'right' }}>
-                            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setViewSlip({ slip: s, emp })}>Payslip</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setViewSlip({ slip: s, emp })} aria-label={`Payslip for ${emp.full_name}`}>Payslip</button>
                           </td>
                         </tr>
                       )
@@ -902,14 +908,14 @@ export default function PayrollRun() {
                     <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Total — {payslips.length}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>{totals.ot > 0 ? `+${fmt(totals.ot)}` : '—'}</td>
+                      {moneyCell(totals.ot, '+')}
                       {negCell(totals.absence)}
                       {negCell(totals.ssfEmp)}
                       {negCell(totals.other)}
-                      <td style={{ textAlign: 'right', color: totals.advDed > 0 ? 'var(--theme-purple-text)' : 'var(--theme-text2)' }}>{totals.advDed > 0 ? `−${fmt(totals.advDed)}` : '—'}</td>
+                      {negCell(totals.advDed)}
                       {negCell(totals.tds)}
-                      <td style={{ textAlign: 'right', color: totals.tada > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)' }}>{totals.tada > 0 ? `+${fmt(totals.tada)}` : '—'}</td>
-                      <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(totals.net)}</td>
+                      {moneyCell(totals.tada, '+')}
+                      <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(totals.net)}</td>
                       <td></td>
                     </tr>
                   </tfoot>

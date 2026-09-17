@@ -23,7 +23,9 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint,
   const Row = ({ label, value, strong, neg }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, fontWeight: strong ? 700 : 400 }}>
       <span style={{ color: strong ? c2 : c1 }}>{label}</span>
-      <span style={{ color: strong ? (forPrint ? '#000' : 'var(--theme-accent-ink)') : (neg ? 'var(--theme-red-text)' : c2) }}>{neg ? '− ' : ''}{fmtn(value)}</span>
+      {/* One ink for every figure (S768): SSF and income tax are required by law, and a red line on
+          the employee's own payslip reads as a penalty. The − sign says it is taken off. */}
+      <span style={{ color: c2 }}>{neg ? '− ' : ''}{fmtn(value)}</span>
     </div>
   )
   const isMonthly = slip.pay_basis === 'monthly'
@@ -86,7 +88,7 @@ export default function PayslipBody({ slip, emp, periodLabel, bizInfo, forPrint,
 
       <div style={{ fontSize: 10, color: c1, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Earnings</div>
       {isMonthly && <Row label="Basic Salary" value={slip.basic} />}
-      {isMonthly && slip.allowances > 0 && <Row label="Allowances (incl. Dearness)" value={slip.allowances} />}
+      {isMonthly && slip.allowances > 0 && <Row label="Allowances" value={slip.allowances} />}
       {!isMonthly && <Row label={wageLabel} value={slip.gross} />}
       {slip.ot_amount > 0 && <Row label={`Overtime (${(slip.ot_hours || 0).toFixed(1)} hrs)`} value={slip.ot_amount} />}
       <Row label="Gross Earnings" value={slip.gross + slip.ot_amount} strong />

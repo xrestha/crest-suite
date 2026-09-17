@@ -28,8 +28,10 @@ export const STATUS_TINT = {
 export const EMPLOYEE_STATUS_COLORS = {
   active:     { ...STATUS_TINT.green,  color: 'var(--theme-green-text)' },
   probation:  { ...STATUS_TINT.accent, color: 'var(--theme-accent-ink)' },
-  resigned:   { ...STATUS_TINT.red,    color: 'var(--theme-red-text)' },
-  terminated: { ...STATUS_TINT.red,    color: 'var(--theme-red-text)' },
+  // A leaver is a fact about the record, not something wrong with it (S768) — red here put every
+  // former employee in the colour of a refused request. Grey is this module's "closed" state.
+  resigned:   STATUS_TINT.gray,
+  terminated: STATUS_TINT.gray,
   inactive:   STATUS_TINT.gray,
 }
 

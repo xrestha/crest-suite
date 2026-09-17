@@ -4,6 +4,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import Tip from '../../../components/Tip'
+import RunStatusBadge from '../payroll/RunStatusBadge'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, daysInBsMonth, formatAd, getBsToday } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
@@ -625,9 +626,7 @@ export default function IncentiveRun() {
           <p className="page-subtitle">
             One-off bonus runs — {runLabel || 'unnamed run'} {bsYear}, paid in {monthName}
             {rows.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: finalized ? 'var(--theme-green-text)' : 'var(--theme-accent-ink)', background: `color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${finalized ? 'var(--theme-green)' : 'var(--theme-accent)'} 20%, transparent)`, padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
-                {finalized ? 'Finalized' : 'Draft'}
-              </span>
+              <RunStatusBadge finalized={finalized} />
             )}
           </p>
         </div>
@@ -736,9 +735,9 @@ export default function IncentiveRun() {
         <>
           <div className="stat-grid stat-grid--compact" style={{ marginBottom: 28 }}>
             {[
-              { label: 'Gross Payout',     value: fmt(total),            color: 'var(--theme-accent-ink)', tip: 'Total bonus before income tax is taken off.' },
-              { label: 'Income Tax (TDS)', value: fmt(totalTds),         color: 'var(--theme-red-text)',   tip: 'Income tax held back from this bonus and paid to the tax office. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so a bonus is taxed at the rate the employee actually falls in.' },
-              { label: 'Net Payout',       value: fmt(total - totalTds), color: 'var(--theme-green-text)', tip: 'What actually reaches staff bank accounts: gross minus income tax.' },
+              { label: 'Gross Payout',     value: fmt(total),            color: 'var(--theme-text1)', tip: 'Total bonus before income tax is taken off.' },
+              { label: 'Income Tax (TDS)', value: fmt(totalTds),         color: 'var(--theme-text1)',   tip: 'Income tax held back from this bonus and paid to the tax office. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so a bonus is taxed at the rate the employee actually falls in.' },
+              { label: 'Net Payout',       value: fmt(total - totalTds), color: 'var(--theme-text1)', tip: 'What actually reaches staff bank accounts: gross minus income tax.' },
               { label: 'Employees',        value: payRows.length,        color: 'var(--theme-text1)',      tip: 'People in this run, not counting anyone marked Excluded.' },
               { label: 'Average Gross',    value: fmt(payRows.length ? total / payRows.length : 0), color: 'var(--theme-text2)', tip: 'Gross payout ÷ people in the run (excluded staff not counted).' },
             ].map(s => (
@@ -814,7 +813,7 @@ export default function IncentiveRun() {
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('xlsx')} disabled={busy}>⬇ Bank Excel</button>
             <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => exportBank('csv')} disabled={busy}>⬇ Bank CSV</button>
             {!finalized && <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={regenerate} disabled={busy || typing}>↻ Recompute</button>}
-            {!finalized && <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => setStatus('finalized')} disabled={!canFinalize}>Finalize</button>}
+            {!finalized && <button className="btn btn-primary" onClick={() => setStatus('finalized')} disabled={!canFinalize}>Finalize</button>}
             {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform operator, while
                 the tenant's own Owner is `isOwner` — both resolve hrRole to 'manager'. Gating this on
                 isAdmin made a client contact support to reopen their own finalized run. */}
@@ -827,13 +826,13 @@ export default function IncentiveRun() {
                 <thead>
                   <tr>
                     <th>Employee</th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-accent-ink)' }}>
+                    <th style={{ textAlign: 'right' }}>
                       <Tip text="The bonus before tax. Editable while draft." width={220}>Gross</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-red-text)' }}>
+                    <th style={{ textAlign: 'right' }}>
                       <Tip text="Income tax held back from this bonus. Tax is worked out on the whole year: this year’s salary so far, the salary still to come, and other bonuses already paid — so a waiter who already earns into a higher band pays that band's rate on the bonus too. Worked out again when you change the amount; you can also type it while draft." width={320}>Income tax (TDS)</Tip>
                     </th>
-                    <th style={{ textAlign: 'right', color: 'var(--theme-green-text)' }}>
+                    <th style={{ textAlign: 'right' }}>
                       <Tip text="What the employee receives: gross − income tax. This is the bank transfer amount." width={240}>Net</Tip>
                     </th>
                     <th>Note</th>
@@ -869,12 +868,12 @@ export default function IncentiveRun() {
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {!editable
-                            ? <span style={{ color: excluded ? 'var(--theme-text3)' : 'var(--theme-accent-ink)', fontWeight: 700 }}>{excluded ? '—' : fmt(r.amount)}</span>
-                            : <MoneyInput key={`${r.id}:amount`} aria-label={`Gross incentive for ${nameOf(r.employee_id)}`} value={r.amount} onCommit={(raw, reset) => updateAmount(r, raw, reset)} disabled={busy} style={{ ...inp, width: 110, textAlign: 'right', color: 'var(--theme-accent-ink)', fontWeight: 600 }} />}
+                            ? <span style={{ color: excluded ? 'var(--theme-text3)' : 'var(--theme-text1)', fontWeight: 700 }}>{excluded ? '—' : fmt(r.amount)}</span>
+                            : <MoneyInput key={`${r.id}:amount`} aria-label={`Gross incentive for ${nameOf(r.employee_id)}`} value={r.amount} onCommit={(raw, reset) => updateAmount(r, raw, reset)} disabled={busy} style={{ ...inp, width: 110, textAlign: 'right', fontWeight: 600 }} />}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {!editable
-                            ? <span style={{ color: r.tds > 0 ? 'var(--theme-red-text)' : 'var(--theme-text3)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
+                            ? <span style={{ color: r.tds > 0 ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{r.tds > 0 ? fmt(r.tds) : '—'}</span>
                             : <MoneyInput key={`${r.id}:tds`} aria-label={`Income tax for ${nameOf(r.employee_id)}`} value={r.tds} onCommit={(raw, reset) => updateTds(r, raw, reset)} disabled={busy} style={{ ...inp, width: 90, textAlign: 'right' }} />}
                           {estimate && (
                             <div style={{ fontSize: 10, color: 'var(--theme-text3)', marginTop: 2 }}>
@@ -882,7 +881,7 @@ export default function IncentiveRun() {
                             </div>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right', color: net > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', fontWeight: 600 }}>{net > 0 ? fmt(net) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: net > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)', fontWeight: 600 }}>{net > 0 ? fmt(net) : '—'}</td>
                         <td>
                           {!editable
                             ? <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>{excluded ? '—' : (r.note || '—')}</span>
@@ -905,9 +904,9 @@ export default function IncentiveRun() {
                 <tfoot>
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
                     <td style={{ color: 'var(--theme-text3)' }}>Total — {payRows.length}{excludedRows.length ? ` (+${excludedRows.length} excluded)` : ''}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-accent-ink)', fontSize: 15 }}>{fmt(total)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-red-text)', fontSize: 15 }}>{totalTds > 0 ? fmt(totalTds) : '—'}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-green-text)', fontSize: 15 }}>{fmt(total - totalTds)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(total)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{totalTds > 0 ? fmt(totalTds) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(total - totalTds)}</td>
                     <td></td>
                     {!finalized && <td className="no-print"></td>}
                   </tr>

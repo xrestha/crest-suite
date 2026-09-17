@@ -231,8 +231,8 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
                   {r.note && <span style={{ color: 'var(--theme-text3)' }}> · "{r.note}"</span>}
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                  <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
-                  <button className="btn btn-primary" style={{ fontSize: 11, padding: '3px 10px' }} disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
+                  <button className="btn btn-ghost btn-sm" disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
+                  <button className="btn btn-primary btn-sm" disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
                 </div>
               </div>
             ))}

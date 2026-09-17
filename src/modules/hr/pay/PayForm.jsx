@@ -299,13 +299,13 @@ export default function PayForm({ employee, onSave, onClose }) {
                 {isMonthly && (
                   <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Other Allowances</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Other Allowances</span>
                       <button onClick={() => addComponent('earning')} style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text3)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>+ Add</button>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                       {QUICK_EARNINGS.filter(n => !earnings.find(c => c.name === n)).map(n => (
                         <button key={n} onClick={() => addComponent('earning', n)}
-                          style={{ background: 'color-mix(in srgb, var(--theme-green) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', borderRadius: 0, color: 'var(--theme-green-text)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
+                          style={{ background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 0, color: 'var(--theme-text1)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
                           + {n}
                         </button>
                       ))}
@@ -342,14 +342,14 @@ export default function PayForm({ employee, onSave, onClose }) {
                 {isMonthly && (
                   <div style={{ borderTop: '1px solid var(--theme-border)', paddingTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-red-text)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Deductions</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Deductions</span>
                       <button onClick={() => addComponent('deduction')} style={{ background: 'none', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text3)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>+ Add</button>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                       {QUICK_DEDUCTIONS.filter(n => !deductions.find(c => c.name === n)).map(n => {
                         const chip = (
                           <button onClick={() => addComponent('deduction', n)}
-                            style={{ background: 'color-mix(in srgb, var(--theme-red) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)', borderRadius: 0, color: 'var(--theme-red-text)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
+                            style={{ background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-text2) 25%, transparent)', borderRadius: 0, color: 'var(--theme-text1)', fontSize: 11, padding: '3px 10px', cursor: 'pointer' }}>
                             + {n}
                           </button>
                         )
@@ -428,12 +428,12 @@ export default function PayForm({ employee, onSave, onClose }) {
                   <div style={{ background: 'var(--theme-input-bg)', borderRadius: 0, border: '1px solid var(--theme-border)', overflow: 'hidden' }}>
                     {[
                       { label: 'Basic Salary',           value: basic,          indent: false, color: 'var(--theme-text1)' },
-                      dearnessAmt > 0 && { label: 'Dearness Allowance', value: dearnessAmt, indent: true,  color: 'var(--theme-green-text)' },
-                      otherEarnings > 0 && { label: `Other Allowances${earnings.length > 0 ? ` (${earnings.length})` : ''}`, value: otherEarnings, indent: true, color: 'var(--theme-green-text)' },
+                      dearnessAmt > 0 && { label: 'Dearness Allowance', value: dearnessAmt, indent: true,  color: 'var(--theme-text1)' },
+                      otherEarnings > 0 && { label: `Other Allowances${earnings.length > 0 ? ` (${earnings.length})` : ''}`, value: otherEarnings, indent: true, color: 'var(--theme-text1)' },
                       { label: 'Gross Earnings',         value: gross,          indent: false, color: 'var(--theme-text1)', bold: true, separator: true },
-                      ssfActive && { label: `SSF Employee (11%${basic > SSF_CAP ? ' · capped' : ''})`, value: -ssf_employee, indent: true, color: 'var(--theme-red-text)' },
-                      ...deductions.map(c => ({ label: c.name || 'Deduction', value: -calcAmount(c, basic), indent: true, color: 'var(--theme-red-text)' })),
-                      { label: 'Net before income tax',    value: net,            indent: false, color: 'var(--theme-accent-ink)', bold: true, big: true, separator: true },
+                      ssfActive && { label: `SSF Employee (11%${basic > SSF_CAP ? ' · capped' : ''})`, value: -ssf_employee, indent: true, color: 'var(--theme-text1)' },
+                      ...deductions.map(c => ({ label: c.name || 'Deduction', value: -calcAmount(c, basic), indent: true, color: 'var(--theme-text1)' })),
+                      { label: 'Net before income tax',    value: net,            indent: false, color: 'var(--theme-text1)', bold: true, big: true, separator: true },
                       { label: 'Cost to Company (CTC)',  value: ctc,            indent: false, color: 'var(--theme-text1)', bold: true, big: true, separator: true, bg: 'color-mix(in srgb, var(--theme-text1) 5%, transparent)' },
                       ssfActive && { label: 'Employer SSF (20%)', value: ssf_employer, indent: true,  color: 'var(--theme-text2)', note: 'paid by company' },
                     ].filter(Boolean).map((r, i) => (

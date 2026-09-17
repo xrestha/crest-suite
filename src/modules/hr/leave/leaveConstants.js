@@ -15,7 +15,7 @@ import { HR_REQUEST_STATUS } from '../payrollConstants'
 // renders one of them as raw text — LeaveManagement passes every one through typeTint() for a
 // fill and typeText() for a label, which is what keeps them legible on the light presets.
 export const DEFAULT_LEAVE_TYPES = [
-  { code: 'home',        name: 'Home / Annual Leave',  paid: true,  annual_quota: 18, carry_forward: true,  color: 'var(--theme-green)', sort_order: 1 },
+  { code: 'home',        name: 'Home / Annual Leave',  paid: true,  annual_quota: 18, carry_forward: true,  color: 'var(--theme-accent)', sort_order: 1 },
   { code: 'sick',        name: 'Sick Leave',           paid: true,  annual_quota: 12, carry_forward: true,  color: '#60a5fa', sort_order: 2 },
   { code: 'bereavement', name: 'Bereavement (Kiriya)', paid: true,  annual_quota: 13, carry_forward: false, color: '#a78bfa', sort_order: 3 },
   { code: 'maternity',   name: 'Maternity Leave',      paid: true,  annual_quota: 98, carry_forward: false, color: '#f472b6', sort_order: 4 },
