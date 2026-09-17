@@ -8,6 +8,7 @@ in `.claude/rules/*.md`; each rules file loads automatically when you open a fil
 ## Where a new rule goes
 
 - **Default to `.claude/rules/`, not this file.** Ask which files a rule is *reachable from*: one module or a few files → the matching rules file (add a `paths:` glob or start a new file); anywhere → here (safety prohibitions, tenant isolation, access control).
+- **Every other new rule goes in a path-scoped rules file, never here.** An incident story goes to `docs/rules-archive/<rules-file>.md`, and the rule keeps a one-line `History:` pointer to it. `check:docs` warns when an area's median rules load rises more than 15%.
 - `scripts/check-claude-size.mjs` holds a ratcheting ceiling on this file. When the file shrinks, lower `CEILING` in the same commit; never raise it.
 - A `paths:` glob that matches nothing is a rule that silently stopped loading. `npm run check:docs` catches that and a pointer to an empty destination, but not a glob scoped to the *wrong* file.
 - Never embed a value that moves (a cache version, a count) in a permanent rule; point at the file. A migrated section must actually shrink here to its one-line pointer.

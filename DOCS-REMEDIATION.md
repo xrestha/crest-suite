@@ -940,8 +940,13 @@ rules a JSX edit needs are restated in `page-layout.md` on `src/pages/**` and `s
 `design-system.md` opens by saying the two change together. Nav and token rules moved to
 `navigation.md` and `design-tokens.md`. Other files were narrowed or split the same way, and history
 went to `docs/rules-archive/`. The median load of one IMS file fell from 366k to 217k and a page
-from 178k to 71k (full table in the S770 CHANGELOG entry). **Still open:** the reported metric in
-`check-rules-globs.mjs` described under "Do, when it is picked up".
+from 178k to 71k (full table in the S770 CHANGELOG entry).
+
+**Reported metric done 2026-09-17 (S773).** `check-rules-globs.mjs` prints, for IMS, POS, HR,
+pages, components and migrations, the median and max chars of rules that opening one file loads.
+It fails nothing. It warns when a median rises more than 15% over a baseline stored in the script
+and names the rule files that grew. The baseline is a ratchet like `CEILING`: lower it when a pass
+lowers a median.
 
 **Condensing piloted 2026-09-17 (S772) on `dashboards.md`.** Each section is now rule bullets, one
 `Why:` line and a `History:` pointer, with the original text word for word in
