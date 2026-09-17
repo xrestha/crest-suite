@@ -2,6 +2,8 @@ import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
+import { useTheme } from '../../../context/ThemeContext'
+import { printWithTitle } from '../../../utils/printTitle'
 import { supabase } from '../../../supabaseClient'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { BS_MONTHS, adToBs, adToBsSafe, formatAd, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
@@ -91,6 +93,16 @@ const SWAP_STATUS_BADGE = {
   rejected_by_target: HR_REQUEST_STATUS.rejected.badge, rejected_by_admin: HR_REQUEST_STATUS.rejected.badge,
   cancelled: HR_REQUEST_STATUS.cancelled.badge,
 }
+// What a swap's state means to the person holding the phone (S768). The chip used to print the
+// database value with its underscores swapped for spaces — "Pending Admin".
+const SWAP_STATUS_LABEL = {
+  pending_target: 'Waiting for your coworker',
+  pending_admin: 'Waiting for your manager',
+  approved: 'Approved',
+  rejected_by_target: 'Declined by your coworker',
+  rejected_by_admin: 'Declined by your manager',
+  cancelled: 'Withdrawn',
+}
 
 function emptyTadaForm() {
   const today = formatAd(new Date())
@@ -120,7 +132,8 @@ function labelFor(cell, mode) {
 export default function SelfServiceHome() {
   const { session, profile, loading: authLoading } = useAuth()
   const navigate = useNavigate()
-  useStaffAppManifest()
+  const { colors: themeColors } = useTheme()
+  useStaffAppManifest(themeColors.bg)
 
   // The tab lives in the URL so the phone's own Back gesture moves between destinations instead
   // of leaving the app — the single thing that most makes an installed PWA feel like a web page.
@@ -138,6 +151,7 @@ export default function SelfServiceHome() {
   // One message per area, not one shared string: a failed payslip read must not blank the roster
   // that loaded fine, and "could not load" must never be rendered as "you have none".
   const [errs, setErrs] = useState({})
+  const [printSlip, setPrintSlip] = useState(null)
   const setErrFor = (key, value) => setErrs(prev => ({ ...prev, [key]: value }))
 
   const [leaveTypes, setLeaveTypes] = useState([])
@@ -194,7 +208,10 @@ export default function SelfServiceHome() {
   useEffect(() => {
     if (!profile?.client_id) return
     supabase.from('settings').select('tada_vehicle_rates, tada_purpose_options, tada_start_points, property_address, vat_number').eq('client_id', profile.client_id).maybeSingle()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // Not a blank: without these the travel form prices distance at nothing and the payslip
+        // prints without its letterhead, so the employee is told rather than left to find out.
+        setErrFor('settings', error ? employeeErrorText(error) : null)
         setTadaVehicleRates({ '2w': null, '4w': null, ev: null, ...(data?.tada_vehicle_rates || {}) })
         setTadaPurposeOptions(data?.tada_purpose_options?.length ? data.tada_purpose_options : DEFAULT_PURPOSE_OPTIONS)
         setTadaStartPoints(data?.tada_start_points?.length ? data.tada_start_points : DEFAULT_START_POINTS)
@@ -446,9 +463,12 @@ export default function SelfServiceHome() {
     loadTada()
   }
 
+  // Back to this restaurant's PIN pad, the same place an expired session lands (S768). It went to
+  // /login — the Owner's email-and-password page, which no employee has an account for.
   async function signOut() {
     await supabase.auth.signOut()
-    navigate('/login', { replace: true })
+    const known = rememberedStaffClient() || profile?.client_id
+    navigate(known ? `/hr/self-service/login/${known}` : '/login', { replace: true })
   }
 
   if (authLoading || !profile?.hr_self_service) {
@@ -458,6 +478,21 @@ export default function SelfServiceHome() {
   const swapsForMe = pendingSwapsForMe(swapRequests, profile.hr_employee_id)
   const todayState = todayView({ days: homeDays, roster, publishMap, today })
   const next = nextShift({ days: homeDays, roster, publishMap, today })
+
+  // Printing hides the app chrome (body.ss-printing in selfService.css) so the sheet prints alone.
+  function savePayslip(slip) {
+    setPrintSlip(slip)
+    document.body.classList.add('ss-printing')
+    // Cleared on afterprint, not on the next line: print() returns at once in Chrome, and clearing
+    // straight away would print the whole app instead of the payslip.
+    const done = () => {
+      document.body.classList.remove('ss-printing')
+      setPrintSlip(null)
+      window.removeEventListener('afterprint', done)
+    }
+    window.addEventListener('afterprint', done)
+    setTimeout(() => printWithTitle(`Payslip - ${slip.full_name || 'Crest Staff'} - ${BS_MONTHS[slip.bs_month - 1]} ${slip.bs_year}`), 60)
+  }
   const latest = payslips === null ? undefined : (payslips[0] || null)
 
   return (
@@ -533,8 +568,8 @@ export default function SelfServiceHome() {
                             {' ⇄ '}
                             <b style={{ color: 'var(--theme-text1)' }}>{r.target_name}</b> ({bsDayOrdinal(r.target_bs_day)}, {r.target_shift_name || '—'})
                           </div>
-                          <span className={SWAP_STATUS_BADGE[r.status] || 'badge-gray'} style={{ textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
-                            {r.status.replace(/_/g, ' ')}
+                          <span className={`${SWAP_STATUS_BADGE[r.status] || 'badge-gray'} badge-sentence`} style={{ whiteSpace: 'nowrap' }}>
+                            {SWAP_STATUS_LABEL[r.status] || r.status.replace(/_/g, ' ')}
                           </span>
                         </div>
                         {iAmTarget && r.status === 'pending_target' && (
@@ -586,6 +621,9 @@ export default function SelfServiceHome() {
                       <div key={r.id} className="card" style={{ padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 14, color: 'var(--theme-text1)' }}>{fmtBsRange(r.start_date, r.end_date)} ({r.days}d)</div>
+                          {leaveTypes.find(t => t.id === r.leave_type_id)?.name && (
+                            <div style={{ fontSize: 13, marginTop: 2, color: 'var(--theme-text2)' }}>{leaveTypes.find(t => t.id === r.leave_type_id).name}</div>
+                          )}
                           {r.reason && <div style={{ fontSize: 12, marginTop: 2, color: 'var(--theme-text3)' }}>{r.reason}</div>}
                         </div>
                         <span className={STATUS_BADGE[r.status]} style={{ textTransform: 'capitalize' }}>{r.status}</span>
@@ -626,7 +664,7 @@ export default function SelfServiceHome() {
       {tab === 'pay' && (
         errs.payslips ? <ErrorCard text={errs.payslips} onRetry={loadPayslips} />
         : payslips === null ? <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
-        : payslips.length === 0 ? <Empty text="No finalised payslips yet. Your payslip appears here once payroll is run." />
+        : payslips.length === 0 ? <Empty text="No payslips yet. Your payslip appears here once your manager finalizes the month's payroll." />
         : (
           // A month row opens the FULL payslip rather than showing a partial breakdown inline: a
           // summary that lists some lines but not all is what made the old card unreadable, since
@@ -689,7 +727,7 @@ export default function SelfServiceHome() {
                 </select>
               </div>
             )}
-            {days > 0 && <div style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Up to {days} day{days !== 1 ? 's' : ''} will be deducted — any public holiday inside these dates is not counted.</div>}
+            {days > 0 && <div style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Uses up to {days} day{days !== 1 ? 's' : ''} of your leave — a public holiday inside these dates is not counted.</div>}
             <div className="ss-field">
               <label htmlFor="ss-leave-reason">Reason</label>
               <textarea id="ss-leave-reason" style={{ ...inp, height: 76, resize: 'vertical' }} value={reason} onChange={e => setReason(e.target.value)} />
@@ -895,13 +933,27 @@ export default function SelfServiceHome() {
             <button className="btn btn-ghost" onClick={() => setViewSlip(null)} aria-label="Close"
               style={{ width: 44, minWidth: 44, padding: 0, justifyContent: 'center' }}>✕</button>
           </div>
+          {errs.settings && <p role="note" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>{errs.settings} Your company's name and address may be missing from this payslip.</p>}
           <PayslipBody
             slip={viewSlip}
             emp={viewSlip}
             periodLabel={`${BS_MONTHS[viewSlip.bs_month - 1]} ${viewSlip.bs_year}`}
             bizInfo={bizInfo}
+            phone
           />
+          {/* A payslip is a document people are asked for — by a bank, a landlord, a visa office. It
+              could be read here and not kept (S768). The phone's print dialog saves it as a PDF. */}
+          <button className="btn btn-ghost btn-block" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={() => savePayslip(viewSlip)}>
+            Save or share as PDF
+          </button>
         </Modal>
+      )}
+      {printSlip && (
+        <div className="print-only" style={{ padding: '28px 36px' }}>
+          <div style={{ maxWidth: 420 }}>
+            <PayslipBody slip={printSlip} emp={printSlip} periodLabel={`${BS_MONTHS[printSlip.bs_month - 1]} ${printSlip.bs_year}`} bizInfo={bizInfo} forPrint />
+          </div>
+        </div>
       )}
     </SelfServiceShell>
   )

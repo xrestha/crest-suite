@@ -14,7 +14,6 @@ const STAFF = {
   manifest: '/staff.webmanifest',
   appleIcon: '/staff180.png',
   appleTitle: 'Crest Staff',
-  themeColor: '#191817',
 }
 
 function setTag(selector, attr, value) {
@@ -31,19 +30,24 @@ function setTag(selector, attr, value) {
  * Called once per portal page (Home and Login), at the top level — NOT from inside a dialog, or
  * the identity would only be correct while that dialog happened to be open.
  */
-export function useStaffAppManifest() {
+export function useStaffAppManifest(themeColor = '#191817') {
   useEffect(() => {
     const restores = [
       setTag('link[rel="manifest"]', 'href', STAFF.manifest),
       setTag('link[rel="apple-touch-icon"]', 'href', STAFF.appleIcon),
       setTag('meta[name="apple-mobile-web-app-title"]', 'content', STAFF.appleTitle),
-      // Both apps now sit on the same ink ground, so this no longer CHANGES the browser bar —
-      // it pins it, so the value survives whatever the admin shell last set and matches what
-      // staff.webmanifest declares. Kept explicit for that reason, not because it differs.
-      setTag('meta[name="theme-color"]', 'content', STAFF.themeColor),
     ].filter(Boolean)
-    return () => restores.forEach(fn => fn())
+    // The tab and the task switcher said "Crest Suite" — an app the employee has never heard of.
+    const previousTitle = document.title
+    document.title = 'Crest Staff'
+    return () => { restores.forEach(fn => fn()); document.title = previousTitle }
   }, [])
+  // The browser bar takes the page's own ground (S768). It was pinned to Night's ink, so a phone in
+  // light mode wore a black status bar over a pale app.
+  useEffect(() => {
+    const restore = setTag('meta[name="theme-color"]', 'content', themeColor)
+    return () => { if (restore) restore() }
+  }, [themeColor])
 }
 
 /**

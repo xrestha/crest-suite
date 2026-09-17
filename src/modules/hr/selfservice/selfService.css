@@ -114,10 +114,12 @@
   border: none;
   background: none;
   font-family: inherit;
-  font-size: 10px;
+  /* 12px in the secondary ink (S768): at 10px in the quietest grey the four destinations of the
+     app measured under AA on a light-mode phone, on the one control every screen depends on. */
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--theme-text3);
+  letter-spacing: 0.02em;
+  color: var(--theme-text2);
   cursor: pointer;
   transition: color var(--motion-fast) var(--ease-standard);
 }
@@ -144,9 +146,11 @@
   height: 16px;
   padding: 0 4px;
   border-radius: var(--radius-full);
-  background: var(--theme-red);
+  /* Amber, the module's "waiting on you" — it was red, a verdict colour on a count, while the
+     cards it leads to are amber. */
+  background: var(--theme-amber);
   color: var(--theme-bg);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 16px;
   text-align: center;
@@ -269,4 +273,30 @@
   border: 1px solid var(--theme-border-lt);
   border-radius: var(--radius-md);
   background: var(--theme-bg);
+}
+
+/* ── The PIN pad (S768) ──────────────────────────────────────────────────────────────────────── */
+.ss-login-card {
+  padding: 40px 36px;
+}
+/* Two tiles to a row on a 360px phone. At a fixed 130px with 36px card padding only ONE fitted,
+   so a restaurant's staff list became a single column to scroll past. */
+.ss-staff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+@media (max-width: 480px) {
+  .ss-login-card { padding: 28px 16px; }
+  .ss-login { padding-left: 12px !important; padding-right: 12px !important; }
+}
+
+/* Saving a payslip prints it alone: the app's bars and screens step aside for the one sheet. */
+@media print {
+  body.ss-printing .ss-topbar,
+  body.ss-printing .ss-tabbar,
+  body.ss-printing .ss-content > :not(.print-only) {
+    display: none !important;
+  }
 }
