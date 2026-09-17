@@ -17,6 +17,7 @@ import {
   fetchPayrollEmployees, fetchEmployeesByIds, buildPayrollRows, allocateAdvanceRepayments, payrollCashCost,
 } from './payrollData'
 import PayslipBody from './PayslipBody'
+import PayrollApprovalSheet from './PayrollApprovalSheet'
 import { CalcDetail, StoredDetail, FINALIZED_INTRO, driftParts, orphanIntro } from './PayslipCalculation'
 import RowDisclosure from '../../../components/RowDisclosure'
 import PayrollMonthStatus from './PayrollMonthStatus'
@@ -101,7 +102,7 @@ function monthProgress(period) {
 }
 
 export default function PayrollRun() {
-  const { clientId, hasHrAccess } = useAuth()
+  const { clientId, hasHrAccess, profile, isAdmin, isOwner } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const periodReq = useLatestRequest()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -145,6 +146,8 @@ export default function PayrollRun() {
   // Payroll Calculation page (S768): the explanation of a figure belongs beside the figure.
   const [expandedId, setExpandedId] = useState(null)
   const [printCalc,  setPrintCalc]  = useState(null)
+  // The month's approval sheet for the Owner to sign (S777) — printed, or saved as PDF from the dialog.
+  const [printApproval, setPrintApproval] = useState(false)
   // Company letterhead for the payslip — a payslip with no employer identity on it at all is
   // missing the single most basic thing a pay document is expected to have. Same source fields
   // Tax Invoice already prints (settings.vat_number is Nepal's PAN, reused as-is — not a new ID).
@@ -645,6 +648,19 @@ export default function PayrollRun() {
     setTimeout(() => { printWithTitle(`Payslip - ${emp.full_name} - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintSlip(null) }, 60)
   }
 
+  // The Owner signs what this prints, so a draft Finalize would refuse is not printed: the signature
+  // would approve figures that are about to change. A finalized month always prints, as paid.
+  function printApprovalSheet() {
+    if (!run || busy || loading || payslips.length === 0) return
+    if (!finalized && !freshness.ok) {
+      setMsg('error:The approval sheet was not printed — this draft cannot be finalized as it stands, so the Owner would be signing figures that are about to change. '
+        + (freshness.reason || 'Press Regenerate, then print it.'))
+      return
+    }
+    setPrintApproval(true)
+    setTimeout(() => { printWithTitle(`Payroll Approval - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintApproval(false) }, 60)
+  }
+
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const status = finalized ? 'Finalized' : 'Draft'
@@ -693,7 +709,7 @@ export default function PayrollRun() {
 
   return (
     <div>
-      <div className={printSlip || printCalc ? 'no-print' : ''}>
+      <div className={printSlip || printCalc || printApproval ? 'no-print' : ''}>
         <div className="page-header page-header--split">
           <div>
             <h1 className="page-title">Payroll</h1>
@@ -711,6 +727,11 @@ export default function PayrollRun() {
             {showActions && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <button className="btn btn-ghost" onClick={exportExcel} disabled={busy}>⬇ Export</button>
+                {payslips.length > 0 && (
+                  <Tip text={`The ${periodLabel} payroll on one sheet — totals, each employee's pay, anything to check, and signature lines — for the Owner to approve. Print it, or choose Save as PDF in the print dialog. A draft prints marked DRAFT; a draft that is out of date must be regenerated first.`} width={300}>
+                    <button className="btn btn-ghost" onClick={printApprovalSheet} disabled={busy} aria-disabled={!finalized && !freshness.ok}>🖨 Approval PDF</button>
+                  </Tip>
+                )}
                 {!finalized && !freshness.empty && <button className="btn btn-ghost" onClick={() => setConfirmAction('regenerate')} disabled={busy}>↻ Regenerate</button>}
                 {!finalized && !freshness.empty && <button className="btn btn-primary" onClick={requestFinalize} disabled={busy}>Finalize</button>}
                 {/* hasHrAccess('manager'), not isAdmin: `isAdmin` is the Crest platform OPERATOR, while
@@ -1048,6 +1069,19 @@ export default function PayrollRun() {
             {periodLabel}{finalized ? ' — as paid' : ' — draft'} — printed {nepalBsLong(new Date()) || nepalDateLong(new Date())}
           </div>
           {renderWorking(printCalc.slip)}
+        </div>
+      )}
+
+      {printApproval && run && period && (
+        <div className="print-only">
+          <PayrollApprovalSheet
+            period={period} periodLabel={periodLabel} run={run} payslips={payslips}
+            empMap={empMap} nameOf={nameOf} totals={totals} cost={cost} bizInfo={bizInfo}
+            settled={settled} progress={finalized ? null : monthProgress(period)}
+            // The Crest operator and the Owner are not the tenant's payroll preparer, so their
+            // names are left for the preparer to write in rather than printed as if they were.
+            preparedBy={!isAdmin && !isOwner && profile?.full_name ? { name: profile.full_name, role: profile.hr_job_title || '' } : null}
+          />
         </div>
       )}
 
