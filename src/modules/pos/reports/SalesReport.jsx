@@ -12,6 +12,7 @@ import { firstError } from '../../../shared/queryError'
 import { errorInfo } from '../../../shared/errorText'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ChartCard from '../../../components/ChartCard'
 import { getBsToday, formatAd, adToBs, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
@@ -1112,11 +1113,9 @@ export default function SalesReport() {
         </div>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 16 }}>
-        {TABS.map(t => (
-          <button key={t.key} className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => { setTab(t.key); setPaymentFilter(null); setPartnerFilter('all') }}>{t.label}</button>
-        ))}
-      </div>
+      {/* Tabs (S776): the row had no selected state a screen reader could hear, and every tab was its own Tab stop. */}
+      <Tabs idBase="pos-sales-report" label="Sales Report views" tabs={TABS} active={tab}
+        onChange={key => { setTab(key); setPaymentFilter(null); setPartnerFilter('all') }} style={{ marginBottom: 16 }} />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         {tab === 'onelakh' ? (

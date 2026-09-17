@@ -282,10 +282,12 @@ export const btnSm = {
   flexShrink: 0,
 }
 
+// No `outline: 'none'` (S776): it took away the billing fields' only focus indicator, so a keyboard user
+// tabbing buyer, discount and tender boxes could not see which one was taking the typing.
 export const billInput = {
   background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
   borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13,
-  color: 'var(--theme-text1)', outline: 'none',
+  color: 'var(--theme-text1)',
 }
 
 // Trailing delay before the Billing modal's live preview is handed to its iframe. Assigning

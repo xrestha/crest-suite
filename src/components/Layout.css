@@ -2862,30 +2862,54 @@ textarea:focus-visible {
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
+/* SELECTED is the accent fill (S776). It used to be bold plus a 1px grey border while HOVER painted the
+   full accent, so on a desktop the method under the mouse looked chosen and the chosen one did not —
+   and a cashier who cannot see the selected method charges the wrong one. The buttons carry
+   aria-pressed, so the choice is not colour alone. accent-text, not a hardcoded #000 — the
+   Accent-Text Pairing Rule. */
 .pay-method-btn--selected {
   font-weight: 700;
-  color: var(--theme-text1);
-  border-color: var(--theme-text2);
-}
-
-/* accent-text, not a hardcoded #000 — the Accent-Text Pairing Rule. Five presets pair their
-   accent with #ffffff, where black failed contrast outright. */
-.pay-method-btn:hover,
-.pay-method-btn:active {
   background: var(--theme-accent);
   color: var(--theme-accent-text);
   border-color: var(--theme-accent);
 }
 
-/* Red tint rather than a solid red fill (DESIGN.md's Danger-button spec). There is no paired
-   red-text token, and --theme-red ranges from light (#f87171 Dark, #ff5555 Dracula) to dark
-   (#dc2626 Bright/Light, #d20f39 Latte) across the presets, so NO single foreground contrasts
-   on all ten — the previous #fff failed on four. A tint sidesteps the pairing problem entirely. */
-.pay-method-btn--credit:hover,
-.pay-method-btn--credit:active {
+/* Hover on an unselected method is a tint and a border, never the fill the selected one wears. */
+.pay-method-btn:not(.pay-method-btn--selected):not(:disabled):hover {
+  background: color-mix(in srgb, var(--theme-accent) 12%, var(--theme-input-bg));
+  color: var(--theme-text1);
+  border-color: var(--theme-accent);
+}
+
+.pay-method-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+
+/* Red tint rather than a solid red fill (DESIGN.md's Danger-button spec): --theme-red ranges from
+   light to dark across the presets, so no single foreground contrasts on a red fill in all ten. The
+   text takes --theme-red-text, which is tuned per preset. Selected Credit adds a 2px red edge, so it
+   still reads as chosen beside an accent-filled neighbour. */
+.pay-method-btn--credit:not(:disabled):hover,
+.pay-method-btn--credit.pay-method-btn--selected {
   background: color-mix(in srgb, var(--theme-red) 15%, transparent);
-  color: var(--theme-red);
+  color: var(--theme-red-text);
   border-color: var(--theme-red);
+}
+.pay-method-btn--credit.pay-method-btn--selected {
+  box-shadow: inset 0 0 0 1px var(--theme-red);
+}
+
+/* The order screen's own controls (S776): tiles, steppers, the remove ×, the back button, the note
+   box and presets. They are inline-styled, so they had the browser's default 1px focus outline while
+   every classed button beside them had the product's pair — a keyboard user tabbing the cart lost
+   the ring at exactly the controls that change the order. Hooked on the touch-floor classes because
+   those are exactly these controls. */
+.till-hit:focus-visible,
+.till-hit--row:focus-visible,
+.till-tile:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
 .ticket-btn {

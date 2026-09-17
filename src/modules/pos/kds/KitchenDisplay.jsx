@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { setIfChanged, rowsSignature } from '../../../shared/setIfChanged'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import EstimateTimeModal from './EstimateTimeModal'
 import { ticketStripColor } from '../posSignals'
 import { playGuestAlert } from '../posChime'
@@ -400,13 +401,9 @@ export default function KitchenDisplay() {
           </div>
         </div>
         {!isTeamLocked && (
-          <div className="tab-bar" style={{ fontSize: 15 }}>
-            {STATIONS.map(s => (
-              <button key={s} className={`tab-btn${station === s ? ' tab-btn--active' : ''}`} onClick={() => selectStation(s)}>
-                {s === 'KOT' ? 'Kitchen (KOT)' : 'Bar (BOT)'}
-              </button>
-            ))}
-          </div>
+          // Which board is showing — a filter over one board, so aria-pressed (S776); the chips said it by colour only.
+          <FilterChips label="Station" active={station} onChange={selectStation} style={{ fontSize: 15 }}
+            options={STATIONS.map(s => ({ key: s, label: s === 'KOT' ? 'Kitchen (KOT)' : 'Bar (BOT)' }))} />
         )}
       </div>
 

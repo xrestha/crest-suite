@@ -10,6 +10,7 @@ import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
@@ -438,12 +439,13 @@ export default function KotLog() {
         </div>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 16 }}>
-        <button className={`tab-btn${tab === 'register' ? ' tab-btn--active' : ''}`} onClick={() => setTab('register')}>Register</button>
-        <button className={`tab-btn${tab === 'reconciliation' ? ' tab-btn--active' : ''}`} onClick={() => setTab('reconciliation')}>Reconciliation</button>
-        <button className={`tab-btn${tab === 'trail' ? ' tab-btn--active' : ''}`} onClick={() => setTab('trail')}>Bill Trail</button>
-        <button className={`tab-btn${tab === 'pulled' ? ' tab-btn--active' : ''}`} onClick={() => setTab('pulled')}>Pulled Items</button>
-      </div>
+      <Tabs idBase="pos-kot-log" label="KOT Log views" active={tab} onChange={setTab} style={{ marginBottom: 16 }}
+        tabs={[
+          { key: 'register', label: 'Register' },
+          { key: 'reconciliation', label: 'Reconciliation' },
+          { key: 'trail', label: 'Bill Trail' },
+          { key: 'pulled', label: 'Pulled Items' },
+        ]} />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         <div>

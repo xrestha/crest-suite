@@ -86,7 +86,7 @@ export default function BillingStation({
 
       {loadError && (
         <p role="alert" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-red-text)' }}>
-          Couldn't refresh the open bills — {loadError}.{rows.length > 0 ? ' The list below is as last loaded and may be out of date — check the total on screen before taking payment.' : ''}{' '}
+          Couldn't refresh the open bills. {loadError}{rows.length > 0 ? ' The list below is as last loaded and may be out of date — check the total on screen before taking payment.' : ''}{' '}
           <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>Retry</button>
         </p>
       )}

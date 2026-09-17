@@ -802,12 +802,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       setLoyaltyPointValue(Number(setRes?.data?.pos_loyalty_point_value) || 1)
       // A failed read is not 'no points' — that difference is the whole S594 rule, and here it
       // would have a cashier tell a regular to their face that they have nothing.
-      if (custRes.error) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points — ${custRes.error.message}`); return }
+      if (custRes.error) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points. ${errorText(custRes.error, 'staff')}`); return }
       if (!custRes.data) { setLoyaltyBalance(null); setLoyaltyLookupMsg(''); return }
       const { data: rows, error: ledErr } = await fetchAllRows(() =>
         scopedFrom('pos_loyalty_ledger', 'points').eq('customer_id', custRes.data.id).order('id'))
       if (cancelled) return
-      if (ledErr) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points — ${ledErr.message}`); return }
+      if (ledErr) { setLoyaltyBalance(null); setLoyaltyLookupMsg(`Couldn't check points. ${errorText(ledErr, 'staff')}`); return }
       setLoyaltyLookupMsg('')
       setLoyaltyBalance((rows || []).reduce((t, r) => t + (r.points || 0), 0))
     }, 400)
@@ -976,7 +976,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const readErr = tblRes.error || ordRes.error
     if (readErr) {
       console.error('loadFloor failed, keeping the last floor shown:', readErr)
-      setFloorLoadError(readErr.message || 'the floor could not be read')
+      setFloorLoadError(errorText(readErr, 'staff'))
       setFloorLoad(false)
       return
     }
@@ -1402,7 +1402,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (sameOrderStillOpen) {
         const { data: same, error: sameErr } = await scopedFrom('pos_orders', OPEN_ORDER_SELECT).eq('id', c.order_id).maybeSingle()
         if (sameErr) {
-          window.alert(`Couldn't load that takeaway order: ${sameErr.message}\n\nNothing was changed — try again in a moment.`)
+          window.alert(`Couldn't load that takeaway order. ${errorText(sameErr, 'staff')}\n\nNothing was changed — try again in a moment.`)
           return
         }
         if (same && same.status === 'open') {
@@ -1436,7 +1436,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       .maybeSingle()
     // Same refusal as openTable: guessing "empty" here starts a second order on a table that has one.
     if (existingErr) {
-      window.alert(`Couldn't check whether ${table.name} already has an open order: ${existingErr.message}\n\nNothing was changed — try again in a moment.`)
+      window.alert(`Couldn't check whether ${table.name} already has an open order. ${errorText(existingErr, 'staff')}\n\nNothing was changed — try again in a moment.`)
       return
     }
 
@@ -1521,14 +1521,14 @@ export default function PosOrders({ billingStation = false } = {}) {
     // Retry actually re-reads, and say it failed.
     if (menuErr) {
       console.error('loadMenu failed, keeping the last menu:', menuErr)
-      setMenuLoadError(menuErr.message || 'the menu could not be read')
+      setMenuLoadError(errorText(menuErr, 'staff'))
       return
     }
     // A failed options read is a failed menu read: without it a dish that must have a size could be
     // added plain. Same keep-last-good rule.
     if (catalog.error) {
       console.error('option catalog read failed, keeping the last menu:', catalog.error)
-      setMenuLoadError(`the dish options could not be read (${catalog.error})`)
+      setMenuLoadError(`The dish choices could not be read, so a dish that needs a size or choice cannot be added yet. (${catalog.error})`)
       return
     }
     setMenuLoadError('')
@@ -1742,7 +1742,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       .eq('id', oid)
       .maybeSingle()
     if (error) {
-      window.alert(`Couldn't load that takeaway order: ${error.message}\n\nTry again in a moment — don't ring it up as a new takeaway, or the kitchen will get it twice.`)
+      window.alert(`Couldn't load that takeaway order. ${errorText(error, 'staff')}\n\nTry again in a moment — don't ring it up as a new takeaway, or the kitchen will get it twice.`)
       return
     }
     if (!existing || existing.status !== 'open') {
@@ -1803,7 +1803,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // inside the `view === 'order'` tree — CLAUDE.md's two-returns trap) and this cannot be
     // missable mid-service (S616).
     if (existingErr) {
-      window.alert(`Couldn't check whether ${table.name} already has an open order: ${existingErr.message}\n\nDon't start a new order on this table until it loads — you may be re-ringing one that is already with the kitchen. Try again in a moment.`)
+      window.alert(`Couldn't check whether ${table.name} already has an open order. ${errorText(existingErr, 'staff')}\n\nDon't start a new order on this table until it loads — you may be re-ringing one that is already with the kitchen. Try again in a moment.`)
       return
     }
 
@@ -2632,7 +2632,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       .order('sent_at', { ascending: false })
       .order('id')
       .limit(50)
-    if (error) { setMsg(`error:Could not load this order's tickets to reprint — ${error.message}`); return }
+    if (error) { setMsg(`error:Could not load this order's tickets to reprint. ${errorText(error, 'staff')}`); return }
     const latest = {}
     for (const row of data || []) if (!latest[row.station]) latest[row.station] = row
     const rows = ['KOT', 'BOT'].map(st => latest[st]).filter(Boolean)
@@ -3777,7 +3777,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const dayStart = today && bsDayBoundaryIso(today.year, today.month, today.day, false)
     const dayEnd   = today && bsDayBoundaryIso(today.year, today.month, today.day, true)
     if (!dayStart || !dayEnd) {
-      setRecentBillsError("today's date is outside the calendar table")
+      setRecentBillsError("Today's date is outside the calendar table.")
       setRecentBills([])
       setRecentBillsLoad(false)
       return
@@ -3789,7 +3789,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         .order('closed_at', { ascending: false })
         .order('id'))
     if (error) {
-      setRecentBillsError(error.message)
+      setRecentBillsError(errorText(error, 'staff'))
       setRecentBills([])
       setRecentBillsLoad(false)
       return
@@ -3823,7 +3823,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // `|| []` turned it into an empty array, and the reprint went out as a Tax Invoice carrying
     // a real invoice number and not one line item (S616).
     if (orderErr || itemsErr || !order || !items) {
-      window.alert(`Couldn't load bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint: ${(orderErr || itemsErr)?.message || 'the bill could not be found'}\n\nNothing was printed — try again.`)
+      window.alert(`Couldn't load bill ${orderRow.invoice_no || orderRow.order_no || ''} to reprint. ${(orderErr || itemsErr) ? errorText(orderErr || itemsErr, 'staff') : 'The bill could not be found.'}\n\nNothing was printed — try again.`)
       return
     }
     let printed
@@ -3892,7 +3892,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A dropped error gave ids = [], skipped both deletes, and then still flipped every occupied
     // table to 'available' — freeing the floor while every open order survived underneath it.
     if (openErr) {
-      window.alert(`Couldn't read the open orders: ${openErr.message}\n\nNothing was cleared — the tables were left as they are rather than freed with their orders still open.`)
+      window.alert(`Couldn't read the open orders. ${errorText(openErr, 'staff')}\n\nNothing was cleared — the tables were left as they are rather than freed with their orders still open.`)
       setFloorLoad(false)
       return
     }
@@ -3905,7 +3905,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       const { error: delOrdersErr } = delItemsErr ? { error: null }
         : await scopedDelete('pos_orders').in('id', ids)
       if (delItemsErr || delOrdersErr) {
-        window.alert(`Couldn't delete the open orders: ${(delItemsErr || delOrdersErr).message}
+        window.alert(`Couldn't delete the open orders. ${errorText(delItemsErr || delOrdersErr, 'staff')}
 
 The tables were left occupied rather than freed with their orders still open.`)
         setFloorLoad(false)
@@ -3914,7 +3914,7 @@ The tables were left occupied rather than freed with their orders still open.`)
       }
     }
     const { error: freeErr } = await scopedUpdate('pos_tables', { status: 'available' }).eq('status', 'occupied')
-    if (freeErr) window.alert(`The orders were deleted, but the tables could not be freed: ${freeErr.message}`)
+    if (freeErr) window.alert(`The orders were deleted, but the tables could not be freed — they still show as occupied. ${errorText(freeErr, 'staff')}`)
     await loadFloor()
   }
 
@@ -4202,7 +4202,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
             {menuLoadError && (
               <p role="alert" style={{ color: 'var(--theme-red-text)', margin: '0 0 12px', fontSize: 13 }}>
-                Couldn't load the menu — {menuLoadError}.{menu.length > 0 ? ' Showing the last menu loaded.' : ' This is a failed read, not an empty menu.'}{' '}
+                Couldn't load the menu. {menuLoadError}{menu.length > 0 ? ' Showing the last menu loaded.' : ' This is a failed read, not an empty menu.'}{' '}
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadMenu()}>Retry</button>
               </p>
             )}
@@ -4231,7 +4231,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                   const hasOptions = !!dishGroupsByRecipe[r.id]
                   const kotTimer = inOrd?.sent_to_kot ? kotTimerLabel(ticketForRecipe(r.id), kotNow) : null
                   return (
-                    <button key={r.id} onClick={() => addItem(r)} style={{
+                    <button key={r.id} className="till-tile" onClick={() => addItem(r)} style={{
                       background: inOrd
                         ? 'color-mix(in srgb, var(--theme-accent) 12%, var(--theme-card))'
                         : 'var(--theme-card)',
@@ -4837,6 +4837,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                 <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                   <Tip text={tenders.length > 0 ? 'Undo all tenders below first to switch back.' : 'Collect this bill with one payment method.'}>
                     <button onClick={() => setSplitMode(false)} disabled={tenders.length > 0}
+                      aria-pressed={!splitMode}
                       className={`pay-method-btn${!splitMode ? ' pay-method-btn--selected' : ''}`}
                       style={{ opacity: tenders.length > 0 ? 0.5 : 1, cursor: tenders.length > 0 ? 'not-allowed' : 'pointer' }}>
                       Single Payment
@@ -4844,6 +4845,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                   </Tip>
                   <Tip text="Collect this bill using more than one payment method — e.g. part eSewa, part cash. Not available with Credit.">
                     <button onClick={() => { setSplitMode(true); setPayMethod('Cash'); setTenderMethod('Cash'); setTenderAmtStr(''); setDeliveryPartner('') }}
+                      aria-pressed={splitMode}
                       className={`pay-method-btn${splitMode ? ' pay-method-btn--selected' : ''}`}>
                       Split Payment
                     </button>
@@ -4854,6 +4856,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                     {PAYMENT_METHODS.map(m => (
                       <button key={m} onClick={() => { setPayMethod(m); setDeliveryPartner('') }}
+                        aria-pressed={payMethod === m}
                         className={`pay-method-btn${payMethod === m ? ' pay-method-btn--selected' : ''}`}>
                         {m}
                       </button>
@@ -4861,6 +4864,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     {hasPosAccess('supervisor') && (
                       <Tip text="Bill closes normally (counts as a sale, consumes an invoice number) but no payment is collected now — the customer owes this amount. Supervisor+ only. Collect it later from Customers → Outstanding Credit.">
                         <button onClick={() => setPayMethod('Credit')}
+                          aria-pressed={payMethod === 'Credit'}
                           className={`pay-method-btn pay-method-btn--credit${payMethod === 'Credit' ? ' pay-method-btn--selected' : ''}`}>
                           Credit
                         </button>
@@ -4878,6 +4882,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       {billingSettings.delivery_partners.map(dp => (
                         <button key={dp.name} type="button"
                           onClick={() => { setDeliveryPartner(dp.name); setBuyerName(dp.name); setBuyerPhone(dp.phone || '') }}
+                          aria-pressed={deliveryPartner === dp.name}
                           className={`pay-method-btn${deliveryPartner === dp.name ? ' pay-method-btn--selected' : ''}`}>
                           {dp.name}
                         </button>
@@ -5012,6 +5017,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
                           {PAYMENT_METHODS.map(m => (
                             <button key={m} onClick={() => setTenderMethod(m)}
+                              aria-pressed={tenderMethod === m}
                               className={`pay-method-btn${tenderMethod === m ? ' pay-method-btn--selected' : ''}`}>
                               {m}
                             </button>
@@ -5575,7 +5581,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           not a window.alert: the 15 s poll would re-raise an alert every time the network blinked. */}
       {floorLoadError && (
         <p role="alert" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-red-text)' }}>
-          Couldn't refresh the floor — {floorLoadError}.{tables.length > 0 ? ' Tables below are as last loaded and may be out of date.' : ''}{' '}
+          Couldn't refresh the floor. {floorLoadError}{tables.length > 0 ? ' Tables below are as last loaded and may be out of date.' : ''}{' '}
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => loadFloor()}>Retry</button>
         </p>
       )}
@@ -5792,7 +5798,7 @@ The tables were left occupied rather than freed with their orders still open.`)
               <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
             ) : recentBillsError ? (
               <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13 }}>
-                Couldn't load today's bills — {recentBillsError}. This is a failed read, not an empty day: do not re-bill a table from this list.
+                Couldn't load today's bills. {recentBillsError} This is a failed read, not an empty day: do not re-bill a table from this list.
               </p>
             ) : recentBills.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No bills closed yet today.</p>

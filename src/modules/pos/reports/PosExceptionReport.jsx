@@ -11,6 +11,7 @@ import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
+import { FilterChips } from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
@@ -321,12 +322,14 @@ export default function PosExceptionReport() {
             {staffOptions.map(id => <option key={id} value={id}>{staffNames[id] || id}</option>)}
           </select>
         </div>
-        <div className="tab-bar" style={{ marginBottom: 0 }}>
-          <button className={`tab-btn${typeFilter === 'all' ? ' tab-btn--active' : ''}`} onClick={() => setTypeFilter('all')}>All</button>
-          <button className={`tab-btn${typeFilter === 'discount' ? ' tab-btn--active' : ''}`} onClick={() => setTypeFilter('discount')}>Discounts</button>
-          <button className={`tab-btn${typeFilter === 'void' ? ' tab-btn--active' : ''}`} onClick={() => setTypeFilter('void')}>Voids</button>
-          <button className={`tab-btn${typeFilter === 'writeoff' ? ' tab-btn--active' : ''}`} onClick={() => setTypeFilter('writeoff')}>Comps</button>
-        </div>
+        {/* A filter over one list, so FilterChips (aria-pressed), not Tabs (S776). */}
+        <FilterChips label="Exception type" active={typeFilter} onChange={setTypeFilter} style={{ marginBottom: 0 }}
+          options={[
+            { key: 'all', label: 'All' },
+            { key: 'discount', label: 'Discounts' },
+            { key: 'void', label: 'Voids' },
+            { key: 'writeoff', label: 'Comps' },
+          ]} />
       </div>
 
       {biz.error && (
