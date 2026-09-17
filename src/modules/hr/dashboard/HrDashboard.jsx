@@ -5,9 +5,11 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
-import { BS_MONTHS, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
+import { BS_MONTHS, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { useHrApprovalCounts } from './useHrApprovalCounts'
 import { SSF_DEPOSIT_DAY } from '../payrollConstants'
+import PayrollMonthStatus from '../payroll/PayrollMonthStatus'
+import { ssfDeadline } from '../payroll/monthStatus'
 
 const fmt = nprInt
 const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
@@ -28,14 +30,11 @@ function nextMonthLabel(bs_year, bs_month) {
 // a missed deadline, just an inapplicable one.
 function ssfDeadlineState(bs_year, bs_month) {
   if (!bs_year || !bs_month) return {}
-  const nm = bs_month === 12 ? 1 : bs_month + 1
-  const ny = bs_month === 12 ? bs_year + 1 : bs_year
-  const today = getBsToday()
-  const dueOrdinal = ny * 12 + nm
-  const nowOrdinal = today.year * 12 + today.month
-  if (nowOrdinal > dueOrdinal || (nowOrdinal === dueOrdinal && today.day > SSF_DEPOSIT_DAY)) return { overdue: true }
+  // One definition of the deadline, shared with the payroll month strip (monthStatus.js, S768).
+  const d = ssfDeadline(bs_year, bs_month)
+  if (d.overdue) return { overdue: true }
   // Same month as the deadline, on or before the due day: it is now the live task.
-  if (nowOrdinal === dueOrdinal) return { alert: true }
+  if (d.dueThisMonth) return { alert: true }
   return {}
 }
 
@@ -138,7 +137,7 @@ export default function HrDashboard() {
       scopedFrom('hr_shift_swap_requests', 'id, requester_employee_id, target_employee_id, bs_year, bs_month, requester_bs_day, target_bs_day, created_at')
         .eq('status', 'pending_admin')
         .order('created_at', { ascending: false }).limit(8),
-      scopedFrom('hr_payroll_runs', 'id, monthly_periods(bs_year, bs_month)')
+      scopedFrom('hr_payroll_runs', 'id, period_id, monthly_periods(bs_year, bs_month)')
         .eq('status', 'finalized')
         .order('created_at', { ascending: false }).limit(1),
       // Both sides of the Advances Outstanding KPI are paged. `hr_advance_repayments` is an
@@ -228,6 +227,10 @@ export default function HrDashboard() {
       hadRealError = hadRealError || slipsErr
       const mp = lastRun.monthly_periods
       setPayInfo({
+        // A failed payslip read is not a run that paid nothing (S768): the four cards below used to
+        // total an empty list and say "no staff enrolled in SSF this period" over real deductions.
+        failed:       !!slipsErr,
+        periodId:     lastRun.period_id,
         periodLabel:  mp ? `${BS_MONTHS[mp.bs_month - 1]} ${mp.bs_year}` : '—',
         netPay:       (slips || []).reduce((s, x) => s + (x.net_pay       || 0), 0),
         ssfEmployee:  (slips || []).reduce((s, x) => s + (x.ssf_employee  || 0), 0),
@@ -315,6 +318,11 @@ export default function HrDashboard() {
         </div>
       )}
 
+      {/* Where the live payroll month stands, as linked steps (S768). Managers only: the run and
+          payslip tables are manager-rank in the database, so a supervisor's read of them is empty
+          and the strip would report "not generated" over a finalized month. */}
+      {hasHrAccess('manager') && <PayrollMonthStatus auto />}
+
       {/* ── KPI Row 1 — Approvals (everything a staff submission needs a manager to act on) ── */}
       <SectionLabel>
         Approvals {approvalsFailed
@@ -395,41 +403,40 @@ export default function HrDashboard() {
           <div className="stat-grid dash-section">
             <KCard
               label="Net Payable"
-              value={`NPR ${fmt(payInfo.netPay)}`}
-              sub={`${payInfo.periodLabel} take-home total`}
-              color="var(--theme-green-text)"
+              value={payInfo.failed ? '—' : `NPR ${fmt(payInfo.netPay)}`}
+              sub={payInfo.failed ? 'payslips could not be read' : `${payInfo.periodLabel} take-home total`}
+              color={payInfo.failed ? 'var(--theme-text2)' : undefined}
               tip="Total net pay disbursed to all employees in the last finalized payroll run."
               onClick={() => navigate('/hr/payroll')}
             />
             <KCard
               label="SSF — Employee (11%)"
-              value={`NPR ${fmt(payInfo.ssfEmployee)}`}
-              sub="deducted from payslips"
+              value={payInfo.failed ? '—' : `NPR ${fmt(payInfo.ssfEmployee)}`}
+              sub={payInfo.failed ? 'could not be read' : 'deducted from payslips'}
               tip="Total employee SSF contributions (11% of capped basic) deducted across all enrolled employees."
             />
             <KCard
               label="SSF — Employer (20%)"
-              value={`NPR ${fmt(payInfo.ssfEmployer)}`}
-              sub="company contribution"
+              value={payInfo.failed ? '—' : `NPR ${fmt(payInfo.ssfEmployer)}`}
+              sub={payInfo.failed ? 'could not be read' : 'company contribution'}
               tip="Total employer SSF contribution (20% of capped basic) — paid by the company on top of net pay."
             />
             {(() => {
               const ssfTotal = payInfo.ssfEmployee + payInfo.ssfEmployer
               // Nothing owed (no SSF-enrolled staff this run) means a passed due day isn't a missed
               // deadline — stay neutral instead of painting a NPR 0 deposit red.
-              const deadline = ssfTotal > 0 ? ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth) : {}
+              const deadline = ssfTotal > 0 && !payInfo.failed ? ssfDeadlineState(payInfo.bsYear, payInfo.bsMonth) : {}
               return (
                 <KCard
                   label="SSF Total to Deposit"
-                  value={`NPR ${fmt(ssfTotal)}`}
-                  sub={ssfTotal === 0
+                  value={payInfo.failed ? '—' : `NPR ${fmt(ssfTotal)}`}
+                  sub={payInfo.failed ? `due by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)} — amount could not be read` : ssfTotal === 0
                     ? 'no staff enrolled in SSF this period'
                     : deadline.overdue
                       ? `Deposit was due ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`
                       : `Deposit by ${nextMonthLabel(payInfo.bsYear, payInfo.bsMonth)}`}
-                  color="var(--theme-accent-ink)"
                   tip={`SSF challan (employee 11% + employer 20%) for ${payInfo.periodLabel}. Deposit with SSF by the ${SSF_DEPOSIT_DAY}th of the following month — late deposits attract 10% interest. Go to HR Reports → SSF Challan for the per-employee breakdown.`}
-                  onClick={() => navigate('/hr/reports')}
+                  onClick={() => navigate(`/hr/reports?tab=ssf${payInfo.periodId ? `&period=${payInfo.periodId}` : ''}`)}
                   {...deadline}
                 />
               )

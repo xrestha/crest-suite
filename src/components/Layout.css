@@ -3050,6 +3050,64 @@ textarea:focus-visible {
   box-shadow: var(--theme-card-shadow);
 }
 
+/* Where one month's payroll stands — PayrollMonthStatus (S768), on the HR Dashboard and Payroll.
+   Four peer steps in order, so a grid rather than a stat strip: each step is a caption, a state in
+   words led by a mark (the mark is never the only carrier), and a link to the page that moves it.
+   The mark takes the *-text variant because it is type; the state sentence stays in the ink. */
+.month-status {
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.month-status__head {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--theme-text1);
+  margin-bottom: 8px;
+}
+.month-status__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 24px;
+}
+.month-status__step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.month-status__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--theme-text2);
+}
+.month-status__state {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--theme-text1);
+}
+.month-status__mark { font-weight: 700; }
+.month-status__mark--done { color: var(--theme-green-text); }
+.month-status__mark--open { color: var(--theme-amber-text); }
+.month-status__mark--none { color: var(--theme-text2); }
+.month-status__link {
+  font-size: 13px;
+  color: var(--theme-accent-ink);
+  text-underline-offset: 2px;
+  align-self: flex-start;
+}
+.month-status__link:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .month-status__link { display: inline-block; padding: 10px 0; }
+}
+
 .stat-label {
   font-size: 11px;
   color: var(--theme-text3);

@@ -1,6 +1,6 @@
 import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -19,6 +19,7 @@ import {
 import PayslipBody from './PayslipBody'
 import { CalcDetail, StoredDetail, FINALIZED_INTRO, driftParts, orphanIntro } from './PayslipCalculation'
 import RowDisclosure from '../../../components/RowDisclosure'
+import PayrollMonthStatus from './PayrollMonthStatus'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -720,6 +721,27 @@ export default function PayrollRun() {
             {msg && <span role={msg.startsWith('ok') ? 'status' : 'alert'} style={{ fontSize: 12, color: msg.startsWith('ok') ? 'var(--theme-green-text)' : 'var(--theme-red-text)', marginLeft: 'auto' }}>{msg.split(':').slice(1).join(':')}</span>}
           </div>
         </div>
+
+        {!loading && !loadError && period && (
+          <PayrollMonthStatus
+            period={period} employees={employees} attendance={attendance} run={run} payslips={payslips}
+            runStale={!!run && !finalized && !freshness.ok} onPayrollPage
+            refreshKey={`${run?.id || ''}:${run?.status || ''}:${payslips.length}:${attendance.length}`}
+          />
+        )}
+
+        {/* After Finalize the month is not done — it has to be paid and filed. These are the three
+            documents that do that, opened on this month (S768); the success message used to be a
+            12px span and nothing said where to go next. */}
+        {!loading && !loadError && period && finalized && (
+          <div className="card" role="note" style={{ marginBottom: 12, padding: '10px 16px', display: 'flex', gap: '6px 18px', flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
+            <strong style={{ color: 'var(--theme-text1)' }}>Next for {monthName}:</strong>
+            <Link className="month-status__link" to={`/hr/reports?tab=bank&period=${period.id}`}>Pay staff — bank transfer sheet</Link>
+            <Link className="month-status__link" to={`/hr/reports?tab=ssf&period=${period.id}`}>Deposit SSF — challan</Link>
+            <Link className="month-status__link" to={`/hr/reports?tab=tds&period=${period.id}`}>Deposit income tax — TDS report</Link>
+            <span style={{ color: 'var(--theme-text2)' }}>Staff see their own payslips in the Crest Staff app.</span>
+          </div>
+        )}
 
         {/* Stale-draft warning. Finalize refuses while this is showing, but the refusal alone would
             only be discovered at the moment of committing — this states the problem, names who it

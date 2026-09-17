@@ -1,6 +1,6 @@
 import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useMemo } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -56,6 +56,8 @@ function retireInfo(dateStr) {
   return null
 }
 
+const REPORT_TABS = ['roster', 'summary', 'ssf', 'bank', 'tds', 'cert']
+
 export default function HrReports() {
   const { clientId, hasHrAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
@@ -78,7 +80,10 @@ export default function HrReports() {
   // S612 silent-zero rule: a failed read must render as a failure, never as "no payroll run" or
   // a challan of zeros — these are figures an accountant files on.
   const [loadError, setLoadError] = useState(null)
-  const [tab,       setTab]       = useState('summary')
+  // A link can open a tab and a month (S768) — Payroll's "Next for Bhadra" and the month strip's SSF
+  // step send a manager straight to that month's challan instead of this page's default month.
+  const [searchParams] = useSearchParams()
+  const [tab,       setTab]       = useState(() => (REPORT_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'summary'))
   const [rosterRetiringOnly, setRosterRetiringOnly] = useState(false)
   const [certFy,      setCertFy]      = useState(null)   // { fyStart, label }
   const [certEmpId,   setCertEmpId]   = useState('')
@@ -116,7 +121,8 @@ export default function HrReports() {
       if (!periodReq.isCurrent(initKey)) return
       if (empErr) { setLoadError(empErr); setLoading(false); return }
       setEmployees(emps || [])
-      const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
+      const wanted = searchParams.get('period')
+      const open = (wanted && (p || []).find(x => x.id === wanted)) || (p || []).find(x => x.status === 'open') || (p || [])[0]
       // Claim before loading (S721 rule): once a period change has run, the ref is never null again,
       // so an admin client switch re-running init() would otherwise have every setter in loadAll
       // skipped as "stale" and show the previous client's TDS sheet under the new one.
