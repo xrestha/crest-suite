@@ -6,6 +6,7 @@ import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import Tip from '../../../components/Tip'
+import { DecisionButtons } from '../ApprovalControls'
 import { HR_REQUEST_STATUS } from '../payrollConstants'
 
 // The Shift Swaps tab: the queue of swaps waiting on a manager's sign-off, and the permanent
@@ -231,8 +232,8 @@ export default function SwapRequestsPanel({ employees, shiftMap, onPendingCount 
                   {r.note && <span style={{ color: 'var(--theme-text3)' }}> · "{r.note}"</span>}
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                  <button className="btn btn-ghost btn-sm" disabled={busyId === r.id} onClick={() => reject(r)}>Reject</button>
-                  <button className="btn btn-primary btn-sm" disabled={busyId === r.id} onClick={() => approve(r)}>Approve</button>
+                  <DecisionButtons who={`${nameById[r.requester_employee_id] || 'swap'} and ${nameById[r.target_employee_id] || 'coworker'}`}
+                    disabled={busyId === r.id} onApprove={() => approve(r)} onReject={() => reject(r)} />
                 </div>
               </div>
             ))}

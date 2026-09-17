@@ -14,6 +14,7 @@ import { disabledStyle } from '../../../shared/inlineFieldState'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { DecisionButtons, BulkApproveBar, decideEach } from '../ApprovalControls'
 
 const fmt = n => Math.round((n || 0) * 10) / 10
 
@@ -313,36 +314,40 @@ export default function LeaveManagement() {
     approveRequestNow(req, type)
   }
 
-  async function approveRequestNow(req, type) {
-    setBusy(true); setMsg('')
+  // The approval itself, without the page's busy flag, message or reload — so a batch can run it per
+  // request and reload once (S768). Resolves to { ok: true, missing } or { ok: false, text, reload }.
+  async function approveCore(req, type) {
     // Re-read the request's status first, the decide path's guard mirrored: approving off a stale
     // 'pending' would mark attendance for a request someone else has since rejected or cancelled.
     const { data: fresh, error: freshErr } = await scopedFrom('hr_leave_requests', 'status').eq('id', req.id).maybeSingle()
-    if (freshErr) { setMsg('error:Could not check this request\'s current status, so nothing was changed — try again. ' + errorText(freshErr, 'operator')); setBusy(false); return }
+    if (freshErr) return { ok: false, text: 'Could not check this request\'s current status, so nothing was changed — try again. ' + errorText(freshErr, 'operator') }
     if (fresh?.status !== 'pending') {
-      await load()
-      setMsg(`error:${fresh ? `Someone else changed this request first — it now shows ${LEAVE_STATUSES[fresh.status]?.label || fresh.status}` : 'That request no longer exists'}, so it was not approved. The list has been refreshed.`)
-      setBusy(false); return
+      return { ok: false, reload: true, text: `${fresh ? `Someone else changed this request first — it now shows ${LEAVE_STATUSES[fresh.status]?.label || fresh.status}` : 'That request no longer exists'}, so it was not approved. The list has been refreshed.` }
     }
     const isHalf = req.day_type && req.day_type !== 'full'
     const status = type.paid
       ? (isHalf ? 'half_paid_leave' : 'paid_leave')
       : (isHalf ? 'half_unpaid_leave' : 'unpaid_leave')
     const { missing, error: syncErr } = await syncAttendance(req, status)
-    if (syncErr) {
-      setMsg('error:The leave days could not be marked on the attendance sheet, so the request was NOT approved. Try again. ' + errorLine(syncErr))
-      setBusy(false)
-      return
-    }
+    if (syncErr) return { ok: false, text: 'The leave days could not be marked on the attendance sheet, so the request was NOT approved. Try again. ' + errorLine(syncErr) }
     const { error: apprErr } = await scopedUpdate('hr_leave_requests', { status: 'approved', decided_at: new Date().toISOString() }).eq('id', req.id)
     if (apprErr) {
       // The attendance rows are already written (upserted, so re-approving is safe); the request
       // is the half that did not move. Say so rather than "Approved".
-      await load()
-      setMsg('error:The leave days were marked on the attendance sheet, but this request still shows Pending. Approve it again — re-approving is safe. ' + errorText(apprErr, 'operator'))
-      setBusy(false)
-      return
+      return { ok: false, reload: true, text: 'The leave days were marked on the attendance sheet, but this request still shows Pending. Approve it again — re-approving is safe. ' + errorText(apprErr, 'operator') }
     }
+    return { ok: true, missing }
+  }
+
+  async function approveRequestNow(req, type) {
+    setBusy(true); setMsg('')
+    const result = await approveCore(req, type)
+    if (!result.ok) {
+      if (result.reload) await load()
+      setMsg('error:' + result.text)
+      setBusy(false); return
+    }
+    const { missing } = result
     await load()
     // The old sentence here read "Create the period(s), then re-approve to mark those days" — and
     // neither half was possible (S741). The period cannot be opened early (one open period per
@@ -352,6 +357,62 @@ export default function LeaveManagement() {
       ? `ok:Approved. ${missing.join(', ')} ${missing.length === 1 ? 'has' : 'have'} no period yet, so those days will be marked on the attendance sheet automatically when that month is created — nothing to do now.`
       : 'ok:Approved — attendance marked')
     setBusy(false)
+  }
+
+  // Every pending request for the year on screen that can be approved WITHOUT a question: one over
+  // its yearly quota needs the manager's own decision (it warns, and that warning is the point), and
+  // one in a finalized month cannot be approved at all — both are left out and named. Quota is
+  // checked as if the batch's earlier requests were already approved, so two requests that each fit
+  // but together overrun are not approved blind (S768).
+  function requestBulkApprove() {
+    const pending = filteredRequests.filter(r => r.status === 'pending')
+    if (pending.length < 2) return
+    const ready = [], skipped = []
+    let simulated = requests
+    for (const req of pending) {
+      const type = typeMap[req.leave_type_id]
+      const name = empMap[req.employee_id]?.full_name || 'A request'
+      if (!type) { skipped.push(`${name} — leave type missing`); continue }
+      const locked = lockedMonthsLabel(req)
+      if (locked) { skipped.push(`${name} — payroll for ${locked} is finalized`); continue }
+      if (quotaOverrun({ requests: simulated, settlements, leaveType: type, request: req })) { skipped.push(`${name} — over the yearly ${type.name} quota`); continue }
+      ready.push({ req, type })
+      simulated = simulated.map(r => (r.id === req.id ? { ...r, status: 'approved' } : r))
+    }
+    if (ready.length === 0) {
+      setMsg(`error:None of the ${pending.length} pending requests can be approved together — ${skipped.join('; ')}. Decide them one at a time.`)
+      return
+    }
+    const days = ready.reduce((s, x) => s + (parseFloat(x.req.days) || 0), 0)
+    askConfirm({
+      title: `Approve ${ready.length} leave request${ready.length === 1 ? '' : 's'}?`,
+      confirmLabel: `Approve ${ready.length}`, busyLabel: 'Approving…',
+      body: (
+        <>
+          <p style={{ margin: skipped.length ? '0 0 10px' : 0 }}>
+            {fmt(days)} day{days === 1 ? '' : 's'} in all. Each request's days are marked on the attendance sheet as paid or unpaid
+            leave by its type — exactly as approving it on its own does.
+          </p>
+          {skipped.length > 0 && <p style={{ margin: 0 }}>Left for you to decide one at a time: {skipped.join('; ')}.</p>}
+        </>
+      ),
+      run: async () => {
+        setBusy(true); setMsg('')
+        const missingMonths = new Set()
+        const { done, failed } = await decideEach(ready, async ({ req, type }) => {
+          const r = await approveCore(req, type)
+          if (!r.ok) return r.text
+          ;(r.missing || []).forEach(m => missingMonths.add(m))
+          return true
+        })
+        await load()
+        const later = missingMonths.size ? ` ${[...missingMonths].join(', ')} ${missingMonths.size === 1 ? 'has' : 'have'} no period yet — those days are marked automatically when the month is created.` : ''
+        setMsg(failed.length === 0
+          ? `ok:Approved ${done.length} leave request${done.length === 1 ? '' : 's'} — attendance marked.${later}`
+          : `error:Approved ${done.length} of ${ready.length}. Not approved — ${failed.map(f => `${empMap[f.item.req.employee_id]?.full_name || 'a request'}: ${f.reason}`).join(' · ')}${later}`)
+        setBusy(false)
+      },
+    })
   }
 
   async function decideRequest(req, newStatus) {
@@ -643,6 +704,9 @@ export default function LeaveManagement() {
           </div>
 
           <div className="card" style={{ padding: 0 }}>
+            <BulkApproveBar count={filteredRequests.filter(r => r.status === 'pending').length} noun="leave requests"
+              detail={`${fmt(filteredRequests.filter(r => r.status === 'pending').reduce((s, r) => s + (parseFloat(r.days) || 0), 0))} days`}
+              onApprove={requestBulkApprove} disabled={busy} />
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
@@ -695,17 +759,17 @@ export default function LeaveManagement() {
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                           {req.status === 'pending' && (
                             <>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green-text)' }} onClick={() => approveRequest(req)} disabled={busy}>Approve</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} onClick={() => decideRequest(req, 'rejected')} disabled={busy}>Reject</button>
+                              <DecisionButtons who={`${e.full_name || 'this request'}, ${bsLabel(req.start_date)}`} disabled={busy}
+                                onApprove={() => approveRequest(req)} onReject={() => decideRequest(req, 'rejected')} />
                             </>
                           )}
                           {(req.status === 'pending' || req.status === 'approved') && (
-                            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => decideRequest(req, 'cancelled')} disabled={busy}>Cancel</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => decideRequest(req, 'cancelled')} disabled={busy}>Cancel</button>
                           )}
                           {(req.status === 'rejected' || req.status === 'cancelled') && (
                             canReopen ? (
                               <Tip text="For a reject or cancel made by mistake. Puts the request back to Pending with its original dates and reason — approve it again to re-mark the attendance days." width={270}>
-                                <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => reopenRequest(req)} disabled={busy}>Reopen</button>
+                                <button className="btn btn-ghost btn-sm" onClick={() => reopenRequest(req)} disabled={busy}>Reopen</button>
                               </Tip>
                             ) : <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>—</span>
                           )}

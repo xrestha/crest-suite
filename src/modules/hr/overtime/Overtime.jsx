@@ -11,6 +11,7 @@ import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, HR_REQUEST_STATUS } from '../payr
 import { errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { DecisionButtons, BulkApproveBar, decideEach } from '../ApprovalControls'
 
 // One ladder for all five HR approval queues (S660) — Pending was brass here and on Leave, grey on
 // TADA and amber on the dashboard and in the employee app, for the same word. `tint` already
@@ -259,6 +260,38 @@ export default function Overtime() {
     await loadEntries(period?.bs_year, period?.bs_month)
   }
 
+  // Every pending entry on screen, approved one after another through the same conditional write a
+  // row's own button makes — so an entry decided on another screen, or one this login may not decide
+  // (its own), is reported by name rather than failing the batch (S768).
+  function requestBulkApprove() {
+    if (refuseIfLocked()) return
+    const pending = filtered.filter(e => e.status === 'pending')
+    if (pending.length < 2) return
+    const hours = pending.reduce((s, e) => s + (parseFloat(e.ot_hours) || 0), 0)
+    askConfirm({
+      title: `Approve ${pending.length} overtime entries?`,
+      confirmLabel: `Approve ${pending.length}`, busyLabel: 'Approving…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {Math.round(hours * 10) / 10} hours in all, for {periodLabel}. Approved overtime is paid by this
+          month's payroll — if a draft run already exists, Regenerate it so it includes them.
+        </p>
+      ),
+      run: async () => {
+        setMsg('')
+        const { done, failed } = await decideEach(pending, async e => {
+          const { data, error } = await scopedUpdate('hr_overtime_entries', { status: 'approved' }).eq('id', e.id).eq('status', 'pending').select('id')
+          if (error) return errorLine(error)
+          return data?.length ? true : 'it was decided on another screen first'
+        })
+        await loadEntries(period?.bs_year, period?.bs_month)
+        setMsg(failed.length === 0
+          ? `ok:Approved ${done.length} overtime entries`
+          : `error:Approved ${done.length} of ${pending.length}. Not approved — ${failed.map(f => `${empMap[f.item.employee_id]?.full_name || 'an entry'} (${formatBsDay(f.item.bs_day, f.item.bs_month)}): ${f.reason}`).join(' · ')}`)
+      },
+    })
+  }
+
   // An approved OT entry is pay: deleting it removes hours from the payroll run. A consequence
   // dialog rather than window.confirm (S682).
   function del(entry) {
@@ -457,6 +490,9 @@ export default function Overtime() {
         </div>
       ) : (
         <div className="card" style={{ padding: 0 }}>
+          <BulkApproveBar count={locked ? 0 : filtered.filter(e => e.status === 'pending').length} noun="overtime entries"
+            detail={`${Math.round(filtered.filter(e => e.status === 'pending').reduce((s, e) => s + (parseFloat(e.ot_hours) || 0), 0) * 10) / 10} hours`}
+            onApprove={requestBulkApprove} />
           <div className="table-wrap table-wrap--fab-clear">
             <table className="data-table">
               <thead>
@@ -492,10 +528,10 @@ export default function Overtime() {
                       <td style={{ textAlign: 'center', color: 'var(--theme-text2)', fontSize: 12 }}>
                         {formatBsDay(e.bs_day, e.bs_month)} {e.bs_year}
                       </td>
-                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-green-text)' }}>
+                      <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--theme-text1)' }}>
                         {otLabel(e.ot_type, e.ot_hours)}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-accent-ink)', fontSize: 13 }}>
+                      <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>
                         {(() => { const a = otAmt(e, emp); return a !== null ? `NPR ${a.toLocaleString('en-IN')}` : <span style={{ color: 'var(--theme-text3)', fontWeight: 400 }}>—</span> })()}
                       </td>
                       <td>
@@ -517,14 +553,14 @@ export default function Overtime() {
                         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                           {e.status === 'pending' && (
                             <>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-green-text)' }} onClick={() => setStatus(e.id, 'approved')} disabled={locked}>Approve</button>
-                              <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px', color: 'var(--theme-red-text)' }} onClick={() => setStatus(e.id, 'rejected')} disabled={locked}>Reject</button>
+                              <DecisionButtons who={`${emp.full_name || 'this entry'}, ${formatBsDay(e.bs_day, e.bs_month)}`}
+                                onApprove={() => setStatus(e.id, 'approved')} onReject={() => setStatus(e.id, 'rejected')} disabled={locked} />
                             </>
                           )}
                           {e.status !== 'pending' && (
-                            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setStatus(e.id, 'pending')} disabled={locked}>Undo</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setStatus(e.id, 'pending')} disabled={locked}>Undo</button>
                           )}
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => openEdit(e)} disabled={locked}>Edit</button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(e)} disabled={locked}>Edit</button>
                           <button className="btn btn-danger btn-sm" onClick={() => del(e)} disabled={locked}>Del</button>
                         </div>
                       </td>

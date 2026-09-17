@@ -16,6 +16,7 @@ import RowDisclosure from '../../../components/RowDisclosure'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { DecisionButtons, BulkApproveBar, decideEach } from '../ApprovalControls'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import { adToBs, adToBsSafe, formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import {
@@ -379,6 +380,34 @@ export default function TadaClaims() {
     load()
   }
 
+  // Every pending claim on screen that this login may decide, approved one after another through the
+  // same conditional write as the row button (S768). A claim decided elsewhere, or refused, is named.
+  function requestBulkApprove() {
+    const pending = filtered.filter(c => c.status === 'pending' && !isOwnClaim(c))
+    if (pending.length < 2) return
+    const total = pending.reduce((s, c) => s + (parseFloat(c.total_amount) || 0), 0)
+    askConfirm({
+      title: `Approve ${pending.length} TADA claims?`,
+      confirmLabel: `Approve ${pending.length}`, busyLabel: 'Approving…',
+      body: (
+        <p style={{ margin: 0 }}>
+          NPR {fmt(total)} in all. Each approved claim is paid by the first payroll after its trip ends —
+          or by hand with Mark Paid, never both.
+        </p>
+      ),
+      run: async () => {
+        setActionError(null)
+        const { done, failed } = await decideEach(pending, async c => {
+          const { data, error } = await scopedUpdate('hr_tada_claims', { status: 'approved' }).eq('id', c.id).eq('status', 'pending').select('id')
+          if (error) return asActionError(error, 'operator').text
+          return data?.length ? true : 'it was decided on another screen first'
+        })
+        await load()
+        if (failed.length) setActionError(`Approved ${done.length} of ${pending.length}. Not approved — ${failed.map(f => `${empMap[f.item.employee_id]?.full_name || 'a claim'} (NPR ${fmt(f.item.total_amount)}): ${f.reason}`).join(' · ')}`)
+      },
+    })
+  }
+
   async function handleReject() {
     if (!rejectTarget) return
     const c = rejectTarget
@@ -472,16 +501,16 @@ export default function TadaClaims() {
           </Tip>
         ) : (
           <>
-            <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green-text)' }} disabled={busy} onClick={act(() => handleApprove(c))}>✓ Approve</button>
-            <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} disabled={busy} onClick={act(() => setRejectTarget(c))}>✕ Reject</button>
+            <DecisionButtons who={`${empMap[c.employee_id]?.full_name || 'this claim'}, NPR ${fmt(c.total_amount)}`} disabled={busy} stopPropagation
+              onApprove={() => handleApprove(c)} onReject={() => setRejectTarget(c)} />
           </>
         )}
-        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-red-text)' }} disabled={busy} onClick={act(() => handleDelete(c))}>Delete</button>
+        <button className="btn btn-danger btn-sm" disabled={busy} onClick={act(() => handleDelete(c))}>Delete</button>
       </>
     )
     if (c.status === 'approved') return canPay ? (
       <Tip text="Paid in cash or bank transfer, outside payroll. Use it only if payroll is not paying this claim — never both.">
-        <button className="btn btn-ghost" style={{ fontSize: 11, color: 'var(--theme-green-text)' }} disabled={busy}
+        <button className="btn btn-ghost btn-sm" disabled={busy}
           onClick={act(() => startMarkPaid(c))}>
           💵 Mark Paid
         </button>
@@ -648,6 +677,9 @@ export default function TadaClaims() {
             )}
           </div>
 
+          <BulkApproveBar count={filtered.filter(c => c.status === 'pending' && !isOwnClaim(c)).length} noun="claims"
+            detail={`NPR ${fmt(filtered.filter(c => c.status === 'pending' && !isOwnClaim(c)).reduce((s, c) => s + (parseFloat(c.total_amount) || 0), 0))}`}
+            onApprove={requestBulkApprove} />
           <div className="table-wrap">
             <table className="data-table">
               <thead>

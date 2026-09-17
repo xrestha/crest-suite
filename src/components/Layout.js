@@ -213,11 +213,12 @@ const HR_GROUPS = [
     { to: '/hr/incentives', label: 'Incentives / Bonus', icon: Gift, minHrRole: 'manager' },
     { to: '/hr/advances',   label: 'Advances & Loans',   icon: CreditCard, minHrRole: 'manager' },
     { to: '/hr/tada',       label: 'TADA Claims',        icon: Briefcase, minHrRole: 'supervisor' },
+    // A leaver's last pay (S768) — it finalizes money like Payroll does, and was filed under Reports.
+    { to: '/hr/settlement', label: 'Final Settlement',   icon: FileCheck2, minHrRole: 'manager' },
   ]},
   { key: 'hr-reports', label: 'Reports', items: [
     { to: '/hr/reports',    label: 'HR Reports',       icon: FileStack, minHrRole: 'manager' },
     { to: '/hr/gratuity',   label: 'Gratuity',         icon: Coins, minHrRole: 'manager' },
-    { to: '/hr/settlement', label: 'Final Settlement', icon: FileCheck2, minHrRole: 'manager' },
   ]},
   { key: 'hr-admin', label: 'Admin', items: [
     { to: '/hr/staff', label: 'HR Staff', icon: Users2, minHrRole: 'manager' },

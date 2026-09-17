@@ -3108,6 +3108,24 @@ textarea:focus-visible {
   .month-status__link { display: inline-block; padding: 10px 0; }
 }
 
+/* An approval queue's batch action — ApprovalControls.jsx (S768). A strip at the head of the queue's
+   card rather than a toolbar button, so it reads as belonging to the rows beneath it, and it states
+   the count and the total before anyone presses it. */
+.bulk-approve {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--theme-border-lt);
+}
+.bulk-approve__text {
+  font-size: 13px;
+  color: var(--theme-text2);
+}
+.bulk-approve__text strong { color: var(--theme-text1); }
+
 .stat-label {
   font-size: 11px;
   color: var(--theme-text3);
