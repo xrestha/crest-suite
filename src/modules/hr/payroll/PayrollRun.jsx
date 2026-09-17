@@ -1,5 +1,5 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -11,12 +11,14 @@ import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
-import { nepalBs, nepalCivilDate } from '../../../shared/nepalTime'
+import { nepalBs, nepalCivilDate, nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import {
-  fetchYtdMap, fetchApprovedTadaMap, payslipDrift, periodAdBounds,
+  fetchYtdMap, fetchApprovedTadaMap, payslipDrift, periodAdBounds, dueAdvances,
   fetchPayrollEmployees, fetchEmployeesByIds, buildPayrollRows, allocateAdvanceRepayments, payrollCashCost,
 } from './payrollData'
 import PayslipBody from './PayslipBody'
+import { CalcDetail, StoredDetail, FINALIZED_INTRO, driftParts, orphanIntro } from './PayslipCalculation'
+import RowDisclosure from '../../../components/RowDisclosure'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -138,6 +140,10 @@ export default function PayrollRun() {
   const [tdsDraft,   setTdsDraft]   = useState({})
   const [viewSlip,   setViewSlip]   = useState(null)
   const [printSlip,  setPrintSlip]  = useState(null)
+  // The row whose working is open, and the working being printed. This page absorbed the separate
+  // Payroll Calculation page (S768): the explanation of a figure belongs beside the figure.
+  const [expandedId, setExpandedId] = useState(null)
+  const [printCalc,  setPrintCalc]  = useState(null)
   // Company letterhead for the payslip — a payslip with no employer identity on it at all is
   // missing the single most basic thing a pay document is expected to have. Same source fields
   // Tax Invoice already prints (settings.vat_number is Nepal's PAN, reused as-is — not a new ID).
@@ -278,13 +284,13 @@ export default function PayrollRun() {
   async function handlePeriodChange(id) {
     periodReq.begin(id)   // claim the page before any await
     const p = periods.find(x => x.id === id); if (!p) return
-    setPeriod(p); setMsg(''); setLoading(true); setConfirmAction(null)
+    setPeriod(p); setMsg(''); setLoading(true); setConfirmAction(null); setExpandedId(null)
     await loadAll(p)
     if (periodReq.isCurrent(id)) setLoading(false)
   }
 
   // The live recomputation from the loaded data — one buildPayrollRows (payrollData.js), the same
-  // function Generate inserts from and Payroll Calculation shows, never a second copy of the arithmetic.
+  // function Generate inserts from and each row's working shows, never a second copy of the arithmetic.
   // Memoized: it runs computePayslip plus a TDS slab walk for every employee, and none of the page's
   // cheap state (a message, a busy flag, a TDS keystroke, an open confirm) moves any of its inputs.
   const liveRows = useMemo(() => {
@@ -298,6 +304,9 @@ export default function PayrollRun() {
   }, [loading, loadError, period, run, employees, components, attendance, otEntries, advances, repayments, ytdMap, tadaMap])
 
   const liveByEmp = useMemo(() => new Map((liveRows.rows || []).map(r => [r.payslip.employee_id, r])), [liveRows])
+  // The advances this month is recovering, through the same dueAdvances() filter the deduction came
+  // from, so a row's working cannot count an advance the run is not cutting.
+  const dueNow = useMemo(() => (period ? dueAdvances(advances, period) : []), [advances, period])
 
   // Live-vs-stored freshness. The draft is a snapshot taken at Generate time, so approving overtime,
   // editing attendance or approving a TADA claim afterwards leaves it quietly wrong — and Finalize
@@ -603,6 +612,33 @@ export default function PayrollRun() {
   const monthName = period ? BS_MONTHS[period.bs_month - 1] : 'this month'
   const finalized = run?.status === 'finalized'
 
+  // A row's working. A finalized month is explained as it was PAID and never recomputed (decision 12,
+  // S751); a draft is the live working from the same buildPayrollRows() the register was generated
+  // from — and when this payslip has drifted from it, the panel says so first, naming what moved,
+  // because the figures below it are then not the ones in the row above.
+  function renderWorking(s) {
+    if (finalized) return <StoredDetail slip={s} intro={FINALIZED_INTRO} />
+    const live = liveByEmp.get(s.employee_id)
+    if (!live) return <StoredDetail slip={s} intro={orphanIntro(settled.some(e => e.id === s.employee_id))} />
+    const moved = payslipDrift(s, live.payslip) === 'moved' ? driftParts(s, live.payslip) : []
+    return (
+      <>
+        {moved.length > 0 && (
+          <div role="note" style={{ padding: '10px 22px 0', background: 'var(--theme-bg)', fontSize: 12, lineHeight: 1.6, color: 'var(--theme-amber-text)' }}>
+            △ This payslip is out of date — the working below is from current data, not the stored figures in the row above.
+            Changed since Generate: {moved.join('; ')}. Regenerate to update it.
+          </div>
+        )}
+        <CalcDetail row={{ ...live.detail, slip: live.payslip }} monthDays={period ? daysInBsMonth(period.bs_year, period.bs_month) : 0} advances={dueNow} ytd={ytdMap[s.employee_id]} />
+      </>
+    )
+  }
+
+  function printWorking(slip, emp) {
+    setPrintCalc({ slip, emp })
+    setTimeout(() => { printWithTitle(`Payroll Calculation - ${emp.full_name} - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintCalc(null) }, 60)
+  }
+
   function printPayslip(slip, emp) {
     setPrintSlip({ slip, emp })
     setTimeout(() => { printWithTitle(`Payslip - ${emp.full_name} - ${periodLabel}${finalized ? '' : ' (DRAFT)'}`); setPrintSlip(null) }, 60)
@@ -656,7 +692,7 @@ export default function PayrollRun() {
 
   return (
     <div>
-      <div className={printSlip ? 'no-print' : ''}>
+      <div className={printSlip || printCalc ? 'no-print' : ''}>
         <div className="page-header page-header--split">
           <div>
             <h1 className="page-title">Payroll</h1>
@@ -797,6 +833,7 @@ export default function PayrollRun() {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th style={{ width: 36 }}><span className="sr-only">Working</span></th>
                       <th>Employee</th>
                       <th style={{ textAlign: 'right' }}><Tip text="Gross earnings: basic + allowances (monthly) or earned wage (daily/hourly)." width={250}>Gross</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Overtime pay: 1.5× the hourly rate on ordinary days, 2× on public holidays (the holiday rate comes from approved Overtime entries)." width={260}>OT</Tip></th>
@@ -824,8 +861,14 @@ export default function PayrollRun() {
                       // the whole attendance array per row per render, which also flagged any employee
                       // with OT in both places on DIFFERENT days, where nothing was superseded at all.
                       const supersededHrs = num(live?.detail?.breakdown?.otSupersededHrs)
+                      const open = expandedId === s.id
                       return (
-                        <tr key={s.id}>
+                        <Fragment key={s.id}>
+                        <tr>
+                          <td style={{ textAlign: 'center' }}>
+                            <RowDisclosure expanded={open} onToggle={() => setExpandedId(open ? null : s.id)}
+                              label={`${open ? 'Hide' : 'Show'} how ${emp.full_name}'s pay was worked out`} controls={`working-${s.id}`} />
+                          </td>
                           <td>
                             <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
                             <div style={{ display: 'flex', gap: 6, marginTop: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -899,6 +942,19 @@ export default function PayrollRun() {
                             <button className="btn btn-ghost btn-sm" onClick={() => setViewSlip({ slip: s, emp })} aria-label={`Payslip for ${emp.full_name}`}>Payslip</button>
                           </td>
                         </tr>
+                        {open && (
+                          <tr>
+                            <td colSpan={12} style={{ padding: 0 }}>
+                              <div id={`working-${s.id}`} style={{ borderTop: '1px solid var(--theme-border)' }}>
+                                <div style={{ padding: '10px 22px 0', background: 'var(--theme-bg)', display: 'flex', justifyContent: 'flex-end' }}>
+                                  <button className="btn btn-ghost btn-sm" onClick={() => printWorking(s, emp)}>🖨 Print working</button>
+                                </div>
+                                {renderWorking(s)}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       )
                     })}
                   </tbody>
@@ -906,6 +962,7 @@ export default function PayrollRun() {
                     {/* One total per column (S751). A single figure spanning Absence→Advance sat right-
                         aligned under Advance and read as the month's advance recovery. */}
                     <tr style={{ fontWeight: 700, borderTop: '2px solid var(--theme-border)' }}>
+                      <td />
                       <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>Total — {payslips.length}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(totals.gross)}</td>
                       {moneyCell(totals.ot, '+')}
@@ -929,6 +986,7 @@ export default function PayrollRun() {
                 {finalized ? 'This payroll is finalized — payslips are locked as a permanent record.' : 'Draft — Regenerate to pull the latest salary, attendance & tax, then Finalize to lock. You can type over any income tax (TDS) figure.'}
               </p>
               <ul style={{ margin: '6px 0 0', paddingLeft: 16 }}>
+                <li><strong>How a figure was worked out</strong>: open the ▸ beside a name. A draft shows the full working from current data — attendance tally, gross, absence, overtime, SSF, the income tax bands, advance cut and TADA — and says first if that payslip has drifted from it. A finalized month shows each figure as it was paid, never recalculated. Either prints as a sheet to hand to the employee.</li>
                 <li><strong>Who is paid</strong>: active and probation staff, and anyone who left during the month — paid up to their last working day. Someone whose Final Settlement already paid the month is left out and named above.</li>
                 <li><strong>SSF</strong> deducts only for employees marked SSF-enrolled AND holding an SSF number — an enrolled employee with no number is flagged in the list and contributes nothing, since a contribution with no number cannot be filed on the challan.</li>
                 <li><strong>TDS</strong> (income tax) comes from the fiscal-year tax slabs by year-to-date projection — finalize earlier months first so each month's tax builds on the last.</li>
@@ -954,6 +1012,20 @@ export default function PayrollRun() {
           <div style={{ maxWidth: 420 }}>
             <PayslipBody slip={printSlip.slip} emp={printSlip.emp} periodLabel={periodLabel} bizInfo={bizInfo} draft={!finalized} forPrint />
           </div>
+        </div>
+      )}
+
+      {printCalc && (
+        // Explicit padding: @media print zeroes .main-content's padding so print-only content controls
+        // its own margins. No hover tooltips inside — hovers do not print, so every explanation in the
+        // working is a visible row or caption.
+        <div className="print-only" style={{ padding: '28px 36px' }}>
+          <h1 style={{ fontSize: 20, marginBottom: 2 }}>Payroll Calculation</h1>
+          <div style={{ fontSize: 13, marginBottom: 2 }}>{printCalc.emp.full_name}{printCalc.emp.employee_code ? ` (${printCalc.emp.employee_code})` : ''}</div>
+          <div style={{ fontSize: 12, color: '#555', marginBottom: 14 }}>
+            {periodLabel}{finalized ? ' — as paid' : ' — draft'} — printed {nepalBsLong(new Date()) || nepalDateLong(new Date())}
+          </div>
+          {renderWorking(printCalc.slip)}
         </div>
       )}
 

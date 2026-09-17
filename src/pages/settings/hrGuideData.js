@@ -26,7 +26,7 @@ export const HR_GUIDE_GROUPS = [
         fields: [
           { label: 'Two kinds of login', desc: 'HR STAFF (people who administer HR — run payroll, approve leave) sign in with email + password at the main /login, created from HR Staff. EMPLOYEES use Self-Service — a public per-company link with a 4-6 digit PIN — to see their own payslips, leave, TADA and roster. An owner uses neither: they already resolve to Manager rank on everything.' },
           { label: 'The rank axis (hr_role)', desc: 'staff < supervisor < manager, NULL = no HR access at all. Each page states its minimum below. Assigning an hr_role to the OWNER\'s own login demotes them out of Owner-level access entirely — staff roles are for staff accounts, never the owner\'s.' },
-          { label: 'status vs access_blocked — the distinction that matters most', desc: 'hr_employees.status (active / probation / inactive / resigned / terminated) is PAYROLL ELIGIBILITY — active and probation staff are picked up, and since S751 Payroll Run and Payroll Calculation also pick up anyone whose end_date falls in or after the month (paid to their last day) unless a finalized Final Settlement already paid it; the Final Settlement picker still filters on status. access_blocked is the SELF-SERVICE LOGIN gate. Two different columns, two different Deactivate buttons (Edit form vs Employees\' bulk bar). Conflating them once dropped a resigned employee out of their own final payroll run.' },
+          { label: 'status vs access_blocked — the distinction that matters most', desc: 'hr_employees.status (active / probation / inactive / resigned / terminated) is PAYROLL ELIGIBILITY — active and probation staff are picked up, and since S751 Payroll Run (and each row\'s working) also picks up anyone whose end_date falls in or after the month (paid to their last day) unless a finalized Final Settlement already paid it; the Final Settlement picker still filters on status. access_blocked is the SELF-SERVICE LOGIN gate. Two different columns, two different Deactivate buttons (Edit form vs Employees\' bulk bar). Conflating them once dropped a resigned employee out of their own final payroll run.' },
         ],
         formulas: [
           'The payroll spine: Roster/Attendance/Leave/Overtime → Payroll Run draft → Finalize → payslips → Reports / Self-Service / next month\'s YTD tax base.',
@@ -85,7 +85,7 @@ export const HR_GUIDE_GROUPS = [
           '"🖨 Print Joining Form" in the page header opens a BLANK joining form to print and have a new hire fill in by hand for the paper personnel file — it is not filled from any employee\'s record. Its status choices are Active / Probation, and Designation is not a required field.',
         ],
         fields: [
-          { label: 'Status (active / probation / inactive / resigned / terminated)', desc: 'Payroll eligibility. Payroll Run, Payroll Calculation and Final Settlement include active + probation only; the other three all drop out. The Edit form\'s Deactivate button (shown on an active OR probation employee) sets Inactive — taking them off Payroll Run, Payroll Calculation, Final Settlement, the Roster and Attendance, without blocking their Self-Service login — and its confirm says to run Final Settlement first for a leaver. Its Activate button (shown on an inactive one) sets Active; Resigned and Terminated are picked from the Status list, and Final Settlement sets them itself when it is finalized.' },
+          { label: 'Status (active / probation / inactive / resigned / terminated)', desc: 'Payroll eligibility. Payroll Run and Final Settlement include active + probation only; the other three all drop out. The Edit form\'s Deactivate button (shown on an active OR probation employee) sets Inactive — taking them off Payroll Run, Final Settlement, the Roster and Attendance, without blocking their Self-Service login — and its confirm says to run Final Settlement first for a leaver. Its Activate button (shown on an inactive one) sets Active; Resigned and Terminated are picked from the Status list, and Final Settlement sets them itself when it is finalized.' },
           { label: 'End Date', desc: 'Shown for Contract / Part-time staff, and on any employee who already has an end date. Payroll pays a monthly employee nothing for days after it; Final Settlement sets it when someone leaves. An amber warning appears if the date has passed while the employee is still active or on probation.' },
           { label: 'Bulk Deactivate / Activate (access_blocked)', desc: 'Blocks or restores Self-Service LOGIN only — status is never touched, so blocking a leaver\'s login can never remove them from their own final payroll. A blocked employee sees the same "Incorrect PIN. Try again." as someone who typed a wrong PIN.' },
           { label: 'Remove Self-Service', desc: 'Deletes the login account outright (different from blocking, which suspends it). The employee record, payslips and leave history all survive either way. It is also how a forgotten PIN is replaced: each employee can have only one login and Enable is refused while one exists, so Remove the login and then press Enable Self-Service again with a new PIN. (A blocked employee shows no Remove button — Activate them first.) A login whose employee record no longer exists cannot sign in.' },
@@ -99,7 +99,7 @@ export const HR_GUIDE_GROUPS = [
           'Delete is refused — by the database, not just the page — for anyone with finalized payslips, a finalized Final Settlement, finalized festival allowances, any advance or loan, a Self-Service login, or TADA claims / incentives / shift-swap requests. Use Deactivate instead, exactly like Item Master\'s Hide-vs-Delete rule in IMS. An employee with none of those (added by mistake, say) can still be deleted.',
           'Self-Service status per employee is read through a dedicated RPC because the profiles table\'s security only lets an account read its own row — a raw query would show every employee as having no login.',
         ],
-        connections: 'Feeds every HR page. status → Payroll Run / Calculation / Settlement pickers; access_blocked → Self-Service login only; join date → payroll proration; retirement date → Dashboard; department/supervisor → Roster and filters.',
+        connections: 'Feeds every HR page. status → Payroll Run / Settlement pickers; access_blocked → Self-Service login only; join date → payroll proration; retirement date → Dashboard; department/supervisor → Roster and filters.',
       },
       {
         id: 'pay-setup',
@@ -129,7 +129,7 @@ export const HR_GUIDE_GROUPS = [
           'The form warns — without blocking — when pay falls below the legal floors: monthly basic under 12,170, the per-basis minimum wage (daily 754, hourly 101, part-time hourly 107, monthly 19,550 all-in), or basic under 60% of gross (a Labour Act rule: benefits are computed on basic, so a low basic quietly undercuts leave encashment, gratuity and festival allowance). The minimum-wage panel (labelled FY 2083/84) appears only when a check fails; otherwise it is a single ✓ line.',
           'Minimum wages were last fixed from Shrawan 1, 2082 under the Labour Act 2074 and are reviewed every two years — next review Shrawan 2084. The constants live in one payroll-constants file when they change.',
         ],
-        connections: 'Basic, basis, components, SSF fields and join date drive Payroll Run, Payroll Calculation, Gratuity, Festival Allowance, Final Settlement and the Roster\'s labor-cost forecast. Bank details feed HR Reports\' Bank Transfer tab.',
+        connections: 'Basic, basis, components, SSF fields and join date drive Payroll Run (and its per-row working), Gratuity, Festival Allowance, Final Settlement and the Roster\'s labor-cost forecast. Bank details feed HR Reports\' Bank Transfer tab.',
       },
       {
         id: 'holidays',
@@ -234,7 +234,7 @@ export const HR_GUIDE_GROUPS = [
           'The bulk buttons (All Present / Off / Holiday) fill blank cells only — they used to overwrite approved leave with Present.',
           'Clear Day, like Clear Month, deletes only the listed staff\'s rows.',
         ],
-        connections: 'The direct input to Payroll Run and Payroll Calculation (statuses, hours, OT). Written by Leave approvals (and deleted by un-approvals). Seeded by the Roster. Approved Overtime entries supersede this sheet\'s OT on their days.',
+        connections: 'The direct input to Payroll Run and its per-row working (statuses, hours, OT). Written by Leave approvals (and deleted by un-approvals). Seeded by the Roster. Approved Overtime entries supersede this sheet\'s OT on their days.',
       },
       {
         id: 'leave',
@@ -297,7 +297,7 @@ export const HR_GUIDE_GROUPS = [
           'One entry per employee per day (hr_overtime_entries_employee_day_key) — every approved entry is paid, so a second one paid the day twice.',
           'A month whose payroll is finalized is locked: approve, reject, undo, edit and delete are off, a new entry for that month is refused, and the database refuses it too. Entries are audited.',
         ],
-        connections: 'Reads the Holiday Calendar (gazetted days → 2× suggestion). Approved entries flow into Payroll Run/Calculation per day, superseding attendance OT. Pending count surfaces on the HR Dashboard.',
+        connections: 'Reads the Holiday Calendar (gazetted days → 2× suggestion). Approved entries flow into Payroll Run per day, superseding attendance OT. Pending count surfaces on the HR Dashboard.',
       },
     ],
   },
@@ -327,7 +327,7 @@ export const HR_GUIDE_GROUPS = [
           { label: 'Excel export', desc: 'Carries Department, Status, Unpaid Days, Worked Days, Hours Worked and Retirement (CIT) columns. A draft export is named payroll_<month>_DRAFT.xlsx.' },
         ],
         formulas: [
-          'Order of the money (buildPayrollRows() in payrollData.js, shared with Calculation): computePayslip → TDS (capped at what is left) → advance cut (capped at what is left after TDS — take-home never goes below zero; the rest stays owed and later cuts take it, so a shortfall lengthens the loan rather than creating arrears) → TADA on top. computePayslip itself cuts a fixed deduction such as CIT before take-home goes negative in a part month, and retirement_contribution follows the cut so the tax relief follows the money.',
+          'Order of the money (buildPayrollRows() in payrollData.js, which each row\'s working also shows): computePayslip → TDS (capped at what is left) → advance cut (capped at what is left after TDS — take-home never goes below zero; the rest stays owed and later cuts take it, so a shortfall lengthens the loan rather than creating arrears) → TADA on top. computePayslip itself cuts a fixed deduction such as CIT before take-home goes negative in a part month, and retirement_contribution follows the cut so the tax relief follows the money.',
           'On Finalize (finalize_payroll_run, S753 — one transaction under hr_pay_lock): the page re-reads everything, re-checks the draft and computes the advance allocation (oldest due advance first); the function then refuses unless the stored payslips are exactly the ids checked (payroll_run_stale), refuses a run paying a settled leaver, checks the repayments add up to each payslip\'s advance cut and that each advance is active and owed that much, then flips the run, marks the TADA claims Paid (Payroll) — refusing if any is no longer Approved — and writes the repayments. All or nothing; the old post-flip payslip recount is gone. Repayments carrying payroll_run_id or final_settlement_id can only be written by these functions (hr_advance_repayments_guard_ledger).',
         ],
         gotchas: [
@@ -336,40 +336,37 @@ export const HR_GUIDE_GROUPS = [
           'A typed TDS is reported, never blocking: an amber line names those payslips and says they are locked as entered rather than recomputed, and the Finalize confirmation repeats it. Only genuine movement blocks.',
           'A stored payslip for someone NOT on the month\'s list (already paid by a finalized Final Settlement, or not employed in the month) now BLOCKS Finalize (S751). It used to be a non-blocking third bucket, and a draft payslip for a settled leaver was finalized on top of the settlement that had already paid that month. Regenerate removes it.',
           'A draft generated before the advance-timing rule (S747) may have cut an advance in the same month it was issued. The advance deduction is one of the figures the staleness check compares, so such a draft now shows as stale and must be Regenerated before it can be finalized.',
-          'Once finalized, the run and its payslips are locked by database triggers (hr_run_finalized), not just the page — Reopen first. A finalized run cannot be deleted, and a period with finalized payroll cannot be deleted from Periods (period_has_finalized_payroll). Payroll Calculation shows a finalized month as stored, never recomputed.',
+          'Once finalized, the run and its payslips are locked by database triggers (hr_run_finalized), not just the page — Reopen first. A finalized run cannot be deleted, and a period with finalized payroll cannot be deleted from Periods (period_has_finalized_payroll). A finalized month\'s per-row working shows each payslip as stored, never recomputed.',
         ],
         connections: 'Reads Attendance, Overtime (approved, per-day supersede), Pay Setup, Advances, TADA Claims (Approved, trip ended by month end), finalized Final Settlements (to leave their month out) and finalized festival/incentive rows (the YTD tax base). HR Reports shows the run while it is still a draft (with a warning) as well as once finalized; finalized payslips feed Festival/Incentive tax projections, Self-Service payslips, and the Dashboard\'s SSF-deadline card.',
       },
       {
         id: 'payroll-calculation',
-        title: 'Calculation (Payroll Review)',
-        route: '/hr/calculation',
+        title: 'Calculation — the working inside Payroll',
+        route: '/hr/payroll',
         plan: 'Manager only',
         summary:
-          'The read-only companion to Payroll Run: it never writes anything. On a DRAFT month it recomputes every figure live from current Attendance/Roster/Overtime/Advances through the same builder Payroll Run uses, shows the complete working step by step (printable), and compares the result against the stored payslip. On a FINALIZED month it recomputes nothing: every figure is the stored payslip "as paid", explained in plain words — so a raise given later can never turn a paid month red.',
+          'How each figure on a payslip was worked out, opened from the ▸ beside an employee on the Payroll register. It was its own page (/hr/calculation) until S768; that page recomputed the same register Payroll already showed, through the same builder, so the explanation of a number lived one route away from the number. The old path now opens Payroll. On a DRAFT month the working is computed live from current Attendance/Roster/Overtime/Advances through buildPayrollRows(); on a FINALIZED month nothing is recomputed — every figure is the stored payslip "as paid", explained in plain words, so a raise given later can never make a paid month look wrong. The panel writes nothing.',
         workflow: [
-          'Pick the month and an employee to see every intermediate: gross build-up, unpaid days, SSF base, the income tax panel, the advance cut due against the cut taken, and how many "Advances in recovery this month" it comes from (an advance issued this month is not counted yet) — the page to open when someone asks "why is my pay this number?".',
-          'Print the working panel as the explanation sheet to hand over. A finalized month prints "— as paid".',
+          'On Payroll, open ▸ beside a name to see every intermediate: attendance tally, gross build-up, unpaid days, SSF base, the income tax panel, the advance cut due against the cut taken and how many "Advances in recovery this month" it comes from (an advance issued this month is not counted yet), TADA, and the net pay reconciliation — the place to go when someone asks "why is my pay this number?".',
+          'Press 🖨 Print working on the open row to print that one employee\'s sheet. A finalized month prints "— as paid", a draft "— draft".',
         ],
         fields: [
-          { label: '⚠ Stale (red)', desc: 'Draft months only. A computed figure moved since Generate — gross, OT amount, absence deduction, SSF employee, other deductions, advance cut, retirement contribution, or a TDS nobody typed — or the TADA claims changed. The chip\'s tooltip names what moved, old → new (e.g. "Overtime NPR 1,200 → 1,800"). The fix lives on Payroll Run: Regenerate.' },
-          { label: 'Adjusted (neutral)', desc: 'Only means TDS was typed by hand on the draft (tds_overridden) and the payslip otherwise matches. TADA can no longer be edited, so it is never the cause. Deliberately NOT the red ⚠ Stale it once showed: an intended override is not drift.' },
-          { label: 'Not generated', desc: 'A run exists for the month but never picked this employee up (typically added after Generate) — distinct from both of the above.' },
-          { label: 'Not on this month\'s payroll any more — Regenerate will remove it', desc: 'Amber chip on a stored draft payslip for someone outside the month\'s payroll list (fetchPayrollEmployees). Anyone whose finalized Final Settlement already paid the month is named in a separate note ("Not on this month\'s payroll") instead of being calculated.' },
-          { label: 'OT superseded', desc: 'Shows attendance OT withheld because an approved Overtime entry covers the same day — so a figure that differs from the attendance sheet is explained rather than mysterious.' },
+          { label: '△ This payslip is out of date', desc: 'Draft months only, at the top of the working. A computed figure moved since Generate — gross, OT amount, absence deduction, SSF employee, other deductions, advance cut, retirement contribution, or a TDS nobody typed — or the TADA claims changed. The note names what moved, old → new (e.g. "Overtime NPR 1,200 → 1,800"), and warns that the working below is current data rather than the stored row above it. The fix is Regenerate; the page\'s amber banner names every such employee as well.' },
+          { label: 'Not on this month\'s payroll any more', desc: 'A stored draft payslip for someone outside the month\'s payroll list (fetchPayrollEmployees) shows the stored figures, not a calculation, and says Regenerate will remove it.' },
           { label: 'Income tax panel', desc: 'A per-band table ("first NPR 10,00,000 at 1% — waived because SSF"), the months left in the tax year, "Tax due by this month", and earlier months\' income — which includes finalized festival allowances and bonuses. Tax that could not be withheld because pay was too low is picked up by later months.' },
           { label: 'Attendance tally', desc: 'Counts marked days only. An unmarked day is PAID for monthly staff (only absences, unpaid leave and half days deduct) and pays nothing for daily/hourly staff.' },
-          { label: 'Travel claims paid by this payroll', desc: 'Approved claims whose trip ended by the month end — the same rule Payroll Run uses, so each claim is counted in exactly one month.' },
+          { label: 'Overtime — two sources', desc: 'Attendance-sheet OT and approved Overtime entries are shown separately, with any attendance OT withheld because an approved entry covers the same day.' },
+          { label: 'Travel claims paid by this payroll', desc: 'Approved claims whose trip ended by the month end — the same rule the TADA column uses, so each claim is counted in exactly one month.' },
         ],
         formulas: [
-          'Identical arithmetic to Payroll Run by construction — both call buildPayrollRows() in payrollData.js (S751; before that they were two copies held together by "must stay identical" comments), so this page can never "disagree" with a fresh draft.',
+          'Identical arithmetic to the register by construction — the working is buildPayrollRows()\'s own `detail`, the same call Generate inserts from.',
         ],
         gotchas: [
-          'On a draft month the live Total Gross and Total Net Pay cards and the table\'s footer totals always show, because they are computed here. Only the stored-net total (the sum of Payroll Run\'s saved payslips) is held back as "—" until EVERY row has a stored payslip — a partial sum would read as the month\'s total. On a finalized month the cards are sums of the stored payslips.',
-          'A finalized month shows no Stale badges at all. Before S751 it was recomputed against today\'s salaries, so every raise turned every past month red against payslips that were correct when paid.',
-          'The printable working uses no hover tooltips on purpose: hovers don\'t print, so every explanation is a visible row or caption.',
+          'A draft\'s working is LIVE, so on an out-of-date payslip it deliberately disagrees with the row above it — that disagreement is what the △ note is for. A finalized month shows no out-of-date note at all.',
+          'The printed working uses no hover tooltips on purpose: hovers don\'t print, so every explanation is a visible row or caption.',
         ],
-        connections: 'Same inputs and the same builder as Payroll Run, through the same shared comparison — the two pages call one buildPayrollRows() and one payslipDrift(), so this page can never disagree with the banner on the other. The Stale badge is the review-side of Payroll Run\'s finalize-block: one detects drift, the other refuses to lock it in.',
+        connections: 'Lives on Payroll Run and reads the same loaded data: one buildPayrollRows(), one payslipDrift(), so the working can never disagree with the stale-draft banner above it.',
       },
       {
         id: 'pay-engine',
@@ -377,7 +374,7 @@ export const HR_GUIDE_GROUPS = [
         route: null,
         plan: 'Reference — applies to every payroll figure',
         summary:
-          'The payroll engine is a set of pure functions — no screen edits its rules. Three pay bases, SSF, join-date proration and Nepal income tax (TDS) in one place, so Payroll Run, Calculation, and the Roster\'s cost forecast all mean the same thing by "a day\'s pay".',
+          'The payroll engine is a set of pure functions — no screen edits its rules. Three pay bases, SSF, join-date proration and Nepal income tax (TDS) in one place, so Payroll Run, its per-row working, and the Roster\'s cost forecast all mean the same thing by "a day\'s pay".',
         workflow: [
           'MONTHLY: gross = basic + allowances. Unpaid days = absences + unpaid leave + half of each half-day + days before the join date. Absence deduction = (gross ÷ days in the BS month) × unpaid days — allowances are forfeited too, not just basic. SSF base = min(basic × paid fraction, 100,000). Net = gross + OT − absence − SSF 11% − other deductions − TDS − advance recovery (only advances issued in an earlier BS month) + TADA. TDS and then the advance cut are each capped at what is left, so take-home never goes below zero (S751).',
           'DAILY: paid days = present + half days × 0.5 + paid leave (paid leave IS paid for daily staff) + half paid leave × 0.5. Earned = daily basic × paid days. No absence deduction, no allowances. OT at (basic ÷ 8) × 1.5.',
@@ -399,7 +396,7 @@ export const HR_GUIDE_GROUPS = [
           'Nepal\'s fiscal year runs Shrawan → Ashadh; Shrawan is month 1 of the tax year. All YTD figures reset there, not at Baisakh.',
           'Lump sums (festival allowance, incentives, settlement items) are taxed marginally — tax(annual taxable + lump) − tax(annual taxable) — never by re-running the monthly engine.',
         ],
-        connections: 'Payroll Run and Calculation call these functions directly; the Roster\'s labor forecast reuses the hourly-rate rule; Festival, Incentives and Final Settlement use the marginal lump-sum tax method on top of the same slab tables.',
+        connections: 'Payroll Run (and its per-row working) calls these functions directly; the Roster\'s labor forecast reuses the hourly-rate rule; Festival, Incentives and Final Settlement use the marginal lump-sum tax method on top of the same slab tables.',
       },
       {
         id: 'festival',
@@ -471,7 +468,7 @@ export const HR_GUIDE_GROUPS = [
           'Write off NPR <owed> forgives the balance: a reason is required, the amount / who / when are stamped server-side, the advance gets a grey Written off badge and can be Reactivated. Payroll stops cutting it and Final Settlement will not recover it.',
         ],
         fields: [
-          { label: 'When payroll starts recovering', desc: 'The payroll of the BS month AFTER the month the advance was issued. The day does not matter: an advance given on 1 Bhadra and one given on 28 Bhadra are both first cut in the Ashwin payroll. An advance issued in Chaitra is first cut in Baisakh of the next year. A back-dated advance whose first month\'s payroll is already finalized is first cut in the first month without finalized payroll. Payroll Calculation\'s working panel counts the "Advances in recovery this month".' },
+          { label: 'When payroll starts recovering', desc: 'The payroll of the BS month AFTER the month the advance was issued. The day does not matter: an advance given on 1 Bhadra and one given on 28 Bhadra are both first cut in the Ashwin payroll. An advance issued in Chaitra is first cut in Baisakh of the next year. A back-dated advance whose first month\'s payroll is already finalized is first cut in the first month without finalized payroll. Payroll\'s per-row working counts the "Advances in recovery this month".' },
           { label: 'Installment / Month', desc: 'A real salary cut, not a reminder. REQUIRED for a loan. LEFT BLANK on a one-time advance, the FULL outstanding balance comes off the first payroll the advance is due in — never more than that month\'s pay; the rest waits for the next.' },
           { label: 'Source (repayment history)', desc: 'Payroll / Final Settlement / Manual. Only a Manual row can be deleted here (logged; the advance goes back to owing and reactivates). Payroll and Final Settlement rows show a lock — undone only by reopening that run or settlement.' },
           { label: 'Status', desc: 'Active = brass/gold (owed, not overdue — nothing is wrong), Settled = green, Written off = grey. Total Outstanding excludes written-off balances; a separate Written Off card shows their total.' },
@@ -517,7 +514,7 @@ export const HR_GUIDE_GROUPS = [
           'A trip cannot end before it starts and amounts cannot be negative (numeric accepts \'NaN\' and NaN > 0 is true, so the CHECK spells out <> \'NaN\'). A manager-entered claim matching another on employee, dates and total gets a duplicate warning; submit_my_tada_claim refuses an identical claim outright.',
           'Payroll adds TADA AFTER tax — it is a reimbursement of the employee\'s own money, never taxable income. The payslip\'s TADA amount is not editable; change or reject the claim instead.',
         ],
-        connections: 'Approved claims whose trip has ended fill Payroll Run\'s read-only TADA column (and are marked Paid (Payroll) by its Finalize; Reopen puts them back to Approved). Payroll Calculation counts them as "Travel claims paid by this payroll". Employees file their own claims from Self-Service\'s TADA tab. Pending count surfaces on the HR Dashboard.',
+        connections: 'Approved claims whose trip has ended fill Payroll Run\'s read-only TADA column (and are marked Paid (Payroll) by its Finalize; Reopen puts them back to Approved). Payroll\'s per-row working counts them as "Travel claims paid by this payroll". Employees file their own claims from Self-Service\'s TADA tab. Pending count surfaces on the HR Dashboard.',
       },
     ],
   },

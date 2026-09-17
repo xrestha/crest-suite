@@ -208,7 +208,6 @@ const HR_GROUPS = [
     { to: '/hr/overtime',   label: 'Overtime',         icon: Timer, minHrRole: 'supervisor' },
   ]},
   { key: 'hr-payroll', label: 'Payroll', items: [
-    { to: '/hr/calculation', label: 'Calculation',       icon: Calculator, minHrRole: 'manager' },
     { to: '/hr/payroll',    label: 'Payroll',            icon: Banknote, minHrRole: 'manager' },
     { to: '/hr/festival',   label: 'Festival Allowance', icon: PartyPopper, minHrRole: 'manager' },
     { to: '/hr/incentives', label: 'Incentives / Bonus', icon: Gift, minHrRole: 'manager' },

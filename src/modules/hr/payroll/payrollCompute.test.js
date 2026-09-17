@@ -43,7 +43,7 @@ describe('isSsfContributor', () => {
   })
   test.each([
     ['PayrollRun.jsx', 'payroll'],
-    ['PayrollCalculation.jsx', 'payroll'],
+    ['PayslipCalculation.jsx', 'payroll'],
     ['FestivalAllowance.jsx', 'festival'],
     ['IncentiveRun.jsx', 'incentives'],
     ['payrollData.js', 'payroll'],
@@ -53,10 +53,9 @@ describe('isSsfContributor', () => {
     expect(src).not.toMatch(/isSsf\s*:\s*!!\s*(emp|employee)\.ssf_enrolled\b/)
     expect(src).not.toMatch(/\(\s*(emp|employee)\.ssf_enrolled\s*\?/)
   })
-  test('the two payroll pages and the two bonus pages compute through the shared builders', () => {
+  test('the payroll page and the two bonus pages compute through the shared builders', () => {
     const read = (dir, f) => fs.readFileSync(path.join(__dirname, '..', dir, f), 'utf8')
     expect(read('payroll', 'PayrollRun.jsx')).toMatch(/buildPayrollRows\(/)
-    expect(read('payroll', 'PayrollCalculation.jsx')).toMatch(/buildPayrollRows\(/)
     expect(read('festival', 'FestivalAllowance.jsx')).toMatch(/computeRunBonusTds\(/)
     expect(read('incentives', 'IncentiveRun.jsx')).toMatch(/computeRunBonusTds\(/)
   })

@@ -77,7 +77,6 @@ const EmployeeList = lazy(() => import('./modules/hr/employees/EmployeeList'))
 const PaySetup = lazy(() => import('./modules/hr/pay/PaySetup'))
 const AttendanceSheet = lazy(() => import('./modules/hr/attendance/AttendanceSheet'))
 const PayrollRun = lazy(() => import('./modules/hr/payroll/PayrollRun'))
-const PayrollCalculation = lazy(() => import('./modules/hr/payroll/PayrollCalculation'))
 const HrReports = lazy(() => import('./modules/hr/reports/HrReports'))
 const FestivalAllowance = lazy(() => import('./modules/hr/festival/FestivalAllowance'))
 const LeaveManagement = lazy(() => import('./modules/hr/leave/LeaveManagement'))
@@ -293,7 +292,8 @@ export default function App() {
               <Route path="/hr/attendance" element={<ModuleGate module="hr"><AttendanceSheet /></ModuleGate>} />
               <Route path="/hr/leave"      element={<ModuleGate module="hr"><LeaveManagement /></ModuleGate>} />
               <Route path="/hr/payroll"    element={<ModuleGate module="hr"><PayrollRun /></ModuleGate>} />
-              <Route path="/hr/calculation" element={<ModuleGate module="hr"><PayrollCalculation /></ModuleGate>} />
+              {/* Folded into Payroll's expandable rows (S768); the path stays so a bookmark lands. */}
+              <Route path="/hr/calculation" element={<Navigate to="/hr/payroll" replace />} />
               <Route path="/hr/reports"    element={<ModuleGate module="hr"><HrReports /></ModuleGate>} />
               <Route path="/hr/festival"   element={<ModuleGate module="hr"><FestivalAllowance /></ModuleGate>} />
               <Route path="/hr/advances"   element={<ModuleGate module="hr"><Advances /></ModuleGate>} />
