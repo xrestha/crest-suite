@@ -24,7 +24,7 @@ in `.claude/rules/*.md`; each rules file loads automatically when you open a fil
 ## Context discipline
 
 - Locate before reading: grep/glob first, then read only relevant line ranges. Don't read whole files over ~300 lines unless the task needs it.
-- Never read lockfiles, build artefacts (`build/`), generated or minified files.
+- Never read lockfiles, `build/static/`, `node_modules/`, generated or minified files, or `.env*.local`, by any tool: `.claude/settings.json` denies them to Read and Grep, not to `cat`, `head` or `grep` in Bash.
 - Run only the relevant test file unless asked for the full suite. Trim its output as in Commands above.
 - For open-ended exploration ("where is X handled", "how does Y work"), use a subagent and return a short summary with file paths and line numbers.
 - When more than 3 source files will change, give a short plan and wait for approval before editing. The CHANGELOG entry, the changelog index, `CACHE_NAME` and `APP_VERSION` don't count. Any migration always gets a plan first.

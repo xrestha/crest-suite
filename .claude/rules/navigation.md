@@ -86,5 +86,6 @@ pair** (`ArrowLeftRight` / `ArrowRightLeft`) used for one concept is worse than 
 the reader cannot tell whether the difference is meaningful.
 
 Before adding a nav entry, check its icon is not already on another route, and verify the export
-exists (`grep "declare const <Name>:" node_modules/lucide-react/dist/lucide-react.d.ts`) — a
-misspelled icon name is a build failure, and a *wrong-but-real* one is silent.
+exists (`node -e "process.exit(require('lucide-react').<Name> ? 0 : 1)"`, exit 0 means it exists;
+never read `node_modules/`) — a misspelled icon name is a build failure, and a *wrong-but-real* one
+is silent.
