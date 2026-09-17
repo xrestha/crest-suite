@@ -2822,6 +2822,31 @@ textarea:focus-visible {
   flex-shrink: 0;
 }
 
+/* ── POS order screen: the touch floor (S776) ────────────────────────────────────────────────
+   The order screen is inline-styled, and an inline style cannot carry a media query. Measured at
+   820px touch: 24 of 36 controls under 44px — the remove × 15px wide, the kitchen-note box 17px tall,
+   the Pair-with dismiss 11px wide, the comp steppers 20px. `.till-hit` is the floor for a square
+   control, `.till-hit--row` for one whose width is its content. Scoped to a finger, not a width, so a
+   desktop keeps its density; min-* wins over an inline width/height, which is what lets these sit on
+   controls whose inline size stays right for a mouse. Never give a till-hit control an inline
+   minWidth/minHeight — that one WOULD beat the class. */
+@media (pointer: coarse) {
+  .till-hit {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .till-hit--row,
+  .ticket-btn {
+    min-height: 44px;
+  }
+}
+
+/* The order screen's message line, above Send (S776) — tighter than .action-error--top's 16px, in a
+   320px cart where every row counts. */
+.action-error--till {
+  margin: 0 0 10px;
+}
+
 .pay-method-btn {
   -webkit-appearance: none;
   appearance: none;

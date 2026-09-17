@@ -731,6 +731,7 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
 - **Order after the close is an owner decision: Split legs → print → table, booking, IMS, customer, loyalty.** Legs first because of their 10-minute window and because `printBill` reads them. Print counters are not awaited. Don't move bookkeeping back in front of the paper.
 - Verified live by letting the PATCH reach the server and aborting its response (`route.fetch()` then `route.abort()`), and again with the read-back also aborted.
 - **The close buttons are never `disabled` for a missing input, only `aria-disabled`.** `closeBlocker()` is the one list: closeOrder refuses with its `text`, the button shows its `label`, and `pressClose()` opens the folded section and focuses its `field`. A new close precondition goes into `closeBlocker`, never into a button's `disabled` expression. Void asks first (`confirmVoid`).
+- **The order screen has a phone layout and a touch floor.** Below 700px (`narrowTill`) the menu takes the width and the cart is a bottom sheet (`cartOpen`); keep TOTAL and the action buttons outside the folded part. A new control on the order screen takes `.till-hit` (square) or `.till-hit--row` (Layout.css, `pointer: coarse` only) and never an inline `minWidth`/`minHeight`, which would beat the class. The message line (`msg`) renders above Send, not in the top bar. Measured S776: 0 of 32 controls under 44px at 820px touch (was 24 of 36).
 
 ## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682)
 

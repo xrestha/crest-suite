@@ -19,6 +19,7 @@ import { lineIngredientDeltas, loadDeltaExplosion, deltaItems } from '../../../u
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
+import ActionError from '../../../components/ActionError'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 // The floor view's six window.alert()s are deliberately NOT converted (S616, re-affirmed S682):
 // setMsg renders only inside the `view === 'order'` tree, so the floor has no banner of its own,
@@ -316,6 +317,17 @@ export default function PosOrders({ billingStation = false } = {}) {
   // 900px the fixed 418px preview column left a phone or portrait tablet a squeezed payment form.
   const [narrowBilling, setNarrowBilling] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900)
   const [billPreviewOpen, setBillPreviewOpen] = useState(false)
+  // The order screen's own breakpoint (S776), state for the same reason. Below 700px the fixed 320px
+  // cart left a 70px menu column at 390px wide, with the cart overlapping the tiles and a tap on a
+  // tile's centre landing on the cart. There the menu takes the width and the cart is a sheet at the
+  // bottom: total and actions always showing, the lines one tap away.
+  const [narrowTill, setNarrowTill] = useState(() => typeof window !== 'undefined' && window.innerWidth < 700)
+  const [cartOpen, setCartOpen] = useState(false)
+  useEffect(() => {
+    const onResize = () => setNarrowTill(window.innerWidth < 700)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   useEffect(() => {
     const onResize = () => setNarrowBilling(window.innerWidth < 900)
     window.addEventListener('resize', onResize)
@@ -3911,6 +3923,7 @@ The tables were left occupied rather than freed with their orders still open.`)
     // different screen than the one they left.
     setBillOnLoad(false)
     setView(billingStation ? 'bills' : 'floor'); setActiveTable(null); setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); setMsg('')
+    setCartOpen(false)
     setSuggestions([])
     setMenuLoaded(false)
     setMenuLoadError('')
@@ -4045,11 +4058,11 @@ The tables were left occupied rather than freed with their orders still open.`)
 
       {/* ── Top bar ── */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: '0 16px', height: 52, flexShrink: 0,
+        display: 'flex', alignItems: 'center', columnGap: narrowTill ? 8 : 12, rowGap: 6, flexWrap: 'wrap',
+        padding: narrowTill ? '6px 12px' : '0 16px', minHeight: 52, flexShrink: 0,
         background: 'var(--theme-card)', borderBottom: '1px solid var(--theme-border)',
       }}>
-        <button onClick={requestBackToFloor} style={{
+        <button onClick={requestBackToFloor} className="till-hit--row" style={{
           background: 'none', border: '1px solid var(--theme-border)',
           borderRadius: 'var(--radius-sm)', padding: '6px 14px',
           color: 'var(--theme-text2)', cursor: 'pointer', fontSize: 14,
@@ -4057,7 +4070,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           ← {activeTable ? activeTable.name : 'Takeaway'}
         </button>
 
-        {activeTable?.section && (
+        {activeTable?.section && !narrowTill && (
           <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{activeTable.section}</span>
         )}
 
@@ -4095,17 +4108,14 @@ The tables were left occupied rather than freed with their orders still open.`)
           <Tip text="Number of guests at this table — used for cover count reporting">
             <span style={{ fontSize: 12, color: 'var(--theme-text3)', cursor: 'default' }}>Covers</span>
           </Tip>
-          <button onClick={() => setCovers(c => Math.max(1, c - 1))} style={btnSm} aria-label="One fewer cover">−</button>
+          <button onClick={() => setCovers(c => Math.max(1, c - 1))} className="till-hit" style={btnSm} aria-label="One fewer cover">−</button>
           <span style={{ fontWeight: 700, color: 'var(--theme-text1)', minWidth: 22, textAlign: 'center', fontSize: 14 }}>{covers}</span>
-          <button onClick={() => setCovers(c => c + 1)} style={btnSm} aria-label="One more cover">+</button>
+          <button onClick={() => setCovers(c => c + 1)} className="till-hit" style={btnSm} aria-label="One more cover">+</button>
         </div>
 
+        {/* The order screen's message line moved from here to directly above Send (S776): at 12px in the
+            top bar's far corner, a failed send was the one thing on the screen nobody looked at. */}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-          {msg && (
-            <span role="alert" style={{ fontSize: 12, color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-              {msg.replace(/^(error|ok):/, '')}
-            </span>
-          )}
           {orderId && isOnline && orderKotTickets.some(t => t.status === 'ready') && (() => {
             const readyCount = orderKotTickets.filter(t => t.status === 'ready').length
             return (
@@ -4121,7 +4131,7 @@ The tables were left occupied rather than freed with their orders still open.`)
               ? "Prints the last kitchen and/or bar ticket again, marked REPRINT — for a ticket that was sent but never came out of the printer. It does not send anything to the kitchen again."
               : 'Reprinting reads the ticket history from the server — reconnect first.'}>
               <button type="button" className="btn btn-ghost btn-sm" onClick={reprintLastTickets} disabled={!isOnline || saving}>
-                ⎙ Reprint KOT/BOT
+                {narrowTill ? '⎙ Reprint' : '⎙ Reprint KOT/BOT'}
               </button>
             </Tip>
           )}
@@ -4153,12 +4163,14 @@ The tables were left occupied rather than freed with their orders still open.`)
       )}
 
       {/* ── Two-panel body ── */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+      {/* Below 700px (narrowTill) a column: the menu over a cart sheet; with the sheet open the menu
+          steps aside, so the lines get the whole height (S776). */}
+      <div style={{ display: 'flex', flexDirection: narrowTill ? 'column' : 'row', flex: 1, minHeight: 0 }}>
 
         {/* LEFT: Menu browser */}
         <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          borderRight: '1px solid var(--theme-border)', minWidth: 0,
+          flex: 1, display: narrowTill && cartOpen ? 'none' : 'flex', flexDirection: 'column',
+          borderRight: narrowTill ? 'none' : '1px solid var(--theme-border)', minWidth: 0, minHeight: 0,
         }}>
           <div style={{
             flexShrink: 0, padding: '8px 12px',
@@ -4167,18 +4179,19 @@ The tables were left occupied rather than freed with their orders still open.`)
           }}>
             <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
               {menuCats.map(c => (
-                <button key={c} className={`tab-btn${catTab === c ? ' tab-btn--active' : ''}`}
+                <button key={c} className={`tab-btn till-hit${catTab === c ? ' tab-btn--active' : ''}`}
                   onClick={() => setCatTab(c)} style={{ flexShrink: 0 }}>{c}</button>
               ))}
             </div>
             <input
               type="text"
               aria-label="Search menu by name or code"
+              className="till-hit--row"
               placeholder="🔍 Search name or code…"
               value={menuSearch}
               onChange={e => setMenuSearch(e.target.value)}
               style={{
-                marginLeft: 'auto', flexShrink: 0, width: 160,
+                marginLeft: 'auto', flexShrink: 0, width: narrowTill ? 128 : 160,
                 background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
                 borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12,
                 color: 'var(--theme-text1)', outline: 'none',
@@ -4258,18 +4271,36 @@ The tables were left occupied rather than freed with their orders still open.`)
           </div>
         </div>
 
-        {/* RIGHT: Order panel */}
+        {/* RIGHT: Order panel — a bottom sheet below 700px (S776) */}
         <div style={{
-          width: 320, flexShrink: 0,
+          width: narrowTill ? '100%' : 320, flexShrink: 0,
+          // Longhands only: React warns when a re-render swaps the `flex` shorthand against flexShrink.
+          flexGrow: narrowTill && cartOpen ? 1 : 0, minHeight: narrowTill && cartOpen ? 0 : undefined,
           display: 'flex', flexDirection: 'column',
           background: 'var(--theme-card)',
+          ...(narrowTill ? { borderTop: '1px solid var(--theme-border)', boxShadow: '0 -6px 18px rgba(0,0,0,0.18)' } : {}),
         }}>
 
+          {narrowTill && (() => {
+            const units = orderItems.reduce((n, i) => n + (Number(i.qty) || 0), 0)
+            return (
+              <button type="button" className="btn btn-ghost" aria-expanded={cartOpen} aria-controls="pos-order-lines"
+                onClick={() => setCartOpen(o => !o)}
+                style={{ width: '100%', justifyContent: 'space-between', border: 'none', borderBottom: '1px solid var(--theme-border)', borderRadius: 0, padding: '10px 14px', fontSize: 14 }}>
+                <span>{cartOpen ? '▾ Back to the menu' : `▴ Order · ${units} item${units === 1 ? '' : 's'}`}</span>
+                {!cartOpen && orderItems.some(i => !i.sent_to_kot) && (
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-amber-text)' }}>not sent yet</span>
+                )}
+              </button>
+            )
+          })()}
+
           {/* Order items list */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '6px 14px' }}>
+          {(!narrowTill || cartOpen) && (
+          <div id="pos-order-lines" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px 14px' }}>
             {orderItems.length === 0 ? (
               <p style={{ color: 'var(--theme-text3)', fontSize: 13, textAlign: 'center', paddingTop: 48, margin: 0 }}>
-                Tap items on the left to add them
+                {narrowTill ? 'Nothing on this order yet — tap a dish on the menu to add it' : 'Tap items on the left to add them'}
               </p>
             ) : orderItems.map((item, idx) => {
               const lineTotal = item.qty * item.unit_price * (1 + (vatReg ? (item.vat_rate ?? 0) : 0))
@@ -4318,11 +4349,11 @@ The tables were left occupied rather than freed with their orders still open.`)
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-                    <button onClick={() => setQty(idx, item.qty - 1)} style={btnSm} aria-label={`One fewer ${item.name}`}>−</button>
+                    <button onClick={() => setQty(idx, item.qty - 1)} className="till-hit" style={btnSm} aria-label={`One fewer ${item.name}`}>−</button>
                     <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 13 }}>
                       {item.qty}
                     </span>
-                    <button onClick={() => setQty(idx, item.qty + 1)} style={btnSm} aria-label={`One more ${item.name}`}>+</button>
+                    <button onClick={() => setQty(idx, item.qty + 1)} className="till-hit" style={btnSm} aria-label={`One more ${item.name}`}>+</button>
                   </div>
                   <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600, minWidth: 68, textAlign: 'right', flexShrink: 0 }}>
                     NPR {Math.round(lineTotal)}
@@ -4331,7 +4362,8 @@ The tables were left occupied rather than freed with their orders still open.`)
                     onClick={() => setQty(idx, 0)}
                     title="Remove"
                     aria-label={`Remove ${item.name}`}
-                    style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 18, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}
+                    className="till-hit"
+                    style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 18, padding: '0 2px', lineHeight: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                   >×</button>
                   </div>
                   {/* Choices line (S759): the summary and the Choices/Change button sit together under
@@ -4373,6 +4405,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     onFocus={() => setNoteFocusIdx(idx)}
                     onBlur={() => setNoteFocusIdx(null)}
                     placeholder="+ Kitchen note (e.g. serve after starters)"
+                    className="till-hit--row"
                     style={{
                       background: 'none', border: 'none', outline: 'none',
                       fontSize: 11, fontStyle: 'italic', color: 'var(--theme-text3)',
@@ -4386,8 +4419,9 @@ The tables were left occupied rather than freed with their orders still open.`)
                           key={p}
                           onMouseDown={e => e.preventDefault()}
                           onClick={() => addPresetToNote(idx, p)}
+                          className="till-hit--row"
                           style={{
-                            fontSize: 10, padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                            fontSize: 12, padding: '2px 10px', borderRadius: 'var(--radius-full)',
                             border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)',
                             color: 'var(--theme-text2)', cursor: 'pointer',
                           }}
@@ -4399,9 +4433,10 @@ The tables were left occupied rather than freed with their orders still open.`)
               )
             })}
           </div>
+          )}
 
           {/* ── ME suggestion chips ── */}
-          {suggestions.length > 0 && (
+          {suggestions.length > 0 && (!narrowTill || cartOpen) && (
             <div style={{
               borderTop: '1px solid var(--theme-border)', flexShrink: 0,
               padding: '8px 14px',
@@ -4411,7 +4446,9 @@ The tables were left occupied rather than freed with their orders still open.`)
                 <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-text3)' }}>Pair with</span>
                 <button
                   onClick={() => setSuggestions([])}
-                  style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: 0, marginLeft: 'auto', lineHeight: 1 }}
+                  aria-label="Hide pairing suggestions"
+                  className="till-hit"
+                  style={{ background: 'none', border: 'none', color: 'var(--theme-text3)', cursor: 'pointer', fontSize: 14, padding: '6px 8px', marginLeft: 'auto', lineHeight: 1 }}
                 >✕</button>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -4448,21 +4485,31 @@ The tables were left occupied rather than freed with their orders still open.`)
           )}
 
           {/* Totals + action buttons */}
-          <div style={{ borderTop: '2px solid var(--theme-border)', padding: '12px 14px', flexShrink: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--theme-text2)', marginBottom: 4 }}>
-              <span>Subtotal (ex-VAT)</span><span>{fmtNpr(subEx)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--theme-text2)', marginBottom: 10 }}>
-              <span>VAT</span><span>{fmtNpr(vatAmt)}</span>
-            </div>
+          <div style={{ borderTop: narrowTill ? 'none' : '2px solid var(--theme-border)', padding: narrowTill ? '8px 14px 12px' : '12px 14px', flexShrink: 0 }}>
+            {/* A folded sheet keeps only the TOTAL: the two lines above it cost a phone the menu's height. */}
+            {(!narrowTill || cartOpen) && (<>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--theme-text2)', marginBottom: 4 }}>
+                <span>Subtotal (ex-VAT)</span><span>{fmtNpr(subEx)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--theme-text2)', marginBottom: 10 }}>
+                <span>VAT</span><span>{fmtNpr(vatAmt)}</span>
+              </div>
+            </>)}
             <div style={{
               display: 'flex', justifyContent: 'space-between',
               fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)',
-              paddingTop: 10, borderTop: '1px solid var(--theme-border)', marginBottom: 14,
+              paddingTop: narrowTill && !cartOpen ? 0 : 10, borderTop: narrowTill && !cartOpen ? 'none' : '1px solid var(--theme-border)',
+              marginBottom: narrowTill ? 10 : 14,
             }}>
               <span>TOTAL</span>
               <span style={{ color: 'var(--theme-accent-ink)' }}>{fmtNpr(total)}</span>
             </div>
+
+            {/* The order screen's message, directly above the button that caused it (S776). A failure is an
+                ActionError; a confirmation ("Order sent!") a status line. */}
+            {msg && (msg.startsWith('error:')
+              ? <ActionError error={msg.slice('error:'.length)} className="action-error--till" />
+              : <p role="status" style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.45, color: 'var(--theme-green-text)' }}>{msg.replace(/^ok:/, '')}</p>)}
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <button
@@ -4753,12 +4800,12 @@ The tables were left occupied rather than freed with their orders still open.`)
                         <span style={{ flex: 1 }}>{i.qty} x {i.name}</span>
                         <span>{fmtNpr(i.qty * i.unit_price)}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <button type="button" onClick={() => setQty(compQty - 1)} disabled={compQty <= 0 || tendersLocked}
+                          <button type="button" className="till-hit" onClick={() => setQty(compQty - 1)} disabled={compQty <= 0 || tendersLocked}
                             aria-label={`Comp one fewer ${i.name}`}
                             title={tendersLocked ? tendersLockHint : undefined}
                             style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty <= 0 || tendersLocked ? 0.4 : 1 }}>−</button>
                           <span style={{ minWidth: 14, textAlign: 'center' }}>{compQty}</span>
-                          <button type="button" onClick={() => setQty(compQty + 1)} disabled={compQty >= i.qty || tendersLocked}
+                          <button type="button" className="till-hit" onClick={() => setQty(compQty + 1)} disabled={compQty >= i.qty || tendersLocked}
                             aria-label={`Comp one more ${i.name}`}
                             title={tendersLocked ? tendersLockHint : undefined}
                             style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty >= i.qty || tendersLocked ? 0.4 : 1 }}>+</button>
