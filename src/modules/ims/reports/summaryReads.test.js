@@ -26,7 +26,16 @@ const FILES = [
   ['AnnualSummary.js',    path.join(__dirname, 'AnnualSummary.js')],
   ['PeriodComparison.js', path.join(__dirname, 'PeriodComparison.js')],
   ['BudgetVsActual.js',   path.join(__dirname, 'BudgetVsActual.js')],
+  ['ConsolidatedPnl.jsx', path.join(__dirname, '../../../pages/dashboard/ConsolidatedPnl.jsx')],
 ]
+
+// 4. ONE ARITHMETIC (S774). Monthly Summary and Consolidated P&L each carried their own copy of the
+//    revenue and COGS rules, and the copies had already drifted (the P&L paged none of its
+//    per-item reads). Both now call periodCost.js, so for those two the arithmetic assertions below
+//    look for the shared call and periodCost.js itself carries the inline form. The READS stay in
+//    each page, which is why paging and the selected columns are still checked per page.
+const SHARED_COST = new Set(['MonthlySummary.js', 'ConsolidatedPnl.jsx'])
+const PERIOD_COST = path.join(__dirname, 'periodCost.js')
 
 // One row per item per period (staff_meals is per item per DAY), so every one of them scales with
 // the window these pages read. `items` is in the list because it is the read that yields the ids
@@ -83,11 +92,12 @@ describe.each(FILES)('%s pages its per-item-per-period reads', (name, file) => {
   })
 })
 
-describe.each(FILES)('%s nets the bill-level discount out of purchases', (_name, file) => {
+describe.each(FILES)('%s nets the bill-level discount out of purchases', (name, file) => {
   const flat = flatten(file)
+  const shared = SHARED_COST.has(name)
 
   it('routes purchases through allocateBillDiscounts', () => {
-    expect(flat).toMatch(/allocateBillDiscounts\(/)
+    expect(flat).toMatch(shared ? /periodStockMaps\(/ : /allocateBillDiscounts\(/)
   })
 
   it('selects the columns allocateBillDiscounts needs', () => {
@@ -106,7 +116,7 @@ describe.each(FILES)('%s nets the bill-level discount out of purchases', (_name,
     // The shape this replaces: summing the purchase row's own qty × rate ignores the bill's
     // discount entirely. Only allocateBillDiscounts' two derived values may feed a purchase
     // figure on these pages.
-    expect(flat).toMatch(/line(Gross|Net)/)
+    expect(flat).toMatch(shared ? /valuePeriodItems\(/ : /line(Gross|Net)/)
   })
 })
 
@@ -127,6 +137,20 @@ describe.each(REVENUE_FILES)('%s keeps NULL-source sales rows', (name, file) => 
     const at = readSites(flat, 'sales_entries')[0]
     expect(`${name} ${at}`).not.toMatch(/ -1$/)
     expect(flat.slice(at, at + 200)).toMatch(/select\('[^']*\bsource\b/)
+    expect(flat).toMatch(SHARED_COST.has(name) ? /periodRevenue\(/ : /source !== 'pos_comp'/)
+  })
+})
+
+describe('periodCost.js holds the arithmetic its two callers delegate to', () => {
+  const flat = flatten(PERIOD_COST)
+
+  it('nets bill discounts through allocateBillDiscounts, from lineGross and lineNet', () => {
+    expect(flat).toMatch(/allocateBillDiscounts\(/)
+    expect(flat).toMatch(/lineGross/)
+    expect(flat).toMatch(/lineNet/)
+  })
+
+  it('filters comps in JS', () => {
     expect(flat).toMatch(/source !== 'pos_comp'/)
   })
 })

@@ -55,13 +55,13 @@ export default function GettingStartedCard({ periodLabel, stats, isTrial, showHr
     { n: 3, label: 'Build your recipes', hint: 'What each dish uses — this is what costs it', to: '/recipes', done: stats.recipeCount > 0 },
     { n: 4, label: 'Enter your sales', hint: 'Daily or bulk — this is the base every % is measured against', to: '/sales', done: stats.revenueTotal > 0 },
   ]
-  const hrSteps = counts.employees === null ? null : [
+  const hrSteps = counts.employees === null || counts.attendance === null ? null : [
     { n: 1, label: 'Add your employees', hint: 'Name, designation, join date and pay basis — then Pay Setup for their salary', to: '/hr/employees', done: counts.employees > 0 },
-    { n: 2, label: 'Mark this month’s attendance', hint: 'Payroll reads attendance — Generate from Roster fills the month in one click', to: '/hr/attendance', done: (counts.attendance ?? 0) > 0 },
+    { n: 2, label: 'Mark this month’s attendance', hint: 'Payroll reads attendance — Generate from Roster fills the month in one click', to: '/hr/attendance', done: counts.attendance > 0 },
   ]
-  const posSteps = counts.tables === null ? null : [
+  const posSteps = counts.tables === null || counts.orders === null ? null : [
     { n: 1, label: 'Set up your tables', hint: 'Tables → Quick Setup builds a floor plan in one click', to: '/pos/tables', done: counts.tables > 0 },
-    { n: 2, label: 'Bill your first order', hint: 'Open a shift, take an order, print the bill', to: '/pos', done: (counts.orders ?? 0) > 0 },
+    { n: 2, label: 'Bill your first order', hint: 'Open a shift, take an order, print the bill', to: '/pos', done: counts.orders > 0 },
   ]
 
   const allDone = steps => steps.every(s => s.done)

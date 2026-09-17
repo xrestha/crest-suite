@@ -6,11 +6,13 @@
 // get_group_pnl() (raw aggregates only — the page derives COGS, so the formula stays in one place).
 //
 // It deliberately computes NOTHING of its own. Every line reuses the figure's canonical source:
-//   Revenue  — MonthlySummary's rule: price-at-sale (unit_price) falling back to the recipe's
-//              current price, minus per-row discounts, excluding 'pos_comp' rows.
-//   COGS     — computeUsed() valued at items.per_uom_rate (is_active, is_sub_recipe=false —
-//              MonthlySummary's convention; Stock Count includes prep, this page does not, and
-//              the on-page note names the difference like S575's disclosures do).
+//   Revenue  — periodRevenue() (periodCost.js), the function MonthlySummary calls: price-at-sale
+//              (unit_price) falling back to the recipe's current price, minus per-row discounts,
+//              excluding 'pos_comp' rows.
+//   COGS     — valuePeriodItems() (periodCost.js), also MonthlySummary's: stock valued at
+//              items.per_uom_rate over is_active, is_sub_recipe=false items. Stock Count includes
+//              prep, this page does not, and the on-page note names the difference like S575's
+//              disclosures do. get_group_pnl repeats both rules in SQL for the group view.
 //   Labour   — finalized HR payroll (gross + overtime + employer SSF, get_group_summary's definition) when a
 //              finalized run exists; otherwise the overheads 'labor' bucket. NEVER both — the two
 //              labour sources are never meant to be summed (see .claude/rules/dashboards.md), and
@@ -30,7 +32,7 @@ import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { supabase } from '../../supabaseClient'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
-import { allocateBillDiscounts } from '../../modules/ims/reports/supplierAttribution'
+import { periodRevenue, periodStockMaps, valuePeriodItems } from '../../modules/ims/reports/periodCost'
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
 import { useBizInfo } from '../../shared/hooks/useBizInfo'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
@@ -194,17 +196,18 @@ export default function ConsolidatedPnl() {
   async function loadSingle(periodId) {
     setLoadError(null)
     const results = await Promise.all([
-      // MonthlySummary's exact conventions, so this statement's COGS ties to that page:
-      // active items only (S436), sub-recipes excluded (prep is counted at the raw-item level).
-      scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false),
-      supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId),
-      supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId),
+      // MonthlySummary's exact reads, so this statement's COGS ties to that page: active items
+      // only (S436), sub-recipes excluded (prep is counted at the raw-item level), and every
+      // per-item-per-period read paged, which this page did not do before S774.
+      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
+      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('purchase_entries')
         .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day')
         .eq('period_id', periodId).order('id')),
-      scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId),
+      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
-      supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId),
+      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
       // `source` selected and comps filtered in JS below, never `.neq('source','pos_comp')` (S747):
       // the column is nullable and NULL <> 'pos_comp' is NULL, so the server-side form dropped
       // every legacy row from REVENUE — the top line of the statement and the denominator of every
@@ -230,48 +233,19 @@ export default function ConsolidatedPnl() {
       { data: salesData }, { data: recipes }, { data: overheadRows }, { data: runs },
     ] = results
 
-    // Revenue — price-at-sale with current-price fallback, net of per-row discounts, comps
-    // excluded here (a comped dish was never paid for) rather than by the query; see the read.
-    const currentPriceMap = {}
-    ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price) || 0 })
-    const revenue = (salesData || []).reduce((s, row) => {
-      if (row.source === 'pos_comp') return s
-      const price = row.unit_price != null ? parseFloat(row.unit_price) : (currentPriceMap[row.recipe_id] || 0)
-      return s + parseFloat(row.qty_sold || 0) * price - (parseFloat(row.discount) || 0)
-    }, 0)
-
-    // Per-item quantity maps, valued at per_uom_rate and summed — the same shape MonthlySummary
-    // builds per category, collapsed to one statement line each.
-    const qtyMap = rows => {
-      const m = {}
-      ;(rows || []).forEach(r => { m[r.item_id] = (m[r.item_id] || 0) + (parseFloat(r.qty ?? r.physical_qty) || 0) })
-      return m
-    }
-    const openMap = qtyMap(opening), closeMap = qtyMap(closing)
-    const wasteMap = qtyMap(wastages), staffMap = qtyMap(staffMealsData)
-    // Bill discounts. `purchase_entries.discount_amount` is a BILL-level figure repeated on every
-    // line of the bill, and this statement used to ignore it entirely — so a NPR 10,000 discount
-    // made COGS NPR 10,000 too high and Net Profit NPR 10,000 too low, while the Purchases
-    // register for the same bill showed the discounted total. allocateBillDiscounts() is the
-    // shared, tested helper (supplierAttribution.js, with its own test file): it dedupes the
-    // repeated value per bill with max(), then spreads it across that bill's own lines in
-    // proportion to line value. Proportional matters here rather than a flat total subtraction,
-    // because the sum below is taken only over ACTIVE, non-sub-recipe items — subtracting a whole
-    // bill's discount when part of that bill sits outside the sum would over-credit it.
-    const purchVal = {}, retVal = {}
-    ;allocateBillDiscounts(purchases).forEach(p => { purchVal[p.item_id] = (purchVal[p.item_id] || 0) + p.lineNet })
-    ;(returns || []).forEach(r => { retVal[r.item_id] = (retVal[r.item_id] || 0) + parseFloat(r.qty) * parseFloat(r.rate) })
-
-    let openingVal = 0, purchasesVal = 0, returnsVal = 0, wastageVal = 0, staffMealsVal = 0, closingVal = 0
-    ;(items || []).forEach(i => {
-      const rate = parseFloat(i.per_uom_rate) || 0
-      openingVal    += (openMap[i.id] || 0) * rate
-      purchasesVal  += purchVal[i.id] || 0
-      returnsVal    += retVal[i.id] || 0
-      wastageVal    += (wasteMap[i.id] || 0) * rate
-      staffMealsVal += (staffMap[i.id] || 0) * rate
-      closingVal    += (closeMap[i.id] || 0) * rate
-    })
+    // Revenue and COGS inputs through periodCost.js, the same calls MonthlySummary makes on the
+    // same rows. Comps are excluded there in JS rather than by the query (see the read above).
+    // Purchases are net of bill discounts: `purchase_entries.discount_amount` is a BILL-level
+    // figure repeated on every line, and this statement once ignored it, so a NPR 10,000 discount
+    // made COGS NPR 10,000 too high while the Purchases register showed the discounted total.
+    // allocateBillDiscounts() spreads it across the bill's own lines by line value, so a bill with
+    // a line outside the active, non-sub-recipe item set is not over-credited.
+    const revenue = periodRevenue(salesData, recipes)
+    const stock = valuePeriodItems(items, periodStockMaps({
+      opening, closing, purchases, returns, wastages, staffMeals: staffMealsData,
+    }))
+    const { openingVal, returnVal: returnsVal, wastageVal, staffMealsVal, closingVal } = stock
+    const purchasesVal = stock.purchaseVal - stock.discountVal
 
     // Overheads by bucket. 'overhead' and 'tax_fees' are always their own lines; 'labor' is only
     // the labour figure when no finalized payroll exists (the two sources are never summed).

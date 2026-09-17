@@ -18,7 +18,7 @@ Rule statements only (S772). Each section's original story, word for word, is in
 - A count shown on both ClientDashboard and HrDashboard reads one hook, `useHrApprovalCounts` (`src/modules/hr/dashboard/useHrApprovalCounts.js`), never two queries.
 - Sales Breakdown renders the manual and POS Category × Day pivots side by side (`PivotTable`, `src/components/PivotTable.jsx`; data from `useSalesPivotData.js` in `src/modules/dashboard/`; `SalesPivot`'s `title` prop is "Manual Sales by Category" / "POS Sales by Category"). The two never tie out. `loadFromSalesEntries` excludes `source` `'pos'` and `'pos_comp'` rows, because `PosOrders.jsx` stamps POS bills into `sales_entries` and showing both pivots would count that revenue twice.
 - Sales Mix buckets combined manual + POS revenue by the real `recipes.category`, one slice per category present, excluding `'Sub-Recipe'`. That is valid only because `Recipes.js` makes category a `<select>` (`recipeCategories`, client-customisable, default `['Food','Beverage','Dessert','Snack','Other']`), not free text. Food and Beverage keep fixed green/purple; other categories take a fallback hex rotation. Every dashboard chart is `ChartCard`-wrapped (S488); hook file names predate the S487 rename and stay.
-- Kitchen/bar `pos_team` (station) accounts get no POS sales breakdown (`showPos && !posIsStationTeam`). Code gap: the original rule said none of Sales Breakdown, but a station login with IMS and sales access still sees the Manual pivot.
+- Kitchen/bar `pos_team` (station) accounts get no POS sales breakdown (`showPos && !posIsStationTeam`). A station login with IMS and sales access still sees the Manual pivot, on purpose (S774): it can already open Sales, so the pivot shows it nothing new.
 
 Why: each page is a different altitude behind a different gate, and weighted columns read wrong in live use.
 
@@ -131,7 +131,7 @@ History: docs/rules-archive/dashboards.md#s756-overheads-bucket-trap
 ## `/pnl` is a statement and computes nothing of its own
 
 - `/pnl` (`ConsolidatedPnl.jsx`, `SuiteGate` with `requireModules={['ims']}` inside the page) runs Revenue → COGS → Gross Profit → operating costs → Net Profit for one BS month, each line from the module that owns it.
-- Its revenue and COGS follow MonthlySummary's rules and `computeUsed()`, so it never becomes a third definition. Code gap: only `computeUsed` and `COGS_FORMULA` are imported (`shared/imsFormulas.js`); the revenue and COGS conventions are re-implemented with comments citing MonthlySummary, so a change there must be mirrored here by hand.
+- Its revenue and COGS come from `periodCost.js`, the functions MonthlySummary calls, so it never becomes a third definition (S774). Its reads must match MonthlySummary's, paging included. The group view's `get_group_pnl` is the SQL copy, kept in step by hand. Detail: `.claude/rules/ims-figures.md`.
 - `LINES` is one declaration feeding the single-outlet table, the group matrix and the Excel export. Never write a second label or tip list.
 - A grouped owner gets one column per Suite Pro outlet plus a consolidated total via `get_group_pnl()`.
 - Labour is payroll XOR the Overheads `labor` bucket per outlet, before consolidating (one branch can run payroll while a sibling types labour). When both exist, the ignored one is named on screen with its amount.
@@ -184,7 +184,7 @@ History: docs/rules-archive/dashboards.md#s643-mrr-arithmetic
 - `fcBand(pct, settings)` (`shared/imsFormulas.js`) bands Food Cost %; `lcBand` / `pcBand` / `nmBand` (`shared/operatingBands.js`) band Labour (30/37), Prime (60/65) and True Net Margin (≥20/≥10) (S660). Never an inline ternary: any page banding these imports them.
 - Render `bandFigure(pct, bander).text`, never `bander(pct).color`. The helper appends ✓/△/▲ so a call site cannot keep the colour and drop the shape.
 - `canOverheads` gates the FIGURE, not just its colour: without Overheads, True Net Margin stays unbanded and unmarked.
-- A shared band needs a shared numerator (S692). `Roster.jsx`'s Labor Forecast reads `lcBand`, and `loadedHourlyRateOf` (`laborForecast.js`) mirrors `computeMonthlyReport.js`'s per-hour estimate, with past days divided by `sales_entries` revenue. Detail: `.claude/rules/hr-payroll.md`. Code gap: `laborForecast`'s SSF requires `ssf_no`; the Owner Report estimate does not.
+- A shared band needs a shared numerator (S692). `Roster.jsx`'s Labor Forecast reads `lcBand`, and `loadedHourlyRateOf` (`laborForecast.js`) mirrors `computeMonthlyReport.js`'s per-hour estimate, with past days divided by `sales_entries` revenue. Detail: `.claude/rules/hr-payroll.md`. Every estimate charges employer SSF only with `ssf_enrolled` and `ssf_no`: `isSsfContributor()` in `computeMonthlyReport.js` and `OwnerDashboard.jsx`, the same test inline in `laborForecast.js`.
 - Sales per Labour Hour has two homes that must mean the same thing (S693): the Owner Report's `ims.revenueTotal / actualHoursWorked` for one closed period (`computeLaborAnalyticsSection.js`), and Roster's Labor Forecast over a trailing 120 days. State their real differences rather than smoothing them: the roster figure uses roster hours where Attendance has not arrived (scaled by a measured bias) and excludes outlier days. If either definition moves, move both.
 
 Why: three of the four were inline copies of the Owner Report's thresholds, and without ✓/△/▲ beside a Food Cost tile that had them.
@@ -214,7 +214,7 @@ History: docs/rules-archive/dashboards.md#s750-module-rank-gate
 
 - `src/pages/dashboard/GettingStartedCard.jsx` is the only place a new owner is told what to do first (S697). `ClientDashboard` decides WHETHER it renders (IMS empty, meaning no items and no purchases, or the client is on a trial; it also needs `showIms` and an active period). The card decides WHICH lists (Stock & costing always; Staff & payroll and Billing only while their first step is undone off-trial, and until every step is done on a trial) and removes itself when none remain. Keep both halves.
 - The card reads its four HR/POS head counts itself, only when rendered. Never fold them into ClientDashboard's main load.
-- A failed count withholds that list; `firstError()` does not apply, because this is guidance, not a figure. Code gap: only the employees and tables counts do; attendance and orders fall back to `?? 0`.
+- A failed count withholds that list; `firstError()` does not apply, because this is guidance, not a figure. A list is withheld when any of its counts failed, not only its first step's (S774).
 
 Why: the parent's rule stops a paying client seeing the card every month at `purchaseTotal 0`; the card's rule lets a trial keep its checklist after the first item exists.
 

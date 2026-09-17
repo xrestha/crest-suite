@@ -12,7 +12,7 @@ import { useSettings } from '../../../context/SettingsContext'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
-import { allocateBillDiscounts } from './supplierAttribution'
+import { periodRevenue, periodStockMaps, valuePeriodItems } from './periodCost'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { findUncountedItems, unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncountedItems'
@@ -107,73 +107,27 @@ export default function MonthlySummary() {
       { data: allSales },
       { data: recipes }
     ] = results
-    const salesData = (allSales || []).filter(r => r.source !== 'pos_comp')
-
-    const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
-    const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) || 0 })
     // Which items were COUNTED (S756 D6): a row whose physical_qty is not null, so a count of 0 is a
-    // count and a blank row is not — closePeriod.js's `physical_qty IS NOT NULL` rule. closeMap above
-    // cannot answer this: it turns both into 0.
+    // count and a blank row is not — closePeriod.js's `physical_qty IS NOT NULL` rule. The stock
+    // maps below cannot answer this: they turn both into 0.
     const countedIds = new Set((closing || []).filter(r => r.physical_qty != null).map(r => r.item_id))
-    const wasteMap = {}; (wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + parseFloat(r.qty) })
-    const staffMealMap = {}; (staffMealsData || []).forEach(r => { staffMealMap[r.item_id] = (staffMealMap[r.item_id] || 0) + parseFloat(r.qty) })
 
-    // Purchase map: item_id -> { qty, gross, value }
-    // `value` is NET of bill discounts (allocateBillDiscounts spreads each bill's single
-    // discount_amount across its own lines by line value); `qty` is untouched, since a discount
-    // changes what was paid, not what arrived. Consolidated P&L uses the same helper on the same
-    // rows, which is what keeps the two pages' COGS tied.
-    //
-    // `gross` is kept separately because the column headed "Gross Purchases" was being fed
-    // `lineNet` — the post-discount figure under a pre-discount label — so gross − net read as
-    // "returns" when part of it was the bill discount, and the Net Purchases column printed a
-    // dash on every bill that had a discount but no return.
-    const purchMap = {}
-    ;allocateBillDiscounts(purchases).forEach(p => {
-      if (!purchMap[p.item_id]) purchMap[p.item_id] = { qty: 0, gross: 0, value: 0 }
-      purchMap[p.item_id].qty += parseFloat(p.qty)
-      purchMap[p.item_id].gross += p.lineGross
-      purchMap[p.item_id].value += p.lineNet
-    })
+    // Revenue and every stock value come from periodCost.js, the arithmetic Consolidated P&L calls
+    // on the same rows, so the two pages tie by construction (S774). Purchases there are net of
+    // bill discounts through allocateBillDiscounts, with the gross kept beside them: the column
+    // headed "Gross Purchases" was once fed the post-discount figure, so gross − net read as
+    // "returns" and Net Purchases printed a dash on every discounted bill with no return.
+    const totalRevenue = periodRevenue(allSales, recipes)
+    const maps = periodStockMaps({ opening, closing, purchases, returns, wastages, staffMeals: staffMealsData })
 
-    // Returns map: item_id -> { qty, value }
-    const retMap = {}
-    ;(returns || []).forEach(r => {
-      if (!retMap[r.item_id]) retMap[r.item_id] = { qty: 0, value: 0 }
-      retMap[r.item_id].qty += parseFloat(r.qty)
-      retMap[r.item_id].value += parseFloat(r.qty) * parseFloat(r.rate)
-    })
-
-    // Revenue
-    // Revenue is computed per sale row using the price actually charged at the time (unit_price,
-    // captured on the row) — falling back to the recipe's current price only for historical rows
-    // recorded before that column existed (unit_price NULL). Previously always used the recipe's
-    // CURRENT price for every row, so a closed period's revenue silently shifted whenever a menu
-    // price changed later.
-    const currentPriceMap = {}
-    ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price) || 0 })
-    const totalRevenue = (salesData || []).reduce((s, row) => {
-      const price = row.unit_price != null ? parseFloat(row.unit_price) : (currentPriceMap[row.recipe_id] || 0)
-      return s + parseFloat(row.qty_sold || 0) * price - (parseFloat(row.discount) || 0)
-    }, 0)
-
-    // Per-category summary — COGS now uses net purchases (purchases − returns)
+    // Per-category summary — COGS uses net purchases (after bill discounts and returns)
     // items.category_id is nullable — an uncategorized item used to match no category's
     // catItems filter and so was silently excluded from every total on this report with no
     // indication. Grouped into a synthetic "Uncategorized" row instead, same shape as a real one.
     function buildCatRow(catName, catItems) {
-      const openingVal  = catItems.reduce((s, i) => s + (openMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const purchaseVal = catItems.reduce((s, i) => s + (purchMap[i.id]?.gross || 0), 0)
-      const discountVal = purchaseVal - catItems.reduce((s, i) => s + (purchMap[i.id]?.value || 0), 0)
-      const returnVal   = catItems.reduce((s, i) => s + (retMap[i.id]?.value || 0), 0)
-      const netPurchaseVal = purchaseVal - discountVal - returnVal
-      const wastageVal    = catItems.reduce((s, i) => s + (wasteMap[i.id]     || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const staffMealsVal = catItems.reduce((s, i) => s + (staffMealMap[i.id] || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const closingVal    = catItems.reduce((s, i) => s + (closeMap[i.id]     || 0) * parseFloat(i.per_uom_rate || 0), 0)
-      const cogsVal = openingVal + netPurchaseVal - wastageVal - staffMealsVal - closingVal
       return {
         category: catName,
-        openingVal, purchaseVal, discountVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal,
+        ...valuePeriodItems(catItems, maps),
         itemCount: catItems.length,
         // Items in this category with stock but no closing count (S756 D6) — the category's COGS
         // counts their whole stock as used. Filled in once the period-level gap is known, below.
@@ -214,8 +168,8 @@ export default function MonthlySummary() {
     // changed — they must keep tying to the close and the frozen report — the gap is named and, while
     // material, the FC% verdict is withheld. Built from the reads above; no extra round trip.
     const purchaseQty = {}; const purchaseValue = {}
-    Object.entries(purchMap).forEach(([id, v]) => { purchaseQty[id] = v.qty; purchaseValue[id] = v.value })
-    const gap = findUncountedItems({ items, openingQty: openMap, purchaseQty, purchaseValue, countedIds, cogs: totalCOGS })
+    Object.entries(maps.purchases).forEach(([id, v]) => { purchaseQty[id] = v.qty; purchaseValue[id] = v.value })
+    const gap = findUncountedItems({ items, openingQty: maps.opening, purchaseQty, purchaseValue, countedIds, cogs: totalCOGS })
     const uncountedIds = new Set(gap.uncounted.map(u => u.id))
     const catKeyOf = i => i.categories?.id ? i.categories.name : 'Uncategorized'
     const uncountedByCat = {}
