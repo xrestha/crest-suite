@@ -710,7 +710,8 @@ navigation and `.sidebar-wrap` is `display: none`; below it the bar goes away an
 `.sidebar-wrap` becomes the phone drawer (`translateX(-100%)` plus a 44px fixed hamburger and a
 55%-black overlay), `.main-content` takes 16px padding, `.context-bar` turns back on as the only
 place a phone states tenant and period, and every multi-column dashboard grid collapses to one
-column. **`display` for both lives in `Layout.css`, never inline in `Layout.js`** — an inline
+column. That block is `screen and (max-width: 768px)`: A4 portrait is narrower than 768px, so a bare
+width query put the phone shell on every printout (S778). **`display` for both lives in `Layout.css`, never inline in `Layout.js`** — an inline
 declaration beats an external rule at any specificity, so a component that sets its own display can
 never be hidden by a media query.
 
@@ -785,6 +786,15 @@ a 1px `#ccc` rectangle with no radius and no shadow, and normalises every cell t
 nor its placeholder (Chrome prints placeholders as if they were values), so a sheet can be handed
 over and filled in with a pen; `.print-hide-row` prints only the rows a user checked. Letterhead
 documents set Georgia and their own grayscale ink ramp rather than reading theme tokens.
+
+**Paper gets the whole page and the Light ink, whatever the screen had (S778).** The shell scrolls
+inside `.layout-root`/`.main-content`, and printed as it stood that box was one screenful plus its
+scrollbar, with the rest of the page dropped. The print block sets both to `height: auto; overflow:
+visible`. It also re-points the ink tokens (`--theme-text1..3`, `--theme-accent-ink`, the signal
+`*-text` variants, border and ground) at Modernist Light with `!important`, because ThemeContext
+sets them inline on `<html>` and Night's near-white text otherwise prints a faint grey. A running
+footer is an `@page` margin box, never a `position: fixed` element that a long table paints over;
+the Owner Report's also counts pages.
 
 **Promoting a label to a `<button>` deletes it from paper.** `button { display: none !important }`
 is blanket, so the moment a column heading becomes a sort control the printed table loses that

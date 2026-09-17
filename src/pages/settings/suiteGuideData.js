@@ -106,7 +106,7 @@ export const SUITE_GUIDE_GROUPS = [
           'The month\'s formal report, captured as a FROZEN SNAPSHOT when the period closes and never recomputed afterwards — even if the underlying data is later corrected in place. That is the whole design: it is the document that was issued, not a live query dressed as one. Every other page in the product is the opposite.',
         workflow: [
           'Generated automatically at period close. Select a closed period to read the report that close produced. If a closed month has none yet (closed before this feature existed, or generation failed at close), opening it here generates and saves one on first view. An open period has no report.',
-          'Print it or export to Excel with the client letterhead; the workbook states the period it covers.',
+          'Print it or export to Excel with the client letterhead; the workbook states the period it covers. The printout is several A4 pages — Menu Engineering, Inventory Depth and Trend each start a fresh page (owner decision, S778) — with the business, month and "Page X of Y" in the bottom margin of every page. In Chrome or Edge; a browser that cannot draw page-margin text prints it without that footer.',
           'Admin only: Regenerate Snapshot rebuilds the report from today\'s data and overwrites the frozen one, after a confirmation. Use it after correcting a closed month, or after finalizing payroll late.',
         ],
         fields: [

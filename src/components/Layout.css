@@ -3298,6 +3298,37 @@ textarea::placeholder {
      bar — brand, module tabs, tenant and period — at the head of every printed document. */
   .sidebar-wrap, .app-topnav { display: none !important; }
   .main-content { margin-left: 0 !important; padding: 0 !important; }
+  /* On screen the shell is a scroll box: .layout-root is 100dvh (S691), and .main-content's
+     `overflow-x: hidden` makes its overflow-y compute to auto, so the page scrolls INSIDE it. Paper
+     cannot scroll. Printed as it stood, the browser drew that box — one screen's height of the page
+     with its scrollbar down the right edge — and dropped everything below it: the Owner Report printed
+     its first screenful and nothing more (S778), as did every browser-printed page longer than one. */
+  .layout-root { display: block !important; height: auto !important; overflow: visible !important; padding-top: 0 !important; }
+  .main-content { overflow: visible !important; }
+  /* Paper is white whatever theme the screen is on. The tokens are inline styles ThemeContext puts on
+     <html>, and on Modernist Night --theme-text1 is near-white — so every title, paragraph and
+     heading that reads a token printed near-white, which Chrome darkens only to a faint grey. An
+     `!important` stylesheet declaration beats a normal inline one, so this points the ink tokens at
+     Modernist Light's values for the print only. Keep them in step with PRESETS.light. */
+  :root {
+    --theme-bg: #ffffff !important;
+    --theme-card: #ffffff !important;
+    --theme-border: #d7d3d3 !important;
+    --theme-border-lt: #e5e3e3 !important;
+    --theme-text1: #201e1d !important;
+    --theme-text2: #605d5d !important;
+    --theme-text3: #6c6868 !important;
+    --theme-accent: #dd2b0f !important;
+    --theme-accent-ink: #7c1405 !important;
+    --theme-green: #15803d !important;
+    --theme-red: #dc2626 !important;
+    --theme-amber: #b45309 !important;
+    --theme-purple: #7c3aed !important;
+    --theme-green-text: #116b33 !important;
+    --theme-red-text: #8f2440 !important;
+    --theme-amber-text: #964900 !important;
+    --theme-purple-text: #6d28d9 !important;
+  }
   .btn, button { display: none !important; }
   body { background: white !important; color: black !important; }
   /* Plain rectangular box — no rounded corners/drop-shadow "card" look on paper. */
@@ -3408,7 +3439,12 @@ textarea::placeholder {
 .mobile-hamburger { display: none; }
 .sidebar-overlay  { display: none; }
 
-@media (max-width: 768px) {
+/* `screen and`, because a printed page matches a bare width query too: A4 portrait leaves ~718px
+   between Chrome's default margins, so every portrait print used to take this phone layout — the
+   context bar ("CLIENT · Ashwin 2083 Open · Pro", naming the OPEN month over a report for a closed
+   one), 16px of padding the print block's 0 could not beat, and a 60px indent on every page title
+   for a hamburger that never prints (S778). Nothing in here means anything on paper. */
+@media screen and (max-width: 768px) {
   /* The bar's dropdowns are a pointer-and-keyboard shape; at phone width the drawer is the whole
      navigation again, exactly as it was before the bar existed. */
   .app-topnav { display: none; }

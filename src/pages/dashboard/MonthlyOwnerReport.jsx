@@ -28,6 +28,18 @@ const sectionTitleStyle = {
   color: 'var(--theme-accent-ink)', margin: '0 0 8px', paddingBottom: 4, borderBottom: '1px solid var(--theme-border-lt)',
 }
 
+// The printed page: A4, and the running footer drawn in its bottom margin boxes (see the <style>
+// where this is rendered). The label is a business name, so it is escaped into a CSS string. The
+// greys are the print block's own literals; a margin box is outside the element tree the theme
+// tokens resolve in.
+const cssString = s => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"`
+function pageFooterCss(label) {
+  const box = 'font-family: Archivo, sans-serif; font-size: 9px; color: #555; border-top: 1px solid #ccc; vertical-align: top; padding-top: 3mm;'
+  return `@page { size: A4 portrait; margin: 16mm 14mm 20mm; `
+    + `@bottom-left { content: ${cssString(label)}; ${box} } `
+    + `@bottom-right { content: "Page " counter(page) " of " counter(pages); ${box} } }`
+}
+
 // A two-column "Label ... Value" line item — the document convention used throughout this
 // report instead of dashboard-style KPI tiles (see CLAUDE.md's Monthly Owner/Manager Report
 // section for why: a frozen artifact meant to be read/printed as a report, not glanced at live).
@@ -377,11 +389,17 @@ export default function MonthlyOwnerReport() {
 
         {!loading && !generating && report && snapshot && (
           <div className="card owner-report-doc" style={{ maxWidth: 760, margin: '0 auto', padding: '22px 30px' }}>
-            {/* Running footer — hidden on screen, fixed to the foot of every printed page so a
-                sheet separated from page 1 still says which business and period it belongs to. */}
-            <div className="owner-report-running-foot" style={{ display: 'none' }}>
-              {bizInfo.name || '—'} · Monthly Owner/Manager Report · {periodLabel}
-            </div>
+            {/* Running footer, so a sheet separated from page 1 still says which business and
+                period it belongs to — and, since S778, which page of how many. It lives in the page's
+                bottom MARGIN. It used to be a position: fixed div, and Chrome paints a table that runs
+                to the foot of a page straight over a fixed element, so the footer vanished on exactly
+                the pages a long list filled. A margin box sits outside the content area where nothing
+                reaches it, and it can count pages. It is a <style> rendered here, not a rule in the
+                .css file, because the text is this report's own and because an @page rule in a lazy
+                chunk's stylesheet stays in the document after you leave, re-margining every later
+                print in the session. Chromium (Chrome, Edge) draws margin boxes; a browser that does
+                not prints the report without a footer. */}
+            <style>{pageFooterCss(`${bizInfo.name || '—'} · Monthly Owner/Manager Report · ${periodLabel}`)}</style>
             {/* Letterhead */}
             <div className="owner-report-letterhead" style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid var(--theme-border)' }}>
               <h2 style={{ margin: '0 0 3px', fontSize: 17, fontWeight: 800, letterSpacing: '0.02em' }}>{bizInfo.name || '—'}</h2>
@@ -522,7 +540,7 @@ export default function MonthlyOwnerReport() {
             )}
 
             {snapshot.pos && (
-              <div>
+              <div className="owner-report-section">
                 <h3 style={sectionTitleStyle}>Crest POS</h3>
                 <div className="table-wrap" style={{ marginBottom: 8 }}>
                   <table className="data-table owner-report-table"><tbody>

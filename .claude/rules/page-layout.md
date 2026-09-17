@@ -43,6 +43,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - Mute a no-activity row by weight and the anchor cells' colour, never by row opacity, which takes the row below AA (S613).
 - State a table's currency once (a `Tip` on the first header, e.g. "All figures in NPR."), never "(NPR)" in every column header.
 - Clearance on an `overflow: auto` element is margin, never padding: padding pushes its scrollbar away from the content.
+- A scroll container around page content prints as one screenful unless the print block resets it to `height: auto; overflow: visible`; a shell breakpoint is `screen and (max-width: …)`, because paper matches a bare width query (S778).
 - History: docs/rules-archive/dashboards.md#stock-summary-table-density
 
 ## Overlays and scrims

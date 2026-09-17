@@ -377,6 +377,14 @@ column, and inline beats the class silently.
 reads correctly while the page header is on screen. Full rule in `DESIGN.md` and
 `.claude/rules/bs-calendar.md`; Excel exports keep the numeric column.
 
+### Paper is not a screen: three shell rules print used to inherit (S778)
+
+- **A scroll box prints as one screenful.** The shell scrolls inside `.layout-root`/`.main-content` (S691), and Chrome printed that box with its scrollbar, dropping everything below the fold, on every browser-printed page. The print block resets both to `height: auto; overflow: visible`. A new scroll container around page content needs the same reset.
+- **A bare width media query matches paper.** A4 portrait leaves ~690–718px, so `@media (max-width: 768px)` put the phone shell (context bar, 16px padding, 60px title indent) on every print. Shell-chrome breakpoints are `screen and (…)`.
+- **Theme tokens are inline on `<html>`, so paper inherited the screen theme**: Night's near-white text printed faint grey. The print block re-points the ink tokens at Modernist Light with `!important`; keep them in step with `PRESETS.light`.
+
+Verify a print with `page.pdf()` in Playwright and read the PDF, never the print preview's first page.
+
 ### Turning a label into a button deletes it from print (S690)
 
 `@media print` in `Layout.css` carries a blanket `button { display: none !important }` — every
