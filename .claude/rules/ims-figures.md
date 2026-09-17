@@ -4,7 +4,21 @@ paths:
   - "src/utils/demandForecastData.js"
   - "src/utils/demandForecastMath.js"
   - "src/modules/ims/stockcount/**"
-  - "src/modules/ims/reports/**"
+  # Narrowed S770 from `src/modules/ims/reports/**`: this file loaded on the VAT, payment and
+  # supplier reports, which it never mentions. Listed below: every report it names, plus
+  # BudgetVsActual by subject. A new summary, stock or menu report must be added here by hand.
+  - "src/modules/ims/reports/AnnualSummary.js"
+  - "src/modules/ims/reports/BestSellers.js"
+  - "src/modules/ims/reports/BudgetVsActual.js"
+  - "src/modules/ims/reports/FifoReport.js"
+  - "src/modules/ims/reports/MonthlySummary.js"
+  - "src/modules/ims/reports/OutstandingPayables.js"
+  - "src/modules/ims/reports/Overheads.js"
+  - "src/modules/ims/reports/PeriodComparison.js"
+  - "src/modules/ims/reports/StockAgeing.js"
+  - "src/modules/ims/reports/stockAgeingCalc.js"
+  - "src/modules/ims/reports/stockAgeingCalc.test.js"
+  - "src/modules/ims/reports/summaryReads.test.js"
   - "src/modules/ims/sales/**"
   # Added S713. Five files here PRINT a banded food-cost figure — MenuPricing, MenuRepricing,
   # MenuEngineering, RecipeMargin, Recipes — and this rule, which is the one that says how, did

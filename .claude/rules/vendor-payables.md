@@ -1,6 +1,32 @@
 ---
 paths:
-  - "src/modules/ims/reports/**"
+  # Narrowed S770 from `src/modules/ims/reports/**`: this file loaded on BestSellers, FifoReport,
+  # Overheads and StockAgeing, which it never mentions. Listed below: every report it names, plus
+  # PaymentReport and PurchaseOneLakhAboveReport by subject. A new supplier or payables report
+  # must be added here by hand.
+  - "src/modules/ims/reports/AnnualSummary.js"
+  - "src/modules/ims/reports/BudgetVsActual.js"
+  - "src/modules/ims/reports/MonthlySummary.js"
+  - "src/modules/ims/reports/PeriodComparison.js"
+  - "src/modules/ims/reports/summaryReads.test.js"
+  - "src/modules/ims/reports/NonVatReport.js"
+  - "src/modules/ims/reports/VatReport.js"
+  - "src/modules/ims/reports/OutstandingPayables.js"
+  - "src/modules/ims/reports/PaymentReport.js"
+  - "src/modules/ims/reports/PurchaseOneLakhAboveReport.js"
+  - "src/modules/ims/reports/SupplierContribution.js"
+  - "src/modules/ims/reports/VendorBalanceConfirmation.js"
+  - "src/modules/ims/reports/VendorBalanceConfirmationPrint.jsx"
+  - "src/modules/ims/reports/VendorReport.js"
+  - "src/modules/ims/reports/payablesAllocation.js"
+  - "src/modules/ims/reports/payablesAllocation.test.js"
+  - "src/modules/ims/reports/purchaseTaxSplit.js"
+  - "src/modules/ims/reports/purchaseTaxSplit.test.js"
+  - "src/modules/ims/reports/readPriorBillLines.js"
+  - "src/modules/ims/reports/supplierAttribution.js"
+  - "src/modules/ims/reports/supplierAttribution.test.js"
+  - "src/modules/ims/reports/vendorBalanceHelpers.js"
+  - "src/modules/ims/reports/vendorBalanceHelpers.test.js"
   - "src/modules/ims/purchases/**"
   - "src/modules/ims/vendors/**"
   - "src/modules/ownerReport/computeVendorPurchasingSection.js"

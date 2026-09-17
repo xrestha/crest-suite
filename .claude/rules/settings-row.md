@@ -9,6 +9,12 @@ paths:
   - "src/modules/pos/customers/LoyaltyTab.jsx"
   - "src/modules/hr/tada/TadaSettingsModal.js"
   - "src/modules/ims/stockcount/StockCountSettings.jsx"
+  # Added S770: the text below names these four as writers of the settings row, and the rule did
+  # not load on any of them.
+  - "src/modules/ims/staff/ImsStaff.jsx"
+  - "src/modules/hr/staff/HrStaff.jsx"
+  - "src/modules/pos/staff/PosStaff.jsx"
+  - "src/modules/ims/recipes/ComboBuilder.js"
 # Started S739. The rule below was written in S730 and lived in ims-figures.md, whose `paths:` has
 # never matched `src/pages/Settings.js` — so the rule most about that file did not load when anyone
 # opened it, and S739 then re-found two of the same shapes on the admin half of the page and a third

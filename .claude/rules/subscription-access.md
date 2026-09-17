@@ -4,7 +4,8 @@ paths:
   - "src/components/ProtectedRoute.js"
   - "src/components/SubscriptionLock.js"
   - "src/pages/AdminClients.js"
-  - "src/pages/adminClients/**"
+  # S770: narrowed from `adminClients/**` to the drawer, the one file there that edits a client.
+  - "src/pages/adminClients/ClientDrawer.js"
   - "src/components/Layout.js"
 ---
 

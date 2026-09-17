@@ -42,11 +42,11 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
 // ---- The ratchet. Only ever lower this. --------------------------------------------------------
-const CEILING = 18000
-// Measured 2026-09-17 (S769) at 14,192 chars (LF-normalised), after a context-reduction pass that
-// cut the file from 49,876. Margin: 3,808 — wider than usual on purpose, because a user-supplied
-// "Context discipline" section is still to be appended. Lower this again once it lands.
-// (Previously 51,500, measured 2026-09-15 at 49,674.)
+const CEILING = 17500
+// Measured 2026-09-17 (S770) at 15,766 chars (LF-normalised), after the "Context discipline"
+// section and the consolidated output rule landed and the module table gained the rules files
+// split out that day. Margin: 1,734, back to the usual size.
+// (Previously 18,000, measured 2026-09-17 (S769) at 14,192; before that 51,500 at 49,674.)
 // ------------------------------------------------------------------------------------------------
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')

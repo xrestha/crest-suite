@@ -73,12 +73,7 @@ A related but distinct artifact, not a fourth dashboard: **`/owner-report`** (`M
 
 ### Owner-altitude pages need a role guard, not just a Suite gate (S601, extended S617)
 
-/owner-dashboard, /owner-report and /pnl are rendered in Layout.js only for `isAdmin || isOwner`,
-but SuiteGate checks `suite_plan` and ProtectedRoute checks a session — neither checks a role. Two
-of the three had no route guard, and because the staff-isolation policies are RESTRICTIVE SELECT
-filters (empty result, no error), a POS PIN account got a full P&L reading Net Profit = Revenue at
-100% margin rather than an access error. All three now carry
-`if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />` after their hooks.
+`/owner-dashboard`, `/owner-report` and `/pnl` each carry the root `CLAUDE.md` role guard after their hooks (S601): `SuiteGate` checks `suite_plan` and `ProtectedRoute` checks a session, and neither checks a role.
 See `.claude/rules/access-control.md`, "A page reachable by URL needs the guard its nav item implies" (the root `CLAUDE.md` keeps the one-line rule).
 
 **`/group-dashboard` was the fourth and it was worse (S617), because the product advertised it.**

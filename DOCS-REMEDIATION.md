@@ -934,6 +934,16 @@ judgement, which is precisely the mistake this entry exists to avoid.
 **Not scheduled.** It is a decision about what the design system is for, not a defect with a
 correct fix, so it does not belong in the ordered list below.
 
+**Decided 2026-09-17 (S770): split by concern, with a summary that loads where the full file does
+not.** `design-system.md` now loads on CSS, `src/components/**` and `DESIGN.md` only. The page-level
+rules a JSX edit needs are restated in `page-layout.md` on `src/pages/**` and `src/modules/**`, and
+`design-system.md` opens by saying the two change together. Nav and token rules moved to
+`navigation.md` and `design-tokens.md`. Other files were narrowed or split the same way, and history
+went to `docs/rules-archive/`. The median load of one IMS file fell from 366k to 217k and a page
+from 178k to 71k (full table in the S770 CHANGELOG entry). **Still open:** the reported metric in
+`check-rules-globs.mjs` described under "Do, when it is picked up", and condensing the
+rule-plus-story sections.
+
 ---
 
 ## T14 — Prose path and line-number references rot exactly like globs, and nothing checks them

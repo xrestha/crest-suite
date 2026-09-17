@@ -19,6 +19,18 @@ in `.claude/rules/*.md`; each rules file loads automatically when you open a fil
 - `npm run check:docs`: rules-glob, pointer-stub and CLAUDE.md size checks. Run it after any edit to this file or `.claude/rules/`.
 - Tests: `npx react-scripts test --watchAll=false <pattern>`. Jest via CRA; `*.test.js` files sit next to their source.
 - Docs: a session entry goes in the newest `CHANGELOG/S###-S###.md`, then `npm run changelog:index`, never in `README.md`. After editing tracked `.md` files, run `npm run mirror:docs` to copy them to the E: backup drive.
+- **Trim command output without hiding exit codes: redirect to a file, echo the exit code, then tail.** Builds and tests run through the Bash tool, so this works as written: `npm run build:verify > /tmp/build.log 2>&1; echo "exit=$?"; tail -40 /tmp/build.log`. Never pipe a build or test run straight into `tail`: a pipeline reports `tail`'s status, so a build that printed `Failed to compile` reads as exit 0 (S693).
+
+## Context discipline
+
+- Locate before reading: grep/glob first, then read only relevant line ranges. Don't read whole files over ~300 lines unless the task needs it.
+- Never read lockfiles, build artefacts (`build/`), generated or minified files.
+- Run only the relevant test file unless asked for the full suite. Trim its output as in Commands above.
+- For open-ended exploration ("where is X handled", "how does Y work"), use a subagent and return a short summary with file paths and line numbers.
+- When more than 3 source files will change, give a short plan and wait for approval before editing. The CHANGELOG entry, the changelog index, `CACHE_NAME` and `APP_VERSION` don't count. Any migration always gets a plan first.
+- Don't re-read files already read this session unless they changed.
+- When a task is complete, say so and remind me to run /clear before the next task.
+- If a session has grown long and I switch to an unrelated task, tell me to /clear or /handoff first.
 
 ## Stack
 
@@ -97,7 +109,7 @@ Each file loads on its own when you open a matching path. Read it first when pla
 | Working on | Read |
 | --- | --- |
 | Plans, tiers, gates, MRR, admin client screens | `.claude/rules/access-control.md`, `.claude/rules/subscription-access.md` |
-| Logins, Owner vs staff, PINs, passwords | `.claude/rules/accounts-and-logins.md`, `.claude/rules/auth-and-pins.md` |
+| Logins, Owner vs staff, PINs, passwords, login page UX | `.claude/rules/accounts-and-logins.md`, `.claude/rules/auth-and-pins.md`, `.claude/rules/login-pages.md` |
 | Multi-outlet groups, `scopedDb` exemptions | `.claude/rules/multi-outlet.md` |
 | SQL, RLS, grants, migrations, Edge Functions | `.claude/rules/supabase-sql.md` |
 | IMS figures: COGS, food-cost bands, on-hand/par | `.claude/rules/ims-figures.md` |
@@ -109,13 +121,17 @@ Each file loads on its own when you open a matching path. Read it first when pla
 | The three dashboards | `.claude/rules/dashboards.md` |
 | Monthly Owner Report snapshot | `.claude/rules/owner-report.md` |
 | POS billing, shifts, IMS handoff, offline queue | `.claude/rules/pos-billing.md` |
+| POS reservations, booking, arrival alert | `.claude/rules/pos-reservations-alerts.md` |
 | HR payroll, settlement, approvals | `.claude/rules/hr-payroll.md` |
 | Crest Staff (Self-Service PWA), web push | `.claude/rules/staff-app.md` |
 | Settings row | `.claude/rules/settings-row.md` |
 | Client data export/import | `.claude/rules/data-export.md` |
-| Design tokens, CSS, motion | `.claude/rules/design-system.md` |
+| CSS, class names, motion | `.claude/rules/design-system.md` |
+| Page layout in JSX: tables, sticky, scrims, stat grids, money/time | `.claude/rules/page-layout.md` |
+| Theme tokens and presets; sidebar and command palette | `.claude/rules/design-tokens.md`, `.claude/rules/navigation.md` |
 | Error messages | `.claude/rules/error-messages.md` |
-| Paging, caching, hangs, slow pages | `.claude/rules/frontend-performance.md` |
+| Paging, hangs, slow pages; page caching and offline | `.claude/rules/frontend-performance.md`, `.claude/rules/offline-and-cache.md` |
+| Archived rule history (never auto-loads) | `docs/rules-archive/` |
 | BS calendar table and stored-date repair | `.claude/rules/bs-calendar.md` |
 | Input arithmetic | `.claude/rules/input-arithmetic.md` |
 | Legal documents | `.claude/rules/legal-documents.md` |

@@ -2,7 +2,8 @@
 paths:
   - "src/modules/admin/dataExport/**"
   - "src/pages/AdminClients.js"
-  - "src/pages/adminClients/**"
+  # S770: narrowed from `adminClients/**`; of that directory only the drawer's Backup tab exports.
+  - "src/pages/adminClients/ClientDrawer.js"
 ---
 
 # Client data Export / Import (S545)

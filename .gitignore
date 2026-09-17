@@ -28,6 +28,8 @@ yarn-error.log*
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .impeccable/hook.cache.json
+# /handoff writes this for the next session to read after /clear; it is scratch, not history.
+/HANDOFF.md
 __pycache__/
 *.pyc
 .playwright-mcp/

@@ -4,7 +4,7 @@ paths:
   - "src/components/ReportLoadError.jsx"
   - "src/components/RowDisclosure.jsx"
   - "src/shared/queryError.js"
-  - "src/shared/errorText.js"
+  # S770: `src/shared/errorText.js` dropped; error-messages.md owns that file.
   - "src/shared/excelLetterhead.js"
   - "src/shared/hooks/useBizInfo.js"
   - "src/modules/ims/reports/**"
@@ -256,15 +256,7 @@ guise: when a report cannot judge, it says so instead of reporting zero.
 
 Migrated from the root `CLAUDE.md` (S663).
 
-`ConsolidatedPnl.jsx` passed its whole table as `ReportPage`'s `children`. `ReportPage` renders
-`children` only once the page has loaded — but **JSX children are an ARGUMENT**: the expression is
-fully evaluated by the parent and handed over as a finished element tree, so the gate inside the
-wrapper never gets a say. `pnl` is `useState(null)` and `loading` is `useState(true)`, so
-`LINES.map(l => … pnl[l.key] …)` ran on the first render and threw on `revenue`. It crashed on
-**every** visit for a single-outlet client, before `SuiteGate` even rendered — so the entitlement
-gate could not stop it either. Only an early return, a guard at the call site (`{!stmt ? null : …}`),
-or a render prop can protect it. The same applies to `banners`/`stats`/`note`/`filters`/`footnote`:
-`ReportPage` suppresses them while loading or after an error, but the caller still *evaluates* them.
+This is the root `CLAUDE.md` rule (JSX children are evaluated before the wrapper runs), and `ReportPage` is where it bit: in S601 `ConsolidatedPnl` crashed on every visit this way, before `SuiteGate` even rendered. It applies to `banners`/`stats`/`note`/`filters`/`footnote` too: `ReportPage` suppresses them while loading or after an error, but the caller still *evaluates* them.
 
 Related, from the same audit: **`banners` is no longer rendered over the error card.** A banner is
 derived from state the caller set before the read, so ConsolidatedPnl's "Provisional — this period is
