@@ -183,14 +183,14 @@ const pinDots = Math.max(4, pin.length)
   // shape as never activated, because the way out is the same: a manager, on this tablet, in /pos.
   if (deviceDead) {
     return (
-      <div style={{
+      <main style={{
         minHeight: '100vh', background: 'var(--theme-bg)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}>
         <div className="card" role="alert" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 8 }}>
+          <h1 style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', margin: '0 0 8px' }}>
             This till needs to be activated again by a manager
-          </div>
+          </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
             Its device key was revoked, so staff can't sign in on it. An owner or POS manager can sign
             in here, open <strong>Crest POS</strong>, and activate this tablet again.
@@ -199,21 +199,21 @@ const pinDots = Math.max(4, pin.length)
             Owner Login
           </button>
         </div>
-      </div>
+      </main>
     )
   }
 
   if (!clientId || !deviceSecret) {
     return (
-      <div style={{
+      <main style={{
         minHeight: '100vh', background: 'var(--theme-bg)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}>
         <div className="card" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>📱</div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 8 }}>
+          <div aria-hidden="true" style={{ fontSize: 32, marginBottom: 12 }}>📱</div>
+          <h1 style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', margin: '0 0 8px' }}>
             This device isn't set up yet
-          </div>
+          </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
             Staff PIN login only works on a device an owner or manager has activated first.
             Log in with your owner account, open <strong>Crest POS</strong>, and click
@@ -223,12 +223,12 @@ const pinDots = Math.max(4, pin.length)
             Owner Login
           </button>
         </div>
-      </div>
+      </main>
     )
   }
 
   return (
-    <div style={{
+    <main style={{
       minHeight: '100vh',
       background: 'var(--theme-bg)',
       display: 'flex',
@@ -246,9 +246,9 @@ const pinDots = Math.max(4, pin.length)
       {/* Header — Georgia serif is reserved for exactly two places in this product: the
           sidebar wordmark and this login screen (DESIGN.md §3, The One Serif Rule). */}
       <div style={{ marginBottom: 36, textAlign: 'center' }}>
-        <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.02em', color: 'var(--theme-text1)', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
+        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, fontFamily: 'Georgia, serif', letterSpacing: '0.02em', color: 'var(--theme-text1)', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
           {clientName}
-        </div>
+        </h1>
         <div style={{ fontSize: selected ? 18 : 14, fontWeight: selected ? 600 : 400, color: selected ? 'var(--theme-text1)' : 'var(--theme-text3)', marginTop: 10, letterSpacing: 0.2 }}>
           {selected ? `Enter PIN for ${selected.full_name}` : 'Who are you?'}
         </div>
@@ -359,8 +359,12 @@ const pinDots = Math.max(4, pin.length)
             </p>
           )}
 
-          {/* PIN dots */}
-          <div style={{ display: 'flex', gap: 14, justifyContent: 'center' }}>
+          {/* PIN dots. The dots are hidden from a screen reader, and the count is announced instead
+              (S776): the pad had given no feedback at all to someone who cannot see it fill. */}
+          <p className="sr-only" aria-live="polite">
+            {pin.length === 0 ? 'No digits entered' : `${pin.length} digit${pin.length === 1 ? '' : 's'} entered`}
+          </p>
+          <div aria-hidden="true" style={{ display: 'flex', gap: 14, justifyContent: 'center' }}>
             {Array.from({ length: pinDots }).map((_, i) => (
               <div key={i} style={{
                 width: 14, height: 14, borderRadius: 0,
@@ -378,6 +382,7 @@ const pinDots = Math.max(4, pin.length)
                 key={i}
                 onClick={() => pressKey(k)}
                 disabled={!k || signingIn}
+                aria-label={k === 'C' ? 'Clear PIN' : k === '⌫' ? 'Delete last digit' : undefined}
                 style={{
                   width: 72, height: 72,
                   background: k ? 'var(--theme-card)' : 'transparent',
@@ -433,6 +438,6 @@ const pinDots = Math.max(4, pin.length)
         </div>
       )}
     </div>
-    </div>
+    </main>
   )
 }

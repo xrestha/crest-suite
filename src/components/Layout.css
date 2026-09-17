@@ -2024,6 +2024,11 @@ tr.interactive-row:focus-visible {
 
 .table-wrap {
   overflow-x: auto;
+  /* A containing block for what is absolutely positioned inside (S776). `.sr-only` text is
+     position: absolute, and with no positioned ancestor it escaped this scroll container and sat at
+     its static place far to the right of a wide table — /pos measured 478px of scroll width at
+     390px wide, the whole page sliding sideways, from a label nobody can see. */
+  position: relative;
 }
 
 /* Reserves space at the bottom of a scrollable table so the fixed-position Fab
@@ -2613,6 +2618,15 @@ textarea:focus-visible {
 .form-input::placeholder,
 .form-field input::placeholder {
   color: var(--theme-text3);
+}
+
+/* Every other field too (S776). An inline-styled input — the whole POS till — fell back to the
+   browser's own placeholder grey, measured 3.65:1 on the menu search and 3.44:1 on "+ Kitchen note"
+   in Dark. --theme-text3 clears AA on every preset; opacity: 1 because Firefox dims it again. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--theme-text3);
+  opacity: 1;
 }
 
 /* `.form-input` fills its container, which is right inside a `.form-field` column and wrong in a

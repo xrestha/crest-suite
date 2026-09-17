@@ -89,23 +89,22 @@ const bounded = (call, label, ms = CLOSE_STEP_MS) =>
 // the print pipeline), and a second copy of any of it is exactly the failure CLAUDE.md warns about.
 export default function PosOrders({ billingStation = false } = {}) {
   const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, hasFeature, customizationEnabled } = useAuth()
+  // Who the floor's Inventory-posting banners are for (S776): the recovery is Periods → Post POS bills
+  // to Inventory, an owner/manager job. hasPosAccess resolves admin and Owner to manager already.
+  const canSeeImsPosting = isAdmin || isOwner || hasPosAccess('manager')
   const { scopedFrom, scopedInsert, scopedUpsert, scopedUpdate, scopedDelete } = useScopedDb()
   // Rendered in BOTH returns (this file has two — S578). One pending ask at a time, drawn by
   // whichever tree is live: the admin clear-all tool asks from the floor, and the discard-payments
   // and discard-unsaved-items asks (S754) come from the order screen.
   const { ask: askConfirm, confirmEl } = useConfirm()
   const { colors } = useTheme()
-  // Solid-amber badges (offline-pending dot, pending-items count, writeoff button) were hardcoded
-  // to black text — passes on Dark but computes to 4.18:1 (fails WCAG AA) on Light's
-  // amber (#b45309), a genuinely dark burnt-orange. Same contrast-pick approach avatarColorFor()
-  // already uses, so this stays correct if a future preset's amber ever needs white too.
+  // Solid-amber badges (offline-pending dot, pending-items count) were hardcoded to black text —
+  // passes on Dark but computes to 4.18:1 (fails WCAG AA) on Light's amber (#b45309), a genuinely
+  // dark burnt-orange. Same contrast-pick approach avatarColorFor() already uses, so this stays
+  // correct if a future preset's amber ever needs white too. The solid red Void and solid amber
+  // Complimentary buttons that also needed a picked foreground are tints now (S776, DESIGN.md's
+  // danger-is-a-tint rule: `btn-danger btn-danger--strong` and `amber-action-btn`).
   const amberBadgeText = contrastRatio(colors.amber, '#ffffff') >= contrastRatio(colors.amber, '#000000') ? '#ffffff' : '#000000'
-  // Same reasoning for the red solid fill (the Void Order button), which was hardcoding white text
-  // and failing WCAG AA on light pastel presets. The green equivalent is gone with the last two
-  // green fills in the module: the Payment button is now the accent (this system's primary-action
-  // colour — green is its "done" verdict, and the bill has not been paid yet), and the "✓ KOT"
-  // sent chip is a quiet brass tint. See posSignals.js.
-  const redBadgeText    = contrastRatio(colors.red, '#ffffff')   >= contrastRatio(colors.red, '#000000')   ? '#ffffff' : '#000000'
 
   // Upsell/Cross-sell suggestion chips (built S210).
   // These used to ladder off pos_plan (starter/growth/pro). Crest POS is sold as a yes/no module
@@ -707,6 +706,23 @@ export default function PosOrders({ billingStation = false } = {}) {
     window.addEventListener(POS_BEFORE_LOCK_EVENT, onBeforeLock)
     return () => window.removeEventListener(POS_BEFORE_LOCK_EVENT, onBeforeLock)
   }, [])
+
+  // The covers numpad answers the keyboard too (S776): digits, Backspace and Enter. It was click-only,
+  // on a till that often has a keyboard. Escape stays the Modal's own; a focused button keeps its
+  // own Enter, so "Open Order" is never pressed twice. The dialog opens with focus on its × button,
+  // so a typed digit moves focus to Open Order — otherwise "4, Enter" closed the dialog.
+  const coversConfirmRef = useRef(null)
+  useEffect(() => {
+    if (!coversModal) return
+    const onKey = e => {
+      if (e.target instanceof HTMLElement && e.target.matches('input, textarea, select')) return
+      if (/^[0-9]$/.test(e.key)) { e.preventDefault(); numpadPress(e.key); coversConfirmRef.current?.focus() }
+      else if (e.key === 'Backspace') { e.preventDefault(); numpadBackspace() }
+      else if (e.key === 'Enter' && !(e.target instanceof HTMLElement && e.target.matches('button'))) { e.preventDefault(); confirmCovers() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [coversModal, pendingCoversStr, pendingTable]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Armed by restoreLockedCart, consumed by showLoadedOrder / startFreshOrder (applyLockedCart).
   const lockedCartRef = useRef(null)
@@ -4177,7 +4193,7 @@ The tables were left occupied rather than freed with their orders still open.`)
             borderBottom: '1px solid var(--theme-border)',
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'thin' }}>
               {menuCats.map(c => (
                 <button key={c} className={`tab-btn till-hit${catTab === c ? ' tab-btn--active' : ''}`}
                   onClick={() => setCatTab(c)} style={{ flexShrink: 0 }}>{c}</button>
@@ -4253,7 +4269,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                         lineHeight: 1.3, paddingRight: inOrd ? 28 : 0,
                       }}>{r.name}</span>
                       <span style={{ fontSize: 12, color: 'var(--theme-accent-ink)', fontWeight: 600 }}>
-                        NPR {price}
+                        {fmtNpr(price)}
                       </span>
                       {hasOptions && (
                         <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>Choices</span>
@@ -4306,7 +4322,7 @@ The tables were left occupied rather than freed with their orders still open.`)
               const lineTotal = item.qty * item.unit_price * (1 + (vatReg ? (item.vat_rate ?? 0) : 0))
               const kotTimer = item.sent_to_kot ? kotTimerLabel(ticketForRecipe(item.recipe_id), kotNow) : null
               return (
-                <div key={idx} style={{
+                <div key={idx} data-cart-line style={{
                   display: 'flex', flexDirection: 'column', gap: 4,
                   borderBottom: '1px solid var(--theme-border)', padding: '9px 0',
                 }}>
@@ -4319,7 +4335,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       {item.sent_to_kot && (
                         <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
                           <span style={{
-                            fontSize: 9, fontWeight: 700, flexShrink: 0,
+                            fontSize: 10, fontWeight: 700, flexShrink: 0,
                             background: 'color-mix(in srgb, var(--theme-accent) 18%, transparent)',
                             color: 'var(--theme-accent-ink)',
                             borderRadius: 0, padding: '1px 5px', cursor: 'default',
@@ -4330,7 +4346,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       )}
                       {kotTimer && (
                         <Tip text="Live kitchen/bar status for this item's ticket — Sent (not yet started) / a countdown once Started, using the kitchen's own estimate / Ready once done">
-                          <span style={{ fontSize: 9, fontWeight: 600, flexShrink: 0, color: kotTimer.color }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, flexShrink: 0, color: kotTimer.color }}>
                             {kotTimer.text}
                           </span>
                         </Tip>
@@ -4338,7 +4354,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                       {!item.sent_to_kot && (item.sent_qty || 0) > 0 && item.qty > item.sent_qty && (
                         <Tip text={`${item.qty - item.sent_qty} extra added since last ticket — press KOT or BOT to send the addition to the station`}>
                           <span style={{
-                            fontSize: 9, fontWeight: 700, flexShrink: 0,
+                            fontSize: 10, fontWeight: 700, flexShrink: 0,
                             background: 'var(--theme-amber)', color: amberBadgeText,
                             borderRadius: 0, padding: '1px 5px', cursor: 'default',
                           }}>
@@ -4356,7 +4372,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     <button onClick={() => setQty(idx, item.qty + 1)} className="till-hit" style={btnSm} aria-label={`One more ${item.name}`}>+</button>
                   </div>
                   <span style={{ fontSize: 13, color: 'var(--theme-text1)', fontWeight: 600, minWidth: 68, textAlign: 'right', flexShrink: 0 }}>
-                    NPR {Math.round(lineTotal)}
+                    {fmtNpr(lineTotal)}
                   </span>
                   <button
                     onClick={() => setQty(idx, 0)}
@@ -4403,7 +4419,9 @@ The tables were left occupied rather than freed with their orders still open.`)
                     value={item.notes || ''}
                     onChange={e => updateItemNote(idx, e.target.value)}
                     onFocus={() => setNoteFocusIdx(idx)}
-                    onBlur={() => setNoteFocusIdx(null)}
+                    // Keep the presets while focus moves INTO them (S776): Tab from the note used to blur
+                    // it, hide the presets and move focus to whatever came after them.
+                    onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
                     placeholder="+ Kitchen note (e.g. serve after starters)"
                     className="till-hit--row"
                     style={{
@@ -4418,6 +4436,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                         <button
                           key={p}
                           onMouseDown={e => e.preventDefault()}
+                          onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
                           onClick={() => addPresetToNote(idx, p)}
                           className="till-hit--row"
                           style={{
@@ -4443,7 +4462,7 @@ The tables were left occupied rather than freed with their orders still open.`)
               background: 'color-mix(in srgb, var(--theme-accent) 5%, var(--theme-card))',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-text3)' }}>Pair with</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-text2)' }}>Pair with</span>
                 <button
                   onClick={() => setSuggestions([])}
                   aria-label="Hide pairing suggestions"
@@ -4470,13 +4489,13 @@ The tables were left occupied rather than freed with their orders still open.`)
                       }}
                     >
                       {r._manual && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--theme-accent-ink)', letterSpacing: 0.5 }}>PAIRED</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', letterSpacing: 0.5 }}>PAIRED</span>
                       )}
                       {isChefsPick && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--theme-amber-text)', letterSpacing: 0.5 }}>CHEF'S PICK</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-amber-text)', letterSpacing: 0.5 }}>CHEF'S PICK</span>
                       )}
                       <span>{r.name}</span>
-                      <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)' }}>+NPR {price}</span>
+                      <span style={{ fontSize: 10, color: 'var(--theme-accent-ink)' }}>+{fmtNpr(price)}</span>
                     </button>
                   )
                 })}
@@ -4534,11 +4553,15 @@ The tables were left occupied rather than freed with their orders still open.`)
                       ? 'Reconnect to close this bill — billing needs a live connection for the sequential invoice number and stock/sales posting.'
                       : 'Close this table — collect payment, or void/write-off if unpaid. Order must be saved first. Supervisor role or above.'}
                     style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
+                    {/* Outlined, not filled (S776): Send Order and Payment were identical accent fills side
+                        by side, so the eye could not tell the kitchen action from the money one. Send
+                        stays the fill — it is the action every order needs; Payment is the one a
+                        supervisor comes to. */}
                     <button
-                      className="btn"
+                      className="btn btn-ghost"
                       style={{
                         width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex',
-                        background: 'var(--theme-accent)', color: 'var(--theme-accent-text)', fontWeight: 700, border: 'none',
+                        color: 'var(--theme-accent-ink)', fontWeight: 700, borderColor: 'var(--theme-accent)',
                         // Same disabled treatment as the KOT/BOT ticket-btn class (opacity 0.5) — this
                         // button uses inline styles instead of that class, so it needs its own dimming.
                         opacity: saving ? 0.5 : payDisabled ? 0.6 : 1,
@@ -4673,7 +4696,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                   // Collapsed by default — same disclosure treatment as Items below. Buyer details
                   // are only mandatory for a discount/Credit bill; a plain Cash sale doesn't need 4
                   // fields surfaced before the payment-method choice a cashier actually taps every time.
-                  <button type="button" onClick={() => setBuyerExpanded(v => !v)} style={{
+                  <button type="button" aria-expanded={buyerExpanded} onClick={() => setBuyerExpanded(v => !v)} style={{
                     display: 'flex', alignItems: 'center', gap: 6, width: '100%', background: 'none', border: 'none',
                     padding: 0, marginBottom: buyerExpanded ? 8 : 0, cursor: 'pointer', textAlign: 'left',
                   }}>
@@ -4764,7 +4787,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     payment, reads as a standing suggestion to comp something. Folding it behind a
                     deliberate tap keeps it available without pushing it in front of every cashier
                     on every bill. */}
-                <button type="button" onClick={() => setItemsExpanded(v => !v)} style={{
+                <button type="button" aria-expanded={itemsExpanded} onClick={() => setItemsExpanded(v => !v)} style={{
                   display: 'flex', alignItems: 'center', gap: 6, width: '100%', background: 'none', border: 'none',
                   padding: 0, marginBottom: itemsExpanded ? 8 : 0, cursor: 'pointer', textAlign: 'left',
                 }}>
@@ -4951,9 +4974,10 @@ The tables were left occupied rather than freed with their orders still open.`)
                     {payMethod === 'Cash' && (
                       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
                         <div style={{ flex: 1 }}>
-                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-tender">Tender</label>
+                          <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-orders-tender">Cash received</label>
                           <input id="pos-orders-tender" type="number" min="0" step="any" placeholder={payTotal.toFixed(0)}
-                            value={tenderedStr} onChange={e => setTenderedStr(e.target.value)} style={{ ...billInput, width: '100%' }} />
+                            value={tenderedStr} onChange={e => setTenderedStr(e.target.value)} style={{ ...billInput, width: '100%' }}
+                            onKeyDown={e => { if (e.key === 'Enter' && !closing) { e.preventDefault(); pressClose('paid') } }} />
                         </div>
                         <div style={{ flex: 1 }}>
                           <span style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }}>
@@ -5107,13 +5131,13 @@ The tables were left occupied rather than freed with their orders still open.`)
               )
             })()}
             {billingTab === 'void' && (
-              <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-red)', color: redBadgeText, borderColor: 'var(--theme-red)' }}
+              <button className="btn btn-danger btn-danger--strong" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
                 onClick={() => pressClose('void')} disabled={closing} aria-disabled={!closing && !closeReason ? true : undefined}>
                 {closing ? (closeStep || 'Processing…') : closeReason ? 'Void Order' : 'Choose a reason to void'}
               </button>
             )}
             {billingTab === 'writeoff' && (
-              <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-amber)', color: amberBadgeText, borderColor: 'var(--theme-amber)' }}
+              <button className="btn amber-action-btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
                 onClick={() => pressClose('writeoff')} disabled={closing} aria-disabled={!closing && !closeReason ? true : undefined}>
                 {closing ? (closeStep || 'Processing…') : closeReason ? 'Mark Complimentary (₨0 collected)' : 'Choose a reason first'}
               </button>
@@ -5293,11 +5317,12 @@ The tables were left occupied rather than freed with their orders still open.`)
             className="btn btn-primary"
             style={{ width: '100%', padding: '12px 0', fontSize: 15, marginBottom: 10, justifyContent: 'center' }}
             onClick={confirmCovers}
+            ref={coversConfirmRef}
           >
             Open Order
           </button>
           <button
-            className="btn btn-danger"
+            className="btn btn-ghost"
             style={{ width: '100%', padding: '12px 0', fontSize: 15, justifyContent: 'center' }}
             onClick={() => { setCoversModal(false); setPendingTable(null) }}
           >
@@ -5507,7 +5532,10 @@ The tables were left occupied rather than freed with their orders still open.`)
         </div>
       )}
 
-      {(unpostedCount > 0 || imsPostWarning > 0) && (
+      {/* The two Inventory-posting banners are for whoever can act on them (S776): the fix is Periods →
+          Post POS bills to Inventory, which a waiter cannot reach, and on a Staff login they were two
+          standing amber blocks above the floor grid with nothing to do about either. */}
+      {canSeeImsPosting && (unpostedCount > 0 || imsPostWarning > 0) && (
         <div role="alert" style={{
           background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
           border: '1px solid color-mix(in srgb, var(--theme-amber) 28%, transparent)',
@@ -5524,7 +5552,7 @@ The tables were left occupied rather than freed with their orders still open.`)
           </div>
         </div>
       )}
-      {unpostedNotes > 0 && (
+      {canSeeImsPosting && unpostedNotes > 0 && (
         <div role="alert" style={{
           background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
           border: '1px solid color-mix(in srgb, var(--theme-amber) 28%, transparent)',
@@ -5617,16 +5645,16 @@ The tables were left occupied rather than freed with their orders still open.`)
                     <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{label}</span>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
                       {kotChip && (
-                        <span className={kotChip.className} style={{ fontSize: 9 }}>{kotChip.label}</span>
+                        <span className={kotChip.className} style={{ fontSize: 10 }}>{kotChip.label}</span>
                       )}
                       {t.offlinePending && (
                         <Tip text="Not yet synced to the server — will upload automatically once this device reconnects">
-                          <span style={{ fontSize: 9, fontWeight: 700, color: amberBadgeText, background: 'var(--theme-amber)', borderRadius: 0, width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'default' }}>📵</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: amberBadgeText, background: 'var(--theme-amber)', borderRadius: 0, width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'default' }}>📵</span>
                         </Tip>
                       )}
                       {t.pending > 0 && (
                         <Tip text="Items added but not sent to the kitchen/bar yet — tap to open and send">
-                          <span style={{ fontSize: 9, fontWeight: 700, color: amberBadgeText, background: 'var(--theme-amber)', borderRadius: 0, padding: '1px 6px', cursor: 'default', whiteSpace: 'nowrap' }}>⚠ {t.pending}</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: amberBadgeText, background: 'var(--theme-amber)', borderRadius: 0, padding: '1px 6px', cursor: 'default', whiteSpace: 'nowrap' }}>⚠ {t.pending}</span>
                         </Tip>
                       )}
                     </div>
@@ -5667,7 +5695,9 @@ The tables were left occupied rather than freed with their orders still open.`)
                 style={{
                   padding: '16px 18px',
                   cursor: inactive ? 'default' : 'pointer',
-                  opacity: inactive ? 0.4 : 1,
+                  // Muted by a dashed edge and the badge, not opacity (S776): 0.4 took the name and
+                  // seat count below AA, so an inactive table was also an unreadable one.
+                  ...(inactive ? { borderStyle: 'dashed', background: 'transparent' } : {}),
                   display: 'flex', flexDirection: 'column', gap: 8,
                   overflow: 'hidden',
                   ...(ord ? { borderColor: 'var(--theme-accent)' } : {}),
@@ -5699,13 +5729,13 @@ The tables were left occupied rather than freed with their orders still open.`)
                       const chip = ticketSummaryChip(kotStatusByTable[t.id])
                       return (
                         <Tip text="Kitchen/bar status of items sent for this order — Sent (not yet started) / Started (being prepared) / Ready or “N ready” (food waiting to be taken to the table) / Served. Open the table to see per-item prep timers and mark Ready food as served.">
-                          <span className={chip.className} style={{ fontSize: 9 }}>{chip.label}</span>
+                          <span className={chip.className} style={{ fontSize: 10 }}>{chip.label}</span>
                         </Tip>
                       )
                     })()}
                     {pendingGuestOrders[t.id]?.length > 0 && (
                       <Tip text="A guest submitted an order from the QR menu on this table — open it to Accept or Dismiss">
-                        <span className="badge-amber" style={{ fontSize: 9 }}>
+                        <span className="badge-amber" style={{ fontSize: 10 }}>
                           🔔 Guest order{pendingGuestOrders[t.id].length > 1 ? ` (${pendingGuestOrders[t.id].length})` : ''}
                         </span>
                       </Tip>
@@ -5713,7 +5743,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     {ord?.offlinePending && (
                       <Tip text="Not yet synced to the server — will upload automatically once this device reconnects">
                         <span style={{
-                          fontSize: 9, fontWeight: 700, color: amberBadgeText,
+                          fontSize: 10, fontWeight: 700, color: amberBadgeText,
                           background: 'var(--theme-amber)', borderRadius: 0,
                           width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
                           cursor: 'default',
@@ -5725,7 +5755,7 @@ The tables were left occupied rather than freed with their orders still open.`)
                     {ord?.pending > 0 && (
                       <Tip text="Items added but not sent to the kitchen/bar yet — tap to open and send">
                         <span style={{
-                          fontSize: 9, fontWeight: 700, color: amberBadgeText,
+                          fontSize: 10, fontWeight: 700, color: amberBadgeText,
                           background: 'var(--theme-amber)', borderRadius: 0,
                           padding: '1px 6px', cursor: 'default', whiteSpace: 'nowrap',
                         }}>

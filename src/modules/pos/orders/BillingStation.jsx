@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import Tip from '../../../components/Tip'
 import SupportContactLine from '../../../components/SupportContactLine'
 import { fmtNpr } from './posOrdersConstants'
@@ -44,6 +45,12 @@ export default function BillingStation({
   canVoid,
 }) {
   const grandTotal = rows.reduce((s, r) => s + r.total, 0)
+  // "Table 12's bill, please" (S776). The list is sorted longest-open first, which is right for
+  // chasing a table and wrong for finding one; a search by table name, section or takeaway number
+  // answers the guest standing at the counter. Matches any part, case-insensitive.
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const shown = q ? rows.filter(r => `${r.label} ${r.section || ''}`.toLowerCase().includes(q)) : rows
 
   return (
     <div>
@@ -99,7 +106,30 @@ export default function BillingStation({
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {rows.map(r => {
+          {rows.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <input
+                type="search"
+                className="form-input form-input--auto"
+                aria-label="Find a bill by table or takeaway number"
+                placeholder="Find a table…"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                style={{ minWidth: 220 }}
+              />
+              {q && (
+                <span role="status" style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                  {shown.length} of {rows.length} open bill{rows.length === 1 ? '' : 's'}
+                </span>
+              )}
+            </div>
+          )}
+          {q && shown.length === 0 && (
+            <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--theme-text3)' }}>
+              No open bill matches “{query.trim()}”. It may already be settled, or be on another table.
+            </div>
+          )}
+          {shown.map(r => {
             const age = openFor(r.openedAt, now)
             return (
               <div

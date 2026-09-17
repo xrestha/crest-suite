@@ -43,7 +43,7 @@ export default function PosTableManagement() {
   const [loading,   setLoading]   = useState(true)
   const [tablesError, setTablesError] = useState(null) // the last pos_tables read that failed
   const [secFilter, setSecFilter] = useState('All')
-  // Transient banner above the floor grid for cycleStatus errors — that action happens directly
+  // Transient banner above the floor grid for setTableStatus errors — that action happens directly
   // on a floor tile, outside the Add/Edit modal, so the modal's own `msg` banner isn't visible.
   const [floorMsg, setFloorMsg] = useState('')
 
@@ -319,10 +319,9 @@ export default function PosTableManagement() {
     setTimeout(() => { w.print(); w.close() }, 300)
   }
 
-  async function cycleStatus(t, e) {
-    e.stopPropagation()
+  async function setTableStatus(t, next) {
+    if (next === t.status) return
     setFloorMsg('')
-    const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(t.status) + 1) % STATUS_CYCLE.length]
     const { error } = await scopedUpdate('pos_tables', { status: next }).eq('id', t.id)
     if (error) { setFloorMsg('error:' + t.name + ' was not updated — the floor still shows its previous state. ' + errorLine(error)); return }
     setTables(prev => prev.map(r => r.id === t.id ? { ...r, status: next } : r))
@@ -1299,21 +1298,22 @@ export default function PosTableManagement() {
                                color: 'var(--theme-text1)', textDecoration: 'none' }}
                       onClick={e => { e.stopPropagation(); openEdit(t) }}
                     >{t.name}</button>
-                    <Tip text="Click to cycle: Available → Reserved → Occupied → Inactive.">
-                      {/* A real button wearing the badge class. The inline reset is the badge
-                          styles' one gap — they set background/padding/radius/size but assume a
-                          span, so a button arrives with its own border and system font. One
-                          site, so it stays inline rather than earning a .badge-btn class. */}
-                      <button
-                        type="button"
+                    <Tip text="This table's status. Pick a new one from the list — the till sets Occupied and Available by itself as orders open and close.">
+                      {/* A picker wearing the badge class (S776). It was a button that CYCLED on each tap
+                          (Available → Reserved → Occupied → Inactive), 57×15 at 10px — so a stray tap on
+                          a tablet quietly marked a table Reserved, and reaching Inactive meant passing
+                          through Occupied. A select names every state and changes nothing until one is
+                          chosen. The inline reset is the badge styles' gap: they assume a span. */}
+                      <select
                         className={STATUS_BADGE[t.status] || 'badge-gray'}
-                        aria-label={`Status: ${STATUS_LABEL[t.status] || t.status}. Change to the next status.`}
-                        style={{ fontSize: 10, flexShrink: 0, cursor: 'pointer', borderBottom: 'none',
-                                 border: 'none', fontFamily: 'inherit' }}
-                        onClick={e => cycleStatus(t, e)}
+                        aria-label={`Status of ${t.name}`}
+                        value={t.status}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => setTableStatus(t, e.target.value)}
+                        style={{ fontSize: 12, flexShrink: 0, cursor: 'pointer', border: 'none', fontFamily: 'inherit' }}
                       >
-                        {STATUS_LABEL[t.status] || t.status}
-                      </button>
+                        {STATUS_CYCLE.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                      </select>
                     </Tip>
                   </div>
                   {t.section && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>{t.section}</div>}
