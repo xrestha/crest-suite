@@ -808,3 +808,41 @@ Decisions taken with Aashish (2026-09-14). Migration `20260915090000`.
   claims shown apart.
 - **Still with the accountant, deliberately unchanged:** leave encashment ÷26, the 12-month gratuity
   rule, and taxing exit lump sums on top of the year at slab rates.
+
+## The HR critique fixes (S768)
+
+Decided with Aashish (2026-09-17). No migration. Several sections above name `PayrollCalculation.jsx`,
+which no longer exists — read them as history.
+
+- **Attendance saves every unsaved cell, not the day on screen.** Unsaved work is `records` compared
+  with `savedRecords` by `cellSignature()` (`attendanceRules.js`) — what a cell SAVES as, so a typed
+  "0800" and a stored "08:00:00" are one cell. One `saveChanges()` upserts all of them from either
+  tab. **Every reload after a write passes `{ carry: true }`** and names what it deleted with `drop`,
+  or the reload replaces the grid and throws away marks left on other days — which is exactly the
+  S768 defect (a blank day pays daily and hourly staff nothing). A period switch passes neither, and
+  asks first when there is unsaved work. `clearCell` removes the key from the saved copy on success,
+  or re-marking that day compares equal to a deleted row and never saves.
+- **A correct payroll figure takes the ink; the sign carries direction.** Registers, the working
+  panel, Festival/Incentive runs, Final Settlement, Gratuity, Pay Setup's preview and `PayslipBody`.
+  Colour is for flags only (SSF no. missing, no bank, out of date, split month, owed by the employee —
+  amber with △). `RunStatusBadge` is the one Draft (amber) / Finalized (green) chip. A resigned or
+  terminated employee is grey, not red.
+- **The Calculation page is Payroll's expandable row.** `/hr/calculation` redirects to `/hr/payroll`;
+  the panels live in `PayslipCalculation.jsx` (`CalcDetail` for a draft, from `buildPayrollRows`'
+  `detail`; `StoredDetail` for a finalized month, never recomputed). A drifted draft's working opens
+  with what moved (`driftParts`), because the live working then disagrees with the stored row above
+  it on purpose.
+- **Where a month stands is `PayrollMonthStatus`** (`monthStatus.js` for the arithmetic): unmarked
+  days for daily/hourly staff only, approvals touching the month, the run, and the SSF deposit. It
+  never calls a passed deposit date missed — deposits are not recorded. On the HR Dashboard it is
+  MANAGER-only: runs and payslips are manager-rank, so a supervisor's empty read would say "not
+  generated" over a finalized month. HR Reports opens on `?tab=` and `?period=`.
+- **One approval control for Leave, Overtime, TADA and Shift Swaps** (`src/modules/hr/ApprovalControls.jsx`).
+  A batch runs each row's OWN decision one after another (`decideEach`) and names every refusal; it
+  never writes a set in one statement, because a trigger refusing one row (self-approval) would fail
+  them all. Leave's batch leaves out a request over quota or in a finalized month, and checks quota
+  as if the batch's earlier requests were already approved — `approveCore()` is the approval without
+  the page's busy flag, message or reload. Approve and Reject are both neutral small ghosts: green and
+  red on a button spend verdict colours on a decision not yet made.
+- **Final Settlement sits in the Payroll nav group** — it finalizes a leaver's pay. Gratuity stays in
+  Reports.

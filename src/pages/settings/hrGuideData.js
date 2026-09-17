@@ -46,6 +46,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'The operational HR console — not a glance page. An approvals KPI row (pending Leave / Overtime / TADA / shift-swap counts), employee statistics, the SSF deposit-deadline card, outstanding advances, the last finalized payroll, and act-on-it queue tables for each pending pile.',
         workflow: [
+          'Managers and the owner see the payroll month strip first (PayrollMonthStatus, S768): the newest started month not yet finalized, as Attendance → Approvals → Payroll → SSF deposit, each with a mark and a link. Supervisors do not get it — run and payslip reads are manager-rank, so their empty read would claim "not generated" over a finalized month.',
           'Open it daily: each KPI in the approvals row links to the page where that queue is cleared.',
           'The SSF card tracks the statutory deposit deadline — the 25th of the month FOLLOWING the payroll month (25 days after the month ends; it was 15 until the July 2025 amendment) — and shows overdue / due-soon / upcoming state relative to today.',
           'Retiring-soon surfaces employees within 180 days of their retirement date.',
@@ -209,6 +210,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'The daily record payroll is computed from. Three modes: Mark Attendance (everyone × one day), By Employee (one person × the whole month), Month Summary. Each cell holds a status, start/end times, break minutes, hours worked, OT hours and a note.',
         workflow: [
+          'Save covers EVERY unsaved mark on the sheet, any day and either tab (S768) — it used to be Save Day / Save Month, each writing only its slice while the grid held edits for other days, and the reload after any save wiped those. Unsaved days are marked in the pickers, on rows and in a banner; switching month asks first.',
           'Mark the day\'s statuses — Present, Half Day, Absent, Paid/Unpaid Leave (full or half), Off, Holiday. Bulk-fill a day or a month, or "Generate from Roster" to seed the sheet from published shifts.',
           'Enter start/end times and the sheet derives hours and suggests OT — both stay editable. If the day\'s rostered shift has Normal hours set, OT is the Start-to-End time beyond those Normal hours (Break does not reduce it); otherwise it is hours worked beyond the shift\'s length, or beyond 8h if the day is not rostered.',
           'Clear Day / Clear Employee-Month / Clear Month (Month Summary tab) genuinely delete rows, for redoing a botched stretch. Clear Month deletes only the listed (active/probation) staff\'s rows — a leaver\'s days stay for Final Settlement — and refuses once the month\'s payroll is finalized, or when that check cannot be read. Approved leave days go too; Leave → Mark approved leave restores them.',
@@ -244,6 +246,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'Leave types, requests and balances. Types are auto-seeded to Labour Act 2074 defaults on first visit: Home/Annual 18 days, Sick 12, Bereavement/Kiriya 13, Maternity 98, Paternity 15, and uncapped Unpaid. Home and Sick are ticked "Carry Fwd", but that tick is stored for reference only — unused days do not roll into the next year automatically.',
         workflow: [
+          '"Approve all N…" (S768) approves every pending request that needs no question, one after another through the same approval as a single row. Over-quota requests and ones in a finalized month are left out and named; quota is checked as if the batch\'s earlier requests were already approved.',
           'Requests arrive from Self-Service (or are entered here on behalf of an employee) and sit pending until a supervisor approves or rejects.',
           'Approving writes the matching attendance rows for every day in the range, using the leave type\'s paid/unpaid nature.',
           'Balances show quota, used and remaining per employee per type for ONE BS calendar year (Baisakh–Chaitra) — not the Shrawan-start fiscal year payroll uses, and with no carry-over from last year. Remaining also takes off any days already paid out as leave encashment on a finalized Final Settlement.',
@@ -280,6 +283,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'Per-employee, per-day OT entries with their own approval ladder (pending → approved / rejected) and an estimated pay preview. This is the module that exists so extraordinary OT — especially holiday OT at double rate — is an approved, attributable record rather than a number typed into the attendance sheet.',
         workflow: [
+          '"Approve all N…" (S768) approves each pending entry in turn with the same conditional write as the row button and names any it could not (your own entry, or one decided elsewhere).',
           'Add an entry: employee, BS day, hours, type (weekday or holiday). The type auto-suggests Holiday when the date matches a gazetted entry in the Holiday Calendar.',
           'Anyone who can open the page (supervisor rank and up) approves or rejects a pending entry; the estimated amount previews what payroll will pay.',
           'Undo puts an approved or rejected entry back to Pending, so a mis-click can be decided again. It has no confirmation, and an entry undone after payroll was generated only changes pay once the draft is regenerated.',
@@ -315,6 +319,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'The transactional payroll page: Generate a draft for the BS month, review each employee\'s row (income tax is the one figure you can type over), Finalize to lock it, and Reopen to unwind. Generate, Finalize, Reopen and every payroll edit need HR manager rank or the owner — enforced by the database on every money table (S751), not just by the page. Payslips print with the company letterhead (a draft prints stamped "Draft — not final"); the run exports to Excel (a draft\'s file name ends _DRAFT).',
         workflow: [
+          'The month strip at the top shows attendance, approvals, this run and the SSF deposit for the selected month. After Finalize, "Next for <month>" links the bank transfer sheet, SSF challan and TDS report for that month (HR Reports opens on ?tab= and ?period=). Final Settlement now sits in the Payroll nav group.',
           'Generate builds a draft for everyone the month\'s payroll covers (fetchPayrollEmployees): active/probation staff PLUS anyone whose end date falls on or after the month start, whatever their status — a leaver is paid to their last working day. Left out, and named on the page: anyone whose FINALIZED Final Settlement has its last working day inside the month. Nobody gets a payslip for a month they were not employed on any day. Inputs: current Attendance, approved Overtime, Advances already due for recovery (issued in an EARLIER BS month — see Advances & Loans) and Approved TADA claims whose trip has ended.',
           'Finalize re-reads everything first and REFUSES if the draft is out of date, if any employee is missing a payslip, or if a stored payslip belongs to someone this run should not pay (Regenerate removes those). The confirmation is a consequence summary — payslip count, total net pay, advance recoveries to be recorded, TADA claims to be closed — plus how many days of the month are left if it is not over yet, and how many leave / overtime requests are still pending. Finalizing early is allowed.',
           'Reopen (HR manager and above) is reopen_payroll_run() since S753 — ONE transaction under hr_pay_lock: deletes the repayment rows this run wrote (the status trigger reactivates anything owed again), puts the TADA claims IT marked Paid (Payroll) back to Approved — never one a manager settled by hand — and returns the run to draft. A written-off advance keeps its write-off and is named.',
@@ -494,6 +499,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'Travel & Daily Allowance claims — money staff spent on work trips (a bus fare to collect supplies, say), repaid to them: an employee (or the office, on their behalf) files a trip with line items, it climbs an approval ladder — pending → approved → paid — and an approved claim is paid by the first payroll after approval once the trip is over, as a non-taxable reimbursement. A settings modal holds purpose options, start points and per-vehicle km rates.',
         workflow: [
+          '"Approve all N…" (S768) approves each pending claim this login may decide, in turn, and names any that did not go through. Approve/Reject now look the same as on Leave, Overtime and Shift Swaps.',
           'File a claim: trip dates, purpose, start point, line items (travel legs with vehicle type and km, plus other expenses). A supervisor-or-above entry goes through create_tada_claim (one transaction); an employee\'s goes through submit_my_tada_claim from Self-Service.',
           'A supervisor or above approves or rejects it — never their own claim (matched on profiles.hr_employee_id or the employee record\'s email; the row says "Your own claim"). approved_by is set server-side.',
           'An Approved claim is then paid ONE way: automatically by the first payroll whose month end is on or after the trip\'s end date (finalizing that payroll marks it Paid (Payroll)), or by an HR manager with Mark Paid for cash/bank. Each approved row says which: "In the <Month> payroll draft" or "Will be paid by the next payroll".',
@@ -657,6 +663,7 @@ export const HR_GUIDE_GROUPS = [
         summary:
           'The employee\'s own app: today\'s shift, their published roster, leave and TADA requests, and their payslips — behind a name-picker + 4-6 digit PIN on one shared per-company link. It installs to a phone\'s home screen as "Crest Staff" with its own icon, opening full-screen on the shift they came to check.',
         workflow: [
+          'Sign-out returns to the remembered PIN pad (S768). PIN-pad errors use the staff wording; a malformed link is refused before any request. The payslip sheet has a phone size and a Save-as-PDF button.',
           'The Owner or an HR Manager enables Self-Service for an employee (sets the PIN) and shares the company\'s one login link from Employees → Copy Self-Service Link. The employee opens it, taps their own name, enters the PIN.',
           'Four destinations on a bottom bar: Home (today\'s shift, the next working shift, swaps waiting on them, latest payslip), Roster (their own Sun-Sat week + swap requests), Requests (Leave and TADA, each opening as a bottom sheet), Pay (own finalized payslips, same layout as the printed one).',
           'Tell employees to add it to their home screen — on Android the account sheet offers a button, on iPhone it is Share → Add to Home Screen. On iPhone that step is also what makes notifications possible at all: iOS never gives push to a browser tab.',

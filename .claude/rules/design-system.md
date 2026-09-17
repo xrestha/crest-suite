@@ -1159,3 +1159,21 @@ product offers for it.
 **The general shape: a control that edits one token of a derived cluster must re-derive the cluster,
 or it leaves the product in a state no other control can reach.** Before adding a swatch, check
 `applyTheme` for which tokens fall back and which do not.
+
+## A size is only a contrast floor at 24px, or 18.66px bold (S768)
+
+DESIGN.md defended white on Modernist Light's `#ec3013` (4.20:1) because "15px/600 is where WCAG's
+large-text threshold begins". WCAG large text is **18pt (24px), or 14pt (≈18.66px) bold** — 15px was
+never large, so every primary label on Light failed AA while the rule defending it read as settled.
+The same document said both lower text tiers clear AA; Light's slate `#7d7979` measured 3.55:1 on the
+card. **A contrast claim in prose is a hypothesis until a number sits beside it.**
+
+- Light `accent` is the ramp's 600 `#dd2b0f` (white 4.74:1), hover 700 `#ae1800`, focus-ring tint
+  re-derived. Light `text3` is `#6c6868` (4.54 card, 4.92 page), off-ramp because the next step down
+  is `text2` itself; the margin between them is thin (ΔE 4.6).
+- **The accent FILL now sits at deuteranopia ΔE 6.6 from red and 5.5 from amber** (was 10.3/10.1).
+  Accepted because no screen separates accent from a signal by FILL hue alone — accent fills are
+  labelled buttons, and accent tints carry `accent-ink` as text, which did not move. **Never add a
+  hue-only accent-vs-signal fill** (a legend swatch, a bar, a dot).
+- 15px/600 stays the control-label size, for legibility and hierarchy. A primary shrunk below it is
+  a hierarchy defect now, not a contrast failure.

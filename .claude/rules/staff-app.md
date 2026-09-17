@@ -188,3 +188,22 @@ not a stale deploy becomes a reload loop that hides the real bug; **never reload
 where the reload is answered from the cached shell and fails identically, spending the one attempt;
 and **never treat an ordinary error as a chunk failure** — `chunkReload.test.js` asserts the
 predicate refuses `TypeError: Failed to fetch` and a plain null-property read.
+
+## The front door (S768)
+
+- **Every error on the PIN pad goes through `employeeErrorText`**, including the staff-list read and
+  sign-in. They showed `e.message`: "TypeError: Failed to fetch" on a dropped connection.
+- **A link that is not a uuid is refused before any request**, with "ask your manager for the link
+  again" — the database's answer was a raw `invalid input syntax for type uuid` under a Retry that
+  could never succeed. An unknown restaurant and one with no Crest Staff logins are the same empty
+  list, so one sentence covers both; naming the restaurant on the pad would need the anonymous staff
+  RPC to return the client name, which is a backend change this app avoids.
+- **Sign-out returns to the remembered PIN pad**, the same place an expired session lands. It went to
+  `/login`, which no employee has an account for.
+- **`useStaffAppManifest(themeColor)` takes the page's own ground** and sets `document.title` to
+  "Crest Staff"; it was pinned to Night's ink on a light phone and the title said Crest Suite.
+- A swap status is a sentence (`SWAP_STATUS_LABEL`), never the database value with its underscores
+  replaced. Tab labels are 12px in `--theme-text2`; the tab count badge is amber.
+- **`PayslipBody phone`** is the staff copy's size (12px heads, 15px lines). Saving a payslip prints a
+  `.print-only` copy with `body.ss-printing` hiding the app bars, cleared on `afterprint` — `print()`
+  returns at once in Chrome, so clearing on the next line would print the app instead.
