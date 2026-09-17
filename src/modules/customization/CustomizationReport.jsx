@@ -13,6 +13,7 @@ import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import ReportPage from '../../components/ReportPage'
 import Tip from '../../components/Tip'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
+import RangePresets from '../pos/reports/RangePresets'
 import { nepalDayStartTs, nepalDayEndTs, bsSlash, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { loadDeltaExplosion, deltaItems } from '../../utils/orderLineIngredients'
 import { loadOptionCatalog } from './customizationData'
@@ -37,15 +38,6 @@ const TABS = [
   { key: 'dishes',   label: 'How often customized' },
   { key: 'removals', label: '"No …" requests' },
   { key: 'margin',   label: 'Choice margin' },
-]
-
-// Each preset is a pair of BS-month offsets — see bsMonthRangeIso. Ranges are recomputed per
-// render so the active pill follows the pickers, and are cheap (four bsToAd calls).
-const RANGE_PRESETS = [
-  { key: 'today',  label: 'Today',         range: () => { const { to } = bsMonthRangeIso(0); return { from: to, to } } },
-  { key: 'month',  label: 'This month',    range: () => bsMonthRangeIso(0) },
-  { key: 'last',   label: 'Last month',    range: () => bsMonthRangeIso(-1) },
-  { key: 'three',  label: 'Last 3 months', range: () => bsMonthRangeIso(-2, 0) },
 ]
 
 const DEFAULT_SORT = {
@@ -322,18 +314,7 @@ export default function CustomizationReport() {
       filters={(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div className="tab-bar" role="group" aria-label="Range presets" style={{ alignSelf: 'flex-end' }}>
-              {RANGE_PRESETS.map(p => {
-                const r = p.range()
-                const active = r.from === fromIso && r.to === toIso
-                return (
-                  <button key={p.key} type="button" aria-pressed={active}
-                    className={`tab-btn${active ? ' tab-btn--active' : ''}`} onClick={() => setRange(r)}>
-                    {p.label}
-                  </button>
-                )
-              })}
-            </div>
+            <RangePresets fromIso={fromIso} toIso={toIso} onPick={setRange} style={{ alignSelf: 'flex-end' }} />
             <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="cust-report-from">From</label>
               <BsCalendarPicker id="cust-report-from" value={fromIso} onChange={setFromIso} />

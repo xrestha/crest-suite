@@ -10,11 +10,12 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
-import { errorInfo } from '../../../shared/errorText'
+import { errorInfo, errorLine } from '../../../shared/errorText'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import RangePresets from './RangePresets'
 import ChartCard from '../../../components/ChartCard'
 import { adToBs, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
@@ -208,15 +209,32 @@ export default function CoversReport() {
     if (!clientId) return
     setHoursSaving(true); setHoursMsg('')
     const payload = { pos_open_time: openTime || null, pos_close_time: closeTime || null }
-    let error
-    if (settingsId) {
-      ;({ error } = await supabase.from('settings').update(payload).eq('id', settingsId))
-    } else {
-      ;({ error } = await supabase.from('settings').insert({ client_id: clientId, ...payload }))
+    // S776: an UPDATE by id that reads back, and an INSERT only once a read has CONFIRMED there is no
+    // row. This inserted whenever `settingsId` was unknown — which is also the state after a failed
+    // settings read, so a blip split the client's settings row in two and changed what every later
+    // settings read returns (S613's PosTableManagement shape). And the update had no `.select()`, so
+    // a write that matched nothing still said "Saved".
+    let id = settingsId
+    if (!id) {
+      const { data: row, error: readErr } = await supabase.from('settings').select('id').eq('client_id', clientId).maybeSingle()
+      if (readErr) {
+        setHoursSaving(false)
+        setHoursMsg(`error:The hours were not saved — this outlet's settings could not be read first. ${errorLine(readErr)}`)
+        return
+      }
+      id = row?.id || null
     }
+    const { data, error } = id
+      ? await supabase.from('settings').update(payload).eq('id', id).select('id')
+      : await supabase.from('settings').insert({ client_id: clientId, ...payload }).select('id')
     setHoursSaving(false)
-    setHoursMsg(error ? 'error:' + error.message : 'ok:Saved.')
-    if (!error) loadRange()
+    if (error) { setHoursMsg(`error:The hours were not saved. ${errorLine(error)}`); return }
+    if (!data?.length) {
+      setHoursMsg('error:The hours were not saved — nothing was updated. Reload the page and try again; if it keeps happening, the settings need a POS manager or the Owner.')
+      return
+    }
+    setHoursMsg('ok:Saved.')
+    loadRange()
   }
 
   /* ── derived rows ── */
@@ -431,6 +449,7 @@ export default function CoversReport() {
       <Tabs idBase="pos-covers-report" label="Covers Report views" tabs={TABS} active={tab} onChange={setTab} style={{ marginBottom: 16 }} />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
+        <RangePresets fromIso={fromIso} toIso={toIso} onPick={r => { setFromIso(r.from); setToIso(r.to) }} />
         <div>
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="covers-report-from-bs">From (BS)</label>
           <BsCalendarPicker id="covers-report-from-bs" value={fromIso} onChange={setFromIso} />

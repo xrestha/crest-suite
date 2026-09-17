@@ -156,7 +156,7 @@ export const POS_GUIDE_GROUPS = [
         summary:
           'The kitchen/bar wall screen: three columns — New → In Progress → Ready — of tonight\'s tickets, advanced by tap. Runs alongside the printed tickets (every card is a real ticket from the log), refreshing every few seconds with a chime on new arrivals. "Tonight" is the service day, which runs until 6 AM Nepal time, so a ticket sent at 11:52 PM is still on the board after midnight.',
         workflow: [
-          'Tap a New ticket to start it — a prompt asks for an estimated prep time, which feeds the guest\'s countdown on the QR menu. Tap again when Ready.',
+          'Tap a New ticket to start it — a prompt asks for an estimated prep time, which feeds the guest\'s countdown on the QR menu. Tapping one of the preset times (Start · 10m) starts the ticket at once; a typed time still takes Confirm (S776, was three taps). Tap again when Ready. Ticket text is sized for reading across a pass (dish lines 20px, table name 22px).',
           'Served (S754): once food has left the pass, the runner taps Served (here, or Served on the waiter\'s order screen) and the ticket leaves the board. There is no fourth column — a served ticket has nothing left for the kitchen to do.',
           'Kitchen notes typed on an order line ("no onion — allergy") show under that dish on the card.',
           'A line pulled or reduced after its ticket was sent is struck through on that ticket with the word "cancelled", the quantity change and the reason — the kitchen must stop cooking it (S754, owner decision).',

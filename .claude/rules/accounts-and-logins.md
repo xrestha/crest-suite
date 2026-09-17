@@ -126,7 +126,9 @@ Found re-analysing `ImsStaff.jsx`; the rules hold for `HrStaff.jsx` and `PosStaf
   `pos_allow_void` from a caller who cannot void. Otherwise a 10%-capped manager could give a waiter
   an unlimited discount and then use that waiter's PIN. **A login a capped manager creates without
   naming a limit starts at the creator's cap**, because the column default is NULL = unlimited, so
-  omission was itself an escalation. Admin and the Owner are exempt.
+  omission was itself an escalation. Admin and the Owner are exempt. **Since S776 POS Staff names
+  one on every create: 0% (owner decision — a new login discounts nothing until a manager sets a
+  cap).** The server fallback above still applies to any other caller.
 - **Converting a marker-less login into staff must refuse the LAST one.** Owner is the absence of
   markers, so "Existing User" mode on a client's only plain login leaves no Owner at all.
   `isLastOwnerLogin()` guards `update_ims_role` and `update_hr_role`; a failed count counts as last.

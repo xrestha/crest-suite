@@ -12,6 +12,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import RangePresets from './RangePresets'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { CLOSE_TYPE_BADGE, STATION_BADGE } from '../posSignals'
@@ -448,6 +449,7 @@ export default function KotLog() {
         ]} />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
+        <RangePresets fromIso={fromIso} toIso={toIso} onPick={r => { setFromIso(r.from); setToIso(r.to) }} />
         <div>
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="kot-log-from-bs">From (BS)</label>
           <BsCalendarPicker id="kot-log-from-bs" value={fromIso} onChange={setFromIso} />

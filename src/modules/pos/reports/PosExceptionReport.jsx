@@ -13,6 +13,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import RangePresets from './RangePresets'
 import { formatAd, BS_MONTHS } from '../../../utils/bsCalendar'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
 import { viewPosBill } from '../../../utils/viewPosBill'
@@ -307,6 +308,7 @@ export default function PosExceptionReport() {
 
       {/* Filters */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
+        <RangePresets fromIso={fromIso} toIso={toIso} onPick={r => { setFromIso(r.from); setToIso(r.to) }} />
         <div>
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="pos-exception-report-from-bs">From (BS)</label>
           <BsCalendarPicker id="pos-exception-report-from-bs" value={fromIso} onChange={setFromIso} />

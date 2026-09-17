@@ -65,9 +65,11 @@ export default function EstimateTimeModal({ ticket, onConfirm, onClose }) {
               key={p}
               className="btn btn-ghost"
               style={{ fontSize: 14, padding: '7px 16px', borderColor: minutes === p ? 'var(--theme-accent)' : undefined, color: minutes === p ? 'var(--theme-accent-ink)' : undefined }}
-              onClick={() => setValue(String(p))}
+              // A preset IS the answer (S776): tapping one starts the ticket. Start used to be three taps —
+              // Start, a preset, then Confirm & Start — with a cook's hands full. Typed minutes still confirm.
+              onClick={() => onConfirm(p)}
             >
-              {p}m
+              Start · {p}m
             </button>
           ))}
         </div>

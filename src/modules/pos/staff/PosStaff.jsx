@@ -10,6 +10,7 @@ import Modal from '../../../components/Modal'
 import { errorLine } from '../../../shared/errorText'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 
 const PERMISSION_LEVELS = [
   { value: 'staff',      label: 'Staff',      desc: 'Take orders, view floor' },
@@ -326,6 +327,10 @@ export default function PosStaff() {
         pos_role:      role.level,
         pos_job_title: addForm.job_title,
         pos_team:      addForm.team,
+        // A new login starts with NO discount (owner decision, S776) — the column's blank is
+        // "unlimited", the least safe starting point for a login nobody has thought about yet. A
+        // manager sets a cap in the Discount % column when this person should be able to discount.
+        pos_discount_limit: 0,
       },
     })
     if (error || data?.error) {
@@ -550,7 +555,7 @@ export default function PosStaff() {
                 <th><Tip text="Custom role name defined for this team (e.g. Cashier, Bartender).">Role</Tip></th>
                 <th><Tip text="Permission level this role maps to — controls which screens they can access.">Access Level</Tip></th>
                 <th><Tip text="Which station this login works. Kitchen/Bar accounts see only the ticket display, locked to their own queue — everything front-of-house (Orders, Tables, Customers, Shifts) is hidden regardless of Access Level.">Team</Tip></th>
-                <th><Tip text="Maximum discount % this login can apply at billing. Leave blank for unlimited.">Discount %</Tip></th>
+                <th><Tip text="Maximum discount % this login can apply at billing. A new login starts at 0 (no discount). Clear the box for no limit.">Discount %</Tip></th>
                 <th><Tip text="Lets this login void a bill themselves, without needing the Owner/Admin.">Void</Tip></th>
                 <th><Tip text="Last time this user was active in the app">Last Seen</Tip></th>
                 {/* Sticky right — the same treatment Stock Count's COGS and Purchases' Total
@@ -681,9 +686,11 @@ export default function PosStaff() {
                         onChange={e => updateAllowVoid(p.id, e.target.checked)}
                       />
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                    {/* BS first, the calendar the owner reads (S776); AD in the title. Both pinned to Nepal. */}
+                    <td style={{ fontSize: 12, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}
+                      title={p.last_seen_at ? nepalDateLong(p.last_seen_at) : undefined}>
                       {p.last_seen_at
-                        ? new Date(p.last_seen_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                        ? (nepalBsLong(p.last_seen_at) || nepalDateLong(p.last_seen_at))
                         : '—'}
                     </td>
                     <td style={{ position: 'sticky', right: 0, background: 'var(--theme-card)' }}>
@@ -885,11 +892,10 @@ export default function PosStaff() {
                   </option>
                 ))}
               </select>
-              {!canGrantAnything && viewerCap !== null && (
-                <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
-                  A login you create starts with a discount limit of {viewerCap}% — your own — and without Void permission.
-                </p>
-              )}
+              <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
+                A new login starts with a 0% discount limit and without Void permission — set both in the
+                list once it is created.{!canGrantAnything && viewerCap !== null ? ` You can give up to ${viewerCap}%, your own limit.` : ''}
+              </p>
             </div>
 
             <div style={{ marginBottom: 20 }}>

@@ -14,6 +14,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import RangePresets from './RangePresets'
 import ChartCard from '../../../components/ChartCard'
 import { getBsToday, formatAd, adToBs, formatBsDay, BS_MONTHS, getBsFiscalYear } from '../../../utils/bsCalendar'
 import { nepalDayStartTs, nepalDayEndTs, todayNepalAdIso, bsSlash } from './reportRange'
@@ -1127,6 +1128,7 @@ export default function SalesReport() {
           </div>
         ) : (
           <>
+            <RangePresets fromIso={fromIso} toIso={toIso} onPick={r => { setFromIso(r.from); setToIso(r.to) }} />
             <div>
               <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="sales-report-from-bs">From (BS)</label>
               <BsCalendarPicker id="sales-report-from-bs" value={fromIso} onChange={setFromIso} />

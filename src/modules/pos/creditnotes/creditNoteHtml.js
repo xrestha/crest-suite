@@ -5,7 +5,6 @@
 // own module (not PosOrders.jsx) so it can be printed/reprinted from both the Recent Bills quick
 // action and the standalone Credit Notes page without either depending on the other's state.
 
-import { adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { numberToWordsNpr } from '../../../utils/numberToWords'
 import { scopedUpdate } from '../../../shared/scopedDb'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
@@ -16,7 +15,7 @@ import { escapeHtml as esc } from '../../../utils/escapeHtml'
 // sequential reprints, which don't map) — so a bill and its own credit note, printed minutes
 // apart, carried contradictory copy labels. One definition, one convention.
 import { COPY_LABEL } from '../orders/posOrdersConstants'
-import { nepalTime } from '../../../shared/nepalTime'
+import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
 export { COPY_LABEL }
 
 export function buildCreditNoteHtml(creditNote, items, settings, outletName, hscMap, copyLabel) {
@@ -25,9 +24,11 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   const cnNo   = `CN${creditNote.credit_note_no}-${prefix}${prefix ? '-' : ''}${esc(creditNote.invoice_fy || '')}`
   const now       = new Date(creditNote.created_at || Date.now())
   const nowStr    = nepalTime(now)
-  const adDateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const bs        = adToBsSafe(now)
-  const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
+  // Date and Miti as read IN NEPAL (S776), through the shared helpers the bill already uses. These
+  // were the runtime's toLocaleDateString and adToBsSafe, so a note printed after 18:15 UTC by a viewer
+  // abroad carried the next or previous day beside a Nepal-pinned clock.
+  const adDateStr = nepalDateAd(now)
+  const bsDateStr = nepalBsLong(now)
   const totalQty  = items.reduce((s, i) => s + i.qty, 0)
 
   return `<!DOCTYPE html>

@@ -32,7 +32,7 @@ function itemNote(i) {
 function ItemOptions({ options }) {
   if (!options?.length) return null
   return (
-    <div style={{ paddingLeft: 16, fontSize: 15, lineHeight: 1.35 }}>
+    <div style={{ paddingLeft: 16, fontSize: 17, lineHeight: 1.35 }}>
       {options.map((o, n) => o.is_removal
         ? <div key={n} style={{ color: 'var(--theme-red-text)', fontWeight: 700 }}>NO {String(o.kitchen || '').replace(/^no\s+/i, '')}</div>
         : <div key={n} style={{ color: 'var(--theme-text1)' }}>+ {o.kitchen}</div>)}
@@ -367,7 +367,11 @@ export default function KitchenDisplay() {
           minutes a banner saying 3 over a card saying 4 is two answers to one question on one
           screen, and this banner's whole claim is that it agrees with the board underneath it. */}
       {alertOn && (
+        // reserveSpace (S776): the header below used to pad a hard-coded 76px, and the banner wraps to
+        // two lines on a narrower screen. The shell's own guest-order banner is suppressed on /pos/kds
+        // (Layout.js), so this is the one mounted instance that may publish --arrival-alert-h here.
         <ArrivalAlert
+          reserveSpace
           icon={alertUrgent ? '▲' : alertWarn ? '△' : '🔔'}
           urgent={alertUrgent}
           muted={alertMuted}
@@ -380,7 +384,7 @@ export default function KitchenDisplay() {
             : `Oldest sent ${Math.round(oldestNewMs / 60000)} min ago. Tap Start on the card to take it.`}
         />
       )}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0, paddingTop: alertOn ? 76 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12, flexShrink: 0, paddingTop: alertOn ? 'var(--arrival-alert-h, 76px)' : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {/* '/pos/orders' was every POS staffer's home before kitchen/bar teams (S431) existed —
               a locked-team account doesn't have Orders in its sidebar at all, so exiting there
@@ -439,7 +443,7 @@ export default function KitchenDisplay() {
             return (
               <div key={col.status}>
                 <h3 style={{
-                  fontSize: 14, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+                  fontSize: 16, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
                   color: 'var(--theme-text2)', margin: '0 0 10px',
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
@@ -490,7 +494,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
     const remainingMin = Math.round((startedMs + ticket.estimated_prep_minutes * 60000 - now) / 60000)
     const over = remainingMin < 0
     etaNode = (
-      <span style={{ fontSize: 12, color: over ? 'var(--theme-red-text)' : 'var(--theme-text3)', fontWeight: over ? 700 : 400 }}>
+      <span style={{ fontSize: 14, color: over ? 'var(--theme-red-text)' : 'var(--theme-text3)', fontWeight: over ? 700 : 400 }}>
         {over ? `${Math.abs(remainingMin)} min over est.` : `~${remainingMin} min left`}
       </span>
     )
@@ -498,7 +502,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
     const actualMin = Math.round((new Date(ticket.ready_at).getTime() - new Date(ticket.started_at).getTime()) / 60000)
     const overEst = actualMin > ticket.estimated_prep_minutes
     etaNode = (
-      <span style={{ fontSize: 12, color: overEst ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
+      <span style={{ fontSize: 14, color: overEst ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
         Done in {actualMin}m (est. {ticket.estimated_prep_minutes}m)
       </span>
     )
@@ -508,8 +512,8 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
     <div className="card" style={{ padding: 16, borderColor, borderWidth: isLate || isWarn ? 2 : 1, overflow: 'hidden' }}>
       <div style={{ margin: '-16px -16px 12px', height: 7, background: stripColor }} />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-        <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--theme-text1)' }}>{ticket.table_name || 'Takeaway'}</span>
-        <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
+        <span style={{ fontWeight: 700, fontSize: 22, color: 'var(--theme-text1)' }}>{ticket.table_name || 'Takeaway'}</span>
+        <span style={{ fontSize: 14, color: 'var(--theme-text3)' }}>#{ticket.order_no}</span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12 }}>
         {(ticket.items || []).map((i, idx) => {
@@ -523,25 +527,25 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
             const last = pulled.reduce((a, e) => (new Date(e.removed_at) > new Date(a.removed_at) ? e : a))
             const reasons = [...new Set(pulled.map(e => (e.reason || '').trim()).filter(Boolean))].join(' / ')
             return (
-              <div key={idx} style={{ fontSize: 16, color: 'var(--theme-text2)' }}>
+              <div key={idx} style={{ fontSize: 20, color: 'var(--theme-text2)' }}>
                 {nowQty === 0 ? (
                   <s style={{ color: 'var(--theme-text3)' }}>{i.qty} × {i.name}</s>
                 ) : (
                   <span><s style={{ color: 'var(--theme-text3)' }}>{i.qty}</s> → {nowQty} × {i.name}</span>
                 )}
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--theme-red-text)', paddingLeft: 16 }}>
+                <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--theme-red-text)', paddingLeft: 16 }}>
                   {nowQty === 0 ? 'Cancelled' : `${removedQty} cancelled`} {nepalTime(last.removed_at)} · {reasons || 'no reason given'}
                 </div>
                 {nowQty > 0 && <ItemOptions options={i.options} />}
-                {nowQty > 0 && note && <div style={{ fontSize: 16, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
+                {nowQty > 0 && note && <div style={{ fontSize: 18, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
               </div>
             )
           }
           return (
-            <div key={idx} style={{ fontSize: 16, color: 'var(--theme-text2)' }}>
+            <div key={idx} style={{ fontSize: 20, color: 'var(--theme-text2)' }}>
               {i.qty} × {i.name}
               <ItemOptions options={i.options} />
-              {note && <div style={{ fontSize: 16, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
+              {note && <div style={{ fontSize: 18, color: 'var(--theme-text1)', paddingLeft: 16 }}>↳ {note}</div>}
             </div>
           )
         })}
@@ -549,7 +553,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           <Tip text={`Time since this ticket was sent. △ means it is approaching the ${Math.round(WARN_MS / 60000)}-minute mark, ▲ that it is past ${Math.round(LATE_MS / 60000)} minutes.`}>
-            <span style={{ fontSize: 13, color: isLate ? 'var(--theme-red-text)' : isWarn ? 'var(--theme-amber-text)' : 'var(--theme-text3)', fontWeight: isLate || isWarn ? 700 : 400 }}>
+            <span style={{ fontSize: 16, color: isLate ? 'var(--theme-red-text)' : isWarn ? 'var(--theme-amber-text)' : 'var(--theme-text3)', fontWeight: isLate || isWarn ? 700 : 400 }}>
               {/* The mark, not the colour, is what makes late and going-late distinguishable.
                   Measured on Light, --theme-red and --theme-amber sit at ΔE 3.1 under
                   deuteranopia — the exact collision S608 retuned redText/amberText out of, still
@@ -563,7 +567,7 @@ function TicketCard({ ticket, now, onAdvance, onRequestEstimate, action, next, i
         </div>
         {action && (
           <button
-            className="btn btn-primary" style={{ fontSize: 14, padding: '8px 16px' }} disabled={advancing}
+            className="btn btn-primary" style={{ fontSize: 16, padding: '10px 20px' }} disabled={advancing}
             onClick={() => isStartAction ? onRequestEstimate(ticket) : onAdvance(ticket, next)}
           >
             {advancing ? '…' : action}

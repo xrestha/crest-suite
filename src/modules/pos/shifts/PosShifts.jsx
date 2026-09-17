@@ -7,16 +7,16 @@ import { scopedFrom as scopedFromRaw } from '../../../shared/scopedDb'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import Tip from '../../../components/Tip'
+import Tabs from '../../../components/Tabs'
 import { errorLine, isNetworkError } from '../../../shared/errorText'
 import RowDisclosure from '../../../components/RowDisclosure'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { computeRecipeCosts } from '../../../utils/recipeCost'
-import { adToBsSafe, BS_MONTHS } from '../../../utils/bsCalendar'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
-import { nepalTime } from '../../../shared/nepalTime'
+import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
 
 const fmtNpr = npr
 // Was its own hardcoded copy of the tender-type list (drifted from posOrdersConstants.js) — a
@@ -83,11 +83,23 @@ function DenomGrid({ counts, onChange }) {
   )
 }
 
+// The one verdict on a drawer variance (S776), for the counting box, the Z-report table and Shift
+// History alike. They had three schemes: the counting box was GREEN for any shortfall under NPR 100
+// and red for an overage over it, while the report and history called short red and over amber. A
+// short drawer is money missing, whatever its size, and a cashier must not see green for it on one
+// screen and red on the next. The mark carries it too, since red and amber collide under
+// deuteranopia on Light (posSignals.js): ✓ balanced, ▲ short (act), △ over (check).
+function varianceSignal(v) {
+  if (Math.abs(v) < 1) return { tone: 'green', mark: '✓', word: 'Balanced' }
+  return v < 0 ? { tone: 'red', mark: '▲', word: 'short' } : { tone: 'amber', mark: '△', word: 'over' }
+}
+
+// The slip's date, as read IN NEPAL (S776): the runtime's toLocaleDateString and adToBsSafe named the
+// next or previous day for a shift closed late at night and printed from a device in another zone.
 function fmtAdBs(date) {
-  const dt = new Date(date)
-  const ad = dt.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
-  const bs = adToBsSafe(dt)
-  return bs ? `${ad} (${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year})` : ad
+  const ad = nepalDateAd(date)
+  const bs = nepalBsLong(date)
+  return bs ? `${ad} (${bs})` : ad
 }
 
 // 80mm thermal-printable Cash Settlement / Shift Opening slip — same template conventions as
@@ -389,8 +401,9 @@ function ReportBody({ report, opening, closing, variance }) {
                 <tr><td>Counted Cash</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(closing)}</td></tr>
                 <tr>
                   <td style={{ fontWeight: 700 }}>Variance</td>
-                  <td style={{ textAlign: 'right', fontWeight: 700, color: Math.abs(variance) < 1 ? 'var(--theme-green-text)' : variance < 0 ? 'var(--theme-red-text)' : 'var(--theme-amber-text)' }}>
-                    {Math.abs(variance) < 1 ? 'Balanced' : `${variance > 0 ? '+' : ''}${fmtNpr(variance)} ${variance > 0 ? '(over)' : '(short)'}`}
+                  <td style={{ textAlign: 'right', fontWeight: 700, color: `var(--theme-${varianceSignal(variance).tone}-text)` }}>
+                    {varianceSignal(variance).mark}{' '}
+                    {Math.abs(variance) < 1 ? 'Balanced' : `${variance > 0 ? '+' : ''}${fmtNpr(variance)} (${varianceSignal(variance).word})`}
                   </td>
                 </tr>
               </>
@@ -757,16 +770,16 @@ export default function PosShifts() {
       <div className="page-header">
         <h1 className="page-title">Shifts</h1>
         <p className="page-subtitle">
-          Open a shift with a starting cash count, watch live totals as the shift runs, and reconcile the drawer with a Z-report when it ends.
+          Open a shift with a starting cash count, watch live totals as the shift runs, and count the drawer against the takings when it ends — the closing report, often called a Z-report.
         </p>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 24 }}>
-        <button className={`tab-btn${mainTab === 'current' ? ' tab-btn--active' : ''}`} onClick={() => setMainTab('current')}>Current Shift</button>
-        <Tip text="Past closed shifts — click one to see its full Z-report">
-          <button className={`tab-btn${mainTab === 'history' ? ' tab-btn--active' : ''}`} onClick={openHistoryTab}>Shift History</button>
-        </Tip>
-      </div>
+      <Tabs idBase="pos-shifts" label="Shift views" active={mainTab} style={{ marginBottom: 24 }}
+        onChange={key => (key === 'history' ? openHistoryTab() : setMainTab('current'))}
+        tabs={[
+          { key: 'current', label: 'Current Shift' },
+          { key: 'history', label: 'Shift History', title: 'Past closed shifts — open one to see its closing report' },
+        ]} />
 
       {/* ══ CURRENT SHIFT TAB ══ */}
       {mainTab === 'current' && (
@@ -793,7 +806,7 @@ export default function PosShifts() {
                     ± Cash In / Out
                   </button>
                   <button className="btn btn-danger"
-                    onClick={() => openModal('close')}>Close Shift (Z-Report)</button>
+                    onClick={() => openModal('close')}>Close Shift &amp; Count Cash</button>
                 </div>
               </div>
 
@@ -902,20 +915,20 @@ export default function PosShifts() {
                             <RowDisclosure
                               expanded={expandedId === s.id}
                               onToggle={() => toggleExpand(s)}
-                              label={`Z-report for ${s.label || 'shift'} on ${fmtSpan(s.opened_at, s.closed_at)}`}
+                              label={`Closing report for ${s.label || 'shift'} on ${fmtSpan(s.opened_at, s.closed_at)}`}
                             /> {s.label || 'Shift'}
                           </td>
                           <td>{fmtSpan(s.opened_at, s.closed_at)}</td>
                           <td style={{ fontSize: 12 }}>{staffNames[s.opened_by] || '—'} / {staffNames[s.closed_by] || '—'}</td>
                           <td style={{ textAlign: 'right' }}>
                             {shiftReport ? (
-                              <span className={Math.abs(variance) < 1 ? 'badge-green' : variance < 0 ? 'badge-red' : 'badge-amber'} style={{ fontSize: 11 }}>
-                                {Math.abs(variance) < 1 ? 'Balanced' : fmtNpr(variance)}
+                              <span className={`badge-${varianceSignal(variance).tone}`} style={{ fontSize: 11 }}>
+                                {varianceSignal(variance).mark} {Math.abs(variance) < 1 ? 'Balanced' : `${fmtNpr(variance)} ${varianceSignal(variance).word}`}
                               </span>
                             ) : '—'}
                           </td>
                           {/* Mouse affordance only — the RowDisclosure carries aria-expanded. */}
-                          <td aria-hidden="true" style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>{expandedId === s.id ? '▲ hide' : '▼ Z-report'}</td>
+                          <td aria-hidden="true" style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>{expandedId === s.id ? '▲ hide' : '▼ closing report'}</td>
                         </tr>
                         {expandedId === s.id && (
                           <tr>
@@ -936,7 +949,7 @@ export default function PosShifts() {
                                       denomCounts: s.closing_denominations || EMPTY_COUNTS,
                                       opening: s.opening_cash, closing: s.closing_cash || 0, report: reportsMap[s.id],
                                     }))}>
-                                    🖨 Reprint Z-Report
+                                    🖨 Reprint closing report
                                   </button>
                                 </>
                               )}
@@ -956,7 +969,7 @@ export default function PosShifts() {
       {/* ══ OPEN / CLOSE MODAL ══ */}
       {modal && (
         <Modal
-          title={modal === 'open' ? 'Open Shift' : 'Close Shift — Z-Report'}
+          title={modal === 'open' ? 'Open Shift' : 'Close Shift — count the drawer'}
           onClose={() => { if (!saving) setModal(null) }}
           maxWidth={480}
           zIndex={1100}
@@ -995,21 +1008,21 @@ export default function PosShifts() {
               const counted = sumDenoms(denomCounts)
               const diff = counted - expectedCash
               const over = diff > 0
-              const material = Math.abs(diff) >= 100
+              const signal = varianceSignal(diff)
               return (
                 <div style={{
                   marginTop: 14, padding: '10px 14px', borderRadius: 'var(--radius-md)',
-                  border: `1px solid color-mix(in srgb, ${material ? 'var(--theme-red)' : 'var(--theme-green)'} 30%, transparent)`,
-                  background: `color-mix(in srgb, ${material ? 'var(--theme-red)' : 'var(--theme-green)'} 8%, transparent)`,
+                  border: `1px solid color-mix(in srgb, var(--theme-${signal.tone}) 30%, transparent)`,
+                  background: `color-mix(in srgb, var(--theme-${signal.tone}) 8%, transparent)`,
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                     <span style={{ color: 'var(--theme-text2)' }}>Counted</span>
                     <strong style={{ color: 'var(--theme-text1)' }}>{fmtNpr(counted)}</strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginTop: 4 }}>
-                    <span style={{ color: 'var(--theme-text2)' }}>{diff === 0 ? 'Balanced' : over ? 'Over by' : 'Short by'}</span>
-                    <strong style={{ color: material ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-                      {diff === 0 ? '—' : fmtNpr(Math.abs(diff))}
+                    <span style={{ color: 'var(--theme-text2)' }}>{Math.abs(diff) < 1 ? 'Balanced' : over ? 'Over by' : 'Short by'}</span>
+                    <strong style={{ color: `var(--theme-${signal.tone}-text)` }}>
+                      {signal.mark} {Math.abs(diff) < 1 ? '—' : fmtNpr(Math.abs(diff))}
                     </strong>
                   </div>
                 </div>
