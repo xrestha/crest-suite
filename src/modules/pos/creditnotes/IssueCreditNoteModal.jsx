@@ -487,13 +487,27 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
               Any loyalty points the bill earned are taken back, and any spent on it are returned.
             </p>
 
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleConfirm}
-                disabled={submitting || nothingToCredit || !refundMode || (refundMode === 'cash' && (refundShift.loading || refundShift.shift === null))}>
-                {submitting ? 'Issuing…' : 'Issue & Print'}
-              </button>
-            </div>
+            {/* aria-disabled, not disabled (S776, the S759 pattern): a press names what is missing in the
+                alert line above and moves to that field. A disabled Issue & Print gave a manager holding a
+                customer's returned bill no reason at all. handleConfirm refuses each of these itself. */}
+            {(() => {
+              const issueBlocker = nothingToCredit ? { label: 'Nothing to credit on this bill' }
+                : !reason.trim() ? { label: 'Enter a reason first', focus: () => document.getElementById('icn-reason')?.focus() }
+                : !refundMode ? { label: 'Say whether money was returned', focus: () => document.querySelector('input[name="icn-refund"]')?.focus() }
+                : refundMode === 'cash' && refundShift.shift === null ? { label: 'Open a shift, or choose Other or None' }
+                : null
+              return (
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+                  <button className="btn btn-primary"
+                    onClick={() => { issueBlocker?.focus?.(); handleConfirm() }}
+                    disabled={submitting || (refundMode === 'cash' && refundShift.loading)}
+                    aria-disabled={!submitting && issueBlocker ? true : undefined}>
+                    {submitting ? 'Issuing…' : issueBlocker ? issueBlocker.label : 'Issue & Print'}
+                  </button>
+                </div>
+              )
+            })()}
           </>
         )}
     </Modal>

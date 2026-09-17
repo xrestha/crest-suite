@@ -2963,31 +2963,82 @@ export default function PosOrders({ billingStation = false } = {}) {
     return true
   }
 
-  // What stops a close before anything is written, as the sentence the cashier reads — or null when
-  // nothing does. One list, read by closeOrder's own refusal (S776), so the refusal and the checks it
-  // is made of cannot drift apart.
+  // What stops a close before anything is written — or null when nothing does (S776). One list, read by
+  // closeOrder's own refusal AND by the close buttons, so a button can never look ready while the press
+  // behind it refuses. `text` is the sentence closeOrder shows; `label` is what the button says instead
+  // of "Confirm Payment" (null where the button's own label already names it — Short by, Remaining,
+  // payments exceed); `field` is the control the cashier is taken to.
   function closeBlocker(closeType) {
-    if ((closeType === 'void' || closeType === 'writeoff') && !closeReason) return 'Select a reason.'
+    const block = (text, label, field = null) => ({ text, label, field })
+    if ((closeType === 'void' || closeType === 'writeoff') && !closeReason) {
+      return block('Select a reason.', 'Choose a reason first', closeType === 'void' ? 'pos-orders-reason' : 'pos-orders-reason-2')
+    }
     if (closeType !== 'paid') return null
-    if (discountAmt > 0 && !discountReason) return 'Select a discount reason.'
-    if (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) return 'Buyer Name + Phone are required for a discount or Credit sale.'
-    if (splitMode && (remaining > 0 || tenders.length === 0)) return 'Split payment is not fully collected yet.'
+    if (discountAmt > 0 && !discountReason) return block('Select a discount reason.', 'Choose a discount reason first', 'pos-orders-discount-reason')
+    if (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) {
+      return block('Buyer Name + Phone are required for a discount or Credit sale.', "Enter the buyer's name and phone first",
+        !buyerName.trim() ? 'pos-orders-buyer-name' : 'pos-orders-buyer-phone')
+    }
+    if (splitMode && (remaining > 0 || tenders.length === 0)) return block('Split payment is not fully collected yet.', null, 'pos-orders-amount')
     if (tendersOverpaid) {
-      return `The payments recorded (${fmtNpr(tendersTotal)}) are more than this bill now comes to (${fmtNpr(payTotal)}) — the total changed after they were taken. Undo the payments and take them again against the new total.`
+      return block(`The payments recorded (${fmtNpr(tendersTotal)}) are more than this bill now comes to (${fmtNpr(payTotal)}) — the total changed after they were taken. Undo the payments and take them again against the new total.`, null)
     }
     // redeem_loyalty_points debits the account on the phone stored on the ORDER (S754), so a
     // redemption with the phone since cleared would fail at the RPC with a message about the bill.
     if (tenders.some(t => t.method === 'Loyalty') && !buyerPhone.trim()) {
-      return "Enter the customer's phone — points are redeemed from the account on that number."
+      return block("Enter the customer's phone — points are redeemed from the account on that number.", "Enter the customer's phone first", 'pos-orders-buyer-phone')
     }
     if (cashShortfall > 0) {
-      return `Tendered ${fmtNpr(resolveTendered(payTotal))} is ${fmtNpr(cashShortfall)} short of the bill total ${fmtNpr(payTotal)} — collect the difference, or put the bill on Credit if the customer will pay later.`
+      return block(`Tendered ${fmtNpr(resolveTendered(payTotal))} is ${fmtNpr(cashShortfall)} short of the bill total ${fmtNpr(payTotal)} — collect the difference, or put the bill on Credit if the customer will pay later.`, null, 'pos-orders-tender')
     }
-    if (hasItemComp && !itemCompReason) return 'Select a reason for the complimentary item(s).'
+    if (hasItemComp && !itemCompReason) return block('Select a reason for the complimentary item(s).', 'Choose a reason for the comped items', 'pos-orders-comp-reason')
     if (orderItems.length > 0 && payableOrderItems.length === 0) {
-      return 'Every item is comped — use the Complimentary tab instead of issuing a ₨0 bill.'
+      return block('Every item is comped — use the Complimentary tab instead of issuing a ₨0 bill.', 'Every item is comped — use Complimentary')
     }
     return null
+  }
+
+  // The close buttons stay pressable while something is missing (S776, the S759 aria-disabled pattern).
+  // A `disabled` button explained nothing: "Confirm Payment — NPR 3,425" read as ready while the tap did
+  // nothing, with a guest waiting. A press now runs closeOrder, whose refusal names what is missing in
+  // the alert line above the button, and moves the cashier to the field — opening Items or Buyer
+  // details first when that field is folded away inside them.
+  function pressClose(closeType) {
+    const blocker = closeBlocker(closeType)
+    if (blocker?.field) {
+      if (blocker.field === 'pos-orders-comp-reason') setItemsExpanded(true)
+      if (blocker.field === 'pos-orders-buyer-name' || blocker.field === 'pos-orders-buyer-phone') setBuyerExpanded(true)
+      setTimeout(() => {
+        const el = document.getElementById(blocker.field)
+        if (!el) return
+        el.scrollIntoView?.({ block: 'nearest' })
+        el.focus()
+      }, 0)
+    }
+    if (closeType === 'void' && !blocker && !closeAttemptRef.current) { confirmVoid(); return }
+    closeOrder(closeType)
+  }
+
+  // A void is the one close with nothing to show for it afterwards — no bill, no number, no revenue —
+  // and it sat one tap from Pay with no confirmation (S776). The ask names what is lost.
+  function confirmVoid() {
+    const where = orderLabel()
+    const sent = orderItems.filter(i => i.sent_to_kot).length
+    askConfirm({
+      title: `Void ${where}?`,
+      confirmLabel: 'Void order', danger: true,
+      cancelLabel: 'Keep the order',
+      // Above the billing modal (1100) inside the order screen's own stacking context.
+      zIndex: 1200,
+      body: (
+        <p style={{ margin: 0 }}>
+          The order is cancelled with no bill issued and no revenue recorded, for the reason “{closeReason}”. It cannot be reopened.
+          {sent > 0 && ` ${sent === 1 ? 'One line was' : `${sent} lines were`} already sent to the kitchen or bar — if that food was made, Complimentary keeps its cost on the books; a void does not.`}
+        </p>
+      ),
+      // Not awaited: the dialog closes at once, and the Void button carries the close's progress.
+      run: () => { void closeOrder('void') },
+    })
   }
 
   // Auto-build the customer book: any bill with buyer Name + Phone (required for discounts and Credit
@@ -3068,7 +3119,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const earlier = closeAttemptRef.current?.orderId === orderId ? closeAttemptRef.current : null
     if (!earlier) {
       const blocker = closeBlocker(closeType)
-      if (blocker) { setCloseMsg(`error:${blocker}`); return false }
+      if (blocker) { setCloseMsg(`error:${blocker.text}`); return false }
     }
     // Guards a manual Charge tap and the QR auto-confirm poll from racing each other — the poll
     // calls closeOrder directly, bypassing the Confirm Payment button's own disabled={closing}.
@@ -3085,7 +3136,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         if (settled !== 'open') return settled === 'finished'
         // Still open on a later press: that write never landed, so this is an ordinary close again.
         const blocker = closeBlocker(closeType)
-        if (blocker) { setCloseMsg(`error:${blocker}`); return false }
+        if (blocker) { setCloseMsg(`error:${blocker.text}`); return false }
       }
 
       // S754 (owner decision): a bill that takes money — Charge (Cash, QR, Split AND Credit, which
@@ -4424,7 +4475,12 @@ The tables were left occupied rather than freed with their orders still open.`)
               </button>
 
               {hasPosAccess('supervisor') && (() => {
-                const payDisabled = saving || !orderId || !isOnline
+                // S776: the reason used to live only in the Tip, and a tablet has no hover — so on an order
+                // not yet sent the button simply did nothing. It stays pressable and says why.
+                const payBlocker = !orderId
+                  ? 'Send or save the order first — a bill is charged against a saved order.'
+                  : !isOnline ? 'Reconnect to take payment — the bill number comes from the server.' : null
+                const payDisabled = saving || !!payBlocker
                 return (
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <Tip text={!isOnline
@@ -4438,11 +4494,11 @@ The tables were left occupied rather than freed with their orders still open.`)
                         background: 'var(--theme-accent)', color: 'var(--theme-accent-text)', fontWeight: 700, border: 'none',
                         // Same disabled treatment as the KOT/BOT ticket-btn class (opacity 0.5) — this
                         // button uses inline styles instead of that class, so it needs its own dimming.
-                        opacity: payDisabled ? 0.5 : 1,
+                        opacity: saving ? 0.5 : payDisabled ? 0.6 : 1,
                         cursor: payDisabled ? 'default' : 'pointer',
                       }}
-                      onClick={openBilling}
-                      disabled={payDisabled}>
+                      onClick={() => { if (payBlocker) { setMsg(`error:${payBlocker}`); return } openBilling() }}
+                      disabled={saving} aria-disabled={payBlocker ? true : undefined}>
                       Payment
                     </button>
                   </Tip>
@@ -4585,11 +4641,11 @@ The tables were left occupied rather than freed with their orders still open.`)
                       {/* Placeholder text is not a label (it vanishes on the first keystroke), and a
                           red border is reinforcement, not the message — so each field carries its
                           name and the two mandatory ones carry aria-invalid (S682). */}
-                      <input placeholder="Name" aria-label="Buyer name" aria-invalid={requireBuyerId && !buyerName.trim() ? true : undefined} value={buyerName} onChange={e => setBuyerName(e.target.value)}
+                      <input id="pos-orders-buyer-name" placeholder="Name" aria-label="Buyer name" aria-invalid={requireBuyerId && !buyerName.trim() ? true : undefined} value={buyerName} onChange={e => setBuyerName(e.target.value)}
                         style={{ ...billInput, borderColor: requireBuyerId && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                       <input placeholder="PAN No." aria-label="Buyer PAN number" value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
                       <input placeholder="Address" aria-label="Buyer address" value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)} style={billInput} />
-                      <input placeholder="Phone" aria-label="Buyer phone" aria-invalid={requireBuyerId && !buyerPhone.trim() ? true : undefined} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
+                      <input id="pos-orders-buyer-phone" placeholder="Phone" aria-label="Buyer phone" aria-invalid={requireBuyerId && !buyerPhone.trim() ? true : undefined} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
                         style={{ ...billInput, borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                     </div>
                     <input placeholder="Remarks" aria-label="Bill remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
@@ -4980,27 +5036,33 @@ The tables were left occupied rather than freed with their orders still open.`)
               scrollable content above gets (e.g. a long list of split-payment tenders). */}
           <div style={{ flexShrink: 0, padding: narrowBilling ? '12px 16px 16px' : '14px 28px 20px', borderTop: '1px solid var(--theme-border)' }}>
             {closeMsg && <p role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: closeMsg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>{closeMsg.replace(/^(error|ok):/, '')}</p>}
-            {billingTab === 'pay' && (
-              <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
-                onClick={() => closeOrder('paid')}
-                disabled={closing || cashShortfall > 0 || tendersOverpaid || (splitMode && (remaining > 0 || tenders.length === 0)) || (discountAmt > 0 && !discountReason) || (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) || (hasItemComp && !itemCompReason) || allItemsComped}>
-                {closing ? (closeStep || 'Processing…')
-                  : tendersOverpaid ? `Payments exceed the bill by ${fmtNpr(tendersTotal - payTotal)} — undo and re-take`
-                  : splitMode ? (remaining > 0 ? `Remaining ${fmtNpr(remaining)}` : `Complete Order — ${fmtNpr(payTotal)}`)
-                  : cashShortfall > 0 ? `Short by ${fmtNpr(cashShortfall)} — collect ${fmtNpr(payTotal)}`
-                  : `Confirm Payment — ${fmtNpr(payTotal)}`}
-              </button>
-            )}
+            {/* aria-disabled, not disabled, for everything but an in-flight close (S776): see pressClose. */}
+            {billingTab === 'pay' && (() => {
+              const blocker = closeBlocker('paid')
+              return (
+                <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
+                  onClick={() => pressClose('paid')}
+                  disabled={closing} aria-disabled={!closing && blocker ? true : undefined}>
+                  {closing ? (closeStep || 'Processing…')
+                    : tendersOverpaid ? `Payments exceed the bill by ${fmtNpr(tendersTotal - payTotal)} — undo and re-take`
+                    : splitMode && remaining > 0 ? `Remaining ${fmtNpr(remaining)}`
+                    : cashShortfall > 0 ? `Short by ${fmtNpr(cashShortfall)} — collect ${fmtNpr(payTotal)}`
+                    : blocker?.label ? blocker.label
+                    : splitMode ? `Complete Order — ${fmtNpr(payTotal)}`
+                    : `Confirm Payment — ${fmtNpr(payTotal)}`}
+                </button>
+              )
+            })()}
             {billingTab === 'void' && (
               <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-red)', color: redBadgeText, borderColor: 'var(--theme-red)' }}
-                onClick={() => closeOrder('void')} disabled={closing || !closeReason}>
-                {closing ? (closeStep || 'Processing…') : 'Void Order'}
+                onClick={() => pressClose('void')} disabled={closing} aria-disabled={!closing && !closeReason ? true : undefined}>
+                {closing ? (closeStep || 'Processing…') : closeReason ? 'Void Order' : 'Choose a reason to void'}
               </button>
             )}
             {billingTab === 'writeoff' && (
               <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-amber)', color: amberBadgeText, borderColor: 'var(--theme-amber)' }}
-                onClick={() => closeOrder('writeoff')} disabled={closing || !closeReason}>
-                {closing ? (closeStep || 'Processing…') : 'Mark Complimentary (₨0 collected)'}
+                onClick={() => pressClose('writeoff')} disabled={closing} aria-disabled={!closing && !closeReason ? true : undefined}>
+                {closing ? (closeStep || 'Processing…') : closeReason ? 'Mark Complimentary (₨0 collected)' : 'Choose a reason first'}
               </button>
             )}
             <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 8, fontSize: 13 }}
