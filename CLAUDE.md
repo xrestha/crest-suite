@@ -1,427 +1,122 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
----
+Crest Suite is a multi-tenant SaaS for Nepal F&B businesses: IMS, HR and POS modules in one React app
+on one Supabase project, switched per client by `clients.ims_enabled` / `hr_enabled` / `pos_enabled`.
+This file loads on **every** request, so it holds only what applies to every task. Module detail lives
+in `.claude/rules/*.md`; each rules file loads automatically when you open a file its `paths:` matches.
 
 ## Where a new rule goes
 
-**Default to `.claude/rules/`, not this file.** Everything here loads on *every* request, so a rule
-that only matters while one module is open is paid for by every session that never opens it. Seven
-`/doctor` passes have now had to migrate sections out (2026-08-18, S605, S615, S663, S678, S712, S757 —
-the S663 one halved the file, 110k → 51k chars), and between the second and third the root file regrew
-7,052 chars in three days — not through carelessness, but because a new
-rule has one obvious home and no single session can see that it is the fortieth to pick it.
-**S678 found the file at 391 chars of headroom against its own 53,000 ceiling**, and what it cut was
-not new bloat but three S663 stubs that had kept their full bodies alongside the pointer — so the
-regrowth to watch for is a section that was migrated and never actually shrank.
+- **Default to `.claude/rules/`, not this file.** Ask which files a rule is *reachable from*: one module or a few files → the matching rules file (add a `paths:` glob or start a new file); anywhere → here (safety prohibitions, tenant isolation, access control).
+- `scripts/check-claude-size.mjs` holds a ratcheting ceiling on this file. When the file shrinks, lower `CEILING` in the same commit; never raise it.
+- A `paths:` glob that matches nothing is a rule that silently stopped loading. `npm run check:docs` catches that and a pointer to an empty destination, but not a glob scoped to the *wrong* file.
+- Never embed a value that moves (a cache version, a count) in a permanent rule; point at the file. A migrated section must actually shrink here to its one-line pointer.
 
-Ask which file the rule is *reachable from*, not which file it is about:
+## Commands
 
-- **Reachable from one module or a few files** → the matching `.claude/rules/*.md` (add a `paths:`
-  entry, or start a new file), with a short pointer stub left here if a root-file read should still
-  surface that the guidance exists.
-- **Reachable from anywhere** → here. Safety-critical prohibitions ("never do X"), multi-tenant
-  isolation, access control, and anything that must be present *before* someone thinks to ask.
-
-A section can be split when both are true — the BS calendar keeps its rules here and its
-table-provenance in `.claude/rules/bs-calendar.md`.
-
-**A `paths:` glob that no longer matches is a rule that silently stopped loading.** Four had rotted
-by S663 — `src/contexts/AuthContext.js` (the directory is `context`, singular) meant
-`accounts-and-logins.md` never loaded for the file it is most about, and three more pointed at pages
-that had moved from `src/pages/` into `src/modules/`. Nothing warned until `npm run check:docs`,
-which `build:verify` runs — a rotted glob now fails a pre-push check. It still cannot tell you a
-glob is scoped to the *wrong* file, only that it matches nothing.
-
-**Never embed a value that moves** (a cache version, a table count, a file count) in a rule that is
-otherwise permanent: the rule stays correct while the number rots inside it, and a derivability
-audit will not catch it because the rule around it genuinely is not derivable. Point at the file
-instead.
-
----
-
-## The sister repo (hss-suite)
-
-**HR, payroll, settlement and `src/utils/bsCalendar.js` are shared with hss-suite**, whose HR module
-was ported from this one; the BS table is identical in both. **A bug fixed on either side stays open
-on the other until it is filed in `docs/CROSS-REPO.md` there** — that file is the backlog both ways,
-and says what is genuinely shared versus what only looks it.
-
-**Copying a permission gate is the trap**: here `isAdmin` is the Crest platform OPERATOR (the
-tenant's Owner is `isOwner`), there it aliases that one company's Owner. Same spelling, different
-meaning.
-
----
+- `npm start`: CRA dev server on `localhost:3000`.
+- `npm run build:verify`: the local verification build. Runs `check:docs`, deletes the stale `.eslintcache`, then builds with `CI=true` so warnings fail. There is no separate lint script: ESLint runs inside the build. `npm run build` is what Vercel runs; leave it as a plain `react-scripts build`.
+- `npm run check:docs`: rules-glob, pointer-stub and CLAUDE.md size checks. Run it after any edit to this file or `.claude/rules/`.
+- Tests: `npx react-scripts test --watchAll=false <pattern>`. Jest via CRA; `*.test.js` files sit next to their source.
+- Docs: a session entry goes in the newest `CHANGELOG/S###-S###.md`, then `npm run changelog:index`, never in `README.md`. After editing tracked `.md` files, run `npm run mirror:docs` to copy them to the E: backup drive.
 
 ## Stack
 
-- **React 19 (CRA)** — no Vite, no custom webpack config, no TypeScript
-- **Supabase JS v2** — single client at `src/supabaseClient.js`; anon key only in the browser bundle
-- **Code splitting (S440)** — every page component in `App.js` is route-level `React.lazy(() => import(...))`; only structural pieces stay eager (contexts, `Layout`, `ProtectedRoute`, `ModuleGate`/`PremiumGate`). Keep new page routes lazy too. Two `Suspense` boundaries: one around `Layout.js`'s `<Outlet />` (so the top bar persists during in-app navigation — only the content area shows `RouteFallback`) and a top-level one in `App.js` for the public routes. Any `import './x.css'` must stay **above** the lazy `const`s or ESLint's `import/first` fails the CI build
-- **`xlsx` is always `import('xlsx')` inside the click handler, never a top-level `import * as XLSX from 'xlsx'` (S522).** Route-level lazy-loading (S440 above) only defers a *page's own* code — it does nothing about a library that page statically imports, which webpack still must fetch the moment the route loads. `xlsx` is 138 kB gzipped and is only ever touched by an explicit Export/Import click, so a static import paid it on every visit to every page with an Excel button. Make the handler `async` and put `const XLSX = await import('xlsx')` on its first line. `recharts` (102 kB) is deliberately left static — charts are above-the-fold content, not a deferred click. The three files that needed a different shape, and how the fix was verified in the built output, are in `.claude/rules/frontend-performance.md`.
-- **Vercel** for deployment — `vercel.json` sets `no-cache` on `index.html` to prevent CDN serving stale bundles
-- **PWA service worker** at `public/service-worker.js` — registered only in production (`src/index.js`). `CACHE_NAME` (read the current value from the file — it moves constantly) must be bumped on **every** JS/CSS change you want existing users to actually receive, not just breaking ones — the fetch handler is cache-first for static assets, so a plain deploy (or even a hard refresh) leaves already-cached chunks serving the old code indefinitely until this constant changes and `activate` purges the old cache (S452 found a real fix silently never reached the browser because of this)
-
----
-
-## Architecture
-
-### Access control — two-layer route guard
-
-Every protected route in `App.js` stacks both guards, `ModuleGate` outside `PremiumGate`:
-
-- **`ModuleGate`** (`src/components/ModuleGate.js`) — checks `imsEnabled` / `hrEnabled` on the client record; admin always passes
-- **`PremiumGate`** (`src/components/PremiumGate.js`) — checks `hasFeature(key)` which respects plan tier first, then individual admin override flags
-
-Plan ranks: `starter (0) < growth (1) < pro (2)`. Keys auto-unlocked by plan live in `STARTER_KEYS`, `GROWTH_KEYS`, `PRO_KEYS` sets in `AuthContext.js`. Admin can grant individual features above the plan tier via `feature_flags` table.
-
-**Two mechanisms decide the same thing and must be changed together.** `PremiumGate` gates on the **`minPlan` rank prop** in `App.js`; `isItemVisible()` (nav) gates on **`hasFeature()`**, i.e. the key sets. `featureKey` on `PremiumGate` is only an *override* path, not the gate. Move a feature between tiers and you must edit the key set in `AuthContext.js` **and** the `minPlan` on its route **and** the `minPlan` tag on its `Layout.js` nav item, or you get a page that is reachable-but-hidden or visible-but-blocked.
-
-**Guest QR Ordering comes WITH the POS module, and `pos_enabled` is its only gate** (settled S632, migration `20260829170000`). `POS_MODULE_KEYS` in `AuthContext.js` grants it on `posEnabled` alone, both server functions already return/raise at the `pos_enabled` gate, and `feature_flags.guest_ordering` now gates nothing — a condition that can only have one answer reads like a control that exists. **`pos_enabled` is now the only thing standing between a client and a public guest menu, so never remove that check** — the migration asserts it is still present for exactly that reason. Anything asking "does this client have HR/POS" reads `hrEnabled`/`posEnabled`.
-
-**`false` in `feature_flags` is not a revoke.** `hasFeature()` only tests `flagVal === true`; `null`, `undefined` and `false` all fall through to the plan check identically, and `FeatureAccessModal`'s toggle only ever writes `true` or `null`. A stray `false` is inert. Assuming otherwise cost a round in S548 — a grandfather sweep used `COALESCE(flag, true)` to "preserve" those falses and under-granted three clients.
-
-**`SuiteGate`** (`src/components/SuiteGate.js`, added S317 for Owner Dashboard) is a third gate type on a genuinely separate axis: `clients.suite_plan`. It differs from `ModuleGate`/`PremiumGate` in one important way: **it never redirects on failure** — an ineligible viewer sees an inline upsell/explanation rendered in place, since the feature's nav entry must stay visible regardless of eligibility. Used as an in-page wrapper inside the gated component, not at the route level; a nav item for a Suite feature therefore carries **no** `featureKey`/`minPlan`, or it would disappear instead of upselling. Suite is an **add-on priced per outlet on top of a client's modules**, not a bundle containing them; `requireModules` (array, default `['ims','hr']`) varies per feature, so don't assume every caller needs Owner Dashboard's set.
-
-**Anything added to `clients` that changes what a client pays needs a place in the admin list in the same change**, and the screen that changes what a client pays must show the money. The MRR arithmetic lives in **`src/shared/clientMrr.js`** (`clientMRR` / `clientMrrBreakdown`, pure over `(client, planPrices)`) and is imported by both admin surfaces — **do not write a second copy.** A price is never PRINTED from
-`pricingPlans.js`'s constants: it resolves through `useSettings().pricing`, off the platform row.
-
-The entitlement histories behind these rules — why `plan` is plain `clients.plan` with no max over anything (S548/S574), the one canonical trial column set (S574), why Suite has one tier and how it became sellable in the shell (S638–S643), and each of `clientMrr.js`'s rules — live in `.claude/rules/access-control.md`, which auto-loads when editing `AuthContext.js`, `App.js`, the gates, `clientMrr.js` or the admin client screens.
-
-### Which tier a feature belongs in
-
-Placement is by attribute, not by when it was built: **Starter = Record & Comply, Growth = Control, Pro = Strategy, Crest Suite Pro = Synthesis** (cross-module, owner altitude). The five scoring attributes, the two rules that fall out of that thesis (both already broken once), the features that were misplaced, and the grandfather sweep a tier move needs in the same deploy are all in `.claude/rules/access-control.md`.
-
-### The IMS figures that must come from one place (S551)
-
-See `.claude/rules/ims-figures.md` (auto-loads when editing `imsFormulas.js`, stock count, or the
-IMS report/summary modules). Headline rules: import `COGS_FORMULA` wherever the formula is PRINTED
-and `computeUsed()` wherever it is COMPUTED (staff meals are in COGS); food-cost banding goes through
-`fcBand(pct, settings)` and variance banding through `varianceBand(pct, value, settings)`, never a
-hardcoded copy — and the OTHER three operating ratios (labour, prime, net margin) band in
-`src/shared/operatingBands.js`, whose `bandFigure()` is what stops a call site taking the colour and
-dropping the ✓/△/▲; **on-hand/"below par" is `buildStockRows()` everywhere** — staff meals deducted,
-AT par is fine, never a local copy (S696).
-
-### Multi-outlet: one login, several clients (S548)
-
-A group of outlets is several `clients` rows joined by `clients.group_id → client_groups`; `profiles.active_client_id` re-scopes every RLS policy through `my_client_id()`, which stays a join-free `coalesce`. Two rules are safety-critical and stay here:
-
-- **`active_client_id` is privilege-bearing and must never be user-writable.** It decides which tenant every RLS policy resolves to, is deliberately NOT on `guard_profiles_privileged_columns()`'s allow-list (S531 invariant #1), and `set_active_outlet()` is the only write path.
-- **Group-spanning reads cannot go through scoped queries.** `get_group_summary()` is `SECURITY DEFINER` with its own caller check and filters to `suite_plan = 'pro'` **server-side** — a client-side filter would ship an unpaid outlet's revenue to the browser and then hide it.
-
-The architecture (selected-outlet indirection, not policy rewriting), `profile_outlet_access`, the HQ→branch `push_master_data` refusals, and the three defects that sat unreachable from S548 to S617 are in `.claude/rules/multi-outlet.md`.
-
-### Subscription access — the third guard (S544)
-
-`ModuleGate`/`PremiumGate`/`SuiteGate` answer "which features has this client bought". None answers "is this client still paying". `getAccessState(client)` in `src/utils/subscription.js` is the single place that decision is made, enforced in **`ProtectedRoute`** — the one choke point every in-app route passes through. **Do not add this check per-page**: a per-page guard reopens the whole product the first time someone adds a route and forgets it, which is precisely how `is_active` came to mean nothing.
-
-**It fails OPEN** — only a date that exists *and* has passed locks anything — and **this is a UI gate, not a security boundary**: RLS still lets a locked client's JWT read and write its own rows, and two doors stay open after the lock (HR Self-Service, mounted outside `ProtectedRoute`, and the public guest-menu route).
-
-`GRACE_DAYS`, the auto-deactivation sweep that must honour it, and the trial carve-out are in `.claude/rules/subscription-access.md`.
-
-### Client data Export / Import (S545)
-
-See `.claude/rules/data-export.md` (auto-loads when working in `src/modules/admin/dataExport/` or the admin client screens). Headline rules: never ship the .xlsx without the .json; restore refuses non-empty clients; Archive > Delete.
-
-### Three dashboards, deliberately not one
-
-See `.claude/rules/dashboards.md` (auto-loads when editing dashboard files). Headline rules: /dashboard, /hr/dashboard and /owner-dashboard are different altitudes/gates — don't merge them; the `overheads` three-bucket trap (labor counted twice, or not at all) is documented there.
-
-### Monthly Owner/Manager Report (frozen snapshot, S434)
-
-See `.claude/rules/owner-report.md` (auto-loads when editing `src/modules/ownerReport/` or MonthlyOwnerReport.jsx). Headline rules: snapshot is captured at period close and never recomputed; resolve FK display values at generation time; `.eq('is_active', true)` on any figure valuing items.
-
-### The four privilege invariants (S531 security review — do not regress these)
-
-A full review on 2026-08-10 found that most of the app's access control was enforced one layer above where it was actually decided. Four rules came out of it, each of which had already been violated:
-
-1. **`profiles` is the root of trust, so a client session may only write `full_name` and `last_seen_at` on it.** `profiles_update` had no column restriction, so any user — including a POS PIN waiter — could PATCH `role = 'admin'` and read every tenant's data, or clear their own `pos_role`/`ims_role`/`hr_role`/`hr_self_service` to shed all four RESTRICTIVE isolation policy families at once *and* pass the negative `isOwner` test. `guard_profiles_privileged_columns()` (migration `20260810120000`) is a `BEFORE UPDATE` trigger enforcing this. It is an **allow-list** on purpose: a deny-list of today's privileged columns silently reopens on the next column added, which is exactly what happened to `admin-user-ops`' conditional-write list twice. It is also deliberately **SECURITY INVOKER** — it keys off `current_user NOT IN ('anon','authenticated')` to let the service role and every `SECURITY DEFINER` body through, and under `SECURITY DEFINER` `current_user` would be the owner every time and the check would never fire. **Adding a column to `profiles` requires no change here; adding a genuinely user-editable one does.**
-2. **A staff-management action must verify what its target *is*, not just which client it belongs to.** Every reset/delete/role action in `admin-user-ops` checked only `targetProfile.client_id === profile.client_id` — and the Owner shares that `client_id`, so a module manager could reset the Owner's password and log in as them. `requireStaffTarget(target, module)` now refuses any target that is not already a staff account of that module (marker per module mirrors that module's own RLS predicate: `pos_email` / `ims_role` / `hr_role`), or that is an admin. Admin callers are exempt from the marker requirement — resetting a locked-out Owner's password is legitimate operator support.
-3. **A lockout the client calls around an operation is not a lockout.** POS and HR Self-Service both had `check_*_pin_lock` before and `record_*_pin_attempt` after, in the browser, with nothing server-side consulting them — so skipping the two RPCs walked a 4-digit PIN unimpeded. Both now run **inside** `pos-staff-login` / `hr-selfservice-login`, on the same request that signs in. Corollary: the frontend must **not** also call `record_*_pin_attempt`, or every failure double-counts and locks a fat-fingered employee out in 3 attempts instead of 5. Same reasoning applies to any future server-side check — **if the browser can skip the call, it is advisory.** The POS discount cap, void permission and item-level comp were the same shape and were fixed the same way (S576/S579), as BEFORE UPDATE **triggers rather than RPCs**, because an RPC protects only the callers that choose to call it and leaves the open policy in place; **attribution the subject of the attribution can choose is not attribution**, so `comped_by` comes from `auth.uid()`, never a parameter. Detail in `.claude/rules/pos-billing.md`.
-4. **A secret must not live on a row the subject of the secret can read.** `clients.pos_device_secret` and `settings.pos_webhook_secret` were both readable by every account of the client. Both now live in **`client_secrets`**, admin-only at the RLS level, reached otherwise through `get_pos_device_secret()` (checks admin/Owner/POS-manager rank) or the service role inside an Edge Function. Postgres has **no column-level RLS**, and the REVOKE-then-GRANT-per-column alternative breaks `select('*')` and fails closed on every column added later — a separate table is the only clean answer. `client_secrets` is deliberately **not** audited: `log_audit()` stores full row snapshots and would put both secrets in `audit_logs` in plaintext.
-
-**Wrap every authorisation condition in `COALESCE(..., false)`.** `pos_role` is NULL for any account with no POS access, `NULL IN ('supervisor','manager')` evaluates to NULL rather than false, `NULL OR false` is NULL, and `IF NOT NULL THEN` never fires — so the natural form of a rank check falls open for exactly the accounts that have no rank. This is the `is_admin()`-returns-NULL trap in a second guise; assume any three-valued expression in a guard is a fail-open until it is wrapped.
-
-`is_client_owner()` is the **third** copy of the negative Owner test, alongside `isOwner` in `AuthContext.js` and `isCallerOwner` in `admin-user-ops/index.ts`. A new staff-account marker column must be added to **all three** — miss one and Owner detection breaks silently and in the permissive direction.
-
-**Security headers live in `vercel.json`, and that file cannot carry comments** — it is strict JSON validated against Vercel's schema, so the usual `"//": "why"` trick fails the *build* rather than being ignored. **`connect-src` is the control that matters most — it is the exfiltration boundary, and adding any new third-party API call requires adding its origin there or it fails silently in production and works fine in dev.** The rest of the rationale is in `.claude/rules/security-headers.md`.
-
-Two entitlement/abuse fixes from the same pass: `feature_flags` writes are now admin-only (one `FOR ALL` policy previously let any account of the client set every Pro flag true, and `hasFeature()` is "plan tier OR explicit flag", so that was a free tier upgrade); and `register_trial` — unauthenticated by design — is rate-limited per-IP (3/hr) and globally (30/hr) via `trial_signup_attempts`, recorded *before* the attempt so a failing loop burns quota too.
-
-### Multi-tenant data isolation
-
-Every Supabase table is client-scoped. **Use the scoped data-access layer, not hand-written `.eq('client_id', ...)`:**
-
-`src/shared/scopedDb.js` fails closed (a sentinel UUID on reads/updates/deletes, an error object on inserts/upserts) when `clientId` is missing, instead of silently running unfiltered or leaking a NULL row — this matters most on **reads**, since an admin's RLS policy (`role='admin' OR client_id=own`) allows every tenant's rows and only the per-query filter narrows an admin "viewing as" session down to one client. Only tables in the `CLIENT_SCOPED_TABLES` allowlist (mirrors the DB's `client_id NOT NULL` constraints) can go through it — `scopedDb` throws for anything else. Tables scoped by `period_id`/parent-id instead of `client_id` (`purchase_entries`, `sales_entries`, `recipe_ingredients`, `opening_stock`, `closing_stock`, `wastages`, `staff_meals`, etc.), tables with a nullable `client_id` (`settings`, `budgets`), and the `clients` table itself stay on raw `supabase.from()`.
-
-Two pages are **correctly exempt, not pending**: `AuditLog.js` (a cross-client admin viewer — `audit_logs.client_id` is nullable and its "All Clients" filter is incompatible with auto-scoping to one client) and `AdminClients.js` (has no `clientId` of its own — it loops over an explicit client list and acts on whichever `client.id` a row targets, so it calls the raw `scopedFrom`/`scopedInsert`/`scopedUpdate`/`scopedDelete` functions from `scopedDb.js` directly with that `client.id`, instead of the `useScopedDb()` hook). `Periods.js`'s admin "all clients" view and `Dashboard.js`'s `loadAdminStats()` use that same raw-function-with-explicit-id pattern, while their genuinely cross-tenant reads stay on plain `supabase.from()`.
-
-### Modules
-
-The app is one React app / one Supabase project with three modules toggled by per-client flags on the `clients` table (`ims_enabled`, `hr_enabled`, `pos_enabled`).
-
-`clientModules` in `AuthContext` drives **display** (nav + dashboard sections). `imsEnabled` / `hrEnabled` drive **route access** (admin bypasses both).
-
-### Staff role systems (POS / IMS / HR)
-
-Three independent rank axes on `profiles` — `pos_role`, `ims_role`, `hr_role` (each `staff|supervisor|manager`, `NULL` = no access) — checked via `hasPosAccess`/`hasImsAccess`/`hasHrAccess` in `AuthContext.js`. Admin/Owner always resolve to `'manager'` on all three, **which makes the resolved ranks the WRONG test for "is this a staff/till session"**: gate any staff-only behaviour on the raw `profile.pos_role` column, never the rank. `isOwner` is a **negative** test, so a new staff-account marker column must be added to every `isOwner`/`isCallerOwner` computation (`AuthContext.js` and `admin-user-ops/index.ts` both) or it silently breaks Owner detection for every other marker.
-
-Each axis gates two things that must both be kept in sync when adding a page: the **route guard** inside the page component and **nav visibility** (a `minPosRole`/`minImsRole`/`minHrRole` tag on the `Layout.js` nav item).
-
-`pos_team`, `pos_discount_limit`/`pos_allow_void`, and the `admin-user-ops` conditional-write rule that any new field in that family must follow from the start are in `.claude/rules/accounts-and-logins.md`.
-
-### Who logs in where, and how an Owner account comes to exist
-
-See `.claude/rules/accounts-and-logins.md` (auto-loads when editing AuthContext, Login, or any
-staff/employee management screen). Headline rules: there are four front doors (`/login` for Owner,
-IMS staff, HR staff and admin; `/pos/login`, `/hr/self-service` and `/ims/count` for PINs) and an
-owner never uses a PIN; **Owner is the ABSENCE of staff markers, so giving the owner's own login a staff role demotes
-them**; and `hr_employees.status` is payroll eligibility only — `access_blocked` is what revokes a
-Self-Service login.
-
-### Splitting a page component once it outgrows one file
-
-See `.claude/rules/component-library.md` (auto-loads when editing components, pages or modules).
-Headline rule: **a page with more than one `return` will render your new UI where nobody can reach
-it** — check which return a handler lives in before placing its modal, and prefer a live click over
-any amount of static checking (S578).
-
-### Bikram Sambat (BS) calendar
-
-All periods and dates in the app use the Nepali calendar; the utilities are in `src/utils/bsCalendar.js`. Four things the signatures don't tell you:
-
-- `formatAd(date)` reads the Date's **local** getters — that is the whole point of it
-- `bsDayBoundaryIso(y, m, d, endOfDay)` returns an AD instant carrying Nepal's `+05:45`
-- `daysInBsMonth(year, month)` — each BS month has a different number of days (28–32); **never assume 30**
-- Nepal fiscal year runs **Shrawan (month 4) → Ashadh (month 3)** of the following BS year
-
-The lookup table covers BS 2000–2087; out-of-range years fall back to a 30-day approximation. Its provenance, why 2084–2087 are deliberately left alone, and what `BS_YEAR_MIN`/`BS_YEAR_MAX`/`adToBsSafe` are for live in `.claude/rules/bs-calendar.md`. Read it before extending the table.
-
-**Never `.toISOString()` a Date that came from `bsToAd`.** It returns local midnight, so at Nepal's UTC+05:45 `.toISOString()` lands at 18:15Z on the *previous* day and `.slice(0,10)` yields the wrong date for every user in the country. This shipped twice. Use `formatAd` where a bare date string is wanted — including any RPC declaring its parameter as `date` — and `bsDayBoundaryIso` where the value is compared against a real `timestamptz`.
-
-**A date picked in BS is STORED as AD, so fixing the table never fixes the stored value.** `BsCalendarPicker` commits `formatAd(bsToAd(...))`; two converter faults have shipped and rows written under either are still wrong today with nothing to signal it — dates of birth worst. A picker given `lockYear`/`lockMonth` stores a day NUMBER instead and is unaffected. **`BS_MONTHS` has exactly one definition and it lives in `bsCalendar.js`** — import it, never retype it. The era table, the repair derivation, `scripts/bs-date-audit.mjs` and `formatBsDay` are all in `.claude/rules/bs-calendar.md`.
-
-### HR payroll engine
-
-See `.claude/rules/hr-payroll.md` (auto-loads when editing `src/modules/hr/`). Headline rules: pure functions in `payrollCompute.js`; `computePayslip` prorates for both `join_date` and `end_date`, so any query feeding it must select both; SSF needs the enrolment flag **and** `ssf_no`; approved OT supersedes attendance OT per `bs_day`; `hr_tada_claims` has no period columns; payroll and settlement Finalize/Reopen are DB functions under `hr_pay_lock`; and HR's five approval queues share ONE status vocabulary in `payrollConstants.js`, where amber means open and brass means decided-but-unpaid.
-
-### Page-revisit caching (`src/shared/sessionDataCache.js`, added S460)
-
-See `.claude/rules/frontend-performance.md` (auto-loads when editing `src/modules/` or the cache
-itself). Headline rule: **a page that batch-saves "every visible row" from on-screen state must not
-adopt it** — a stale cached number can be written back over a real figure, and `Stock.js` and
-`Sales.js` both have that shape.
-
----
-
-## Design conventions
-
-### Design context (PRODUCT.md / DESIGN.md)
-
-`PRODUCT.md` (strategic: users, positioning, brand personality, anti-references) and `DESIGN.md` (visual: colors, typography, components, extracted from the actual `Layout.css`/`ThemeContext.js` tokens) exist at the project root, written by the `impeccable` skill's `init`/`document` commands. Read them before any design-focused work — `DESIGN.md` in particular documents named rules (the Accent-Text Pairing Rule, the One Accent Rule, the One Signal Meaning Rule, the Chart Palette Rule) that are already enforced in code but weren't written down anywhere before this. `.impeccable/design.json` is the machine-readable sidecar; don't hand-edit it, regenerate via `/impeccable document` — which **defaults to sidecar-only here**; the usual right answer is the middle path, sidecar plus surgical `DESIGN.md` edits where the code has moved past it (S668), and a full `DESIGN.md` rewrite is a deliberate, user-approved call (S645, revised S662). See `.claude/rules/design-system.md`. The visual system is **Modernist** as of S689; `node scripts/check-design-layers.mjs` asserts the four token layers still agree.
-
-### Design system — tokens, motion, class names, field states
-
-See `.claude/rules/design-system.md` (auto-loads when editing CSS, components, pages or modules).
-Headline rules: all colors are CSS variables, never hardcoded hex, and a signal color used as TEXT
-takes the `*-text` variant while a FILL takes the base token; never build a multi-series chart
-palette out of the semantic tokens (Recharts SVG props stay literal hex); motion uses the four
-`--motion-*`/`--ease-*` tokens, and Recharts series animation is unreachable from CSS so every
-series needs `{...chartMotion()}`; the radius/type scales are CLOSED sets defined in `DESIGN.md`;
-reach for a global class (`data-table`, `btn` **+ a colour variant**, `badge-*`, `form-input`,
-`form-select`, `page-header`/`page-header--split`) rather than
-inline styles — an inline-styled control escapes the `:disabled` treatment, the `[aria-invalid]`
-hook and the `@media (pointer: coarse)` 16px touch floor. There is no `badge-gold`. A table needs
-at least one column that can absorb a squeeze, so `white-space: nowrap` goes on the unbreakable
-ATOM (a date, an item name), never on the whole cell — every column nowrap and the table can only
-overflow, which is not the same thing as scrolling.
-
-### Component library (reusable)
-
-See `.claude/rules/component-library.md` (auto-loads when editing components, pages or modules) for
-the full table — `Tip`, `SearchableSelect`, `Fab`, `Modal`/`ConfirmModal`, `FieldError`,
-`BsCalendarPicker`, `QtyInput`, `Calculator`, `ChartCard`, `StatPill`, `ReportPage`,
-`RowDisclosure`, `ModuleGate`, `PremiumGate` — with the rationale behind each. Reach for one of
-these before hand-rolling an overlay, a numeric field or a report shell.
-
-### A gating wrapper cannot protect an eagerly-evaluated children expression (S601)
-
-**JSX children are an ARGUMENT**: the expression is fully evaluated by the parent and handed over as a finished element tree, so a gate inside the wrapper never gets a say. Only an early return, a guard at the call site (`{!stmt ? null : …}`), or a render prop can protect it — and the same applies to `banners`/`stats`/`note`/`filters`/`footnote`.
-
-The `ConsolidatedPnl.jsx` crash this came from, and three related instances, are in
-`.claude/rules/report-pages.md`.
-
-### An overlapping load must not win the page (S601)
-
-A closed native `<select>` fires `change` on every arrow keypress, so arrowing a 12-period list starts twelve concurrent loads and **the last response to land wins the figures** while the label is whatever was clicked last — which on Consolidated P&L drives the subtitle, print title, workbook and filename alike. `src/shared/hooks/useLatestRequest.js` is the one guard: call `periodReq.begin(id)` synchronously in the handler before any await, and `if (!periodReq.isCurrent(periodId)) return` after the last await and before the first setter.
-
-**The key is the period id, not a counter**, and **it fails open**. The current adoption list, the two properties behind those choices, and the pages still unswept are in `.claude/rules/frontend-performance.md`.
-
-### A page reachable by URL needs the guard its nav item implies (S601)
-
-`Layout.js` rendering a nav item only for `isAdmin || isOwner` is **not** a guard. `SuiteGate` gates on `suite_plan`, `PremiumGate` on plan/feature, `ModuleGate` on the module — **none of them checks a role.** Put the check in the page component itself, after every hook: `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />`.
-
-This matters more than a plain leak, because the staff-isolation policies are **RESTRICTIVE SELECT filters**: a fenced table returns `{ data: [], error: null }`, indistinguishable from an empty period and invisible to `firstError()`. A POS PIN account reaching `/pnl` therefore rendered a complete, confident statement at **Net Profit = Revenue, 100% margin, in green** — not an error.
-
-**Audit by grepping `Layout.js` for `minPosRole`/`minImsRole`/`minHrRole` and the `isAdmin || isOwner` render conditions, then checking each named route has a matching early return in its own component.** **A SUB-route has no nav item to audit and inherits nothing from its parent page (S647)** — a modal turned into a route makes its record id a URL parameter, so a filter the parent did in memory must become a real check. **A nav allowlist is not a guard either (S683), and a ROUTE allowlist says nothing about what is inside the page it opens (S761)** — a count PIN fenced to `/stock` alone still got all seven Stock Count tabs, COGS included, for 24 sessions. The pages this has recurred on, and what each leaked, are in `.claude/rules/access-control.md`.
-
-### A report page must not show a number it has not computed (S594)
-
-See `.claude/rules/report-pages.md` (auto-loads when editing `ReportPage.jsx` or any reports
-module). Headline rules: a failed read is not an empty period and must never render as one — use
-`firstError(results)` / `ReportLoadError`, never `{ data } … || []`; a dropped WRITE error is silent
-data loss and a guard that drops its READ error passes vacuously; the KPI strip does not render
-while loading or after a failure; and a report that states a scope must state it everywhere the
-report goes (subtitle, print header, workbook, filename).
-
-### An error surfaced as `error.message` is not a message (S619)
-
-`src/shared/errorText.js` is the ONE table turning a Supabase/Postgres error into a sentence its reader can act on, with two audiences (`'staff'` can only escalate; `'operator'` is the person who fixes it). `src/components/ActionError.jsx` is where that sentence goes — convert at the CALL SITE, never at render.
-
-Two rules are load-bearing and a test asserts the first: **no message claims a failed write did not land** — a dead fetch does not prove that, since the response can be lost after the server committed, and on any table without a unique index the retry then silently creates a second row (`items` was the worked example until S707 gave it `items_client_name_key`; most tables still have nothing) — and **a message names the CONSEQUENCE, not the constraint** — say what state the record is in now and how to get out of it. **Never destroy the technical detail**; it rides along as fine print.
-
-The full table, the `ActionError`/`FieldError`/`ReportLoadError` family, and the ~20 call sites this replaced are in `.claude/rules/error-messages.md`.
-
-### Every `type="password"` input needs an explicit `autoComplete`
-
-`new-password` on PIN/account-creation fields, `username`/`current-password` on a real sign-in form — or Chrome bleeds a saved login into unrelated inputs (S329). Detail in `.claude/rules/auth-and-pins.md`.
-
-### Crest Staff — the employee app
-
-See `.claude/rules/staff-app.md` (auto-loads when editing `src/modules/hr/selfservice/`, `webPush.js`
-or the service worker). Headline rules: `/hr/self-service` is a **second installable PWA** with its
-own manifest/icon/start URL, swapped onto the page at runtime; a day with no shift and a day whose
-month is unpublished are identical in the data and must never look identical on screen; a failed
-read is never an empty list; push only offers a button in the states where pressing it can work
-(iOS-not-installed is checked BEFORE capability); 16px fields / 44px controls scoped to
-`.self-service`, with `touch` props on the two inline-styled pickers; and the whole thing runs on
-RPCs that already existed — no migration, no Edge Function deploy.
-
-### Password policy, leaked-password protection, PIN vault, login pages
-
-See `.claude/rules/auth-and-pins.md` (auto-loads when editing Login/ResetPassword/PosStaff/SelfService files, `weakPasswords.js`, or `supabase/functions/`). Headline rules: `MIN_PASSWORD_LENGTH` has an independent server copy; PINs are never raw auth passwords (peppered HMAC); the PIN vault is a deliberate weakening, PINs only, never staff passwords.
-
-### Arithmetic in input fields
-
-`src/utils/evalMath.js` is the single evaluator behind `QtyInput` and the Quick Calculator — a hand-written parser, **never `eval()` / `new Function()`** (pasted strings reach it; strict CSP). Its invariants are in `.claude/rules/input-arithmetic.md`.
-
-### Every item is stored in its SMALLEST unit — `purchase_qty` is always 1 (S597)
-
-See `.claude/rules/item-master-rates.md` (auto-loads when editing the IMS items or purchases
-modules). Headline rules: `items.rate` is the price of ONE base unit and equals the generated
-`per_uom_rate`, held by a `CHECK (purchase_qty = 1)`; `purchase_qty` no longer mirrors
-`conversion_factor`; a purchase bill prefills `per_uom_rate × cf`, never `items.rate`; and a field
-that is only arithmetic must not look like a field that is stored. That file also holds the
-`purchase_entries` base-unit qty/rate convention — different columns, different arithmetic.
-
-### `billKeyOf`/`aging` are centralized in `purchasesHelpers.js` — but not everywhere
-
-See `.claude/rules/vendor-payables.md` (auto-loads when editing IMS report, purchases or vendors files). Headline rules: `VendorReport.js` and `computeVendorPurchasingSection.js` deliberately keep local single-period copies; a phantom sub-paisa balance can come from three different layers (S502/S505/S510) — check all three. As of S580 it also covers **Supplier Contribution** (`/supplier-contribution`, Pro): `items` has no vendor column, so a supplier is only ever DERIVED, and its net-spend figure must keep meaning exactly what `VendorReport.js` means by it. As of S671 it also carries the vendor LIFECYCLE: the `vendors` row is the only copy of the supplier's name, so a vendor with history is archived (`archived_at`), never deleted. As of S698 a bill with vendor payments against it can be neither edited nor deleted — `payable_payments` cascades. As of S723 a tab filter is not a valuation boundary: value a bill over ALL its lines, never the half a per-line filter returned.
-
-**A foreign key is a guard on some tables and not others, and the calling code cannot see which.** The four tables referencing `vendors` split two/two — plain FK (Postgres refuses the delete) vs `ON DELETE SET NULL` (the delete **succeeds** and those rows silently lose their parent). So a delete guard trusting "the database will stop me" is right about half its tables and wrong about the rest, with no error on the wrong half. **Check `confdeltype` before treating any FK as protection**, and enumerate the referencing tables in the app. **A delete guard that lives only in the page is a guard on the page, not on the table**, and put the step the FK can refuse FIRST, or a refusal lands after the cascade has already destroyed the children. The `items` (S706/S707) and `recipes` (S711) instances are in `.claude/rules/item-master-rates.md` and `.claude/rules/recipes-and-subrecipes.md`.
-
-### Sales Entry saves through one atomic RPC, not three round trips
-
-`save_sales_day` is the one transaction behind both Daily and Bulk, and
-`src/modules/ims/sales/persistSalesDay.js` is its only caller. It is deliberately
-**`SECURITY INVOKER`** — adding `SECURITY DEFINER` would silently punch through `sales_entries`'
-RESTRICTIVE staff-isolation policies; don't. Detail and the legacy three-call fallback are in
-`.claude/rules/supabase-sql.md`.
-
-### `recipe_ingredients` has no `client_id` column
-
-Always scope ingredient fetches by recipe IDs first — collect the recipes' ids and filter
-`.in('recipe_id', recipeIds)`; there is no `client_id` to scope on.
-
-### POS billing, shifts and the IMS handoff
-
-See `.claude/rules/pos-billing.md` (auto-loads when editing `src/modules/pos/`). Headline rules: a closed bill that can't reach IMS is stamped `ims_posted_at IS NULL` and surfaced, never silent; `sales_entries` and `stock_movements` can diverge, so neither proves the other posted; order lines are replaced through `save_pos_order_items`, never delete-then-insert; a new way to slice a bill is a new `keyOf` passed to `computeGroupAmounts`, never a fourth copy of the proportional-discount arithmetic; delivery commission is measured against the ex-VAT, post-discount base and never `paid_amount`. That file also holds the module's colour vocabulary (`posSignals.js`) — reach for it before picking a colour anywhere in POS.
-
-### Sub-recipe mirror items
-
-See `.claude/rules/recipes-and-subrecipes.md` (auto-loads when editing Recipes.js, `recipeCost.js` or
-the IMS recipe/stock-count modules). Headline rules: a recipe with `category = 'Sub-Recipe'` auto-creates
-a mirror row in `items` with `is_sub_recipe = true`, so filter `.eq('is_sub_recipe', false)` out of
-Item Master, Purchases, POs, Requisitions, Reorder Report and Supplier Price Tracker; a sub-recipe
-can never appear in `stock_movements` and must not be written there; sub-recipes nest, so a cycle
-guard must be a PATH set (not a visited set) or a shared base costs 0 on its second branch.
+- **React 19 on CRA** (no Vite, no custom webpack, no TypeScript). **Supabase JS v2**: a single client in `src/supabaseClient.js`, with only the anon key in the browser. **Vercel** deploys; `vercel.json` sets `no-cache` on `index.html`.
+- **Every page route in `App.js` is `React.lazy`** (S440); only contexts, `Layout`, `ProtectedRoute` and the gates stay eager. Keep any `import './x.css'` above the lazy `const`s, or ESLint `import/first` fails the CI build.
+- **`xlsx` is only ever `await import('xlsx')` inside the click handler**, never a top-level import (138 kB gzipped). `recharts` stays static on purpose.
+- **Bump `CACHE_NAME` in `public/service-worker.js` on every JS/CSS change users should receive.** The service worker is cache-first, so a plain deploy keeps serving old chunks. Read the current value from the file.
+- **Security headers live in `vercel.json`, which is strict JSON, so no comments.** `connect-src` is the exfiltration boundary: a new third-party origin must be added there, or the call works in dev and fails silently in production (`.claude/rules/security-headers.md`).
+
+## Sister repo (hss-suite)
+
+- HR, payroll, settlement and `src/utils/bsCalendar.js` are shared with hss-suite. A bug fixed on either side stays open on the other until it is filed in `docs/CROSS-REPO.md` there.
+- Never copy a permission gate across: here `isAdmin` is the Crest platform OPERATOR and the tenant's Owner is `isOwner`; there `isAdmin` aliases that company's Owner.
+
+## Hard rules: tenancy and privilege
+
+- **Use the scoped data layer (`useScopedDb()` / `src/shared/scopedDb.js`), never a hand-written `.eq('client_id', …)`.** It fails closed without a `clientId` and accepts only `CLIENT_SCOPED_TABLES`. Parent-scoped tables, nullable-`client_id` tables (`settings`, `budgets`) and `clients` stay on raw `supabase.from()`. `recipe_ingredients` has no `client_id`, so scope it with `.in('recipe_id', recipeIds)`.
+- **`profiles` is the root of trust.** A client session may write only `full_name` and `last_seen_at`, enforced by the allow-list trigger `guard_profiles_privileged_columns()`. **`active_client_id` picks the tenant for every RLS policy, and only `set_active_outlet()` may write it.**
+- **A staff-management action verifies what its target *is*, not just its client** (`requireStaffTarget` in `admin-user-ops`). The Owner shares the staff's `client_id`.
+- **If the browser can skip a check, it is advisory.** PIN lockouts run inside the login Edge Functions, and the frontend must not also call `record_*_pin_attempt`. Discount caps, voids and comps are BEFORE UPDATE triggers, and attribution comes from `auth.uid()`, never a parameter.
+- **A secret never lives on a row its subject can read.** Secrets go in `client_secrets`: admin-only RLS, and deliberately not audited, because `log_audit()` stores full rows. Postgres has no column-level RLS.
+- **Wrap every authorisation condition in `COALESCE(…, false)`.** `NULL IN (…)` evaluates to NULL and `IF NOT NULL` never fires, so a bare rank check falls open for exactly the accounts with no rank. `is_admin()` can return NULL too.
+- **Owner is a negative test: the absence of every staff marker.** It exists in three copies: `isOwner` (`AuthContext.js`), `isCallerOwner` (`admin-user-ops/index.ts`) and `is_client_owner()` (SQL). A new staff-marker column goes into all three. Giving the Owner's own login a staff role demotes them.
+- **Group-spanning reads go through `SECURITY DEFINER` RPCs that filter server-side** (`get_group_summary()`), never a client-side filter over another outlet's rows.
+- **A new business table must be added to every matching restrictive staff-isolation policy list**, or a bare same-client policy reopens it. `feature_flags` writes are admin-only, and `register_trial` is rate-limited. Full rationale: `.claude/rules/supabase-sql.md`.
+
+## Hard rules: access control
+
+- **Route guards stack `ModuleGate` (module) outside `PremiumGate` (plan tier or feature flag)**. `ProtectedRoute` enforces subscription state via `getAccessState()`; never add that check per page. It fails open and is a UI gate, not a security boundary.
+- **Moving a feature between tiers takes three edits in one change:** the key set in `AuthContext.js`, `minPlan` on its `App.js` route, and `minPlan` on its `Layout.js` nav item. Placement: Starter = Record & Comply, Growth = Control, Pro = Strategy, Crest Suite Pro = Synthesis.
+- **`SuiteGate` (`clients.suite_plan`) upsells in place instead of redirecting**, so a Suite nav item carries no `featureKey`/`minPlan`.
+- **A nav item hidden by role is not a guard.** No gate checks a role, and restrictive RLS returns `[]` instead of an error, so an unguarded report shows confident wrong figures. Put the role check (e.g. `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />`) in the page after its hooks. Audit by grepping `Layout.js` for `minPosRole`/`minImsRole`/`minHrRole` and `isAdmin || isOwner`. A sub-route inherits nothing from its parent.
+- **Staff ranks** are `pos_role`/`ims_role`/`hr_role` (`staff|supervisor|manager`, NULL = none). Admin and Owner resolve to `manager`, so gate staff-only (till) behaviour on the raw `profile.pos_role`. A page's rank guard must match its nav tag.
+- **Guest QR Ordering's only gate is `pos_enabled`; never remove that check.** `false` in `feature_flags` does not revoke anything.
+- `clientModules` drives display (nav, dashboard sections); `imsEnabled`/`hrEnabled` drive route access. Anything asking "does this client have HR/POS" reads `hrEnabled`/`posEnabled`.
+- Client MRR is computed only in `src/shared/clientMrr.js`, and prices resolve through `useSettings().pricing`. Anything added to `clients` that changes what a client pays needs a place in the admin client list.
+
+## Hard rules: data correctness
+
+- **supabase-js resolves `{ data, error }` and does not throw**, so a `try/catch` around a call catches nothing. Always destructure `error`: a guard that drops its read error passes vacuously, and a failed poll must keep the last good state rather than blank it. Decide per site whether to fail loudly, retry, or swallow to `console.error`.
+- **A query builder that is never awaited never sends.** For fire-and-forget, use `void p.then(ok, onErr)`.
+- **A bare `.select()` silently stops at 1000 rows.** Read transaction tables with `fetchAllRows(() => query)`: pass a function, and sort on a unique tiebreaker (`.order('id')`). Large `.in()` id lists use `fetchAllRowsChunked` / `runChunkedByIds`, because the ids travel in the URL. Judge by what the query returns, not by the table name.
+- **A supabase call can hang forever, and `.abortSignal()` doesn't prevent it.** Wrap any await that blocks the user in `withTimeout()` (`src/utils/withTimeout.js`). Only `/auth/v1/` is bounded at the client level.
+- **One write never proves another landed.** When a best-effort write follows a primary one, give each table its own link back to the source row.
+- **A report never shows a number it did not compute.** A failed read is not an empty period: use `firstError(results)` / `ReportLoadError`, and don't render KPIs while loading or after a failure.
+- **An overlapping load must not win the page.** Call `useLatestRequest`'s `begin(id)` synchronously in the handler, and check `isCurrent(id)` after the last await, before any setter.
+- **A foreign key is not a delete guard until you check `confdeltype`.** With `ON DELETE SET NULL` the delete succeeds and the child rows lose their parent. Run the step the FK can refuse first.
+- **User-facing errors go through `src/shared/errorText.js` → `ActionError`**, converted at the call site. Never claim a failed write did not land. Name the consequence, and keep the technical detail as fine print.
+- `monthly_periods` allows one `open` period per client (a partial unique index). `profiles` RLS is self-or-admin, so resolve other staff names with `get_client_profile_names(p_client_id)`. A page that batch-saves every visible row must not use `sessionDataCache`.
+
+## Hard rules: dates (Bikram Sambat)
+
+- All periods and dates are BS, via `src/utils/bsCalendar.js`. Months run 28–32 days, so use `daysInBsMonth()` and never assume 30. The fiscal year runs Shrawan (month 4) → Ashadh (month 3).
+- **Never `.toISOString()` a Date from `bsToAd`.** It is local midnight, so at UTC+05:45 it lands on the previous day. Use `formatAd()` for a bare date (including `date` RPC params) and `bsDayBoundaryIso()` when comparing against a `timestamptz`.
+- A date picked in BS is stored as AD, so fixing the table never repairs stored rows. `BS_MONTHS` has one definition; import it (`.claude/rules/bs-calendar.md`).
+
+## UI conventions
+
+- Read `PRODUCT.md` and `DESIGN.md` before design work. Never hand-edit `.impeccable/design.json`; regenerate it with `/impeccable document`.
+- Colours are CSS variables, never hex. A signal colour used as text takes the `*-text` token; a fill takes the base token. Chart series use literal hex, never the semantic tokens.
+- Use global classes (`btn` plus a colour variant, `data-table`, `form-input`, `form-select`, `badge-*`, `page-header`) rather than inline styles, which miss `:disabled`, `[aria-invalid]` and the touch floor. Reach for the shared components before building your own (`.claude/rules/component-library.md`).
+- **JSX children are evaluated before the wrapper runs**, so a gate inside a wrapper cannot protect them. Use an early return, a guard at the call site, or a render prop.
+- If a page has more than one `return`, new UI can land in one nobody reaches. Check which return a handler's modal belongs in.
+- Every `type="password"` input sets `autoComplete`: `new-password` for PIN or account creation, `current-password` for a real sign-in.
+- Input arithmetic goes only through `src/utils/evalMath.js`. Never use `eval()` or `new Function()`.
+- Non-obvious columns, metrics and form labels get a `Tip`.
 
 ## When adding a new feature
 
-See `.claude/skills/new-feature-checklist/SKILL.md` — invoke it before shipping any new page,
-report or module feature. Nine steps: the `feature_flags` **DB column** (the one that breaks every
-other client’s flag save when skipped) plus the tier set in `AuthContext.js`, route guards in
-`App.js`, the `Layout.js` nav entry, `Tip` tooltips, the Help page, the `CHANGELOG/` entry and
-E-drive mirror, Danger Zone registration in `admin-user-ops`, `RESTORE_ORDER` in the Export/Import
-restore, and closing the entry in any `*_TODO.md` that carries the feature.
+Invoke `.claude/skills/new-feature-checklist/SKILL.md` before shipping any page, report or module feature. The `feature_flags` DB column is the step that breaks every other client's flag save when skipped.
 
----
+## Module pointers
 
-## Supabase / DB notes
+Each file loads on its own when you open a matching path. Read it first when planning work before you have opened one.
 
-- **A supabase-js call can hang forever — and `.abortSignal()` does not save you.** Every call `await`s `getAccessToken()` *before* it ever reaches `fetch(...)`, so when the auth layer stalls the AbortController is attached to nothing: the promise never resolves **and** never rejects, and a `try/finally` that resets a `saving` flag never runs. Guard any user-gating await with `withTimeout()` (`src/utils/withTimeout.js`) — a `Promise.race` against a wall clock is the only thing immune to where the hang is. Keep `.abortSignal()` alongside it; it's a complement, not a substitute. S449→S454 burned four rounds on this because each fix only covered the layer above the real one.
-- **Why `getSession()` stalls, and the client-level fix (S455).** auth-js sets no timeout on its own network calls, and one never-settling refresh wedges `_acquireLock` permanently — freezing every query app-wide with no error anywhere until the tab is closed. `src/supabaseClient.js` passes `global.fetch` through `makeAuthTimeoutFetch()` (`src/utils/authFetchTimeout.js`), which bounds **only** `/auth/v1/` requests at 15s so the promise settles and the client self-heals. PostgREST and Storage traffic is deliberately left unbounded there — bound those per-call with `withTimeout()` instead.
-- **SQL authoring rules live in `.claude/rules/supabase-sql.md`** (auto-loads when editing anything under `supabase/` or AuditLog.js): the RLS policy pattern and `(select auth.uid())` wrapping, one-permissive-policy-per-command, per-row helper-function costs, FK/index discipline, the REVOKE-vs-PUBLIC and per-signature grant gotchas, `log_audit()` trigger conventions, and the schema-migration workflow. It also now holds the Edge Function inventory and the restrictive staff-isolation policy families — **when creating a new business table, add it to every matching restrictive-policy list**, or a bare same-client policy re-opens the hole for whichever staff-account type's JWT touches it.
-- **`profiles` does not follow the standard same-client pattern** — `profiles_select` RLS is self-or-admin only, so a raw `profiles` query run by a real client login silently returns nothing but the caller's own row. Use the `get_client_profile_names(p_client_id)` RPC to resolve another staff member's name; never a raw `profiles` query for anyone but the caller's own row. Session/profile-read details are in `.claude/rules/accounts-and-logins.md`.
-- Generated columns, server-assigned numbers, the offline IndexedDB queue and the `settings` RLS history moved to the rules files that scope them: `per_uom_rate` → `.claude/rules/item-master-rates.md`; `pos_orders.order_no`/`invoice_no`/`comp_no` triggers, `offlineQueue.js` and `settings` → `.claude/rules/pos-billing.md`; the period-close preflight and the one-open-period index → `.claude/rules/closed-periods.md`.
-
-### Two writes in one function can diverge, so one is never evidence of the other
-
-A pattern worth recognising beyond POS. `writeSalesEntries` writes revenue to `sales_entries` and
-then depletion to `stock_movements` inside a try/catch that swallows failures — deliberately, so a
-depletion problem never blocks a bill closing. The consequence is that **a bill can have revenue
-and no movements**, and a later guard that inferred "has this already posted?" from
-`stock_movements` was therefore *wrong* rather than merely incomplete: it re-posted two bills'
-revenue on real data (S573). Whenever a best-effort second write follows a primary one, the second
-one's absence proves nothing — give each table its own link back to the source row and ask the
-table you actually mean.
-
-### A `try/catch` around a supabase call catches nothing
-
-supabase-js **resolves** with `{ data, error }`; it does not throw on a database error. An RLS
-refusal, a constraint violation, a `42703` — all arrive as a returned value. So
-`try { await scopedUpdate(...) } catch (e) { … }` is inert: the catch can only fire on a bug in the
-arguments, and every real failure passes through it untouched. Three blocks in `PosOrders.jsx` were
-written that way, each with a `console.error` in the catch that had never once run (S654).
-
-The same fact makes the bare form worse than it looks. `await scopedUpdate(...)` with nothing
-destructured, or `const { data } = await …` without `error`, **discards the only evidence the call
-failed** — and the code below then proceeds as though it succeeded. Two shapes are worth naming
-because both shipped:
-
-- **A guard that drops its read error passes vacuously.** The POS offline-sync replay checked
-  `pos_orders.status` before overwriting an order another device might have billed — but on a
-  failed read `data` is null, the `if` is false, and the replay proceeds. The check that exists to
-  prevent the overwrite is precisely what stops working when the network does.
-- **A failed poll that writes its empty result BLANKS live state.** `setKotStatusByTable({})` on a
-  dropped read wipes every table's kitchen badge, which a waiter reads as "nothing has been
-  started", not as a failed read. On a poll, return early and keep the last good value.
-
-The decision each site needs is **fail loudly, retry, or genuinely swallow** — and it is per-site,
-not per-file. Making all of them loud is its own bug: a till that throws red at a cashier holding up
-a queue is worse than a stale reprint counter. The test for whether a failure belongs in front of a
-user is whether there is an action they can take; if there is not, `console.error` is the honest
-floor. Where a write fails *after* the thing it belongs to is already committed — a bill is closed
-and numbered, so refusing it is not available — surface it non-blockingly and name the downstream
-consequence, not the error (`PosOrders.jsx`'s `warnWrite` + floor banner is the reference).
-
-**A builder that is never `await`ed never runs.** postgrest-js sends inside `then()`, so a bare
-`supabase.from(x).update(y).eq(…)` statement builds an object and drops it — no request, no error.
-It reads like deliberate fire-and-forget, which is why review misses it; S715 found one dead since
-it shipped, a paid feature's column NULL for every client. Fire-and-forget is `void p.then(ok, onErr)`.
-
-### A bare `.select()` silently truncates at 1000 rows
-
-Supabase sets PostgREST's `db-max-rows` to 1000. A `.select()` with no `.range()` that matches more rows than that returns the first 1000 with **no error and nothing in the data to say so** — every total summed from that array is then wrong, and wrong quietly, which is the dangerous part: it reads as a real figure until someone compares it against another source. Found live (S528) reporting 1000 movements / NPR 49,241 against a real 1753 / NPR 87,043.
-
-Use `fetchAllRows(makeQuery)` (`src/shared/fetchAllRows.js`) for any read that can realistically exceed 1000 rows — transaction tables rather than master data. Two rules: it takes a **function** returning a fresh builder (a supabase-js builder is a one-shot thenable and cannot be awaited twice), and that query must carry a **unique tiebreaker in its sort** (`.order('id')` after the display order), or paging a non-uniquely-ordered query repeats a row on one page and skips it on the next.
-
-**Decide by rows-per-what, not by table name, and count what the QUERY returns rather than what the function is named after.** A read narrowed in JS is bigger than it reads: `fetchYtdMap` looked scoped to one month while pulling the client's entire history. Per-employee-per-day and per-anything-per-month both cross 1000 inside one real client-year. And note the guard problem — truncation returns **no error**, so every `if (error)` check written against a failed read passes happily over a short one.
-
-**Deliberately not wrapped:** single-parent reads (`.eq('order_id', X)` for one bill), `head: true` count queries, single-day reads, and id-bounded backfill lookups. Wrapping those would be noise.
-
-**An `.in(column, ids)` filter is a URL as well as a row count (S629).** PostgREST spells the id list out in the request URL, so a few hundred uuids is already past what proxies and CDNs accept — a loud 414 — while the 1000-row cap still applies underneath. Reach for `fetchAllRowsChunked(ids, makeQuery)`, or `runChunkedByIds(ids, makeQuery)` for a write filtered the same way (sequential, first error wins, and **not** atomic — some chunks may already have landed).
-
-The sweeps since S528, their per-table thresholds, and the two traps that cost rounds — a misplaced closing paren that only fails at runtime, and the stale `.eslintcache` that `npm run build:verify` exists to clear — are in `.claude/rules/frontend-performance.md`.
+| Working on | Read |
+| --- | --- |
+| Plans, tiers, gates, MRR, admin client screens | `.claude/rules/access-control.md`, `.claude/rules/subscription-access.md` |
+| Logins, Owner vs staff, PINs, passwords | `.claude/rules/accounts-and-logins.md`, `.claude/rules/auth-and-pins.md` |
+| Multi-outlet groups, `scopedDb` exemptions | `.claude/rules/multi-outlet.md` |
+| SQL, RLS, grants, migrations, Edge Functions | `.claude/rules/supabase-sql.md` |
+| IMS figures: COGS, food-cost bands, on-hand/par | `.claude/rules/ims-figures.md` |
+| Item master, purchases, base-unit rates | `.claude/rules/item-master-rates.md` |
+| Recipes and sub-recipe mirror items | `.claude/rules/recipes-and-subrecipes.md` |
+| Vendors, payables, supplier reports | `.claude/rules/vendor-payables.md` |
+| Period close and locked periods | `.claude/rules/closed-periods.md` |
+| Report pages | `.claude/rules/report-pages.md` |
+| The three dashboards | `.claude/rules/dashboards.md` |
+| Monthly Owner Report snapshot | `.claude/rules/owner-report.md` |
+| POS billing, shifts, IMS handoff, offline queue | `.claude/rules/pos-billing.md` |
+| HR payroll, settlement, approvals | `.claude/rules/hr-payroll.md` |
+| Crest Staff (Self-Service PWA), web push | `.claude/rules/staff-app.md` |
+| Settings row | `.claude/rules/settings-row.md` |
+| Client data export/import | `.claude/rules/data-export.md` |
+| Design tokens, CSS, motion | `.claude/rules/design-system.md` |
+| Error messages | `.claude/rules/error-messages.md` |
+| Paging, caching, hangs, slow pages | `.claude/rules/frontend-performance.md` |
+| BS calendar table and stored-date repair | `.claude/rules/bs-calendar.md` |
+| Input arithmetic | `.claude/rules/input-arithmetic.md` |
+| Legal documents | `.claude/rules/legal-documents.md` |
+| Support contact line, app version | `.claude/rules/support-contact.md` |

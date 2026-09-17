@@ -386,9 +386,25 @@ on client + fiscal year. A reload of the same range still lands, and an admin's 
 not. The race here was the S601 one exactly: the export's scope line and filename come from the
 pickers, which move before the data does.
 
+## A bare `.select()` silently truncates at 1000 rows — the rule
+
+Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root keeps only the one-line rule.
+
+Supabase sets PostgREST's `db-max-rows` to 1000. A `.select()` with no `.range()` that matches more rows than that returns the first 1000 with **no error and nothing in the data to say so** — every total summed from that array is then wrong, and wrong quietly, which is the dangerous part: it reads as a real figure until someone compares it against another source. Found live (S528) reporting 1000 movements / NPR 49,241 against a real 1753 / NPR 87,043.
+
+Use `fetchAllRows(makeQuery)` (`src/shared/fetchAllRows.js`) for any read that can realistically exceed 1000 rows — transaction tables rather than master data. Two rules: it takes a **function** returning a fresh builder (a supabase-js builder is a one-shot thenable and cannot be awaited twice), and that query must carry a **unique tiebreaker in its sort** (`.order('id')` after the display order), or paging a non-uniquely-ordered query repeats a row on one page and skips it on the next.
+
+**Decide by rows-per-what, not by table name, and count what the QUERY returns rather than what the function is named after.** A read narrowed in JS is bigger than it reads: `fetchYtdMap` looked scoped to one month while pulling the client's entire history. Per-employee-per-day and per-anything-per-month both cross 1000 inside one real client-year. And note the guard problem — truncation returns **no error**, so every `if (error)` check written against a failed read passes happily over a short one.
+
+**Deliberately not wrapped:** single-parent reads (`.eq('order_id', X)` for one bill), `head: true` count queries, single-day reads, and id-bounded backfill lookups. Wrapping those would be noise.
+
+**An `.in(column, ids)` filter is a URL as well as a row count (S629).** PostgREST spells the id list out in the request URL, so a few hundred uuids is already past what proxies and CDNs accept — a loud 414 — while the 1000-row cap still applies underneath. Reach for `fetchAllRowsChunked(ids, makeQuery)`, or `runChunkedByIds(ids, makeQuery)` for a write filtered the same way (sequential, first error wins, and **not** atomic — some chunks may already have landed).
+
+The sweeps since S528, their per-table thresholds, and the two traps that cost rounds — a misplaced closing paren that only fails at runtime, and the stale `.eslintcache` that `npm run build:verify` exists to clear — are in the next section.
+
 ## The 1000-row truncation sweeps: S528, S529, S613, S628
 
-The RULE (and `fetchAllRowsChunked`) stays in the root `CLAUDE.md`. These are the sweep histories behind it, migrated S663 — read them before starting another sweep.
+The rule is the section above; its one-line form stays in the root `CLAUDE.md`. These are the sweep histories behind it, migrated S663 — read them before starting another sweep.
 
 Found live (S528) on Stock Movements: the page reported "1000 movements / NPR 49,241 depleted" for a period that actually had 1753 / NPR 87,043. The round number was the only tell, and it had been wrong in production for as long as that client had been busy enough to cross the cap. `ReorderReport.js` had the same shape on the same table, so **Book Stock — a figure people place purchase orders against — was silently low too.**
 
@@ -544,6 +560,42 @@ code alone.
 Migrated from the root `CLAUDE.md` (S663). The rule — `xlsx` is always `import('xlsx')` inside the click handler — stays resident there; this is the sweep that applied it across all 37 pages, including the three files that needed a different shape.
 
 - **`xlsx` is always `import('xlsx')` inside the click handler, never a top-level `import * as XLSX from 'xlsx'` (S522).** Route-level lazy-loading (S440 above) only defers a *page's own* code — it does nothing about a library that page statically imports, which webpack still must fetch as a parallel chunk the moment the route itself loads. `xlsx` (SheetJS) is genuinely huge (138 kB gzipped, the single largest chunk in the app after `main.js`) and is only ever touched by an explicit "Export Excel"/"Import Excel" click, never by simply viewing a page — so a static import was paying that 138 kB on every visit to any of the 37 pages that have an Excel button, whether or not the button was ever clicked. Fixed across all 37 by making the export/import handler function `async` and adding `const XLSX = await import('xlsx')` as its first line; verified in the built output (`r.e(1238).then(r.bind(r,1238))` now sits inside the button's `onClick`, not at module top level). Two files needed a different shape rather than a flat per-function fix: `SalesReport.jsx`/`CoversReport.jsx` share one `withLetterhead(title, ...)` helper across every tab's export branch, so `XLSX` is now its first parameter instead, passed down from the one `await import('xlsx')` in `exportExcel`; `MonthlyOwnerReport.jsx`'s `monthlyReportExcel.js` uses `XLSX` throughout a whole dedicated helper file, so instead of touching every internal function, the *page* now dynamically imports the whole module at click time (`const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')`) and that file's own top-level `import * as XLSX from 'xlsx'` was left untouched. `recharts` (102 kB gzipped, the other large chunk) was deliberately left as a static import everywhere it's used — charts are core above-the-fold content on those pages, not a deferred click action, so eagerly loading it is correct per `/impeccable optimize`'s own rule against lazy-loading above-fold content.
+
+## A `try/catch` around a supabase call catches nothing (S654)
+
+Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root keeps only the one-line rule.
+
+supabase-js **resolves** with `{ data, error }`; it does not throw on a database error. An RLS
+refusal, a constraint violation, a `42703` — all arrive as a returned value. So
+`try { await scopedUpdate(...) } catch (e) { … }` is inert: the catch can only fire on a bug in the
+arguments, and every real failure passes through it untouched. Three blocks in `PosOrders.jsx` were
+written that way, each with a `console.error` in the catch that had never once run (S654).
+
+The same fact makes the bare form worse than it looks. `await scopedUpdate(...)` with nothing
+destructured, or `const { data } = await …` without `error`, **discards the only evidence the call
+failed** — and the code below then proceeds as though it succeeded. Two shapes are worth naming
+because both shipped:
+
+- **A guard that drops its read error passes vacuously.** The POS offline-sync replay checked
+  `pos_orders.status` before overwriting an order another device might have billed — but on a
+  failed read `data` is null, the `if` is false, and the replay proceeds. The check that exists to
+  prevent the overwrite is precisely what stops working when the network does.
+- **A failed poll that writes its empty result BLANKS live state.** `setKotStatusByTable({})` on a
+  dropped read wipes every table's kitchen badge, which a waiter reads as "nothing has been
+  started", not as a failed read. On a poll, return early and keep the last good value.
+
+The decision each site needs is **fail loudly, retry, or genuinely swallow** — and it is per-site,
+not per-file. Making all of them loud is its own bug: a till that throws red at a cashier holding up
+a queue is worse than a stale reprint counter. The test for whether a failure belongs in front of a
+user is whether there is an action they can take; if there is not, `console.error` is the honest
+floor. Where a write fails *after* the thing it belongs to is already committed — a bill is closed
+and numbered, so refusing it is not available — surface it non-blockingly and name the downstream
+consequence, not the error (`PosOrders.jsx`'s `warnWrite` + floor banner is the reference).
+
+**A builder that is never `await`ed never runs.** postgrest-js sends inside `then()`, so a bare
+`supabase.from(x).update(y).eq(…)` statement builds an object and drops it — no request, no error.
+It reads like deliberate fire-and-forget, which is why review misses it; S715 found one dead since
+it shipped, a paid feature's column NULL for every client. Fire-and-forget is `void p.then(ok, onErr)`.
 
 ## Why a supabase-js call hangs: the auth-stall diagnosis (S449–S455)
 

@@ -79,7 +79,7 @@ of the three had no route guard, and because the staff-isolation policies are RE
 filters (empty result, no error), a POS PIN account got a full P&L reading Net Profit = Revenue at
 100% margin rather than an access error. All three now carry
 `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />` after their hooks.
-See CLAUDE.md, "A page reachable by URL needs the guard its nav item implies".
+See `.claude/rules/access-control.md`, "A page reachable by URL needs the guard its nav item implies" (the root `CLAUDE.md` keeps the one-line rule).
 
 **`/group-dashboard` was the fourth and it was worse (S617), because the product advertised it.**
 It had no guard at the route or in the component, and while the sidebar offered it on

@@ -1182,3 +1182,16 @@ which is why pinning net to it pins VAT too. A client whose VAT registration cha
 bill and the note is refused, correctly. **A Credit bill with a credit note against it is no longer owed**, so
 it leaves Customers → Outstanding. A bill settled before it was credited stays in Collected,
 because that money really changed hands.
+
+## Two writes in one function can diverge, so one is never evidence of the other (S573)
+
+Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root keeps only the one-line rule.
+
+A pattern worth recognising beyond POS. `writeSalesEntries` writes revenue to `sales_entries` and
+then depletion to `stock_movements` inside a try/catch that swallows failures — deliberately, so a
+depletion problem never blocks a bill closing. The consequence is that **a bill can have revenue
+and no movements**, and a later guard that inferred "has this already posted?" from
+`stock_movements` was therefore *wrong* rather than merely incomplete: it re-posted two bills'
+revenue on real data (S573). Whenever a best-effort second write follows a primary one, the second
+one's absence proves nothing — give each table its own link back to the source row and ask the
+table you actually mean.

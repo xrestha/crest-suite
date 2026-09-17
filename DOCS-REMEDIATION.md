@@ -23,11 +23,10 @@ Eight days later the rules corpus had grown ~70% and `DESIGN.md` ~39%, which is 
 corpus is where the growth goes.** That is the intended direction, and it is also what makes T13's
 per-file audit worth repeating rather than treating as done.
 
-- **`CLAUDE.md`** (52,854 chars, hard ceiling 53,000 — see T11) — stack, access control and the
-  three gate types, tier thesis, multi-outlet, subscription access, the four S531 privilege
-  invariants, multi-tenant isolation and `scopedDb`, staff role axes, BS calendar rules,
-  page-splitting, Supabase/DB traps. **Running at 146 chars of headroom**, so the next section
-  added here has to pay for itself out of an existing one.
+- **`CLAUDE.md`** (14,192 chars / 122 lines after S769, ceiling 18,000 — see T11) — commands,
+  stack, the sister repo, hard rules in four groups (tenancy and privilege, access control, data
+  correctness, BS dates), UI conventions, and a pointer table into `.claude/rules/`. Everything
+  module-specific left in S769; the root holds each rule as one line and the rules file holds why.
 - **`.claude/rules/*.md`** (27 files, ~759k chars) — everything scoped by `paths:`, loaded only when
   a matching file is open. Up ~50k in the ten days since the previous line was written, all of it
   into existing files rather than new ones, which is the direction T11 intends.
@@ -686,6 +685,21 @@ resolves to the files that need the rule.
 That diagnosis is right, and it means the problem cannot be solved by any single session's judgement.
 Four `/doctor` passes have now been spent on it. The fifth is already scheduled by arithmetic.
 
+**A sixth pass, S769 (2026-09-17), went further than trimming: 49,876 → 14,192 chars, 427 → 122
+lines, `CEILING` 51,500 → 18,000.** The brief was "only what applies to every task", so each
+module section became a one-line rule plus a pointer, and the root gained a Commands section it had
+never had. The part worth keeping is how the cut was made safe. Before removing anything, each
+section's distinctive tokens (function names, migration ids, session numbers, worked examples) were
+searched for across the whole corpus. **Five pieces existed nowhere but the root**: the full S531
+invariants, the `scopedDb` exemptions, the BS signature traps, "two writes can diverge", and the
+try/catch and 1000-row rules, plus the `feature_flags`-false paragraph. They were moved verbatim by a
+script that asserted each block's size and each anchor's uniqueness, into the rules file that loads
+for their code. That is the S678 lesson turned around: a migration that leaves the original in place
+costs what not migrating would, and a cut that assumes the destination already has the content loses
+it silently. T4 cannot tell those apart, so the search has to come first. Two code comments
+(`ComboBuilder.js`, `featureFlagsSchema.test.js`) cite root sections by name, so those sentences
+were kept in the root rather than editing app code.
+
 **Do.** Add `scripts/check-claude-size.mjs`:
 
 - Read a ceiling from a committed constant, initially **53,000** — the current size plus a small
@@ -873,6 +887,15 @@ merely unmeasured, it is moving, and faster than the file the ceiling actually g
 being the same interval over which the root file once regrew 7,052 chars. Each addition was
 individually correct, which is exactly the failure mode T11's own diagnosis names. **If any ceiling
 is worth making mechanical next, it is this one, keyed on size × glob reach rather than size.**
+
+**Re-measured 2026-09-17 (S769) as what one file open actually loads, now that the root is small
+enough to compare against.** Summing every rule whose `paths:` match a single file:
+`src/modules/ims/reports/VendorReport.js` loads **~400k chars (~100k tokens)** across seven rule
+files; `PosOrders.jsx` ~304k; `PayrollRun.jsx` ~282k; `src/pages/Settings.js` ~261k; a migration
+file ~85k; `bsCalendar.js` ~15k. `design-system.md` is now **117,939 chars**, present in every
+figure above except the last two. The root `CLAUDE.md` at 14,192 is about 3.5% of what opening
+one IMS report costs. The decision below is still open, and this measurement does not settle it,
+but the ratio has changed direction completely since T13 was written.
 
 **The case that prompted this.** `design-system.md` was 65,384 chars — larger than `CLAUDE.md`
 itself at 51,027 — and its globs are `src/**/*.css`, `src/components/**`, `src/pages/**` and

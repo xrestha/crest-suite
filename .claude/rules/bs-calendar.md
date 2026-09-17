@@ -149,3 +149,20 @@ S614 (all byte-identical, so nothing rendered wrong — it was simply a list tha
 once to disagree with itself). Three of those 31 hid from a `^const BS_MONTHS =` grep: one held the
 same twelve strings under a different name (`BS_MONTH_NAMES`), one wrapped the array across two lines,
 and one declared it inside a component body. Import it; never retype it.
+
+## The four things the signatures don't tell you, and the `.toISOString()` trap
+
+Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root keeps only the one-line rule.
+
+All periods and dates in the app use the Nepali calendar; the utilities are in `src/utils/bsCalendar.js`. Four things the signatures don't tell you:
+
+- `formatAd(date)` reads the Date's **local** getters — that is the whole point of it
+- `bsDayBoundaryIso(y, m, d, endOfDay)` returns an AD instant carrying Nepal's `+05:45`
+- `daysInBsMonth(year, month)` — each BS month has a different number of days (28–32); **never assume 30**
+- Nepal fiscal year runs **Shrawan (month 4) → Ashadh (month 3)** of the following BS year
+
+The lookup table covers BS 2000–2087; out-of-range years fall back to a 30-day approximation. Its provenance, why 2084–2087 are deliberately left alone, and what `BS_YEAR_MIN`/`BS_YEAR_MAX`/`adToBsSafe` are for are in the sections above. Read them before extending the table.
+
+**Never `.toISOString()` a Date that came from `bsToAd`.** It returns local midnight, so at Nepal's UTC+05:45 `.toISOString()` lands at 18:15Z on the *previous* day and `.slice(0,10)` yields the wrong date for every user in the country. This shipped twice. Use `formatAd` where a bare date string is wanted — including any RPC declaring its parameter as `date` — and `bsDayBoundaryIso` where the value is compared against a real `timestamptz`.
+
+**A date picked in BS is STORED as AD, so fixing the table never fixes the stored value.** `BsCalendarPicker` commits `formatAd(bsToAd(...))`; two converter faults have shipped and rows written under either are still wrong today with nothing to signal it — dates of birth worst. A picker given `lockYear`/`lockMonth` stores a day NUMBER instead and is unaffected. **`BS_MONTHS` has exactly one definition and it lives in `bsCalendar.js`** — import it, never retype it. The era table, the repair derivation, `scripts/bs-date-audit.mjs` and `formatBsDay` are all in this file.

@@ -71,7 +71,7 @@ quotes as the evidence of what a signed contract incorporated by reference, so u
 
 | Read this | For |
 | --- | --- |
-| [`CLAUDE.md`](CLAUDE.md) | Architecture and the rules that must be known before you think to ask: the gate model, tenant isolation, the privilege invariants, the Supabase traps. Loaded on every request of every session. |
+| [`CLAUDE.md`](CLAUDE.md) | Commands, stack, and the rules that must be known before you think to ask: the gate model, tenant isolation, the privilege invariants, the Supabase and BS-date traps, plus a pointer table into `.claude/rules/`. Loaded on every request of every session, so it holds nothing module-specific. |
 | [`.claude/rules/`](.claude/rules/) | The same kind of rule, scoped by a `paths:` glob so it loads only when a matching file is open. Check `npm run check:docs` still passes after moving a file. |
 | [`.claude/skills/new-feature-checklist/`](.claude/skills/new-feature-checklist/) | The steps between "it works" and "it shipped". Invoke it before any new page, report or module feature. |
 | [`DESIGN.md`](DESIGN.md) | The design system as it actually exists in the code: tokens, scales, components, and the named rules that are already enforced. |

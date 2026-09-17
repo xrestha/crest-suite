@@ -47,3 +47,13 @@ SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public'
 ```
 
 **Three defects sat in this feature from S548 until S617 and none were reachable, because no client has ever had a `group_id`.** Worth knowing as a shape: a feature with no users accumulates faults that every review passes over. `set_active_outlet()` and `get_group_summary()` each checked group MEMBERSHIP and called it authorisation, so the Owner-only rule lived only in React; `/group-dashboard` had no role guard at all while the command palette advertised it; and `active_client_id` was read in two places in `AuthContext` and never selected, so switching outlets would have left every scoped query filtering on the home id while RLS resolved to the new one — every client-scoped table returning zero rows with `error: null`.
+
+## Multi-tenant data isolation: `scopedDb` and the pages exempt from it
+
+Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root keeps only the one-line rule.
+
+Every Supabase table is client-scoped. **Use the scoped data-access layer, not hand-written `.eq('client_id', ...)`:**
+
+`src/shared/scopedDb.js` fails closed (a sentinel UUID on reads/updates/deletes, an error object on inserts/upserts) when `clientId` is missing, instead of silently running unfiltered or leaking a NULL row — this matters most on **reads**, since an admin's RLS policy (`role='admin' OR client_id=own`) allows every tenant's rows and only the per-query filter narrows an admin "viewing as" session down to one client. Only tables in the `CLIENT_SCOPED_TABLES` allowlist (mirrors the DB's `client_id NOT NULL` constraints) can go through it — `scopedDb` throws for anything else. Tables scoped by `period_id`/parent-id instead of `client_id` (`purchase_entries`, `sales_entries`, `recipe_ingredients`, `opening_stock`, `closing_stock`, `wastages`, `staff_meals`, etc.), tables with a nullable `client_id` (`settings`, `budgets`), and the `clients` table itself stay on raw `supabase.from()`.
+
+Two pages are **correctly exempt, not pending**: `AuditLog.js` (a cross-client admin viewer — `audit_logs.client_id` is nullable and its "All Clients" filter is incompatible with auto-scoping to one client) and `AdminClients.js` (has no `clientId` of its own — it loops over an explicit client list and acts on whichever `client.id` a row targets, so it calls the raw `scopedFrom`/`scopedInsert`/`scopedUpdate`/`scopedDelete` functions from `scopedDb.js` directly with that `client.id`, instead of the `useScopedDb()` hook). `Periods.js`'s admin "all clients" view and `Dashboard.js`'s `loadAdminStats()` use that same raw-function-with-explicit-id pattern, while their genuinely cross-tenant reads stay on plain `supabase.from()`.
