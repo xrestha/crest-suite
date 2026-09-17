@@ -13,7 +13,7 @@ import { loadMapFrom, slotIsFull, dayFlags } from './bookingAvailability'
 import './guestBooking.css'
 
 // Fully public, unauthenticated page — reached from the outlet's booking QR or link (printed from
-// Table Management → Reservations). Copies the guest menu's shape line for line: the client UUID
+// POS Setup → Reservations). Copies the guest menu's shape line for line: the client UUID
 // in the URL is the credential, get_booking_page decides whether this outlet takes online
 // bookings at all, submit_reservation_request does every check server-side, and the guest's own
 // request is polled by its unguessable id. Nothing self-confirms: a request waits for a staff

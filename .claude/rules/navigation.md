@@ -42,12 +42,17 @@ promoting an upsell into the row that answers "where am I" advertises to every u
 forever. Same question for the next add-on: does this belong to a panel, or does it keep having to be
 copied into all of them?
 
+### The top bar wraps between 768 and 1120px, and one page has one name (S776)
+
+- Below 1120px `.topbar-primary` and `.topbar-nav` WRAP (Layout.css, `max-width: 1119px`): account actions top-right, the context on its own line, pills on a second row. At 820 the context had collapsed to 2px and three nav menus sat past the edge of a scrollbar-less row. A new top-bar element must be checked at 820 and 1024 by `scrollWidth`, not by eye.
+- `/pos/tables` is **POS Setup** (Admin group) and `/pos` is **Till Devices** (owner decision). The tables page had three names and "POS Setup" had meant both pages in the copy. A link or guide names a page by its nav label, and a new page's heading uses the same words.
+
 ### "You are here" is a longest-prefix match, not a prefix match (S763)
 
 `NavLink`'s `isActive` prefix-matches by default. That is right for an item with sub-routes
 (`/purchases` stays lit while `/purchases/new` is open) and wrong for an item that is a PARENT of
 other nav destinations — and this model has exactly one: **`/pos` sits above `/pos/orders`,
-`/pos/billing`, `/pos/kds` and eight more**, so POS Setup was highlighted on every POS page, with
+`/pos/billing`, `/pos/kds` and eight more**, so POS Setup (now Till Devices) was highlighted on every POS page, with
 `aria-current="page"` on it, since the module shipped. Nobody reported it for months; it was noticed
 in a screenshot of a different change.
 

@@ -279,7 +279,7 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
         </div>
         <div className="form-field">
           <label htmlFor={idFor('duration')}>
-            Expected sitting (min) <Tip text="Prefilled per party size from Table Management → Reservations, where the outlet's own measured turn times are shown. Change it for a booking that will run long." width={280}>ⓘ</Tip>
+            Expected sitting (min) <Tip text="Prefilled per party size from POS Setup → Reservations, where the outlet's own measured turn times are shown. Change it for a booking that will run long." width={280}>ⓘ</Tip>
           </label>
           <input id={idFor('duration')} type="number" min={15} max={720} step={15} inputMode="numeric" value={duration}
             onChange={e => { setDurationTouched(true); setDuration(e.target.value) }} {...fieldAria(idFor('duration'), errors.duration)} />

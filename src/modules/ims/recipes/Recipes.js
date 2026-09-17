@@ -1938,7 +1938,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
             {!isSubRecipeForm && (
               <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16, marginTop: 16 }}>
                 <div className="form-field">
-                  <label htmlFor="recipe-f6"><Tip text="Optional — shown on the guest-facing QR menu (Table Management → Print QR). Leave blank to omit." width={280}>Description (guest menu)</Tip></label>
+                  <label htmlFor="recipe-f6"><Tip text="Optional — shown on the guest-facing QR menu (POS Setup → Print QR). Leave blank to omit." width={280}>Description (guest menu)</Tip></label>
                   <input id="recipe-f6" value={recipeForm.description} onChange={e => setRecipeForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Grilled chicken breast, herb butter, seasonal veg" />
                 </div>
                 {/* S756 (D16): an upload stored in Crest, because the guest menu's CSP blocks

@@ -153,7 +153,7 @@ const IMS_GROUPS = [
 ]
 const HR_DASHBOARD = { to: '/hr/dashboard', label: 'HR Dashboard', icon: LayoutDashboard, minHrRole: 'supervisor' }
 
-// POS Setup lives in the Admin group with POS Staff, not as a bare pill of its own (S763, owner
+// Till Devices (/pos, named POS Setup until S776) lives in the Admin group with POS Staff, not as a bare pill of its own (S763, owner
 // decision). Both are manager-only configuration reached a handful of times per outlet — a standing
 // top-level pill for one of them, right of Dashboard, gave the least-used POS page the most
 // prominent position in the bar and left Admin holding a single row.
@@ -167,7 +167,6 @@ const POS_GROUPS = [
     { to: '/pos/kds', label: 'Kitchen Display', icon: Utensils, minPosRole: 'staff' },
     { to: '/pos/parking', label: 'Parking Slips', icon: ParkingSquare, minPosRole: 'staff' },
     { to: '/pos/reservations', label: 'Reservations', icon: CalendarCheck, minPosRole: 'staff' },
-    { to: '/pos/tables', label: 'Tables', icon: LayoutGrid, minPosRole: 'manager' },
     { to: '/pos/customers', label: 'Customers', icon: Contact, minPosRole: 'supervisor' },
     { to: '/pos/shifts', label: 'Shifts', icon: Clock, minPosRole: 'supervisor' },
   ]},
@@ -182,7 +181,12 @@ const POS_GROUPS = [
     { to: '/pos/covers-report', label: 'Covers Report', icon: UtensilsCrossed, minPosRole: 'manager' },
   ]},
   { key: 'pos-admin', label: 'Admin', items: [
-    { to: '/pos', label: 'POS Setup', icon: Settings2, minPosRole: 'manager' },
+    // One page, one name (S776, owner decision): /pos/tables is "POS Setup" — it was "Tables" here,
+    // "Table Management" on its own heading and "POS Setup" in every link and guide — and it moved
+    // from Floor to Admin with that name, since it is manager-only configuration. The tablet page
+    // that had held the name is "Till Devices".
+    { to: '/pos/tables', label: 'POS Setup', icon: LayoutGrid, minPosRole: 'manager' },
+    { to: '/pos', label: 'Till Devices', icon: Settings2, minPosRole: 'manager' },
     { to: '/pos/staff', label: 'POS Staff', icon: Users2, minPosRole: 'manager' },
   ]},
 ]
@@ -229,8 +233,8 @@ const HR_GROUPS = [
 // ── "You are here" ───────────────────────────────────────────────────────────────────────────
 //
 // react-router's `NavLink` marks itself active on a PREFIX match by default, and exactly one
-// destination in this model is a parent of other destinations: `/pos` (POS Setup) sits above
-// `/pos/orders`, `/pos/billing`, `/pos/kds` and eight more. So POS Setup was highlighted — and
+// destination in this model is a parent of other destinations: `/pos` (Till Devices) sits above
+// `/pos/orders`, `/pos/billing`, `/pos/kds` and eight more. So that item was highlighted — and
 // carried `aria-current="page"` — on every single POS page. Live since the module shipped, in
 // every screenshot of the till, reported on the Billing page (S763).
 //

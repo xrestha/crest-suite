@@ -2176,7 +2176,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               Their user accounts, logins, settings and the client record are <strong>kept</strong>, so
               restoring the backup reverses this. Use this rather than Delete for a client who is leaving.
               Every POS tablet is signed out for good and the shared till key is switched off; a restore does not
-              bring them back, so each tablet is activated again from POS Setup.</>,
+              bring them back, so each tablet is activated again from Till Devices.</>,
             run: handleArchiveClient,
           },
           clientData: {
@@ -2186,7 +2186,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               sales, payables, periods), HR (employees, attendance, payroll, leave, roster) and POS (tables,
               orders, shifts, customers). The client record, user accounts, feature flags and settings are
               kept. Every POS tablet key is revoked and the shared till key is switched off, so each tablet has to be
-              activated again from POS Setup. <strong>This cannot be undone.</strong></>,
+              activated again from Till Devices. <strong>This cannot be undone.</strong></>,
             run: handleDeleteClientData,
           },
           deleteClient: {

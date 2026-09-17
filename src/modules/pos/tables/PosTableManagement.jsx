@@ -731,7 +731,7 @@ export default function PosTableManagement() {
     <div>
 
       <div className="page-header">
-        <h1 className="page-title">Table Management</h1>
+        <h1 className="page-title">POS Setup</h1>
         <p className="page-subtitle">
           Set up your floor plan and configure ticket routing for the kitchen and bar.
         </p>

@@ -1,6 +1,6 @@
 import { PARTY_BANDS, bandFor } from '../reports/coversMath'
 
-// settings.pos_reservation_settings — one jsonb, edited on Table Management → Reservations.
+// settings.pos_reservation_settings — one jsonb, edited on POS Setup → Reservations.
 //
 // The duration defaults are deliberately pessimistic round numbers; the settings tab shows the
 // outlet's own MEASURED dwell per band beside each field (turnoverByBand over the last 90 days)

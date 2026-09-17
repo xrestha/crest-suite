@@ -5679,7 +5679,7 @@ The tables were left occupied rather than freed with their orders still open.`)
       ) : tables.length === 0 && floorLoadError ? null : tables.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
           No tables set up yet.{' '}
-          <a href="/pos/tables" style={{ color: 'var(--theme-accent-ink)' }}>Go to Table Management →</a>
+          <a href="/pos/tables" style={{ color: 'var(--theme-accent-ink)' }}>Go to POS Setup →</a>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14 }}>

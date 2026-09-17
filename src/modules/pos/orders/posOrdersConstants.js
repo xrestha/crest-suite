@@ -240,7 +240,7 @@ export const PAYMENT_METHODS = ['Cash', 'Card', 'eSewa', 'Khalti', 'FonePay']
 // Delivery partners (Foodmandu, Pathao, etc.) are NOT payment methods — they don't pay the
 // restaurant at the counter (they remit later, minus commission), so their orders close as Credit
 // like any other unpaid balance, same as a real customer. The list of platforms itself is
-// client-editable (Table Management → Delivery Partners → settings.pos_delivery_partners), not a
+// client-editable (POS Setup → Delivery Partners → settings.pos_delivery_partners), not a
 // fixed constant here, since aggregators come and go — PosOrders.jsx reads it from
 // billingSettings.delivery_partners for the Credit quick-select chips, and commission is only
 // entered later, at settlement (PosCustomers.jsx), against the platform's actual remittance.

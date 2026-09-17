@@ -40,7 +40,7 @@ export default function PosLogin() {
   const [loadError, setLoadError] = useState('')
   const [retryToken, setRetryToken] = useState(0)
   const [signingIn, setSigningIn] = useState(false)
-  // The device key was refused by the picker itself — revoked from POS Setup, or never registered.
+  // The device key was refused by the picker itself — revoked from Till Devices, or never registered.
   const [deviceDead, setDeviceDead] = useState(false)
 
   useEffect(() => {
@@ -127,7 +127,7 @@ export default function PosLogin() {
           setError(`Too many incorrect attempts. Try again ${when}, or ask your manager to reset your PIN.`)
           setPin('')
         } else if (status === 401 && body?.error === ERR_DEVICE_NOT_ACTIVATED) {
-          // The device key no longer works: this tablet was revoked in POS Setup, or it still
+          // The device key no longer works: this tablet was revoked in Till Devices, or it still
           // holds the shared key a manager has since switched off (S754). No PIN will work until a
           // manager activates it again from /pos.
           setError('This till needs to be activated again by a manager')
@@ -146,7 +146,7 @@ export default function PosLogin() {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
       })
-      // S754: /pos is POS Setup, manager-only, and bounced every waiter to /dashboard. The till is
+      // S754: /pos is Till Devices, manager-only, and bounced every waiter to /dashboard. The till is
       // /pos/orders; a kitchen/bar station account is sent on to its KDS by ModuleGate
       // (canReachPosPath → STATION_TEAM_HOME), so no team check is needed here.
       navigate('/pos/orders', { replace: true })
@@ -175,7 +175,7 @@ const pinDots = Math.max(4, pin.length)
   const itemsWord = n => `${n} item${n === 1 ? '' : 's'}`
 
   // Device not yet activated for any client — explain why, instead of silently bouncing
-  // to /login. Activation itself happens from Crest POS (/pos) by an owner/manager.
+  // to /login. Activation itself happens from Till Devices (/pos) by an owner/manager.
   // Also catches a device activated before device-secret verification was introduced — its
   // stored client_id is still present but there's no secret to authorize get_pos_staff with,
   // so it needs a one-time re-activation rather than silently showing "no staff found".
@@ -193,7 +193,7 @@ const pinDots = Math.max(4, pin.length)
           </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
             Its device key was revoked, so staff can't sign in on it. An owner or POS manager can sign
-            in here, open <strong>Crest POS</strong>, and activate this tablet again.
+            in here, open <strong>POS → Admin → Till Devices</strong>, and activate this tablet again.
           </p>
           <button className="btn btn-primary" onClick={() => navigate('/login')}>
             Owner Login
@@ -216,7 +216,7 @@ const pinDots = Math.max(4, pin.length)
           </h1>
           <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
             Staff PIN login only works on a device an owner or manager has activated first.
-            Log in with your owner account, open <strong>Crest POS</strong>, and click
+            Log in with your owner account, open <strong>POS → Admin → Till Devices</strong>, and click
             <strong> Activate</strong> — then this screen will show your staff.
           </p>
           <button className="btn btn-primary" onClick={() => navigate('/login')}>

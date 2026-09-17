@@ -6,7 +6,7 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { withTimeout } from '../../../utils/withTimeout'
 import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
 
-// "Tablets" on POS Setup (S754): every till that has its own device key, who activated it, when it
+// "Tablets" on Till Devices (S754): every till that has its own device key, who activated it, when it
 // last reached the sign-in screen, and Revoke. Below the list, the restaurant's shared key from
 // before per-tablet keys, and the one control that switches it off.
 //

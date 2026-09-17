@@ -404,7 +404,7 @@ export default function PosCustomers() {
               .update({ pos_loyalty_point_value: v }).eq('client_id', clientId).select('id')
             if (error) return error
             // A sentence we wrote is returned as a string, so the tab shows it as written.
-            if (!data?.length) return 'No settings row exists for this outlet yet, so the point value was not saved. Save any setting in Table Management first, then try again.'
+            if (!data?.length) return 'No settings row exists for this outlet yet, so the point value was not saved. Save any setting in POS Setup first, then try again.'
             setPointValue(v)
             return null
           }}
@@ -680,7 +680,7 @@ export default function PosCustomers() {
                             <td colSpan={7} style={{ background: 'var(--theme-bg)', padding: '10px 18px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
                                 <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                                  <Tip text="Confirm against the platform's actual remittance statement — this is a starting suggestion from Table Management → Delivery Partners, not a locked-in figure" width={280}>
+                                  <Tip text="Confirm against the platform's actual remittance statement — this is a starting suggestion from POS Setup → Delivery Partners, not a locked-in figure" width={280}>
                                     {b.delivery_partner} commission
                                   </Tip>
                                 </span>

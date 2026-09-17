@@ -19,7 +19,7 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 //     opt-in per person — flipping the feature on does not start accruing points for an entire
 //     existing customer book.
 //   * A scheme sets the earn RATE and a minimum spend, and nothing else. What a point is WORTH is
-//     one client-level number (Table Management → Loyalty), because schemes differing in both
+//     one client-level number (POS Setup → Loyalty), because schemes differing in both
 //     directions is a thing no cashier can explain at the till.
 //
 // Who may change it (S754, owner decision): schemes, the point value and who is enrolled are set by

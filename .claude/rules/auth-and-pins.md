@@ -101,7 +101,7 @@ when one was last used.
 
 **The shared key is retired explicitly, never automatically when the first tablet registers.** An
 outlet with three tills that re-activates one would otherwise lose the other two mid-service.
-`pos-staff-login` stamps `pos_legacy_key_last_used_at` on every legacy sign-in, and POS Setup shows
+`pos-staff-login` stamps `pos_legacy_key_last_used_at` on every legacy sign-in, and Till Devices shows
 that stamp. A manager presses Switch off once the tablets have moved.
 `retire_pos_legacy_device_key` then **rotates** `client_secrets.pos_device_secret` to a value no
 tablet holds, so every path still comparing against it stops matching at once. That includes
@@ -117,7 +117,7 @@ comparison** (`POS_TODO.md` A2). **Archive, Clear Client Data, Delete Client and
 tablet key and rotate/retire the shared key (S755)**. `revokeClientTablets` runs first inside
 `deleteClientDataFor`, with the service role, because `revoke_pos_device` and
 `retire_pos_legacy_device_key` refuse a caller with no session. The caller is recorded as
-`revoked_by`. A restore brings neither back, so each tablet is re-activated from POS Setup.
+`revoked_by`. A restore brings neither back, so each tablet is re-activated from Till Devices.
 
 ### Login and sign-up page UX (moved)
 

@@ -20,7 +20,7 @@ export const POS_GUIDE_GROUPS = [
         summary:
           'Crest POS is a till system built to feed the rest of Crest: every closed bill posts its revenue into IMS Sales Entry and its ingredient depletion into the Stock Movements ledger, so the food-cost figures the suite is sold on come from real service, not re-typed totals. It is sold flat — pos_enabled on or off, no tiers, and no feature flag of its own: everything in this guide, Guest QR Ordering and Loyalty included, comes WITH the module (S632). pos_enabled is the only thing standing between a client and a public guest menu.',
         workflow: [
-          'Setup once: activate each till tablet on POS Setup (every tablet gets its own key), build tables and ticket routing in Table Management, create PIN staff on POS Staff.',
+          'Setup once: activate each till tablet on Till Devices (every tablet gets its own key), build tables and ticket routing in POS Setup, create PIN staff on POS Staff.',
           'Service: front-of-house staff PIN in and take orders on the floor grid; Send Order fires the KOT/BOT tickets (printed and on the Kitchen Display); a Supervisor or above presses Payment to close the bill. Kitchen and bar team logins only ever see the Kitchen Display.',
           'Cash discipline: a Supervisor opens a shift with a counted float BEFORE the first bill is charged (since S754 a bill cannot be charged without an open shift), and closes it against a recount; credit bills are settled later in Customers.',
           'Management: four reports (Sales, Exceptions, KOT Log, Covers) plus Credit Notes cover what sold, what was given away, what the kitchen was told, and how tables turned.',
@@ -65,7 +65,7 @@ export const POS_GUIDE_GROUPS = [
           'A lock (idle or Lock POS) keeps the order screen\'s unsent items for the login that typed them, on that tablet only, for up to 12 hours (S776). The PIN screen names them and whose they are; when that same PIN signs in, the table reopens with them back as unsent — measured against the order as it now stands, so nothing another device saved meanwhile is added twice. A different PIN never gets them. Before S776 the lock discarded them, and the 20-second countdown was drawn underneath the order screen where nobody could see it.',
           'Forgotten PINs are recoverable only by the platform admin (Admin → Clients → Staff PINs); within the product the remedy is a reset, which sets a new one.',
         ],
-        connections: 'Roster and verification both depend on POS Setup\'s device secret. Lockout state is what the idle lock returns staff to; PIN resets live on POS Staff.',
+        connections: 'Roster and verification both depend on Till Devices\' tablet keys. Lockout state is what the idle lock returns staff to; PIN resets live on POS Staff.',
       },
     ],
   },
@@ -174,7 +174,7 @@ export const POS_GUIDE_GROUPS = [
           'If the check for cancelled lines fails, the board says so and keeps the cancellations it last saw — a line the kitchen was told is cancelled never quietly becomes un-cancelled. "Clear Occupied" on the floor deletes the orders and their tickets, so nothing is struck through here — the food already sent is recorded under KOT Log → Pulled Items as "Table cleared" (S755).',
           'The board is deliberately exempt from the 3-minute idle lock — it is meant to sit untouched on a wall. A double-tap cannot advance a ticket twice, and a failed write reverts visibly instead of showing a phantom "done".',
         ],
-        connections: 'Cards map one-to-one onto KOT Log tickets. The prep estimate feeds the Guest Menu\'s status countdown. Station routing follows Table Management\'s ticket-routing categories.',
+        connections: 'Cards map one-to-one onto KOT Log tickets. The prep estimate feeds the Guest Menu\'s status countdown. Station routing follows POS Setup\'s ticket-routing categories.',
       },
       {
         id: 'parking',
@@ -236,7 +236,7 @@ export const POS_GUIDE_GROUPS = [
       },
       {
         id: 'tables',
-        title: 'Tables (Table Management)',
+        title: 'POS Setup',
         route: '/pos/tables',
         plan: 'Manager only',
         summary:
@@ -286,7 +286,7 @@ export const POS_GUIDE_GROUPS = [
           'The credit list is unbounded by date on purpose (old debts are still debts) — it is paged underneath, so it stays complete however long the system runs.',
           'The No-shows column comes from the reservations book, matched on the canonical phone number; a "?" means that read failed, not that the record is clean.',
         ],
-        connections: 'Built from Orders\' buyer details; settlements post drawer movements into Shifts; partner definitions come from Table Management. Credit totals appear in the Sales Report\'s payment summary. No-shows come from Reservations, and a party seated from a booking arrives on its bill with name and phone already filled in, so the book grows from bookings too.',
+        connections: 'Built from Orders\' buyer details; settlements post drawer movements into Shifts; partner definitions come from POS Setup. Credit totals appear in the Sales Report\'s payment summary. No-shows come from Reservations, and a party seated from a booking arrives on its bill with name and phone already filled in, so the book grows from bookings too.',
       },
       {
         id: 'shifts',
@@ -323,7 +323,7 @@ export const POS_GUIDE_GROUPS = [
         summary:
           'What a guest sees after scanning the table\'s QR: the restaurant\'s own name and logo at the top (set by the Owner in POS Setup → Guest Menu, S767), then the live menu with prices — VAT is added into the price only when the outlet is VAT-registered — allergen warnings for every client, and nutrition figures only when the client has the nutrition feature switched on (feature_flags.nutrition_facts). They can build a cart and submit it — which lands as a REQUEST for staff to accept, never directly on the order. Ordering comes with Crest POS; there is no separate flag to buy or switch on (S632). The page (and the public booking page) always wears the app\'s default dark theme, whatever theme a staff member saved on that phone (S767).',
         workflow: [
-          'Guest scans the QR printed from Table Management → browses the live menu.',
+          'Guest scans the QR printed from POS Setup → browses the live menu.',
           'Being told at all (S763): a request no longer announces itself only on the Orders floor. A loud bar drops down over WHATEVER page anyone with POS access is on — Inventory, HR, anywhere — naming the table and how long the guest has waited, with an Open Orders button, and the chime repeats every 20 seconds until someone deals with it, turning red past three minutes. Mute 5 min silences the sound and leaves the bar up. Suppressed on Orders (which already shows it better) and on the Kitchen Display (the kitchen cannot Accept a guest order, and a kitchen-team login cannot even reach Orders).',
           'With ordering on: build a cart → submit → the Orders floor shows a request badge with a chime → staff open the table and press Accept (or Dismiss). Accept only adds the items to that staff member\'s unsaved cart — nothing is saved until they press Send Order (a new table) or Update Order (an order already running). If they leave the table without saving, the request goes back on the list.',
           'Tickets: on a new table, Send Order fires KOT/BOT as usual. On an order already running, Update Order only saves — staff must then press KOT / BOT to send the guest\'s items to the kitchen and bar.',
@@ -337,7 +337,7 @@ export const POS_GUIDE_GROUPS = [
         formulas: [],
         gotchas: [
           'The page authorizes itself server-side from the table id (table → client → POS enabled) since a guest has no login — an invalid or stale QR gets nothing.',
-          'A table marked inactive in Table Management still shows the menu from its QR, but ordering is off and the server refuses a guest order for it — the floor cannot open an inactive table, so the order would have nowhere to land (S746).',
+          'A table marked inactive in POS Setup still shows the menu from its QR, but ordering is off and the server refuses a guest order for it — the floor cannot open an inactive table, so the order would have nowhere to land (S746).',
           'A dish switched on for POS with no selling price is left off the guest menu and refused in a guest order until it is priced — it used to appear, and be orderable, at NPR 0 (S746). Admin → Guest Menu counts how many were left off.',
           'Admin → Guest Menu embeds this page with Place Order switched off, so previewing can never send a real order; guests\' phones are unaffected.',
           'If ANY dish in a guest\'s order has gone off the menu (sold out, switched off, price removed) since they loaded the page, the WHOLE order is refused and the guest is told which dish, by name (S754, owner decision). The page re-reads the menu and takes that dish out of their cart, saying so, so they can send the rest. Every refusal now has its own plain sentence rather than a generic error.',
@@ -347,7 +347,7 @@ export const POS_GUIDE_GROUPS = [
           'Allergens are built from what is recorded on the ingredients, so a dish can have allergens nobody recorded. The filter sheet tells guests to ask staff about a serious allergy — do not promise more than the data holds.',
           'Sending an order gives up after 20 seconds on a bad connection and tells the guest it cannot tell whether the order arrived, rather than spinning forever. Sending again is safe while the first order is still waiting — the server refuses a second one instead of doubling it.',
         ],
-        connections: 'Menu content and On-POS visibility come from Menu Pricing (IMS guide). Requests surface on the Orders floor; ticket status flows back from the KDS. The QR itself is printed per table in Table Management. There is nothing to toggle: guest ordering is gated on pos_enabled alone, so it is live the moment POS is on. The feature_flags.guest_ordering switch still shown in the admin Feature Access modal is inert and grants nothing (S632).',
+        connections: 'Menu content and On-POS visibility come from Menu Pricing (IMS guide). Requests surface on the Orders floor; ticket status flows back from the KDS. The QR itself is printed per table in POS Setup. There is nothing to toggle: guest ordering is gated on pos_enabled alone, so it is live the moment POS is on. The feature_flags.guest_ordering switch still shown in the admin Feature Access modal is inert and grants nothing (S632).',
       },
     ],
   },
@@ -444,7 +444,7 @@ export const POS_GUIDE_GROUPS = [
           'Day boundaries are Nepal\'s (S754): a bill closed at 00:15 in Kathmandu lands on the same day for a viewer abroad, and the pickers default to Nepal\'s today. Excel is disabled while a range is still loading, or when the company-name read for the letterhead failed.',
           'An off-rate flag needs BOTH a gap of half a percentage point AND a rupee gap bigger than per-bill rounding can explain. Commission is rounded to the rupee at settlement, so one tolerance alone flags honest platforms on small bills.',
         ],
-        connections: 'Reads Orders\' bills and payments; the Kitchen/Bar axis reads Table Management\'s ticket routing; Comped Bills cross-references Exceptions; daily totals reconcile to Shifts\' frozen Z-reports.',
+        connections: 'Reads Orders\' bills and payments; the Kitchen/Bar axis reads POS Setup\'s ticket routing; Comped Bills cross-references Exceptions; daily totals reconcile to Shifts\' frozen Z-reports.',
       },
       {
         id: 'kot-log',
@@ -481,7 +481,7 @@ export const POS_GUIDE_GROUPS = [
           'Reservations: bookings whose BOOKED time falls in the range. Kept = seated or completed; no-show rate = no-shows ÷ (kept + no-shows), so cancelled and still-open bookings neither help nor hurt it.',
         ],
         fields: [
-          { label: 'RevPASH', desc: 'Revenue ÷ (total seats × open hours). Needs the opening and closing time set (editable inline on the report); left unset, that one card hides rather than blocking the rest. Total seats = the capacity sum from Table Management.' },
+          { label: 'RevPASH', desc: 'Revenue ÷ (total seats × open hours). Needs the opening and closing time set (editable inline on the report); left unset, that one card hides rather than blocking the rest. Total seats = the capacity sum from POS Setup.' },
         ],
         formulas: [
           'Spend per cover = dine-in bill revenue, net of dine-in returns issued in the range ÷ dine-in covers, over the same discount-aware bill math as the Sales Report.',
@@ -491,7 +491,7 @@ export const POS_GUIDE_GROUPS = [
           'Why dine-in only: a takeaway bag has no covers and no table time, so it only dragged the per-cover and turn-time figures around. A tab left empty because the range held only takeaway says so.',
           'Reads are paged; truncation here would not just shrink totals, it would skew the averages the report exists for.',
         ],
-        connections: 'Covers come from Orders\' cover counts; capacity from Table Management; revenue math shared with the Sales Report. The Turnover tab\'s per-band averages are the same arithmetic (coversMath.js) the Reservations settings show as "Measured", so the two can never disagree. Booked-vs-walk-in reads the order link a seated booking carries.',
+        connections: 'Covers come from Orders\' cover counts; capacity from POS Setup; revenue math shared with the Sales Report. The Turnover tab\'s per-band averages are the same arithmetic (coversMath.js) the Reservations settings show as "Measured", so the two can never disagree. Booked-vs-walk-in reads the order link a seated booking carries.',
       },
     ],
   },
@@ -503,13 +503,13 @@ export const POS_GUIDE_GROUPS = [
     sections: [
       {
         id: 'pos-setup',
-        title: 'POS Setup',
+        title: 'Till Devices',
         route: '/pos',
         plan: 'Manager only',
         summary:
           'Where each till tablet is activated and managed. Activation gives THAT tablet its own key (S754), which is what lets the PIN login screen list staff before anyone is signed in. The Tablets list shows every activated tablet, who activated it, when it was last used, and a Revoke button. Also the jumping-off link to the PIN screen.',
         workflow: [
-          'On each till tablet, a Manager (or the Owner) signs in once at the main login, opens POS Setup, names the tablet ("Front counter", "Bar") and presses Activate. From then on the tablet boots straight to the PIN picker.',
+          'On each till tablet, a Manager (or the Owner) signs in once at the main login, opens Till Devices, names the tablet ("Front counter", "Bar") and presses Activate. From then on the tablet boots straight to the PIN picker.',
           'Lost, sold or broken tablet: press Revoke beside it in the Tablets list. It stops at the PIN screen on its very next sign-in; every other tablet keeps working.',
           'Moving from the old shared key: tablets activated before S754 all share one restaurant-wide key. An amber panel says the shared key is still on and when a tablet last used it. Re-activate each old tablet so it appears in the list, then press "Switch it off" — that cannot be undone.',
           'Deactivate before rebinding a machine to a different outlet — a device bound to another client refuses to simply switch. Deactivating a tablet that has its own key also revokes that key.',
@@ -541,7 +541,7 @@ export const POS_GUIDE_GROUPS = [
           'Manage Roles: add as many custom job titles as the house uses (Captain, Head Waiter, Cashier…) and map each one to a permission level — Staff, Supervisor or Manager. Changing a title\'s level cascades to everyone holding it; "Reset to defaults" returns to the plain Staff / Supervisor / Manager titles.',
         ],
         fields: [
-          { label: 'The three ranks', desc: 'Staff: take orders on the floor, Kitchen Display, Reservations, view Parking Slips. Supervisor: + the Payment button (close bills, discounts, comps), Recent Bills and reprints, Customers & Credit settlement, open/close Shifts and Cash In/Out, issue Parking Slips. Manager: + Table Management and every till-setup list, Menu Pricing, loyalty schemes, all reports, Credit Notes and cash refunds, POS Staff, tablet setup. Owner only: the invoice prefix, VAT number and VAT registration, property address/phone and the payment QR printed on bills. Since S754 the database enforces every one of these, not just the screens.' },
+          { label: 'The three ranks', desc: 'Staff: take orders on the floor, Kitchen Display, Reservations, view Parking Slips. Supervisor: + the Payment button (close bills, discounts, comps), Recent Bills and reprints, Customers & Credit settlement, open/close Shifts and Cash In/Out, issue Parking Slips. Manager: + POS Setup and every till-setup list, Menu Pricing, loyalty schemes, all reports, Credit Notes and cash refunds, POS Staff, tablet setup. Owner only: the invoice prefix, VAT number and VAT registration, property address/phone and the payment QR printed on bills. Since S754 the database enforces every one of these, not just the screens.' },
           { label: 'What a POS Manager cannot do (S754)', desc: 'Change their OWN login or another Manager\'s (role, PIN reset, delete) — that is the Owner\'s job. Make anyone a Manager — only the Owner (or admin) can. Give a Discount Limit higher than their own, or "no limit" if they have one, or tick Allow Void if they cannot void themselves. A new login a capped Manager creates starts at that Manager\'s own limit. Why: otherwise a manager capped at 10% could give a waiter an unlimited discount and then use the waiter\'s PIN.' },
           { label: 'Allow Void', desc: 'Deliberately a per-person switch, NOT a Supervisor power — promoting someone to Supervisor does not let them void, and the checkbox is the only thing that does. It once looked like a rank power on paper, and managers promoted people to grant it, got Supervisors who still couldn\'t void, and no error explained why.' },
           { label: 'Team (FOH / Kitchen / Bar)', desc: 'Which station, not how much power — a Kitchen or Bar account sees only the Kitchen Display regardless of rank, and is locked to its own ticket queue there.' },

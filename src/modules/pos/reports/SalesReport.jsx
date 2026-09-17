@@ -209,7 +209,7 @@ export default function SalesReport() {
       if (failed) { setBizError(failed); return }
       const [{ data: client }, { data: settings }, { data: recipeRows }] = results
       setBizInfo({ name: client?.name || '', vat: settings?.vat_number || '', address: settings?.property_address || '' })
-      // The CONTRACTED commission rate per partner (Table Management -> Delivery Partners). It is
+      // The CONTRACTED commission rate per partner (POS Setup -> Delivery Partners). It is
       // the only thing a settled bill's actual commission can be checked against - without it the
       // Delivery Partners tab can say how much a platform took but never whether that was right.
       setPartnerRates(Object.fromEntries((settings?.pos_delivery_partners || [])
@@ -243,7 +243,7 @@ export default function SalesReport() {
   const [vatReg, setVatReg] = useState(true)
   // For the credit note number on a minus row, as the Credit Note Book prints it.
   const [invoicePrefix, setInvoicePrefix] = useState('')
-  // The same Kitchen/Bar split the tills route tickets by (Table Management → Ticket Routing),
+  // The same Kitchen/Bar split the tills route tickets by (POS Setup → Ticket Routing),
   // and the same ['Beverage'] fallback PosOrders.jsx and PosTableManagement.jsx use — if this
   // page disagreed with them, the Bar figure would not match the BOT tickets it came from.
   const [botCategories, setBotCategories] = useState(new Set(['Beverage']))
@@ -1574,7 +1574,7 @@ export default function SalesReport() {
                   <Tip text="What that commission actually works out to, as a % of the ex-VAT, post-discount value of the settled bills — the basis Foodmandu and Pathao calculate on. Outstanding bills are left out: they carry no commission yet, so counting them would drag the rate down mid-month." width={330}>Effective %</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="The rate you agreed with this platform, from Table Management → Delivery Partners. Fill it in there and any partner withholding more than agreed turns amber in the column to the left." width={320}>Agreed %</Tip>
+                  <Tip text="The rate you agreed with this platform, from POS Setup → Delivery Partners. Fill it in there and any partner withholding more than agreed turns amber in the column to the left." width={320}>Agreed %</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>Net Received</th>
               </tr>
@@ -1774,7 +1774,7 @@ export default function SalesReport() {
             </div>
             <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>
               {productAxis === 'station'
-                ? `Bar (BOT) is every line in a bar category (${[...botCategories].join(', ')}) — the same split the tills print BOT tickets from, set in Table Management → Ticket Routing. Everything else is Kitchen (KOT).`
+                ? `Bar (BOT) is every line in a bar category (${[...botCategories].join(', ')}) — the same split the tills print BOT tickets from, set in POS Setup → Ticket Routing. Everything else is Kitchen (KOT).`
                 : productAxis === 'vat'
                 ? 'Taxable is every line billed at a VAT rate above zero, Non-Taxable everything else — as billed, not as the item is configured today.'
                 : 'Veg / Non-Veg comes from the flag on each recipe. Items with the flag unset are shown separately rather than assumed.'}

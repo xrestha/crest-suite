@@ -164,7 +164,7 @@ export default function AdminGuestMenu() {
         <Header clientName={clientName} />
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>
           This client has no tables set up yet, and a guest menu is reached through a table's QR code.{' '}
-          <Link to="/pos/tables" style={linkStyle}>Add a table in Table Management →</Link>
+          <Link to="/pos/tables" style={linkStyle}>Add a table in POS Setup →</Link>
         </div>
       </div>
     )
@@ -231,7 +231,7 @@ export default function AdminGuestMenu() {
           <strong style={{ color: 'var(--theme-amber-text)' }}>{selected.name} is marked inactive.</strong>{' '}
           Its QR code still shows the menu, but guests cannot order from it — the POS floor cannot open an
           inactive table, so an order sent from it would have nowhere to go.{' '}
-          <Link to="/pos/tables" style={linkStyle}>Change table status in Table Management →</Link>
+          <Link to="/pos/tables" style={linkStyle}>Change table status in POS Setup →</Link>
         </div>
       )}
 

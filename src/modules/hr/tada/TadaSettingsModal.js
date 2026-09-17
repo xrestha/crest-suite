@@ -72,7 +72,7 @@ function OptionListEditor({ label, hint, placeholder, addLabel, options, setOpti
 // Admin/owner-only settings for TADA Claims — vehicle rates (used by the Transport line's
 // auto-fill), Purpose preset options, and Start Point preset options (both used by the New
 // Claim form's dropdowns, on the manager form and the Self-Service TADA tab). Edits are staged
-// locally and written in one explicit Save, same convention as Table Management's Discount
+// locally and written in one explicit Save, same convention as POS Setup's Discount
 // Reasons/Quick Notes tabs, rather than auto-saving per keystroke.
 export default function TadaSettingsModal({ clientId, vehicleRates, purposeOptions, startPoints, onClose, onSaved }) {
   const [rates, setRates] = useState({

@@ -183,7 +183,7 @@ export default function Pos() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Crest POS</h1>
+        <h1 className="page-title">Till Devices</h1>
         <p className="page-subtitle">
           Point of Sale — set up this device so your staff can log in with a PIN.
         </p>
