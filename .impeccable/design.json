@@ -18,7 +18,7 @@
           "oklch(82.0% 0.198 31.5)",
           "oklch(95.0% 0.181 31.5)"
         ],
-        "lightPreset": "#ec3013"
+        "lightPreset": "#dd2b0f"
       },
       "accent-red-hover": {
         "role": "primary",
@@ -34,7 +34,7 @@
           "oklch(82.0% 0.122 31.8)",
           "oklch(95.0% 0.112 31.8)"
         ],
-        "lightPreset": "#dd2b0f"
+        "lightPreset": "#ae1800"
       },
       "accent-text": {
         "role": "primary",
@@ -174,7 +174,7 @@
         "role": "neutral",
         "displayName": "Focus Ring (tint)",
         "canonical": "rgba(255,86,60,0.15)",
-        "lightPreset": "rgba(236,48,19,0.12)"
+        "lightPreset": "rgba(221,43,15,0.12)"
       },
       "focus-outline": {
         "role": "neutral",
@@ -238,7 +238,7 @@
           "oklch(82.0% 0.004 17.3)",
           "oklch(95.0% 0.004 17.3)"
         ],
-        "lightPreset": "#7d7979"
+        "lightPreset": "#6c6868"
       },
       "signal-success": {
         "role": "tertiary",
@@ -595,7 +595,7 @@
       },
       "button-label": {
         "displayName": "Button Label",
-        "purpose": "Every control label. 15px is a CONTRAST floor, not a density choice: white on the Light accent measures 4.20:1, legal as large text and not as normal text, and 15px/600 is where that threshold begins. Do not reduce it."
+        "purpose": "Every control label. A legibility and hierarchy size, not a contrast floor: 15px/600 is not WCAG large text (24px, or 18.66px bold), and since S768 the Light accent carries white at 4.74:1 by itself."
       },
       "subtitle": {
         "displayName": "Subtitle",
@@ -1122,7 +1122,7 @@
       "The Zero Corner Rule. No element in the app takes a radius. If a shape needs to be distinguished from its neighbour, it takes a rule, a ground, or a position — never a corner. Replaces the Proportional Corner Rule. Two exemptions, both outside the interface itself: print templates, and the veg / non-veg food mark’s round dot. The guest pages were exempt until S767 and are square now.",
       "A rig built as percentages of the accent is only as neutral as the accent is. /login’s three radial light layers were each a colour-mix of --theme-accent; at 34% of a muted gold they read as light, and at 34% of a saturated red as a brown cast over the whole page. Derived decoration inherits the accent’s temperament, not just its hue.",
       "A red accent lands next to the danger and warning slots in a way a brass accent never did, so accentInk is the one token a new accent genuinely forces. Both presets’ inks moved a ramp step further out after measurement: Light’s #ae1800 sat at ΔE 0.5 from amberText under deuteranopia, Night’s #ff9783 at ΔE 7.4 from red. Re-run those pairs before changing either.",
-      "The 15px/600 button label is a CONTRAST floor, not a density choice. White on Light’s accent measures 4.20:1 — legal as large text, not as normal text — and 15px/600 is where that threshold begins. An accent fill carrying smaller text takes the darker accent-hover fill instead; ::selection does exactly that, because it inherits whatever size it lands on."
+      "The contrast lives in the fill, not the label size. 15px/600 is not WCAG large text (24px, or 18.66px bold), so it never protected white on Light's old #ec3013 accent (4.20:1); since S768 the Light accent is #dd2b0f, where white clears 4.74:1 at any size. Check any size defended as a contrast floor against 24px / 18.66px-bold."
     ],
     "dos": [
       "**Do** read every colour from a `--theme-*` token, and check the fallback half of a `var()` as carefully as a standalone literal — a drifted fallback paints in the one instant nobody is watching and reads as correct in review.",

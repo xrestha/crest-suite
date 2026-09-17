@@ -214,12 +214,12 @@
    The fill is `--theme-accent-HOVER`, not `--theme-accent`, and this is the one place in the
    product where that distinction is a contrast fix rather than an interaction state. Selection
    inherits the size of whatever it lands on — including 11px badges and 10px micro-captions — so
-   unlike a button it cannot be given a 15px large-text floor. On Modernist Light the base accent
-   carries white at 4.20:1, under AA at those sizes; accent-hover is #dd2b0f, where white clears
-   4.74:1. On Night accent-hover runs the other way (lighter, #ff9783), which RAISES contrast
-   against that preset's ink accent-text rather than lowering it. So one declaration is correct on
-   both grounds, and it stays a token — a literal would be right on one preset and wrong on the
-   other. */
+   unlike a button it cannot be given a size floor. On Modernist Light accent-hover is #ae1800,
+   where white clears 7.17:1 (the base accent #dd2b0f clears 4.74:1 itself since S768, when the
+   preset stopped relying on a large-text floor that 15px never was). On Night accent-hover runs
+   the other way (lighter, #ff9783), which RAISES contrast against that preset's ink accent-text
+   rather than lowering it. So one declaration is correct on both grounds, and it stays a token —
+   a literal would be right on one preset and wrong on the other. */
 ::selection {
   background: var(--theme-accent-hover);
   color: var(--theme-accent-text);
@@ -1488,14 +1488,13 @@ tr.interactive-row:focus-visible {
   }
 }
 
-/* 15px/600 is a CONTRAST FLOOR, not a density choice, and it is the one number in this file that
-   must not be "tidied" back down. White on Modernist Light's accent (#ec3013) measures 4.20:1 —
-   over AA for LARGE text, under it for normal text — and 15px/600 is exactly where WCAG's
-   large-text threshold begins. Every .btn-primary in the product is a label on that fill, so
-   dropping this to 13px reintroduces a real contrast failure on every commit action at once.
-   Where a smaller label on an accent fill is unavoidable the FILL moves to #dd2b0f (white clears
-   4.74:1) rather than the label shrinking — see ::selection above, which inherits whatever size
-   it lands on and so cannot be given a floor at all. DESIGN.md → Components → Buttons. */
+/* 15px/600 is the product's control-label size. It was defended here as a CONTRAST floor — white on
+   Light's old accent #ec3013 measured 4.20:1, "and 15px/600 is where WCAG's large-text threshold
+   begins" — and that premise was false: WCAG large text is 24px, or 18.66px bold, so 15px never
+   qualified and every primary label on Light failed AA regardless (S768). The contrast now comes
+   from the FILL, as it should: Light's accent is #dd2b0f, where white clears 4.74:1 at any size.
+   The 15px stays as a legibility and consistency choice; it no longer carries contrast, and a
+   shrunk primary label is a hierarchy mistake rather than an AA failure. DESIGN.md → Buttons. */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -1532,11 +1531,10 @@ tr.interactive-row:focus-visible {
   gap: 4px;
 }
 
-/* .btn-sm's 12px sits BELOW the 15px accent-fill contrast floor, so the small PRIMARY keeps the
-   full label size and only the tighter padding. Five sites in the product wear this pair; without
-   this rule each is a 12px white label at 4.20:1 on the accent. Shrinking the fill instead would
-   need a preset-aware token — Night's accent is already safe at any size, so a single darker hex
-   would be wrong there — and a new token is not worth five buttons. */
+/* The small PRIMARY keeps the full label size and only the tighter padding: a primary is the one
+   commit on its row, and a 12px commit reads as a secondary control. This was written as a contrast
+   rule (white on Light's old accent, 4.20:1) — that premise went with the accent's move to #dd2b0f
+   in S768, and what remains is hierarchy. */
 .btn-sm.btn-primary {
   font-size: 15px;
   font-weight: 600;

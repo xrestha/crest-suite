@@ -102,9 +102,9 @@ typography:
   card-heading:
     fontSize: "15px"
     fontWeight: 600
-  # Every control label in the product. 15px is a CONTRAST floor, not a density choice — white on
-  # Light's accent measures 4.20:1, which is legal as large text and not as normal text, and
-  # 15px/600 is where that threshold begins. See Components -> Buttons.
+  # Every control label in the product. Once defended as a CONTRAST floor on a false premise
+  # (15px/600 is not WCAG large text — 24px, or 18.66px bold, is); since S768 the Light accent
+  # carries white at 4.74:1 by itself and this is a legibility size. See Components -> Buttons.
   button-label:
     fontSize: "15px"
     fontWeight: 600
@@ -300,11 +300,20 @@ reserve. The red is rationed hard: it marks the thing you are meant to press and
 
 ### Primary
 
-- **Signal Red** (`#ff563c` Night / `#ec3013` Light): the product's only brand colour. It marks the
+- **Signal Red** (`#ff563c` Night / `#dd2b0f` Light): the product's only brand colour. It marks the
   active route, the live/occupied state, the primary action, a categorical tag and the period chip.
-  Hover steps to `#ff9783` on Night and `#dd2b0f` on Light — **lighter** on the dark ground,
+  Hover steps to `#ff9783` on Night and `#ae1800` on Light — **lighter** on the dark ground,
   **darker** on the light one. Night's is the ramp's 500 step rather than the `#ec3013` base, which
-  is too dark to read as an accent on ink.
+  is too dark to read as an accent on ink; Light's is the 600 step, one darker than the base,
+  because white on the base measured 4.20:1 and failed AA on every button label (S768).
+
+  **What the Light move cost, measured.** The accent FILL now sits nearer the signal fills under
+  deuteranopia — ΔE **6.6** from red (was 10.3) and **5.5** from amber (was 10.1), under the floor of
+  8 the ink slots are held to. It was accepted because nothing in the product separates the accent
+  from a signal by fill hue alone: the accent's fills are labelled buttons, and its tints carry
+  `accent-ink` as text, which did not move. **Never introduce a hue-only accent-vs-signal fill** — a
+  legend swatch, a bar or a dot that means "accent, not danger" by colour alone will read as one
+  colour to ~8% of men.
 - **Accent Ink** (`accent-ink`, `#ffc4b8` Night / `#7c1405` Light): the accent used **as text** — a
   link, an active nav item, a `.stat-value.gold`, a `.btn-linklike` in a table cell.
 
@@ -334,9 +343,9 @@ reserve. The red is rationed hard: it marks the thing you are meant to press and
 - **Accent Text** (`accent-text`, `#201e1d` Night / `#ffffff` Light): the foreground that sits **on**
   an accent fill. Not interchangeable with `accent-ink` — this one pairs with a filled surface, that
   one is type on a normal ground. Night's is ink rather than white and measures 5.26:1 on the fill.
-  Light's white measures **4.20:1** on `#ec3013`, which is why the button label floor is 15px/600
-  (see Buttons); `::selection` and any other accent fill carrying text below that size uses
-  `#dd2b0f`, where white clears 4.74:1.
+  Light's white measures **4.74:1** on `#dd2b0f` and 7.17:1 on the `#ae1800` hover, at any size.
+  Until S768 it sat on `#ec3013` at **4.20:1**, defended by a 15px/600 "large-text floor" that WCAG
+  does not recognise (large text is 24px, or 18.66px bold) — every Light primary failed AA.
 
 ### Secondary
 
@@ -362,11 +371,16 @@ reserve. The red is rationed hard: it marks the thing you are meant to press and
 - **Paper** (`text1`, `#f3f2f2` / `#201e1d`): every figure, every table cell, every value.
 - **Fog** (`text2`, `#bab6b6` / `#605d5d`): the secondary tier — labels, column headers,
   subtitles, `badge-gray`'s foreground.
-- **Slate** (`text3`, `#9b9797` / `#7d7979`): the quietest tier — placeholders, stat labels,
+- **Slate** (`text3`, `#9b9797` / `#6c6868`): the quietest tier — placeholders, stat labels,
   micro-captions, the empty state.
 
-  The ladder is paper > fog > slate. Both lower tiers clear AA, so the ordering is *hierarchy*
-  rather than accessibility — which is exactly why an inversion between them once survived every
+  The ladder is paper > fog > slate. Both lower tiers clear AA — measured, not asserted: Night's
+  slate is 5.48:1 on the card; Light's is 4.54:1 on the card, 4.92:1 on the page and 5.50:1 on an
+  input. **This sentence was false on Light until S768**: slate was `#7d7979`, the handoff's
+  neutral-600, at 3.55:1 on the card, and the claim above sat unchallenged over ~250 HR labels
+  alone. `#6c6868` is off the ramp deliberately — the next step down is fog itself — and its
+  margin over fog is thin (ΔE 4.6), so re-measure both before moving either. The ordering is still
+  *hierarchy* rather than accessibility — which is exactly why an inversion between them once survived every
   contrast audit unnoticed, with each quietest-tier hint outranking every secondary label. The
   Night pair sits at the same ratio it always did; only the hue moved off blue-grey onto the
   neutral ramp.
@@ -896,13 +910,14 @@ four of which live on the class and none of which announce their absence.
 - **Shape:** square (no radius), `8px 16px` padding, **15px/600**, a 6px gap for an icon.
   Transitions background and colour at 0.13s.
 
-  **The 15px is a contrast floor, not a taste call.** White on Light's `#ec3013` measures
-  **4.20:1** — under AA for normal text, over it for large text, and 15px/600 is where WCAG's
-  large-text threshold begins. The label size is therefore load-bearing: dropping a primary button
-  back to 13px reintroduces a real contrast failure on every commit action in the product. Where a
-  smaller label on an accent fill is genuinely unavoidable, the FILL moves to `#dd2b0f` (white
-  clears 4.74:1) rather than the label shrinking — that is what `::selection` does, since it
-  inherits the size of whatever text is selected and cannot be given a floor at all.
+  **The contrast lives in the fill, not the label size.** This section used to call 15px a
+  contrast floor: white on Light's `#ec3013` measured **4.20:1**, "and 15px/600 is where WCAG's
+  large-text threshold begins". It is not — WCAG large text is **24px, or 18.66px bold** — so the
+  floor protected nothing and every primary on Light failed AA (S768). Light's accent is `#dd2b0f`
+  now, where white clears 4.74:1 at any size. 15px/600 stays as the control-label size for
+  legibility and hierarchy; a primary shrunk below it is a hierarchy defect (the one commit on a
+  row reading as secondary), not a contrast one. **Before defending any size as a contrast floor,
+  check it against 24px / 18.66px-bold.**
 - **Label alignment:** flush left. A wide or block button is `justify-content: space-between` with
   the label left and a trailing `→` right; only `.btn-icon` centres, because it has no label to
   align. Centred labels are the one thing that makes a square button read as a generic dialog

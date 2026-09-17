@@ -57,13 +57,28 @@ export const PRESETS = {
   light: {
     name: 'Modernist Light', description: 'Paper & signal red',
     bg: '#f3f2f2', card: '#eae9e9', border: '#d7d3d3', borderLt: '#e5e3e3', sidebar: '#eae9e9',
-    text1: '#201e1d', text2: '#605d5d', text3: '#7d7979',
-    // accentText is plain white here and that is a MEASURED 4.20:1 on the accent — legal as large
-    // text, not as normal text. The product's answer is the label size, not a darker ink: .btn is
-    // 15px/600, which is where WCAG's large-text threshold begins. Any accent fill carrying text
-    // below that (::selection, which inherits whatever size it lands on) uses #dd2b0f instead,
-    // where white clears 4.74:1. See DESIGN.md -> Components -> Buttons.
-    accent: '#ec3013', accentHover: '#dd2b0f', accentText: '#ffffff',
+    // text3 is #6c6868, not the handoff's neutral-600 #7d7979 (S768). The ladder claimed both lower
+    // tiers clear AA, and slate did not: #7d7979 measured 3.55:1 on the card and 3.85:1 on the page,
+    // on every stat label, caption, placeholder and empty state — and on Crest Staff's "Who are
+    // you?". #6c6868 is the lightest grey that clears 4.5:1 on the card (4.54; 4.92 page, 5.50 on
+    // an input) while staying lighter than fog. It is off the ramp on purpose: the next ramp step
+    // down IS fog, and a quietest tier equal to the secondary one is no tier at all. The margin
+    // between the two is thinner than it was (ΔE 4.6), so re-measure both before moving either.
+    text1: '#201e1d', text2: '#605d5d', text3: '#6c6868',
+    // accent is the ramp's 600 step #dd2b0f, not the base #ec3013 the handoff specified (S768).
+    // White on #ec3013 measured 4.20:1, and the claim beside it — that 15px/600 is where WCAG's
+    // large-text threshold begins — was wrong: large text is 24px, or 18.66px bold. So every
+    // primary button, every accent chip and ::selection on Light failed AA for as long as the
+    // preset existed. White on #dd2b0f clears 4.74:1 at any size. Hover takes the next step down,
+    // 700 #ae1800 (white 7.17:1), mirroring Night's one-step-lighter hover.
+    //
+    // The price, measured and accepted: the accent FILL now sits closer to the signal fills under
+    // deuteranopia — ΔE 6.6 from red (was 10.3) and 5.5 from amber (was 10.1), under the floor of 8
+    // the INK slots are held to. No screen tells the accent from red or amber by fill alone: the
+    // accent's fills are labelled buttons and tints whose TEXT is accentInk, which did not move and
+    // still clears 16.1/21.3. If a hue-only accent-vs-signal fill is ever introduced, this is why it
+    // will fail for ~8% of men.
+    accent: '#dd2b0f', accentHover: '#ae1800', accentText: '#ffffff',
     // accent-800, not the accent-700 the handoff specified — the mirror of the Night correction
     // above. #ae1800 measured ΔE 0.5 from amberText under deuteranopia and 6.5 under protanopia:
     // the categorical slot ("decided, unpaid" / a rank / a close type) and the open-and-waiting
@@ -71,7 +86,7 @@ export const PRESETS = {
     // them apart. #7c1405 clears at 16.1/21.3 and holds 8.85:1 on the card, 9.59:1 on the page and
     // 8.11:1 on its own badge tint over the page ground (the S683 second-ground rule).
     accentInk: '#7c1405',
-    inputBg: '#ffffff', tableHover: '#e6e4e4', focusRing: 'rgba(236,48,19,0.12)',
+    inputBg: '#ffffff', tableHover: '#e6e4e4', focusRing: 'rgba(221,43,15,0.12)',
     green: '#15803d', red: '#dc2626', amber: '#b45309', purple: '#7c3aed',
     // Unchanged from the pre-Modernist palette, and see the S608/S683 history in git: these are
     // the only pair (of 120 searched) clearing both deuteranopia and protanopia while every
