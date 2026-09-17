@@ -8,10 +8,12 @@ import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import ConfirmModal from '../../../components/ConfirmModal'
 import FieldError, { fieldAria } from '../../../components/FieldError'
-import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay } from '../../../utils/bsCalendar'
+import { BS_MONTHS, daysInBsMonth, bsToAd, getBsToday, formatBsDay, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { ATTENDANCE_STATUSES, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 import { buildAttendanceFromRoster } from './attendanceFromRoster'
 import { isNonWorking, withStatus, fillBlankCells, attendanceRowFor, unsavedKeys, carryUnsavedEdits, splitCellKey } from './attendanceRules'
+import { stillIncomplete } from './attendanceImportPlan'
+import AttendanceImportModal from './AttendanceImportModal'
 import { calcHours, shiftHours, shiftRegularHours } from '../roster/laborForecast'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 
@@ -103,6 +105,13 @@ export default function AttendanceSheet() {
   // Generate from Roster awaiting its ConfirmModal: { rows, who, kept }. It writes pay rows across a
   // month, so the ask names what it will write rather than a window.confirm count (S749).
   const [pendingGenerate, setPendingGenerate] = useState(null)
+  // Import from machine (S775). `importFlags` holds the imported days that came in incomplete (one
+  // punch, or in and out under an hour apart): `${employee_id}:${bs_day}` → the machine's record in
+  // words. A flag shows in amber until the day's times make a shift or it stops being a working day
+  // (`stillIncomplete`), and Save asks once while any unsaved one is still open.
+  const [importing, setImporting] = useState(false)
+  const [importFlags, setImportFlags] = useState({})
+  const [confirmSaveFlags, setConfirmSaveFlags] = useState(false)
   // Shift types (client-wide) + this period's roster assignments — used to auto-calc OT when an
   // admin enters a Start/End time: worked hours beyond the employee's roster-assigned shift for
   // that day (or STANDARD_HOURS_PER_DAY if they're not on the roster that day) become OT.
@@ -264,7 +273,8 @@ export default function AttendanceSheet() {
       const [pRes, eRes] = await Promise.all([
         scopedFrom('monthly_periods')
           .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-        scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, status, department')
+        // join_date / end_date: Import from machine marks no day before someone joined or after they left.
+        scopedFrom('hr_employees', 'id, full_name, employee_code, pay_basis, status, department, join_date, end_date')
           .in('status', ['active', 'probation']).order('full_name'),
       ])
       // A failed read is not "No active employees" or "No period found" (S749) — both of those
@@ -294,6 +304,7 @@ export default function AttendanceSheet() {
     if (!p) return
     periodReq.begin(id)
     applyPeriod(p)
+    setImportFlags({})
     setRunStatus('none')
     setLoading(true)
     await loadAttendance(id)
@@ -493,13 +504,16 @@ export default function AttendanceSheet() {
   // day marked and then left for another day was never written, and the next save's reload wiped
   // it from the screen too. For daily and hourly staff a blank day pays nothing. Now every unsaved
   // cell goes in one upsert, whichever tab or day the reader happens to be on.
-  async function saveChanges() {
+  // `force` is the "Save anyway" answer to imported days still flagged incomplete.
+  async function saveChanges({ force = false } = {}) {
     if (!period || refuseIfLocked()) return
     const keys = unsaved
     if (keys.length === 0) {
       setSavedMsg('ok:Nothing to save — every mark on this sheet is already saved.')
       return
     }
+    if (!force && unsavedFlags.length > 0) { setConfirmSaveFlags(true); return }
+    setConfirmSaveFlags(false)
     setSaving(true); setSavedMsg('')
     const rows = keys.map(key => {
       const { employeeId, day } = splitCellKey(key)
@@ -507,9 +521,50 @@ export default function AttendanceSheet() {
     })
     const { error } = await scopedUpsert('hr_attendance', rows, { onConflict: 'employee_id,period_id,bs_day' })
     if (error) { setSavedMsg(`error:${describeChanges(keys)} may not have saved. What you entered is still on screen — press Save again (saving twice is safe). ` + errorLine(error)); setSaving(false); return }
+    // A flagged day that has been saved was a decision: the reader fixed it or chose Save anyway.
+    setImportFlags(f => {
+      const next = { ...f }
+      keys.forEach(k => { delete next[k] })
+      return next
+    })
     await loadAttendance(period.id, { carry: true })
     setSavedMsg(`ok:Saved ${describeChanges(keys)}`)
     setSaving(false)
+  }
+
+  // ── Import from machine ────────────────────────────────────────────────────
+  function openImport() {
+    if (!period || refuseIfLocked()) return
+    // A day with no punch follows the roster, and a punched day's overtime is measured against its
+    // shift, so an unread roster would mark working days Off and pay the wrong overtime.
+    if (rosterReadError) {
+      setSavedMsg('error:The roster or its shift types could not be read, so nothing can be imported — days with no punch are marked from the roster, and overtime is measured against each day\'s shift. Reload to try again. ' + errorLine(rosterReadError))
+      return
+    }
+    setSavedMsg('')
+    setImporting(true)
+  }
+  // The dialog's changes land as unsaved marks, like a bulk mark, so the sheet's own Save writes them.
+  // Each change carries the cell it was planned against; one that moved meanwhile is left alone.
+  function applyImport(changes) {
+    setImporting(false)
+    if (refuseIfLocked()) return
+    const next = { ...records }
+    const flags = {}
+    let applied = 0, moved = 0
+    for (const ch of changes) {
+      if (next[ch.key] !== ch.before) { moved += 1; continue }
+      next[ch.key] = ch.cell
+      applied += 1
+      if (ch.kind === 'flagged') flags[ch.key] = ch.machine
+    }
+    setRecords(next)
+    setImportFlags(f => ({ ...f, ...flags }))
+    const toCheck = Object.keys(flags).length
+    setSavedMsg(`ok:${applied} day${applied === 1 ? '' : 's'} filled in from the machine file`
+      + (toCheck ? ` · ${toCheck} to check, shown in amber` : '')
+      + (moved ? ` · ${moved} left alone because the sheet changed meanwhile` : '')
+      + '. Nothing is saved until you press Save.')
   }
 
   // Deletes every employee's record for the selected day — reverts the whole day back to
@@ -678,6 +733,13 @@ export default function AttendanceSheet() {
   const unsavedDays = useMemo(() => new Set(unsaved.map(k => splitCellKey(k).day)), [unsaved])
   const unsavedEmployees = useMemo(() => new Set(unsaved.map(k => splitCellKey(k).employeeId)), [unsaved])
   const unsavedSet = useMemo(() => new Set(unsaved), [unsaved])
+  const openFlags = useMemo(() => Object.keys(importFlags).filter(k => stillIncomplete(records[k])), [importFlags, records])
+  const openFlagSet = useMemo(() => new Set(openFlags), [openFlags])
+  const unsavedFlags = useMemo(() => openFlags.filter(k => unsavedSet.has(k)), [openFlags, unsavedSet])
+  // "Ronish — 6th, 9th" per employee, in sheet order, for the banner's shortcuts.
+  const flagsByEmployee = useMemo(() => employees
+    .map(emp => ({ emp, days: openFlags.map(splitCellKey).filter(k => k.employeeId === emp.id).map(k => k.day).sort((a, b) => a - b) }))
+    .filter(x => x.days.length > 0), [employees, openFlags])
   // "3 changes on 5th Bhadra and 6th Bhadra" — the days named, because the day is what a reader goes
   // back to.
   function describeChanges(keys) {
@@ -769,6 +831,9 @@ export default function AttendanceSheet() {
               </option>
             ))}
           </select>
+          <Tip text="Bring in a month of punches from the attendance machine's Excel or CSV export. You pick which Crest employee each person on the machine is, and see what will change before anything goes on the sheet. Nothing is saved until you press Save." width={280}>
+            <button className="btn btn-ghost" onClick={openImport} disabled={loading || !period || employees.length === 0} style={{ fontSize: 12 }}>↑ Import from machine</button>
+          </Tip>
           {tab === 'summary' && <button className="btn btn-ghost" onClick={exportExcel} style={{ fontSize: 12 }}>⬇ Export Excel</button>}
         </div>
       </div>
@@ -788,6 +853,24 @@ export default function AttendanceSheet() {
             {runStatus === 'unknown'
               ? 'Nothing here can be changed until the page can confirm payroll for this month has not been finalized. Reload to try again.'
               : 'Its payslips were built from these records, so nothing on this sheet can be changed. To correct it, reopen the payroll run for this month, fix the days here, then finalize payroll again.'}
+          </div>
+        </div>
+      )}
+      {!loading && period && !locked && openFlags.length > 0 && (
+        <div role="status" className="card" style={amberBanner}>
+          <strong style={{ color: 'var(--theme-amber-text)' }}>
+            △ {openFlags.length} imported day{openFlags.length === 1 ? '' : 's'} to check
+          </strong>
+          <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 4, lineHeight: 1.6 }}>
+            The machine has only one punch, or an in and out under an hour apart. Type the missing time, or change the day to Half-day, Absent or Off. Hours stay blank until you do — for hourly-paid staff a Present day with no hours pays nothing.
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {flagsByEmployee.map(({ emp, days: flagDays }) => (
+              <button key={emp.id} type="button" className="btn btn-ghost btn-sm"
+                onClick={() => { setSelectedEmployeeId(emp.id); setTab('employee') }}>
+                {emp.full_name} — {flagDays.map(bsDayOrdinal).join(', ')}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -932,6 +1015,7 @@ export default function AttendanceSheet() {
                             {emp.employee_code || ''}{emp.pay_basis && emp.pay_basis !== 'monthly' ? ` · ${emp.pay_basis}` : ''}
                           </div>
                           {unsavedSet.has(`${emp.id}:${selectedDay}`) && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-amber-text)' }}>Unsaved</div>}
+                          {openFlagSet.has(`${emp.id}:${selectedDay}`) && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)' }}>△ Check · machine: {importFlags[`${emp.id}:${selectedDay}`]}</div>}
                         </td>
                         <td>
                           <select
@@ -1128,6 +1212,7 @@ export default function AttendanceSheet() {
                           <td style={{ color: 'var(--theme-text1)', fontWeight: 600, fontSize: 13 }}>
                             {d} · {weekdayOf(period, d)}
                             {unsavedSet.has(`${selectedEmployeeId}:${d}`) && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--theme-amber-text)' }}>Unsaved</div>}
+                            {openFlagSet.has(`${selectedEmployeeId}:${d}`) && <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-amber-text)' }}>△ Check · machine: {importFlags[`${selectedEmployeeId}:${d}`]}</div>}
                           </td>
                           <td>
                             <select
@@ -1312,8 +1397,10 @@ export default function AttendanceSheet() {
                         {days.map(d => {
                           const rec = cellFor(emp.id, d)
                           const sc = rec ? STATUS_MAP[rec.status] : null
+                          const flagged = openFlagSet.has(`${emp.id}:${d}`)
                           return (
-                            <td key={d} style={{ textAlign: 'center', padding: '6px 4px' }}>
+                            <td key={d} title={flagged ? `Imported day to check — machine: ${importFlags[`${emp.id}:${d}`]}` : undefined}
+                              style={{ textAlign: 'center', padding: '6px 4px', ...(flagged ? { outline: '1px dashed var(--theme-amber)', outlineOffset: -3 } : null) }}>
                               {sc ? <span style={{ color: sc.textColor, fontWeight: 700 }}>{sc.short}</span> : <span style={{ color: 'var(--theme-border)' }}>·</span>}
                             </td>
                           )
@@ -1334,6 +1421,33 @@ export default function AttendanceSheet() {
             P column counts present days (half-days as 0.5). O counts explicit Off days. Nothing is marked off automatically — mark each staff member's off days directly, or via Generate from Roster. Payroll reads this sheet: marked absences and unpaid leave are deducted, daily and hourly staff are paid for the days and hours marked here, and overtime is paid at 1.5× unless an approved Overtime entry covers that day. Once payroll for a month is finalized, its sheet is locked.
           </div>
         </div>
+      )}
+
+      {importing && period && (
+        <AttendanceImportModal
+          period={period} periodLabel={periodLabel} employees={employees} records={records}
+          rosterByKey={rosterByKey} shiftTypesById={shiftTypesById} autoHours={autoHoursFor}
+          defaultBreak={defaultBreakMin}
+          onApply={applyImport} onClose={() => setImporting(false)}
+        />
+      )}
+
+      {confirmSaveFlags && (
+        <ConfirmModal
+          title={`Save with ${unsavedFlags.length} imported day${unsavedFlags.length === 1 ? '' : 's'} still to check?`}
+          confirmLabel="Save anyway"
+          busy={saving} busyLabel="Saving…"
+          onConfirm={() => saveChanges({ force: true })}
+          onCancel={() => setConfirmSaveFlags(false)}
+        >
+          <p style={{ margin: '0 0 10px' }}>
+            {unsavedFlags.length === 1 ? 'This day has' : 'These days have'} only one punch, or an in and out under an hour apart. Saved as {unsavedFlags.length === 1 ? 'it is' : 'they are'},
+            each is a Present day with no hours: a daily-paid employee is paid for the day, an hourly-paid employee is paid nothing for it, and no overtime is counted.
+          </p>
+          <p style={{ margin: 0 }}>
+            To fix them first, cancel — they are listed in the amber box at the top of the sheet.
+          </p>
+        </ConfirmModal>
       )}
 
       {pendingPeriodId && (

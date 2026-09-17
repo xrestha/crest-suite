@@ -770,3 +770,22 @@ which no longer exists — read them as history.
   red on a button spend verdict colours on a decision not yet made.
 - **Final Settlement sits in the Payroll nav group** — it finalizes a leaver's pay. Gratuity stays in
   Reports.
+
+## Import from machine (S775)
+
+Decided with Aashish (2026-09-17). No migration. `attendanceImport.js` reads the file,
+`attendanceImportPlan.js` decides what each day becomes, `AttendanceImportModal.jsx` is the dialog.
+
+- **An import writes nothing.** Its days land as unsaved marks and the sheet's Save writes them, so
+  the lock, the unsaved banner and the one upsert all hold. Never give the dialog its own write.
+- **People are confirmed on every import; no machine ID is stored.** A guess is prefilled, a person
+  without one must be picked or skipped. Adding a remembered pairing is a new decision, not a fix.
+- **What a day becomes lives only in `planImport`.** Blank + full punch → Present with the sheet's
+  own `autoHoursFor`; Present → machine times, untickable; any other status is never touched. No
+  punch follows the roster (working → Absent, off → `zeroHourStatus`, unrostered → blank). One punch
+  or a span under 60 min / over 16 h → Present, hours blank, amber until `stillIncomplete` is false.
+- **The roster rule must never reach an unlived day:** nothing after today, nothing with no punch
+  today, nothing outside `join_date`–`end_date`. An unread roster refuses the import.
+- **Dates: the reading with the most REAL dates wins, then the most inside the month.** Ranked the
+  other way, a Bhadra grid's "05-04" read day-first is Shrawan 5 and one column pours into Shrawan.
+- **A CSV is read with `raw: true`.** Read as a spreadsheet, SheetJS turns a BS "05-01" into an AD date.
