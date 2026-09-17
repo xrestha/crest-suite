@@ -4,6 +4,7 @@ import { supabase } from '../../../supabaseClient'
 import { useTheme } from '../../../context/ThemeContext'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
 import { withTimeout } from '../../../utils/withTimeout'
+import { listLockedCarts } from '../posLockedCart'
 
 // The exact `error` strings pos-staff-login returns on a 401 (supabase/functions/pos-staff-login).
 const ERR_INVALID_CREDENTIALS = 'Invalid credentials'
@@ -167,6 +168,11 @@ export default function PosLogin() {
   function back()        { setSelected(null); setPin(''); setError('') }
 
 const pinDots = Math.max(4, pin.length)
+  // What a till lock kept on this device (S776, posLockedCart.js). Said here because this is the
+  // screen the waiter comes back to — the lock itself happened while nobody was looking.
+  const keptCarts = listLockedCarts(clientId)
+  const keptForSelected = selected ? keptCarts.find(k => k.profileId === selected.id) : null
+  const itemsWord = n => `${n} item${n === 1 ? '' : 's'}`
 
   // Device not yet activated for any client — explain why, instead of silently bouncing
   // to /login. Activation itself happens from Crest POS (/pos) by an owner/manager.
@@ -251,6 +257,19 @@ const pinDots = Math.max(4, pin.length)
       {!selected ? (
         /* ── Staff grid ─────────────────────────────────────────────────── */
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32 }}>
+          {keptCarts.length > 0 && (
+            <div role="status" style={{
+              width: '100%', maxWidth: 440, padding: '12px 16px', fontSize: 14, lineHeight: 1.5,
+              color: 'var(--theme-text1)', background: 'color-mix(in srgb, var(--theme-accent) 8%, transparent)',
+              border: '1px solid var(--theme-border)',
+            }}>
+              {keptCarts.map(k => (
+                <div key={k.profileId}>
+                  Kept for <strong>{k.name}</strong>: {itemsWord(k.units)} not sent on {k.where}. They come back when {k.name} signs in.
+                </div>
+              ))}
+            </div>
+          )}
           {loading ? (
             <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
           ) : loadError ? (
@@ -333,6 +352,12 @@ const pinDots = Math.max(4, pin.length)
       ) : (
         /* ── PIN entry ──────────────────────────────────────────────────── */
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, width: 240 }}>
+
+          {keptForSelected && (
+            <p role="status" style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--theme-text2)', textAlign: 'center' }}>
+              Your {itemsWord(keptForSelected.units)} not sent on {keptForSelected.where} come{keptForSelected.units === 1 ? 's' : ''} back when you sign in.
+            </p>
+          )}
 
           {/* PIN dots */}
           <div style={{ display: 'flex', gap: 14, justifyContent: 'center' }}>

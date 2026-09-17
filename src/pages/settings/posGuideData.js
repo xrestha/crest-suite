@@ -62,6 +62,7 @@ export const POS_GUIDE_GROUPS = [
           'A failed sign-in says WHICH thing failed (S754): the server could not be reached (the PIN is kept, try again), the tablet needs activating again (its key was revoked or switched off), or the PIN was wrong.',
           'A leaver whose Final Settlement blocked their logins no longer appears on the picker.',
           'Coming back to a tablet that slept counts as idle time, not activity: if the 3 idle minutes passed while nobody was there, it locks at once instead of handing the next person the last waiter\'s session.',
+          'A lock (idle or Lock POS) keeps the order screen\'s unsent items for the login that typed them, on that tablet only, for up to 12 hours (S776). The PIN screen names them and whose they are; when that same PIN signs in, the table reopens with them back as unsent — measured against the order as it now stands, so nothing another device saved meanwhile is added twice. A different PIN never gets them. Before S776 the lock discarded them, and the 20-second countdown was drawn underneath the order screen where nobody could see it.',
           'Forgotten PINs are recoverable only by the platform admin (Admin → Clients → Staff PINs); within the product the remedy is a reset, which sets a new one.',
         ],
         connections: 'Roster and verification both depend on POS Setup\'s device secret. Lockout state is what the idle lock returns staff to; PIN resets live on POS Staff.',

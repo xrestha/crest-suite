@@ -40,6 +40,7 @@ import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { playChime } from '../posChime'
 import { errorText, isNetworkError } from '../../../shared/errorText'
 import { withTimeout, isTimeout } from '../../../utils/withTimeout'
+import { keepLockedCart, takeLockedCart, lockedCartWhere, POS_BEFORE_LOCK_EVENT } from '../posLockedCart'
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
@@ -666,6 +667,46 @@ export default function PosOrders({ billingStation = false } = {}) {
   // tick while the modal was open and the cashier was still typing (discount, tender, etc).
   const closeOrderRef = useRef(null)
   closeOrderRef.current = closeOrder
+
+  // ── What a till lock keeps (S776, owner decision; posLockedCart.js) ──
+  // Layout fires POS_BEFORE_LOCK_EVENT just before a PIN session signs out, idle or Lock POS. This
+  // screen holds the cart, so it is what keeps the lines not yet saved — for this login only — and
+  // hands back a points redemption an unfinished close left standing, which nobody would be left here
+  // to undo. Read through a ref for closeOrderRef's reason: the listener is registered once.
+  const beforeLockRef = useRef(null)
+  beforeLockRef.current = waitUntil => {
+    if (liveRedemptionRef.current?.orderId) waitUntil(cancelLiveRedemption())
+    if (view !== 'order' || !profile?.id || !clientId) return
+    // Units beyond what is saved on the server. A note edit or a lowered quantity alone keeps nothing:
+    // there is no line to bring back, and the saved order already holds the rest.
+    const saved = savedItemsRef.current
+    const unsentUnits = orderItems.reduce((n, i) => {
+      const savedQty = parseInt(String(saved.get(lineKeyOf(i)) || '0|').split('|')[0], 10) || 0
+      return n + Math.max(0, (Number(i.qty) || 0) - savedQty)
+    }, 0)
+    keepLockedCart({
+      profileId: profile.id, profileName: profile.full_name || '', clientId,
+      tableId: activeTable?.id || null, tableName: activeTable?.name || null,
+      orderId: orderId || null, orderNo: orderNo || null, covers, items: orderItems, unsentUnits,
+    })
+  }
+  useEffect(() => {
+    const onBeforeLock = e => beforeLockRef.current?.(e.detail?.waitUntil || (() => {}))
+    window.addEventListener(POS_BEFORE_LOCK_EVENT, onBeforeLock)
+    return () => window.removeEventListener(POS_BEFORE_LOCK_EVENT, onBeforeLock)
+  }, [])
+
+  // Armed by restoreLockedCart, consumed by showLoadedOrder / startFreshOrder (applyLockedCart).
+  const lockedCartRef = useRef(null)
+  // Once per mount, for the login now signed in. Not on the Billing station: a waiter's cart belongs
+  // on the order screen, and it stays kept until they next open /pos/orders.
+  const lockedCartCheckedRef = useRef(false)
+  useEffect(() => {
+    if (lockedCartCheckedRef.current || !clientId || !profile?.id || billingStation) return
+    lockedCartCheckedRef.current = true
+    const kept = takeLockedCart(profile.id, clientId)
+    if (kept) restoreLockedCart(kept)
+  }, [clientId, profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   // payTotal changes on every discount/item edit too — same staleness risk as closeOrder above,
   // needed for the poll's amount-match check without also being a restart trigger.
   const payTotalRef = useRef(payTotal)
@@ -1537,6 +1578,17 @@ export default function PosOrders({ billingStation = false } = {}) {
   // supplies the covers, otherwise the numpad asks. Also the "Walk-in instead" answer to the
   // seat prompt below.
   function startFreshOrder(table) {
+    // Lines a till lock kept for this login, for a table whose order was never saved or has since
+    // closed (S776): straight onto a new order with the covers they had, no numpad to re-answer.
+    const kept = lockedCartRef.current
+    if (kept) {
+      setActiveTable(table)
+      setOrderId(null); setOrderNo(null); setOrderItems([]); markCartSaved([]); itemsVersionRef.current = null
+      setCovers(kept.covers || 1)
+      setMsg(''); setView('order'); loadMenu()
+      applyLockedCart([], null)
+      return
+    }
     const pendingGuestReq = pendingGuestOrders[table.id]?.[0]
     if (pendingGuestReq) {
       // The guest already gave a covers count when placing their order — skip the redundant
@@ -1605,7 +1657,61 @@ export default function PosOrders({ billingStation = false } = {}) {
     // reaches the screen. A path that never gets here (a fresh table, a refused read) therefore
     // cannot leave the flag armed for whatever order is opened next.
     if (billOnOpenRef.current) { billOnOpenRef.current = false; setBillOnLoad(true) }
+    // The same funnel brings back what a till lock kept for this login (S776), measured against the
+    // order AS IT NOW STANDS — anything another device saved meanwhile is not added twice.
+    if (lockedCartRef.current) applyLockedCart(items, id)
     return lines
+  }
+
+  // Puts the lines a till lock kept (posLockedCart.js) back as UNSENT: only what the order on screen
+  // does not already carry, by the same rule a stale save uses (missingFromServer). Consumes the ref,
+  // so the lines come back once.
+  function applyLockedCart(serverItems, loadedOrderId) {
+    const kept = lockedCartRef.current
+    lockedCartRef.current = null
+    if (!kept) return
+    const missing = missingFromServer(kept.items, serverItems)
+    if (missing.length === 0) return
+    const units = missing.reduce((n, m) => n + (Number(m.qty) || 0), 0)
+    setOrderItems(prev => mergeUnsentLines(prev, missing))
+    const moved = kept.orderId && kept.orderId !== loadedOrderId
+    setMsg(`ok:${units} item${units === 1 ? '' : 's'} not sent before the till locked ${units === 1 ? 'is' : 'are'} back${moved ? ' — the order they were on has closed, so this is a new one' : ''}. Check, then send or save.`)
+  }
+
+  // After a PIN sign-in: the order this login left when the till locked, reopened (S776). Its lines
+  // land through showLoadedOrder or startFreshOrder above. When the order cannot be looked up, the
+  // cart is kept again rather than lost, and the floor says how to get it back.
+  async function restoreLockedCart(kept) {
+    const where = lockedCartWhere(kept)
+    const units = Number(kept.unsentUnits) || 0
+    const keepAgain = () => {
+      keepLockedCart(kept)
+      setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before the till locked could not be put back — the order could not be read. They are still kept: lock the till and sign in again once the connection is back.`)
+    }
+    lockedCartRef.current = kept
+    try {
+      if (kept.tableId) {
+        const { data: table, error } = await bounded(scopedFrom('pos_tables', '*').eq('id', kept.tableId).maybeSingle(), 'Reading the table')
+        if (error) { keepAgain(); return }
+        if (!table || table.status === 'inactive') {
+          setFloorMsg(`error:${units} item${units === 1 ? '' : 's'} not sent for ${where} before the till locked could not be put back — that table is no longer in use. Ring them on another table or a takeaway.`)
+          return
+        }
+        await openTable(table)
+      } else if (kept.orderId) {
+        const { data: order, error } = await bounded(scopedFrom('pos_orders', 'id, status').eq('id', kept.orderId).maybeSingle(), 'Reading the takeaway')
+        if (error) { keepAgain(); return }
+        if (order?.status === 'open') await openOrderById(kept.orderId)
+        else { openTakeaway(); applyLockedCart([], null) }
+      } else {
+        openTakeaway()
+        applyLockedCart([], null)
+      }
+    } finally {
+      // A refusal inside openTable/openOrderById (already on the floor banner or an alert) never
+      // consumed it; it must not attach itself to whatever order is opened next.
+      lockedCartRef.current = null
+    }
   }
 
   // A takeaway has no table to look it up by, so it opens by order id (S754).
@@ -1702,6 +1808,9 @@ export default function PosOrders({ billingStation = false } = {}) {
       setFloorMsg('error:That bill was already closed on another device.')
       loadFloor({ quiet: true })
     } else {
+      // Lines a till lock kept for this login go straight onto a new order (S776), before a booking
+      // prompt can ask about a party that is not the one these items were rung for.
+      if (lockedCartRef.current) { startFreshOrder(table); return }
       // An explicit handoff from the Reservations page seats straight away; a table whose
       // booking is due offers the party by name before falling back to the numpad.
       const handoff = seatReservationRef.current

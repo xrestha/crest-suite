@@ -12,6 +12,7 @@ import AppErrorBoundary from './AppErrorBoundary'
 // Calculation nav entry.
 import QuickCalculator from './Calculator'
 import { usePosIdleLock } from '../modules/pos/usePosIdleLock'
+import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { useGuestOrderAlerts, REPEAT_MS } from '../shared/hooks/useGuestOrderAlerts'
 import ArrivalAlert from './ArrivalAlert'
@@ -550,6 +551,9 @@ export default function Layout() {
 
   async function handleSignOut() {
     const isPosDevice = !!localStorage.getItem('pos_device_client_id')
+    // A till locking — idle, or Lock POS — first lets the order screen keep its unsent cart for this
+    // login (S776, posLockedCart.js). Before this the lock simply discarded it.
+    if (isPosDevice && isPinStaff) await runBeforePosLock()
     await signOut()
     navigate(isPosDevice && isPinStaff ? '/pos/login' : '/login')
   }
@@ -2018,16 +2022,18 @@ export default function Layout() {
 
       {/* POS idle-lock warning — any deliberate input (pointerdown/keydown/touch/wheel) resets
           the timer, which is why the toast needs no button of its own. role="alert" so a screen
-          reader hears the countdown start, not just the sudden return to the PIN screen. */}
+          reader hears the countdown start, not just the sudden return to the PIN screen.
+          zIndex 1100 (S776): the POS order screen and the KDS are full-screen fixed layers at 1000, so
+          at 400 this warning rendered UNDER the till — a waiter never saw it. Below ArrivalAlert (3000). */}
       {idleLockSecs != null && (
         <div role="alert" className="no-print" style={{
-          position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 400,
+          position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 1100,
           background: 'var(--theme-card)', border: '1px solid var(--theme-amber)',
           borderRadius: 'var(--radius-md)', padding: '10px 18px', boxShadow: '0 6px 24px rgba(0,0,0,0.25)',
           fontSize: 13, color: 'var(--theme-text1)', maxWidth: 'calc(100vw - 32px)',
         }}>
           <strong style={{ color: 'var(--theme-amber-text)' }}>Locking in {idleLockSecs}s</strong>
-          {' '}— touch the screen or press any key to stay signed in.
+          {' '}— touch the screen or press any key to stay signed in. Items not sent yet are kept for your PIN.
         </div>
       )}
     </div>

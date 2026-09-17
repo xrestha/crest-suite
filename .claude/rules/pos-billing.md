@@ -253,6 +253,11 @@ floor-view check.
   whoever woke it three more minutes of the absent waiter's session, under that waiter's name on
   every bill. Idle time is measured from the last real input: past the lock period it locks at
   once, otherwise only what is left of the period is re-armed.
+  **A lock keeps the unsent cart (S776, owner decision).** `handleSignOut` runs `runBeforePosLock()`
+  for a PIN session; `PosOrders` keeps the unsaved units for that login in `posLockedCart.js`
+  (localStorage, never the replaying offline queue) and restores them once, as unsent, through
+  `showLoadedOrder`/`startFreshOrder` (`applyLockedCart`, `missingFromServer`). The PIN screen names
+  them. The countdown toast is `zIndex: 1100`, above the till's 1000 layer — at 400 it was invisible.
 - **Sales Exceptions ranks by Revenue Impact** (discount + void menu value + comp *potential
   sales value*) — one coherent unit, **all ex-VAT since S754**. Comp food cost stays in its own
   column. Never reintroduce a total that adds comp COST to revenue figures, or VAT to a sale that
