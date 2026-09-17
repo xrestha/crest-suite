@@ -114,16 +114,12 @@ export default function EmployeeJoiningForm({ onClose }) {
 
       {/* Action bar — hidden in print */}
       <div className="empform-chrome" style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
-        <button
-          onClick={() => printWithTitle(`${clientName} - Employee Joining Form`)}
-          style={{ background: 'var(--theme-accent)', color: 'var(--theme-accent-text)', border: 'none', borderRadius: 8, padding: '10px 28px', fontWeight: 700, fontSize: 14, cursor: 'pointer', letterSpacing: '0.03em' }}
-        >
+        {/* The shared button classes (S768): these were hand-rolled with an 8px corner in a zero-radius
+            system and a Close in the quietest grey, and escaped the focus ring and the touch floor. */}
+        <button type="button" className="btn btn-primary" onClick={() => printWithTitle(`${clientName} - Employee Joining Form`)}>
           Print / Save PDF
         </button>
-        <button
-          onClick={onClose}
-          style={{ background: 'transparent', color: 'var(--theme-text3)', border: '1px solid var(--theme-border)', borderRadius: 8, padding: '10px 20px', fontSize: 13, cursor: 'pointer' }}
-        >
+        <button type="button" className="btn btn-ghost" onClick={onClose}>
           Close
         </button>
       </div>

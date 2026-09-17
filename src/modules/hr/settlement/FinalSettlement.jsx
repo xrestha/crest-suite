@@ -9,7 +9,7 @@ import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs } from '../../../utils/bsCalendar'
+import { BS_MONTHS, bsToAd, daysInBsMonth, getBsToday, formatAd, adToBs, BS_YEAR_MIN, BS_YEAR_MAX } from '../../../utils/bsCalendar'
 import { fiscalYearOf } from '../payroll/tds'
 import { printWithTitle } from '../../../utils/printTitle'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -43,8 +43,14 @@ function fmtService(months) {
 
 function BsDateSelect({ id, label, year, month, day, onChange, tip, disabled }) {
   const daysInMonth = daysInBsMonth(year, month)
+  // Ten years back to a year ahead, inside the calendar table (S768). It was a fixed 2075–2090, which
+  // offered three years the table cannot convert and would have gone stale; a stored year outside the
+  // window is still listed so an old settlement shows its own date.
+  const thisYear = getBsToday().year
   const yearRange = []
-  for (let y = 2075; y <= 2090; y++) yearRange.push(y)
+  for (let y = Math.max(BS_YEAR_MIN, thisYear - 10); y <= Math.min(BS_YEAR_MAX, thisYear + 1); y++) yearRange.push(y)
+  if (year && !yearRange.includes(year)) yearRange.push(year)
+  yearRange.sort((a, b) => a - b)
 
   const set = obj => onChange({ year, month, day, ...obj })
 

@@ -111,7 +111,7 @@ export default function IncentiveConfigs({ configs, onClose, onChanged }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {configs.length === 0 && <p style={{ fontSize: 13, color: 'var(--theme-text3)' }}>No incentive types yet — add one below.</p>}
           {configs.map(cfg => (
-            <div key={cfg.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--theme-input-bg)', borderRadius: 0, opacity: cfg.active ? 1 : 0.6, outline: form.id === cfg.id ? '1px solid var(--theme-accent)' : 'none' }}>
+            <div key={cfg.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--theme-input-bg)', borderRadius: 0, outline: form.id === cfg.id ? '1px solid var(--theme-accent)' : 'none' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)' }}>{cfg.name}{!cfg.active && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · inactive</span>}</div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>

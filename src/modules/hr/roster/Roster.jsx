@@ -1473,7 +1473,7 @@ export default function Roster() {
                                     <Tip text={fr.required
                                       ? `Recommended ${fr.recommended} staff — the forecast revenue needs about ${fr.required.hours}h at this outlet's own sales per labour hour. Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`
                                       : `Recommended ${fr.recommended} staff (~${Math.round(fr.forecastCovers || 0)} forecasted covers ÷ ${coversPerStaffTarget}/staff). Scheduled: ${fr.scheduledCount}. See the Labor Forecast tab for the full breakdown.`} width={240}>
-                                      <span style={{ fontSize: 9, fontWeight: short ? 700 : 500, color: short ? 'var(--theme-amber-text)' : 'var(--theme-text3)', cursor: 'default' }}>
+                                      <span style={{ fontSize: 10, fontWeight: short ? 700 : 500, color: short ? 'var(--theme-amber-text)' : 'var(--theme-text3)', cursor: 'default' }}>
                                         Rec: {fr.recommended}
                                       </span>
                                     </Tip>
@@ -1600,8 +1600,10 @@ export default function Roster() {
                                         minHeight: viewMode === 'weekly' ? 56 : 30,
                                         background: onLeave
                                           ? 'repeating-linear-gradient(45deg, color-mix(in srgb, var(--theme-red) 18%, transparent), color-mix(in srgb, var(--theme-red) 18%, transparent) 4px, color-mix(in srgb, var(--theme-red) 6%, transparent) 4px, color-mix(in srgb, var(--theme-red) 6%, transparent) 8px)'
-                                          : shift ? shift.color + '22' : 'transparent',
-                                        border:     onLeave ? '1px solid color-mix(in srgb, var(--theme-red) 55%, transparent)' : shift ? `1px solid ${shift.color}55` : '1px dashed var(--theme-border)',
+                                          // color-mix, not `${color}22`: a concatenated alpha is invalid CSS the moment
+                                          // a shift colour is a var() token (design-system.md), and paints no tint at all.
+                                          : shift ? `color-mix(in srgb, ${shift.color} 13%, transparent)` : 'transparent',
+                                        border:     onLeave ? '1px solid color-mix(in srgb, var(--theme-red) 55%, transparent)' : shift ? `1px solid color-mix(in srgb, ${shift.color} 33%, transparent)` : '1px dashed var(--theme-border)',
                                         borderRadius: 0, cursor: 'pointer',
                                         padding: viewMode === 'weekly' ? '6px 6px' : '2px',
                                         display: 'flex', flexDirection: 'column',
@@ -1617,12 +1619,12 @@ export default function Roster() {
                                             {viewMode === 'weekly' ? shift.name : shift.name.slice(0, 2).toUpperCase()}
                                           </span>
                                           {viewMode === 'weekly' && shift.start_time && (
-                                            <span style={{ fontSize: 9, color: 'var(--theme-text3)', lineHeight: 1 }}>
+                                            <span style={{ fontSize: 10, color: 'var(--theme-text3)', lineHeight: 1 }}>
                                               {fmtTime(shift.start_time)}–{fmtTime(shift.end_time)}
                                             </span>
                                           )}
                                           {hrs != null && (
-                                            <span style={{ fontSize: 9, color: 'var(--theme-text3)', lineHeight: 1 }}>{hrs}h</span>
+                                            <span style={{ fontSize: 10, color: 'var(--theme-text3)', lineHeight: 1 }}>{hrs}h</span>
                                           )}
                                         </>
                                       ) : (
@@ -1865,7 +1867,7 @@ export default function Roster() {
           )}
 
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
-            Coming days: hours and cost come from the roster, priced at what each hour costs the business (basic pay + allowances + employer SSF); revenue and covers come from Demand Forecast (run/update it on the Demand Forecast page) — a day with no forecast yet just shows "—". Days already past are marked <span className="badge-gray" style={{ fontSize: 9 }}>actual</span> and show what was recorded instead: hours and staff from Attendance, revenue from Sales Entries, covers from closed POS bills, with the rostered figure underneath so you can see how the plan held up. A festival/holiday badge next to a date means that day's forecast was adjusted by the multiplier set for it in Holiday Calendar — an unadjusted badge (no "×N") means the holiday is known but no multiplier has been set yet.
+            Coming days: hours and cost come from the roster, priced at what each hour costs the business (basic pay + allowances + employer SSF); revenue and covers come from Demand Forecast (run/update it on the Demand Forecast page) — a day with no forecast yet just shows "—". Days already past are marked <span className="badge-gray" style={{ fontSize: 10 }}>actual</span> and show what was recorded instead: hours and staff from Attendance, revenue from Sales Entries, covers from closed POS bills, with the rostered figure underneath so you can see how the plan held up. A festival/holiday badge next to a date means that day's forecast was adjusted by the multiplier set for it in Holiday Calendar — an unadjusted badge (no "×N") means the holiday is known but no multiplier has been set yet.
           </p>
           {actualsError && (
             <div style={{ marginBottom: 8 }}>
@@ -1974,7 +1976,7 @@ export default function Roster() {
                         {weekday} {r.col.bsDay} {BS_MONTHS_SHORT[r.col.bsMonth - 1]}
                         {r.isPast && (
                           <Tip text="This day has already happened. Its figures are what was recorded — Attendance for hours and staff, Sales Entries for revenue, closed POS bills for covers — not a forecast. Demand Forecast only ever covers the days ahead." width={260}>
-                            <span className="badge-gray" style={{ fontSize: 9, marginLeft: 6 }}>actual</span>
+                            <span className="badge-gray" style={{ fontSize: 10, marginLeft: 6 }}>actual</span>
                           </Tip>
                         )}
                         {r.holiday && (
@@ -1985,10 +1987,10 @@ export default function Roster() {
                                multiplier — which is precisely what amber means everywhere else in
                                HR. Colour now separates them; it used to hide the difference. */
                             ? <Tip text={`Forecast Revenue/Covers on this row are adjusted ×${r.holiday.multiplier} for ${r.holiday.name} (set in Holiday Calendar).`} width={260}>
-                                <span className="badge-yellow" style={{ fontSize: 9, marginLeft: 6 }}>{r.holiday.name} ×{r.holiday.multiplier}</span>
+                                <span className="badge-yellow" style={{ fontSize: 10, marginLeft: 6 }}>{r.holiday.name} ×{r.holiday.multiplier}</span>
                               </Tip>
                             : <Tip text={`${r.holiday.name} — no demand multiplier set in Holiday Calendar, so Forecast Revenue/Covers on this row are NOT adjusted for it.`} width={260}>
-                                <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>⚠ {r.holiday.name}</span>
+                                <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>⚠ {r.holiday.name}</span>
                               </Tip>
                         )}
                       </td>
@@ -2014,7 +2016,7 @@ export default function Roster() {
                             )}
                             {a?.recorded && a.otHours > 0 && (
                               <Tip text={`${a.otHours}h of these were overtime (beyond the rostered shift), priced at basic × ${1.5} in Labor Cost.`} width={220}>
-                                <span className="badge-yellow" style={{ fontSize: 9, marginLeft: 6 }}>{a.otHours}h OT</span>
+                                <span className="badge-yellow" style={{ fontSize: 10, marginLeft: 6 }}>{a.otHours}h OT</span>
                               </Tip>
                             )}
                             {a?.recorded && r.scheduledHrs > 0 && plan(`plan ${r.scheduledHrs}h`)}
@@ -2060,7 +2062,7 @@ export default function Roster() {
                                 someone gives the shift its hours on the Shift Types tab. */}
                             {r.unpricedCount > 0 && (
                               <Tip text={`${r.unpricedCount} scheduled shift${r.unpricedCount === 1 ? '' : 's'} on this day ${r.unpricedCount === 1 ? 'has' : 'have'} no hours set, so ${r.unpricedCount === 1 ? 'it adds' : 'they add'} nothing to Hours or Labor Cost. Set the hours on the Shift Types tab.`} width={260}>
-                                <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>⚠ {r.unpricedCount} unpriced</span>
+                                <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>⚠ {r.unpricedCount} unpriced</span>
                               </Tip>
                             )}
                             {/* What the day needs, from this outlet's own history. Neutral, never
@@ -2121,14 +2123,14 @@ export default function Roster() {
                     {viewMode === 'weekly' ? 'Week' : 'Month'} total
                     {(laborTotals.actualDays > 0 || laborTotals.noDataDays > 0) && (
                       <Tip text={`${laborTotals.actualDays} day${laborTotals.actualDays === 1 ? '' : 's'} counted at actual figures, ${laborTotals.forecastDays} at forecast${laborTotals.noDataDays > 0 ? `, and ${laborTotals.noDataDays} with no revenue figure at all (no forecast run for them, or no period for their month)` : ''}. Cost % is measured over the days that have both a revenue and a cost figure.${laborTotals.asRosteredDays > 0 ? ` ${laborTotals.asRosteredDays} past day${laborTotals.asRosteredDays === 1 ? ' has' : 's have'} no attendance entered, so the roster stands in for ${laborTotals.asRosteredDays === 1 ? 'it' : 'them'}.` : ''}`} width={300}>
-                        <span className={laborTotals.noDataDays > 0 || laborTotals.asRosteredDays > 0 ? 'badge-amber' : 'badge-gray'} style={{ fontSize: 9, marginLeft: 6 }}>
+                        <span className={laborTotals.noDataDays > 0 || laborTotals.asRosteredDays > 0 ? 'badge-amber' : 'badge-gray'} style={{ fontSize: 10, marginLeft: 6 }}>
                           {laborTotals.actualDays} actual{laborTotals.asRosteredDays > 0 ? ` (${laborTotals.asRosteredDays} as rostered)` : ''} · {laborTotals.forecastDays} forecast{laborTotals.noDataDays > 0 ? ` · ${laborTotals.noDataDays} no data` : ''}
                         </span>
                       </Tip>
                     )}
                     {laborTotals.actualDays === 0 && laborTotals.noDataDays === 0 && laborTotals.forecastDays < laborTotals.totalDays && (
                       <Tip text={`Only ${laborTotals.forecastDays} of ${laborTotals.totalDays} days have a forecast. Cost % below is planned cost on those ${laborTotals.forecastDays} days against their forecast revenue — the other days' cost is in the Labor Cost total but has no revenue to be measured against.`} width={280}>
-                        <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>{laborTotals.forecastDays}/{laborTotals.totalDays} days forecast</span>
+                        <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>{laborTotals.forecastDays}/{laborTotals.totalDays} days forecast</span>
                       </Tip>
                     )}
                   </td>
@@ -2136,7 +2138,7 @@ export default function Roster() {
                     {laborTotals.hours > 0 ? `${laborTotals.hours}h` : '—'}
                     {laborTotals.unpricedShifts > 0 && (
                       <Tip text={`${laborTotals.unpricedShifts} scheduled shift${laborTotals.unpricedShifts === 1 ? '' : 's'} in this period ${laborTotals.unpricedShifts === 1 ? 'has' : 'have'} no hours set and count for nothing here. Set the hours on the Shift Types tab.`} width={260}>
-                        <span className="badge-amber" style={{ fontSize: 9, marginLeft: 6 }}>⚠ {laborTotals.unpricedShifts} unpriced</span>
+                        <span className="badge-amber" style={{ fontSize: 10, marginLeft: 6 }}>⚠ {laborTotals.unpricedShifts} unpriced</span>
                       </Tip>
                     )}
                     {/* The period requirement — the single most actionable figure on the tab, and

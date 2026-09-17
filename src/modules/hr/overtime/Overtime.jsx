@@ -414,6 +414,9 @@ export default function Overtime() {
         </div>
       )}
 
+      {/* Nothing below a failed read (S768): the counts, the filter and "No OT entries for Bhadra yet"
+          all used to render under the error card, as though the month were empty. */}
+      {!loadError && (<>
       {/* Stat cards */}
       <div className="stat-grid">
         <div className="stat-card">
@@ -572,6 +575,7 @@ export default function Overtime() {
           </div>
         </div>
       )}
+      </>)}
 
       <div style={{ marginTop: 12, fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
         <strong style={{ color: 'var(--theme-text2)' }}>Payroll integration:</strong> only <strong>Approved</strong> entries feed into the payroll run.

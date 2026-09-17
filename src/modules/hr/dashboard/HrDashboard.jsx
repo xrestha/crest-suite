@@ -91,6 +91,9 @@ export default function HrDashboard() {
   const [otList,      setOtList]      = useState([])
   const [tadaList,    setTadaList]    = useState([])
   const [swapList,    setSwapList]    = useState([])
+  // Which preview lists could not be read (S768). Each rendered "No pending … ✓" over a failed read —
+  // the queue a manager most needs to open, telling them it is clear.
+  const [listErrors,  setListErrors]  = useState({})
   const [payInfo,     setPayInfo]     = useState(null)
   const [advOutstanding, setAdvOutstanding] = useState(0)
   const [empMap,      setEmpMap]      = useState({})
@@ -153,10 +156,10 @@ export default function HrDashboard() {
     const [
       { data: emps, error: empsErr },
       { data: ltypes },
-      { data: leaves },
-      { data: otPending },
-      { data: tadaPending },
-      { data: swapPending },
+      { data: leaves, error: leavesErr },
+      { data: otPending, error: otErr },
+      { data: tadaPending, error: tadaErr },
+      { data: swapPending, error: swapErr },
       { data: runs },
       { data: advs, error: advsErr },
       { data: reps, error: repsErr },
@@ -203,6 +206,7 @@ export default function HrDashboard() {
     setTypeMap(tMap)
 
     // ── Leave + OT + TADA + Swap queues ────────────────────────────────────────
+    setListErrors({ leave: !!leavesErr, ot: !!otErr, tada: !!tadaErr, swap: !!swapErr })
     setLeaveList(leaves || [])
     setOtList(otPending || [])
     setTadaList(tadaPending || [])
@@ -460,7 +464,9 @@ export default function HrDashboard() {
             Pending Leave Requests {pendingLeave > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingLeave})</span>}
           </SectionLabel>
           <div className="card" style={{ padding: 0 }}>
-            {leaveList.length === 0 ? (
+            {listErrors.leave ? (
+              <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
+            ) : leaveList.length === 0 ? (
               <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending leave requests ✓</div>
             ) : (
               <div className="table-wrap">
@@ -500,7 +506,9 @@ export default function HrDashboard() {
             Pending OT Entries {pendingOt > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingOt})</span>}
           </SectionLabel>
           <div className="card" style={{ padding: 0 }}>
-            {otList.length === 0 ? (
+            {listErrors.ot ? (
+              <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
+            ) : otList.length === 0 ? (
               <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending OT entries ✓</div>
             ) : (
               <div className="table-wrap">
@@ -548,7 +556,9 @@ export default function HrDashboard() {
             Pending TADA Claims {pendingTada > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingTada})</span>}
           </SectionLabel>
           <div className="card" style={{ padding: 0 }}>
-            {tadaList.length === 0 ? (
+            {listErrors.tada ? (
+              <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
+            ) : tadaList.length === 0 ? (
               <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending TADA claims ✓</div>
             ) : (
               <div className="table-wrap">
@@ -586,7 +596,9 @@ export default function HrDashboard() {
             Pending Shift Swaps {pendingSwap > 0 && <span style={{ color: 'var(--theme-amber-text)' }}>({pendingSwap})</span>}
           </SectionLabel>
           <div className="card" style={{ padding: 0 }}>
-            {swapList.length === 0 ? (
+            {listErrors.swap ? (
+              <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text2)' }}>This list could not be loaded — open the page to see what is waiting.</div>
+            ) : swapList.length === 0 ? (
               <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--theme-text3)' }}>No pending shift swaps ✓</div>
             ) : (
               <div className="table-wrap">
