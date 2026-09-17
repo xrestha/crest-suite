@@ -57,6 +57,8 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - `.btn` always takes a colour variant (`btn-primary`, `btn-ghost`, `btn-danger`, `btn-danger--strong`); alone it renders as browser chrome.
 - A text input uses `.form-input` (plus `form-input--auto` where it sizes to a toolbar), never `.form-select`, which is for `<select>`.
 - The badge set is complete: `badge-green|red|amber|yellow|purple|gray`. `badge-amber` means warning; `badge-yellow` means category.
+- On the POS order screen an inline-styled control takes `.till-hit` (square) or `.till-hit--row` for the 44px touch floor and the focus pair, a menu tile `.till-tile`; never an inline `minWidth`/`minHeight`, which beats the class (S776).
+- A precondition on an action button is `aria-disabled` plus a press that says what is missing, never `disabled` alone; `disabled` is for an action in flight (S776, the S759 pattern).
 
 ## Money and time
 

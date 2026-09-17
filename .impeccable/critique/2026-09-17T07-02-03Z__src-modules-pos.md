@@ -112,3 +112,19 @@ The most operationally mature module in the product — KOT delta tickets, shift
 - The bill is legally final when the close write returns. Why does the guest wait for Inventory posting and loyalty before the paper comes out?
 - The guest says "Table 12's bill, please." Should the Billing station be searchable by table, not just sorted by age?
 - The covers numpad got a named 48px readout. Why is the KDS, read across a pass, set like a desktop report?
+
+## Resolution (S776, 2026-09-17)
+
+Every priority issue, minor observation and persona flag above was fixed and pushed the same day, in
+eight commits (`c287f0da` → `e2de401d`, crest-v328 → v335). Detail per stage is in the S776 changelog
+entry; the standing rules are in `.claude/rules/pos-billing.md` (S776 sections) and `navigation.md`.
+
+Owner decisions taken while fixing, so a re-critique does not re-raise them as open questions:
+- The idle lock keeps the unsent cart for the same PIN and says so on the PIN screen.
+- The bill prints first; Inventory posting, the customer book and loyalty follow it.
+- A new POS login starts with a 0% discount limit.
+- `/pos/tables` is POS Setup (Admin group); `/pos` is Till Devices.
+- Update Order's "Send / Just save" ask stays (an S754 decision).
+
+Not verified live, and carried in `POS_TODO.md` B3: the idle lock on a real PIN session, the KDS
+estimate presets, the unified shift-variance display, and the Billing station search.

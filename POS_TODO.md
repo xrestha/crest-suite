@@ -9,7 +9,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-09-16 (S767 — guest QR menu critique fixed in full and moved to POS_DECISIONS.md; the guest build-your-own steps pressed in a browser)
+Last updated: 2026-09-17 (S776 — POS module critique fixed in full and moved to POS_DECISIONS.md, with the order-screen breakpoint item; four S776 checks that need a second device or live service added under B3)
 
 ---
 
@@ -70,7 +70,7 @@ when these were filed. Every item below assumes they are.
   key the limit on that hop.
 - [ ] 🔵 **Remove the legacy shared device key once every client has switched it off.** Code to
   remove: the `verify_pos_legacy_device` branch in `pos-staff-login`, its `PGRST202` fallback, and
-  `get_pos_staff`'s secret comparison. POS Setup shows when each client's shared key was last used.
+  `get_pos_staff`'s secret comparison. Till Devices shows when each client's shared key was last used.
 - [x] **Archiving a client did not revoke its tablet keys** — closed S755: `deleteClientDataFor` in
   `admin-user-ops` (Archive, Clear Client Data, Delete Client, the trial purge) revokes every live
   `pos_devices` key and rotates/retires the shared key first; a restored client re-activates tablets.
@@ -138,9 +138,18 @@ when these were filed. Every item below assumes they are.
   the tap, should say so and refresh rather than open the covers numpad. Both are single clicks
   once a staff PIN and a second device are to hand.
 
-- [ ] 🟡 `PosOrders.jsx` has no breakpoint — a two-panel flex with a fixed 320px cart, so below
-  ~600px the menu side collapses to almost nothing. Deferred rather than missed: restructuring the
-  live billing screen is not a layout-pass change, and the till is a tablet/desktop device today.
+- [ ] 🟢 **Four S776 behaviours were verified in code and tests but never pressed live** (S776,
+  2026-09-17), each for want of a real till or live service on the dummy client:
+  (1) **the idle lock on a real PIN session** — keep and restore were exercised by firing the lock
+  event by hand as the Owner, and the PIN screen's note by a render test, because the browser was not
+  an activated till; one activated tablet and a staff PIN left idle for 3 minutes answers it;
+  (2) **the KDS estimate presets starting a ticket in one tap** — no New ticket was on the board;
+  (3) **the unified variance display** (✓/▲/△) on a closed shift;
+  (4) **the Billing station's "Find a table…"**, which needs two or more open bills.
+- [ ] 🟡 **`admin-user-ops` still defaults an unnamed discount limit to NULL (= unlimited) for admin
+  and Owner callers.** The S776 owner decision (a new POS login starts at 0%) is enforced by POS
+  Staff sending `pos_discount_limit: 0`; a create from any other caller still lands unlimited. Making
+  the Edge Function default 0 closes it, and needs a deploy.
 
 ## B4. Timezone follow-ups left by S670
 

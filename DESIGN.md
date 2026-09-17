@@ -632,6 +632,14 @@ module switcher, tenant, BS period, plan, search, account. Band 2 (`.topbar-nav`
 within the selected module. Two bands rather than one because those are independent axes; a single
 strip makes them read as one list. Content padding is 32px on every page and nothing is centred in
 a reading measure — every screen here is a working surface rather than a document.
+
+**Between 768 and 1120px both bands wrap rather than clip (S776).** Measured at 820 — a tablet in
+landscape — band 1 held 891px of content in 810, so the tenant and period (which may shrink) collapsed
+to 2px and spilled under the account button, and band 2 held 1,094px behind a hidden scrollbar, so
+three module menus sat past the edge with nothing saying the row scrolls. Below 1120 the account
+actions stay top-right, tenant and period take their own full-width line, and the pills wrap onto a
+second row: the bar grows (108 → 172px at 820) and nothing is unreachable. From 1120 up it is one row
+each, as before. A new top-bar element is checked at 820 and 1024 by `scrollWidth`, not by eye.
 (`/legal/*` renders outside the shell and is the exception; see Density above.)
 
 **`.layout-root` owns the scrollport, and that is what makes the bar sticky.** `src/index.css`
@@ -694,7 +702,10 @@ where they had been 13 / 23 / 31); and **"the same size" means both dimensions**
 label offset inside each card as well as the outer box, because the outer boxes agreeing is exactly
 the state in which the inner drift shows.
 
-**One breakpoint: 768px.** No tablet tier and no desktop max-width. Above it the top bar IS the
+**One layout breakpoint: 768px.** No tablet tier and no desktop max-width. (Two narrower rules sit
+beside it and are not tiers: the top bar's 1120px wrap above, and the POS order screen's 700px, where
+the full-screen till puts the menu full width and the cart in a bottom sheet — a width, because a
+320px cart column beside a 390px phone left the menu 70px.) Above 768 the top bar IS the
 navigation and `.sidebar-wrap` is `display: none`; below it the bar goes away and the same
 `.sidebar-wrap` becomes the phone drawer (`translateX(-100%)` plus a 44px fixed hamburger and a
 55%-black overlay), `.main-content` takes 16px padding, `.context-bar` turns back on as the only
@@ -710,6 +721,11 @@ top-bar control (`.topbar-pill`, the context and account triggers) 44,
 finger actually hits, which were in no coarse rule at all until they were measured (the outlet
 switcher, the control that re-scopes the whole tenant session, at 95x20px; sidebar search at
 27x25). A narrow desktop window keeps its own density, which a width breakpoint could not express.
+The POS order screen, inline-styled throughout, reaches the floor through two classes of its own:
+`.till-hit` (44x44 minimum) and `.till-hit--row` (44px tall), which also carry the focus pair, plus
+`.ticket-btn`. `min-*` beats an inline width or height, so the classes sit on controls whose inline
+size stays right for a mouse; an inline `minWidth`/`minHeight` on the same control would beat the
+class. Measured at 820px touch: 0 of 32 order-screen controls under 44px, from 24 of 36.
 
 **Under a coarse pointer every text field goes to 16px, with `!important`, and that is load
 bearing.** Below 16px iOS Safari zooms the viewport on focus and never zooms back, so tapping any
@@ -722,7 +738,9 @@ deliberately excluded. A control on a class is still the better answer — it al
 `[aria-invalid]` and `:disabled` hooks — but the floor must not wait on that sweep.
 
 **Wide tables scroll; they do not compress.** `.table-wrap` is `overflow-x: auto` around every wide
-table and the data keeps its native column widths. Pair it with `.table-wrap--fab-clear` on any
+table and the data keeps its native column widths. It is also `position: relative` (S776): an
+`.sr-only` label inside a table is `position: absolute`, and with no positioned ancestor it escaped
+the scroll container and widened the whole page — `/pos` measured 478px of scroll width at 390. Pair it with `.table-wrap--fab-clear` on any
 page that also renders a `Fab` — the Fab is fixed with no reserved space, so without it the button
 sits on top of the last row's actions.
 

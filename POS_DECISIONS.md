@@ -71,7 +71,7 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   eight POS pages at ≤768px**, iPad portrait included. Invisible on desktop, which is why it
   survived every review.
 - [x] ~~POS drill-downs were mouse-only~~ — **fixed S653.** Nine rows across four files plus the
-  whole Table Management floor grid had no keyboard path; eight glyph-only controls in `PosOrders`
+  whole Table Management (now POS Setup) floor grid had no keyboard path; eight glyph-only controls in `PosOrders`
   had no accessible name. This closes the standing critique item "POS reports are a different
   dialect" — its other three limbs (KPI tiles, h2-first outlines, a third tab family) were already
   closed or were never POS.
@@ -179,6 +179,22 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 ---
 
 ## Shipped (for reference — moved here once complete)
+
+- [x] ~~The POS module critique (24/40)~~ — **shipped S776, 2026-09-17, every finding fixed in eight
+  commits** (`c287f0da` → `e2de401d`, crest-v328 → v335; snapshot
+  `.impeccable/critique/2026-09-17T07-02-03Z__src-modules-pos.md`). Owner decisions:
+  (1) **a till lock keeps the unsent cart** for the login that typed it, restores it when that PIN
+  signs in, and says so on the PIN screen — not "never lock", not "just warn louder";
+  (2) **the bill prints first**, straight after the close write and the Split legs, with Inventory
+  posting, the customer book and loyalty after it and non-blocking;
+  (3) **a new POS login starts with a 0% discount limit** (set from POS Staff; existing logins untouched);
+  (4) **one page, one name**: `/pos/tables` is **POS Setup**, moved to the Admin group, and the tablet
+  page `/pos` is **Till Devices**. The close path is bounded and reads a lost reply back instead of
+  blaming "another till"; close buttons say what is missing instead of going dead, and Void asks
+  first; staff errors are plain sentences; the selected payment method is filled. Moved here from
+  `POS_TODO.md` B3 in the same commit: **"`PosOrders.jsx` has no breakpoint"** — the order screen
+  has a 700px bottom-sheet cart and a 44px touch floor now (0 of 32 controls under 44px at 820 touch).
+  Full detail in the S776 changelog entry and `.claude/rules/pos-billing.md`.
 
 - [x] ~~The guest QR menu, third critique (24/40)~~ — **shipped S767, 2026-09-16; every finding
   fixed, each product question decided by Aashish in plain words.** Migrations `20260921100000`
