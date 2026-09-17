@@ -719,6 +719,13 @@ carried 32 sites of it (12 reads taking `data` without `error`, 20 writes destru
   the co-occurrence suggestions and the Recent Bills comp lookup log and move on. The test is
   whether there is an action the user could take.
 
+## A close whose answer is lost is read back, never retried blind (S776)
+
+- **Every await on the close path is bounded** (`bounded()` / `CLOSE_STEP_MS` in `PosOrders.jsx`). Cancel stays disabled while a close is in flight, so an unbounded await was a till with no way out.
+- **A timeout or dropped connection on the close write is not a failure.** `closeAttemptRef` is set just before the write; `settleUnknownClose()` reads the bill: closed by this login with this close type → `finishClosedBill()` (legs, print, the rest); open straight after the timeout → keep the mark, the write can still land; unreadable → say it is unknown. The next press AND Cancel settle it first. Without this a retry was refused "already closed" and blamed on another till, and the bill never printed.
+- **Order after the close is an owner decision: Split legs → print → table, booking, IMS, customer, loyalty.** Legs first because of their 10-minute window and because `printBill` reads them. Print counters are not awaited. Don't move bookkeeping back in front of the paper.
+- Verified live by letting the PATCH reach the server and aborting its response (`route.fetch()` then `route.abort()`), and again with the read-back also aborted.
+
 ## The floor view's `window.alert`s are deliberate, and were re-affirmed (S682)
 
 `PosOrders.jsx` has two returns, and `setMsg` renders only inside the `view === 'order'` tree — so

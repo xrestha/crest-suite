@@ -38,7 +38,8 @@ import { buildKotBotHtml, buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml 
 import BillingStation from './BillingStation'
 import { nepalTime, nepalBs } from '../../../shared/nepalTime'
 import { playChime } from '../posChime'
-import { errorText } from '../../../shared/errorText'
+import { errorText, isNetworkError } from '../../../shared/errorText'
+import { withTimeout, isTimeout } from '../../../utils/withTimeout'
 import {
   vatOf, fmtNpr, toItemPayload, QR_PAY_METHODS, STATUS_BADGE, STATUS_LABEL, tableStripColor,
   summarizeTicketStages, ticketSummaryChip, kotTimerLabel,
@@ -70,6 +71,15 @@ const HINT = {
 // Postgres prefixes a RAISE message with the code word the function chose; the reader wants the
 // sentence after it.
 const stripCodeWord = (msg, word) => String(msg || '').replace(new RegExp(`^(pos_orders|pos_order_items|${word}):\\s*`), '')
+
+// Every wait on the bill-close path is bounded (S776). A supabase call can hang with no error at all
+// (withTimeout.js says where), and a cashier holding a guest on "Processing…" had no way out — Cancel
+// is disabled while a close is in flight, for good reason. withTimeout REJECTS; `bounded` resolves the
+// same `{ error }` a supabase call does, so each step keeps its one error branch. A timed-out write may
+// still land: the close write itself is read back (settleUnknownClose), never assumed failed.
+const CLOSE_STEP_MS = 20000
+const bounded = (call, label, ms = CLOSE_STEP_MS) =>
+  withTimeout(call, ms, label).catch(error => ({ data: null, error }))
 
 // `billingStation` is the /pos/billing route (S762) — the SAME component, entered on a third view
 // that lists the open bills instead of the floor plan. Deliberately not a separate page: billing is
@@ -373,6 +383,14 @@ export default function PosOrders({ billingStation = false } = {}) {
   // state) because the poll's setInterval closure needs the CURRENT value synchronously, not
   // whatever `closing` was when the interval callback was created.
   const closingRef = useRef(false)
+  // A close attempt whose write went out and whose answer never came back (S776): `{ orderId, closeType }`,
+  // set just before the close write and cleared once its outcome is KNOWN. While it names the bill on
+  // screen, "already closed" may be this till's own write, so the bill is read back (settleUnknownClose)
+  // before another till is blamed or the payment is taken again. A ref for closingRef's reason.
+  const closeAttemptRef = useRef(null)
+  // What a close is doing right now, for the Confirm button's label ("Printing…") — a close is several
+  // round trips, and "Processing…" for all of them said nothing about which one was slow.
+  const [closeStep, setCloseStep] = useState('')
   // Re-entry guard for performSave — saveOrder/sendTicket are only gated by the `saving` state,
   // which doesn't update synchronously, so a double-tap on Send Order before the re-render commits
   // can enter performSave twice with orderId still null and insert two pos_orders rows. A ref for
@@ -2629,7 +2647,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   async function cancelLiveRedemption() {
     const live = liveRedemptionRef.current
     if (!live?.orderId) return { ok: true, text: '' }
-    const { error } = await supabase.rpc('redeem_loyalty_points', { p_order_id: live.orderId, p_points: 0 })
+    const { error } = await bounded(supabase.rpc('redeem_loyalty_points', { p_order_id: live.orderId, p_points: 0 }), 'Handing the points back')
     if (error) {
       console.error('loyalty redemption cancel failed:', error)
       // A bill that is already closed can never be un-redeemed from the till, so there is nothing
@@ -2663,8 +2681,23 @@ export default function PosOrders({ billingStation = false } = {}) {
   // Cancel, the backdrop and Escape all come here (S754). They used to close the modal outright,
   // and openBilling resets `tenders` — so a Cancel after taking NPR 500 cash and 300 on eSewa threw
   // away the only record of both, with the money already in the drawer and the eSewa app.
-  function requestCloseBilling() {
-    if (closing) return
+  async function requestCloseBilling() {
+    if (closing || closingRef.current) return
+    // A Confirm on this bill went out and never heard back (S776). Leaving without checking could walk
+    // away from a bill that DID close — unprinted, and a payment taken twice on the next attempt — so
+    // the bill is read first. Closed by this login: it is finished and printed here. Unknown: the modal
+    // still closes (a cashier must never be trapped on a dead connection), and the order screen keeps
+    // the warning.
+    if (closeAttemptRef.current?.orderId === orderId) {
+      closingRef.current = true
+      setClosing(true); setCloseMsg('')
+      let settled
+      try { settled = await settleUnknownClose() } finally { closingRef.current = false; setClosing(false); setCloseStep('') }
+      if (settled === 'finished' || settled === 'elsewhere') return
+      if (settled === 'unknown') {
+        setMsg(`error:It is not known whether ${orderLabel()} closed — the connection dropped before the till heard back. Check Recent Bills on the floor before taking the payment again.`)
+      }
+    }
     // No tenders on screen: close at once (handing back any redemption a failed attempt left standing).
     if (tenders.length === 0) { dismissBillingAfterRefusal(); return }
     const n = tenders.length
@@ -2821,36 +2854,112 @@ export default function PosOrders({ billingStation = false } = {}) {
     return true
   }
 
-  async function closeOrder(closeType) {
-    if (!orderId || !clientId) return false
-    if ((closeType === 'void' || closeType === 'writeoff') && !closeReason) {
-      setCloseMsg('error:Select a reason.'); return false
-    }
-    if (closeType === 'paid' && discountAmt > 0 && !discountReason) {
-      setCloseMsg('error:Select a discount reason.'); return false
-    }
-    if (closeType === 'paid' && requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) {
-      setCloseMsg('error:Buyer Name + Phone are required for a discount or Credit sale.'); return false
-    }
-    if (closeType === 'paid' && splitMode && (remaining > 0 || tenders.length === 0)) {
-      setCloseMsg('error:Split payment is not fully collected yet.'); return false
-    }
-    if (closeType === 'paid' && tendersOverpaid) {
-      setCloseMsg(`error:The payments recorded (${fmtNpr(tendersTotal)}) are more than this bill now comes to (${fmtNpr(payTotal)}) — the total changed after they were taken. Undo the payments and take them again against the new total.`); return false
+  // What stops a close before anything is written, as the sentence the cashier reads — or null when
+  // nothing does. One list, read by closeOrder's own refusal (S776), so the refusal and the checks it
+  // is made of cannot drift apart.
+  function closeBlocker(closeType) {
+    if ((closeType === 'void' || closeType === 'writeoff') && !closeReason) return 'Select a reason.'
+    if (closeType !== 'paid') return null
+    if (discountAmt > 0 && !discountReason) return 'Select a discount reason.'
+    if (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) return 'Buyer Name + Phone are required for a discount or Credit sale.'
+    if (splitMode && (remaining > 0 || tenders.length === 0)) return 'Split payment is not fully collected yet.'
+    if (tendersOverpaid) {
+      return `The payments recorded (${fmtNpr(tendersTotal)}) are more than this bill now comes to (${fmtNpr(payTotal)}) — the total changed after they were taken. Undo the payments and take them again against the new total.`
     }
     // redeem_loyalty_points debits the account on the phone stored on the ORDER (S754), so a
     // redemption with the phone since cleared would fail at the RPC with a message about the bill.
-    if (closeType === 'paid' && tenders.some(t => t.method === 'Loyalty') && !buyerPhone.trim()) {
-      setCloseMsg("error:Enter the customer's phone — points are redeemed from the account on that number."); return false
+    if (tenders.some(t => t.method === 'Loyalty') && !buyerPhone.trim()) {
+      return "Enter the customer's phone — points are redeemed from the account on that number."
     }
-    if (closeType === 'paid' && cashShortfall > 0) {
-      setCloseMsg(`error:Tendered ${fmtNpr(resolveTendered(payTotal))} is ${fmtNpr(cashShortfall)} short of the bill total ${fmtNpr(payTotal)} — collect the difference, or put the bill on Credit if the customer will pay later.`); return false
+    if (cashShortfall > 0) {
+      return `Tendered ${fmtNpr(resolveTendered(payTotal))} is ${fmtNpr(cashShortfall)} short of the bill total ${fmtNpr(payTotal)} — collect the difference, or put the bill on Credit if the customer will pay later.`
     }
-    if (closeType === 'paid' && hasItemComp && !itemCompReason) {
-      setCloseMsg('error:Select a reason for the complimentary item(s).'); return false
+    if (hasItemComp && !itemCompReason) return 'Select a reason for the complimentary item(s).'
+    if (orderItems.length > 0 && payableOrderItems.length === 0) {
+      return 'Every item is comped — use the Complimentary tab instead of issuing a ₨0 bill.'
     }
-    if (closeType === 'paid' && orderItems.length > 0 && payableOrderItems.length === 0) {
-      setCloseMsg('error:Every item is comped — use the Complimentary tab instead of issuing a ₨0 bill.'); return false
+    return null
+  }
+
+  // Auto-build the customer book: any bill with buyer Name + Phone (required for discounts and Credit
+  // sales) adds/updates a pos_customers row keyed by phone. Null when the bill names no customer.
+  function buyerCustomerRow() {
+    if (!buyerName.trim() || !buyerPhone.trim()) return null
+    return {
+      name: buyerName.trim(), phone: buyerPhone.trim(), updated_at: new Date().toISOString(),
+      ...(buyerAddress.trim() ? { address: buyerAddress.trim() } : {}),
+      ...(buyerPan.trim() ? { pan: buyerPan.trim() } : {}),
+    }
+  }
+
+  // Where the bill on screen stands after a close write whose answer never arrived (S776). Read,
+  // never guessed. 'mine' is THIS login's close of the kind that attempt asked for — closed_by is
+  // stamped by the server from the session (S754), so no request can put another login's name there.
+  async function readCloseOutcome(closeType) {
+    const { data, error } = await bounded(scopedFrom('pos_orders', '*').eq('id', orderId).maybeSingle(), 'Checking the bill')
+    if (error) return { state: 'unknown' }
+    if (!data) return { state: 'elsewhere' }
+    if (data.status === 'open') return { state: 'open' }
+    if (data.closed_by && data.closed_by === profile?.id && data.close_type === closeType) return { state: 'mine', row: data }
+    return { state: 'elsewhere' }
+  }
+
+  // Settles a close attempt on this bill that reached the close write and never heard back (S776).
+  // Returns 'none' (no such attempt), 'open', 'unknown', 'elsewhere' or 'finished'.
+  //
+  // Before this, a lost answer went two wrong ways at once: "Processing…" could hang with Cancel
+  // disabled, and a second press re-ran the save, which the server refused because the first write had
+  // in fact closed the bill — so the cashier was told it was "billed or voided on another till", and the
+  // bill that really was closed never printed. A bill this login closed is finished here instead:
+  // Split legs, the print, and everything after, exactly as the lost answer would have run them.
+  //
+  // `justTried` is the read straight after the write gave up. Open then is not final — the write can
+  // still land — so the mark stays and the next press (or Cancel) reads again before writing anything.
+  async function settleUnknownClose({ justTried = false } = {}) {
+    const pending = closeAttemptRef.current
+    if (!pending || pending.orderId !== orderId) return 'none'
+    const where = orderLabel()
+    setCloseStep('Checking whether the bill closed…')
+    const outcome = await readCloseOutcome(pending.closeType)
+    if (outcome.state === 'open') {
+      if (justTried) {
+        setCloseMsg(`error:${where} has not closed — the connection is too slow. Press again once the signal is back. If the first try lands in the meantime, the till picks it up and prints it; it is not charged twice.`)
+      } else closeAttemptRef.current = null
+      return 'open'
+    }
+    if (outcome.state === 'unknown') {
+      setCloseMsg(`error:It is not known whether ${where} closed — the connection dropped before the till heard back. Do not take the payment again: press again once the signal is back, and the till checks first.`)
+      return 'unknown'
+    }
+    closeAttemptRef.current = null
+    if (outcome.state === 'elsewhere') { showClosedElsewhere(); return 'elsewhere' }
+
+    let compNo = null
+    let compedItemRows = []
+    if (pending.closeType === 'paid' && hasItemComp) {
+      const { data, error } = await bounded(
+        scopedFrom('pos_order_items', '*').eq('order_id', orderId).not('comp_no', 'is', null), 'Reading the comped items')
+      if (error) {
+        warnWrite('The complimentary slip for this bill was not printed — its items could not be read back. Reprint it from Recent Bills.', error)
+        compedItemRows = null
+      } else {
+        // The latest comp event is this close's: an earlier failed attempt can have reserved a lower number.
+        compNo = (data || []).reduce((max, r) => (r.comp_no != null && (max == null || r.comp_no > max) ? r.comp_no : max), null)
+        compedItemRows = (data || []).filter(r => r.comp_no === compNo)
+      }
+    }
+    await finishClosedBill(pending.closeType, outcome.row, { compNo, compedItemRows, custRow: buyerCustomerRow() })
+    return 'finished'
+  }
+
+  async function closeOrder(closeType) {
+    if (!orderId || !clientId) return false
+    // An earlier press on this bill reached the close write and never heard back (S776). Nothing is
+    // refused before that is settled — this press may be what finishes a bill that already closed.
+    const earlier = closeAttemptRef.current?.orderId === orderId ? closeAttemptRef.current : null
+    if (!earlier) {
+      const blocker = closeBlocker(closeType)
+      if (blocker) { setCloseMsg(`error:${blocker}`); return false }
     }
     // Guards a manual Charge tap and the QR auto-confirm poll from racing each other — the poll
     // calls closeOrder directly, bypassing the Confirm Payment button's own disabled={closing}.
@@ -2862,6 +2971,14 @@ export default function PosOrders({ billingStation = false } = {}) {
     setClosing(true); setCloseMsg('')
 
     try {
+      if (earlier) {
+        const settled = await settleUnknownClose()
+        if (settled !== 'open') return settled === 'finished'
+        // Still open on a later press: that write never landed, so this is an ordinary close again.
+        const blocker = closeBlocker(closeType)
+        if (blocker) { setCloseMsg(`error:${blocker}`); return false }
+      }
+
       // S754 (owner decision): a bill that takes money — Charge (Cash, QR, Split AND Credit, which
       // are all close type 'paid') or Complimentary — needs an open shift, so every bill lands on a
       // drawer count and a Z-report. Void takes no money and is not gated. A FRESH read, not the
@@ -2870,7 +2987,9 @@ export default function PosOrders({ billingStation = false } = {}) {
       // read refuses (fails closed). Runs before performSave, so a refusal here has written nothing.
       let billShiftId = openShiftId
       if (closeType === 'paid' || closeType === 'writeoff') {
-        const { data: shiftRow, error: shiftErr } = await scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle()
+        setCloseStep('Checking the shift…')
+        const { data: shiftRow, error: shiftErr } = await bounded(
+          scopedFrom('pos_shifts', 'id').eq('status', 'open').maybeSingle(), 'Checking the shift')
         if (shiftErr) {
           setCloseMsg(`error:Couldn't check whether a shift is open, so this bill was not charged — try again. ${errorText(shiftErr, 'staff')}`)
           return false
@@ -2904,9 +3023,20 @@ export default function PosOrders({ billingStation = false } = {}) {
       // in-memory cart — so an unsaved line on a comp slip reached IMS and the paper while never
       // existing on the order. performSave only persists lines, covers and guest-request accepts;
       // it never fires a ticket (that is saveOrder/sendTicket), so it is safe for all three.
+      //
+      // Bounded like every step here (S776). A save that timed out may still land, and a retry is safe:
+      // performSave reads a stale refusal back and counts its own landed lines as saved.
       if (orderItems.length > 0) {
-        const persisted = await performSave()
+        setCloseStep('Saving the order…')
+        const persisted = await withTimeout(performSave(), CLOSE_STEP_MS + 10000, 'Saving the order')
+          .catch(error => ({ ok: false, handled: false, error }))
         if (!persisted.ok) {
+          // The earlier press's close landed between the read above and this save (S776): "already
+          // closed" is this till's own bill, so it is read once more before another till is blamed.
+          if (earlier && persisted.handled && [HINT.notOpen, HINT.locked].includes(persisted.error?.hint)) {
+            closeAttemptRef.current = earlier
+            if (await settleUnknownClose() === 'finished') { setClosedElsewhere(null); return true }
+          }
           // A stale order, a bill closed elsewhere, a dish off the menu: the order screen already says
           // which, so the payment modal gets out of its way (and hands back any standing redemption).
           if (persisted.handled) { dismissBillingAfterRefusal(); return false }
@@ -2941,6 +3071,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       let compNo = null
       let compedItemRows = []
       if (closeType === 'paid' && hasItemComp) {
+        setCloseStep('Applying the complimentary items…')
         const compFy = getBsFiscalYear(today.year, today.month)
         // A plain line is comped by recipe, exactly as before; a customized one (S758) by recipe AND
         // selection, so comping "Momo, extra cheese" never comps the plain Momo beside it.
@@ -2965,18 +3096,19 @@ export default function PosOrders({ billingStation = false } = {}) {
         // ranks staff by and a caller able to choose it could comp under a colleague's name. It
         // stays in the call only so the argument list keeps matching the function's signature for
         // any device still on an older bundle; do not start relying on it again.
-        const { data: newCompNo, error: compErr } = await supabase.rpc('apply_pos_item_comps', {
+        const { data: newCompNo, error: compErr } = await bounded(supabase.rpc('apply_pos_item_comps', {
           p_order_id: orderId, p_client_id: clientId, p_fy: compFy,
           p_comp_reason: itemCompReason, p_comped_by: profile?.id || null,
           p_full_recipe_ids: fullCompRecipeIds, p_partial: partialComps,
           ...(fullCompLines.length ? { p_full_lines: fullCompLines } : {}),
-        })
+        }), 'Applying the comps')
         if (compErr) {
-          setCloseMsg('error:Could not apply the complimentary item(s) — ' + compErr.message)
+          setCloseMsg(`error:Could not apply the complimentary item(s), so the bill was not charged — ${errorText(compErr, 'staff')}`)
           return false
         }
         compNo = newCompNo
-        const { data, error: compRowsErr } = await scopedFrom('pos_order_items', '*').eq('order_id', orderId).eq('comp_no', compNo)
+        const { data, error: compRowsErr } = await bounded(
+          scopedFrom('pos_order_items', '*').eq('order_id', orderId).eq('comp_no', compNo), 'Reading the comped items')
         // The comps are already applied by the RPC above, so this cannot abort the close. But an
         // empty read prints a Complimentary Slip with no lines on it, and a blank NC document is
         // worse than none — the number is assigned, so it can be reprinted from Recent Bills.
@@ -3006,13 +3138,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       // void / Complimentary) hands back whatever an earlier attempt left standing first.
       // Only a Charge redeems — a tender list left over from the Pay tab must not redeem on a void.
       const loyaltyTender = closeType === 'paid' ? tenders.find(t => t.method === 'Loyalty') : null
-      const custRow = buyerName.trim() && buyerPhone.trim()
-        ? {
-            name: buyerName.trim(), phone: buyerPhone.trim(), updated_at: new Date().toISOString(),
-            ...(buyerAddress.trim() ? { address: buyerAddress.trim() } : {}),
-            ...(buyerPan.trim() ? { pan: buyerPan.trim() } : {}),
-          }
-        : null
+      const custRow = buyerCustomerRow()
       let custUpsertDone = false
       if (!loyaltyTender && liveRedemptionRef.current?.orderId === orderId) {
         const res = await cancelLiveRedemption()
@@ -3022,16 +3148,17 @@ export default function PosOrders({ billingStation = false } = {}) {
         }
       }
       if (loyaltyTender) {
-        const { error: buyerErr } = await scopedUpdate('pos_orders', {
+        setCloseStep('Redeeming points…')
+        const { error: buyerErr } = await bounded(scopedUpdate('pos_orders', {
           buyer_name: buyerName.trim() || null, buyer_phone: buyerPhone.trim() || null,
-        }).eq('id', orderId)
+        }).eq('id', orderId), 'Attaching the customer')
         if (buyerErr) {
           setCloseMsg("error:Could not attach the customer's phone to this bill, so the points were NOT redeemed and nothing was charged — try again, or undo the points and take another payment.")
           console.error('buyer write before redemption failed:', buyerErr)
           return false
         }
         if (custRow) {
-          const { error: custErr } = await scopedUpsert('pos_customers', custRow, { onConflict: 'client_id,phone' })
+          const { error: custErr } = await bounded(scopedUpsert('pos_customers', custRow, { onConflict: 'client_id,phone' }), 'Saving the customer')
           // Not a refusal on its own: the balance shown was read from this customer's existing row,
           // so the RPC can still find it. If it truly is missing the RPC refuses, and says so.
           if (custErr) console.error('pos_customers upsert before redemption failed:', custErr)
@@ -3040,13 +3167,13 @@ export default function PosOrders({ billingStation = false } = {}) {
         // Marked BEFORE the call: a response lost after the server committed must still leave this
         // screen able to hand the points back (undo, Cancel, or a close without them).
         liveRedemptionRef.current = { orderId }
-        const { error: redErr } = await supabase.rpc('redeem_loyalty_points', {
+        const { error: redErr } = await bounded(supabase.rpc('redeem_loyalty_points', {
           p_order_id: orderId, p_points: loyaltyTender.points,
-        })
+        }), 'Redeeming the points')
         if (redErr) {
           setCloseMsg(redErr.hint === HINT.rank
             ? 'error:Redeeming points needs a POS Supervisor login or above — nothing was charged.'
-            : `error:Could not redeem the points, so nothing was charged — ${redErr.message}`)
+            : `error:Could not redeem the points, so the bill was not charged — ${errorText(redErr, 'staff')}`)
           return false
         }
       }
@@ -3087,12 +3214,30 @@ export default function PosOrders({ billingStation = false } = {}) {
         shift_id: billShiftId,
       }
 
-      const { data: updated, error } = await scopedUpdate('pos_orders', payload).eq('id', orderId)
-        .select('*').single()
+      setCloseStep('Closing the bill…')
+      // Marked BEFORE the write (S776): if its answer is lost, this is what tells the next press — or
+      // Cancel — that "already closed" may be this till's own write rather than another till's.
+      closeAttemptRef.current = { orderId, closeType }
+      const { data: updated, error } = await bounded(
+        scopedUpdate('pos_orders', payload).eq('id', orderId).select('*').single(), 'Closing the bill')
+      // No answer — a timeout or a dropped connection. The write may have landed, so the bill is read
+      // back rather than the close reported as failed.
+      if (error && (isTimeout(error) || isNetworkError(error))) {
+        return await settleUnknownClose({ justTried: true }) === 'finished'
+      }
       if (error) {
+        closeAttemptRef.current = null
         // Closed on another device between the save above and this write: the close guard now refuses
-        // any write to a closed bill (S754).
-        if (error.hint === HINT.locked) { showClosedElsewhere(); return false }
+        // any write to a closed bill (S754). After an earlier press that never heard back, it may be
+        // that press's write instead (S776), so it is read before another till is blamed.
+        if (error.hint === HINT.locked) {
+          if (earlier) {
+            closeAttemptRef.current = earlier
+            return await settleUnknownClose() === 'finished'
+          }
+          showClosedElsewhere()
+          return false
+        }
         // Closing is Supervisor work and the server now says so for every close type (S754) — the
         // Payment button is already hidden below that rank, so this is a login whose rank changed.
         if (error.hint === HINT.rank) {
@@ -3106,180 +3251,213 @@ export default function PosOrders({ billingStation = false } = {}) {
         setCloseMsg('error:' + stripCodeWord(error.message, 'pos_orders'))
         return false
       }
-      // The bill is closed and numbered. Nothing an earlier attempt redeemed is "standing" any more —
-      // it is this bill's tender now.
-      liveRedemptionRef.current = null
-      const where = activeTable?.name || (orderNo ? `Takeaway #${orderNo}` : 'this takeaway')
-
-      // Split legs FIRST, straight after the close: the server admits them only from the login that
-      // closed the bill, within 10 minutes of its server-stamped closed_at (S754) — nothing else may
-      // run in between that could push them past that window or out of this session.
-      if (isSplit) {
-        // The Loyalty leg is deliberately absent: redeem_loyalty_points already wrote it, in the
-        // same transaction as the ledger debit, so inserting it again here would show the bill as
-        // collecting the redemption twice — and the server refuses a Loyalty leg from the browser.
-        const cashTenders = tenders.filter(t => t.method !== 'Loyalty')
-        if (cashTenders.length > 0) {
-          // The bill is already billed and numbered by this point, so this cannot be undone by
-          // refusing the close. But these rows ARE the record of how the bill was paid: without
-          // them the shift's Z-report reconciles a drawer against a payment mix missing this
-          // bill's legs, which reads as a cash variance nobody can explain.
-          const legRows = cashTenders.map(t => ({
-            order_id: orderId,
-            payment_method: t.method, amount: t.amount, tendered_amount: t.tenderedAmount,
-            recorded_by: profile?.id || null,
-          }))
-          let { error: payErr } = await scopedInsert('pos_order_payments', legRows)
-          if (payErr) {
-            // A dropped response can hide an insert that landed, and a blind retry of a landed one is
-            // refused anyway (the server will not let the legs exceed the bill). So look first: legs
-            // already there means it landed; none there means one retry, still inside the window.
-            const { data: legs, error: legsErr } = await scopedFrom('pos_order_payments', 'amount')
-              .eq('order_id', orderId).neq('payment_method', 'Loyalty')
-            const want = cashTenders.reduce((s, t) => s + t.amount, 0)
-            const found = legs || []
-            const have = found.reduce((s, l) => s + (Number(l.amount) || 0), 0)
-            if (!legsErr && found.length === cashTenders.length && Math.abs(have - want) < 0.01) {
-              payErr = null
-            } else if (!legsErr && found.length === 0) {
-              const retry = await scopedInsert('pos_order_payments', legRows)
-              payErr = retry.error
-            }
-          }
-          if (payErr) {
-            warnWrite(`How ${where} was paid (${cashTenders.map(t => `${t.method} ${fmtNpr(t.amount)}`).join(' + ')}) did not save. The bill is closed and correct, but the shift report will not show these payments — give the amounts to whoever closes the drawer. They cannot be added to the bill afterwards.`, payErr)
-          }
-        }
-      }
-
-      if (closeType === 'void') {
-        // Best-effort — a KDS ticket for a voided order should disappear from the board rather
-        // than sit accumulating "late" alerts forever with no signal the order no longer exists.
-        // Comps (writeoff) don't cancel here: the food was actually prepared/served, so its
-        // ticket keeps its normal lifecycle.
-        // Best-effort by design; the try/catch this replaces caught nothing, since the call
-        // resolves with { error } rather than throwing. Failure leaves a cancelled order's
-        // ticket on the kitchen board accruing "late" alerts, which is worth a console line.
-        const { error: kotCancelErr } = await scopedUpdate('pos_kot_log', { status: 'cancelled' }).eq('order_id', orderId)
-        if (kotCancelErr) console.error('KDS ticket cancel failed (non-fatal):', kotCancelErr)
-      }
-
-      // The two writes below are STARTED here and awaited further down, rather than each taking
-      // its own turn in the queue. Both depend only on the order already being billed — neither
-      // reads anything the IMS post produces — so they travel alongside it instead of adding two
-      // more round trips to a cashier who is holding up the counter. Each carries its own .catch
-      // so a network throw cannot surface as an unhandled rejection in the gap before it is
-      // awaited; both have always swallowed their failures, and still do.
-
-      // Freeing the table. Awaited before loadFloor() reads the floor back, so a tile can never
-      // repaint as still occupied.
-      const tableFree = activeTable?.id
-        ? Promise.resolve(scopedUpdate('pos_tables', { status: 'available' }).eq('id', activeTable.id))
-            .catch(e => { console.error('pos_tables release failed (non-fatal):', e) })
-        : null
-
-      // A booking seated from the floor completes when its bill closes — every close type, since
-      // the visit is over as far as the book is concerned (the bill's own outcome is read through
-      // order_id). Zero rows matched is the ordinary walk-in case, not a failure.
-      const reservationDone = Promise.resolve(
-        scopedUpdate('pos_reservations', stampFor('completed')).eq('order_id', orderId).eq('status', 'seated')
-      ).then(({ error }) => {
-        if (error) warnWrite('The booking linked to this bill still shows as Seated in Reservations — mark it Completed there.', error)
-      }).catch(e => { console.error('pos_reservations completion failed (non-fatal):', e) })
-
-      // Auto-build the customer book: any bill with buyer Name + Phone (required for discounts and
-      // Credit sales) adds/updates a pos_customers row keyed by phone. Non-fatal — never blocks billing.
-      // Already written before a redemption (above), in which case it is not sent twice.
-      let custUpsert = null
-      if (custRow && !custUpsertDone) {
-        custUpsert = Promise.resolve(scopedUpsert('pos_customers', custRow, { onConflict: 'client_id,phone' }))
-          .catch(e => { console.error('pos_customers upsert failed (non-fatal):', e) })
-      }
-
-      // Stamp only on a confirmed post. A void has nothing to post, so it is marked done rather
-      // than left looking like a failure the floor banner should chase.
-      if (closeType !== 'void') {
-        const posted = await writeSalesEntries(closeType)
-        if (posted) {
-          // The stamp is the only thing separating "posted" from "needs backfilling". If it
-          // fails the revenue IS in IMS, so the floor banner will chase a bill that is fine.
-          // Not a double-post risk: the Periods backfill re-checks sales_entries.pos_order_id
-          // before posting anything and re-stamps what it finds — but say so rather than let
-          // someone hunt a phantom.
-          const { error: stampErr } = await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId)
-          if (stampErr) warnWrite('The bill just closed did reach Inventory, but saving its "posted" mark failed — it will keep showing as not posted until a backfill from Periods clears it.', stampErr)
-        } else setImsPostWarning(w => w + 1)
-      } else {
-        const { error: stampErr } = await scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId)
-        if (stampErr) warnWrite('The voided bill could not be marked as settled with Inventory — it will show as not posted until a backfill from Periods clears it.', stampErr)
-      }
-
-      // Settled before the loyalty award below, and that ordering is load-bearing rather than
-      // incidental: award_loyalty_points matches the customer on pos_orders.buyer_phone against
-      // pos_customers, and returns 0 if there is no row — so a first-time customer would earn
-      // nothing if the two ran together.
-      if (custUpsert) await custUpsert
-
-      // Loyalty earn, immediately after the customer row exists — award_loyalty_points()
-      // resolves the customer from the order's buyer_phone, so the upsert above has to have
-      // landed first.
-      //
-      // Best-effort in the same shape writeSalesEntries established: a points problem must
-      // never stop a bill closing. But deliberately NOT silent — an earn that fails without a
-      // word is how a regular discovers at the till next month that none of it counted. The
-      // RPC computes from the order's own stored lines, so nothing here can influence the
-      // number; this call only asks.
-      //
-      // S754: the server now awards only to the login that closed the bill, within 10 minutes of the
-      // close, and a till cannot retry it later — so a failure here is final for staff, and the note
-      // says who can still add the points rather than inviting a retry that will be refused.
-      setLoyaltyNote(null)
-      if (hasFeature('loyalty') && closeType === 'paid' && buyerPhone.trim()) {
-        const who = buyerName.trim() || buyerPhone.trim()
-        const awardFailed = detail => setLoyaltyNote({
-          ok: false,
-          text: `Points were not added for ${who} — ${detail} They can only be added from the till as the bill closes, so ask the Owner to add them.`,
-        })
-        try {
-          const { data: earned, error: loyErr } = await supabase.rpc('award_loyalty_points', { p_order_id: orderId })
-          // The award's own refusals (not the closer, past the 10-minute window) already say "ask the Owner".
-          if (loyErr && (loyErr.hint === HINT.rank || loyErr.hint === 'award_window_closed')) {
-            setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${loyErr.message}` })
-          } else if (loyErr) awardFailed(errorText(loyErr, 'staff'))
-          else if (earned > 0) setLoyaltyNote({ ok: true, text: `+${earned} point${earned === 1 ? '' : 's'} for ${who}` })
-        } catch (e) {
-          awardFailed(String(e?.message || e))
-        }
-      }
-
-      if (tableFree) await tableFree
-      await reservationDone
-      // The per-table snapshot described the order that just closed (S754) — left behind, an
-      // offline open of this table reloaded a paid bill's lines. Best-effort: the offline path now
-      // also refuses a snapshot unless the table reads occupied.
-      if (activeTable?.id) clearCachedPosOrderForTable(activeTable.id).catch(e => console.error('order snapshot clear failed (non-fatal):', e))
-
-      // A blocked pop-up used to set an order-screen message that backToFloor wiped a moment later,
-      // on a floor with no message line — so the bill closed and nothing printed, silently (S754).
-      // The close cannot be undone for it; the floor banner names the recovery.
-      const printed = []
-      if (closeType === 'paid') printed.push(await printBill(updated, payableOrderItems))
-      if (closeType === 'writeoff') printed.push(await printCompSlip(updated, orderItems))
-      // compedItemRows is null only when the read above failed — skip rather than print a slip
-      // with no lines; the operator has already been told to reprint it.
-      if (closeType === 'paid' && compNo != null && compedItemRows) printed.push(await printItemCompSlip(updated, compedItemRows))
-      if (printed.some(p => p !== true)) {
-        warnWrite(`The bill for ${where} was closed but did not print — allow pop-ups for this site, then reprint it from Recent Bills.`)
-      }
-
-      setBillingOpen(false)
-      await loadFloor()
-      backToFloor()
-      return true
+      closeAttemptRef.current = null
+      return await finishClosedBill(closeType, updated, { compNo, compedItemRows, custRow, custUpsertDone })
     } finally {
       closingRef.current = false
       setClosing(false)
+      setCloseStep('')
     }
+  }
+
+  // Everything after the bill is closed and numbered. The close cannot be undone from here, so nothing
+  // below refuses: each failure is a warnWrite naming its consequence. Shared by an ordinary close and
+  // by a close whose answer was lost and read back (settleUnknownClose, S776).
+  //
+  // The ORDER is an owner decision (S776): the Split legs, then the PRINT, then everything else. The
+  // legs come first because the server admits them only within 10 minutes of the close and the printed
+  // bill reads them back; Inventory posting, the customer book and loyalty used to run before the print,
+  // so a guest waited on bookkeeping for their bill — and on a slow connection, waited indefinitely.
+  async function finishClosedBill(closeType, updated, { compNo = null, compedItemRows = [], custRow = null, custUpsertDone = false } = {}) {
+    // The bill is closed and numbered. Nothing an earlier attempt redeemed is "standing" any more —
+    // it is this bill's tender now.
+    liveRedemptionRef.current = null
+    const where = activeTable?.name || (orderNo ? `Takeaway #${orderNo}` : 'this takeaway')
+
+    // Split legs FIRST, straight after the close: the server admits them only from the login that
+    // closed the bill, within 10 minutes of its server-stamped closed_at (S754) — nothing else may
+    // run in between that could push them past that window or out of this session.
+    if (updated.payment_method === 'Split') {
+      setCloseStep('Recording the payments…')
+      // The Loyalty leg is deliberately absent: redeem_loyalty_points already wrote it, in the
+      // same transaction as the ledger debit, so inserting it again here would show the bill as
+      // collecting the redemption twice — and the server refuses a Loyalty leg from the browser.
+      const cashTenders = tenders.filter(t => t.method !== 'Loyalty')
+      if (cashTenders.length > 0) {
+        // The bill is already billed and numbered by this point, so this cannot be undone by
+        // refusing the close. But these rows ARE the record of how the bill was paid: without
+        // them the shift's Z-report reconciles a drawer against a payment mix missing this
+        // bill's legs, which reads as a cash variance nobody can explain.
+        const legRows = cashTenders.map(t => ({
+          order_id: orderId,
+          payment_method: t.method, amount: t.amount, tendered_amount: t.tenderedAmount,
+          recorded_by: profile?.id || null,
+        }))
+        let { error: payErr } = await bounded(scopedInsert('pos_order_payments', legRows), 'Recording the payments')
+        if (payErr) {
+          // A dropped response can hide an insert that landed, and a blind retry of a landed one is
+          // refused anyway (the server will not let the legs exceed the bill). So look first: legs
+          // already there means it landed; none there means one retry, still inside the window.
+          const { data: legs, error: legsErr } = await bounded(scopedFrom('pos_order_payments', 'amount')
+            .eq('order_id', orderId).neq('payment_method', 'Loyalty'), 'Checking the payments')
+          const want = cashTenders.reduce((s, t) => s + t.amount, 0)
+          const found = legs || []
+          const have = found.reduce((s, l) => s + (Number(l.amount) || 0), 0)
+          if (!legsErr && found.length === cashTenders.length && Math.abs(have - want) < 0.01) {
+            payErr = null
+          } else if (!legsErr && found.length === 0) {
+            const retry = await bounded(scopedInsert('pos_order_payments', legRows), 'Recording the payments')
+            payErr = retry.error
+          }
+        }
+        if (payErr) {
+          warnWrite(`How ${where} was paid (${cashTenders.map(t => `${t.method} ${fmtNpr(t.amount)}`).join(' + ')}) did not save. The bill is closed and correct, but the shift report will not show these payments — give the amounts to whoever closes the drawer. They cannot be added to the bill afterwards.`, payErr)
+        }
+      }
+    }
+
+    // The paper, before any bookkeeping (see above). A blocked pop-up used to set an order-screen
+    // message that backToFloor wiped a moment later, on a floor with no message line — so the bill
+    // closed and nothing printed, silently (S754). The close cannot be undone for it; the floor
+    // banner names the recovery.
+    setCloseStep('Printing…')
+    const printed = []
+    if (closeType === 'paid') printed.push(await printBill(updated, payableOrderItems))
+    if (closeType === 'writeoff') printed.push(await printCompSlip(updated, orderItems))
+    // compedItemRows is null only when the read above failed — skip rather than print a slip
+    // with no lines; the operator has already been told to reprint it.
+    if (closeType === 'paid' && compNo != null && compedItemRows) printed.push(await printItemCompSlip(updated, compedItemRows))
+    // false is a blocked pop-up; null is a print that already said why it stopped (a failed read).
+    if (printed.some(p => p === false)) {
+      warnWrite(`The bill for ${where} was closed but did not print — allow pop-ups for this site, then reprint it from Recent Bills.`)
+    }
+
+    setCloseStep('Finishing up…')
+    if (closeType === 'void') {
+      // Best-effort — a KDS ticket for a voided order should disappear from the board rather
+      // than sit accumulating "late" alerts forever with no signal the order no longer exists.
+      // Comps (writeoff) don't cancel here: the food was actually prepared/served, so its
+      // ticket keeps its normal lifecycle.
+      // Best-effort by design; the try/catch this replaces caught nothing, since the call
+      // resolves with { error } rather than throwing. Failure leaves a cancelled order's
+      // ticket on the kitchen board accruing "late" alerts, which is worth a console line.
+      const { error: kotCancelErr } = await bounded(scopedUpdate('pos_kot_log', { status: 'cancelled' }).eq('order_id', orderId), 'Clearing the kitchen tickets')
+      if (kotCancelErr) console.error('KDS ticket cancel failed (non-fatal):', kotCancelErr)
+    }
+
+    // The three writes below are STARTED here and awaited further down, rather than each taking
+    // its own turn in the queue. All depend only on the order already being billed — none reads
+    // anything the IMS post produces — so they travel alongside it instead of adding more round
+    // trips. Each is bounded and resolves `{ error }`, so none can surface as an unhandled rejection
+    // in the gap before it is awaited.
+
+    // Freeing the table. Awaited before loadFloor() reads the floor back, so a tile can never
+    // repaint as still occupied.
+    const tableFree = activeTable?.id
+      ? bounded(scopedUpdate('pos_tables', { status: 'available' }).eq('id', activeTable.id), 'Freeing the table')
+          .then(({ error }) => { if (error) console.error('pos_tables release failed (non-fatal):', error) })
+      : null
+
+    // A booking seated from the floor completes when its bill closes — every close type, since
+    // the visit is over as far as the book is concerned (the bill's own outcome is read through
+    // order_id). Zero rows matched is the ordinary walk-in case, not a failure.
+    const reservationDone = bounded(
+      scopedUpdate('pos_reservations', stampFor('completed')).eq('order_id', orderId).eq('status', 'seated'), 'Completing the booking'
+    ).then(({ error }) => {
+      if (error) warnWrite('The booking linked to this bill still shows as Seated in Reservations — mark it Completed there.', error)
+    })
+
+    // The customer book (buyerCustomerRow). Non-fatal — never blocks billing. Already written before
+    // a redemption, in which case it is not sent twice.
+    const custUpsert = custRow && !custUpsertDone
+      ? bounded(scopedUpsert('pos_customers', custRow, { onConflict: 'client_id,phone' }), 'Saving the customer')
+          .then(({ error }) => { if (error) console.error('pos_customers upsert failed (non-fatal):', error) })
+      : null
+
+    // Stamp only on a confirmed post. A void has nothing to post, so it is marked done rather
+    // than left looking like a failure the floor banner should chase. A post that timed out counts as
+    // not posted: rows it did land carry pos_order_id, which the Periods backfill checks before
+    // posting, so the chase cannot double-post.
+    if (closeType !== 'void') {
+      const posted = await withTimeout(writeSalesEntries(closeType), CLOSE_STEP_MS + 10000, 'Posting to Inventory')
+        .catch(e => { console.error('IMS post did not finish — bill left for backfill:', e); return false })
+      if (posted) {
+        // The stamp is the only thing separating "posted" from "needs backfilling". If it
+        // fails the revenue IS in IMS, so the floor banner will chase a bill that is fine.
+        // Not a double-post risk: the Periods backfill re-checks sales_entries.pos_order_id
+        // before posting anything and re-stamps what it finds — but say so rather than let
+        // someone hunt a phantom.
+        const { error: stampErr } = await bounded(scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId), 'Marking the bill posted')
+        if (stampErr) warnWrite('The bill just closed did reach Inventory, but saving its "posted" mark failed — it will keep showing as not posted until a backfill from Periods clears it.', stampErr)
+      } else setImsPostWarning(w => w + 1)
+    } else {
+      const { error: stampErr } = await bounded(scopedUpdate('pos_orders', { ims_posted_at: new Date().toISOString() }).eq('id', orderId), 'Marking the bill settled')
+      if (stampErr) warnWrite('The voided bill could not be marked as settled with Inventory — it will show as not posted until a backfill from Periods clears it.', stampErr)
+    }
+
+    // Settled before the loyalty award below, and that ordering is load-bearing rather than
+    // incidental: award_loyalty_points matches the customer on pos_orders.buyer_phone against
+    // pos_customers, and returns 0 if there is no row — so a first-time customer would earn
+    // nothing if the two ran together.
+    if (custUpsert) await custUpsert
+
+    // Loyalty earn, immediately after the customer row exists — award_loyalty_points()
+    // resolves the customer from the order's buyer_phone, so the upsert above has to have
+    // landed first.
+    //
+    // Best-effort in the same shape writeSalesEntries established: a points problem must
+    // never stop a bill closing. But deliberately NOT silent — an earn that fails without a
+    // word is how a regular discovers at the till next month that none of it counted. The
+    // RPC computes from the order's own stored lines, so nothing here can influence the
+    // number; this call only asks.
+    //
+    // S754: the server now awards only to the login that closed the bill, within 10 minutes of the
+    // close, and a till cannot retry it later — so a failure here is final for staff, and the note
+    // says who can still add the points rather than inviting a retry that will be refused.
+    setLoyaltyNote(null)
+    const phone = updated.buyer_phone || buyerPhone.trim()
+    if (hasFeature('loyalty') && closeType === 'paid' && phone) {
+      const who = updated.buyer_name || buyerName.trim() || phone
+      const { data: earned, error: loyErr } = await bounded(supabase.rpc('award_loyalty_points', { p_order_id: orderId }), 'Adding the points')
+      // The award's own refusals (not the closer, past the 10-minute window) already say "ask the Owner".
+      if (loyErr && (loyErr.hint === HINT.rank || loyErr.hint === 'award_window_closed')) {
+        setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${loyErr.message}` })
+      } else if (loyErr && (isTimeout(loyErr) || isNetworkError(loyErr))) {
+        // The award may have landed with its answer lost, so this must not invite adding them by hand.
+        setLoyaltyNote({ ok: false, text: `It is not known whether points were added for ${who} — the connection dropped. Ask the Owner to check the customer's balance before adding any by hand.` })
+      } else if (loyErr) {
+        setLoyaltyNote({ ok: false, text: `Points were not added for ${who} — ${errorText(loyErr, 'staff')} They can only be added from the till as the bill closes, so ask the Owner to add them.` })
+      } else if (earned > 0) setLoyaltyNote({ ok: true, text: `+${earned} point${earned === 1 ? '' : 's'} for ${who}` })
+    }
+
+    if (tableFree) await tableFree
+    await reservationDone
+    // The per-table snapshot described the order that just closed (S754) — left behind, an
+    // offline open of this table reloaded a paid bill's lines. Best-effort: the offline path now
+    // also refuses a snapshot unless the table reads occupied.
+    if (activeTable?.id) clearCachedPosOrderForTable(activeTable.id).catch(e => console.error('order snapshot clear failed (non-fatal):', e))
+
+    setBillingOpen(false)
+    setFloorMsg(`ok:${closedStatement(closeType, updated, where)}`)
+    await withTimeout(loadFloor(), CLOSE_STEP_MS, 'Reloading the floor')
+      .catch(e => console.error('floor reload after a close did not finish (non-fatal):', e))
+    backToFloor()
+    return true
+  }
+
+  // The sentence a close ends on (S776): the number on the paper, the amount, and the change to hand
+  // back — so the cashier can confirm the bill closed without reading the print. The payment modal
+  // used to close onto the floor with nothing said at all.
+  function closedStatement(closeType, row, where) {
+    if (closeType === 'void') return `${where} voided — no bill was issued.`
+    if (closeType === 'writeoff') return `Complimentary slip NC-${String(row.invoice_no ?? '').padStart(2, '0')} closed for ${where}.`
+    const parts = [`${vatReg ? 'TI' : 'PB'}${row.invoice_no ?? ''} closed`, where, fmtNpr(Number(row.paid_amount) || 0)]
+    if (row.payment_method === 'Credit') parts.push(row.delivery_partner ? `on credit to ${row.delivery_partner}` : 'on credit')
+    else if (row.payment_method === 'Split') parts.push('split payment')
+    else if (row.payment_method && row.payment_method !== 'Cash') parts.push(row.payment_method)
+    const change = row.tendered_amount != null ? Number(row.tendered_amount) - Number(row.paid_amount) : 0
+    if (change > 0) parts.push(`change ${fmtNpr(change)}`)
+    return parts.join(' · ')
   }
 
   // Pure HTML builder — no side effects, no DB calls. Shared by the actual print (printBill)
@@ -3302,9 +3480,9 @@ export default function PosOrders({ billingStation = false } = {}) {
     // have mislabelled the next reprint's ORIGINAL/SECOND-COPY line too (S616).
     let payments
     if (order.payment_method === 'Split') {
-      const { data, error } = await scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', order.id).order('recorded_at')
+      const { data, error } = await bounded(scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', order.id).order('recorded_at'), 'Reading the payments')
       if (error) {
-        window.alert(`Couldn't load this bill's split payment lines: ${error.message}\n\nNothing was printed — try again, so the bill doesn't go out without its payment breakdown.`)
+        window.alert(`Couldn't load this bill's split payment lines — ${errorText(error, 'staff')}\n\nNothing was printed. Reprint it from Recent Bills, so the bill doesn't go out without its payment breakdown.`)
         return null // not printed, and already said so — distinct from false (a blocked pop-up)
       }
       payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
@@ -3314,8 +3492,10 @@ export default function PosOrders({ billingStation = false } = {}) {
     // the counter being stale. But the label printed on this copy comes from `newCount` while
     // the stored one does not move, so the NEXT reprint repeats this same copy number — which
     // is exactly what the ORIGINAL/COPY sequence exists to make distinguishable.
-    const { error: pcErr } = await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
-    if (pcErr) warnWrite('A reprint count did not save — the next reprint of that bill will carry the same copy number as this one.', pcErr)
+    // Not awaited (S776): the paper does not wait on a counter.
+    void bounded(scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id), 'Counting the print').then(({ error: pcErr }) => {
+      if (pcErr) warnWrite('A reprint count did not save — the next reprint of that bill will carry the same copy number as this one.', pcErr)
+    })
     const qrUrl = QR_PAY_METHODS.includes(order.payment_method)
       ? await makeBillQr(order.paid_amount, order.order_no ? `CR${order.order_no}` : null) : ''
     // Returned so a caller can tell a blocked pop-up from a printed bill (S754).
@@ -3325,6 +3505,17 @@ export default function PosOrders({ billingStation = false } = {}) {
       tableName: activeTable?.name || order.table_name || 'Takeaway',
       cashierName: profile?.full_name || '',
     }))
+  }
+
+  // A Complimentary Slip is valued at food cost, so a slip printed without its costs would be a wrong
+  // document, not a partial one. Bounded (S776); null means not printed, and the floor banner says so.
+  async function slipCosts(recipeIds) {
+    try {
+      return await withTimeout(computeRecipeCosts(supabase, recipeIds), CLOSE_STEP_MS, 'Reading food costs')
+    } catch (e) {
+      warnWrite('A Complimentary Slip was not printed — its food cost could not be read in time. Reprint it from Recent Bills.', e)
+      return null
+    }
   }
 
   // Complimentary items were never sold — this is an internal cost-tracking slip, not a Tax
@@ -3337,10 +3528,13 @@ export default function PosOrders({ billingStation = false } = {}) {
     // the counter being stale. But the label printed on this copy comes from `newCount` while
     // the stored one does not move, so the NEXT reprint repeats this same copy number — which
     // is exactly what the ORIGINAL/COPY sequence exists to make distinguishable.
-    const { error: pcErr } = await scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id)
-    if (pcErr) warnWrite('A reprint count did not save — the next reprint of that bill will carry the same copy number as this one.', pcErr)
+    // Not awaited (S776): the paper does not wait on a counter.
+    void bounded(scopedUpdate('pos_orders', { print_count: newCount }).eq('id', order.id), 'Counting the print').then(({ error: pcErr }) => {
+      if (pcErr) warnWrite('A reprint count did not save — the next reprint of that bill will carry the same copy number as this one.', pcErr)
+    })
     const recipeIds = items.map(i => i.recipe_id).filter(Boolean)
-    const costMap = await computeRecipeCosts(supabase, recipeIds)
+    const costMap = await slipCosts(recipeIds)
+    if (!costMap) return null
     return printHtml(buildCompSlipHtml({
       order, items, costMap, copyLabel: COPY_LABEL(newCount),
       outletName,
@@ -3357,10 +3551,13 @@ export default function PosOrders({ billingStation = false } = {}) {
   // one document never mislabels the other's copy number — see reprintItemCompSlip.
   async function printItemCompSlip(order, compedItems) {
     const newCount = (order.comp_print_count || 0) + 1
-    const { error: pcErr } = await scopedUpdate('pos_orders', { comp_print_count: newCount }).eq('id', order.id)
-    if (pcErr) warnWrite('A complimentary-slip reprint count did not save — the next reprint will carry the same copy number as this one.', pcErr)
+    // Not awaited (S776): the paper does not wait on a counter.
+    void bounded(scopedUpdate('pos_orders', { comp_print_count: newCount }).eq('id', order.id), 'Counting the print').then(({ error: pcErr }) => {
+      if (pcErr) warnWrite('A complimentary-slip reprint count did not save — the next reprint will carry the same copy number as this one.', pcErr)
+    })
     const recipeIds = compedItems.map(i => i.recipe_id).filter(Boolean)
-    const costMap = await computeRecipeCosts(supabase, recipeIds)
+    const costMap = await slipCosts(recipeIds)
+    if (!costMap) return null
     return printHtml(buildCompSlipHtml({
       order: { ...order, invoice_no: compedItems[0]?.comp_no ?? null, close_reason: compedItems[0]?.comp_reason || itemCompReason, bill_remarks: '' },
       items: compedItems, costMap, copyLabel: COPY_LABEL(newCount),
@@ -3653,7 +3850,7 @@ The tables were left occupied rather than freed with their orders still open.`)
     return (
       <>
         {floorMsg && (
-          <div role="alert" style={{
+          <div role={floorMsg.startsWith('error:') ? 'alert' : 'status'} style={{
             background: floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 8%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
             border: `1px solid ${floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 25%, transparent)' : 'color-mix(in srgb, var(--theme-green) 25%, transparent)'}`,
             borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,
@@ -4678,7 +4875,7 @@ The tables were left occupied rather than freed with their orders still open.`)
               <button className="btn btn-primary" style={{ width: '100%', padding: '11px 0', justifyContent: 'center' }}
                 onClick={() => closeOrder('paid')}
                 disabled={closing || cashShortfall > 0 || tendersOverpaid || (splitMode && (remaining > 0 || tenders.length === 0)) || (discountAmt > 0 && !discountReason) || (requireBuyerId && (!buyerName.trim() || !buyerPhone.trim())) || (hasItemComp && !itemCompReason) || allItemsComped}>
-                {closing ? 'Processing…'
+                {closing ? (closeStep || 'Processing…')
                   : tendersOverpaid ? `Payments exceed the bill by ${fmtNpr(tendersTotal - payTotal)} — undo and re-take`
                   : splitMode ? (remaining > 0 ? `Remaining ${fmtNpr(remaining)}` : `Complete Order — ${fmtNpr(payTotal)}`)
                   : cashShortfall > 0 ? `Short by ${fmtNpr(cashShortfall)} — collect ${fmtNpr(payTotal)}`
@@ -4688,13 +4885,13 @@ The tables were left occupied rather than freed with their orders still open.`)
             {billingTab === 'void' && (
               <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-red)', color: redBadgeText, borderColor: 'var(--theme-red)' }}
                 onClick={() => closeOrder('void')} disabled={closing || !closeReason}>
-                {closing ? 'Processing…' : 'Void Order'}
+                {closing ? (closeStep || 'Processing…') : 'Void Order'}
               </button>
             )}
             {billingTab === 'writeoff' && (
               <button className="btn" style={{ width: '100%', padding: '11px 0', justifyContent: 'center', background: 'var(--theme-amber)', color: amberBadgeText, borderColor: 'var(--theme-amber)' }}
                 onClick={() => closeOrder('writeoff')} disabled={closing || !closeReason}>
-                {closing ? 'Processing…' : 'Mark Complimentary (₨0 collected)'}
+                {closing ? (closeStep || 'Processing…') : 'Mark Complimentary (₨0 collected)'}
               </button>
             )}
             <button className="btn btn-ghost" style={{ width: '100%', padding: '9px 0', justifyContent: 'center', marginTop: 8, fontSize: 13 }}
@@ -5032,7 +5229,7 @@ The tables were left occupied rather than freed with their orders still open.`)
         </div>
       )}
       {floorMsg && (
-        <div style={{
+        <div role={floorMsg.startsWith('error:') ? 'alert' : 'status'} style={{
           background: floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 8%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
           border: `1px solid ${floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 25%, transparent)' : 'color-mix(in srgb, var(--theme-green) 25%, transparent)'}`,
           borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13,

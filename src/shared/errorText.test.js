@@ -11,6 +11,16 @@ describe('errorText', () => {
     expect(text).not.toMatch(/nothing was saved|not saved|wasn't saved/i)
   })
 
+  it('names a timeout without claiming the request did or did not land (S776)', () => {
+    const err = new Error('Closing the bill timed out after 20s — check your connection and try again.')
+    err.name = 'TimeoutError'
+    for (const audience of ['staff', 'operator']) {
+      const text = errorText(err, audience)
+      expect(text).toMatch(/too long/i)
+      expect(text).not.toMatch(/nothing was saved|not saved|did not go through|didn't go through/i)
+    }
+  })
+
   it('speaks to the audience: the same failure, two different next steps', () => {
     const err = { code: 'PGRST202', message: 'Could not find the function in the schema cache' }
     expect(errorText(err, 'staff')).toMatch(/tell your manager/i)

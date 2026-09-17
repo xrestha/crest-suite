@@ -57,6 +57,14 @@ const rules = [
     operator: "Couldn't reach the server — you're offline, or the connection dropped. Check your internet and try again.",
   },
 
+  // withTimeout gave up (S776). The request may still land after the clock ran out, so neither
+  // wording says it did not happen.
+  {
+    test: e => e.name === 'TimeoutError' || /timed out after \d+s/i.test(e.message || ''),
+    staff: 'The server took too long to answer. Check your signal, then check whether it went through before trying again.',
+    operator: "The server took too long to answer, so it isn't known whether this went through. Check your connection, then check before trying again.",
+  },
+
   // A function or column the deployed frontend expects but the database does not have yet — i.e.
   // an unapplied migration. This project applies migrations by hand, so it is a real state.
   {

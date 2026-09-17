@@ -21,10 +21,18 @@
 export function withTimeout(promise, ms = 20000, label = 'Request') {
   let timer
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s — check your connection and try again.`)),
-      ms
-    )
+    timer = setTimeout(() => {
+      const err = new Error(`${label} timed out after ${Math.round(ms / 1000)}s — check your connection and try again.`)
+      err.name = 'TimeoutError'
+      reject(err)
+    }, ms)
   })
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
+// True when a failure was this guard giving up, not the server answering (S776). The distinction
+// matters to a WRITE: a timed-out request may still land after the clock ran out, so a caller that
+// must not repeat it (a bill close) reads the row back instead of assuming it failed.
+export function isTimeout(err) {
+  return err?.name === 'TimeoutError'
 }

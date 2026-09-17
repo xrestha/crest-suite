@@ -1,4 +1,4 @@
-import { withTimeout } from './withTimeout'
+import { withTimeout, isTimeout } from './withTimeout'
 
 describe('withTimeout', () => {
   test('settles a promise that never resolves and never rejects', async () => {
@@ -6,6 +6,14 @@ describe('withTimeout', () => {
     // `await getAccessToken()` before it ever calls fetch, so the abort signal is attached
     // to nothing. Only a wall clock can break out of it.
     await expect(withTimeout(new Promise(() => {}), 50, 'Save')).rejects.toThrow(/Save timed out/)
+  })
+
+  test('marks its own give-up so a caller can tell it from a real failure', async () => {
+    const timedOut = await withTimeout(new Promise(() => {}), 20, 'Save').catch(e => e)
+    expect(isTimeout(timedOut)).toBe(true)
+    const real = await withTimeout(Promise.reject(new Error('boom')), 50, 'Save').catch(e => e)
+    expect(isTimeout(real)).toBe(false)
+    expect(isTimeout(null)).toBe(false)
   })
 
   test('passes a normal success straight through', async () => {
