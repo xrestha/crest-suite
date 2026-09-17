@@ -941,8 +941,13 @@ rules a JSX edit needs are restated in `page-layout.md` on `src/pages/**` and `s
 `navigation.md` and `design-tokens.md`. Other files were narrowed or split the same way, and history
 went to `docs/rules-archive/`. The median load of one IMS file fell from 366k to 217k and a page
 from 178k to 71k (full table in the S770 CHANGELOG entry). **Still open:** the reported metric in
-`check-rules-globs.mjs` described under "Do, when it is picked up", and condensing the
-rule-plus-story sections.
+`check-rules-globs.mjs` described under "Do, when it is picked up".
+
+**Condensing piloted 2026-09-17 (S772) on `dashboards.md`.** Each section is now rule bullets, one
+`Why:` line and a `History:` pointer, with the original text word for word in
+`docs/rules-archive/dashboards.md`. The file is 34% smaller, and a blind scenario test passed 11 of
+11. The S772 CHANGELOG entry ranks the remaining files and lists the method changes proposed for
+the next pass. The other rules files are not yet condensed.
 
 ---
 

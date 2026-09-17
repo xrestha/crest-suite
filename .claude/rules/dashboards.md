@@ -6,374 +6,265 @@ paths:
   - "src/pages/Dashboard.js"
 ---
 
-# Dashboards (ClientDashboard / HrDashboard / OwnerDashboard / GroupDashboard)
+# Dashboards: Client, HR, Owner, Group, Admin overview, and the P&L beside them
 
-> Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
+Rule statements only (S772). Each section's original story, word for word, is in `docs/rules-archive/dashboards.md` at the anchor on its History line. Read it before reversing a rule.
 
-### Three dashboards, deliberately not one (as of S330 analysis)
+## Separate dashboards, deliberately not merged
 
-A client with 2+ modules sees three separate dashboard destinations, each a different altitude and gate — don't merge them without re-reading this:
+- `/dashboard` (`ClientDashboard.jsx`, no plan gate) is the quick glance. `/hr/dashboard` (`HrDashboard.jsx`, `ModuleGate` only, and the page redirects below supervisor) is the working HR console: an Approvals row (Leave/OT/TADA/Swap pending, S330), queue tables you act on, SSF breakdown, advances. `/owner-dashboard` (`OwnerDashboard.jsx`, `SuiteGate` inside the page, Crest Suite Pro) is the cross-module view: margin %, labour cost % (HR wages over IMS revenue, computed nowhere else). It is IMS+HR only; POS is Phase 2. Don't merge them without reading the history.
+- At 2+ modules (`showModuleHeaders`) the `.dash-3col-*` columns (`Layout.css`) stay equal, all `1fr`. Balance density by card count, never by column weight (S438 weighted them, S439 reversed it): IMS's top row is 5 money cards (Net Purchases, Revenue, Food Cost%, Net Margin%, Wastage Value) beside HR's 4 and POS's 4, and the 6 reference cards (Active Period, Items, Vendors, Recipes, Menu Health, Fixed Costs%) plus every chart and table go full width below the grid.
+- The split layout and the 1-module single-column layout compose the same extracted JSX (`imsChartsAndTables` and the card variables). Never fork a second copy of a card.
+- A count shown on both ClientDashboard and HrDashboard reads one hook, `useHrApprovalCounts` (`src/modules/hr/dashboard/useHrApprovalCounts.js`), never two queries.
+- Sales Breakdown renders the manual and POS Category × Day pivots side by side (`PivotTable`, `src/components/PivotTable.jsx`; data from `useSalesPivotData.js` in `src/modules/dashboard/`; `SalesPivot`'s `title` prop is "Manual Sales by Category" / "POS Sales by Category"). The two never tie out. `loadFromSalesEntries` excludes `source` `'pos'` and `'pos_comp'` rows, because `PosOrders.jsx` stamps POS bills into `sales_entries` and showing both pivots would count that revenue twice.
+- Sales Mix buckets combined manual + POS revenue by the real `recipes.category`, one slice per category present, excluding `'Sub-Recipe'`. That is valid only because `Recipes.js` makes category a `<select>` (`recipeCategories`, client-customisable, default `['Food','Beverage','Dessert','Snack','Other']`), not free text. Food and Beverage keep fixed green/purple; other categories take a fallback hex rotation. Every dashboard chart is `ChartCard`-wrapped (S488); hook file names predate the S487 rename and stay.
+- Kitchen/bar `pos_team` (station) accounts get no POS sales breakdown (`showPos && !posIsStationTeam`). Code gap: the original rule said none of Sales Breakdown, but a station login with IMS and sales access still sees the Manual pivot.
 
-- **`/dashboard`** (`ClientDashboard.jsx`, universal, no plan gate) — the "quick glance" one. Already merges IMS/HR/POS sections onto a single page when `clientModules.{ims,hr,pos}` says 2+ are enabled (a `moduleHeader()` per section). S438 first shipped this as **weighted** columns (IMS 1.5fr vs HR/POS 1fr each); live feedback reversed that call for this specific page — three peer modules coexisting for whichever combination a client bought reads differently than a single-purpose executive dashboard, so **S439 made the columns equal** (`.dash-3col-*` in `Layout.css`, all `1fr`) and instead trimmed *card count*: at 2+ modules (`showModuleHeaders`), IMS's top row drops from 11 cards to 5 "money" pills (Net Purchases, Revenue, Food Cost%, Net Margin%, Wastage Value) matching HR's 4 / POS's 4, while the other 6 IMS cards (Active Period, Items, Vendors, Recipes, Menu Health, Fixed Costs%) plus all charts/tables render full-width *below* the equal-width grid instead of squeezed into a narrow column — `imsChartsAndTables` and the individual card JSX are extracted into variables in `ClientDashboard.jsx` so the exact same elements compose into either this split layout or the original untouched single-column arrangement a 1-module client still gets. HR's "Approvals-lite" card (Leave/OT/TADA/Swap pending counts) sources from the shared `useHrApprovalCounts` hook (`src/modules/hr/dashboard/useHrApprovalCounts.js`) so it and the real HR console (`HrDashboard.jsx`'s Approvals row) read one query instead of two independently-drifting copies. The Category × Day sales pivot (`PivotTable`, `src/components/PivotTable.jsx`; data via `useSalesPivotData.js`, `src/modules/dashboard/`) was originally either/or (POS pivot replacing the manual one) — S439 made both render side by side in a shared full-width "Sales Breakdown" section instead (`SalesPivot` now takes a `title` prop: "Manual Sales by Category" / "POS Sales by Category"), since a client can carry real revenue on both and the two were never meant to tie out anyway (same philosophy as the Owner/Manager Report's POS section below). This required `loadFromSalesEntries` (in `useSalesPivotData.js`) to additionally exclude `source:'pos'` rows — a POS-enabled client's `sales_entries` already contains POS-stamped rows (`PosOrders.jsx`'s convention, noted above), so showing both pivots together would otherwise double-count that revenue. Same section also has a **Sales Mix pie**, `ChartCard`-wrapped like every other dashboard chart since S488 (`useFoodBeverageSplit.js` + `FoodBeverageSplit.jsx`, both `src/modules/dashboard/` — file/hook names predate the S487 rename and were left as-is to avoid an unrequested rename ripple) bucketing combined manual+POS revenue by the real `recipes.category` text, one slice per category actually present (`Food`/`Beverage`/`Dessert`/`Snack`/`Other`/custom, excluding `'Sub-Recipe'`) rather than the original fixed Food/Beverage/else-Other 3-way split — legitimate because Recipes.js constrains that field to a real `<select>` (`recipeCategories`, client-customizable but defaults to `['Food','Beverage','Dessert','Snack','Other']`), not free text. Food and Beverage keep fixed semantic colors (green/purple) when present; any other category draws from a small fallback hex rotation local to `FoodBeverageSplit.jsx` (mirrors `ClientDashboard.jsx`'s own `CHART_COLORS`, duplicated rather than shared since it's the only other consumer). Kitchen/bar `pos_team` accounts get none of the Sales Breakdown content (no use for a revenue breakdown).
-- **`/hr/dashboard`** (`HrDashboard.jsx`, `ModuleGate` only) — the operational HR console: an **Approvals** row (Leave/OT/TADA/Swap pending counts, S330) plus queue tables you act on directly, SSF breakdown, advances. This is a working tool, not a glance.
-- **`/owner-dashboard`** (`OwnerDashboard.jsx`, `SuiteGate`, Crest Suite Pro) — the strategic cross-module view: margin%, labor cost% (needs HR wage data + IMS revenue together, computed nowhere else). IMS+HR only so far; POS integration is an explicit Phase 2.
+Why: each page is a different altitude behind a different gate, and weighted columns read wrong in live use.
 
-## `sales_entries.source` is nullable, so a server-side `.neq` on it is a silent undercount
+History: docs/rules-archive/dashboards.md#s439-three-dashboards
 
-Both dashboards were bitten by this and both now select `source` and filter comps in JS, with the
-reasoning at the call site (`ClientDashboard.jsx`'s trend read, `OwnerDashboard.jsx`'s reorder
-read AND its revenue read). `NULL <> 'pos_comp'` evaluates to NULL, not true, so the server-side
-form drops every legacy row whose source predates the column default — and on the Client Dashboard
-it dropped them from REVENUE ONLY, leaving a short denominator under a full numerator and every
-Food Cost % on the chart failing HIGH. Full rule, including why the same defect on `Sales.js`
-DELETED rows rather than merely undercounting them, is in `.claude/rules/ims-figures.md`.
+## A `.neq` on `sales_entries.source` is a silent undercount
 
-**`OwnerDashboard`'s revenue read was the last one and it stood for three sessions after being
-written down here as open (fixed S734).** Worth noting what the delay cost, because the entry read
-like a loose end and was not: that read is the DENOMINATOR of every figure in the page's
-Profitability row, so Food Cost %, Labor Cost % and Prime Cost % each read HIGH against a short
-base while True Net Margin % read LOW — four banded verdicts, all wrong in the direction that
-alarms, on the page sold as the one an owner can act on. **A known defect on a denominator is not
-the same size as a known defect on a figure**; when one is left open, say what divides by it.
+- Select `source` and filter comps in JS, never a server-side `.neq('source', 'pos_comp')`. ClientDashboard's trend read and `loadStats`, and OwnerDashboard's reorder and revenue reads, all do this. Full rule, including why the same defect DELETED rows on `Sales.js`: `.claude/rules/ims-figures.md` (S699).
+- A known defect on a denominator is not the same size as one on a figure. A short revenue base makes Food Cost %, Labor Cost % and Prime Cost % read HIGH and True Net Margin % read LOW, four verdicts wrong in the direction that alarms. When one is left open, say what divides by it (OwnerDashboard's revenue read stood open three sessions until S734).
 
-**S556 added a frozen month-end forecast line to Daily Purchases vs Sales, on the same "capture once, never move" principle as the Monthly Owner Report snapshot above.** The existing dashed projection (`salesProjection`/`purchProjection`) is deliberately *live* — `projectTrend()` refits to every actual day on every load, so it answers "if today's pace continues, where do we land" but has no memory of what it said yesterday. `monthly_periods.sales_projection_snapshot`/`purch_projection_snapshot` (nullable jsonb, migration `20260814130000`) hold `{slope, intercept, cap, capturedDay, projectedMonthEnd}` — **and migration `20260814130000` was not actually applied live until S753 (2026-09-14)**, so for a month every dashboard load logged two `PGRST204` failed saves and no snapshot was ever captured; found in a browser console, not by any check. Captured the first time each metric crosses `projectTrend()`'s own 5-point threshold in the open period and never overwritten afterward — `targetLineValue()` reconstructs a full month-1-to-month-end reference line from that frozen fit, rendered as a third, distinctly-hued dotted line (`DAILY_TREND_COLORS.salesTarget`/`purchTarget` — blue/orange, deliberately not gold/green, since a third same-hue series at that point reads as dash-pattern soup rather than a distinguishable line) alongside the still-live adaptive tail. The write is a best-effort `scopedUpdate(...).is('sales_projection_snapshot', null)` — the `.is()` guard means a second tab racing the same capture can't stomp a snapshot the other just wrote, and both would compute the identical fit from the identical data anyway. Same session, the X-axis ticks were extended to show the BS weekday initial (S/M/T/W/T/F/S, Sunday-first, duplicate letters accepted on purpose — that's literally what was asked for) below each day number, via a custom Recharts `tick` render function closed over `activePeriod.bs_year`/`bs_month` and `bsToAd(...).getDay()`.
+Why: `NULL <> 'pos_comp'` is NULL, so legacy rows dropped out of revenue only, leaving a short denominator under a full numerator.
 
-**`ChartCard`'s expand-modal had no `maxHeight`, so a chart with enough header chrome (legend chips, stat pills, a footer) could overflow the viewport top *and* bottom simultaneously** — a centered `align-items:center` backdrop with a taller-than-viewport child overflows symmetrically, not just at the bottom. Fixed once, for all ~9 charts that use `ChartCard`: `maxHeight: calc(100vh - 48px)` + `overflowY: auto` on the modal panel. Since the modal's own `renderChart(440)` call was a hardcoded constant, the one chart with unusually dense chrome (Daily Purchases vs Sales, after the Target lines shipped) needed a shorter chart area to avoid scrolling just to see the X-axis — `ChartCard` now takes an optional `modalHeight` prop (default `440`, unchanged for every other caller) rather than lowering the shared default for everyone.
+History: docs/rules-archive/dashboards.md#s734-nullable-source-undercount
 
-**`Top Items by Spend` was folded into `Spend by Category` as a second tab (S556), specifically so Daily Purchases vs Sales could take the reclaimed grid column instead of three cards splitting the row evenly.** The row's class changed from the standard `repeat(auto-fit, minmax(280px,1fr))` to a new `.dash-spend-purchases-row` (`Layout.css`) — `1fr 2fr` on desktop, collapsing to `1fr` at the usual 768px breakpoint, same inline-style-can't-be-media-overridden reasoning as `.dash-3col-*`. The merged card's tab state (`spendView`) is plain UI state, not page data — not seeded from or written to `dashboardCache`, resets to `'category'` on remount the way `ChartCard`'s own `expanded` does.
+## Daily Purchases vs Sales: actual, live projection, frozen Target
 
-An `/impeccable critique dashboard` run the same session scored `ClientDashboard.jsx` 28/40 — findings (period-close has no confirmation/error-handling, page density at 2-3 modules, three accessibility gaps) recorded to memory rather than fixed; the first two were fixed in S558 below, and the three accessibility gaps in S569: `ChartCard` titles are real `<h3>`s, single-module pages get `.sr-only` `<h2>`s from `moduleHeader()`, both in-card tab rows route through a shared `ChartTabs` component (roving tabIndex, arrow keys, `aria-controls` → a real `role="tabpanel"` wrapper — idBase is suffixed `big`/`small` because the compact card and its expanded modal render concurrently and would otherwise duplicate DOM ids), the load-error and subscription-expiry banners carry `role="alert"`/`role="status"`, and the six hand-rolled KPI grids point at the named `.stat-grid--compact` variant in `Layout.css` instead of six inline reimplementations.
+- Each metric has three series: the actual line; a live projection (`salesProjection`/`purchProjection`: `projectTrend()` refits on every load once there are 5 points and answers "if today's pace continues", with no memory); and a frozen Target, captured the first time the metric crosses that 5-point threshold in the open period and never moved. Never make the projection remember, or the Target follow the data.
+- The snapshot lives in `monthly_periods.sales_projection_snapshot` / `purch_projection_snapshot` (nullable jsonb `{slope, intercept, cap, capturedDay, projectedMonthEnd}`, migration `20260814130000`), and `targetLineValue()` rebuilds the month-long line from that fit (S556). The write is best effort: `scopedUpdate(...).is('sales_projection_snapshot', null)`. A capture-once write guards with `.is(col, null)` so a racing tab cannot overwrite it.
+- A migration file in the repo does not prove it is live. `20260814130000` was not applied until S753 (2026-09-14); a month of `PGRST204` failed saves was found only in a browser console. Check the live database.
+- The Target is a third, distinct hue (`DAILY_TREND_COLORS.salesTarget` / `purchTarget`, blue/orange), never a dash variant of an existing series' hue.
+- X-axis ticks show the BS weekday initial under each day number (S/M/T/W/T/F/S, Sunday first, duplicate letters intended) through a custom Recharts `tick` using `bsToAd(...).getDay()`.
+- The tooltip arrow on the actual rows is shape = fact, colour = verdict, with opposite polarity: above target is green for Sales and red for Purchases. The full rule is `.claude/rules/design-system.md`, "A signal colour is a verdict" (S634); don't restate or re-derive it.
+- The food-cost band on every dashboard tile comes from the client's own `fc_warning_pct` / `fc_critical_pct` (35/45 are only defaults) via `fcBand()`, with a ✓/△/▲ marker so the verdict is not colour-only.
+- A figure containing the prorated labour estimate (Prime Cost %, True Net Margin %) discloses that inline under the number, never only in a hover.
 
-**S557 folded the Sales Mix pie into a second tab on Revenue vs Cost Breakdown, and deleted `FoodBeverageSplit.jsx`.** The pie used to be its own card sharing the Sales Breakdown row with the manual/POS sales pivots, and it had two real limits worth fixing together: it only rendered at 2+ modules even though a single-module IMS client had always had the underlying revenue data, just no card showing it, and it was competing for row width the pivots needed more (see the S556 Spend/Top-Items merge for the same "one card took a whole column for one view" shape). Now `costCardEffectiveView` picks between `'cost'`/`'mix'` on the merged card exactly like `spendView` does for Spend by Category/Top Items — `ChartCard`'s `title` prop switches with the view, `smallHeight` grows from 140→172 only when both tabs actually exist (`costTabAvailable && mixTabAvailable`) so a client with just one view keeps its original height. The pie itself is unchanged: `useFoodBeverageSplit.js` (the hook, still lives in `src/modules/dashboard/`) computes `salesMixBuckets`/`salesMixCategories` off its own effect, independent of `loadStats`' load cycle, same as before. `FoodBeverageSplit.jsx` (the component file — not the hook) is deleted since nothing imports it anymore; its own local `CHART_COLORS`-mirroring fallback-hex duplication is gone too, since that logic now lives directly in `ClientDashboard.jsx` and no longer needs a second copy for a file living outside the page. `PeriodComparison.js`'s own category-color-fallback comment, which used to point at `FoodBeverageSplit.jsx` as the convention it mirrors, now points at "the Dashboard's Sales Mix" instead — same for `OwnerDashboard.jsx`'s `COST_BREAKDOWN_COLORS` comment. Sales Mix itself carries no tier gate, only a data-source one (`salesMixIncludeManual`/`salesMixIncludePos`), matching what the deleted component always did.
+Why: the dotted line is a target precisely because it does not follow the data, and a print or screenshot loses the hover.
 
-**S558 fixed the critique's P0 and P1, and the P1 fix is worth reading for the reversal, not just the result.** P0: `closeAndAdvancePeriod()` now confirms via `window.confirm` (matching `Periods.js`'s own wording for the identical action), wraps both writes in try/catch/finally so `advancingPeriod` always resolves, surfaces a dismissible `role="alert"` on failure, and treats a `23505` on the insert as benign (next period already exists from a retried click) rather than a real error. P1 shipped **twice** — the first pass hid HR's Total Employees/Active/Payroll and POS's Covers Served/Avg Check/Tables Occupied behind a "Show 3 more" disclosure, collapsed by default, to cut the 2-3 module page down to one headline tile per section. Challenged directly ("what's the point of hiding pills in the dashboard?"), and real dashboard-UX research backed the pushback: a KPI dashboard's whole job is a 5-second read of business state, and the single most-cited progressive-disclosure failure mode is hiding numbers people check *regularly*, not just occasionally — which is exactly what Covers Served/Avg Check/Tables Occupied are for a mid-shift glance. **Reverted for HR/POS**: every card renders unconditionally again; the headline tile (Pending Approvals / Revenue / Open Tickets) gets visual weight only, via size (`kpiValueStyle(22,800)`) and a `gridColumn: 'span 2'` in the 2+ module layout, never via hiding its siblings. **Kept for IMS's reference row** (Active Period, Items in Master, Vendors, Recipes, Menu Health, Fixed Costs %) — defensible to collapse because it was *already* the codebase's own established secondary tier (S439 split IMS into 5 "money" cards vs. these 6 "reference" cards below), and none of the six are something a mid-shift glance needs. Lesson for the next density pass: "one headline tile with more visual weight" and "hide the rest" are not the same fix, and only the tier a page already treated as reference data is safe to collapse.
+History: docs/rules-archive/dashboards.md#s556-frozen-target-line and docs/rules-archive/dashboards.md#s634-three-series
 
-**Same session, a real perceived-load-time fix on `loadStats`/`loadFcTrend`** — reported as "loading time is taking some time and the charts are loading in a jerking fashion" after login. Root cause: `loadFcTrend` used to fire only after `loadStats` fully finished (period fetch → a 15-query `Promise.all` → `explodeRecipeIngredients`'s own up-to-5-round sub-recipe walk), so the FC Trend chart's own ~11-period query never even started until everything else was done — guaranteeing it was the last thing to render, well after its neighbors had already popped in and run their own `chartMotion()` 450ms draw-in. Fixed by decoupling: `loadFcTrend(period, myId)` now fires as soon as `period` is known (right after the period fetch, not awaited) and derives the open period's own Food Cost % point by folding `currentPeriod.id` into its own `.in('period_id', ...)` batch instead of being handed a figure `loadStats` had to finish computing first — costs one period's worth of duplicate purchase/sales rows, buys full concurrency. `loadStats` itself also had 8 of its 15 queries (item/vendor/recipe counts, recipe/item/par_levels reference data) sitting inside the same `Promise.all` as the 7 period-scoped ones for no reason — split into an `independentPromise` fired immediately alongside the period lookup and a `dependentPromise` fired once `period` is known, with `explodeRecipeIngredients` itself kicked off the moment `recipes` resolves (it only needs that, not anything period-scoped) so it runs alongside `dependentPromise` rather than after it. Net: critical path dropped from ~4 serial round-trip stages to ~2 concurrent ones. HR/POS/Sales Mix stay independent pipelines by design (each needs its own `loadIdRef` cancellation guard against a client switch) — this closed the biggest gap (IMS's own chain plus FC Trend tacked onto the end of it), not the whole stagger.
+## `ChartCard`'s expand modal
 
-**Two follow-up table-density fixes on `Stock.js`'s Summary tab, from screenshots.** The category-rollup table (9 columns) had `(NPR)` repeated on 6 of them — real width with nothing behind it, since every sibling report (`VendorReport.js` etc.) already states the currency once rather than per-column; dropped it (headers now read "Opening Stock"/"Purchase"/"COGS" etc., a `Tip` on "Category" says figures are in NPR) and COGS stopped clipping off the right edge. The item-level table below it is a genuinely different shape — 17 real columns (qty *and* value for Opening/Purchased/Wastage/Staff Meals/Closing, plus UOM/Used/Requisitioned/COGS) — so text-trimming couldn't get it onto one screen, and the actual complaint was worse than clipping: reading any one row meant scrolling all the way down past every item to reach `table-wrap`'s horizontal scrollbar, dragging it right, then losing track of which row or column that was for. Fixed with the same `position: sticky` pattern already shipped on `Purchases.js`'s Daily Register (sticky `Total`, `right:0`) and `Sales.js`'s pivot (sticky item name, `left:0`): sticky header (`top:0`) so labels survive any vertical scroll, sticky **Item** (`left:0`) so row identity survives any horizontal scroll, sticky **COGS** (`right:0`) so the bottom-line figure does too — the corner cell (Item's header) needs the highest `zIndex` since it's sticky on both axes at once. A sticky cell needs a fully opaque background (`var(--theme-card)`) so scrolled-away columns don't show through underneath it, which is why the row's `hasData ? 1 : 0.4` dimming had to move from the shared `<tr>` style onto each sticky `<td>` individually — everything else still gets it for free from the row.
+- The modal panel carries `maxHeight: 'calc(100vh - 48px)'` and `overflowY: 'auto'`, fixed once for all ~9 `ChartCard` charts.
+- The modal chart height is the `modalHeight` prop (default `440`, the old hardcoded `renderChart(440)`). A chart with dense chrome passes its own (Daily Purchases vs Sales passes 340). Adjust a shared component per caller through an optional prop; never lower the default for everyone.
 
-**The `overheads` table's three buckets are the recurring trap across all of these.** `Overheads.js` splits fixed costs into `bucket` = `overhead` / `labor` / `tax_fees`, and each consumer deliberately picks a different subset — so "the overhead total" means something different depending on which page you're in, and mixing two pages' conventions silently double-counts labor:
+Why: a centred `align-items: center` backdrop with a child taller than the viewport overflows at the top and bottom at once.
 
-- `ClientDashboard.jsx` uses the **same XOR rule as `Overheads.js` since S756 (owner decision D22)**: `resolveLabour()` in `src/modules/dashboard/labourSource.js` takes a finalized payroll run (gross + overtime + employer SSF) when one exists and the typed `labor` bucket otherwise, never both, and names the source on the Fixed Costs % and Est. Net Margin % tiles. Until S756 it summed all three buckets, so a client running payroll with a blank Labor tab saw a healthy margin here and a loss on Overheads. An IMS staff login on an HR client cannot read `hr_payroll_runs` (restrictive `no_ims_staff` returns `[]`), so both pages say labour is unreadable on that login and withhold the verdict. `Overheads.js` calls the same helper since S756 stage 4, so the rule has one copy.
-- `OwnerDashboard.jsx` and `computeMonthlyReport.js` query `.eq('bucket','overhead')` **only**, because both separately subtract a real HR-payroll labor figure. **Since S756 stage 4 the Owner Dashboard prefers a finalized payroll run** over its prorated estimate, using `finalizedPayrollCost` (the same gross + OT + employer SSF total as every other labour reader, so the trend chart and the tile agree), and names the source on each labour tile. A failed run/payslip/estimate read shows dashes rather than falling back, and a full month's payroll finalized while the month is still running withholds the Labour/Prime/Net Margin verdict (a whole month's wages over part of a month's revenue). **Labour cost from a finalized run is gross + overtime + employer SSF everywhere** (owner decision, S756): `payrollLabourTotal` in `labourSource.js` on every page, and `get_group_summary` / `get_group_pnl` since migration `20260918170000`. `hr_payslips.gross` is basic + allowances only, so a reader that sums `gross` alone silently drops overtime — until then Overheads, ClientDashboard, ConsolidatedPnl and both group functions did, and labour read low in exactly the busy months. Absence deductions are deliberately not subtracted; `payrollCashCost` is the cash-paid figure, a different question.
-- `Recipes.js`'s per-recipe True Cost allocation also uses `bucket='overhead'` only — labor and tax & fees stay period-level and are never distributed per-portion.
-- `Overheads.js` itself — the data-entry page — sums **all three**, but its `labor` bucket is superseded by a finalized HR payroll run when one exists for the period (S716), so it is the same XOR rule `ConsolidatedPnl` applies, computed on one outlet. Until S716 the page could not see payroll at all: an HR client who ran payroll properly and left the Labor tab blank got a Net Profit overstated by their entire wage bill, painted green under "✓ Profitable this period". **That is this trap's other half** — S526 was labour counted twice, this was labour counted zero times, and both come from the same fact that neither source announces the other exists.
+History: docs/rules-archive/dashboards.md#s556-chartcard-modal-height
 
-S526 found the mix live: ClientDashboard's Revenue vs Cost Breakdown pie drew the all-bucket `overheadTotal` as one "Overheads" slice **and** added `hrStats.payroll` on top as a separate "Labor (basic)" slice, so labor was counted twice and the pie's own total (NPR 454k on a real period) exceeded the cost base its neighbouring −57.2% net margin was computed from (401k) by exactly the payroll figure. Fixed by keeping `overheadTotal` intact for the KPI cards and additionally carrying an `overheadBuckets` split on `stats` (the query selects `bucket` alongside `amount`) purely so the pie can render Food Cost → Labor → Overheads → Tax & Fees → Net Margin from one source. **Before adding any labor/payroll figure to an IMS page, check whether the overhead figure beside it already contains one** — the two labor sources (Overheads' manually-entered `labor` bucket vs HR's computed payroll) are never meant to be summed, and neither one announces that it overlaps the other.
+## Spend by Category and Top Items share one card
 
-**`/pnl`** (`ConsolidatedPnl.jsx`, `SuiteGate` with `requireModules={['ims']}`) is a fifth destination and the only one that is a *statement* rather than a dashboard: Revenue → COGS → Gross Profit → operating costs → Net Profit for one BS month, every line sourced from the module that owns it. It computes nothing of its own, which is the point — it reuses MonthlySummary's revenue and COGS rules and `computeUsed()`, so it can never become a third definition of either. `LINES` is one declaration feeding the single-outlet table, the group matrix and the Excel export, because two hand-written copies of labels and tips is exactly how they would drift. A grouped owner gets one column per Suite Pro outlet plus a consolidated total via `get_group_pnl()`.
+- Top Items by Spend is a second tab on Spend by Category (S556), so Daily Purchases vs Sales takes the freed column. The row is `.dash-spend-purchases-row` (`Layout.css`: `1fr 2fr`, `1fr` at 768px), replacing `repeat(auto-fit, minmax(280px,1fr))`.
+- A responsive grid split goes in a CSS class, never an inline style, which a media query cannot override (the same reason as `.dash-3col-*`).
+- Tab or view state (`spendView`, default `'category'`) is UI state, never seeded from or written to `dashboardCache`; it resets on remount like `ChartCard`'s `expanded`.
 
-Three things it enforces that the overheads trap above makes possible:
+Why: three cards splitting the row evenly starved the chart that needed the width.
 
-- **Labour is payroll XOR the Overheads `labor` bucket, never the sum**, applied *per outlet* before consolidating (one branch can run payroll while a sibling enters labour by hand). When both exist the ignored one is **named on screen with its amount** rather than silently dropped — the best copy in the codebase, and the direct answer to the S526 double-count.
-- **It defaults to the most recent CLOSED period**, because COGS subtracts a closing count. An open period renders behind a provisional banner, and a period closed *without* a count gets its own separate warning — two genuinely different failure modes, distinguished.
-- **Colour is decided by `lineColor(line, amount)` and the `strong` flag is not something a caller may force** (S594). It tests `strong && amount > 0` *before* `line.cost`, so `lineColor({ ...l, strong: true }, …)` painted every positive consolidated figure success-green — COGS, Wastage, Labour, Overheads and Tax & Fees rendering as `(NPR 1,240,000)` in green while the identical line sat grey one column left. On the page a multi-outlet owner compares branches with, that made the whole consolidated column read as good news; to an accountant, parenthesised-and-green reads as a credit. If a column needs weight, set `fontWeight`.
-
-A related but distinct artifact, not a fourth dashboard: **`/owner-report`** (`MonthlyOwnerReport.jsx`, `SuiteGate` with `requireModules={['ims']}`) — see "Monthly Owner/Manager Report" below. Where all three above are always live (re-query on every load, reflect the currently-open period), this one is a **frozen snapshot** captured once when a period *closes* and never recomputed afterward, even if the underlying data is later corrected in place.
+History: docs/rules-archive/dashboards.md#s556-spend-by-category-tabs
 
-### Owner-altitude pages need a role guard, not just a Suite gate (S601, extended S617)
+## Dashboard accessibility
 
-`/owner-dashboard`, `/owner-report` and `/pnl` each carry the root `CLAUDE.md` role guard after their hooks (S601): `SuiteGate` checks `suite_plan` and `ProtectedRoute` checks a session, and neither checks a role.
-See `.claude/rules/access-control.md`, "A page reachable by URL needs the guard its nav item implies" (the root `CLAUDE.md` keeps the one-line rule).
-
-**`/group-dashboard` was the fourth and it was worse (S617), because the product advertised it.**
-It had no guard at the route or in the component, and while the sidebar offered it on
-`(isAdmin || isOwner) && outlets.length > 1`, the **command palette** offered it on
-`outlets.length > 1` alone — so a staff account of a grouped client could search its way in. The
-two conditions must match: the palette flattens every module into one searchable list, so any
-gate applied to a nav entry has to be applied there too. Its RPC had the mirror-image hole —
-`get_group_summary()` checked only `my_group_id() IS NULL`, which is a MEMBERSHIP test, and every
-staff account shares its client's `client_id`, so a waiter could have pulled every outlet's
-revenue, purchases and payroll. Both fixed; neither was reachable, because no client has ever had
-a `group_id`.
-
-### The Group Console's two admin sections (S617)
-
-Below the branch table sit **Outlet Access** and **Push master data**, both Owner/admin only by
-virtue of the page guard above.
-
-- **Outlet Access** (`OutletAccessPanel.jsx`) is a matrix of who may switch into which branch. It
-  lives here rather than beside each staff account for a structural reason: `profiles_select` RLS
-  is self-or-admin only, so an Owner cannot read a sibling outlet's staff rows at all — hence
-  `get_group_outlet_access()`, the group-wide sibling of `get_client_profile_names()`. It grants
-  **reach, never rank**. The home outlet renders as a fixed marker, not a checkbox, so nobody can
-  lock a person out of their own branch.
-- **Push master data** (`MasterPushPanel.jsx`) previews before it writes, always. The dry run
-  returns exactly the rows the write pass applies, so the preview cannot drift from the outcome.
-  Three refusals are load-bearing and documented in `.claude/rules/multi-outlet.md`: branch purchase rates are never
-  overwritten, selling price is a separate opt-in, and an unmappable ingredient is reported
-  rather than dropped.
-
-Both panels take their outlet list from the RPC's `rows`, **not** from AuthContext's `outlets` —
-the matrix must include outlets excluded from the figures for want of Suite Pro, since access and
-staffing are not what the group is billed for.
-
-### Daily Purchases vs Sales: three series per metric, and two of them mean opposite things (S634)
-
-The chart carries, per metric, an **actual** line, a **live projection** (`projectTrend()` refits on
-every load — "if today's pace continues, where do we land", with no memory of what it said
-yesterday) and a **frozen Target** (captured once, the first time that metric crosses the 5-point
-threshold in the open period, and never moved again). Confusing the last two is the easiest mistake
-to make here: the dotted line is a target precisely *because* it does not follow the data.
-
-The tooltip's arrow on the two actual rows is **shape = fact, colour = verdict**, with opposite
-polarity per metric — above target is green for Sales and red for Purchases. Full reasoning, and the
-general rule for any cost sitting beside a revenue, is in `.claude/rules/design-system.md` ("A signal
-colour is a verdict, so it inverts where down is the good direction"); don't restate it here, and
-don't re-derive it the next time a report needs the same treatment.
-
-Two smaller things that were wrong and are easy to get wrong again: the food-cost band on every
-dashboard tile comes from the **client's own** `fc_warning_pct`/`fc_critical_pct` (35/45 are only
-defaults) via `fcBand()`, and it carries a ✓/△/▲ marker so the verdict is not colour-only. And a
-figure containing the prorated labour estimate — Prime Cost %, True Net Margin % — must disclose
-that **inline under the number**, not in a hover: a print or a screenshot loses the hover, and both
-tiles carry a red/amber/green verdict.
-
-### MRR arithmetic is shared with Admin → Clients (S643)
-
-`AdminDashboardOverview.jsx` no longer owns `clientMRR()`. It lives in `src/shared/clientMrr.js`
-(`clientMRR` / `clientMrrBreakdown`, pure over `(client, planPrices)`) because Admin → Clients needs
-the same per-client figure — that page activates modules, extends dates and toggles Suite, so it
-changes MRR and used to show none of it. `clientMrr.test.js` pins every rule; the reasoning for each
-is in `.claude/rules/access-control.md` (the billed-axis section); the root `CLAUDE.md` keeps only the "do not write a second copy" rule. **Never re-derive a client's monthly value here.**
-
-### The Owner Dashboard's four KPI ratios have one definition, and it is not this file (S660)
-
-`fcBand(pct, settings)` (`shared/imsFormulas.js`) bands Food Cost %; `lcBand` / `pcBand` / `nmBand`
-(`shared/operatingBands.js`) band Labour, Prime and True Net Margin. **None of the four is an inline
-ternary any more**, and the reason is that three of them were: the same 30/37, 60/65 and ≥20/≥10
-thresholds the Monthly Owner Report already had, written out a second time here — and **without the
-✓/△/▲ marks**, sitting immediately beside a Food Cost tile that had them. One KPI row, one metric
-banded accessibly and the three next to it not.
-
-Two things to preserve when touching them:
-
-- **Render `bandFigure(pct, bander).text`, not `bander(pct).color`.** The helper appends the mark to
-  the number precisely so a call site cannot take the colour and drop the shape, which is exactly
-  what happened here.
-- **`canOverheads` gates the FIGURE, not just its colour.** Without Overheads there is no margin, so
-  True Net Margin stays unbanded and unmarked rather than painting a verdict on a number the page
-  cannot compute — the same rule as "don't let a page show a number it has not computed".
-
-`Roster.jsx`'s Labor Forecast tab reads `lcBand` too, so a day that reads healthy on the roster
-board reads healthy here. It used to carry its own `> 35 ? amber`, which agreed with neither.
-**A shared band needs a shared numerator as well (S692):** that tab priced hours at basic pay while
-this page counts gross + OT + employer SSF, so the same band told two stories; `loadedHourlyRateOf`
-in `laborForecast.js` now mirrors `computeMonthlyReport.js`'s estimate per hour, and its past days
-divide by `sales_entries` revenue — this page's own denominator. Detail in `hr-payroll.md`.
-**Sales per Labour Hour now has a second home, and they must keep meaning the same thing (S693).**
-The Monthly Owner Report computes it for one closed period as `ims.revenueTotal / actualHoursWorked`;
-Roster's Labor Forecast learns it over a trailing 120 days to say how many hours a day NEEDS. Same
-unit, same revenue definition, deliberately — so an owner can read one against the other. Two real
-differences to state rather than smooth over: the roster figure includes days whose hours came from
-the roster because Attendance had not arrived (scaled by a measured bias), and it excludes outlier
-days. If either definition moves, move both.
-
-### A branch the page knows about must be said out loud (S683)
-
-Three places rendered a figure or a table while silently omitting what the page KNEW was missing.
-`ConsolidatedPnl.jsx` printed Labour as `NPR 0` with an empty annotation when HR is off — Net Profit
-overstated by exactly the labour nobody entered — and `MonthlyOwnerReport.jsx` dropped whole sections
-per `modules_included` with nothing naming the gap, so a reader took "no HR section" for "nothing to
-report". Both now say it: the P&L carries a banner (*Labour is from Overheads only — Crest HR is not
-enabled*) and the row annotation names the state, and the Owner Report lists what was not enabled
-when it was generated under its own header. `GroupDashboard.jsx` was the failed-read form of the same
-thing: its KPI strip was gated on `!error` and its table was not, so a failed `get_group_summary`
-rendered *"Nothing here is a real figure"* directly above *"No outlets in this group"* (rows is `[]`
-on failure). The table and both admin panels now wait for a successful read. **A page that branches on
-a module flag or an error owes the reader the sentence for the branch it took.**
-
-## A module section gates on the viewer's rank, not only on the client's module (S750)
-
-`ClientDashboard`'s `showIms` / `showHr` / `showPos` each need BOTH halves: `clientModules.x` (the
-client bought it) and `hasXAccess('staff')` (this login may see it). POS had only the first until
-S750's browser check, so an HR-only login got a Point of Sale section reading Revenue NPR 0, 0 bills,
-0 tables beside the Owner's real figures — the staff-isolation policies return an RLS-empty read, not
-an error, and the section painted it as a quiet day. The same shape one rank deeper: the HR employee
-and payroll tiles are hidden below supervisor (`hasHrAccess('supervisor')`), because `no_hr_staff_rank`
-empties those reads for staff rank. **When a fence is added to a table a dashboard tile reads, gate
-the tile at the same rank in the same change** — the zero is otherwise indistinguishable from a real
-one.
-
-## The getting-started card is one component with two visibility rules (S697)
-
-`src/pages/dashboard/GettingStartedCard.jsx` is the only place a new owner is told what to do
-first. `ClientDashboard` decides **whether** it renders (IMS empty — no items, no purchases — or
-the client is on a trial); the card decides **which module lists** to show (Stock & costing
-always; Staff & payroll and Billing only while their first step is undone off-trial, and until
-every step is done on a trial) and removes itself when none remain. Keep both halves: the parent
-rule is what stops a paying client seeing the card every month at `purchaseTotal 0`, and the card's
-own rule is what lets a trial keep its checklist after the first item exists. It reads its four
-HR/POS head counts itself, only when rendered — **do not fold them into ClientDashboard's main
-load**, which most clients pay for on every visit and which never needs them. A failed count
-withholds that list; this is guidance, not a figure, so `firstError()` does not apply.
-
-## The five dashboards share one vertical rhythm, and one KPI card (S700)
-
-`.dash-section` (28px) and `.dash-row` (16px) in `Layout.css` are the rhythm. A section heading
-holds **8px** above its own content, which is the point: 28-against-8 is a 3.5x contrast, and that
-ratio — not the absolute gap — is what makes a group read as a group. ClientDashboard had been
-running 10-under-14 (1.4x) and its module headings floated free of the cards they named; a spacing
-sweep found **14 distinct vertical intervals** across the five files against a documented 4/8/16/24
-scale, and four different section intervals (14 / 16 / 20 / 28) with nothing choosing between them.
-
-Four things about those two classes matter when adding to a dashboard:
-
-- **They are declared AFTER `.stat-grid` and `.stat-grid--compact`**, so a grid that IS a section
-  takes `stat-grid dash-section` and wins the tie on equal specificity, and a compact pill row that
-  needs a gap below it takes `stat-grid stat-grid--compact dash-row` — beating that class's own
-  `margin-bottom: 0`. Move either declaration and both stop working, silently.
-- **Both zero on `:last-child`**, and that is what makes them safe to apply unconditionally. This
-  JSX is conditional almost everywhere — which block renders last depends on which modules a client
-  bought — so a plain bottom margin stacks on `.main-content`'s 32px bottom padding for some clients
-  and not others, and a row landing last inside a section doubles up with the section's own gap.
-- **They step to 16/8 under 768px.** `.main-content` drops 32 → 16 there, and 28 would separate
-  sections by nearly twice the page's own margin on the screen with the least room to give.
-- **A block inside `.dash-3col-*` gets NO margin of its own.** HR and POS carried `marginTop: 6`
-  and `marginBottom: 14`, written when the module blocks stacked; once S438/S439 made them grid
-  columns the top margin stopped being a separator and became a column OFFSET, so Inventory's
-  heading sat 6px above the other two. On the phone, where the grid collapses to one column, the
-  same margins compounded with its 16px row-gap into 36px. The grid's gap is the only thing that
-  should space them.
-
-**The KPI card is `.stat-card`, in one of two tiers.** Plain `.stat-card` for a `.stat-grid`
-(`gap: 0`, so the class's `-1px` margins collapse each pair of adjacent borders into one drawn line
-and its shadow is dropped to do it); `.stat-card stat-card--compact` for a strip that has a real
-gap (`8px 16px`, no seam pull, shadow kept). Before S700 three dashboards had typed the same five
-box properties out inline and landed on their own padding — `10px 14px`, `14px 16px`, `12px 14px`
-against the class's `20px` — and two of them sat in a `gap: 0` grid **without** the seam pull or
-the shadow reset, so thirteen KPI cells drew 2px double rules with their shadows overlapping at
-every join. GroupDashboard had the same defect one step removed, using `.card` in that grid.
-`.card--compact` (16px) is the matching tier for a whole card, ChartCard included.
-
-**A loading skeleton must be the same grid as the content it stands in for.** AdminDashboardOverview's
-was `minmax(190px)` / `gap: 14` / `alignItems: start` against the real strip's `158` / `8` /
-`stretch`, so the skeleton laid out fewer columns at a different height and the page jumped when
-the data landed. A skeleton that does not match is a layout shift with extra steps.
-
-**Verify a cascade claim by measuring it.** Every statement above was checked by rendering the real
-`Layout.css` in a browser and reading `getComputedStyle` at 1440 and 390 — which tie wins, which
-`:last-child` fires, what the compact gutter actually renders as (the declared 8px had been coming
-out as **7px**, because `.stat-card`'s seam pull is meaningless once there is space between cells).
-Specificity reasoning is a hypothesis; the computed value is the fact.
-
-## Every KPI tile re-analysed, S734 — the three shapes it came back in
-
-A sweep across all five KPI surfaces (`/dashboard`, `/hr/dashboard`, `/owner-dashboard`,
-`/group-dashboard`, the admin overview). The findings were not five unrelated bugs; they were three
-shapes, each appearing on more than one dashboard, and each worth checking on the sixth.
-
-**1. A tile reads a table without paging it — and the MASTER-DATA reads were the ones left.** The rule lives in the root `CLAUDE.md`
-and the sweep histories in `frontend-performance.md`; what dashboards add is that a KPI tile is the
-LAST place a truncation is noticed, because there is no row list beside it to look short. Three
-were found: `pos_orders` on `loadPosStats` (Revenue, Covers, Bills, Avg Check — one row per bill,
-so 40 bills a day crosses 1,000 inside one period, while `SalesReport` and `CoversReport`, the two
-pages those tiles link to, already page the same table); `staff_meals` on both the Client and Owner
-dashboards, each sitting in the same `Promise.all` as a `wastages` read that WAS paged; and
-`payable_payments` on Overdue Payables, hung off a paged read's id list with a bare `.in()`, which
-is a 414 at a few hundred uuids and a silent truncation under 1,000 either way. **Ask rows-per-what
-for every read behind a tile, and check its neighbours in the same batch** — in all three cases the
-correct version was one array element or one page away.
-
-The second pass found nine more, and every one was **master data**: `items`, `recipes`,
-`par_levels`, `opening_stock`, `closing_stock`, `vendor_returns` across both dashboards, plus an
-unpaged `pos_orders` feeding a paged `pos_order_items` in `useSalesPivotData`. They had survived
-every previous sweep because a transaction table obviously grows and a master table obviously does
-not — which is the wrong question. **On a dashboard these reads are MAPS, and the transaction rows
-looked up in them are already complete**, so a truncation does not shorten a visible list; it
-deletes rows from a figure computed over everything:
-
-| producer | what a row past the cut does |
-| --- | --- |
-| `recipes` | prices its sales at **0** — Revenue understated, so every ratio dividing by it fails HIGH |
-| `items` | values its wastage and spend at **rate 0** — reads low, i.e. like a good month |
-| `par_levels` | reads as "no par set" — the item can never surface as below par |
-| `opening_stock` / `closing_stock` | reads as a **zero count** — a large false over-consumption in Variance |
-
-None of those shortens anything on screen, which is why none of them was ever reported. Ask what a
-missing row does to the ARITHMETIC, not to the list. And when leaving one bare, write its
-rows-per-what down beside it — `overheads` (one row per named fixed cost per period, tens of rows)
-is the only read on these two pages that is deliberately unpaged, and it now says so.
-
-**2. A count of zero that nobody computed, painted as the good state.** `useHrApprovalCounts`
-discarded `{ error }` from four `head: true` queries, so a refusal returned null, `|| 0` made it a
-zero, and both consumers spent their reassuring vocabulary on it — "0 · all clear" in green on
-HrDashboard's four tiles, a neutral 0 on ClientDashboard's Pending Approvals. The Admin Dashboard
-had it at platform scale: "0 active · 0 inactive · 0 total properties" over "NPR 0" MRR.
-
-The general rule ("a failed read is not an empty list") is already everywhere in this repo. The
-dashboard-specific corollary is sharper and is what these sites missed: **on a queue tile, zero is
-the OUTCOME THE READER WANTS, so a failed read does not merely show a wrong number — it actively
-tells them not to look.** A tile whose empty state is good news needs a third rendering, distinct
-from both the good state and the loading state; ours is an em-dash plus "count unavailable — open
-the page". Hold a shared hook to the same standard: it must RETURN the failure, because only the
-consumer knows how its own tile says so.
-
-**3. The same metric banded differently one page over.** `operatingBands.js` was written to end
-this and its own header names the three copies it found. `GroupDashboard` was a fourth, unlisted,
-with its own `pctColor(v, good, warn)` on `(35, 45)` food / `(25, 35)` labour — so 26% labour was
-amber there and green on the Owner Dashboard. And all three ratio tiles on `ClientDashboard` printed
-a bare percentage in a verdict colour with **no ✓/△/▲**, while the identical metrics on three other
-surfaces carry it.
-
-Two things generalise past this sweep:
-
-- **`bandFigure(pct, bander).text`, never `bander(pct).color`.** Already the stated rule; what S734
-  adds is that the drift reappears wherever a call site needs to wrap the band in something else —
-  here a settle-day guard — because the wrapper is written around the COLOUR and the mark is
-  dropped in passing. Wrap the whole figure (`verdictFigure` in `ClientDashboard.jsx` returns
-  `{ color, title, text }`), not the hue.
-- **A hardcoded 35/45 is not merely a duplicate, it is an override.** Those two numbers are the
-  DEFAULTS behind `fc_warning_pct`/`fc_critical_pct`, so a local copy silently un-honours a setting
-  the client changed — and does it only on the page that copied it, which is the hardest kind of
-  inconsistency to report.
-
-**A settle guard belongs on every lumpy ratio on the page, not on the ones someone remembered.**
-`periodTooEarly` greys Food Cost % and Est. Net Margin % before day 10 and had never been applied
-to **Fixed Costs %**, which is the lumpiest of the three: a month's rent is one row entered on
-whatever day someone gets to it, so a day-3 outlet read several hundred percent in red. Two of
-three ratios greying out and the third not also makes the two that do look like the exception. And
-withhold the MARK with the colour — a ✓ on a day-4 figure is the same claim in a quieter voice.
-
-## Two tiles called "Revenue", 13% apart, on one screen (S734)
-
-An IMS+POS client sees the Inventory section's **Revenue** (`sales_entries` at the ex-VAT,
-post-discount `unit_price` — which already CONTAINS every POS bill, since `PosOrders` stamps a row
-per closure) beside the POS section's **Revenue** (`pos_orders.paid_amount`, the amount actually
-tendered, VAT included). The same trade, counted twice, under one word, in two columns.
-
-**Neither figure is wrong and neither should be changed to match**: every ratio on the page divides
-by the ex-VAT base, and a till total that excluded VAT would not tie to the cash drawer. The defect
-was that nothing on either card said which was which. Both now name their basis in the subtext
-(`Sales entries, excl. VAT` / `billed, incl. VAT`) and each tip points at the other.
-
-The transferable test: **when two tiles on one page share a label, they must differ in their
-subtext, not only in their source code.** A reader comparing two numbers assumes the label is the
-definition.
-
-## Two gaps the Owner Dashboard had that no other dashboard did (S734)
-
-Worth naming separately, because both were absences rather than mistakes — nothing on the page was
-wrong to read, so neither could be found by looking at a figure.
-
-**It was the only one of the five with no load-cancellation guard.** ClientDashboard and
-HrDashboard each carry a `loadIdRef` with a comment explaining it; this page ran five multi-second
-loaders with nothing identifying which load was current, so an admin switching "view as" client
-mid-load let the PREVIOUS tenant's revenue, payroll and payables land last and repaint the page
-under the new client's name in the header. The stakes are higher here than on the pages that
-already guard: these are cross-module money figures, and once two tenants' numbers are mixed there
-is nothing on screen that could tell them apart. Each loader now takes `myId` and re-checks after
-every await — including the extra awaits (`payable_payments`, the recipe walk) that sit after the
-main batch, which is where a single check at the top of the function would have missed it.
-
-**And it labelled every tile "(MTD)" while carrying none of the settle guard.** `periodTooEarly`
-has greyed ClientDashboard's lumpy ratios before day 10 for a long time; the page that exists to
-make these figures trustworthy had none of it, so a day-3 outlet that had just bought the month's
-rice wore a red ▲ on Food Cost % under a tooltip inviting the owner to act, with Prime Cost % and
-True Net Margin % inheriting it.
-
-**The interesting half is what was NOT greyed.** Labor Cost % keeps its band from day one: it is
-prorated by elapsed days against revenue accruing over the same days, so the ratio is settled even
-when the month is not. Greying it "for consistency" would be its own lie — the guard's claim is
-that a verdict is shown once it has been earned, not that early-month figures are all suspect.
-Apply it per metric, by asking whether the numerator accrues on the same clock as the denominator.
+- `ChartCard` titles are real `<h3>`s, and a single-module page gets `.sr-only` `<h2>`s from `moduleHeader()`.
+- Every in-card tab row goes through the shared `ChartTabs` (roving tabIndex, arrow keys, `aria-controls` pointing at a real `role="tabpanel"` wrapper). A component rendered twice at once, like the compact card and its expanded modal, suffixes its ids (`idBase` + `big`/`small`) so DOM ids never duplicate.
+- The load-error banner carries `role="alert"` and the subscription-expiry banner `role="status"`.
+- A KPI grid uses the named `.stat-grid--compact` variant in `Layout.css`, never an inline reimplementation (there were six).
+
+Why: the `/impeccable critique dashboard` run (28/40, S556) found three accessibility gaps, fixed in S569.
+
+History: docs/rules-archive/dashboards.md#s569-critique-and-accessibility
+
+## Sales Mix is a tab on Revenue vs Cost Breakdown
+
+- Sales Mix is the second tab of Revenue vs Cost Breakdown (S557), and `FoodBeverageSplit.jsx` is deleted. `costCardEffectiveView` picks `'cost'`/`'mix'` the way `spendView` does, and `ChartCard`'s `title` switches with it.
+- `smallHeight` is 172 only when both tabs exist (`costTabAvailable && mixTabAvailable`), otherwise 140: a card with one view keeps its original height.
+- Don't gate a card on module count when a single-module client has the data (the pie once rendered only at 2+ modules).
+- `useFoodBeverageSplit.js` (the hook, still in `src/modules/dashboard/`) returns `{ buckets, loading, error }` from its own effect and its own `loadIdRef`, independent of `loadStats`' cycle. ClientDashboard derives `salesMixBuckets` / `salesMixCategories` from it and owns the category fallback colours.
+- Sales Mix carries no tier gate, only data-source gates (`salesMixIncludeManual` / `salesMixIncludePos`).
+- When deleting a file that other comments cite as a convention, repoint them: `PeriodComparison.js` cites "the Dashboard's Sales Mix", and `OwnerDashboard.jsx`'s colour comment cites ClientDashboard's `COST_BREAKDOWN_COLORS`.
+
+Why: the pie competed for row width the pivots needed, and was hidden from single-module clients who had the data.
+
+History: docs/rules-archive/dashboards.md#s557-sales-mix-tab
+
+## Headline tiles get weight, never hidden siblings; period close from the dashboard
+
+- On a 2–3 module page every HR and POS card renders. The headline tile (Pending Approvals / Revenue / Open Tickets) gets weight only through size (`kpiValueStyle(22, 800)`) and `gridColumn: 'span 2'`.
+- Never put a KPI people check regularly behind a disclosure (S558's "Show 3 more" on HR and POS was reverted). Only a tier the page already treats as reference data may collapse: IMS's six reference cards, from the S439 split.
+- Period close from the dashboard confirms first, always releases its busy flag, and shows failure. Today `askPeriodClose()` runs the preflights and opens a `ConfirmModal`; `closeAndAdvancePeriod()` calls `performPeriodClose` (`src/pages/periods/closePeriod.js`; see `.claude/rules/owner-report.md`) in a try/finally so `advancingPeriod` always resets, and shows `closeFailureText(...)` in a `role="alert"` that the next attempt clears. A `23505` on the next-period insert is benign (a retried click) and is handled inside `performPeriodClose`.
+
+Why: a KPI dashboard is a 5-second read, and hiding numbers people check regularly is the most-cited progressive-disclosure failure.
+
+History: docs/rules-archive/dashboards.md#s558-period-close-and-disclosure
+
+## Start each dashboard load as soon as its inputs exist
+
+- `loadFcTrend(period, myId)` fires, unawaited, as soon as `period` is known, and folds the open period's id into its own `.in('period_id', ...)` batch instead of waiting for a figure from `loadStats`. A small duplicate read is the price of concurrency.
+- `loadStats` fires `independentPromise` (item/vendor/recipe counts and recipe/item/`par_levels` reference data, 8 of the old 15-query `Promise.all`) alongside the period lookup, and `dependentPromise` (the 7 period-scoped reads) once `period` is known. `explodeRecipeIngredients` (up to 5 sub-recipe rounds) starts as soon as `recipes` resolves.
+- Never queue a chart's load behind a load it does not need.
+- HR, POS and Sales Mix stay separate pipelines, each with its own `loadIdRef` guard against a client switch. Don't fold them into `loadStats`.
+
+Why: FC Trend's ~11-period query started last and popped in after its neighbours' 450ms `chartMotion()` draw-in, which read as jerky; ~4 serial stages became ~2 concurrent ones.
+
+History: docs/rules-archive/dashboards.md#s558-load-decoupling
+
+## The `overheads` buckets: labour is payroll XOR the `labor` bucket
+
+- `Overheads.js` splits fixed costs into `bucket` = `overhead` / `labor` / `tax_fees`, and each consumer picks a different subset, so "the overhead total" means something different on each page.
+- Labour is a finalized payroll run XOR the typed `labor` bucket, never both (S756, owner decision D22). `resolveLabour()` in `src/modules/dashboard/labourSource.js` decides it for `ClientDashboard.jsx` and for `Overheads.js` (S756 stage 4), and names the source on the Fixed Costs % and Est. Net Margin % tiles.
+- A login that cannot read `hr_payroll_runs` (an IMS staff login on an HR client; restrictive `no_ims_staff` returns `[]`) says labour is unreadable and withholds the verdict. Never fall back silently.
+- `OwnerDashboard.jsx` and `computeMonthlyReport.js` read `.eq('bucket','overhead')` only, because both subtract labour separately. OwnerDashboard prefers a finalized run (`finalizedPayrollCost`) over its prorated estimate and names the source on each labour tile. A failed run, payslip or estimate read shows dashes, never a fallback, and a full month's payroll finalized while the month is still running withholds the Labour / Prime / Net Margin verdict.
+- Labour from a finalized run is gross + overtime + employer SSF everywhere: `payrollLabourTotal` (`labourSource.js`) on every page, and `get_group_summary` / `get_group_pnl` since migration `20260918170000`. `hr_payslips.gross` is basic + allowances only, so summing it alone drops overtime. Absence deductions are not subtracted; `payrollCashCost` (`src/modules/hr/payroll/payrollData.js`) is the cash-paid figure, a different question.
+- `Recipes.js`'s per-recipe True Cost uses `bucket='overhead'` only; labour and tax & fees are never distributed per portion.
+- `Overheads.js` sums all three buckets, but a finalized payroll run supersedes its `labor` bucket (S716), the same XOR `ConsolidatedPnl` applies. A page that sums buckets must also see payroll.
+- A chart that splits a cost total carries the bucket split (`overheadBuckets` on `stats`; the read selects `bucket` with `amount`), so the pie draws Food Cost → Labor → Overheads → Tax & Fees → Net Margin from one source while `overheadTotal` stays intact for the KPI cards. Never add a second labour figure on top of an all-bucket total.
+- Before adding any labour or payroll figure to an IMS page, check whether the overhead figure beside it already contains one.
+
+Why: the two labour sources never announce each other. S526 counted labour twice (the pie totalled NPR 454k against a 401k cost base beside a −57.2% net margin), and before S716 Overheads counted it zero times under "✓ Profitable this period".
+
+History: docs/rules-archive/dashboards.md#s756-overheads-bucket-trap
+
+## `/pnl` is a statement and computes nothing of its own
+
+- `/pnl` (`ConsolidatedPnl.jsx`, `SuiteGate` with `requireModules={['ims']}` inside the page) runs Revenue → COGS → Gross Profit → operating costs → Net Profit for one BS month, each line from the module that owns it.
+- Its revenue and COGS follow MonthlySummary's rules and `computeUsed()`, so it never becomes a third definition. Code gap: only `computeUsed` and `COGS_FORMULA` are imported (`shared/imsFormulas.js`); the revenue and COGS conventions are re-implemented with comments citing MonthlySummary, so a change there must be mirrored here by hand.
+- `LINES` is one declaration feeding the single-outlet table, the group matrix and the Excel export. Never write a second label or tip list.
+- A grouped owner gets one column per Suite Pro outlet plus a consolidated total via `get_group_pnl()`.
+- Labour is payroll XOR the Overheads `labor` bucket per outlet, before consolidating (one branch can run payroll while a sibling types labour). When both exist, the ignored one is named on screen with its amount.
+- It defaults to the most recent CLOSED period, because COGS subtracts a closing count. An open period shows a provisional banner, and a period closed without a count gets its own separate warning.
+- Colour comes from `lineColor(line, amount)`, which tests `strong && amount > 0` before `line.cost`. Never pass `{ ...l, strong: true }` to add weight; set `fontWeight` (S594 painted every positive consolidated cost success-green, `(NPR 1,240,000)`).
+
+Why: two hand-written copies of a definition drift, and green on a parenthesised cost reads as a credit to an accountant.
+
+History: docs/rules-archive/dashboards.md#s594-consolidated-pnl
+
+## `/owner-report` is a frozen snapshot
+
+- `/owner-report` (`MonthlyOwnerReport.jsx`, `SuiteGate` with `requireModules={['ims']}`) is not a dashboard: it is captured once when a period closes and never recomputed, even if the data is corrected in place later. Its rules are in `.claude/rules/owner-report.md`.
+
+Why: every other page here re-queries the open period on each load; this one keeps what a closed period looked like.
+
+History: docs/rules-archive/dashboards.md#owner-report-snapshot
+
+## Owner-level pages carry a role guard
+
+- `/owner-dashboard`, `/owner-report`, `/pnl` and `/group-dashboard` each run `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />` after their hooks (S601, S617). `SuiteGate` checks `suite_plan` and `ProtectedRoute` a session; neither checks a role. The rule lives in root `CLAUDE.md` and `.claude/rules/access-control.md` ("A page reachable by URL needs the guard its nav item implies").
+- The command palette applies every gate a nav entry has. `Layout.js` builds `paletteItems` through the same `isItemVisible` check (`ownerOnly`, `needsGroup`) as the sidebar; before S617 the palette offered `/group-dashboard` on `outlets.length > 1` alone.
+- A group RPC's membership test (`my_group_id() IS NULL`) is not authorisation, because every staff account shares its client's `client_id`. `get_group_summary()` checks `COALESCE(is_admin(), false) OR COALESCE(is_client_owner(), false)` first.
+
+Why: restrictive RLS returns an empty read, not an error, so a staff login got a confident wrong page (a P&L at 100% margin). Both S617 holes went unexploited only because no client has ever had a `group_id`.
+
+History: docs/rules-archive/dashboards.md#s617-owner-pages-role-guard
+
+## The Group Console's admin sections
+
+- Below the branch table, Outlet Access and Push master data are Owner/admin only through the page guard.
+- Outlet Access (`OutletAccessPanel.jsx`) grants reach, never rank. It reads `get_group_outlet_access()`, the group-wide sibling of `get_client_profile_names()`, because `profiles_select` RLS is self-or-admin. The home outlet renders as a fixed marker, never a checkbox, so nobody can be locked out of their own branch.
+- Push master data (`MasterPushPanel.jsx`) always previews before it writes, and the dry run returns exactly the rows the write applies. Its three refusals are in `.claude/rules/multi-outlet.md`: branch purchase rates are never overwritten, selling price is a separate opt-in, and an unmappable ingredient is reported rather than dropped.
+- Both panels take their outlet list from the RPC's `rows`, never AuthContext's `outlets`, so the matrix includes outlets excluded from the figures for want of Suite Pro.
+
+Why: access and staffing are not what the group is billed for.
+
+History: docs/rules-archive/dashboards.md#s617-group-console-admin-sections
+
+## MRR is never computed on a dashboard
+
+- Never re-derive a client's monthly value here. `clientMRR` / `clientMrrBreakdown` live in `src/shared/clientMrr.js` (pure over `(client, planPrices)`), shared by `AdminDashboardOverview.jsx` and Admin → Clients (S643), and `clientMrr.test.js` pins every rule. Reasoning: `.claude/rules/access-control.md`, the billed-axis section.
+
+Why: Admin → Clients activates modules and toggles Suite, so it changes MRR and must show the same figure.
+
+History: docs/rules-archive/dashboards.md#s643-mrr-arithmetic
+
+## KPI bands have one definition each
+
+- `fcBand(pct, settings)` (`shared/imsFormulas.js`) bands Food Cost %; `lcBand` / `pcBand` / `nmBand` (`shared/operatingBands.js`) band Labour (30/37), Prime (60/65) and True Net Margin (≥20/≥10) (S660). Never an inline ternary: any page banding these imports them.
+- Render `bandFigure(pct, bander).text`, never `bander(pct).color`. The helper appends ✓/△/▲ so a call site cannot keep the colour and drop the shape.
+- `canOverheads` gates the FIGURE, not just its colour: without Overheads, True Net Margin stays unbanded and unmarked.
+- A shared band needs a shared numerator (S692). `Roster.jsx`'s Labor Forecast reads `lcBand`, and `loadedHourlyRateOf` (`laborForecast.js`) mirrors `computeMonthlyReport.js`'s per-hour estimate, with past days divided by `sales_entries` revenue. Detail: `.claude/rules/hr-payroll.md`. Code gap: `laborForecast`'s SSF requires `ssf_no`; the Owner Report estimate does not.
+- Sales per Labour Hour has two homes that must mean the same thing (S693): the Owner Report's `ims.revenueTotal / actualHoursWorked` for one closed period (`computeLaborAnalyticsSection.js`), and Roster's Labor Forecast over a trailing 120 days. State their real differences rather than smoothing them: the roster figure uses roster hours where Attendance has not arrived (scaled by a measured bias) and excludes outlier days. If either definition moves, move both.
+
+Why: three of the four were inline copies of the Owner Report's thresholds, and without ✓/△/▲ beside a Food Cost tile that had them.
+
+History: docs/rules-archive/dashboards.md#s693-kpi-ratio-bands
+
+## Say out loud which branch the page took
+
+- A page that branches on a module flag or an error owes the reader the sentence for the branch it took (S683).
+- Never render a line from a switched-off module as `NPR 0`. `ConsolidatedPnl.jsx` shows a banner (*Labour is from Overheads only — Crest HR is not enabled*) and names the state on the row; `MonthlyOwnerReport.jsx` lists what `modules_included` left out under its header.
+- Every block that depends on a read waits for that read to succeed. `GroupDashboard.jsx`'s KPI strip, table and both admin panels all wait on `get_group_summary` (it once rendered *"Nothing here is a real figure"* above *"No outlets in this group"*, because `rows` is `[]` on failure).
+
+Why: a missing section reads as "nothing to report", and an empty-list message under an error contradicts it.
+
+History: docs/rules-archive/dashboards.md#s683-branch-said-out-loud
+
+## A module section gates on the viewer's rank
+
+- `ClientDashboard`'s `showIms` / `showHr` / `showPos` each need `clientModules.x` (the client bought it) AND `hasXAccess('staff')` (this login may see it). HR employee and payroll tiles also need `hasHrAccess('supervisor')`, because `no_hr_staff_rank` empties those reads for staff rank.
+- When a fence is added to a table a tile reads, gate the tile at the same rank in the same change.
+
+Why: the staff-isolation policies return an empty read, not an error, so an HR-only login saw POS Revenue NPR 0, 0 bills, 0 tables as a quiet day (S750).
+
+History: docs/rules-archive/dashboards.md#s750-module-rank-gate
+
+## The getting-started card
+
+- `src/pages/dashboard/GettingStartedCard.jsx` is the only place a new owner is told what to do first (S697). `ClientDashboard` decides WHETHER it renders (IMS empty, meaning no items and no purchases, or the client is on a trial; it also needs `showIms` and an active period). The card decides WHICH lists (Stock & costing always; Staff & payroll and Billing only while their first step is undone off-trial, and until every step is done on a trial) and removes itself when none remain. Keep both halves.
+- The card reads its four HR/POS head counts itself, only when rendered. Never fold them into ClientDashboard's main load.
+- A failed count withholds that list; `firstError()` does not apply, because this is guidance, not a figure. Code gap: only the employees and tables counts do; attendance and orders fall back to `?? 0`.
+
+Why: the parent's rule stops a paying client seeing the card every month at `purchaseTotal 0`; the card's rule lets a trial keep its checklist after the first item exists.
+
+History: docs/rules-archive/dashboards.md#s697-getting-started-card
+
+## Vertical rhythm and the KPI card
+
+- `.dash-section` (28px) and `.dash-row` (16px) in `Layout.css` are the rhythm across all five dashboards (S700). A section heading holds 8px above its own content; the 28-to-8 ratio (3.5x), not the absolute gap, makes a group read as a group.
+- Both are declared AFTER `.stat-grid` and `.stat-grid--compact`: a grid that is a section takes `stat-grid dash-section`, and a compact pill row that needs a gap below takes `stat-grid stat-grid--compact dash-row`. Move either declaration and both stop working, silently.
+- Both zero on `:last-child`, so apply them unconditionally: which block renders last depends on which modules the client bought.
+- Both step to 16/8 under 768px, where `.main-content` padding drops 32 → 16.
+- A block inside `.dash-3col-*` gets no margin of its own; the grid gap alone spaces the columns (the old `marginTop: 6` / `marginBottom: 14` became a column offset, and 36px on the phone).
+- The KPI card is `.stat-card` in a `.stat-grid` (`gap: 0`; its `-1px` margins collapse adjacent borders into one drawn line, and its shadow is dropped), or `.stat-card stat-card--compact` in a strip with a real gap (padding `8px 16px`, no border pull, shadow kept). `.card--compact` (16px) is the matching tier for a whole card, `ChartCard` included. Never type the card's box properties inline (three dashboards had `10px 14px` / `14px 16px` / `12px 14px` against the class's `20px`, and 13 cells drew double rules), and never put a `.card` in a gap-0 grid (GroupDashboard did).
+- A loading skeleton uses the same grid as its content (AdminDashboardOverview's was `190px` / 14 / `start` against the strip's `158` / 8 / `stretch`, so the page jumped when data landed).
+- Verify a cascade claim by measuring: render the real `Layout.css` and read `getComputedStyle` at 1440 and 390 (the declared compact gutter rendered as 7px, not 8px).
+
+Why: a spacing sweep found 14 distinct vertical intervals against a documented 4/8/16/24 scale, and four section intervals (14/16/20/28) with nothing choosing between them.
+
+History: docs/rules-archive/dashboards.md#s700-vertical-rhythm-and-kpi-card
+
+## KPI tiles: the three shapes S734 found
+
+The sweep covered `/dashboard`, `/hr/dashboard`, `/owner-dashboard`, `/group-dashboard` and the admin overview. Check every new tile for all three.
+
+- **Paging.** For every read behind a tile, ask rows-per-what, and check its neighbours in the same batch. Found unpaged: `pos_orders` in `loadPosStats` (one row per bill, so 40 bills a day pass 1,000 inside a period, while `SalesReport` and `CoversReport` already paged it); `staff_meals` on both dashboards beside a paged `wastages`; and `payable_payments` for Overdue Payables, hung off a paged id list with a bare `.in()`. Chunk such an `.in()`: it is a 414 at a few hundred uuids.
+- **Master-data reads are maps.** `items`, `recipes`, `par_levels`, `opening_stock`, `closing_stock`, `vendor_returns`, and `pos_orders` in `useSalesPivotData` are paged too. A row past the cut shortens nothing on screen; it corrupts arithmetic. A missing `recipes` row prices its sales at 0 (Revenue low, every ratio HIGH); `items`, wastage and spend at rate 0 (reads like a good month); `par_levels`, "no par set"; `opening_stock` / `closing_stock`, a zero count (a false over-consumption in Variance). Ask what a missing row does to the arithmetic, not to the list.
+- A read left unpaged carries a comment giving its rows-per-what. `overheads` (tens of rows per period) is the only one on these pages.
+- **A zero nobody computed.** On a queue tile zero is the outcome the reader wants, so a failed read needs a third rendering distinct from both the good and the loading state: an em-dash plus "count unavailable — open the page". A shared hook RETURNS the failure (`useHrApprovalCounts` returns `error`), because only the consumer knows how its tile says so. (Four discarded `head: true` errors once read "0 · all clear"; the Admin Dashboard showed "0 active · 0 inactive · 0 total properties" over "NPR 0" MRR.)
+- **The same metric banded differently.** Use `bandFigure(pct, bander).text`, never `bander(pct).color`. When wrapping a band, e.g. in a settle guard, wrap the whole figure (`verdictFigure` in `ClientDashboard.jsx` returns `{ color, title, text }`), not the hue. A hardcoded 35/45 overrides the client's `fc_warning_pct` / `fc_critical_pct`, not merely duplicates them (`GroupDashboard`'s old `pctColor(v, good, warn)` on (35, 45) food and (25, 35) labour showed 26% labour amber there and green on the Owner Dashboard).
+- **A settle guard goes on every lumpy ratio.** `periodTooEarly` (before day 10) greys Food Cost %, Est. Net Margin % AND Fixed Costs % (a month's rent is one row entered on any day), and withholds the ✓/△/▲ mark with the colour.
+
+Why: these were not unrelated bugs but three shapes, each on more than one dashboard, and a tile is the last place a truncation or a false zero is noticed.
+
+History: docs/rules-archive/dashboards.md#s734-kpi-tile-re-analysis
+
+## Two tiles called "Revenue"
+
+- On an IMS+POS client, Inventory's Revenue is `sales_entries` at the ex-VAT, post-discount `unit_price` (it already contains every POS bill, since `PosOrders` stamps a row per closure), and POS's Revenue is `pos_orders.paid_amount`, VAT included; they sit about 13% apart. Neither changes to match: every ratio divides by the ex-VAT base, and a till total must tie to the cash drawer.
+- Each names its basis in the subtext (`Sales entries, excl. VAT` / `billed, incl. VAT`), and each tip points at the other.
+- Two tiles on one page that share a label must differ in their subtext, not only in their source code.
+
+Why: a reader comparing two numbers assumes the label is the definition.
+
+History: docs/rules-archive/dashboards.md#s734-two-revenue-tiles
+
+## Load guard and settle guard on the Owner Dashboard
+
+- Every dashboard with several loaders has a load-cancellation guard. `OwnerDashboard` passes `myId` (`loadIdRef`) to each loader and re-checks after every await before any setter, including the awaits after the main batch (`payable_payments`, the recipe walk). A single check at the top of the function misses those.
+- A page that labels tiles "(MTD)" carries the settle guard (`periodTooEarly`), applied per metric by asking whether the numerator accrues on the same clock as the denominator. Food Cost %, Prime Cost % and True Net Margin % are withheld early; Labor Cost % keeps its band from day one, because it is prorated by elapsed days against revenue over the same days. Greying it "for consistency" would be its own lie.
+
+Why: an admin switching "view as" mid-load let the previous tenant's revenue, payroll and payables repaint under the new client's name, and a day-3 outlet that had just bought the month's rice wore a red ▲ on Food Cost %.
+
+History: docs/rules-archive/dashboards.md#s734-owner-dashboard-gaps

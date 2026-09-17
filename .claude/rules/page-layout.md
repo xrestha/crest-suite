@@ -39,7 +39,11 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - `position: sticky` never sticks in the body flow, because `index.css` sets `overflow-x: hidden` on `html, body`. Pages inside the app shell are unaffected.
 - A page that renders straight into the body (guest menu, `/login`, `/pricing`) needs its own scrollport: `height: 100dvh; overflow-y: auto; overscroll-behavior: contain`, and no `min-height: 100vh`. Then pass that container as an `IntersectionObserver` root.
 - Verify sticky with `getBoundingClientRect().top` across real scroll positions, never by eye.
+- A table too wide for one screen gets three sticky anchors: the header (`top: 0`), the identity column (`left: 0`) and the bottom-line column (`right: 0`), as on `Stock.js`'s Summary item table (Item, COGS), `Purchases.js`'s Daily Register (`Total`) and `Sales.js`'s pivot (item name). The corner cell takes the highest `zIndex`, and every sticky cell an opaque `var(--theme-card)` background so scrolled columns don't show through.
+- Mute a no-activity row by weight and the anchor cells' colour, never by row opacity, which takes the row below AA (S613).
+- State a table's currency once (a `Tip` on the first header, e.g. "All figures in NPR."), never "(NPR)" in every column header.
 - Clearance on an `overflow: auto` element is margin, never padding: padding pushes its scrollbar away from the content.
+- History: docs/rules-archive/dashboards.md#stock-summary-table-density
 
 ## Overlays and scrims
 
