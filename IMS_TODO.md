@@ -121,6 +121,14 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 — `Overheads.js:210+` IMS-role login can't read payroll → says "no payroll run" and green Net Profit; say labour unreadable, withhold verdict.
 
 ### 2d. Frontend — wrong numbers / data loss
+- ✅ S779 — `PurchaseBillForm.jsx` held a whole vendor bill in React state until Save, so a Chrome
+  auto-update restart, a tablet discarding the backgrounded tab, the memory saver or a
+  deploy-triggered chunk reload took 10–20 typed lines with it, silently. Reported live. Drafted to
+  `localStorage` per bill per login (`purchaseBillDraft.js`), restored behind an amber notice,
+  cleared on save and on cancel. Rule: `.claude/rules/offline-and-cache.md`.
+- ⚪ **`Sales.js`' bulk grid is the same shape and is not drafted.** A human legitimately spends
+  minutes in it before Save and nothing survives the page dying. Stock Count is covered by the
+  offline queue and per-row saves; Sales Entry is covered by neither.
 - ✅ S756 — `Stock.js:709-727` Save All writes/deletes every visible row (parallel tablets wipe each other; restamps counted_by; recount guard refuses) → send changed cells only.
 - ✅ S756 — `Stock.js:549-586` offline replay into closed period (with D1).
 - ✅ S756 — `Stock.js:810,242` bare selects (pull-from-last-month, items).
