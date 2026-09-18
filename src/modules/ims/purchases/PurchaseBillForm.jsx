@@ -1,5 +1,5 @@
 import { npr2 } from '../../../shared/nepalMoney'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { bsToAd, formatAd, daysInBsMonth, formatBsDay } from '../../../utils/bsCalendar'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -10,10 +10,14 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import { invalidStyle } from '../../../shared/inlineFieldState'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { nepalTime, nepalBsLong } from '../../../shared/nepalTime'
 import {
   getCf, calcBillTotals, billDiscountError, fmtRate, lineState, PURCHASE_PAYMENT_METHODS,
   parseInvoiceAmount, invoiceAmountError, invoiceMismatch, invoiceMismatchText,
 } from './purchasesHelpers'
+import {
+  billDraftId, billDraftSignature, readBillDraft, saveBillDraft, clearBillDraft,
+} from './purchaseBillDraft'
 
 const EMPTY_HEADER = { vendor_id: '', bs_day: '', invoice_ref: '', payment_method: 'Cash', discount: '', vat_inclusive: false, invoice_vat: '', invoice_total: '' }
 const newLine = () => ({ _key: Date.now() + Math.random(), item_id: '', qty: '', rate: '', expiry_date: '', shelf_life: '', vat_inclusive: false, _amtDraft: '' })
@@ -64,8 +68,30 @@ function initFromEditingEntries(entries, items) {
 // happens after a save, and this file stays what it always was: the form.
 export default function PurchaseBillForm({ period, items, itemOptions, vendors, editingGroupId, editingEntries, onClose, onSaved }) {
   const initial = editingEntries?.length ? initFromEditingEntries(editingEntries, items) : { header: { ...EMPTY_HEADER }, lines: [newLine()] }
-  const [billHeader, setBillHeader] = useState(initial.header)
-  const [billLines, setBillLines]   = useState(initial.lines)
+  // The bill as it was OPENED. `initial` above is rebuilt on every render and only its first value
+  // ever reaches useState, so the baseline a draft is measured against — and the state "discard
+  // the restored draft" goes back to — is captured once, here.
+  const pristineRef = useRef(null)
+  if (pristineRef.current === null) {
+    pristineRef.current = { ...initial, signature: billDraftSignature(initial.header, initial.lines) }
+  }
+
+  // S779 — what the reader had typed when the page last died. See purchaseBillDraft.js for why a
+  // page dies with a bill in it (a Chrome auto-update restart, a backgrounded tab discarded, a
+  // deploy-triggered chunk reload) and why localStorage rather than session or server state.
+  // Read once, in a useState initialiser, so the restored bill is the form's FIRST render: seeding
+  // it in an effect would mount the blank form, then replace it, and a keystroke landing in that
+  // gap would be typed into state that is about to be thrown away.
+  const draftId = billDraftId({ groupId: editingGroupId, periodId: period?.id })
+  const [restoredDraft] = useState(() => readBillDraft(draftId))
+  const [billHeader, setBillHeader] = useState(() => ({ ...initial.header, ...(restoredDraft?.header || {}) }))
+  const [billLines, setBillLines]   = useState(() => (
+    // Merged over a fresh line so a draft written by an older build, before a field existed, comes
+    // back with that field defined rather than undefined in a controlled input. The stored `_key`
+    // wins where there is one.
+    restoredDraft ? restoredDraft.lines.map(l => ({ ...newLine(), ...l })) : initial.lines
+  ))
+  const [draftRestoredAt, setDraftRestoredAt] = useState(() => restoredDraft?.savedAt || null)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
   // Per-field validation. `error` above stays the form-level channel — a rejected write, and the
@@ -85,6 +111,46 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   const committingRef = useRef(false)
   // The duplicate-bill question (S698). A warning, never a hard stop — some vendors reuse numbers.
   const { ask: askConfirm, confirmEl } = useConfirm()
+
+  // Mirror the bill to localStorage as it is typed (S779). Two triggers, because they cover
+  // different deaths: a 400ms debounce catches the ordinary case at typing speed without writing
+  // per keystroke, and visibilitychange/pagehide write NOW — hidden is the last event a page is
+  // guaranteed to see before the OS discards it or the browser restarts itself, and the debounce
+  // would not have fired for whatever was typed in the last fraction of a second.
+  //
+  // `saved` stops it dead: once the bill is committed the draft is cleared, and a straggling write
+  // would put it straight back for the next reader of this period to be offered.
+  useEffect(() => {
+    if (!draftId || saved) return undefined
+    const flush = () => saveBillDraft(draftId, {
+      header: billHeader, lines: billLines, baseSignature: pristineRef.current.signature,
+    })
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush() }
+    const t = setTimeout(flush, 400)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flush)
+    }
+  }, [draftId, billHeader, billLines, saved])
+
+  // Throw the restored draft away and go back to the bill as it was opened — blank for a new bill,
+  // the saved lines for an edit.
+  function discardRestoredDraft() {
+    setBillHeader(pristineRef.current.header)
+    setBillLines(pristineRef.current.lines)
+    setDraftRestoredAt(null)
+    clearBillDraft(draftId)
+  }
+
+  // Cancel has always thrown the typing away — that is what it means. It must therefore also throw
+  // the draft away, or the next visit to this bill would offer back the very bill just abandoned.
+  function cancelBill() {
+    clearBillDraft(draftId)
+    onClose()
+  }
 
   function handleHeaderDayChange(day) {
     setDayErr('')
@@ -364,6 +430,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
     // The bill is committed. Saving stays on, and `saved` keeps Save disabled, through onSaved and
     // the navigation it ends in (S756 — see `saved` above). Only a throw from onSaved hands the
     // form back, and then with a sentence that does not invite a second save: the first one landed.
+    // The kept draft goes first (S779): it exists only to survive a page that dies with an UNSAVED
+    // bill in it, and this bill is now on the server. Cleared before onSaved, which navigates.
+    clearBillDraft(draftId)
     setSaved(true)
     try {
       await onSaved(billHeader, valid, savedCreatedAt || null)
@@ -382,6 +451,23 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // simply works, and a duplicate would now be two calculators on one screen.
   return (
     <>
+      {/* What came back (S779). Never silent: the reader left this page expecting to have lost the
+          bill, so an unannounced set of lines on screen is a bill they did not knowingly type. It
+          states plainly that nothing is recorded yet, and offers the other answer — start clean —
+          rather than making them empty the rows by hand. */}
+      {draftRestoredAt && (
+        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18, padding: '10px 14px', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+          <span style={{ flex: '1 1 340px' }}>
+            <strong style={{ color: 'var(--theme-amber-text)' }}>↺ Brought back what you were typing.</strong>{' '}
+            This bill was still unsaved when the page closed on {nepalBsLong(draftRestoredAt)}, {nepalTime(draftRestoredAt)}.
+            Nothing has been recorded yet — check it over and Save.
+          </span>
+          <button className="btn btn-ghost" onClick={discardRestoredDraft} style={{ flex: '0 0 auto' }}>
+            {editingGroupId ? 'Discard these changes' : 'Start a blank bill'}
+          </button>
+        </div>
+      )}
+
       {/* Header row */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1.4fr auto 90px 1fr', gap: 14, marginBottom: 20, alignItems: 'end' }}>
         <div className="form-field">
@@ -459,7 +545,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
 
       <div style={{ borderTop: '1px solid var(--theme-border)', marginBottom: 16 }} />
 
-      {/* Line items table — mirrors vendor bill: Item | Qty | NetRate | NetAmt | VAT */}
+      {/* Line items table — mirrors a vendor bill: Item | Qty | Rate | Total | VAT | Amount */}
       <div className="table-wrap">
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 956 }}>
           <thead>
@@ -471,11 +557,16 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
                 <Tip text="Ex-VAT price for ONE of whatever the Qty column is counting — the base unit (GM, PCS…), or the purchase unit where the item has a conversion set. Item Master's price for that same unit is shown under each box. Leave it 0 for free goods (buy 10 get 1 free): stock goes up, spend does not. Check the VAT box on each line for items attracting 13% VAT." width={300}>Rate (NPR)</Tip>
               </th>
-              <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 4px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 40 }}>
-                <Tip text="Check to apply 13% VAT to this line item only." width={210}>VAT</Tip>
-              </th>
+              {/* Total then VAT then Amount (S779, owner's call). The tick used to sit between Rate
+                  and Total, which split the two boxes that hold the same fact — the rate per unit
+                  and the line's money — and put a checkbox in the tab path between them. It now
+                  sits where it is read: after the figure taken off the bill, before the Amount it
+                  changes, so ticking it and watching Amount move is one glance left to right. */}
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
                 <Tip text="Enter total paid for this line — Rate is back-calculated automatically." width={230}>Total (NPR)</Tip>
+              </th>
+              <th style={{ textAlign: 'center', fontSize: 11, color: 'var(--theme-text2)', padding: '0 4px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 40 }}>
+                <Tip text="Check to apply 13% VAT to this line item only." width={210}>VAT</Tip>
               </th>
               <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--theme-text2)', padding: '0 8px 10px', textTransform: 'uppercase', letterSpacing: '0.07em', width: 105 }}>
                 <Tip text="Amount = Qty × Rate. For VAT items: Qty × Rate × 1.13 (what you actually pay)." width={240}>Amount</Tip>
@@ -540,6 +631,16 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                         </div>
                       )}
                     </td>
+                    <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
+                      <input
+                        type="number" min="0" step="any"
+                        aria-label={`Line total for ${selItem?.name || 'new line'}`}
+                        value={line._amtDraft}
+                        placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
+                        onChange={e => setLineTotal(line._key, e.target.value)}
+                        style={cellInput}
+                      />
+                    </td>
                     <td style={{ padding: '6px 4px 4px', verticalAlign: 'middle', textAlign: 'center' }}>
                       <input
                         type="checkbox"
@@ -552,16 +653,6 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                           floor for real text (DESIGN.md → Typography). This is a live VAT marker
                           on a money row, not a decorative caret. */}
                       {line.vat_inclusive && <div style={{ fontSize: 10, color: 'var(--theme-amber-text)', marginTop: 2, fontWeight: 700 }}>13%</div>}
-                    </td>
-                    <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle' }}>
-                      <input
-                        type="number" min="0" step="any"
-                        aria-label={`Line total for ${selItem?.name || 'new line'}`}
-                        value={line._amtDraft}
-                        placeholder={lineAmount > 0 ? lineAmount.toFixed(2) : ''}
-                        onChange={e => setLineTotal(line._key, e.target.value)}
-                        style={cellInput}
-                      />
                     </td>
                     <td style={{ padding: '6px 8px 4px', verticalAlign: 'middle', textAlign: 'right' }}>
                       {lineAmount > 0 && (
@@ -704,7 +795,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
           Purchases' real "Delete All" uses. And the row is one group at the right edge rather than
           `1fr auto 1fr`, which pushed Cancel and Save to opposite ends of a 1160px modal. */}
       <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
-        <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button className="btn btn-ghost" onClick={cancelBill}>Cancel</button>
         <button className="btn btn-primary" onClick={saveBill} disabled={saving || saved} aria-busy={saving || undefined}>
           {(() => {
             if (saved) return 'Saved'
