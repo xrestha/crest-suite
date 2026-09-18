@@ -57,7 +57,7 @@ from 120 days does not move in ten minutes.
 
 ## A cache outlives the session that filled it (S731)
 
-Three stores here survive a sign-out, and each had assumed it did not.
+Three stores here survive a sign-out, and each had assumed it did not. A fourth — the purchase-bill draft (S779, below) — survives one **on purpose**, and pays this rule's price in its key.
 
 **`sessionDataCache` keys on `page_section_clientId` — no user id — and `sessionStorage` lives as
 long as the TAB, not the session.** So signing out and back in as a *different account of the same
@@ -89,6 +89,60 @@ Firefox private browsing refuses `indexedDB.open` outright — and because `flus
 FIRST thing `init()` does, an unusable local cache took the **online** path down with it. Give any
 such boot a top-level `.catch()` that sets the page's real error state, and wrap the cache reads so
 a missing store degrades to "no cache" rather than to a dead page.
+
+## A long form must survive the page dying (S779)
+
+`sessionDataCache` above answers a page the USER navigated away from. This answers the page that
+was taken away from them, which is a different problem with a different store.
+
+`PurchaseBillForm` held an entire vendor bill — vendor, day, discount, the supplier's printed
+figures and a row per item — in React state and nowhere else until Save, and a bill keyed off paper
+is commonly 10–20 lines. Reported live: switch to another app, come back, start again. The reporter
+added that Chrome had auto-updated itself, which is the whole story. **The page can end at any time
+and nothing warns first** — a browser restarting for an update, a phone or tablet discarding a
+backgrounded tab to reclaim memory, Chrome's memory saver on a laptop, and this app's own
+`recoverFromChunkError()` reload when a deploy lands mid-entry.
+
+`src/modules/ims/purchases/purchaseBillDraft.js` is the pattern. Before copying it, note which
+decisions are load-bearing:
+
+- **`localStorage`, not `sessionStorage`.** A browser that restarts itself opens a NEW session, so
+  `sessionStorage` is empty in exactly the case that reported this. That is the opposite of the
+  `sessionDataCache` choice above, and for a reason: that cache wants to expire with the tab.
+- **Not the offline queue.** `offlineQueue.js` REPLAYS writes. A half-typed bill must never be
+  written by anything but the person who finishes it, so a draft is a restore, never a send.
+- **Two write triggers, because they cover different deaths.** A debounce (400ms) catches typing
+  without writing per keystroke; `visibilitychange` (hidden) and `pagehide` write immediately,
+  because hidden is the last event a page is guaranteed to see before it is discarded, and the
+  debounce would not have fired for the last fraction of a second of typing. A debounce alone loses
+  exactly the keystrokes the reader typed just before switching away.
+- **Keyed by the record AND by the login.** This is the S731 rule above applied to a store that
+  deliberately outlives a session. Crest runs on shared store-room and counting tablets where a PIN
+  session ends on an idle lock, so surviving the sign-out is the point — but keyed by record alone
+  the NEXT login is handed someone else's half-typed bill under the words "what you were typing",
+  and can save it under their own name. `posLockedCart.js` had already reached this answer for an
+  unsent till cart. **A store that survives a sign-out must name the session it belongs to, whether
+  it survives one by accident or by design.** Fail closed: no login means no draft.
+- **Store the DIFFERENCE from the record as opened, not the record.** On a new bill that means "the
+  reader has typed something"; on an edit, "there are unsaved corrections". Opening and touching
+  nothing, or undoing back to the start, then leaves nothing to restore — which is what keeps the
+  restore notice honest.
+- **Cleared when the save lands and when the reader cancels.** Cancel has always meant "throw this
+  away", so leaving the draft would offer back the very record just abandoned. Anything restored is
+  then, by construction, still unsaved.
+- **Restore in the `useState` initialiser, never an effect.** An effect mounts the blank form and
+  then replaces it, and a keystroke landing in that gap is typed into state about to be discarded.
+- **Never restore silently.** The reader left expecting to have lost the work, so lines appearing
+  unannounced are lines they did not knowingly type — and on a form that writes money that is a
+  record someone will save without reading. A `role="status"` bar names what came back and when,
+  says plainly that nothing is recorded yet, and offers the other answer (start clean / discard the
+  changes) rather than making them empty the rows by hand.
+
+**Which forms want this**: the ones a human legitimately spends minutes in before pressing Save —
+the same list `sessionKeepAlive.js` was written for (Purchases, Stock Count, Sales Entry), which is
+not a coincidence. Both files exist because this product's entry screens are long. Stock Count has
+the offline queue and saves per row, so it is already covered by a different mechanism; **Sales
+Entry's bulk grid is not, and has the same shape.**
 
 ## `navigator.onLine` is a claim about a network interface, not about the server (S731)
 

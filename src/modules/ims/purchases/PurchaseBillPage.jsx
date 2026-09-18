@@ -358,6 +358,7 @@ export default function PurchaseBillPage() {
             items={items}
             itemOptions={itemOptions}
             vendors={vendors}
+            profileId={profile?.id}
             editingGroupId={isEdit ? groupId : null}
             editingEntries={editingEntries}
             onClose={backToList}

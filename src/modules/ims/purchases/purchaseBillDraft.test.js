@@ -11,12 +11,19 @@ const blankBase = () => billDraftSignature(EMPTY_HEADER, [line({ _key: 99, item_
 beforeEach(() => localStorage.clear())
 
 describe('billDraftId', () => {
-  test('an edit is keyed by its bill, a new bill by its period', () => {
-    expect(billDraftId({ groupId: 'g1', periodId: 'p1' })).toBe('edit:g1')
-    expect(billDraftId({ periodId: 'p1' })).toBe('new:p1')
+  test('an edit is keyed by its bill, a new bill by its period, both by the login', () => {
+    expect(billDraftId({ groupId: 'g1', periodId: 'p1', profileId: 'u1' })).toBe('edit:g1:u1')
+    expect(billDraftId({ periodId: 'p1', profileId: 'u1' })).toBe('new:p1:u1')
+  })
+
+  test('the next login on a shared tablet gets its own key, not the last one typed', () => {
+    expect(billDraftId({ periodId: 'p1', profileId: 'u1' }))
+      .not.toBe(billDraftId({ periodId: 'p1', profileId: 'u2' }))
   })
 
   test('nothing to key on is null, not a shared bucket', () => {
+    expect(billDraftId({ profileId: 'u1' })).toBeNull()
+    expect(billDraftId({ periodId: 'p1' })).toBeNull()
     expect(billDraftId({})).toBeNull()
     expect(billDraftId()).toBeNull()
   })

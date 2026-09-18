@@ -26,13 +26,25 @@ const KEY = 'crest_purchase_bill_drafts'
 export const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 /**
- * Which bill a draft belongs to. Period and purchase-group ids are UUIDs, so this is already
- * unique across clients on a device an admin switches tenants on — no client id needed, and none
- * stored. Returns null when there is no bill to key on yet.
+ * Which bill a draft belongs to, and WHO typed it.
+ *
+ * The bill half is a period or purchase-group UUID, so it is already unique across clients on a
+ * device an admin switches tenants on — no client id is needed and none is stored.
+ *
+ * The profile half is the S731 rule ("a cache outlives the session that filled it") applied to a
+ * store that deliberately survives one. Crest runs on shared store-room and counting tablets where
+ * a PIN session ends on an idle lock, so keeping the bill across a sign-out is the whole point —
+ * but keyed by bill alone, the NEXT login to open that period would be handed a half-typed bill
+ * under the words "what you were typing", and could save someone else's keying under their own
+ * name. Keyed by login it comes back for the person who typed it and for nobody else, which is
+ * what posLockedCart.js does with an unsent till cart for the same reason.
+ *
+ * Fail closed: no login, or no bill, means no draft is kept or read rather than one shared bucket.
  */
-export function billDraftId({ groupId, periodId } = {}) {
-  if (groupId) return `edit:${groupId}`
-  return periodId ? `new:${periodId}` : null
+export function billDraftId({ groupId, periodId, profileId } = {}) {
+  if (!profileId) return null
+  if (groupId) return `edit:${groupId}:${profileId}`
+  return periodId ? `new:${periodId}:${profileId}` : null
 }
 
 /**

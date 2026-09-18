@@ -66,7 +66,7 @@ function initFromEditingEntries(entries, items) {
 // open. It is now the body of a real route (PurchaseBillPage) and renders at the full content
 // width. Kept as a separate component from the page so the page owns routing, loading and what
 // happens after a save, and this file stays what it always was: the form.
-export default function PurchaseBillForm({ period, items, itemOptions, vendors, editingGroupId, editingEntries, onClose, onSaved }) {
+export default function PurchaseBillForm({ period, items, itemOptions, vendors, profileId, editingGroupId, editingEntries, onClose, onSaved }) {
   const initial = editingEntries?.length ? initFromEditingEntries(editingEntries, items) : { header: { ...EMPTY_HEADER }, lines: [newLine()] }
   // The bill as it was OPENED. `initial` above is rebuilt on every render and only its first value
   // ever reaches useState, so the baseline a draft is measured against — and the state "discard
@@ -82,7 +82,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   // Read once, in a useState initialiser, so the restored bill is the form's FIRST render: seeding
   // it in an effect would mount the blank form, then replace it, and a keystroke landing in that
   // gap would be typed into state that is about to be thrown away.
-  const draftId = billDraftId({ groupId: editingGroupId, periodId: period?.id })
+  const draftId = billDraftId({ groupId: editingGroupId, periodId: period?.id, profileId })
   const [restoredDraft] = useState(() => readBillDraft(draftId))
   const [billHeader, setBillHeader] = useState(() => ({ ...initial.header, ...(restoredDraft?.header || {}) }))
   const [billLines, setBillLines]   = useState(() => (
