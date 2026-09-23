@@ -1315,6 +1315,10 @@ export default function ClientDashboard() {
   const measuredRain = weatherByAd && salesForecastInputs?.base
     ? measuredRainEffect({ dayLog: salesDayLog, byWeekday: salesForecastInputs.base.byWeekday, weatherByAd })
     : null
+  // The MET Norway credit's links. An <a> with no colour of its own is the browser's default blue,
+  // which is near-unreadable on the dark presets. text2 plus an underline reads as a link without
+  // spending the accent on an attribution.
+  const weatherCreditLink = { color: 'var(--theme-text2)', textDecoration: 'underline', textUnderlineOffset: 2 }
 
   // Compact card window — 6 days back → 3 days ahead of today, sliced out of the full-month
   // `dailyTrend` array so the small glanceable card stays readable; the expanded modal (`big`
@@ -2261,8 +2265,8 @@ export default function ClientDashboard() {
                 )}
                 {weatherByAd && (
                   <span style={{ color: 'var(--theme-text3)' }}>
-                    Weather: <a href="https://www.met.no/en" target="_blank" rel="noreferrer">MET Norway</a>
-                    {' '}(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>)
+                    Weather: <a href="https://www.met.no/en" target="_blank" rel="noreferrer" style={weatherCreditLink}>MET Norway</a>
+                    {' '}(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" style={weatherCreditLink}>CC BY 4.0</a>)
                   </span>
                 )}
               </div>

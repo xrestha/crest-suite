@@ -60,6 +60,7 @@ Rule statements only, extracted from `.claude/rules/design-system.md` (S770). Th
 - The badge set is complete: `badge-green|red|amber|yellow|purple|gray`. `badge-amber` means warning; `badge-yellow` means category.
 - On the POS order screen an inline-styled control takes `.till-hit` (square) or `.till-hit--row` for the 44px touch floor and the focus pair, a menu tile `.till-tile`; never an inline `minWidth`/`minHeight`, which beats the class (S776).
 - A precondition on an action button is `aria-disabled` plus a press that says what is missing, never `disabled` alone; `disabled` is for an action in flight (S776, the S759 pattern).
+- There is no global link style, so an `<a>` sets its own colour: a bare one is the browser's blue, 1.69:1 on the Dark card (S784). Use `--theme-text2` + underline for a quiet in-text link, `--theme-accent-ink` for one that is the action.
 
 ## Money and time
 
