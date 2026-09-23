@@ -494,3 +494,26 @@ prorated by elapsed days against revenue accruing over the same days, so the rat
 when the month is not. Greying it "for consistency" would be its own lie — the guard's claim is
 that a verdict is shown once it has been earned, not that early-month figures are all suspect.
 Apply it per metric, by asking whether the numerator accrues on the same clock as the denominator.
+
+## S780 Weekday target
+
+**S780 replaced the S556 slope fit, found from four screenshots of CASA ACAI CAFE, Ashwin 2083.**
+The Target was a least-squares line through the month's first five days: 13.8k, 9k, 17.8k (a
+Saturday), 9.9k, 7.5k. With the Saturday early and a Monday last, it sloped down, reached zero on
+day 14 and ran along the floor for the rest of the month, so the "Sales target" read NPR 92,144
+against 73,846 already sold by day 6. The Purchase target read 14,452 against 19,052 spent by day
+5. The live projection swung 92,144 → 4,33,926 on one good day. Its 1.25 × best-day ceiling, meant
+to stop runaways, became the purchase forecast itself: every remaining day at 8,891, NPR 2,40,207
+of purchases projected against 92k of sales. The owner also asked the question that set the fix:
+why wait five days when there are months of history?
+
+Owner decisions (2026-09-23): the Target is the last 4 weeks' pace; the purchase target is the past
+purchase pace, not sales × food-cost %; the forecast leans on this month quickly (from about day 7);
+the bad Ashwin snapshots are replaced once. Three properties to keep:
+
+- **Purchases average per calendar day, never per purchase day.** A kitchen buys on some days and
+  not others, and a per-purchase-day rate charged a restock to every remaining day.
+- **The history window ends at Day 1, not today**, so the Target is the same whichever day it is
+  captured on. That is also what makes the one-time replacement of an old snapshot mid-month safe.
+- **A failed history read captures nothing.** Treated as an empty history, it would lock a
+  one-week new-client Target for the whole month, and a capture-once value cannot be corrected.

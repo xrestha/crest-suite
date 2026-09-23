@@ -7,6 +7,11 @@ import { nmBand, descendingBand, bandFigure } from '../../shared/operatingBands'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
+import { firstError } from '../../shared/queryError'
+import {
+  dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
+  projectMonth, makeSnapshot, isCurrentSnapshot, targetValue,
+} from '../../modules/dashboard/dailyForecast'
 import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel } from '../../modules/dashboard/labourSource'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
@@ -201,43 +206,33 @@ function TrendTooltipContent({ active, payload, label, big }) {
 // matching the plain single-glyph weekday row this was modeled on. Index matches JS Date.getDay().
 const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
-// Least-squares trend on a day→value map, extended to monthEndDay — shared by both the Sales and
-// Purchases month-end projections on the Daily Purchases vs Sales chart. Dampened so a steep slope
-// fitted to a few volatile early days can't run away: each projected day is clamped to
-// [0, 1.25 × recent (up-to-7-day) peak]. Needs ≥5 data points to bother projecting at all.
-//
-// Returns slope/intercept/cap alongside the usual projDays/projectedTotal so a caller can freeze
-// this exact fit (see the sales/purch_projection_snapshot capture in loadStats) and reconstruct a
-// static full-month line from it later via targetLineValue() below — projDays alone only covers
-// days after the last actual, which is enough for the live forward tail but not for a frozen
-// month-long reference line.
-function projectTrend(dayNums, valueMap, monthEndDay) {
-  if (dayNums.length < 5) return null
-  const xs = dayNums, ys = xs.map(d => valueMap[d]), n = xs.length
-  const sumX = xs.reduce((a, b) => a + b, 0), sumY = ys.reduce((a, b) => a + b, 0)
-  const sumXY = xs.reduce((a, x, i) => a + x * ys[i], 0), sumXX = xs.reduce((a, x) => a + x * x, 0)
-  const denom = n * sumXX - sumX * sumX
-  const slope = denom !== 0 ? (n * sumXY - sumX * sumY) / denom : 0
-  const intercept = (sumY - slope * sumX) / n
-  const recentYs = xs.slice(-7).map(d => valueMap[d]) // last up-to-7 days
-  const cap = Math.round(Math.max(...recentYs) * 1.25)
-  const lastActual = xs[xs.length - 1]
-  const projDays = {}
-  let projSum = 0
-  for (let d = lastActual + 1; d <= monthEndDay; d++) {
-    const v = Math.min(cap, Math.max(0, Math.round(slope * d + intercept)))
-    projDays[d] = v; projSum += v
+// The Daily Purchases vs Sales history read: the open month's two predecessors, for the 28-day
+// window dailyForecast.js learns the weekday pattern from. Two months because a BS month can be
+// shorter than the window's reach on a boundary; historyWindowDays() keeps only the days inside
+// it. Returns raw rows plus the first error, and never throws: a failed read must reach the
+// caller as a failure, not as an empty history (see the trend build in loadStats).
+async function loadForecastHistory(scopedFrom, period) {
+  const prev = k => {
+    const m = period.bs_month - k
+    return m >= 1 ? { y: period.bs_year, m } : { y: period.bs_year - 1, m: m + 12 }
   }
-  return { projDays, projectedTotal: Math.round(sumY + projSum), lastActual, slope, intercept, cap }
-}
-
-// Reconstructs one day's value on a frozen projection snapshot ({slope, intercept, cap} captured
-// once by loadStats — see sales/purch_projection_snapshot below), using the same clamp
-// projectTrend() applies to its own live projected days. Unlike projDays (only future-of-capture
-// days), this is called for every day 1..monthEndDay so the frozen line spans the whole period.
-function targetLineValue(snap, day) {
-  if (!snap) return null
-  return Math.min(snap.cap, Math.max(0, Math.round(snap.slope * day + snap.intercept)))
+  const wanted = [prev(1), prev(2)]
+  const { data: periodRows, error: periodErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
+    .lte('bs_year', period.bs_year)
+    .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+    .limit(6)
+  if (periodErr) return { error: periodErr }
+  const periods = (periodRows || []).filter(p => wanted.some(w => w.y === p.bs_year && w.m === p.bs_month))
+  if (!periods.length) return { periods: [], sales: [], purchases: [], returns: [], error: null }
+  const ids = periods.map(p => p.id)
+  const results = await Promise.all([
+    fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, unit_price, discount, source').in('period_id', ids).order('id')),
+    fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate, bs_day, discount_amount, purchase_group_id, vendor_id, invoice_ref').in('period_id', ids).order('id')),
+    fetchAllRows(() => supabase.from('vendor_returns').select('period_id, qty, rate, bs_day').in('period_id', ids).order('id')),
+  ])
+  const error = firstError(results)
+  if (error) return { error }
+  return { periods, sales: results[0].data || [], purchases: results[1].data || [], returns: results[2].data || [], error: null }
 }
 
 export default function ClientDashboard() {
@@ -268,11 +263,13 @@ export default function ClientDashboard() {
   const [hasDailySales, setHasDailySales] = useState(() => readDashboardCache('hasDailySales', effectiveClientId) ?? false)
   const [salesProjection, setSalesProjection] = useState(() => readDashboardCache('salesProjection', effectiveClientId)) // { projectedMonthEnd } | null
   const [purchProjection, setPurchProjection] = useState(() => readDashboardCache('purchProjection', effectiveClientId)) // { projectedMonthEnd } | null
-  // Frozen, never-recalculated trend fit — captured once by loadStats the first time each metric
-  // crosses the 5-point threshold, so it can be compared against as the period plays out instead of
-  // silently moving with every new day of actuals the way salesProjection/purchProjection do.
-  const [salesTargetSnap, setSalesTargetSnap] = useState(() => readDashboardCache('salesTargetSnap', effectiveClientId)) // { slope, intercept, cap, capturedDay, projectedMonthEnd } | null
-  const [purchTargetSnap, setPurchTargetSnap] = useState(() => readDashboardCache('purchTargetSnap', effectiveClientId)) // { slope, intercept, cap, capturedDay, projectedMonthEnd } | null
+  // Frozen Target, captured once per period (dailyForecast.js makeSnapshot) and never recalculated,
+  // so it can be compared against as the period plays out instead of moving with every new day of
+  // actuals the way salesProjection/purchProjection do.
+  const [salesTargetSnap, setSalesTargetSnap] = useState(() => readDashboardCache('salesTargetSnap', effectiveClientId)) // { model: 2, source, byWeekday[7], sampleDays, capturedDay, projectedMonthEnd } | null
+  const [purchTargetSnap, setPurchTargetSnap] = useState(() => readDashboardCache('purchTargetSnap', effectiveClientId)) // same shape
+  // The history read failed AND it cost the chart something (a Target that could not be set).
+  const [forecastHistoryFailed, setForecastHistoryFailed] = useState(() => readDashboardCache('forecastHistoryFailed', effectiveClientId) ?? false)
   const [topItemSpend, setTopItemSpend] = useState(() => readDashboardCache('topItemSpend', effectiveClientId) ?? [])
   const [reorderItems, setReorderItems]   = useState(() => readDashboardCache('reorderItems', effectiveClientId) ?? [])
   const [fcTrend, setFcTrend]             = useState(() => readDashboardCache('fcTrend', effectiveClientId) ?? [])
@@ -422,6 +419,15 @@ export default function ClientDashboard() {
     // Promise.all below instead of after it. Not awaited — same fire-and-forget shape it always had.
     loadFcTrend(period, myId)
 
+    // The 28 days before this month began, for the Daily Purchases vs Sales forecast and Target.
+    // Only the month in progress forecasts anything, so only then is it read. Its own error slot:
+    // a failed history degrades one chart, it does not make the page's figures incomplete.
+    const bsNow = getBsToday()
+    const periodIsThisMonth = !!period && period.bs_year === bsNow.year && period.bs_month === bsNow.month
+    const historyPromise = periodIsThisMonth
+      ? loadForecastHistory(scopedFrom, period).catch(err => ({ error: err?.message || String(err) }))
+      : Promise.resolve(null)
+
     const dependentPromise = Promise.all([
       // `discount_amount` + the bill-key columns (`purchase_group_id`, and the vendor/invoice/day
       // fallback for bills written before grouping existed) feed allocateBillDiscounts() below —
@@ -499,7 +505,7 @@ export default function ClientDashboard() {
       ? explodeRecipeIngredients(supabase, dashRecipeIds).catch(err => { console.error('Dashboard: recipe walk failed', err); return null })
       : Promise.resolve({})
 
-    const [dependentResults, rawBreakdown] = await Promise.all([dependentPromise, ingredientBreakdownPromise])
+    const [dependentResults, rawBreakdown, forecastHistory] = await Promise.all([dependentPromise, ingredientBreakdownPromise, historyPromise])
     if (loadIdRef.current !== myId) return // superseded again after these more awaits
     const ingredientBreakdown = rawBreakdown || {}
 
@@ -670,97 +676,97 @@ export default function ClientDashboard() {
         .sort((a, b) => b.value - a.value)
     )
 
-    // ── Daily trend: purchases (actual, net) + daily sales revenue + month-end sales projection ──
-    const dayNetPurchMap = {}
-    const dayReturnMap = {}
-    // Net of bill discounts, so the daily bars sum to the Net Purchases tile.
-    ;allocatedPurchases.forEach(p => { dayNetPurchMap[p.bs_day] = (dayNetPurchMap[p.bs_day] || 0) + p.lineNet })
-    ;(returns || []).forEach(r => { dayReturnMap[r.bs_day] = (dayReturnMap[r.bs_day] || 0) + parseFloat(r.qty || 0) * parseFloat(r.rate || 0) })
-    const dayPurchMap = {}
-    new Set([...Object.keys(dayNetPurchMap), ...Object.keys(dayReturnMap)]).forEach(d => {
-      dayPurchMap[d] = Math.round((dayNetPurchMap[d] || 0) - (dayReturnMap[d] || 0))
-    })
-
-    // Daily sales revenue — ONLY from day-attributed entries (bs_day > 0). Bulk monthly entries
-    // (bs_day = 0) have no daily breakdown and are skipped. This map is the single source the chart
-    // reads; when the POS ships it can feed this same shape (day → revenue) with no chart change.
-    // unit_price captured on the row used per-row when present, else falls back to the recipe's
-    // current price (see revenueTotal above for why).
-    const daySalesMap = {}
-    ;(salesData || []).forEach(s => {
-      if (s.source === 'pos_comp') return
-      const d = parseInt(s.bs_day)
-      if (!d || d <= 0) return
-      const price = s.unit_price != null ? parseFloat(s.unit_price) : (currentPriceMap[s.recipe_id] || 0)
-      daySalesMap[d] = (daySalesMap[d] || 0) + parseFloat(s.qty_sold || 0) * price - (parseFloat(s.discount) || 0)
-    })
-    Object.keys(daySalesMap).forEach(d => { daySalesMap[d] = Math.round(daySalesMap[d]) }) // whole NPR (no ugly decimals)
+    // ── Daily trend: purchases (actual, net) + daily sales revenue, month-end forecast, frozen Target ──
+    // One definition of a day's net purchases (net of bill discounts, so the daily points sum to
+    // the Net Purchases tile) and of a day's revenue (day-attributed entries only, comps excluded,
+    // the row's unit_price before the recipe's current one). The history window below is built
+    // from the same two functions, so last month and this month are measured the same way.
+    const dayPurchMap = dailyPurchaseMap(allocatedPurchases, returns)
+    const daySalesMap = dailySalesMap(salesData, currentPriceMap)
     const salesDayNums = Object.keys(daySalesMap).map(Number).sort((a, b) => a - b)
     const dailySalesOn = salesDayNums.length > 0
     setAndCache(setHasDailySales, 'hasDailySales', dailySalesOn)
     const purchDayNums = Object.keys(dayPurchMap).map(Number).sort((a, b) => a - b)
 
-    // Projections: current open month only, via the shared projectTrend() helper (≥5 data points,
-    // dampened cap) — Sales and Purchases each get their own independent trend line. Past/closed
-    // months show actuals only. Purchases are inherently lumpier than sales (a bulk restock lands
-    // in one day rather than accruing steadily with daily covers), so its projection is expected to
-    // be noisier — the same dampening cap that guards Sales keeps one big purchase day from
-    // blowing up the forecast here too.
+    // Forecast and Target: the month in progress only. Past months show actuals only. How each
+    // works, and why neither is a slope, is at the top of dailyForecast.js.
     const bsToday = getBsToday()
     const isCurrentMonth = !!period && period.bs_year === bsToday.year && period.bs_month === bsToday.month
     const monthEndDay = period ? daysInBsMonth(period.bs_year, period.bs_month) : 31
-    const salesTrend = (dailySalesOn && isCurrentMonth) ? projectTrend(salesDayNums, daySalesMap, monthEndDay) : null
-    const purchTrend = isCurrentMonth ? projectTrend(purchDayNums, dayPurchMap, monthEndDay) : null
-    const projDays = salesTrend?.projDays || {}
-    const purchProjDays = purchTrend?.projDays || {}
-    setAndCache(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal } : null)
-    setAndCache(setPurchProjection, 'purchProjection', purchTrend ? { projectedMonthEnd: purchTrend.projectedTotal } : null)
+    const weekdayOf = d => (period ? bsToAd(period.bs_year, period.bs_month, d).getDay() : 0)
+    const lastActualSalesDay = salesDayNums.length ? salesDayNums[salesDayNums.length - 1] : null
+    const lastActualPurchDay = purchDayNums.length ? purchDayNums[purchDayNums.length - 1] : null
+    // Days elapsed = the latest day holding either kind of entry. Purchases are judged over every
+    // one of them, a day with no bill counting as zero; sales over the days with an entry.
+    const elapsedDay = Math.max(lastActualSalesDay || 0, lastActualPurchDay || 0)
 
-    // Freeze a one-time "Target" snapshot the first time each metric crosses projectTrend()'s
-    // 5-point threshold, so a later visit can compare actual performance against what was
-    // projected EARLY in the period — salesTrend/purchTrend above are intentionally live and
-    // refit to all actuals on every load, so without a frozen copy there is no way to look back at
-    // an earlier forecast; it has already moved on by the time you'd check it. Read whatever
-    // snapshot already exists on the period row first (arrives for free once the migration lands,
-    // scopedFrom selects '*'); only capture a new one when none exists yet — never overwritten
-    // automatically afterward, matching the Monthly Owner Report's own frozen-snapshot precedent.
-    let nextSalesTargetSnap = period?.sales_projection_snapshot || null
-    let nextPurchTargetSnap = period?.purch_projection_snapshot || null
-    if (period && isCurrentMonth) {
-      if (!nextSalesTargetSnap && salesTrend) {
-        nextSalesTargetSnap = {
-          slope: salesTrend.slope, intercept: salesTrend.intercept, cap: salesTrend.cap,
-          capturedDay: salesTrend.lastActual, capturedAt: new Date().toISOString(),
-          projectedMonthEnd: salesTrend.projectedTotal,
-        }
-        // Best-effort: a failed save just means this loads uncaptured again next visit, and the
-        // .is(...) guard means a second tab racing this same capture can't stomp a snapshot the
-        // other just wrote (both would compute the same numbers from the same data anyway).
-        scopedUpdate('monthly_periods', { sales_projection_snapshot: nextSalesTargetSnap })
-          .eq('id', period.id).is('sales_projection_snapshot', null)
-          .then(({ error }) => { if (error) console.error('Failed to save sales target snapshot', error) })
+    // The 28 days before this month began. A FAILED history read is not an empty history: taking
+    // it as one would lock a new-client Target from one week of this month when four weeks were
+    // there to read, and that Target could never be corrected. So a failure captures nothing.
+    const historyFailed = isCurrentMonth && !!forecastHistory?.error
+    let historyBase = { sales: null, purch: null }
+    if (isCurrentMonth && forecastHistory && !historyFailed) {
+      const inPeriod = (rows, id) => rows.filter(r => r.period_id === id)
+      historyBase = baseFromHistory(historyWindowDays(period.bs_year, period.bs_month,
+        forecastHistory.periods.map(p => ({
+          bs_year: p.bs_year,
+          bs_month: p.bs_month,
+          salesMap: dailySalesMap(inPeriod(forecastHistory.sales, p.id), currentPriceMap),
+          // Per period: allocateBillDiscounts' legacy bill key has no period in it.
+          purchMap: dailyPurchaseMap(allocateBillDiscounts(inPeriod(forecastHistory.purchases, p.id)), inPeriod(forecastHistory.returns, p.id)),
+        }))))
+    }
+
+    // The frozen Target: captured once per period, never recalculated, so a later visit can judge
+    // the month against what was expected of it. A pre-S780 snapshot (a slope fit that ran to zero
+    // mid-month) is treated as absent and replaced once; the write guard's `->>model IS NULL`
+    // matches both an empty column and an old snapshot, and nothing else. It stays a best-effort
+    // write: a failed save just means the next visit captures it, and a second tab racing this one
+    // cannot overwrite a v2 snapshot the first has just written.
+    let nextSalesTargetSnap = isCurrentSnapshot(period?.sales_projection_snapshot) ? period.sales_projection_snapshot : null
+    let nextPurchTargetSnap = isCurrentSnapshot(period?.purch_projection_snapshot) ? period.purch_projection_snapshot : null
+    if (period && isCurrentMonth && !historyFailed) {
+      const capture = (column, base) => {
+        const snap = makeSnapshot(base, { monthEndDay, weekdayOf, capturedDay: bsToday.day })
+        scopedUpdate('monthly_periods', { [column]: snap })
+          .eq('id', period.id).is(`${column}->>model`, null)
+          .then(({ error }) => { if (error) console.error(`Failed to save ${column}`, error) })
+        return snap
       }
-      if (!nextPurchTargetSnap && purchTrend) {
-        nextPurchTargetSnap = {
-          slope: purchTrend.slope, intercept: purchTrend.intercept, cap: purchTrend.cap,
-          capturedDay: purchTrend.lastActual, capturedAt: new Date().toISOString(),
-          projectedMonthEnd: purchTrend.projectedTotal,
-        }
-        scopedUpdate('monthly_periods', { purch_projection_snapshot: nextPurchTargetSnap })
-          .eq('id', period.id).is('purch_projection_snapshot', null)
-          .then(({ error }) => { if (error) console.error('Failed to save purchase target snapshot', error) })
+      if (!nextSalesTargetSnap) {
+        const base = historyBase.sales || baseFromMonth({ kind: 'sales', valueMap: daySalesMap, dayNums: salesDayNums, weekdayOf })
+        if (base) nextSalesTargetSnap = capture('sales_projection_snapshot', base)
+      }
+      if (!nextPurchTargetSnap) {
+        // No bill at all this month means a client not recording purchases here, not a month of
+        // zero spend, so it gets no purchase target from its own days.
+        const base = historyBase.purch
+          || (purchDayNums.length ? baseFromMonth({ kind: 'purch', valueMap: dayPurchMap, elapsed: elapsedDay, weekdayOf }) : null)
+        if (base) nextPurchTargetSnap = capture('purch_projection_snapshot', base)
       }
     }
     setAndCache(setSalesTargetSnap, 'salesTargetSnap', nextSalesTargetSnap)
     setAndCache(setPurchTargetSnap, 'purchTargetSnap', nextPurchTargetSnap)
+    setAndCache(setForecastHistoryFailed, 'forecastHistoryFailed', historyFailed && (!nextSalesTargetSnap || !nextPurchTargetSnap))
+
+    // The live forecast leans on the Target's weekday pattern (or, before one exists, the history
+    // base), scaled to how this month is running against it.
+    const salesTrend = (dailySalesOn && isCurrentMonth)
+      ? projectMonth({ base: nextSalesTargetSnap || historyBase.sales, valueMap: daySalesMap, expectDays: salesDayNums, fromDay: lastActualSalesDay + 1, monthEndDay, weekdayOf })
+      : null
+    const purchTrend = (isCurrentMonth && elapsedDay > 0)
+      ? projectMonth({ base: nextPurchTargetSnap || historyBase.purch, valueMap: dayPurchMap, expectDays: Array.from({ length: elapsedDay }, (_, i) => i + 1), fromDay: elapsedDay + 1, monthEndDay, weekdayOf })
+      : null
+    const projDays = salesTrend?.projDays || {}
+    const purchProjDays = purchTrend?.projDays || {}
+    setAndCache(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal } : null)
+    setAndCache(setPurchProjection, 'purchProjection', purchTrend ? { projectedMonthEnd: purchTrend.projectedTotal } : null)
 
     // Build the unified day axis, full month (Day 1 → month end for the current month; full actual
     // range for past months). The compact card slices this down to a 10-day window (6 days back →
     // 3 days ahead) at render time — see `dailyTrendWindowed` below — while the expanded modal shows
     // this whole-month array so the full trend is visible there.
     const baseDays = [...purchDayNums, ...salesDayNums].filter(d => d > 0)
-    const lastActualSalesDay = salesDayNums.length ? salesDayNums[salesDayNums.length - 1] : null
-    const lastActualPurchDay = purchDayNums.length ? purchDayNums[purchDayNums.length - 1] : null
     const hasProj = Object.keys(projDays).length > 0
     const hasPurchProj = Object.keys(purchProjDays).length > 0
     const startDay = isCurrentMonth ? 1 : (baseDays.length ? Math.min(...baseDays) : 1)
@@ -781,8 +787,8 @@ export default function ClientDashboard() {
         // Frozen full-month line, unlike salesProj/purchProj above — non-null for every day in
         // range (not just from the last actual onward) so it's a static reference the actual line
         // can be compared against retroactively, not just a forward-looking tail.
-        salesTarget: targetLineValue(nextSalesTargetSnap, d),
-        purchTarget: targetLineValue(nextPurchTargetSnap, d),
+        salesTarget: targetValue(nextSalesTargetSnap, weekdayOf(d)),
+        purchTarget: targetValue(nextPurchTargetSnap, weekdayOf(d)),
       })
     }
     setAndCache(setDailyTrend, 'dailyTrend', trend)
@@ -1243,9 +1249,17 @@ export default function ClientDashboard() {
   })()
   const dailyTrendPurchTotal = dailyTrend.reduce((s, d) => s + (d.purchases || 0), 0)
   const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales || 0), 0)
+  // Only a current-model Target is drawn: a pre-S780 one can still be sitting in dashboardCache
+  // for the moment before loadStats replaces it, and its slope fit is exactly what S780 removed.
+  const salesTarget = isCurrentSnapshot(salesTargetSnap) ? salesTargetSnap : null
+  const purchTarget = isCurrentSnapshot(purchTargetSnap) ? purchTargetSnap : null
+  // Where a Target came from, in the words the footer and the screen-reader summary use.
+  const targetBasis = snap => (snap.source === 'history'
+    ? "last 4 weeks' pace"
+    : `set on Day ${snap.capturedDay} from this month's first ${snap.sampleDays} days`)
   const dailyTrendSummary = dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
-    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTargetSnap ? ` Sales target locked on Day ${salesTargetSnap.capturedDay}: NPR ${salesTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTargetSnap ? ` Purchase target locked on Day ${purchTargetSnap.capturedDay}: NPR ${purchTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}`
+    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}`
   const topItemSpendSummary = topItemSpend.length === 0
     ? 'No purchase data for this period.'
     : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-IN')}`).join(', ')}.`
@@ -2075,22 +2089,26 @@ export default function ClientDashboard() {
             {hasDailySales && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.sales }}>●</span> Sales</span>}
             {salesProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.sales, letterSpacing: '-2px' }}>┄</span> Sales Proj.</span>}
             {purchProjection && <span style={{ color: 'var(--theme-text2)' }}><span style={{ color: DAILY_TREND_COLORS.purchases, letterSpacing: '-2px' }}>┄</span> Purch. Proj.</span>}
-            {salesTargetSnap && (
+            {salesTarget && (
               <span style={{ color: 'var(--theme-text2)' }}>
                 <span style={{ color: DAILY_TREND_COLORS.salesTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
-                <Tip text={`Locked in on Day ${salesTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual sales line against it to see if you're ahead or behind pace — unlike Sales Proj. above, which updates every day to reflect today's pace instead. Hover any day: the tooltip shows how far that day ran off target, green when it went your way. A grey ≈ means the day landed close enough to count as on target.`}>Sales Target</Tip>
+                <Tip text={`${salesTarget.source === 'history'
+                  ? `What a usual day sells, from the 4 weeks before ${periodLabel} began.`
+                  : `What a usual day sells, from this month's first ${salesTarget.sampleDays} days of sales (there weren't 4 weeks of daily sales before ${periodLabel} to learn from).`} Each weekday has its own figure, so a busy Saturday sits higher than a quiet Monday. It stays fixed for the rest of ${periodLabel}: compare your actual sales line against it to see whether you're ahead of or behind your usual trade. Sales Proj. is different: it updates every day. Hover any day: the tooltip shows how far that day ran off target, in green when it went your way. A grey ≈ means the day was close enough to count as on target.`}>Sales Target</Tip>
               </span>
             )}
-            {purchTargetSnap && (
+            {purchTarget && (
               <span style={{ color: 'var(--theme-text2)' }}>
                 <span style={{ color: DAILY_TREND_COLORS.purchTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
-                <Tip text={`Locked in on Day ${purchTargetSnap.capturedDay} from your first few days' pace, and never changes for the rest of ${periodLabel}. Compare your actual purchases line against it to see if you're spending ahead of or behind that pace — unlike Purch. Proj. above, which updates every day to reflect today's pace instead. Hover any day: the tooltip shows how far that day ran off target, and here green means UNDER it — spending less than the pace you locked in is the win. A grey ≈ means the day landed close enough to count as on target.`}>Purch. Target</Tip>
+                <Tip text={`${purchTarget.source === 'history'
+                  ? `Your usual spend per day, from the 4 weeks before ${periodLabel} began: that time's net purchases divided by its days, counting days with no purchases.`
+                  : `Your usual spend per day, from this month's first ${purchTarget.sampleDays} days, counting days with no purchases (there weren't 4 weeks of purchases before ${periodLabel} to learn from).`} It stays fixed for the rest of ${periodLabel}. Kitchens buy in batches, so single days will swing well above and below it: what matters is whether your purchases run above it for days on end. Hover any day: here green means UNDER the target, because spending less than usual is the win. A grey ≈ means the day was close enough to count as on target.`}>Purch. Target</Tip>
               </span>
             )}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
           </>}
           footer={<>
-            {(salesProjection || purchProjection || salesTargetSnap || purchTargetSnap) && (
+            {(salesProjection || purchProjection || salesTarget || purchTarget || forecastHistoryFailed) && (
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
                 {salesProjection && (
                   <span>
@@ -2102,17 +2120,25 @@ export default function ClientDashboard() {
                     Projected month-end purchases: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
-                {salesTargetSnap && (
+                {salesTarget && (
                   <span>
-                    Sales target (locked Day {salesTargetSnap.capturedDay}): <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}</strong>
+                    Sales target ({targetBasis(salesTarget)}): <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesTarget.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
-                {purchTargetSnap && (
+                {purchTarget && (
                   <span>
-                    Purchase target (locked Day {purchTargetSnap.capturedDay}): <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}</strong>
+                    Purchase target ({targetBasis(purchTarget)}): <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchTarget.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
-                <span style={{ color: 'var(--theme-text3)' }}>· trend estimate</span>
+                {forecastHistoryFailed ? (
+                  <span style={{ color: 'var(--theme-amber-text)' }}>
+                    Past months could not be read, so the forecast uses this month only. A target will be set once they load.
+                  </span>
+                ) : (salesProjection || purchProjection) && (
+                  <span style={{ color: 'var(--theme-text3)' }}>
+                    · {salesTarget || purchTarget ? "forecast = your usual weekday pattern, adjusted to this month's pace" : "forecast = this month's daily average"}
+                  </span>
+                )}
               </div>
             )}
             <p className="sr-only">{dailyTrendSummary}</p>
@@ -2186,9 +2212,9 @@ export default function ClientDashboard() {
                       its own hue (DAILY_TREND_COLORS.salesTarget/purchTarget) rather than reusing
                       Purchases/Sales' gold/green, so it doesn't collapse into a same-colour dash
                       variant of the line already sharing this metric's hue. Never moves once
-                      captured; see targetLineValue()/salesTargetSnap above for why that's the point. */}
-                  {salesTargetSnap && <Line type="monotone" dataKey="salesTarget" name="Sales Target" stroke={DAILY_TREND_COLORS.salesTarget} strokeWidth={1.5} strokeDasharray="2 3" strokeOpacity={0.75} connectNulls dot={false} {...chartMotion()} />}
-                  {purchTargetSnap && <Line type="monotone" dataKey="purchTarget" name="Purchases Target" stroke={DAILY_TREND_COLORS.purchTarget} strokeWidth={1.5} strokeDasharray="2 3" strokeOpacity={0.75} connectNulls dot={false} {...chartMotion()} />}
+                      captured; see dailyForecast.js for why that's the point. */}
+                  {salesTarget && <Line type="monotone" dataKey="salesTarget" name="Sales Target" stroke={DAILY_TREND_COLORS.salesTarget} strokeWidth={1.5} strokeDasharray="2 3" strokeOpacity={0.75} connectNulls dot={false} {...chartMotion()} />}
+                  {purchTarget && <Line type="monotone" dataKey="purchTarget" name="Purchases Target" stroke={DAILY_TREND_COLORS.purchTarget} strokeWidth={1.5} strokeDasharray="2 3" strokeOpacity={0.75} connectNulls dot={false} {...chartMotion()} />}
                   {big ? (
                     <Area type="monotone" dataKey="purchases" name="Purchases" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2.5} fill="url(#dtPurchasesFill)" connectNulls dot={{ r: 3, fill: DAILY_TREND_COLORS.purchases, strokeWidth: 0 }} activeDot={{ r: 5, fill: DAILY_TREND_COLORS.purchases }} {...chartMotion()} />
                   ) : (
@@ -2212,8 +2238,8 @@ export default function ClientDashboard() {
                     {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
                     {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
                     {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchases} />}
-                    {salesTargetSnap && <StatPill label="Sales target" value={`NPR ${salesTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.salesTarget} />}
-                    {purchTargetSnap && <StatPill label="Purchase target" value={`NPR ${purchTargetSnap.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchTarget} />}
+                    {salesTarget && <StatPill label="Sales target" value={`NPR ${salesTarget.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.salesTarget} />}
+                    {purchTarget && <StatPill label="Purchase target" value={`NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchTarget} />}
                     <StatPill label="Period" value={periodLabel} />
                   </div>
                 )}

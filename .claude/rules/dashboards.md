@@ -35,8 +35,10 @@ History: docs/rules-archive/dashboards.md#s734-nullable-source-undercount
 
 ## Daily Purchases vs Sales: actual, live projection, frozen Target
 
-- Each metric has three series: the actual line; a live projection (`salesProjection`/`purchProjection`: `projectTrend()` refits on every load once there are 5 points and answers "if today's pace continues", with no memory); and a frozen Target, captured the first time the metric crosses that 5-point threshold in the open period and never moved. Never make the projection remember, or the Target follow the data.
-- The snapshot lives in `monthly_periods.sales_projection_snapshot` / `purch_projection_snapshot` (nullable jsonb `{slope, intercept, cap, capturedDay, projectedMonthEnd}`, migration `20260814130000`), and `targetLineValue()` rebuilds the month-long line from that fit (S556). The write is best effort: `scopedUpdate(...).is('sales_projection_snapshot', null)`. A capture-once write guards with `.is(col, null)` so a racing tab cannot overwrite it.
+- Each metric has three series: the actual line, a live forecast (`salesProjection`/`purchProjection`) and a frozen Target. All the arithmetic is in `src/modules/dashboard/dailyForecast.js` (S780), pinned by its test. Never make the forecast remember, or the Target follow the data.
+- The Target comes from the 28 days before Day 1 of the open month (`loadForecastHistory`, the previous two periods). Sales: an average per weekday, over the days with an entry. Purchases: net purchases ÷ calendar days, because a day with no bill is a real zero. It has under 14 days of history → built from the month's own first 7 days (`source: 'month'`). The forecast = that weekday base × a pace factor weighted `n/(n+3)` toward this month. Never reintroduce a slope or a ceiling: S780's least-squares fit ran to zero by day 14, and its 1.25× cap became the purchase forecast.
+- The snapshot is `monthly_periods.sales_projection_snapshot` / `purch_projection_snapshot` (jsonb `{model: 2, source, byWeekday[7], sampleDays, capturedDay, projectedMonthEnd}`). It is a best-effort capture guarded by `.is('<col>->>model', null)`, which matches an empty column or a pre-S780 slope snapshot, so those are replaced once. Never guard it with a `.neq`, which drops NULL rows. `isCurrentSnapshot()` hides an old one still in `dashboardCache`.
+- A failed history read captures NO Target: it would lock one week of the month in for the whole month. The footer says so (`forecastHistoryFailed`).
 - A migration file in the repo does not prove it is live. `20260814130000` was not applied until S753 (2026-09-14); a month of `PGRST204` failed saves was found only in a browser console. Check the live database.
 - The Target is a third, distinct hue (`DAILY_TREND_COLORS.salesTarget` / `purchTarget`, blue/orange), never a dash variant of an existing series' hue.
 - X-axis ticks show the BS weekday initial under each day number (S/M/T/W/T/F/S, Sunday first, duplicate letters intended) through a custom Recharts `tick` using `bsToAd(...).getDay()`.
@@ -46,7 +48,7 @@ History: docs/rules-archive/dashboards.md#s734-nullable-source-undercount
 
 Why: the dotted line is a target precisely because it does not follow the data, and a print or screenshot loses the hover.
 
-History: docs/rules-archive/dashboards.md#s556-frozen-target-line and docs/rules-archive/dashboards.md#s634-three-series
+History: docs/rules-archive/dashboards.md#s556-frozen-target-line, docs/rules-archive/dashboards.md#s634-three-series and docs/rules-archive/dashboards.md#s780-weekday-target
 
 ## `ChartCard`'s expand modal
 

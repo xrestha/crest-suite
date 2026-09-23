@@ -129,6 +129,17 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ⚪ **`Sales.js`' bulk grid is the same shape and is not drafted.** A human legitimately spends
   minutes in it before Save and nothing survives the page dying. Stock Count is covered by the
   offline queue and per-row saves; Sales Entry is covered by neither.
+- ✅ S780 — Dashboard's Daily Purchases vs Sales Target was a least-squares line through the
+  month's first 5 days, frozen. CASA, Ashwin 2083: it ran to zero by day 14 (sales target 92,144
+  against 73,846 sold by day 6), and the 1.25× ceiling became the purchase forecast (2,40,207).
+  Rebuilt in `src/modules/dashboard/dailyForecast.js`. The Target is the last 4 weeks' weekday
+  pattern from Day 1, and the forecast is that pattern × this month's pace. Old snapshots are
+  replaced once. Rule: `.claude/rules/dashboards.md`.
+- ⚪ **The Target's weekday averages still count past public holidays.** Demand Forecast
+  (`DemandForecast.js`, D21) leaves them out and applies Holiday Calendar multipliers. Here, a
+  Dashain Saturday in the 4-week window lifts the Saturday target for the next month, and a
+  holiday in the open month is not marked. Candidate: read the same Holiday Calendar and exclude
+  those days in `historyWindowDays()`.
 - ✅ S756 — `Stock.js:709-727` Save All writes/deletes every visible row (parallel tablets wipe each other; restamps counted_by; recount guard refuses) → send changed cells only.
 - ✅ S756 — `Stock.js:549-586` offline replay into closed period (with D1).
 - ✅ S756 — `Stock.js:810,242` bare selects (pull-from-last-month, items).
