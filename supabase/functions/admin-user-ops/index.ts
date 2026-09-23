@@ -207,7 +207,9 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
     await del(admin.from('hr_payslips').delete().in('run_id', runIds), 'hr_payslips')
   }
   // Repayments BEFORE the runs (S752): payroll_run_id is ON DELETE NO ACTION, so deleting a run a
-  // payroll recovery points at threw here, after the payslips were already gone.
+  // payroll recovery points at threw here, after the payslips were already gone. Salary payments
+  // (S782) the same: run_id and employee_id are both NO ACTION.
+  await del(admin.from('hr_salary_payments').delete().eq('client_id', clientId), 'hr_salary_payments')
   await del(admin.from('hr_advance_repayments').delete().eq('client_id', clientId), 'hr_advance_repayments')
   await del(admin.from('hr_payroll_runs').delete().eq('client_id', clientId), 'hr_payroll_runs')
   // Before hr_advance_repayments (whose final_settlement_id points at it) and before
@@ -2051,7 +2053,8 @@ Deno.serve(async (req) => {
         if (runIds.length > 0) {
           await del(admin.from('hr_payslips').delete().in('run_id', runIds), 'hr_payslips')
         }
-        // Repayments before the runs they point at (payroll_run_id is ON DELETE NO ACTION) — S752.
+        // Repayments and salary payments before the runs they point at (both NO ACTION) — S752, S782.
+        await del(admin.from('hr_salary_payments').delete().eq('client_id', clientId), 'hr_salary_payments')
         await del(admin.from('hr_advance_repayments').delete().eq('client_id', clientId), 'hr_advance_repayments')
         await del(admin.from('hr_payroll_runs').delete().eq('client_id', clientId), 'hr_payroll_runs')
         // Before hr_advance_repayments (whose final_settlement_id points at it) and before

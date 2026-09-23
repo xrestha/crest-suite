@@ -45,6 +45,7 @@ const TABLE_LABELS = {
   // a bonus amount or type, a travel claim's approval and payment
   hr_advances:            'Advance / Loan',
   hr_advance_repayments:  'Advance Repayment',
+  hr_salary_payments:     'Salary Payment',
   hr_incentives:          'Incentive',
   hr_incentive_configs:   'Incentive Type',
   hr_tada_claims:         'TADA Claim',

@@ -12,7 +12,7 @@ A migration is a production change. This procedure has two halves with a hard st
 1. **Plan first, always.** Say what the migration changes (tables, columns, functions, policies, grants), what depends on it, and how it would be reversed. Wait for approval of the plan.
 2. **Create the file** `supabase/migrations/<YYYYMMDDHHMMSS>_<description>.sql`, timestamped after the newest file there (or scaffold it with `supabase migration new <description>`).
 3. **Write the SQL** to `.claude/rules/supabase-sql.md`, which loads when the file is opened. The checks most often missed:
-   - A table created in raw SQL gets no role grants here: add explicit `GRANT`s to `authenticated`.
+   - A table created in raw SQL gets no SELECT/INSERT/UPDATE/DELETE grants here: add explicit `GRANT`s to `authenticated`. It DOES get TRUNCATE, REFERENCES, TRIGGER and MAINTAIN for `anon` and `authenticated` from the schema's default privileges, so `REVOKE` those in the same migration (S782).
    - Policies call `my_client_id()`, never its body, and every authorisation condition is wrapped in `COALESCE(…, false)`.
    - A new business table joins every matching restrictive staff-isolation policy list.
    - `CREATE OR REPLACE FUNCTION` cannot change a function's return columns; drop it first.

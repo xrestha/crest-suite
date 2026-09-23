@@ -236,3 +236,25 @@ describe('errorText', () => {
     })
   })
 })
+
+// S782 — salary payments. The rank refusal carries ERRCODE 42501, so it must sit ahead of the
+// generic permission rule or it would read as a bare "not allowed".
+describe('salary payment refusals', () => {
+  const raised = (name, code = 'P0001') => ({ code, message: `${name}: …` })
+
+  it('the rank refusal names who can do it, ahead of the generic 42501 rule', () => {
+    const text = errorText(raised('salary_payment_rank', '42501'), 'operator')
+    expect(text).toMatch(/Owner or an HR manager/)
+    expect(text).toMatch(/nothing was recorded/i)
+  })
+
+  it('a stale page is told to reload, not to retry blind', () => {
+    for (const name of ['salary_payment_nothing_due', 'salary_payment_not_finalized', 'salary_payment_already_voided', 'salary_payment_run_missing']) {
+      expect(errorText(raised(name), 'operator')).toMatch(/reload the page/i)
+    }
+  })
+
+  it('a direct write is pointed back at the Payroll page', () => {
+    expect(errorText(raised('salary_payment_ledger_locked'), 'operator')).toMatch(/Mark paid/)
+  })
+})

@@ -790,6 +790,21 @@ Decided with Aashish (2026-09-17). No migration. `attendanceImport.js` reads the
   other way, a Bhadra grid's "05-04" read day-first is Shrawan 5 and one column pours into Shrawan.
 - **A CSV is read with `raw: true`.** Read as a spreadsheet, SheetJS turns a BS "05-01" into an AD date.
 
+## Salary payments: finalizing pays nobody (S782)
+
+Decided with Aashish (2026-09-23). Migration `20260923100000`; helpers `salaryPayments.js`.
+
+- **A payment is its own row (`hr_salary_payments`), keyed by run + employee, never a payslip column.**
+  Reopen stays allowed after payment, and Regenerate deletes and re-inserts payslips, so a paid mark on
+  the payslip would be wiped. `paymentState()` names the difference instead: still to pay, or overpaid.
+- **Written only by `record_salary_payments` / `void_salary_payment`** (DEFINER, HR manager or Owner,
+  under `hr_pay_lock`); `hr_salary_payments_guard` refuses direct writes, operator exempt for restore.
+  The amount is never a parameter: Mark paid records net pay less active payments, and refuses someone
+  already paid rather than skipping them. Undo is a void with a required reason, never a delete.
+- **A failed payments read is its own state** ("not checked", Mark paid hidden), never "not paid",
+  and it does not take the register down. The Staff app swallows its read and shows nothing.
+- `run_id` and `employee_id` are NO ACTION, so Danger Zone deletes payments before runs and employees.
+
 ## Year-to-date income is pay earned (S781)
 
 - **Every taxable-income sum over payslips goes through `earnedPay()`** (`payrollCompute.js`): gross −

@@ -365,6 +365,11 @@ const rules = [
     operator: 'Finalizing or reopening payroll needs the Owner or an HR manager, so nothing was changed.',
   },
   {
+    test: e => /salary_payment_rank/i.test(e.message || ''),
+    staff: 'Only the owner or an HR manager can mark salaries paid. Nothing was changed.',
+    operator: 'Marking salaries paid, or undoing a payment, needs the Owner or an HR manager, so nothing was recorded.',
+  },
+  {
     test: e => /self_service_blocked/i.test(e.message || ''),
     staff: 'Your access to the Staff app has been turned off. Speak to your manager if you think this is a mistake.',
     operator: 'This employee\'s Staff app access is turned off, so the request was refused. Turn it back on in Employees if they should still use it.',
@@ -688,6 +693,25 @@ const rules = [
     test: e => /payroll_run_empty|payroll_run_not_found/i.test(e.message || ''),
     staff: 'That payroll run has no payslips any more. Reload the page.',
     operator: 'Nothing was finalized: the run has no payslips, or no longer exists. Reload the page.',
+  },
+  // ── Salary payments (S782, migration 20260923100000) ────────────────────────────────────────
+  // Every refusal below is raised inside record_salary_payments / void_salary_payment before or in
+  // place of their one write, so "nothing was recorded" is true of each. The rank refusal sits with
+  // payroll_rank above, ahead of the generic 42501 rule.
+  {
+    test: e => /salary_payment_(nothing_due|no_payslip|not_finalized|already_voided|not_found|run_missing)/i.test(e.message || ''),
+    staff: 'That payroll changed on another screen. Reload the page.',
+    operator: 'Nothing was recorded — this payroll changed since the page loaded: someone was marked paid or a payment was undone in another tab, or the run was reopened or regenerated. Reload the page to see who is still to be paid.',
+  },
+  {
+    test: e => /salary_payment_(method|date|reference|void_reason|nobody)/i.test(e.message || ''),
+    staff: 'Something in the payment details was not accepted. Nothing was changed.',
+    operator: 'Nothing was recorded: the payment details were not accepted — the date cannot be in the future, a payment method must be chosen, the reference is at most 100 characters and an undo needs a reason. The detail below says which.',
+  },
+  {
+    test: e => /salary_payment_ledger_locked/i.test(e.message || ''),
+    staff: 'Salary payments can only be changed from the Payroll page. Nothing was changed.',
+    operator: 'Salary payments are recorded with Mark paid and undone with Undo payment on the Payroll page, never edited directly, so the record of who was paid stays complete. Nothing was changed.',
   },
   {
     test: e => /repayment_ledger_locked/i.test(e.message || ''),

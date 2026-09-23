@@ -20,6 +20,7 @@ import { employeeErrorText } from './employeeError'
 import { useStaffAppManifest } from './useStaffApp'
 import { rememberedStaffClient } from './staffClient'
 import { HR_REQUEST_STATUS, TADA_REQUEST_STATUS } from '../payrollConstants'
+import { methodLabel } from '../payroll/salaryPayments'
 import './selfService.css'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -146,6 +147,19 @@ export default function SelfServiceHome() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
 
   const [payslips, setPayslips] = useState(null)
+  // payslip id → { paid_amount, last_paid_on, last_method } (S782). Only what the manager recorded;
+  // an empty map shows nothing rather than "not paid", because an outlet may simply not record it.
+  const [paidBySlip, setPaidBySlip] = useState({})
+  // "Paid on 3 Ashwin 2083 · Bank transfer", or null when nothing was recorded for that month.
+  const paidLine = slip => {
+    const p = slip && paidBySlip[slip.id]
+    if (!p) return null
+    const paid = parseFloat(p.paid_amount) || 0
+    const net = parseFloat(slip.net_pay) || 0
+    return paid >= net - 0.01
+      ? `Paid on ${fmtBs(p.last_paid_on)} · ${methodLabel(p.last_method)}`
+      : `NPR ${fmt(paid)} of NPR ${fmt(net)} paid so far, last on ${fmtBs(p.last_paid_on)}`
+  }
   const [viewSlip, setViewSlip] = useState(null)
   const [bizInfo, setBizInfo] = useState({ name: '', address: '', vatNumber: '' })
   // One message per area, not one shared string: a failed payslip read must not blank the roster
@@ -252,9 +266,16 @@ export default function SelfServiceHome() {
 
   // ── Loaders ────────────────────────────────────────────────────────────────────────────────
   const loadPayslips = useCallback(async () => {
-    const { data, error } = await supabase.rpc('get_my_hr_payslips')
+    const [{ data, error }, paid] = await Promise.all([
+      supabase.rpc('get_my_hr_payslips'),
+      supabase.rpc('get_my_salary_payments'),
+    ])
     setErrFor('payslips', error ? employeeErrorText(error) : '')
     if (!error) setPayslips(data || [])
+    // The "Paid on …" line is extra, so its failure is swallowed: it must never blank the payslips,
+    // and there is nothing the employee could do about it.
+    if (paid.error) console.error('get_my_salary_payments failed', paid.error)
+    else setPaidBySlip(Object.fromEntries((paid.data || []).map(p => [p.payslip_id, p])))
   }, [])
 
   const loadLeave = useCallback(async () => {
@@ -682,7 +703,7 @@ export default function SelfServiceHome() {
               >
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year}</span>
-                  <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Tap to view full payslip</span>
+                  <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>{paidLine(p) || 'Tap to view full payslip'}</span>
                 </span>
                 <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-green-text)', whiteSpace: 'nowrap' }}>NPR {fmt(p.net_pay)}</span>
               </button>
@@ -934,6 +955,7 @@ export default function SelfServiceHome() {
               style={{ width: 44, minWidth: 44, padding: 0, justifyContent: 'center' }}>✕</button>
           </div>
           {errs.settings && <p role="note" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>{errs.settings} Your company's name and address may be missing from this payslip.</p>}
+          {paidLine(viewSlip) && <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--theme-text1)' }}>{paidLine(viewSlip)}</p>}
           <PayslipBody
             slip={viewSlip}
             emp={viewSlip}

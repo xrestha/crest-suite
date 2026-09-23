@@ -36,10 +36,47 @@ beforeEach(() => {
 })
 
 describe('PayrollMonthStatus', () => {
-  it('names the month and walks the four steps in order', async () => {
+  it('names the month and walks the five steps in order', async () => {
     renderStrip({ employees: [], attendance: [], run: null, payslips: [] })
     expect(await screen.findByRole('navigation', { name: /Bhadra 2083 payroll/ })).toBeInTheDocument()
-    expect([...document.querySelectorAll('.month-status__label')].map(n => n.textContent)).toEqual(['Attendance', 'Approvals', 'Payroll', 'SSF deposit'])
+    expect([...document.querySelectorAll('.month-status__label')].map(n => n.textContent)).toEqual(['Attendance', 'Approvals', 'Payroll', 'Staff paid', 'SSF deposit'])
+    expect(await within(step('Staff paid')).findByText(/After Finalize — finalizing pays nobody/)).toBeInTheDocument()
+  })
+
+  // S782. Finalize pays nobody, so the step between the run and the SSF deposit is whether the
+  // money actually went out — and a failed read of that is never a reassuring answer.
+  describe('Staff paid', () => {
+    const finalized = { id: 'r', status: 'finalized' }
+    const payslips = [{ employee_id: 'a', net_pay: 29963 }, { employee_id: 'b', net_pay: 26697 }]
+    const paid = id => ({ employee_id: id, amount: id === 'a' ? 29963 : 26697, paid_on: '2026-09-20', voided_at: null })
+
+    it("says how many are still to be paid, from the page's own payments", async () => {
+      renderStrip({ employees: [], attendance: [], run: finalized, payslips, payments: [paid('a')] })
+      expect(await within(step('Staff paid')).findByText(/1 of 2 marked paid — NPR 26,697 still to pay/)).toBeInTheDocument()
+    })
+
+    it('ticks only when everyone is paid', async () => {
+      renderStrip({ employees: [], attendance: [], run: finalized, payslips, payments: [paid('a'), paid('b')] })
+      expect(await within(step('Staff paid')).findByText('All 2 marked paid')).toBeInTheDocument()
+      expect(within(step('Staff paid')).getByText('✓')).toBeInTheDocument()
+    })
+
+    it('does not count an undone payment', async () => {
+      renderStrip({ employees: [], attendance: [], run: finalized, payslips, payments: [paid('a'), { ...paid('b'), voided_at: '2026-09-21T00:00:00Z' }] })
+      expect(await within(step('Staff paid')).findByText(/1 of 2 marked paid/)).toBeInTheDocument()
+    })
+
+    it('never turns a failed payments read into "not paid" or a tick', async () => {
+      renderStrip({ employees: [], attendance: [], run: finalized, payslips, payments: [], paymentsError: { message: 'refused' } })
+      expect(await within(step('Staff paid')).findByText('Could not check')).toBeInTheDocument()
+      expect(within(step('Staff paid')).queryByText('✓')).toBeNull()
+    })
+
+    it('reads the payments itself when the page does not pass them', async () => {
+      mockAnswers.hr_salary_payments = () => ({ data: [paid('a'), paid('b')], error: null })
+      renderStrip({ employees: [], attendance: [], run: finalized, payslips })
+      expect(await within(step('Staff paid')).findByText('All 2 marked paid')).toBeInTheDocument()
+    })
   })
 
   it('counts unpaid unmarked days for daily staff, and links the queues that are waiting', async () => {

@@ -111,7 +111,8 @@ preference on a `/hr/self-service` path — the admin app keeps `dark`.
 Every figure comes from an RPC the portal already called: `get_my_hr_payslips`,
 `get_my_leave_types`, `get_my_leave_requests`, `submit_my_leave_request`, `get_my_roster`,
 `get_my_roster_publish_status`, `get_coworker_roster`, `request_shift_swap`, `respond_shift_swap`,
-`get_my_swap_requests`, `get_my_tada_claims`, `submit_my_tada_claim`, `get_my_client_vendors`.
+`get_my_swap_requests`, `get_my_tada_claims`, `submit_my_tada_claim`, `get_my_client_vendors`, and since
+S782 `get_my_salary_payments` (the "Paid on …" line; its failure is swallowed, never shown).
 **Keep it that way where possible** — the whole rebuild carried no migration and no Edge Function
 deploy, which is why it could not break the admin side.
 

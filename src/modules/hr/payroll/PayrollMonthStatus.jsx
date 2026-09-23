@@ -7,6 +7,7 @@ import { nprInt } from '../../../shared/nepalMoney'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { fetchPayrollEmployees, periodAdBounds } from './payrollData'
 import { attendanceGaps, pickStatusPeriod, ssfDeadline } from './monthStatus'
+import { fetchRunPayments, runPaymentSummary } from './salaryPayments'
 
 // Where one month's payroll stands, as four linked steps (S768): attendance → approvals → the run →
 // the SSF deposit. It is the answer to the owner's actual question — "is Bhadra's payroll right and
@@ -19,7 +20,11 @@ import { attendanceGaps, pickStatusPeriod, ssfDeadline } from './monthStatus'
 // Two ways in. `period` shows that month (the Payroll page passes the one it is on, and its own loaded
 // `employees`/`attendance`/`run`/`payslips` so nothing is read twice). `auto` picks the month itself —
 // the newest started month whose payroll is not finalized — for the HR Dashboard.
-export default function PayrollMonthStatus({ period: givenPeriod, auto = false, employees, attendance, run, payslips, runStale, onPayrollPage = false, refreshKey }) {
+//
+// "Staff paid" (S782) sits between the run and the SSF deposit: Finalize pays nobody. The Payroll page
+// passes its own `payments`/`paymentsError`, so the step always agrees with the Paid column; without
+// them the step reads the run's payments itself.
+export default function PayrollMonthStatus({ period: givenPeriod, auto = false, employees, attendance, run, payslips, payments, paymentsError, runStale, onPayrollPage = false, refreshKey }) {
   const { clientId } = useAuth()
   const { scopedFrom } = useScopedDb()
   const [state, setState] = useState({ loading: true })
@@ -57,14 +62,18 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       if (!live) return
       const runRow = runRes.error ? null : (runRes.data || null)
       let ssf = null
+      let paid = null
       if (runRow?.status === 'finalized') {
-        if (payslips) {
-          ssf = { total: payslips.reduce((s, p) => s + (parseFloat(p.ssf_employee) || 0) + (parseFloat(p.ssf_employer) || 0), 0) }
-        } else {
-          const slips = await scopedFrom('hr_payslips', 'ssf_employee, ssf_employer').eq('run_id', runRow.id)
-          if (!live) return
-          ssf = slips.error ? { error: slips.error } : { total: (slips.data || []).reduce((s, p) => s + (parseFloat(p.ssf_employee) || 0) + (parseFloat(p.ssf_employer) || 0), 0) }
-        }
+        const ownPayments = payments !== undefined
+        const [slips, pays] = await Promise.all([
+          payslips ? { data: payslips } : scopedFrom('hr_payslips', 'employee_id, net_pay, ssf_employee, ssf_employer').eq('run_id', runRow.id),
+          ownPayments ? { data: payments, error: paymentsError || null } : fetchRunPayments(scopedFrom, runRow.id),
+        ])
+        if (!live) return
+        ssf = slips.error ? { error: slips.error } : { total: (slips.data || []).reduce((s, p) => s + (parseFloat(p.ssf_employee) || 0) + (parseFloat(p.ssf_employer) || 0), 0) }
+        // Kept only when read here; the page's own payments are summarised at render, so a Mark paid
+        // there updates this step without a re-read.
+        if (!ownPayments) paid = slips.error || pays.error ? { error: slips.error || pays.error } : runPaymentSummary(slips.data, pays.data)
       }
       const approvalsFailed = [leave, ot, tada].some(r => r.error || r.count == null)
       setState({
@@ -74,6 +83,7 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
         approvals: approvalsFailed ? { error: true } : { leave: leave.count, ot: ot.count, tada: tada.count },
         run: runRes.error ? { error: runRes.error } : { status: runRow?.status || 'none' },
         ssf,
+        paid,
       })
     })()
     return () => { live = false }
@@ -93,7 +103,7 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
 
   const steps = []
   if (state.loading) {
-    for (const name of ['Attendance', 'Approvals', 'Payroll', 'SSF deposit']) steps.push({ name, tone: 'none', mark: '…', text: 'Checking…' })
+    for (const name of ['Attendance', 'Approvals', 'Payroll', 'Staff paid', 'SSF deposit']) steps.push({ name, tone: 'none', mark: '…', text: 'Checking…' })
   } else {
     const a = state.attendance
     steps.push(a.error ? { name: 'Attendance', tone: 'none', mark: '—', text: 'Could not check', link: ['/hr/attendance', 'Open Attendance'] }
@@ -117,6 +127,18 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       : r.status === 'finalized' ? { name: 'Payroll', tone: 'done', mark: '✓', text: 'Finalized', link: payrollLink }
       : r.status === 'draft' ? { name: 'Payroll', tone: 'open', mark: '△', text: runStale ? 'Draft — out of date, Regenerate before finalizing' : 'Draft — not finalized yet', link: payrollLink }
       : { name: 'Payroll', tone: 'none', mark: '—', text: 'Not generated yet', link: payrollLink && ['/hr/payroll', 'Generate'] })
+
+    // Staff paid (S782). "Not paid" is never inferred from a failed read.
+    const pd = r.status !== 'finalized' ? null
+      : payments !== undefined ? (paymentsError ? { error: paymentsError } : runPaymentSummary(payslips, payments))
+      : state.paid
+    const due = pd && !pd.error ? pd.owed - pd.paid : 0
+    steps.push(r.status !== 'finalized' ? { name: 'Staff paid', tone: 'none', mark: '—', text: 'After Finalize — finalizing pays nobody' }
+      : !pd || pd.error ? { name: 'Staff paid', tone: 'none', mark: '—', text: 'Could not check', link: payrollLink }
+      : pd.owed === 0 ? { name: 'Staff paid', tone: 'done', mark: '✓', text: 'Nothing to pay' }
+      : pd.over > 0 ? { name: 'Staff paid', tone: 'open', mark: '△', text: `${pd.over} paid more than their payslip — check Payroll`, link: payrollLink }
+      : due === 0 ? { name: 'Staff paid', tone: 'done', mark: '✓', text: `All ${pd.owed} marked paid` }
+      : { name: 'Staff paid', tone: 'open', mark: '△', text: `${pd.paid} of ${pd.owed} marked paid — NPR ${nprInt(pd.dueTotal)} still to pay`, link: payrollLink })
 
     const s = state.ssf
     steps.push(r.status !== 'finalized' ? { name: 'SSF deposit', tone: 'none', mark: '—', text: `After Finalize — due by ${dueLabel}` }

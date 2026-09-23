@@ -10,7 +10,7 @@ import RunStatusBadge from './RunStatusBadge'
 import Modal from '../../../components/Modal'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { BS_MONTHS, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
+import { BS_MONTHS, daysInBsMonth, formatAd, formatAdAsBs } from '../../../utils/bsCalendar'
 import { nepalBs, nepalCivilDate, nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import {
   fetchYtdMap, fetchApprovedTadaMap, payslipDrift, periodAdBounds, dueAdvances,
@@ -20,7 +20,10 @@ import PayslipBody from './PayslipBody'
 import PayrollApprovalSheet from './PayrollApprovalSheet'
 import { CalcDetail, StoredDetail, FINALIZED_INTRO, driftParts, orphanIntro } from './PayslipCalculation'
 import RowDisclosure from '../../../components/RowDisclosure'
+import RowMenu from '../../../components/RowMenu'
 import PayrollMonthStatus from './PayrollMonthStatus'
+import { fetchRunPayments, runPaymentSummary, methodLabel } from './salaryPayments'
+import { MarkPaidDialog, UndoPaymentDialog } from './SalaryPaymentDialogs'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -128,6 +131,15 @@ export default function PayrollRun() {
   // the error card INSTEAD of the register and hides every action: nothing below it is a real figure,
   // and "No active employees. Add employees…" over a failed read sent an owner to re-enter staff.
   const [loadError,  setLoadError]  = useState(null)
+  // Salary payments recorded against this run (S782), undone ones included. A failed read is its own
+  // state, never an empty list: "nobody is paid" over a read that failed would invite paying twice.
+  // It does not take the register down with it — the figures are still right; only "who is paid"
+  // is unknown, and the page says exactly that.
+  const [payments,   setPayments]   = useState([])
+  const [paymentsError, setPaymentsError] = useState(null)
+  // null | [{ employee_id, name, due }] — the Mark paid dialog; null | { payment, name } — Undo.
+  const [markPaid,   setMarkPaid]   = useState(null)
+  const [undoPay,    setUndoPay]    = useState(null)
   const [busy,       setBusy]       = useState(false)
   const [msg,        setMsg]        = useState('')
   // Which consequential action is awaiting its ConfirmModal: null | 'regenerate' | 'finalize'
@@ -190,6 +202,7 @@ export default function PayrollRun() {
       // Everything the previous client showed is dropped before the first await, so no label, list or
       // name from one outlet can sit over another's while this loads (S751 review).
       setLoading(true); setMsg(''); setLoadError(null); setRun(null); setPayslips([])
+      setPayments([]); setPaymentsError(null); setMarkPaid(null); setUndoPay(null)
       setPeriods([]); setPeriod(null); setEmployees([]); setSettled([]); setExtraEmps([]); setConfirmAction(null)
       const { data: p, error: pErr } = await scopedFrom('monthly_periods')
         .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
@@ -255,9 +268,16 @@ export default function PayrollRun() {
     let error = inputs.error || runRes.error
     let slips = []
     let extra = []
+    let pays = []
+    let payErr = null
     const runRow = runRes.data || null
     if (!error && runRow) {
-      const slipRes = await scopedFrom('hr_payslips').eq('run_id', runRow.id)
+      const [slipRes, payRes] = await Promise.all([
+        scopedFrom('hr_payslips').eq('run_id', runRow.id),
+        fetchRunPayments(scopedFrom, runRow.id),
+      ])
+      if (payRes.error) payErr = payRes.error
+      else pays = payRes.data || []
       if (slipRes.error) error = slipRes.error
       else {
         slips = slipRes.data || []
@@ -274,6 +294,7 @@ export default function PayrollRun() {
     if (error) {
       setLoadError(error)
       setRun(null); setPayslips([]); setEmployees([]); setSettled([]); setExtraEmps([])
+      setPayments([]); setPaymentsError(null)
       return
     }
     const d = inputs.data
@@ -283,12 +304,14 @@ export default function PayrollRun() {
     setAdvances(d.advances); setRepayments(d.repayments)
     setYtdMap(d.ytdMap); setTadaMap(d.tadaMap)
     setRun(runRow); setPayslips(slips); setTdsDraft({})
+    setPayments(pays); setPaymentsError(payErr)
   }
 
   async function handlePeriodChange(id) {
     periodReq.begin(id)   // claim the page before any await
     const p = periods.find(x => x.id === id); if (!p) return
     setPeriod(p); setMsg(''); setLoading(true); setConfirmAction(null); setExpandedId(null)
+    setMarkPaid(null); setUndoPay(null)
     await loadAll(p)
     if (periodReq.isCurrent(id)) setLoading(false)
   }
@@ -616,6 +639,86 @@ export default function PayrollRun() {
   const monthName = period ? BS_MONTHS[period.bs_month - 1] : 'this month'
   const finalized = run?.status === 'finalized'
 
+  // Who has been paid (S782). One summary from the page's own payslips and payments, so the Paid
+  // column, "Mark everyone paid", the status strip and the Reopen warning cannot disagree.
+  const paySummary = useMemo(() => runPaymentSummary(payslips, payments), [payslips, payments])
+  const activePayments = payments.filter(p => !p.voided_at)
+  // Shown on a finalized run, and on a reopened draft that already has payments — whoever is fixing
+  // the month needs to see who already has their money.
+  const showPaid = !!run && (finalized || payments.length > 0)
+  const canMarkPaid = finalized && !paymentsError
+
+  function openMarkPaid(employeeIds) {
+    const people = employeeIds
+      .map(id => ({ employee_id: id, name: nameOf(id), due: paySummary.byEmployee.get(id)?.due || 0 }))
+      .filter(p => p.due > 0)
+    if (people.length > 0) { setMsg(''); setMarkPaid(people) }
+  }
+
+  async function afterPaymentChange(text) {
+    setMarkPaid(null); setUndoPay(null)
+    if (period) await loadAll(period)
+    setMsg('ok:' + text)
+  }
+
+  // The Paid cell. A mark and words for every state, never colour alone; amber only where someone
+  // must act (a difference still owed, or an overpayment after a Reopen).
+  function renderPaidCell(s, emp) {
+    if (paymentsError) {
+      return (
+        <Tip text="The salary payments for this month could not be read, so whether this person has been paid is unknown. Reload the page before marking anyone paid." width={260}>
+          <span style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>not checked</span>
+        </Tip>
+      )
+    }
+    const st = paySummary.byEmployee.get(s.employee_id)
+    if (!st || st.state === 'none') return <span style={{ color: 'var(--theme-text2)' }}>—</span>
+    const undoItems = st.active.map(p => ({
+      key: p.id,
+      label: `Undo NPR ${fmt(p.amount)} paid ${formatAdAsBs(p.paid_on)}…`,
+      onSelect: () => { setMsg(''); setUndoPay({ payment: p, name: emp.full_name }) },
+      danger: true,
+    }))
+    const last = st.last
+    const payBtn = label => canMarkPaid && (
+      <button className="btn btn-ghost btn-sm" onClick={() => openMarkPaid([s.employee_id])} disabled={busy}
+        aria-label={`${label} — ${emp.full_name}`}>{label}</button>
+    )
+    let body
+    if (st.state === 'paid') {
+      body = (
+        <Tip text={`NPR ${fmt(st.paid)} recorded as paid${st.active.length > 1 ? ` in ${st.active.length} payments` : ''}, last on ${formatAdAsBs(last.paid_on)} by ${methodLabel(last.method).toLowerCase()}${last.reference ? ` (ref. ${last.reference})` : ''}.`} width={260}>
+          <span style={{ fontSize: 12, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
+            <span aria-hidden="true" style={{ color: 'var(--theme-green-text)' }}>✓</span> {formatAdAsBs(last.paid_on)} · {methodLabel(last.method)}
+          </span>
+        </Tip>
+      )
+    } else if (st.state === 'unpaid') {
+      body = payBtn('Mark paid') || <span style={{ fontSize: 12, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>Not paid</span>
+    } else if (st.state === 'short') {
+      body = (
+        <>
+          <Tip text={`NPR ${fmt(st.paid)} was recorded as paid, but this payslip now comes to NPR ${fmt(st.net)} — the month was reopened and its figures changed. NPR ${fmt(st.due)} is still owed.`} width={270}>
+            <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>△ NPR {fmt(st.due)} still to pay</span>
+          </Tip>
+          {payBtn('Pay difference')}
+        </>
+      )
+    } else {
+      body = (
+        <Tip text={`NPR ${fmt(st.paid)} was recorded as paid, but this payslip now comes to NPR ${fmt(st.net)} — the month was reopened and its figures went down. NPR ${fmt(-st.due)} was paid too much; recover it by hand or from next month's pay, or undo a payment that was recorded by mistake.`} width={290}>
+          <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>△ Overpaid NPR {fmt(-st.due)}</span>
+        </Tip>
+      )
+    }
+    return (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+        {body}
+        {undoItems.length > 0 && <RowMenu label={`More for ${emp.full_name}'s payment`} items={undoItems} disabled={busy} />}
+      </div>
+    )
+  }
+
   // A row's working. A finalized month is explained as it was PAID and never recomputed (decision 12,
   // S751); a draft is the live working from the same buildPayrollRows() the register was generated
   // from — and when this payslip has drifted from it, the panel says so first, naming what moved,
@@ -678,6 +781,15 @@ export default function PayrollRun() {
         'Advance Ded': s.advance_deduction || 0,
         'TDS': s.tds, 'TADA': s.tada_amount || 0, 'Net Pay': s.net_pay,
         'SSF Employer': s.ssf_employer,
+        // What was recorded as paid (S782) — blank when payments could not be read, never 0.
+        ...(showPaid && !paymentsError ? (() => {
+          const st = paySummary.byEmployee.get(s.employee_id)
+          return {
+            'Paid (NPR)': st ? st.paid : 0,
+            'Paid On (BS)': st?.last ? formatAdAsBs(st.last.paid_on) : '',
+            'Paid By': st?.last ? methodLabel(st.last.method) : '',
+          }
+        })() : {}),
       }
     })
     const ws = XLSX.utils.json_to_sheet(rows)
@@ -746,6 +858,7 @@ export default function PayrollRun() {
         {!loading && !loadError && period && (
           <PayrollMonthStatus
             period={period} employees={employees} attendance={attendance} run={run} payslips={payslips}
+            payments={payments} paymentsError={paymentsError}
             runStale={!!run && !finalized && !freshness.ok} onPayrollPage
             refreshKey={`${run?.id || ''}:${run?.status || ''}:${payslips.length}:${attendance.length}`}
           />
@@ -758,6 +871,18 @@ export default function PayrollRun() {
           <div className="card" role="note" style={{ marginBottom: 12, padding: '10px 16px', display: 'flex', gap: '6px 18px', flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
             <strong style={{ color: 'var(--theme-text1)' }}>Next for {monthName}:</strong>
             <Link className="month-status__link" to={`/hr/reports?tab=bank&period=${period.id}`}>Pay staff — bank transfer sheet</Link>
+            {/* Then record it (S782). Finalize pays nobody; this is the record that the money went out. */}
+            {paymentsError ? (
+              <span style={{ color: 'var(--theme-amber-text)' }}>△ Salary payments could not be read — reload before marking anyone paid.</span>
+            ) : paySummary.toPay.length > 0 ? (
+              <Tip text={`Records that the salaries were paid, with the date and how (bank, cash, eSewa/Khalti or cheque). It does not send any money — pay first, then record it. Staff see the date in the Crest Staff app. ${paySummary.paid} of ${paySummary.owed} marked paid so far.`} width={300}>
+                <button className="btn btn-ghost btn-sm" onClick={() => openMarkPaid(paySummary.toPay)} disabled={busy}>
+                  {paySummary.toPay.length === paySummary.owed ? 'Mark everyone paid…' : `Mark the other ${paySummary.toPay.length} paid…`}
+                </button>
+              </Tip>
+            ) : paySummary.owed > 0 && (
+              <span style={{ color: 'var(--theme-text1)' }}><span aria-hidden="true" style={{ color: 'var(--theme-green-text)' }}>✓</span> All {paySummary.owed} marked paid</span>
+            )}
             <Link className="month-status__link" to={`/hr/reports?tab=ssf&period=${period.id}`}>Deposit SSF — challan</Link>
             <Link className="month-status__link" to={`/hr/reports?tab=tds&period=${period.id}`}>Deposit income tax — TDS report</Link>
             <span style={{ color: 'var(--theme-text2)' }}>Staff see their own payslips in the Crest Staff app.</span>
@@ -852,7 +977,12 @@ export default function PayrollRun() {
               {[
                 { label: 'Total Gross',  value: totals.gross, color: 'var(--theme-text1)', tip: 'Sum of gross earnings (basic + allowances, or earned wage) across all payslips.' },
                 { label: 'Deductions',   value: totalDeductions, color: 'var(--theme-text1)', tip: 'Everything taken off pay: unpaid days, SSF (11%), other deductions such as CIT, advance recovery, and income tax (TDS).' },
-                { label: 'Net Payable',  value: totals.net, color: 'var(--theme-text1)', tip: 'Total take-home pay to disburse this period, TADA reimbursements included.' },
+                {
+                  label: 'Net Payable', value: totals.net, color: 'var(--theme-text1)', tip: 'Total take-home pay to disburse this period, TADA reimbursements included.',
+                  sub: finalized && !paymentsError && paySummary.owed > 0
+                    ? `${payslips.length} payslip${payslips.length === 1 ? '' : 's'} · ${paySummary.paid} of ${paySummary.owed} marked paid`
+                    : undefined,
+                },
                 { label: 'Employer SSF', value: totals.ssfEmpr, color: 'var(--theme-text2)', tip: '20% SSF the company pays on top — not part of net payable.' },
                 {
                   label: 'Cost to Business', value: cost.total, color: 'var(--theme-text1)',
@@ -887,6 +1017,11 @@ export default function PayrollRun() {
                       <th style={{ textAlign: 'right' }}><Tip text="Income tax, worked out from the fiscal-year tax slabs. You can type over it while this is a draft — a typed figure is kept when you Finalize, and ↺ puts back the calculated one." width={280}>TDS</Tip></th>
                       <th style={{ textAlign: 'right' }}><Tip text="Travel/Daily Allowance reimbursement — the total of approved claims whose trip was over by the end of the month. Added after income tax and not taxed. To change it, change the claim in TADA Claims." width={290}>TADA</Tip></th>
                       <th style={{ textAlign: 'right' }}>Net Pay</th>
+                      {showPaid && (
+                        <th style={{ textAlign: 'right' }}>
+                          <Tip text="Whether this salary has been paid out, and when. Finalizing pays nobody — Mark paid records the date and how it was paid, and staff see it in the Crest Staff app. If the month is reopened and a figure changes, this shows what is still owed or what was paid too much." width={290}>Paid</Tip>
+                        </th>
+                      )}
                       <th></th>
                     </tr>
                   </thead>
@@ -981,13 +1116,14 @@ export default function PayrollRun() {
                             </div>
                           </td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 700, fontSize: 14 }}>{fmt(s.net_pay)}</td>
+                          {showPaid && <td style={{ textAlign: 'right' }}>{renderPaidCell(s, emp)}</td>}
                           <td style={{ textAlign: 'right' }}>
                             <button className="btn btn-ghost btn-sm" onClick={() => setViewSlip({ slip: s, emp })} aria-label={`Payslip for ${emp.full_name}`}>Payslip</button>
                           </td>
                         </tr>
                         {open && (
                           <tr>
-                            <td colSpan={12} style={{ padding: 0 }}>
+                            <td colSpan={showPaid ? 13 : 12} style={{ padding: 0 }}>
                               <div id={`working-${s.id}`} style={{ borderTop: '1px solid var(--theme-border)' }}>
                                 <div style={{ padding: '10px 22px 0', background: 'var(--theme-bg)', display: 'flex', justifyContent: 'flex-end' }}>
                                   <button className="btn btn-ghost btn-sm" onClick={() => printWorking(s, emp)}>🖨 Print working</button>
@@ -1016,6 +1152,11 @@ export default function PayrollRun() {
                       {negCell(totals.tds)}
                       {moneyCell(totals.tada, '+')}
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 15 }}>{fmt(totals.net)}</td>
+                      {showPaid && (
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text2)', fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap' }}>
+                          {paymentsError ? '' : `${paySummary.paid} of ${paySummary.owed} paid`}
+                        </td>
+                      )}
                       <td></td>
                     </tr>
                   </tfoot>
@@ -1030,6 +1171,7 @@ export default function PayrollRun() {
               </p>
               <ul style={{ margin: '6px 0 0', paddingLeft: 16 }}>
                 <li><strong>How a figure was worked out</strong>: open the ▸ beside a name. A draft shows the full working from current data — attendance tally, gross, absence, overtime, SSF, the income tax bands, advance cut and TADA — and says first if that payslip has drifted from it. A finalized month shows each figure as it was paid, never recalculated. Either prints as a sheet to hand to the employee.</li>
+                <li><strong>Paid</strong>: finalizing pays nobody. Once the money has gone out, Mark paid (one person) or Mark everyone paid records the date and how — bank transfer, cash, eSewa/Khalti or cheque — and staff see it in the Crest Staff app. A mark made by mistake is undone from the ⋯ beside it, with a reason; the record is kept, marked undone. If the month is reopened and a figure changes, the Paid column shows what is still owed, or what was paid too much.</li>
                 <li><strong>Who is paid</strong>: active and probation staff, and anyone who left during the month — paid up to their last working day. Someone whose Final Settlement already paid the month is left out and named above.</li>
                 <li><strong>SSF</strong> deducts only for employees marked SSF-enrolled AND holding an SSF number — an enrolled employee with no number is flagged in the list and contributes nothing, since a contribution with no number cannot be filed on the challan.</li>
                 <li><strong>TDS</strong> (income tax) comes from the fiscal-year tax slabs by year-to-date projection — finalize earlier months first so each month's tax builds on the last.</li>
@@ -1192,9 +1334,40 @@ export default function PayrollRun() {
                 change when this run's recovery is removed, so check {writtenOff.length === 1 ? 'it' : 'them'} in Advances &amp; Loans afterwards.
               </p>
             )}
+            {/* Reopen stays allowed after payment (decided 2026-09-23), with this warning. The payment
+                records survive the reopen and any Regenerate; the Paid column then names a difference. */}
+            {activePayments.length > 0 && (() => {
+              const paidPeople = new Set(activePayments.map(p => p.employee_id)).size
+              return (
+                <p style={{ margin: '10px 0 0', color: 'var(--theme-amber-text)' }}>
+                  △ {paidPeople === 1 ? '1 person is' : `${paidPeople} staff are`} already marked paid for {monthName} (NPR {fmt(paySummary.paidTotal)}).
+                  Those payment records are kept. If you change any figures and finalize again, the Paid column shows anyone still owed a
+                  difference, or paid too much — nothing is taken back or paid automatically.
+                </p>
+              )
+            })()}
+            {paymentsError && (
+              <p style={{ margin: '10px 0 0', color: 'var(--theme-amber-text)' }}>
+                △ The salary payments for {monthName} could not be read, so this cannot say whether anyone has already been paid.
+              </p>
+            )}
           </ConfirmModal>
         )
       })()}
+      {markPaid && run && (
+        <MarkPaidDialog
+          people={markPaid} periodLabel={periodLabel} runId={run.id}
+          onClose={() => setMarkPaid(null)}
+          onDone={res => afterPaymentChange(`Recorded NPR ${fmt(res?.total || 0)} paid to ${res?.payments || 0} ${(res?.payments || 0) === 1 ? 'person' : 'staff'}`)}
+        />
+      )}
+      {undoPay && (
+        <UndoPaymentDialog
+          payment={undoPay.payment} name={undoPay.name}
+          onClose={() => setUndoPay(null)}
+          onDone={() => afterPaymentChange(`Undone — ${undoPay.name}'s NPR ${fmt(undoPay.payment.amount)} is no longer counted as paid`)}
+        />
+      )}
       {confirmEl}
     </div>
   )

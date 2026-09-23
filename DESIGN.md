@@ -1310,8 +1310,8 @@ block.
 
 ### Where a month stands, and a decision taken in bulk (S768)
 
-**`.month-status` is a summary card, not a banner.** Payroll and the HR Dashboard open on four
-steps — Attendance, Approvals, Payroll, SSF deposit — each an 11px uppercase label, a mark with a
+**`.month-status` is a summary card, not a banner.** Payroll and the HR Dashboard open on five
+steps — Attendance, Approvals, Payroll, Staff paid (S782), SSF deposit — each an 11px uppercase label, a mark with a
 sentence, and a link to the page that moves that step. The mark is the only colour: `✓` in
 green-text when the step is done, `△` in amber-text when it needs someone, `—` in fog when there
 is nothing to say or it could not be read. The sentence always carries the state on its own, so
