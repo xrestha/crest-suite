@@ -152,7 +152,7 @@ export default function FestivalAllowance() {
       fetchAllRows(() => scopedFrom('hr_employees', EMP_COLS).order('full_name').order('id')),
       // Paged: every finalized payslip the client has ever had; the fiscal year is picked in JS.
       fetchAllRows(() =>
-        scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, ssf_employee, retirement_contribution, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+        scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, absence_deduction, ssf_employee, retirement_contribution, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
           .eq('hr_payroll_runs.status', 'finalized')
           .order('id')),
       fetchFinalizedBonuses(scopedFrom),

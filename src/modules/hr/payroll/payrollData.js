@@ -6,7 +6,7 @@ import { adToBsSafe, bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCa
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { computeMonthlyTdsBreakdown, fiscalYearOf } from './tds'
 import { bonusFiscalYear, fetchFinalizedBonuses } from './bonusTax'
-import { computePayslip, employedInPeriod, isSsfContributor } from './payrollCompute'
+import { computePayslip, earnedPay, employedInPeriod, isSsfContributor } from './payrollCompute'
 
 // Year-to-date taxable per employee: sum of (gross − SSF) and tds from PRIOR finalized payslips
 // in the same fiscal year (months before the current one) — PLUS every finalized Festival Allowance
@@ -17,7 +17,6 @@ import { computePayslip, employedInPeriod, isSsfContributor } from './payrollCom
 // base reads this same map, so a leaver's gratuity is taxed above the bonuses they were paid too.
 // Returns `{ data, error }`, not a bare map — see the `if (error)` note below.
 export async function fetchYtdMap(scopedFrom, period) {
-  const cur = fiscalYearOf(period.bs_year, period.bs_month)
   // Paged. The fiscal-year narrowing below happens in JS, so this read is EVERY finalized payslip
   // the client has ever had — one row per employee per month, for as long as they have run payroll.
   // Unpaged that silently stops at PostgREST's 1000-row cap (~20 staff x 4 years), and a truncated
@@ -28,7 +27,7 @@ export async function fetchYtdMap(scopedFrom, period) {
     fetchAllRows(() =>
       // retirement_contribution (S748) is the CIT / provident-fund part of other_deductions; it needs
       // migration 20260914150000 applied before this deploys, or every payroll read fails loudly.
-      scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, ssf_employee, retirement_contribution, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
+      scopedFrom('hr_payslips', 'employee_id, gross, ot_amount, absence_deduction, ssf_employee, retirement_contribution, tds, hr_payroll_runs!inner(status, monthly_periods!inner(bs_year, bs_month))')
         .eq('hr_payroll_runs.status', 'finalized')
         .order('id')),
     fetchFinalizedBonuses(scopedFrom),
@@ -41,23 +40,33 @@ export async function fetchYtdMap(scopedFrom, period) {
   // composes with firstError() at the call sites.
   if (error) return { data: null, error }
   if (bonuses.error) return { data: null, error: bonuses.error }
+  return { data: ytdFromPayslips(data, bonuses.data, period), error: null }
+}
+
+// The pure half of fetchYtdMap, so the arithmetic is tested without a database. `payslips` are
+// hr_payslips rows with their run's status and period embedded; `bonuses` come from
+// fetchFinalizedBonuses.
+export function ytdFromPayslips(payslips, bonuses, period) {
+  const cur = fiscalYearOf(period.bs_year, period.bs_month)
   const map = {}
   const entry = id => (map[id] = map[id] || { gross: 0, ssf: 0, retirement: 0, withheld: 0, count: 0, bonus: 0, bonusWithheld: 0 })
-  ;(data || []).forEach(r => {
+  ;(payslips || []).forEach(r => {
     if (r.hr_payroll_runs?.status !== 'finalized') return
     const mp = r.hr_payroll_runs?.monthly_periods
     if (!mp) return
     const fy = fiscalYearOf(mp.bs_year, mp.bs_month)
     if (fy.fyStart !== cur.fyStart || fy.monthInFy >= cur.monthInFy) return
     const e = entry(r.employee_id)
-    // OT pay is taxable income too — must stay in sync with monthlyGross below (S365 + OT fix).
-    e.gross += (r.gross || 0) + (r.ot_amount || 0)
+    // Pay actually earned — the same earnedPay() buildPayrollRows taxes the current month on. This
+    // was gross + OT, which overstated every earlier month for anyone with unpaid days or a part
+    // month, so the year's projection ran high and TDS was over-withheld.
+    e.gross += earnedPay(r)
     e.ssf   += r.ssf_employee || 0
     e.retirement += parseFloat(r.retirement_contribution) || 0
     e.withheld += r.tds || 0
     e.count += 1 // prior finalized months this FY — feeds tds.js's ytdMonths (mid-year-joiner fix)
   })
-  ;(bonuses.data || []).forEach(b => {
+  ;(bonuses || []).forEach(b => {
     const fy = bonusFiscalYear(b)
     if (fy.fyStart !== cur.fyStart || fy.monthInFy >= cur.monthInFy) return
     const e = entry(b.employee_id)
@@ -66,7 +75,7 @@ export async function fetchYtdMap(scopedFrom, period) {
     e.gross += amount; e.withheld += tds
     e.bonus += amount; e.bonusWithheld += tds
   })
-  return { data: map, error: null }
+  return map
 }
 
 // TADA claims a payroll run pays, per employee (S751, decided with Aashish): every claim that is
@@ -380,8 +389,9 @@ export function buildPayrollRows({ runId = null, period, employees, components, 
     const tdsBreakdown = computeMonthlyTdsBreakdown({
       period,
       // Actual income earned this month, not contractual gross — Nepal's Income Tax Act withholds
-      // TDS on remuneration actually paid (S365). OT pay is taxable remuneration too.
-      monthlyGross:          slip.gross - slip.absence_deduction + slip.ot_amount,
+      // TDS on remuneration actually paid (S365). OT pay is taxable remuneration too. The same
+      // earnedPay() fetchYtdMap sums the earlier months with, so the year adds up on one definition.
+      monthlyGross:          earnedPay(slip),
       monthlySsf:            slip.ssf_employee,
       ytdGross:              ytd.gross,
       ytdSsf:                ytd.ssf,

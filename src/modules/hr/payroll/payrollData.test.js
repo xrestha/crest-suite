@@ -1,4 +1,4 @@
-import { groupByEmployee, sliceFor, buildAdvanceMap, firstRecoveryMonth, advanceDueIn, dueAdvances, payrollCashCost } from './payrollData'
+import { groupByEmployee, sliceFor, buildAdvanceMap, firstRecoveryMonth, advanceDueIn, dueAdvances, payrollCashCost, ytdFromPayslips } from './payrollData'
 import { bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 
 // `buildRows` in PayrollRun.jsx and `rows` in PayrollCalculation.jsx replaced a per-employee
@@ -159,5 +159,45 @@ describe('payrollCashCost (S753)', () => {
   it('treats blanks as zero and rounds to paisa', () => {
     expect(payrollCashCost([{ gross: '100.005', ssf_employer: null }, {}])).toEqual({ total: 100.01, earned: 100.01, employerSsf: 0, tada: 0 })
     expect(payrollCashCost(null).total).toBe(0)
+  })
+})
+
+// Year-to-date taxable income for monthly TDS and Final Settlement. hss-suite found (2026-09-17) that
+// earlier months were summed as gross + OT while the current month is taxed on gross − unpaid days
+// + OT, so anyone with an absence or a part month had every earlier month overstated and was
+// over-withheld for the rest of the year. Same line was in crest.
+describe('ytdFromPayslips', () => {
+  const slip = (bs_month, over = {}) => ({
+    employee_id: 'e1', gross: 30000, ot_amount: 0, absence_deduction: 0, ssf_employee: 0,
+    retirement_contribution: 0, tds: 100,
+    hr_payroll_runs: { status: 'finalized', monthly_periods: { bs_year: 2083, bs_month } },
+    ...over,
+  })
+  const ASHWIN = { bs_year: 2083, bs_month: 6 }
+
+  it('counts an earlier month at pay earned: gross − unpaid days + overtime', () => {
+    const ytd = ytdFromPayslips([slip(4, { absence_deduction: 4000, ot_amount: 1500 }), slip(5)], [], ASHWIN)
+    expect(ytd.e1.gross).toBe(30000 - 4000 + 1500 + 30000)
+    expect(ytd.e1.count).toBe(2)
+    expect(ytd.e1.withheld).toBe(200)
+  })
+
+  it('leaves out the current month, later months, drafts and other fiscal years', () => {
+    const ytd = ytdFromPayslips([
+      slip(6), slip(7),                                                             // this month, later
+      slip(5, { hr_payroll_runs: { status: 'draft', monthly_periods: { bs_year: 2083, bs_month: 5 } } }),
+      slip(3),                                                                      // Ashadh 2083: FY 2082/83
+    ], [], ASHWIN)
+    expect(ytd.e1).toBeUndefined()
+  })
+
+  it('adds earlier finalized bonuses to gross and withheld but not to the month count', () => {
+    const ytd = ytdFromPayslips([slip(4)], [{ employee_id: 'e1', amount: '10000', tds: '500', bs_year: 2083, bs_month: 5 }], ASHWIN)
+    expect(ytd.e1).toMatchObject({ gross: 40000, withheld: 600, count: 1, bonus: 10000, bonusWithheld: 500 })
+  })
+
+  it('refuses a row whose query left out absence_deduction, rather than quietly subtracting nothing', () => {
+    const { absence_deduction, ...noAbsence } = slip(4)
+    expect(() => ytdFromPayslips([noAbsence], [], ASHWIN)).toThrow(/absence_deduction/)
   })
 })

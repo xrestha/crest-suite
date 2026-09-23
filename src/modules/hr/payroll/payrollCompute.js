@@ -115,6 +115,19 @@ export function isSsfContributor(employee) {
   return !!(employee?.ssf_enrolled && String(employee?.ssf_no || '').trim())
 }
 
+// Pay actually earned in a payslip's month: gross − unpaid days + overtime. Income tax is withheld on
+// this, never on the contract figure (S365), so the current month AND every earlier month the
+// year-to-date sums must use it. They did not: fetchYtdMap and payslipYtdForFy counted earlier months
+// as gross + OT, overstating the year for anyone with unpaid days or a part month and over-withholding
+// TDS (hss-suite found it, 2026-09-17; see docs/CROSS-REPO.md). ONE definition so the two cannot drift
+// again. Throws when `absence_deduction` is missing from the row — a query that forgot to select it
+// would otherwise subtract nothing and bring the bug back without a sound.
+export function earnedPay(slip) {
+  if (slip?.absence_deduction === undefined) throw new Error('earnedPay needs absence_deduction on the payslip row — add it to the query')
+  const n = v => parseFloat(v) || 0
+  return n(slip.gross) - n(slip.absence_deduction) + n(slip.ot_amount)
+}
+
 // Compute OT amount from approved hr_overtime_entries rows.
 // Weekday entries at 1.5×, holiday entries at 2×.
 function entryOt(approvedOtEntries, hr) {

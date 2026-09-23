@@ -789,3 +789,11 @@ Decided with Aashish (2026-09-17). No migration. `attendanceImport.js` reads the
 - **Dates: the reading with the most REAL dates wins, then the most inside the month.** Ranked the
   other way, a Bhadra grid's "05-04" read day-first is Shrawan 5 and one column pours into Shrawan.
 - **A CSV is read with `raw: true`.** Read as a spreadsheet, SheetJS turns a BS "05-01" into an AD date.
+
+## Year-to-date income is pay earned (S781)
+
+- **Every taxable-income sum over payslips goes through `earnedPay()`** (`payrollCompute.js`): gross −
+  `absence_deduction` + OT, the figure the current month is taxed on. `fetchYtdMap` and `payslipYtdForFy`
+  summed gross + OT, so an unpaid day or a part month overstated the year and TDS was over-withheld
+  (found in hss-suite). A query feeding either must select `absence_deduction`; `earnedPay` throws
+  without it. History: `docs/CROSS-REPO.md`, Closed, 2026-09-17.

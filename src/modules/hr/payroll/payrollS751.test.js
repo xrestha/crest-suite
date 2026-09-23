@@ -176,9 +176,21 @@ describe('bonus tax (festival allowance + incentives)', () => {
     expect(b).toEqual({ e1: 5 })
   })
 
+  const ytdSlip = (y, m, gross, ot, absence = 0) => ({ employee_id: 'e1', gross, ot_amount: ot, absence_deduction: absence, ssf_employee: 0, retirement_contribution: 0, hr_payroll_runs: { monthly_periods: { bs_year: y, bs_month: m } } })
+
   test('payslipYtdForFy counts overtime and only that fiscal year', () => {
-    const slip = (y, m, gross, ot) => ({ employee_id: 'e1', gross, ot_amount: ot, ssf_employee: 0, retirement_contribution: 0, hr_payroll_runs: { monthly_periods: { bs_year: y, bs_month: m } } })
-    expect(payslipYtdForFy([slip(2083, 4, 30000, 2000), slip(2083, 3, 30000, 0)], 2083).e1).toEqual({ gross: 32000, ssf: 0, retirement: 0, months: 1 })
+    expect(payslipYtdForFy([ytdSlip(2083, 4, 30000, 2000), ytdSlip(2083, 3, 30000, 0)], 2083).e1).toEqual({ gross: 32000, ssf: 0, retirement: 0, months: 1 })
+  })
+
+  test('payslipYtdForFy counts pay EARNED — unpaid days come off, as they do for the current month', () => {
+    // A Shrawan with NPR 3,000 of unpaid days earned 29,000, not 32,000; counting 32,000 projected a
+    // higher year and taxed the festival allowance on income that was never paid (hss-suite, 2026-09-17).
+    expect(payslipYtdForFy([ytdSlip(2083, 4, 30000, 2000, 3000)], 2083).e1.gross).toBe(29000)
+  })
+
+  test('payslipYtdForFy refuses a row whose query left out absence_deduction', () => {
+    const { absence_deduction, ...noAbsence } = ytdSlip(2083, 4, 30000, 0)
+    expect(() => payslipYtdForFy([noAbsence], 2083)).toThrow(/absence_deduction/)
   })
 
   test("a joiner's months before the join are not projected", () => {

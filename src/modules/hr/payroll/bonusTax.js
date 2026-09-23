@@ -13,7 +13,7 @@
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { adToBsSafe, bsToAd, daysInBsMonth, formatAd } from '../../../utils/bsCalendar'
 import { computeBonusTds, fiscalYearOf, projectBonusTaxableBase } from './tds'
-import { calcAmount, employedInPeriod, isSsfContributor, retirementContributionOf } from './payrollCompute'
+import { calcAmount, earnedPay, employedInPeriod, isSsfContributor, retirementContributionOf } from './payrollCompute'
 import { SSF_CAP, SSF_EMPLOYEE_PCT, STANDARD_HOURS_PER_DAY } from '../payrollConstants'
 
 // A bonus row written before S751 has no pay month; those runs were always treated as Ashwin, and
@@ -46,7 +46,8 @@ export async function fetchFinalizedBonuses(scopedFrom) {
   }
 }
 
-// Per employee, the finalized payslips of ONE fiscal year: { gross (incl. OT), ssf, retirement, months }.
+// Per employee, the finalized payslips of ONE fiscal year: { gross (earned: less unpaid days, plus OT),
+// ssf, retirement, months }. The rows must carry `absence_deduction` — earnedPay throws without it.
 export function payslipYtdForFy(payslipRows, fyStart) {
   const ytd = {}
   ;(payslipRows || []).forEach(r => {
@@ -54,7 +55,7 @@ export function payslipYtdForFy(payslipRows, fyStart) {
     if (!mp) return
     if (fiscalYearOf(mp.bs_year, mp.bs_month).fyStart !== fyStart) return
     const e = ytd[r.employee_id] || { gross: 0, ssf: 0, retirement: 0, months: 0 }
-    e.gross      += (parseFloat(r.gross) || 0) + (parseFloat(r.ot_amount) || 0)
+    e.gross      += earnedPay(r)
     e.ssf        += parseFloat(r.ssf_employee) || 0
     e.retirement += parseFloat(r.retirement_contribution) || 0
     e.months     += 1
