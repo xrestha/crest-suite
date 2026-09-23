@@ -12,6 +12,11 @@ import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue,
 } from '../../modules/dashboard/dailyForecast'
+import {
+  adDateOf, adDateBack, weatherIndex, rainPctValue, rainFactorForMonth, rainAhead, measuredRainEffect,
+  WEATHER_HORIZON_DAYS, RAIN_MM, MIN_MEASURE_DAYS,
+} from '../../modules/dashboard/weatherEffect'
+import { useWeatherDays } from '../../modules/dashboard/useWeatherDays'
 import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel } from '../../modules/dashboard/labourSource'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
@@ -29,8 +34,8 @@ import ConfirmModal from '../../components/ConfirmModal'
 import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailureText } from '../periods/closePeriod'
 import { closingCountNote } from '../periods/closingCountNote'
 import CloseConfirmBody from '../periods/CloseConfirmBody'
-import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd } from '../../utils/bsCalendar'
-import { nepalBs } from '../../shared/nepalTime'
+import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd } from '../../utils/bsCalendar'
+import { nepalBs, nepalCivilDate } from '../../shared/nepalTime'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
 import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
@@ -194,6 +199,12 @@ function TrendTooltipContent({ active, payload, label, big }) {
                 {' '}{mark.glyph}{gapPct != null && ` ${gapPct < 1 ? gapPct.toFixed(1) : Math.round(gapPct)}%`}
               </span>
             )}
+            {/* S784: why this forecast day sits lower (or higher) than its weekday usually does. */}
+            {en.dataKey === 'salesProj' && row.rainMm != null && (
+              <span style={{ display: 'block', color: 'var(--theme-text3)', fontSize: big ? 11 : 10 }}>
+                Rain expected ({row.rainMm} mm) · forecast × {row.rainPct}%
+              </span>
+            )}
           </p>
         )
       })}
@@ -242,7 +253,7 @@ export default function ClientDashboard() {
   // more use for revenue figures on their landing dashboard than a POS-only staffer has for IMS's.
   const posIsStationTeam = posTeam === 'kitchen' || posTeam === 'bar'
   const { colors } = useTheme()
-  const { settings } = useSettings()
+  const { settings, settingsLoadError } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const hrApprovals = useHrApprovalCounts() // shared with HrDashboard.jsx's own Approvals row
@@ -270,6 +281,11 @@ export default function ClientDashboard() {
   const [purchTargetSnap, setPurchTargetSnap] = useState(() => readDashboardCache('purchTargetSnap', effectiveClientId)) // same shape
   // The history read failed AND it cost the chart something (a Target that could not be set).
   const [forecastHistoryFailed, setForecastHistoryFailed] = useState(() => readDashboardCache('forecastHistoryFailed', effectiveClientId) ?? false)
+  // What the rain adjustment (S784) re-runs the sales forecast from at render time, so the weather,
+  // which arrives on its own, never has to wait for or re-run loadStats. salesDayLog is the days the
+  // outlet's own rainy-day effect is measured over: the Target's history window plus this month.
+  const [salesForecastInputs, setSalesForecastInputs] = useState(() => readDashboardCache('salesForecastInputs', effectiveClientId))
+  const [salesDayLog, setSalesDayLog] = useState(() => readDashboardCache('salesDayLog', effectiveClientId) ?? [])
   const [topItemSpend, setTopItemSpend] = useState(() => readDashboardCache('topItemSpend', effectiveClientId) ?? [])
   const [reorderItems, setReorderItems]   = useState(() => readDashboardCache('reorderItems', effectiveClientId) ?? [])
   const [fcTrend, setFcTrend]             = useState(() => readDashboardCache('fcTrend', effectiveClientId) ?? [])
@@ -705,16 +721,18 @@ export default function ClientDashboard() {
     // there to read, and that Target could never be corrected. So a failure captures nothing.
     const historyFailed = isCurrentMonth && !!forecastHistory?.error
     let historyBase = { sales: null, purch: null }
+    let historyDays = []
     if (isCurrentMonth && forecastHistory && !historyFailed) {
       const inPeriod = (rows, id) => rows.filter(r => r.period_id === id)
-      historyBase = baseFromHistory(historyWindowDays(period.bs_year, period.bs_month,
+      historyDays = historyWindowDays(period.bs_year, period.bs_month,
         forecastHistory.periods.map(p => ({
           bs_year: p.bs_year,
           bs_month: p.bs_month,
           salesMap: dailySalesMap(inPeriod(forecastHistory.sales, p.id), currentPriceMap),
           // Per period: allocateBillDiscounts' legacy bill key has no period in it.
           purchMap: dailyPurchaseMap(allocateBillDiscounts(inPeriod(forecastHistory.purchases, p.id)), inPeriod(forecastHistory.returns, p.id)),
-        }))))
+        })))
+      historyBase = baseFromHistory(historyDays)
     }
 
     // The frozen Target: captured once per period, never recalculated, so a later visit can judge
@@ -754,6 +772,18 @@ export default function ClientDashboard() {
     const salesTrend = (dailySalesOn && isCurrentMonth)
       ? projectMonth({ base: nextSalesTargetSnap || historyBase.sales, valueMap: daySalesMap, expectDays: salesDayNums, fromDay: lastActualSalesDay + 1, monthEndDay, weekdayOf })
       : null
+    // The same call's inputs, kept for the rain adjustment to re-run at render (S784). Sales only:
+    // purchases follow restock days, whatever the weather.
+    const salesBase = nextSalesTargetSnap || historyBase.sales
+    setAndCache(setSalesForecastInputs, 'salesForecastInputs', salesTrend ? {
+      base: salesBase ? { byWeekday: salesBase.byWeekday } : null,
+      valueMap: daySalesMap, expectDays: salesDayNums, fromDay: lastActualSalesDay + 1,
+      monthEndDay, bsYear: period.bs_year, bsMonth: period.bs_month, lastActualSalesDay,
+    } : null)
+    setAndCache(setSalesDayLog, 'salesDayLog', isCurrentMonth ? [
+      ...historyDays.filter(x => x.sales != null).map(x => ({ ad: adDateBack(period.bs_year, period.bs_month, x.back), dow: x.dow, sales: x.sales })),
+      ...salesDayNums.map(d => ({ ad: adDateOf(period.bs_year, period.bs_month, d), dow: weekdayOf(d), sales: daySalesMap[d] })),
+    ] : [])
     const purchTrend = (isCurrentMonth && elapsedDay > 0)
       ? projectMonth({ base: nextPurchTargetSnap || historyBase.purch, valueMap: dayPurchMap, expectDays: Array.from({ length: elapsedDay }, (_, i) => i + 1), fromDay: elapsedDay + 1, monthEndDay, weekdayOf })
       : null
@@ -1237,15 +1267,64 @@ export default function ClientDashboard() {
   const categorySpendSummary = categorySpend.length === 0
     ? 'No purchase data for this period.'
     : `Top spend category: ${categorySpend[0].name} at NPR ${categorySpend[0].value.toLocaleString('en-IN')}${categorySpendTotal > 0 ? ` (${Math.round((categorySpend[0].value / categorySpendTotal) * 100)}% of total purchases)` : ''}.`
+  // ── Rain adjustment on the live SALES forecast (S784) ───────────────────────────────────────
+  // weatherEffect.js holds the reasoning. The weather arrives from its own hook and is applied here
+  // by re-running projectMonth with a per-day factor, so loadStats never waits for it. Sales only,
+  // the next WEATHER_HORIZON_DAYS only, never the Target, and the measured effect is shown, never
+  // applied: the Owner's percentage is the one that moves the line.
+  const weatherFeature = hasFeature('weather_forecast')
+  const weatherSettingsOwn = !!settings && settings.client_id === effectiveClientId
+  const weatherLocated = weatherSettingsOwn && settings.weather_lat != null && settings.weather_lon != null
+  const { weather, error: weatherError } = useWeatherDays({
+    clientId: effectiveClientId,
+    enabled: !!clientModules.ims && hasImsAccess('staff') && weatherFeature && weatherLocated,
+    locationKey: weatherLocated ? `${settings.weather_lat},${settings.weather_lon}` : null,
+  })
+  const rainPct = weatherSettingsOwn ? rainPctValue(settings.rain_sales_pct) : null
+  const weatherByAd = weather?.days?.length ? weatherIndex(weather.days) : null
+  const weatherTodayAd = weather?.today || formatAd(nepalCivilDate(Date.now()))
+  // The Nepal date the forecast was fetched: a stale forecast steers only the days it was made for.
+  const weatherForecastAd = weather?.fetched_at ? formatAd(nepalCivilDate(weather.fetched_at)) : null
+  const rainAdj = salesForecastInputs && weatherByAd
+    ? rainFactorForMonth({
+        rainPct, weatherByAd, todayAd: weatherTodayAd, forecastAd: weatherForecastAd,
+        bsYear: salesForecastInputs.bsYear, bsMonth: salesForecastInputs.bsMonth, monthEndDay: salesForecastInputs.monthEndDay,
+      })
+    : null
+  const rainAheadView = weatherByAd ? rainAhead({ weatherByAd, todayAd: weatherTodayAd, forecastAd: weatherForecastAd }) : null
+  const rainTrend = rainAdj
+    ? projectMonth({
+        ...salesForecastInputs,
+        weekdayOf: d => bsToAd(salesForecastInputs.bsYear, salesForecastInputs.bsMonth, d).getDay(),
+        dayFactor: rainAdj.factorOf,
+      })
+    : null
+  // The days AHEAD the rain moved, for the footer. A rainy day already gone only corrected the pace.
+  const rainForecastDays = rainTrend
+    ? Object.keys(rainAdj.byDay).map(Number).filter(d => rainTrend.projDays[d] != null).sort((a, b) => a - b)
+    : []
+  const dailyTrendView = rainTrend
+    ? dailyTrend.map(row => {
+        const d = parseInt(String(row.day).replace('Day ', ''), 10)
+        if (rainTrend.projDays[d] == null) return row
+        const rain = rainAdj.byDay[d]
+        return { ...row, salesProj: rainTrend.projDays[d], ...(rain && { rainMm: rain.mm, rainPct: rainAdj.pct }) }
+      })
+    : dailyTrend
+  const salesProjectionView = rainTrend ? { projectedMonthEnd: rainTrend.projectedTotal } : salesProjection
+  const measuredRain = weatherByAd && salesForecastInputs?.base
+    ? measuredRainEffect({ dayLog: salesDayLog, byWeekday: salesForecastInputs.base.byWeekday, weatherByAd })
+    : null
+
   // Compact card window — 6 days back → 3 days ahead of today, sliced out of the full-month
   // `dailyTrend` array so the small glanceable card stays readable; the expanded modal (`big`
   // in renderChart below) uses the full `dailyTrend` array instead.
   const dailyTrendWindowed = (() => {
-    if (dailyTrend.length <= 10) return dailyTrend
+    if (dailyTrendView.length <= 10) return dailyTrendView
     const bsToday = getBsToday()
-    const todayIdx = dailyTrend.findIndex(d => d.day === `Day ${bsToday.day}`)
-    if (todayIdx === -1) return dailyTrend.slice(-10)
-    return dailyTrend.slice(Math.max(0, todayIdx - 6), todayIdx + 4)
+    const todayIdx = dailyTrendView.findIndex(d => d.day === `Day ${bsToday.day}`)
+    if (todayIdx === -1) return dailyTrendView.slice(-10)
+    return dailyTrendView.slice(Math.max(0, todayIdx - 6), todayIdx + 4)
   })()
   const dailyTrendPurchTotal = dailyTrend.reduce((s, d) => s + (d.purchases || 0), 0)
   const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales || 0), 0)
@@ -1259,7 +1338,7 @@ export default function ClientDashboard() {
     : `set on Day ${snap.capturedDay} from this month's first ${snap.sampleDays} days`)
   const dailyTrendSummary = dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
-    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjection ? ` Projected month-end revenue: NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}`
+    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjectionView ? ` Projected month-end revenue: NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${rainForecastDays.length ? ` The sales forecast allows for rain on day ${rainForecastDays.join(', ')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}`
   const topItemSpendSummary = topItemSpend.length === 0
     ? 'No purchase data for this period.'
     : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-IN')}`).join(', ')}.`
@@ -2112,7 +2191,7 @@ export default function ClientDashboard() {
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
                 {salesProjection && (
                   <span>
-                    Projected month-end revenue: <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesProjection.projectedMonthEnd.toLocaleString('en-IN')}</strong>
+                    Projected month-end revenue: <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {purchProjection && (
@@ -2141,6 +2220,66 @@ export default function ClientDashboard() {
                 )}
               </div>
             )}
+            {/* S784: the rain adjustment's own lines. Printed in the footer rather than only in a
+                hover, so a screenshot or a print keeps which days were adjusted and by how much. */}
+            {salesForecastInputs && (weatherFeature ? (weatherLocated ? (
+              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+                {rainForecastDays.length > 0 ? (
+                  <span>
+                    <Tip text={`On a day the weather forecast calls rainy (${RAIN_MM} mm or more between 5:45 am and 11:45 pm), that day's sales forecast is ${rainAdj.pct}% of a usual day: the figure set in Settings → Weather. Only days up to ${WEATHER_HORIZON_DAYS} days ahead are scaled, because a forecast further out is not reliable. A rainy day already gone this month is not counted as a slow day either, so the rest of the month's forecast can move a little too. Purchases and the dotted targets never change with the weather.`}>
+                      Forecast allows for rain
+                    </Tip>: Day {rainForecastDays.join(', ')} (sales × {rainAdj.pct}%)
+                  </span>
+                ) : rainPct == null ? (
+                  isOwner && <span style={{ color: 'var(--theme-text3)' }}>Rain is not adjusting this forecast: set how rain affects your sales in Settings → Weather.</span>
+                ) : rainAheadView && rainAheadView.rainy.length === 0 && rainAheadView.through >= 1 && (
+                  <span style={{ color: 'var(--theme-text3)' }}>
+                    No rain forecast in the next {rainAheadView.through} day{rainAheadView.through === 1 ? '' : 's'}.
+                  </span>
+                )}
+                {measuredRain && (
+                  <span style={{ color: 'var(--theme-text3)' }}>
+                    <Tip text={`Worked out from your own sales: each day's sales against its weekday's usual, on rainy days against dry ones, over the 4 weeks before ${periodLabel} and this month so far. It needs ${MIN_MEASURE_DAYS} rainy and ${MIN_MEASURE_DAYS} dry days, and the weather is only recorded from the day this was switched on. It is shown to help you set your own figure; only your figure changes the forecast.`}>
+                      Measured
+                    </Tip>: {measuredRain.pct != null
+                      ? `your rainy days sold about ${measuredRain.pct}% of a usual day (${measuredRain.rainyDays} rainy days)`
+                      : measuredRain.rainyDays < MIN_MEASURE_DAYS
+                        ? `not enough rainy days recorded yet (${measuredRain.rainyDays} of ${MIN_MEASURE_DAYS})`
+                        : measuredRain.dryDays < MIN_MEASURE_DAYS
+                          ? `not enough dry days recorded yet (${measuredRain.dryDays} of ${MIN_MEASURE_DAYS})`
+                          : 'no dry-day sales to compare against yet'}
+                  </span>
+                )}
+                {weather?.reason === 'not_configured' ? (
+                  <span style={{ color: 'var(--theme-amber-text)' }}>
+                    The weather service is not set up yet, so this forecast does not allow for rain.{isAdmin && ' Set the MET_USER_AGENT Edge Function secret.'}
+                  </span>
+                ) : (weatherError && !weather) || (weather && !weatherByAd && (weather.stale || weather.reason)) ? (
+                  <span style={{ color: 'var(--theme-amber-text)' }}>The weather forecast could not be read, so this forecast does not allow for rain.</span>
+                ) : weather?.stale && (
+                  <span style={{ color: 'var(--theme-amber-text)' }}>The weather forecast is more than 12 hours old.</span>
+                )}
+                {weatherByAd && (
+                  <span style={{ color: 'var(--theme-text3)' }}>
+                    Weather: <a href="https://www.met.no/en" target="_blank" rel="noreferrer">MET Norway</a>
+                    {' '}(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>)
+                  </span>
+                )}
+              </div>
+            ) : settingsLoadError ? (
+              // A failed settings read has no city in it, which is not the same as no city set.
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-amber-text)' }}>
+                Your settings could not be read, so this forecast does not allow for rain.
+              </p>
+            ) : isOwner && (
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text3)' }}>
+                Set your city in Settings → Weather to let rain adjust the sales forecast.
+              </p>
+            )) : isOwner && (
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text3)' }}>
+                A forecast that allows for rain comes with the {tierLabel(FEATURE_TIER.weather_forecast)} plan.
+              </p>
+            ))}
             <p className="sr-only">{dailyTrendSummary}</p>
           </>}
           renderChart={h => {
@@ -2150,7 +2289,7 @@ export default function ClientDashboard() {
               </div>
             )
             const big = h > 200
-            const chartData = big ? dailyTrend : dailyTrendWindowed
+            const chartData = big ? dailyTrendView : dailyTrendWindowed
             // Two-line X-axis tick: the BS day number, and below it the day-of-week initial —
             // needs activePeriod's bs_year/bs_month to convert each day to an AD date for
             // .getDay(). Recharts passes the RAW "Day N" axis value via payload.value to a custom
@@ -2236,7 +2375,7 @@ export default function ClientDashboard() {
                   <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                     <StatPill label="Purchases so far" value={`NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchases} />
                     {hasDailySales && <StatPill label="Sales so far" value={`NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
-                    {salesProjection && <StatPill label="Projected sales" value={`NPR ${salesProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
+                    {salesProjectionView && <StatPill label="Projected sales" value={`NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
                     {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchases} />}
                     {salesTarget && <StatPill label="Sales target" value={`NPR ${salesTarget.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.salesTarget} />}
                     {purchTarget && <StatPill label="Purchase target" value={`NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchTarget} />}

@@ -159,6 +159,45 @@ describe('projectMonth', () => {
   })
 })
 
+// S784: the rain adjustment rides in as a per-day factor.
+describe('projectMonth with a day factor', () => {
+  const base = { byWeekday: Array(7).fill(1000) }
+  const onTarget = { 1: 1000, 2: 1000, 3: 1000 }
+
+  test('a factor of 1 everywhere changes nothing, with or without a base', () => {
+    const one = () => 1
+    expect(projectMonth({ base, valueMap: onTarget, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf, dayFactor: one }))
+      .toEqual(projectMonth({ base, valueMap: onTarget, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf }))
+    expect(projectMonth({ base: null, valueMap: CASA_SALES, expectDays: [1, 2, 3, 4, 5, 6], fromDay: 7, monthEndDay, weekdayOf, dayFactor: one }))
+      .toEqual(projectMonth({ base: null, valueMap: CASA_SALES, expectDays: [1, 2, 3, 4, 5, 6], fromDay: 7, monthEndDay, weekdayOf }))
+  })
+
+  test('a rainy forecast day is scaled and its neighbours are not', () => {
+    const r = projectMonth({ base, valueMap: onTarget, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf, dayFactor: d => (d === 5 ? 0.8 : 1) })
+    expect(r.projDays[5]).toBe(800)
+    expect(r.projDays[4]).toBe(1000)
+    expect(r.projDays[6]).toBe(1000)
+    expect(r.projectedTotal).toBe(1000 * monthEndDay - 200)
+  })
+
+  test('a rainy day already past does not drag the pace down', () => {
+    // Day 2 rained and sold 800 against an 80% expectation: the month is on target.
+    const valueMap = { 1: 1000, 2: 800, 3: 1000 }
+    const rained = projectMonth({ base, valueMap, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf, dayFactor: d => (d === 2 ? 0.8 : 1) })
+    expect(rained.paceFactor).toBe(1)
+    // Without the weather the same 800 reads as a slow month.
+    const blind = projectMonth({ base, valueMap, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf })
+    expect(blind.paceFactor).toBeLessThan(1)
+  })
+
+  test('without a base, the running average is taken per normal day', () => {
+    // 3 days, the middle one rainy at 50%: 1000 + 500 + 1000 is 1000 per normal day.
+    const r = projectMonth({ base: null, valueMap: { 1: 1000, 2: 500, 3: 1000 }, expectDays: [1, 2, 3], fromDay: 4, monthEndDay, weekdayOf, dayFactor: d => (d === 2 || d === 4 ? 0.5 : 1) })
+    expect(r.projDays[4]).toBe(500)
+    expect(r.projDays[5]).toBe(1000)
+  })
+})
+
 describe('snapshots', () => {
   test('a snapshot sums the whole month and reads back per weekday', () => {
     const byWeekday = [1, 2, 3, 4, 5, 6, 7]

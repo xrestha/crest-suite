@@ -69,6 +69,7 @@ const DEFAULT_FLAGS = {
   fixed_asset_register: false,
   multi_outlet: false,
   stock_count_assignment: false,
+  weather_forecast: false,
 }
 
 export function SettingsProvider({ children }) {

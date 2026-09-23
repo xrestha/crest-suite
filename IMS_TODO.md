@@ -139,6 +139,13 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
   buying week, a no-bill day counting as zero (CASA: Sunday restock ~12,800, Saturday ~2,350), and
   deliberately does not follow the sales curve. The purchase snapshot moved to model 3 and was
   replaced once; the sales Target was left frozen.
+- ✅ S784 — The dashed SALES forecast can allow for rain (Growth+). The Owner sets the city and "a
+  rainy day sells about N%" in Settings → Weather; MET Norway via the `weather-forecast` Edge
+  Function; purchases and both Targets never move. Rule: `.claude/rules/dashboards.md`.
+- ⚪ **`weather-forecast`'s signed-in path had not run end to end at ship** (no user JWT to hand;
+  only OPTIONS / no-auth / bad-bearer were probed). The first dashboard load by an Owner with a city
+  set is the test: the footer should credit MET Norway, and `weather_locations` should hold a row
+  with `last_error` NULL. If not, read the function's logs.
 - ⚪ **The Target's weekday averages still count past public holidays.** Demand Forecast
   (`DemandForecast.js`, D21) leaves them out and applies Holiday Calendar multipliers. Here, a
   Dashain Saturday in the 4-week window lifts the Saturday target for the next month, and a big

@@ -16,6 +16,8 @@ import FieldError, { fieldAria } from '../components/FieldError'
 import { fcThresholds, varianceFlagPct } from '../shared/imsFormulas'
 import { fetchAllRows } from '../shared/fetchAllRows'
 import { DEFAULT_SUPPORT_CONTACT, EMERGENCY_CHANNELS, SUPPORT_HOURS, resolveSupportContact, supportPhone } from '../shared/supportContact'
+import { NEPAL_CITIES, cityByKey } from '../shared/nepalCities'
+import { validateRainPct, RAIN_PCT_MIN, RAIN_PCT_MAX, RAIN_MM, WEATHER_HORIZON_DAYS } from '../modules/dashboard/weatherEffect'
 
 // Lazy so the three module guides' prose (several thousand lines of admin-only strings) lives in
 // its own on-demand chunk instead of the Settings chunk every client login downloads — the Guides
@@ -25,7 +27,7 @@ const GuidesTab = lazy(() => import('./settings/GuidesTab'))
 // A tab's DOM id, for the roving focus and the tabpanel's aria-labelledby.
 const tabSlug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
-const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Support', 'Plan Pricing', 'Data', 'Theme', 'Guides']
+const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Weather', 'Support', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
 // The columns the page-level Save Changes button owns — and the ONLY columns it may write (S730).
 // `settings` is one row per client that nine other pages write their own columns onto
@@ -45,6 +47,10 @@ const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Co
 // on Help → Support, PremiumGate's upsell card and SubscriptionLock's lock screen
 // (resolveSupportContact's `client` half), so the consultant override simply stopped existing.
 export const CONSULTANT_FIELDS = ['contact_phone', 'contact_email', 'contact_website']
+// The weather-adjusted sales forecast (S784): the outlet's city, its coordinates (written together
+// by the city picker; the weather-forecast Edge Function reads them from the row, never from the
+// request) and the Owner's rainy-day percentage.
+export const WEATHER_FIELDS = ['weather_city', 'weather_lat', 'weather_lon', 'rain_sales_pct']
 
 // Which columns each TAB owns. The page-level Save writes the union over the tabs the viewer
 // actually has, which is what keeps the threshold validation self-limiting: an admin has no
@@ -60,6 +66,7 @@ export const TAB_FIELDS = {
   'Vendor Codes': ['vendor_code_prefix'],
   'Sub-Recipe Codes': ['sub_recipe_code_prefix'],
   Support: CONSULTANT_FIELDS,
+  Weather: WEATHER_FIELDS,
   // Nothing for the page button to write: one action, a per-device theme, reference prose, and two
   // cards that commit the PLATFORM row through their own savers.
   'Product Codes': [], 'Recipe Categories': [], 'Plan Pricing': [], Data: [], Theme: [], Guides: [],
@@ -71,6 +78,7 @@ export const PAGE_FIELDS = [
   'block_negative_stock', 'warn_below_cost_pricing',
   'item_code_prefix', 'vendor_code_prefix', 'sub_recipe_code_prefix',
   ...CONSULTANT_FIELDS,
+  ...WEATHER_FIELDS,
 ]
 // Every tab's columns must have a home in PAGE_FIELDS, or the seed below stops preserving an unsaved
 // edit on that tab across a reseed and the field silently reverts under the typist.
@@ -83,7 +91,7 @@ if (process.env.NODE_ENV !== 'production') {
 // for it to save — Categories has its own Save, Theme is per-device, Product Codes is one action —
 // so a Save Changes button there wrote a row for no reason and, on Categories, wrote the STALE
 // category list from the loaded row over whatever had just been typed into the list beside it.
-const PAGE_SAVE_TABS = new Set(['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes'])
+const PAGE_SAVE_TABS = new Set(['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Weather'])
 // Tabs whose fields are the viewed row itself, so a failed read of that row leaves nothing real to
 // show (S747). SettingsContext used to drop the error and hand over DEFAULT_SETTINGS — "Crest Suite"
 // as a client's brand, a blank VAT number — as editable values. Product Codes reads recipes, and
@@ -92,6 +100,9 @@ const ROW_TABS = new Set([...PAGE_SAVE_TABS, 'Recipe Categories'])
 // numeric columns: '' in the box is NULL in the row (readers fall back to the default), never ''
 // — Postgres refuses '' for numeric and integer, and the error it raised named the type.
 const NUMERIC_FIELDS = { fc_warning_pct: 'float', fc_critical_pct: 'float', expiry_warning_days: 'int', variance_flag_pct: 'float' }
+// The Weather tab's numbers, kept OUT of NUMERIC_FIELDS: that map is what puts validateThresholds()
+// in scope, and a weather save must neither run it nor be sent to the Thresholds tab by it.
+const WEATHER_NUMERIC = { weather_lat: 'float', weather_lon: 'float', rain_sales_pct: 'int' }
 
 const sameValue = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
@@ -155,16 +166,19 @@ export default function Settings() {
   const { settings, saveSettings, recipeCategories, platformSupport, savePlatformSupport,
           planPrices, savePlatformPlanPrices, settingsLoadError, platformLoadError, platformLoaded } = useSettings()
   const { ask: askConfirm, confirmEl } = useConfirm()
-  const { clientId, isAdmin, adminViewClientName, hasFeature, hasImsAccess } = useAuth()
+  const { clientId, isAdmin, isOwner, adminViewClientName, hasFeature, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
-  const ADMIN_TABS = new Set(['Branding', 'Property', 'Support', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
+  const ADMIN_TABS = new Set(['Branding', 'Property', 'Weather', 'Support', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
   const CLIENT_HIDDEN = new Set(['Support', 'Branding', 'Property', 'Data', 'Plan Pricing', 'Guides'])
   const TABS = ALL_TABS.filter(t => {
     if (isAdmin) return ADMIN_TABS.has(t)
     if (CLIENT_HIDDEN.has(t)) return false
     if (t === 'Sub-Recipe Codes' && !hasFeature('recipe_costing')) return false
     if (t === 'Recipe Categories' && !hasFeature('recipe_costing')) return false
+    // The Owner's call, like the rest of how the business reads its own trade: an IMS manager
+    // reaches this page for thresholds and codes, not for this.
+    if (t === 'Weather' && !(isOwner && hasFeature('weather_forecast'))) return false
     return true
   })
   // WHOSE row this page is editing, which is not the same question as "is the viewer an admin".
@@ -317,6 +331,13 @@ export default function Settings() {
     if (fieldErr[key]) setFieldErr(e => ({ ...e, [key]: '' }))
   }
 
+  // The city picker writes the three location columns together, so the name and the coordinates the
+  // weather is read for can never disagree. Blank clears all three: no city, no weather.
+  function pickCity(key) {
+    const c = cityByKey(key)
+    setForm(f => ({ ...f, weather_city: c ? c.key : null, weather_lat: c ? c.lat : null, weather_lon: c ? c.lon : null }))
+  }
+
   // A category the recipes still use that is not in the list — removed here, or never added.
   const orphanCats = catUsage
     ? Object.keys(catUsage).filter(c => c && !cats.some(x => x.toLowerCase() === c.toLowerCase()))
@@ -391,6 +412,7 @@ export default function Settings() {
       if (!(k in form)) continue
       let v = form[k]
       if (k in NUMERIC_FIELDS) v = toNumberOrNull(v, NUMERIC_FIELDS[k])
+      else if (k in WEATHER_NUMERIC) v = toNumberOrNull(v, WEATHER_NUMERIC[k])
       else if (typeof v === 'string' && k !== 'logo_url') v = v.trim()
       // A never-set VAT flag is read as registered by every reader (`?? true` in PosOrders,
       // viewPosBill, CreditNotes, computeMonthlyReport), and the box shows it ticked. Ticking it
@@ -452,6 +474,14 @@ export default function Settings() {
       if (Object.keys(errs).length) {
         if (TABS.includes('Thresholds')) setActiveTab('Thresholds')
         setError('Nothing was saved — a threshold needs correcting first (marked below).')
+        return
+      }
+    }
+    if (fields.includes('rain_sales_pct')) {
+      const msg = validateRainPct(form.rain_sales_pct)
+      setFieldErr(e => ({ ...e, rain_sales_pct: msg || '' }))
+      if (msg) {
+        setError('Nothing was saved — the rainy-day figure needs correcting first (marked below).')
         return
       }
     }
@@ -864,7 +894,7 @@ export default function Settings() {
                 Theme is this browser, Guides is reference prose — the subtitle now says which. */}
             {isAdmin
               ? <>Branding, property and the consultant for <strong>{rowLabel}</strong> · plan pricing for the whole platform · theme for this browser</>
-              : 'Operational thresholds, code formats, recipe categories and your theme'}
+              : `Operational thresholds, code formats, recipe categories${TABS.includes('Weather') ? ', weather' : ''} and your theme`}
           </p>
         </div>
         {/* Only on the tabs whose fields it saves (PAGE_SAVE_TABS). Support and Plan Pricing commit
@@ -874,7 +904,7 @@ export default function Settings() {
             Recipe Categories, Product Codes and Theme too — see PAGE_SAVE_TABS. And not on
             Property with no client selected: nothing on that tab is read off the platform row, so
             the button could only ever report success over a write that moved nothing. */}
-        {PAGE_SAVE_TABS.has(activeTab) && !(activeTab === 'Property' && !editingClient) && !settingsLoadError && (
+        {PAGE_SAVE_TABS.has(activeTab) && !((activeTab === 'Property' || activeTab === 'Weather') && !editingClient) && !settingsLoadError && (
           // THIS tab's columns only (S747, decided with Aashish). It wrote the union over every
           // visible tab, so Save on Branding also committed a consultant number half-typed on the
           // Support tab — which has its own Save precisely so that could not happen — and the
@@ -1084,6 +1114,48 @@ export default function Settings() {
               </label>
             </div>
           </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* WEATHER (S784) — per-client, like Property: with no client selected there is no row whose
+          weather anything reads, so the tab says so instead of offering the fields. */}
+      {shownTab === 'Weather' && (
+        <div className="card">
+          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Weather</h3>
+          {!editingClient ? (
+            <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>
+              The weather is set per outlet. Choose a client from the top bar's client switcher to set theirs.
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
+                The Dashboard's <strong>Daily Purchases vs Sales</strong> chart can lower (or raise) its sales forecast on the
+                days rain is expected, for the next {WEATHER_HORIZON_DAYS} days. Purchases and the dotted targets never change
+                with the weather.
+              </p>
+              <div className="form-grid form-grid-2">
+                <div className="form-field">
+                  <label htmlFor="set-weather-city"><Tip text="The weather forecast is read for this city, not your street, which is as close as a forecast gets anyway. Pick the nearest one. Leave it on 'Not set' and the forecast ignores the weather." width={280}>City</Tip></label>
+                  <select id="set-weather-city" className="form-select" value={form.weather_city || ''} onChange={e => pickCity(e.target.value)}>
+                    <option value="">Not set: no weather</option>
+                    {NEPAL_CITIES.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+                  </select>
+                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Weather data from MET Norway.</span>
+                </div>
+                <div className="form-field">
+                  <label htmlFor="set-rain_sales_pct"><Tip text={`What a rainy day does to your trade, as a share of a normal day. 85 means a rainy day sells about 85% of what that weekday usually sells, so a Friday that usually takes NPR 40,000 is forecast at NPR 34,000 when rain is expected. Above 100 if rain brings you more trade (a delivery kitchen, a cosy café). A day counts as rainy at ${RAIN_MM} mm or more between 5:45 am and 11:45 pm. Blank = the weather does not change the forecast. The Dashboard also shows what your own sales say once it has recorded enough rainy days.`} width={300}>On a rainy day, sales are about</Tip></label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input id="set-rain_sales_pct" type="number" min={RAIN_PCT_MIN} max={RAIN_PCT_MAX} step="1"
+                      value={form.rain_sales_pct ?? ''} onChange={e => update('rain_sales_pct', e.target.value)}
+                      placeholder="e.g. 85" style={{ width: 100 }} {...fieldAria('set-rain_sales_pct', fieldErr.rain_sales_pct)} />
+                    <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>% of a normal day</span>
+                  </div>
+                  <FieldError id="set-rain_sales_pct" message={fieldErr.rain_sales_pct} />
+                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>From {RAIN_PCT_MIN} to {RAIN_PCT_MAX}. Leave blank for no adjustment.</span>
+                </div>
+              </div>
             </>
           )}
         </div>

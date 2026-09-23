@@ -88,6 +88,7 @@ const GROWTH_EXTRAS = [
   'Purchase Orders',
   'Nutrition Facts & Allergen Labels',
   'Combo Builder',
+  'Weather-Adjusted Sales Forecast',
 ]
 
 const PRO_EXTRAS = [

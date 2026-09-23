@@ -133,20 +133,27 @@ export function baseFromMonth({ kind, valueMap, dayNums, elapsed, weekdayOf }) {
 // With a base, each future day is its weekday's base × a pace factor that leans toward this
 // month as days accrue; without one, it is this month's plain average once MIN_DAYS_FOR_FORECAST
 // days exist. Never a slope, so it cannot run to zero; never a ceiling, so it cannot pin to one.
-export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay, weekdayOf }) {
+//
+// `dayFactor(d)` scales one day's expectation (S784: the rain adjustment, weatherEffect.js). It
+// applies to the elapsed days as well as the future ones, so a rainy week already past is judged
+// against a rain-lowered expectation and does not drag the pace down, only for the rain to be
+// counted a second time on the days ahead. With every factor 1 the arithmetic is unchanged.
+export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay, weekdayOf, dayFactor = () => 1 }) {
   const n = expectDays.length
   if (n === 0) return null
   const actual = sum(expectDays.map(d => valueMap[d] || 0))
   let perDay, paceFactor = null
   if (base) {
-    const expected = sum(expectDays.map(d => base.byWeekday[weekdayOf(d)]))
+    const expected = sum(expectDays.map(d => base.byWeekday[weekdayOf(d)] * dayFactor(d)))
     const ratio = expected > 0 ? actual / expected : 1
     const w = n / (n + PACE_DAMPING)
     paceFactor = Math.max(0, 1 + w * (ratio - 1))
-    perDay = d => base.byWeekday[weekdayOf(d)] * paceFactor
+    perDay = d => base.byWeekday[weekdayOf(d)] * paceFactor * dayFactor(d)
   } else {
     if (n < MIN_DAYS_FOR_FORECAST) return null
-    perDay = () => actual / n
+    const weight = sum(expectDays.map(d => dayFactor(d)))
+    const perNormalDay = weight > 0 ? actual / weight : actual / n
+    perDay = d => perNormalDay * dayFactor(d)
   }
   const projDays = {}
   let projSum = 0

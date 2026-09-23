@@ -68,6 +68,7 @@ export const FEATURE_GROUPS = [
     { key: 'nutrition_facts',      label: 'Nutrition Facts' },
     { key: 'menu_repricing',       label: 'Menu Repricing' },
     { key: 'combo_builder',        label: 'Combo Builder' },
+    { key: 'weather_forecast',     label: 'Weather-Adjusted Forecast' },
   ]},
   // Pro sells Strategy. Demand Forecast and Fixed Assets left this tier for Crest Suite Pro (see
   // the Suite band below) — the first is genuinely cross-module, the second is owner/finance

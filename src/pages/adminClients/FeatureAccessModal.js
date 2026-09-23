@@ -36,6 +36,7 @@ const DEFAULT_FLAGS = {
   monthly_owner_report: null,
   stock_movement_log: null,
   stock_count_assignment: null,
+  weather_forecast: null,
   fixed_asset_register: null,
   multi_outlet: null,
 }

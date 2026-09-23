@@ -49,6 +49,9 @@ const GROWTH_KEYS = new Set([
   // login for counters. Stock Count itself stays Starter — recording a count is Record & Comply.
   // Deciding who may count what, and holding them to it, is Control, which is Growth.
   'stock_count_assignment',
+  // Weather-adjusted sales forecast on the dashboard (S784). Control, not Strategy: it steers
+  // tomorrow's buying and staffing off the next week's rain, the same altitude as the reorder loop.
+  'weather_forecast',
 ])
 // Requires Pro plan
 const PRO_KEYS = new Set([
