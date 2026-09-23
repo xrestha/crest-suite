@@ -517,3 +517,12 @@ the bad Ashwin snapshots are replaced once. Three properties to keep:
   captured on. That is also what makes the one-time replacement of an old snapshot mid-month safe.
 - **A failed history read captures nothing.** Treated as an empty history, it would lock a
   one-week new-client Target for the whole month, and a capture-once value cannot be corrected.
+
+**S783: purchases got their own weekday shape, the same day.** S780 shipped the purchase Target
+as a flat daily average. The owner asked for purchases to be shaped by weekday like sales. CASA's
+Bhadra showed why shaping them after sales would have been wrong. Sunday purchases averaged
+12,798 (the weekly restock) and Saturday 2,346, while Saturday sold the most (15,018). A purchase
+target following the sales curve would have turned every Saturday green and every Sunday red on a
+normal week. The owner chose each metric's own week, and replacing Ashwin's flat line once. The
+snapshot model became per kind, so the purchase snapshot could move to model 3 while the sales
+Target, already correct, stayed frozen.

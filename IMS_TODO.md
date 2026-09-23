@@ -135,10 +135,15 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
   Rebuilt in `src/modules/dashboard/dailyForecast.js`. The Target is the last 4 weeks' weekday
   pattern from Day 1, and the forecast is that pattern × this month's pace. Old snapshots are
   replaced once. Rule: `.claude/rules/dashboards.md`.
+- ✅ S783 — The purchase Target was still one flat daily average. It now follows the client's own
+  buying week, a no-bill day counting as zero (CASA: Sunday restock ~12,800, Saturday ~2,350), and
+  deliberately does not follow the sales curve. The purchase snapshot moved to model 3 and was
+  replaced once; the sales Target was left frozen.
 - ⚪ **The Target's weekday averages still count past public holidays.** Demand Forecast
   (`DemandForecast.js`, D21) leaves them out and applies Holiday Calendar multipliers. Here, a
-  Dashain Saturday in the 4-week window lifts the Saturday target for the next month, and a
-  holiday in the open month is not marked. Candidate: read the same Holiday Calendar and exclude
+  Dashain Saturday in the 4-week window lifts the Saturday target for the next month, and a big
+  pre-festival restock lifts that weekday's purchase target the same way. A holiday in the open
+  month is not marked either. Candidate: read the same Holiday Calendar and exclude
   those days in `historyWindowDays()`.
 - ✅ S756 — `Stock.js:709-727` Save All writes/deletes every visible row (parallel tablets wipe each other; restamps counted_by; recount guard refuses) → send changed cells only.
 - ✅ S756 — `Stock.js:549-586` offline replay into closed period (with D1).

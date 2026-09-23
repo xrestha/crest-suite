@@ -14,12 +14,18 @@
 //   - The live FORECAST is the base scaled by how this month is running against it, weighted
 //     n / (n + 3) toward this month, so a real change in trade shows within a week.
 //
-// Sales and purchases differ on one point: a day with no sales ENTRY is unknown (closed, or not
+// Both metrics are shaped by weekday, each by its OWN week: sales peak when the dining room is
+// full, purchases on the restock day (CASA: Saturday sells most and buys least, Sunday buys five
+// times a Monday). They differ on one point: a day with no sales ENTRY is unknown (closed, or not
 // yet entered), but a day with no purchase is a real zero, because a kitchen buys on some days
-// and not others. So purchases are averaged per calendar day, never per purchase day.
+// and not others. So a purchase weekday is averaged over every such day in the window, never only
+// over the days a bill landed.
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 
-export const SNAPSHOT_MODEL = 2
+// Per kind, because the purchase snapshot changed shape after the sales one (S783: flat daily
+// average → per weekday). A stored snapshot of an older model is treated as absent and replaced
+// once; bumping one kind never disturbs the other's frozen Target.
+export const SNAPSHOT_MODEL = { sales: 2, purch: 3 }
 export const HISTORY_DAYS = 28
 export const MIN_HISTORY_DAYS = 14
 export const MIN_MONTH_DAYS_FOR_TARGET = 7
@@ -82,41 +88,44 @@ export function historyWindowDays(openYear, openMonth, periods) {
   return days.filter(x => x.back <= earliest).sort((a, b) => b.back - a.back)
 }
 
-// Average per weekday. A weekday with no samples takes `fallback`: 0 for history (four weeks
-// without one Saturday entry means the place is shut on Saturdays), the overall mean for a new
-// client's first week (a weekday it simply has not reached yet).
+// Average per weekday. A weekday with no samples takes `fallback`: 0 for sales history (four
+// weeks without one Saturday entry means the place is shut on Saturdays), the overall mean
+// wherever a weekday simply has not come round yet.
 function weekdayAverages(samples, fallback) {
   const tot = Array(7).fill(0), cnt = Array(7).fill(0)
   samples.forEach(({ dow, v }) => { tot[dow] += v; cnt[dow]++ })
   return tot.map((t, i) => Math.round(cnt[i] ? t / cnt[i] : fallback))
 }
 
+const meanOf = samples => (samples.length ? sum(samples.map(s => s.v)) / samples.length : 0)
+
 // { sales, purch } bases from the history window, each null when history is too thin to judge.
+// Purchases take every window day as a sample, a day without a bill at 0.
 export function baseFromHistory(days) {
   const salesDays = (days || []).filter(x => x.sales != null)
   const sales = salesDays.length >= MIN_HISTORY_DAYS
     ? { source: 'history', byWeekday: weekdayAverages(salesDays.map(x => ({ dow: x.dow, v: x.sales })), 0), sampleDays: salesDays.length }
     : null
-  const purch = (days || []).length >= MIN_HISTORY_DAYS && days.some(x => x.purch != null)
-    ? { source: 'history', byWeekday: Array(7).fill(Math.round(sum(days.map(x => x.purch || 0)) / days.length)), sampleDays: days.length }
+  const purchSamples = (days || []).map(x => ({ dow: x.dow, v: x.purch || 0 }))
+  const purch = purchSamples.length >= MIN_HISTORY_DAYS && days.some(x => x.purch != null)
+    ? { source: 'history', byWeekday: weekdayAverages(purchSamples, meanOf(purchSamples)), sampleDays: purchSamples.length }
     : null
   return { sales, purch }
 }
 
-// A new client's base from its own open month, once there is a week of it.
-//   sales: days WITH an entry, averaged per weekday.
+// A new client's base from its own open month, once there is a week of it, per weekday.
+//   sales: the days WITH an entry.
 //   purch: every calendar day up to `elapsed`, a day without a bill counting as zero.
 export function baseFromMonth({ kind, valueMap, dayNums, elapsed, weekdayOf }) {
+  let samples
   if (kind === 'sales') {
     if (dayNums.length < MIN_MONTH_DAYS_FOR_TARGET) return null
-    const samples = dayNums.map(d => ({ dow: weekdayOf(d), v: valueMap[d] }))
-    const mean = sum(samples.map(s => s.v)) / samples.length
-    return { source: 'month', byWeekday: weekdayAverages(samples, mean), sampleDays: dayNums.length }
+    samples = dayNums.map(d => ({ dow: weekdayOf(d), v: valueMap[d] }))
+  } else {
+    if (!elapsed || elapsed < MIN_MONTH_DAYS_FOR_TARGET) return null
+    samples = Array.from({ length: elapsed }, (_, i) => ({ dow: weekdayOf(i + 1), v: valueMap[i + 1] || 0 }))
   }
-  if (!elapsed || elapsed < MIN_MONTH_DAYS_FOR_TARGET) return null
-  let total = 0
-  for (let d = 1; d <= elapsed; d++) total += valueMap[d] || 0
-  return { source: 'month', byWeekday: Array(7).fill(Math.round(total / elapsed)), sampleDays: elapsed }
+  return { source: 'month', byWeekday: weekdayAverages(samples, meanOf(samples)), sampleDays: samples.length }
 }
 
 // The live month-end forecast. `expectDays` are the days this month's pace is judged over (sales:
@@ -150,11 +159,11 @@ export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay,
 }
 
 // The frozen Target, as stored in monthly_periods.sales/purch_projection_snapshot.
-export function makeSnapshot(base, { monthEndDay, weekdayOf, capturedDay }) {
+export function makeSnapshot(kind, base, { monthEndDay, weekdayOf, capturedDay }) {
   let total = 0
   for (let d = 1; d <= monthEndDay; d++) total += base.byWeekday[weekdayOf(d)]
   return {
-    model: SNAPSHOT_MODEL,
+    model: SNAPSHOT_MODEL[kind],
     source: base.source,
     byWeekday: base.byWeekday,
     sampleDays: base.sampleDays,
@@ -164,10 +173,15 @@ export function makeSnapshot(base, { monthEndDay, weekdayOf, capturedDay }) {
   }
 }
 
-// A pre-S780 snapshot is a slope/intercept fit and is treated as absent, so it gets recaptured
-// once. The write guard that lets that recapture through is `->>model IS NULL`, never a `.neq`:
-// `.neq` drops the rows whose value is NULL, which is exactly the rows it needs to reach.
-export const isCurrentSnapshot = snap =>
-  !!snap && snap.model === SNAPSHOT_MODEL && Array.isArray(snap.byWeekday) && snap.byWeekday.length === 7
+// A snapshot of an older model (a pre-S780 slope fit, or S780's flat purchase line) is treated as
+// absent, so it gets recaptured once.
+export const isCurrentSnapshot = (kind, snap) =>
+  !!snap && snap.model === SNAPSHOT_MODEL[kind] && Array.isArray(snap.byWeekday) && snap.byWeekday.length === 7
 
-export const targetValue = (snap, dow) => (isCurrentSnapshot(snap) ? snap.byWeekday[dow] : null)
+// The PostgREST `or` filter that lets exactly that recapture through: an empty column, or one
+// holding an older model. The `is.null` arm is load-bearing, not tidiness: a `neq` alone drops
+// every row whose value is NULL, which is the pre-S780 rows and the never-captured ones.
+export const staleSnapshotFilter = (kind, column) =>
+  `${column}->>model.is.null,${column}->>model.neq.${SNAPSHOT_MODEL[kind]}`
+
+export const targetValue = (kind, snap, dow) => (isCurrentSnapshot(kind, snap) ? snap.byWeekday[dow] : null)

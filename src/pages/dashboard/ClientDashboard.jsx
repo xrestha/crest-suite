@@ -10,7 +10,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
-  projectMonth, makeSnapshot, isCurrentSnapshot, targetValue,
+  projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue,
 } from '../../modules/dashboard/dailyForecast'
 import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel } from '../../modules/dashboard/labourSource'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -718,31 +718,31 @@ export default function ClientDashboard() {
     }
 
     // The frozen Target: captured once per period, never recalculated, so a later visit can judge
-    // the month against what was expected of it. A pre-S780 snapshot (a slope fit that ran to zero
-    // mid-month) is treated as absent and replaced once; the write guard's `->>model IS NULL`
-    // matches both an empty column and an old snapshot, and nothing else. It stays a best-effort
-    // write: a failed save just means the next visit captures it, and a second tab racing this one
-    // cannot overwrite a v2 snapshot the first has just written.
-    let nextSalesTargetSnap = isCurrentSnapshot(period?.sales_projection_snapshot) ? period.sales_projection_snapshot : null
-    let nextPurchTargetSnap = isCurrentSnapshot(period?.purch_projection_snapshot) ? period.purch_projection_snapshot : null
+    // the month against what was expected of it. A snapshot of an older model (a pre-S780 slope
+    // fit that ran to zero mid-month, or S780's flat purchase line) is treated as absent and
+    // replaced once; staleSnapshotFilter() matches an empty column or an older model and nothing
+    // else. It stays a best-effort write: a failed save just means the next visit captures it,
+    // and a second tab racing this one cannot overwrite the snapshot the first has just written.
+    let nextSalesTargetSnap = isCurrentSnapshot('sales', period?.sales_projection_snapshot) ? period.sales_projection_snapshot : null
+    let nextPurchTargetSnap = isCurrentSnapshot('purch', period?.purch_projection_snapshot) ? period.purch_projection_snapshot : null
     if (period && isCurrentMonth && !historyFailed) {
-      const capture = (column, base) => {
-        const snap = makeSnapshot(base, { monthEndDay, weekdayOf, capturedDay: bsToday.day })
+      const capture = (kind, column, base) => {
+        const snap = makeSnapshot(kind, base, { monthEndDay, weekdayOf, capturedDay: bsToday.day })
         scopedUpdate('monthly_periods', { [column]: snap })
-          .eq('id', period.id).is(`${column}->>model`, null)
+          .eq('id', period.id).or(staleSnapshotFilter(kind, column))
           .then(({ error }) => { if (error) console.error(`Failed to save ${column}`, error) })
         return snap
       }
       if (!nextSalesTargetSnap) {
         const base = historyBase.sales || baseFromMonth({ kind: 'sales', valueMap: daySalesMap, dayNums: salesDayNums, weekdayOf })
-        if (base) nextSalesTargetSnap = capture('sales_projection_snapshot', base)
+        if (base) nextSalesTargetSnap = capture('sales', 'sales_projection_snapshot', base)
       }
       if (!nextPurchTargetSnap) {
         // No bill at all this month means a client not recording purchases here, not a month of
         // zero spend, so it gets no purchase target from its own days.
         const base = historyBase.purch
           || (purchDayNums.length ? baseFromMonth({ kind: 'purch', valueMap: dayPurchMap, elapsed: elapsedDay, weekdayOf }) : null)
-        if (base) nextPurchTargetSnap = capture('purch_projection_snapshot', base)
+        if (base) nextPurchTargetSnap = capture('purch', 'purch_projection_snapshot', base)
       }
     }
     setAndCache(setSalesTargetSnap, 'salesTargetSnap', nextSalesTargetSnap)
@@ -787,8 +787,8 @@ export default function ClientDashboard() {
         // Frozen full-month line, unlike salesProj/purchProj above — non-null for every day in
         // range (not just from the last actual onward) so it's a static reference the actual line
         // can be compared against retroactively, not just a forward-looking tail.
-        salesTarget: targetValue(nextSalesTargetSnap, weekdayOf(d)),
-        purchTarget: targetValue(nextPurchTargetSnap, weekdayOf(d)),
+        salesTarget: targetValue('sales', nextSalesTargetSnap, weekdayOf(d)),
+        purchTarget: targetValue('purch', nextPurchTargetSnap, weekdayOf(d)),
       })
     }
     setAndCache(setDailyTrend, 'dailyTrend', trend)
@@ -1251,8 +1251,8 @@ export default function ClientDashboard() {
   const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales || 0), 0)
   // Only a current-model Target is drawn: a pre-S780 one can still be sitting in dashboardCache
   // for the moment before loadStats replaces it, and its slope fit is exactly what S780 removed.
-  const salesTarget = isCurrentSnapshot(salesTargetSnap) ? salesTargetSnap : null
-  const purchTarget = isCurrentSnapshot(purchTargetSnap) ? purchTargetSnap : null
+  const salesTarget = isCurrentSnapshot('sales', salesTargetSnap) ? salesTargetSnap : null
+  const purchTarget = isCurrentSnapshot('purch', purchTargetSnap) ? purchTargetSnap : null
   // Where a Target came from, in the words the footer and the screen-reader summary use.
   const targetBasis = snap => (snap.source === 'history'
     ? "last 4 weeks' pace"
@@ -2101,8 +2101,8 @@ export default function ClientDashboard() {
               <span style={{ color: 'var(--theme-text2)' }}>
                 <span style={{ color: DAILY_TREND_COLORS.purchTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
                 <Tip text={`${purchTarget.source === 'history'
-                  ? `Your usual spend per day, from the 4 weeks before ${periodLabel} began: that time's net purchases divided by its days, counting days with no purchases.`
-                  : `Your usual spend per day, from this month's first ${purchTarget.sampleDays} days, counting days with no purchases (there weren't 4 weeks of purchases before ${periodLabel} to learn from).`} It stays fixed for the rest of ${periodLabel}. Kitchens buy in batches, so single days will swing well above and below it: what matters is whether your purchases run above it for days on end. Hover any day: here green means UNDER the target, because spending less than usual is the win. A grey ≈ means the day was close enough to count as on target.`}>Purch. Target</Tip>
+                  ? `What you usually spend on each weekday, from the 4 weeks before ${periodLabel} began.`
+                  : `What you usually spend on each weekday, from this month's first ${purchTarget.sampleDays} days (there weren't 4 weeks of purchases before ${periodLabel} to learn from).`} A weekday you bought nothing on counts as zero, so your usual restock day sits high and your quiet buying days sit low. It stays fixed for the rest of ${periodLabel}. Hover any day: here green means UNDER the target, because spending less than usual is the win. A grey ≈ means the day was close enough to count as on target.`}>Purch. Target</Tip>
               </span>
             )}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}

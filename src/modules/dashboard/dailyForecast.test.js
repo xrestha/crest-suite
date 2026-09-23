@@ -1,6 +1,6 @@
 import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
-  projectMonth, makeSnapshot, isCurrentSnapshot, targetValue, HISTORY_DAYS,
+  projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, HISTORY_DAYS,
 } from './dailyForecast'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 
@@ -72,10 +72,18 @@ describe('base from history', () => {
     expect(sales.byWeekday[1]).toBe(10000)
   })
 
-  test('purchases are averaged per calendar day, not per purchase day', () => {
+  test('purchases follow their own buying days, a no-bill day counting as zero', () => {
     const { purch } = baseFromHistory(historyWindowDays(OPEN.y, OPEN.m, bhadraHistory()))
-    // 4 Sundays × 7,000 over 28 days = 1,000 a day, never 7,000.
-    expect(purch.byWeekday).toEqual(Array(7).fill(1000))
+    // Bought 7,000 every Sunday and nothing else: Sunday is the restock day, the rest are zero,
+    // and the week still totals 7,000, the same as the flat 1,000-a-day line it replaced.
+    expect(purch.byWeekday).toEqual([7000, 0, 0, 0, 0, 0, 0])
+    expect(purch.byWeekday.reduce((s, v) => s + v, 0)).toBe(7000)
+  })
+
+  test("purchases peak on a different day from sales, as CASA's do", () => {
+    const { sales, purch } = baseFromHistory(historyWindowDays(OPEN.y, OPEN.m, bhadraHistory()))
+    expect(sales.byWeekday.indexOf(Math.max(...sales.byWeekday))).toBe(6)
+    expect(purch.byWeekday.indexOf(Math.max(...purch.byWeekday))).toBe(0)
   })
 
   test('under 14 days of history is not enough to judge', () => {
@@ -96,10 +104,12 @@ describe('base from the open month (a new client)', () => {
     expect(base.byWeekday.every(v => v > 0)).toBe(true)
   })
 
-  test('purchases per calendar day, once 7 days have elapsed', () => {
+  test('purchases per weekday, once 7 days have elapsed, day 7 counting as zero', () => {
     expect(baseFromMonth({ kind: 'purch', valueMap: CASA_PURCH, elapsed: 6, weekdayOf })).toBeNull()
     const base = baseFromMonth({ kind: 'purch', valueMap: CASA_PURCH, elapsed: 7, weekdayOf })
-    expect(base.byWeekday[0]).toBe(Math.round(21377 / 7))
+    expect(base.byWeekday[weekdayOf(2)]).toBe(7113)
+    expect(base.byWeekday[weekdayOf(7)]).toBe(0)
+    expect(base.byWeekday.reduce((s, v) => s + v, 0)).toBe(21377)
   })
 })
 
@@ -152,18 +162,31 @@ describe('projectMonth', () => {
 describe('snapshots', () => {
   test('a snapshot sums the whole month and reads back per weekday', () => {
     const byWeekday = [1, 2, 3, 4, 5, 6, 7]
-    const snap = makeSnapshot({ source: 'history', byWeekday, sampleDays: 28 }, { monthEndDay, weekdayOf, capturedDay: 1 })
+    const snap = makeSnapshot('sales', { source: 'history', byWeekday, sampleDays: 28 }, { monthEndDay, weekdayOf, capturedDay: 1 })
     let expected = 0
     for (let d = 1; d <= monthEndDay; d++) expected += byWeekday[weekdayOf(d)]
     expect(snap.projectedMonthEnd).toBe(expected)
-    expect(isCurrentSnapshot(snap)).toBe(true)
-    expect(targetValue(snap, 6)).toBe(7)
+    expect(isCurrentSnapshot('sales', snap)).toBe(true)
+    expect(targetValue('sales', snap, 6)).toBe(7)
   })
 
   test('a pre-S780 slope fit is treated as absent', () => {
     const old = { slope: -1200, intercept: 15000, cap: 22000, capturedDay: 5, projectedMonthEnd: 92144 }
-    expect(isCurrentSnapshot(old)).toBe(false)
-    expect(targetValue(old, 3)).toBeNull()
-    expect(isCurrentSnapshot(null)).toBe(false)
+    expect(isCurrentSnapshot('sales', old)).toBe(false)
+    expect(targetValue('sales', old, 3)).toBeNull()
+    expect(isCurrentSnapshot('sales', null)).toBe(false)
+  })
+
+  test("S780's flat purchase snapshot is replaced; the sales one of the same model is kept", () => {
+    const s780 = { model: 2, source: 'history', byWeekday: Array(7).fill(5022), capturedDay: 6, projectedMonthEnd: 155682 }
+    expect(isCurrentSnapshot('purch', s780)).toBe(false)
+    expect(isCurrentSnapshot('sales', s780)).toBe(true)
+    const fresh = makeSnapshot('purch', { source: 'history', byWeekday: [12798, 2822, 4065, 4088, 4944, 4095, 2346], sampleDays: 28 }, { monthEndDay, weekdayOf, capturedDay: 7 })
+    expect(isCurrentSnapshot('purch', fresh)).toBe(true)
+  })
+
+  test('the write guard reaches an empty column and an older model, never by a bare neq', () => {
+    expect(staleSnapshotFilter('purch', 'purch_projection_snapshot'))
+      .toBe('purch_projection_snapshot->>model.is.null,purch_projection_snapshot->>model.neq.3')
   })
 })
