@@ -53,14 +53,64 @@ export function adDateBack(bsYear, bsMonth, back) {
   return formatAd(new Date(s.getFullYear(), s.getMonth(), s.getDate() - back))
 }
 
-// The Edge Function's rows, keyed by date.
+const numOrNull = v => {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+// The Edge Function's rows, keyed by date. The four S785 figures are null on a row written before
+// the function kept them, and on a day MET gave no instant for; the strip shows a dash, never 0°.
 export function weatherIndex(days) {
   const map = {}
   ;(days || []).forEach(r => {
-    if (r && r.date) map[r.date] = { precip_mm: Number(r.precip_mm) || 0, complete: !!r.complete }
+    if (r && r.date) map[r.date] = {
+      precip_mm: Number(r.precip_mm) || 0,
+      complete: !!r.complete,
+      temp_max: numOrNull(r.temp_max),
+      temp_min: numOrNull(r.temp_min),
+      cloud_pct: numOrNull(r.cloud_pct),
+      thunder: r.thunder === null || r.thunder === undefined ? null : !!r.thunder,
+    }
   })
   return map
 }
+
+// ── The Dashboard header's weather strip (S785) ──────────────────────────────────────────────
+
+export const LIGHT_RAIN_MM = 1
+export const HEAVY_RAIN_MM = 20
+export const STRIP_DAYS = 4
+
+// The picture and the plain word for one day. The rain words start where the forecast does:
+// "Rain" begins at RAIN_MM, so a day the sales forecast scales reads Rain, Heavy rain or
+// Storms, never Light rain or a dry word. Below LIGHT_RAIN_MM the sky decides; a row with
+// no cloud figure (written before S785) says "Dry" rather than guessing sun or cloud.
+export function weatherLook(w) {
+  if (!w) return null
+  const mm = Number(w.precip_mm) || 0
+  if (w.thunder) return { kind: 'thunder', word: 'Storms' }
+  if (mm >= HEAVY_RAIN_MM) return { kind: 'heavy_rain', word: 'Heavy rain' }
+  if (mm >= RAIN_MM) return { kind: 'rain', word: 'Rain' }
+  if (mm >= LIGHT_RAIN_MM) return { kind: 'light_rain', word: 'Light rain' }
+  if (w.cloud_pct === null || w.cloud_pct === undefined) return { kind: 'dry', word: 'Dry' }
+  if (w.cloud_pct >= 70) return { kind: 'cloudy', word: 'Cloudy' }
+  if (w.cloud_pct >= 30) return { kind: 'partly', word: 'Partly cloudy' }
+  return { kind: 'clear', word: 'Sunny' }
+}
+
+// `n` consecutive 'YYYY-MM-DD' dates from `todayAd`, by UTC day arithmetic so no timezone moves them.
+export function datesFrom(todayAd, n) {
+  if (!todayAd) return []
+  const today = dayNumber(todayAd)
+  return Array.from({ length: n }, (_, i) => isoOfDayNumber(today + i))
+}
+
+// Whether the strip has anything to show: a forecast row for at least one of ITS days. The reply
+// also carries 60 days of past rows (the measured effect reads them), so "any row" would call a
+// long outage ready and draw four "No forecast" days instead of saying the weather is unavailable.
+export const stripHasForecast = (weatherByAd, todayAd) =>
+  !!weatherByAd && datesFrom(todayAd, STRIP_DAYS).some(d => !!weatherByAd[d])
 
 export const isRainyDay = w => !!w && w.complete && Number(w.precip_mm) >= RAIN_MM
 

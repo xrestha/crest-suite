@@ -1,6 +1,7 @@
 import {
   RAIN_MM, WEATHER_HORIZON_DAYS, adDateOf, adDateBack, weatherIndex, isRainyDay, rainPctValue,
   validateRainPct, rainFactorForMonth, rainAhead, measuredRainEffect,
+  weatherLook, datesFrom, stripHasForecast, LIGHT_RAIN_MM, HEAVY_RAIN_MM, STRIP_DAYS,
 } from './weatherEffect'
 import { bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 
@@ -38,7 +39,74 @@ describe('what counts as rainy', () => {
 
   test('weatherIndex keys the function rows by date', () => {
     const idx = weatherIndex([{ date: '2026-09-23', precip_mm: '12.5', complete: true }])
-    expect(idx['2026-09-23']).toEqual({ precip_mm: 12.5, complete: true })
+    expect(idx['2026-09-23']).toEqual({
+      precip_mm: 12.5, complete: true, temp_max: null, temp_min: null, cloud_pct: null, thunder: null,
+    })
+  })
+
+  test('weatherIndex carries the strip figures, and a missing one stays null rather than 0', () => {
+    const idx = weatherIndex([
+      { date: '2026-09-24', precip_mm: 40.2, complete: true, temp_max: '22.4', temp_min: 17, cloud_pct: 96, thunder: false },
+      { date: '2026-09-25', precip_mm: 0, complete: true, temp_max: null, temp_min: undefined, cloud_pct: '', thunder: undefined },
+    ])
+    expect(idx['2026-09-24']).toMatchObject({ temp_max: 22.4, temp_min: 17, cloud_pct: 96, thunder: false })
+    expect(idx['2026-09-25']).toMatchObject({ temp_max: null, temp_min: null, cloud_pct: null, thunder: null })
+  })
+})
+
+describe('weatherLook: the strip\'s picture and word', () => {
+  const day = (precip_mm, extra = {}) => ({ precip_mm, complete: true, cloud_pct: 10, thunder: false, ...extra })
+
+  test('rain words by amount, and "Rain" starts exactly where the forecast adjusts', () => {
+    expect(weatherLook(day(0.9)).word).toBe('Sunny')
+    expect(weatherLook(day(LIGHT_RAIN_MM)).word).toBe('Light rain')
+    expect(weatherLook(day(RAIN_MM - 0.1)).word).toBe('Light rain')
+    expect(weatherLook(day(RAIN_MM)).word).toBe('Rain')
+    expect(isRainyDay(day(RAIN_MM))).toBe(true)
+    expect(weatherLook(day(HEAVY_RAIN_MM - 0.1)).word).toBe('Rain')
+    expect(weatherLook(day(HEAVY_RAIN_MM)).word).toBe('Heavy rain')
+  })
+
+  test('a dry day reads its sky, and a row with no cloud figure says Dry', () => {
+    expect(weatherLook(day(0, { cloud_pct: 29 })).kind).toBe('clear')
+    expect(weatherLook(day(0, { cloud_pct: 30 })).kind).toBe('partly')
+    expect(weatherLook(day(0, { cloud_pct: 70 })).kind).toBe('cloudy')
+    expect(weatherLook(day(0, { cloud_pct: null })).word).toBe('Dry')
+  })
+
+  test('thunder outranks every rain word; no day is null', () => {
+    expect(weatherLook(day(2, { thunder: true })).word).toBe('Storms')
+    expect(weatherLook(day(40, { thunder: true })).kind).toBe('thunder')
+    expect(weatherLook(undefined)).toBeNull()
+  })
+
+  test('a day the forecast scales never reads as light rain or dry', () => {
+    for (const mm of [RAIN_MM, 7.3, 19.3, 40.2]) {
+      expect(['rain', 'heavy_rain', 'thunder']).toContain(weatherLook(day(mm)).kind)
+    }
+  })
+})
+
+describe('datesFrom', () => {
+  test('consecutive dates across a month end', () => {
+    expect(datesFrom('2026-09-29', STRIP_DAYS)).toEqual(['2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02'])
+  })
+  test('no today, no dates', () => {
+    expect(datesFrom(null, 4)).toEqual([])
+  })
+})
+
+describe('stripHasForecast', () => {
+  const row = { precip_mm: 0, complete: true }
+  test('ready when one of the strip\'s own days has a row', () => {
+    expect(stripHasForecast({ '2026-10-02': row }, '2026-09-29')).toBe(true)
+  })
+  test('past rows alone are not a forecast: a long outage is "unavailable", not four blank days', () => {
+    expect(stripHasForecast({ '2026-09-20': row, '2026-09-28': row }, '2026-09-29')).toBe(false)
+    expect(stripHasForecast({ '2026-10-03': row }, '2026-09-29')).toBe(false)
+  })
+  test('no rows, no forecast', () => {
+    expect(stripHasForecast(null, '2026-09-29')).toBe(false)
   })
 })
 

@@ -10,7 +10,10 @@ import { supabase } from '../../supabaseClient'
 import { withTimeout } from '../../utils/withTimeout'
 import { readPageCache, writePageCache } from '../../shared/sessionDataCache'
 
-export function useWeatherDays({ clientId, enabled, locationKey }) {
+// `refreshKey` re-asks without a remount (S785): the dashboard passes its location key, so opening
+// Dashboard again from the nav while it is already mounted fetches again instead of keeping a reply
+// from the day before. The Edge Function's own cache is what keeps that cheap for MET.
+export function useWeatherDays({ clientId, enabled, locationKey, refreshKey }) {
   // Seeded from the page cache for an instant revisit, but only for the same outlet AND the same
   // city: a city changed in Settings must not come back as the old city's rain.
   const [weather, setWeather] = useState(() => {
@@ -47,7 +50,7 @@ export function useWeatherDays({ clientId, enabled, locationKey }) {
       if (loadIdRef.current !== myId) return
       setError(err)
     })
-  }, [clientId, enabled, locationKey])
+  }, [clientId, enabled, locationKey, refreshKey])
 
   return { weather: weather && weather.clientId === clientId ? weather : null, error }
 }

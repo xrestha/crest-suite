@@ -3113,6 +3113,100 @@ textarea::placeholder {
   }
 }
 
+/* S785 — the Dashboard header's weather strip (WeatherStrip.jsx), on the right of a
+   .page-header--split. One bordered box with 1px rules between the days: the Modernist grammar,
+   where a rule separates and nothing else does, rather than four floating cards.
+   Each day is two lines beside its picture (day + high/low, then the word + the sales tag), so
+   the strip stands about as tall as the title block beside it; a first version stacked five lines
+   per day and doubled the header's height. The days are equal columns: 1fr tracks in a grid the
+   header sizes to its content resolve to the WIDEST day's content, so the rules sit evenly without
+   a width typed here that a longer word ("Partly cloudy", or "Heavy rain" plus a tag) would break.
+   Measured with the real stylesheet: 58px tall against the title's 42px, and beside the title
+   from 1024px up; below that the split header wraps it under the title.
+   Under 768px the four days go 2 × 2 and keep the same two-line cell: four columns at a phone's
+   74px each stacked five lines per day (99px) and still clipped a long word. */
+.weather-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.weather-strip__days {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--theme-border);
+  background: var(--theme-card);
+}
+.weather-strip__day { padding: 5px 10px; min-width: 0; }
+.weather-strip__day + .weather-strip__day { border-left: 1px solid var(--theme-border-lt); }
+.weather-strip__cell {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+}
+.weather-strip__icon { grid-row: 1 / span 2; color: var(--theme-text2); }
+.weather-strip__icon--none { font-size: 12px; line-height: 18px; }
+.weather-strip__line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.weather-strip__line--top { justify-content: space-between; }
+.weather-strip__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--theme-text2);
+}
+.weather-strip__temp {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--theme-text1);
+  font-variant-numeric: tabular-nums;
+}
+.weather-strip__word { font-size: 11px; color: var(--theme-text2); }
+.weather-strip__tag {
+  padding: 0 4px;
+  font-size: var(--font-size-micro);
+}
+.weather-strip__skeleton { display: block; width: 104px; height: 32px; }
+.weather-strip__credit,
+.weather-strip__note {
+  margin: 0;
+  font-size: var(--font-size-micro);
+  color: var(--theme-text3);
+  text-align: right;
+}
+.weather-strip__note { font-size: 11px; }
+/* page-layout.md: an <a> sets its own colour, or it is the browser's blue at 1.69:1 on Night. */
+.weather-strip__credit a {
+  color: var(--theme-text2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.weather-strip__stale { color: var(--theme-amber-text); }
+
+@media screen and (max-width: 768px) {
+  .weather-strip { align-items: stretch; width: 100%; }
+  .weather-strip__days {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* 2 × 2: the column rule only between the pair, and a row rule above the second pair. */
+  .weather-strip__day:nth-child(odd) { border-left: none; }
+  .weather-strip__day:nth-child(n + 3) { border-top: 1px solid var(--theme-border-lt); }
+  .weather-strip__skeleton { width: 100%; }
+  .weather-strip__credit,
+  .weather-strip__note { text-align: left; }
+}
+
 /* The -1px right/bottom margins are the mechanism: each cell pulls its neighbour over its own
    border so the two draw as one line. No shadow — a shared-edge grid that also floats is two
    depth models arguing, and the cells are not separate objects any more. */

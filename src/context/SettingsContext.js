@@ -101,6 +101,11 @@ export function SettingsProvider({ children }) {
   const [settingsLoadError, setSettingsLoadError] = useState(null)
   const [platformLoadError, setPlatformLoadError] = useState(null)
   const [platformLoaded, setPlatformLoaded] = useState(false)
+  // Which client the `settings` on screen was read FOR (S785), set with it by the load that won.
+  // `loading` covers only the first load, and a client with no settings row shows DEFAULT_SETTINGS
+  // with no client_id, so neither says whether the row belongs to the client now being viewed —
+  // the Dashboard asks this before telling an Owner their city is not set.
+  const [settingsClientId, setSettingsClientId] = useState(undefined)
   // The row the app currently WANTS, and a sequence per load (S747). Every client switch ran two
   // loads (this provider's effect and Settings.js's own), nothing decided which response won, and
   // a save's follow-up reload could land after the admin had already switched client — so one
@@ -127,6 +132,7 @@ export function SettingsProvider({ children }) {
       if (!current()) return
       setSettings(data ? { ...DEFAULT_SETTINGS, ...data } : DEFAULT_SETTINGS)
       setSettingsLoadError(error || null)
+      setSettingsClientId(key)
       // Signed-out and admin-with-no-client already read the platform row above; a client
       // session read its own row, so the platform contact needs one more small read. Fail-soft:
       // on any error keep whatever was last known rather than blanking six surfaces (the KDS-poll
@@ -154,6 +160,7 @@ export function SettingsProvider({ children }) {
       if (!current()) return
       setSettings(DEFAULT_SETTINGS)
       setSettingsLoadError(e)
+      setSettingsClientId(key)
       setPlatformLoadError(e)
     } finally {
       // Only the load that won ends `loading`: Pricing.js gates its figures on it spanning BOTH
@@ -324,7 +331,7 @@ export function SettingsProvider({ children }) {
   return (
     <SettingsContext.Provider value={{
       settings, featureFlags, loading, platformSupport, planPrices, pricing,
-      settingsLoadError, platformLoadError, platformLoaded,
+      settingsLoadError, platformLoadError, platformLoaded, settingsClientId,
       saveSettings, saveClientSettings, saveFeatureFlags, savePlatformSupport, savePlatformPlanPrices,
       loadSettings, loadClientSettings, loadClientFeatureFlags,
       isFeatureEnabled, recipeCategories

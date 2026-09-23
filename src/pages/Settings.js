@@ -1133,7 +1133,7 @@ export default function Settings() {
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
                 The Dashboard's <strong>Daily Purchases vs Sales</strong> chart can lower (or raise) its sales forecast on the
                 days rain is expected, for the next {WEATHER_HORIZON_DAYS} days. Purchases and the dotted targets never change
-                with the weather.
+                with the weather. The city also puts today's and the next three days' weather at the top of the Dashboard.
               </p>
               <div className="form-grid form-grid-2">
                 <div className="form-field">

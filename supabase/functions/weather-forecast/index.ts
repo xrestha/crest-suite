@@ -25,6 +25,11 @@ const CORS = {
 // overwrites a complete one, so each stored past day ends up as the last full-day forecast made
 // before it began — which is what the dashboard measures a rainy-day effect against.
 //
+// S785: each day also carries its high and low temperature, mean cloud cover and whether thunder is
+// forecast, over the same window, for the Dashboard header's weather strip. The sales forecast
+// still reads rain alone. A day already stored whole keeps its rain and its high/low; its sky and
+// thunder follow later fetches (display only — see the refresh after the upsert).
+//
 // A MET failure never turns into a 500: the stored rows come back with `reason` saying why no
 // fresh forecast came, and the function backs off for BACKOFF_MS rather than asking again on every
 // dashboard load. `stale` is a separate fact: the last good fetch is more than 12 hours old.
@@ -48,28 +53,56 @@ const round2 = (n: number) => Math.round(n * 100) / 100
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 const dayStartUtc = (iso: string) => Date.parse(`${iso}T00:00:00Z`)
 
-type DayTotal = { mm: number; covered: number; first: number }
+type DayTotal = {
+  mm: number; covered: number; first: number
+  // S785, for the Dashboard's weather strip: filled in from `samples` once the walk is done.
+  tempMax: number | null; tempMin: number | null; cloudPct: number | null; thunder: boolean | null
+}
+type Samples = { tMax: number; tMin: number; tN: number; cloudSum: number; cloudN: number }
 type MetEntry = {
   time: string
   data?: {
-    next_1_hours?: { details?: { precipitation_amount?: number } }
-    next_6_hours?: { details?: { precipitation_amount?: number } }
+    instant?: { details?: { air_temperature?: number; cloud_area_fraction?: number } }
+    next_1_hours?: { summary?: { symbol_code?: string }; details?: { precipitation_amount?: number } }
+    next_6_hours?: { summary?: { symbol_code?: string }; details?: { precipitation_amount?: number } }
   }
 }
 
 // Sums each block's rain into the trading window of every date it overlaps, pro rata, and tracks
-// how much of each window the forecast covered and the earliest moment of it covered.
+// how much of each window the forecast covered and the earliest moment of it covered. Beside the
+// rain (S785): the high and low temperature and the mean cloud cover of the instants that fall
+// inside each window, and whether a block overlapping it names thunder.
+//
+// Only the rain walk creates a day. The samples are kept apart and merged into days that exist,
+// because MET's last few entries carry an instant and no block: a day made from those alone would be
+// a no-rain row the forecast never covered, which the dashboard would read as a dry day.
 function aggregate(timeseries: MetEntry[]) {
   const days: Record<string, DayTotal> = {}
+  const samples: Record<string, Samples> = {}
+  const thunderSeen: Record<string, boolean> = {}
   let coveredUntil = -Infinity
   for (const entry of timeseries) {
     const start = Date.parse(entry.time)
     if (!Number.isFinite(start)) continue
+
+    // An instant belongs to the day whose window contains it, and to no day outside a window.
+    const instantDay = dayStartUtc(isoDay(start))
+    if (start - instantDay < WINDOW_MS) {
+      const temp = entry.data?.instant?.details?.air_temperature
+      const cloud = entry.data?.instant?.details?.cloud_area_fraction
+      const key = isoDay(instantDay)
+      const s = samples[key] || (samples[key] = { tMax: -Infinity, tMin: Infinity, tN: 0, cloudSum: 0, cloudN: 0 })
+      if (typeof temp === 'number' && Number.isFinite(temp)) {
+        s.tMax = Math.max(s.tMax, temp); s.tMin = Math.min(s.tMin, temp); s.tN++
+      }
+      if (typeof cloud === 'number' && Number.isFinite(cloud)) { s.cloudSum += cloud; s.cloudN++ }
+    }
+
     const one = entry.data?.next_1_hours?.details?.precipitation_amount
     const six = entry.data?.next_6_hours?.details?.precipitation_amount
-    let end: number, amount: number
-    if (typeof one === 'number') { end = start + HOUR_MS; amount = one }
-    else if (typeof six === 'number') { end = start + 6 * HOUR_MS; amount = six }
+    let end: number, amount: number, symbol: string | undefined
+    if (typeof one === 'number') { end = start + HOUR_MS; amount = one; symbol = entry.data?.next_1_hours?.summary?.symbol_code }
+    else if (typeof six === 'number') { end = start + 6 * HOUR_MS; amount = six; symbol = entry.data?.next_6_hours?.summary?.symbol_code }
     else continue
     // Hourly entries also carry a 6-hour figure; the walk takes the hourly one and skips whatever
     // a later block repeats, so nothing is counted twice.
@@ -82,12 +115,21 @@ function aggregate(timeseries: MetEntry[]) {
       const overlap = Math.min(end, dayMs + WINDOW_MS) - Math.max(from, dayMs)
       if (overlap <= 0) continue
       const key = isoDay(dayMs)
-      const d = days[key] || (days[key] = { mm: 0, covered: 0, first: Infinity })
+      const d = days[key] || (days[key] = { mm: 0, covered: 0, first: Infinity, tempMax: null, tempMin: null, cloudPct: null, thunder: null })
       d.mm += blockAmount * (overlap / blockLen)
       d.covered += overlap
       d.first = Math.min(d.first, Math.max(from, dayMs))
+      if (typeof symbol === 'string') thunderSeen[key] = (thunderSeen[key] || false) || symbol.includes('thunder')
     }
     coveredUntil = end
+  }
+  for (const [key, d] of Object.entries(days)) {
+    const s = samples[key]
+    if (s && s.tN > 0) { d.tempMax = Math.round(s.tMax * 10) / 10; d.tempMin = Math.round(s.tMin * 10) / 10 }
+    if (s && s.cloudN > 0) d.cloudPct = Math.min(100, Math.max(0, Math.round(s.cloudSum / s.cloudN)))
+    // null, not false, when no block carried a symbol at all: "no thunder" is a forecast, and the
+    // absence of a symbol is not one.
+    if (key in thunderSeen) d.thunder = thunderSeen[key]
   }
   return days
 }
@@ -205,23 +247,52 @@ Deno.serve(async (req) => {
             const complete = t.first <= dayStartUtc(date) && t.covered >= COMPLETE_MIN_MS
             // A one-hour seam is scaled over rather than read as dry.
             const mm = complete && t.covered < WINDOW_MS ? t.mm * (WINDOW_MS / t.covered) : t.mm
-            return { lat_key: latKey, lon_key: lonKey, ad_date: date, precip_mm: Math.round(mm * 10) / 10, complete, fetched_at: new Date(now).toISOString() }
+            return {
+              lat_key: latKey, lon_key: lonKey, ad_date: date, precip_mm: Math.round(mm * 10) / 10, complete,
+              temp_max: t.tempMax, temp_min: t.tempMin, cloud_pct: t.cloudPct, thunder: t.thunder,
+              fetched_at: new Date(now).toISOString(),
+            }
           })
           const dates = incoming.map(r => r.ad_date)
           const { data: existing, error: existingErr } = dates.length
-            ? await admin.from('weather_daily').select('ad_date, complete')
+            ? await admin.from('weather_daily').select('ad_date, complete, temp_max')
                 .eq('lat_key', latKey).eq('lon_key', lonKey).in('ad_date', dates)
             : { data: [], error: null }
           let writeErr = ''
           if (existingErr) {
             writeErr = `reading existing rows failed: ${existingErr.message}`
           } else {
-            const completeAlready = new Set((existing || []).filter(r => r.complete).map(r => r.ad_date))
-            const rows = incoming.filter(r => r.complete || !completeAlready.has(r.ad_date))
+            const storedComplete = new Map((existing || []).filter(r => r.complete).map(r => [r.ad_date, r]))
+            const rows = incoming.filter(r => r.complete || !storedComplete.has(r.ad_date))
             const { error: upsertErr } = rows.length
               ? await admin.from('weather_daily').upsert(rows, { onConflict: 'lat_key,lon_key,ad_date' })
               : { error: null }
             if (upsertErr) writeErr = `upsert failed: ${upsertErr.message}`
+
+            // S785: a day already stored whole keeps its rain and its `complete` flag — the sales
+            // forecast is measured against the forecast made before the day began. But the sky and
+            // thunder are display only, so they follow the latest forecast for the rest of the day:
+            // otherwise a "Sunny" tile stands under "updated 11:00" after MET has added afternoon
+            // storms. The high/low stays the full-day one, and is filled from this fetch only where
+            // the stored row has none (a row written before S785). Display only, so a failure here
+            // is logged and never turns the fetch into cache_write_failed: the rain rows above landed.
+            if (!upsertErr) {
+              for (const r of incoming) {
+                const stored = storedComplete.get(r.ad_date)
+                if (r.complete || !stored) continue
+                const patch: Record<string, number | boolean> = {}
+                if (r.cloud_pct != null) patch.cloud_pct = r.cloud_pct
+                if (r.thunder != null) patch.thunder = r.thunder
+                if (stored.temp_max == null && r.temp_max != null && r.temp_min != null) {
+                  patch.temp_max = r.temp_max
+                  patch.temp_min = r.temp_min
+                }
+                if (!Object.keys(patch).length) continue
+                const { error: patchErr } = await admin.from('weather_daily').update(patch)
+                  .eq('lat_key', latKey).eq('lon_key', lonKey).eq('ad_date', r.ad_date)
+                if (patchErr) console.error('weather-forecast: display refresh failed', r.ad_date, patchErr.message)
+              }
+            }
           }
           if (writeErr) {
             // Nothing was stored, so back off as for a MET failure: otherwise every load fetches
@@ -261,7 +332,7 @@ Deno.serve(async (req) => {
     const todayNpt = isoDay(now + NPT_OFFSET_MS)
     const todayMs = dayStartUtc(todayNpt)
     const { data: rows, error: rowsErr } = await admin
-      .from('weather_daily').select('ad_date, precip_mm, complete')
+      .from('weather_daily').select('ad_date, precip_mm, complete, temp_max, temp_min, cloud_pct, thunder')
       .eq('lat_key', latKey).eq('lon_key', lonKey)
       .gte('ad_date', isoDay(todayMs - PAST_DAYS * 24 * HOUR_MS))
       .lte('ad_date', isoDay(todayMs + AHEAD_DAYS * 24 * HOUR_MS))
@@ -270,7 +341,13 @@ Deno.serve(async (req) => {
 
     const stale = lastFetch == null || now - lastFetch > STALE_AFTER_MS
     return json({
-      days: (rows || []).map(r => ({ date: r.ad_date, precip_mm: Number(r.precip_mm), complete: r.complete })),
+      days: (rows || []).map(r => ({
+        date: r.ad_date, precip_mm: Number(r.precip_mm), complete: r.complete,
+        temp_max: r.temp_max == null ? null : Number(r.temp_max),
+        temp_min: r.temp_min == null ? null : Number(r.temp_min),
+        cloud_pct: r.cloud_pct == null ? null : Number(r.cloud_pct),
+        thunder: r.thunder,
+      })),
       today: todayNpt,
       fetched_at: lastFetch != null ? new Date(lastFetch).toISOString() : null,
       stale,

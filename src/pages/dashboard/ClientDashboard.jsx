@@ -13,12 +13,12 @@ import {
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue,
 } from '../../modules/dashboard/dailyForecast'
 import {
-  adDateOf, adDateBack, weatherIndex, rainPctValue, rainFactorForMonth, rainAhead, measuredRainEffect,
+  adDateOf, adDateBack, weatherIndex, rainPctValue, rainFactorForMonth, rainAhead, measuredRainEffect, stripHasForecast,
   WEATHER_HORIZON_DAYS, RAIN_MM, MIN_MEASURE_DAYS,
 } from '../../modules/dashboard/weatherEffect'
 import { useWeatherDays } from '../../modules/dashboard/useWeatherDays'
 import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel } from '../../modules/dashboard/labourSource'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
   LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine,
@@ -47,6 +47,8 @@ import SalesPivot from '../../modules/dashboard/SalesPivot'
 import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 import GettingStartedCard from './GettingStartedCard'
+import WeatherStrip from './WeatherStrip'
+import { cityByKey } from '../../shared/nepalCities'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
@@ -247,13 +249,13 @@ async function loadForecastHistory(scopedFrom, period) {
 }
 
 export default function ClientDashboard() {
-  const { profile, clientId, isAdmin, isOwner, isTrial, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
+  const { profile, clientId, isAdmin, isOwner, isTrial, clientModules, imsEnabled, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
   // 'kitchen'/'bar' pos_team accounts (S431) get kitchen-ops KPIs (open/late tickets, prep time)
   // instead of the front-of-house Revenue/Covers/Avg Check/Tables Occupied cards — they have no
   // more use for revenue figures on their landing dashboard than a POS-only staffer has for IMS's.
   const posIsStationTeam = posTeam === 'kitchen' || posTeam === 'bar'
   const { colors } = useTheme()
-  const { settings, settingsLoadError } = useSettings()
+  const { settings, settingsLoadError, settingsClientId } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const hrApprovals = useHrApprovalCounts() // shared with HrDashboard.jsx's own Approvals row
@@ -1275,10 +1277,14 @@ export default function ClientDashboard() {
   const weatherFeature = hasFeature('weather_forecast')
   const weatherSettingsOwn = !!settings && settings.client_id === effectiveClientId
   const weatherLocated = weatherSettingsOwn && settings.weather_lat != null && settings.weather_lon != null
+  // Any module (S785): the header's weather strip is for every restaurant with a city set, so the
+  // weather loads without IMS. The chart's rain adjustment below needs the client's IMS data
+  // (salesForecastInputs); its "×N%" tags in the strip also need THIS viewer to see that chart.
   const { weather, error: weatherError } = useWeatherDays({
     clientId: effectiveClientId,
-    enabled: !!clientModules.ims && hasImsAccess('staff') && weatherFeature && weatherLocated,
+    enabled: weatherFeature && weatherLocated,
     locationKey: weatherLocated ? `${settings.weather_lat},${settings.weather_lon}` : null,
+    refreshKey: location.key,
   })
   const rainPct = weatherSettingsOwn ? rainPctValue(settings.rain_sales_pct) : null
   const weatherByAd = weather?.days?.length ? weatherIndex(weather.days) : null
@@ -1319,6 +1325,35 @@ export default function ClientDashboard() {
   // which is near-unreadable on the dark presets. text2 plus an underline reads as a link without
   // spending the accent on an attribution.
   const weatherCreditLink = { color: 'var(--theme-text2)', textDecoration: 'underline', textUnderlineOffset: 2 }
+
+  // ── The header's weather strip (S785) ───────────────────────────────────────────────────────
+  // A day the chart's forecast actually moved gets a "×N%" tag: exactly rainForecastDays,
+  // the same days the chart footer names, so the two can never disagree about which days dip.
+  // Only for a viewer who sees that chart (showIms's test, below): a POS PIN login on an IMS+POS
+  // client would otherwise read about a sales forecast it is never shown.
+  const rainTagByAd = rainTrend && clientModules.ims && hasImsAccess('staff')
+    ? Object.fromEntries(rainForecastDays.map(d => [adDateOf(salesForecastInputs.bsYear, salesForecastInputs.bsMonth, d), rainAdj.pct]))
+    : null
+  // The strip's "Today" is the viewer's Nepal date, not the reply's: a reply can be from before
+  // midnight, and its rows are keyed by date, so the right days are in it either way.
+  const weatherStripToday = formatAd(nepalCivilDate(Date.now()))
+  // Ready only when one of the strip's OWN days has a row — the reply also carries 60 past days —
+  // and a reply with no such row (an outage, `{ days: [], reason }`) is no weather, the same as a
+  // failed call. A failed REFRESH keeps the last good answer, which useWeatherDays holds on to.
+  const weatherStripState = !weatherFeature || !weatherLocated ? null
+    : stripHasForecast(weatherByAd, weatherStripToday) ? 'ready'
+    : weather || weatherError ? 'unavailable'
+    : 'loading'
+  const weatherCityName = weatherSettingsOwn
+    ? (cityByKey(settings.weather_city)?.name || settings.weather_city || '')
+    : ''
+  // The Owner is told where to add a city, but only once THIS client's settings have been read:
+  // before that, during a client switch, or after a failed read, "no city" is not something the page
+  // knows. Settings is an IMS route, so a POS-only or HR-only Owner is told who sets it instead.
+  const weatherCityPointer = weatherFeature && !weatherLocated && isOwner
+    && settingsClientId === effectiveClientId && !settingsLoadError
+    ? (imsEnabled ? 'settings' : 'crest')
+    : null
 
   // Compact card window — 6 days back → 3 days ahead of today, sliced out of the full-month
   // `dailyTrend` array so the small glanceable card stays readable; the expanded modal (`big`
@@ -2757,12 +2792,34 @@ export default function ClientDashboard() {
         {loading ? 'Loading dashboard data…' : 'Dashboard data loaded'}
       </div>
       {/* ── Header ── */}
-      <div className="page-header">
-        <h1 className="page-title">{dashTitle}</h1>
-        <p className="page-subtitle">
-          {isAdmin ? (adminViewClientName || '— Select a property from the sidebar —') : (profile?.clients?.name || '')}
-          {activePeriod && ` · ${periodLabel} · Open`}
-        </p>
+      {/* S785: the weather strip sits on the right, so the header becomes a split one only when
+          there is something to put there — a title-only header takes .page-header alone. */}
+      <div className={weatherStripState || weatherCityPointer ? 'page-header page-header--split' : 'page-header'}>
+        <div>
+          <h1 className="page-title">{dashTitle}</h1>
+          <p className="page-subtitle">
+            {isAdmin ? (adminViewClientName || '— Select a property from the sidebar —') : (profile?.clients?.name || '')}
+            {activePeriod && ` · ${periodLabel} · Open`}
+          </p>
+        </div>
+        {weatherStripState ? (
+          <WeatherStrip
+            state={weatherStripState}
+            weatherByAd={weatherByAd}
+            todayAd={weatherStripToday}
+            cityName={weatherCityName}
+            fetchedAt={weather?.fetched_at || null}
+            stale={!!weather?.stale}
+            rainTagByAd={rainTagByAd}
+          />
+        ) : weatherCityPointer && (
+          <p className="no-print" style={{ margin: 0, fontSize: 11, color: 'var(--theme-text3)', alignSelf: 'center' }}>
+            {weatherCityPointer === 'settings' ? (
+              <>See the weather here: add your city in{' '}
+                <Link to="/settings" style={weatherCreditLink}>Settings → Weather</Link>.</>
+            ) : 'See the weather here: ask Crest support to set your city.'}
+          </p>
+        )}
       </div>
 
       {/* A load failure used to be indistinguishable from "this client genuinely has no data" —
