@@ -76,15 +76,19 @@ export function dayTip({ iso, isToday, w, look, tagPct }) {
   return parts.join(' ')
 }
 
-// state: 'loading' | 'ready' | 'unavailable'
-export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fetchedAt, stale, rainTagByAd }) {
+// state: 'loading' | 'ready' | 'unavailable'. `onChangeCity` (S786) is set only for a login that
+// may change the city; it puts a "Change city" button in the line under the days.
+export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fetchedAt, stale, rainTagByAd, onChangeCity }) {
   const dates = datesFrom(todayAd, STRIP_DAYS)
   const label = cityName ? `Weather for ${cityName}` : 'Weather'
+  const changeCity = onChangeCity && (
+    <> · <button type="button" className="weather-strip__change" onClick={onChangeCity}>Change city</button></>
+  )
 
   if (state === 'unavailable') {
     return (
       <section className="weather-strip no-print" aria-label={label}>
-        <p className="weather-strip__note">{cityName ? `${cityName} · ` : ''}Weather unavailable right now.</p>
+        <p className="weather-strip__note">{cityName ? `${cityName} · ` : ''}Weather unavailable right now.{changeCity}</p>
       </section>
     )
   }
@@ -164,6 +168,7 @@ export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fe
         {fetchedAt && (stale
           ? <span className="weather-strip__stale"> · over 12 hours old</span>
           : <> · updated {nepalTime(fetchedAt)}</>)}
+        {changeCity}
       </p>
     </section>
   )

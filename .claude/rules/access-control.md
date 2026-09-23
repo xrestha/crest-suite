@@ -299,6 +299,17 @@ Migrated from the root `CLAUDE.md` (S663). This is the tail of the original Gues
 
 **Guest QR Ordering comes WITH the POS module, and `pos_enabled` is its only gate** (settled S632, migration `20260829170000`). "Only gate" is about ENTITLEMENT — which clients have it. S746 added two refusals below it that are not entitlement: an `inactive` table takes no guest order, and an unpriced dish is not served (`pos-billing.md`). The flag hunt above ended one step short: with `pos_plan` gone, `feature_flags.guest_ordering` was left as the sole gate — matching the SQL, `posGuideData.js` and the original migration's "Pro-tier feature" comment. But `POS_MODULE_KEYS` in `AuthContext.js` grants it on `posEnabled` alone and `FeatureAccessModal` renders it **locked with a "Plan" chip** once POS is on, so the admin screen promised a feature the server refused. POS is flat and its features are part of it; both functions already return/raise at the `pos_enabled` gate, so the flag check was deleted rather than widened to `flag OR pos_enabled` — a condition that can only have one answer reads like a control that exists. `feature_flags.guest_ordering` now gates nothing (the modal still offers it while POS is off, where it grants nothing usable). **`pos_enabled` is now the only thing standing between a client and a public guest menu, so never remove that check** — the migration asserts it is still present for exactly that reason. Anything asking "does this client have HR/POS" reads `hrEnabled`/`posEnabled`. (`ims_plan` was in that array too and **has never existed as a column** — `42703` against the live DB.) `is_premium` survived S548 as the last plan-raiser and was retired in S574: it appeared on no admin screen, in no MRR figure and in no control, so a Starter client carrying it received every IMS Pro feature while every surface said — and billed — Starter. Migration `20260818180000` folded it into `clients.plan` (`'pro'` wherever set) so no entitlement changed; the column is now vestigial like `hr_plan`/`pos_plan`. `plan` therefore resolves as plain `clients.plan`, no max over anything.
 
+## The weather comes WITH POS and HR; the rain-adjusted forecast does not (S786)
+
+Owner decision. `hasWeather` (AuthContext, rule in `weatherEntitled()` in
+`src/modules/dashboard/weatherSettings.js`) is the Growth key `weather_forecast` OR `posEnabled` OR
+`hrEnabled`: the dashboard weather strip and the city behind it are flat module features, like guest
+ordering. The rain-adjusted SALES forecast stays on `hasFeature('weather_forecast')` alone, so an
+IMS-Starter client that also runs POS sees the weather and gets no adjustment. One key cannot mean
+both: before the split, including the key with POS would have handed that client the Growth forecast.
+No client had IMS off when this shipped, so nothing needed a grandfather sweep. `FeatureAccessModal`
+shows no weather row for a POS-only or HR-only client, correctly: nothing there needs granting.
+
 ## `false` in `feature_flags` is not a revoke (S548)
 
 Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root keeps only the one-line rule.

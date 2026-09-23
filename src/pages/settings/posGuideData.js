@@ -240,12 +240,13 @@ export const POS_GUIDE_GROUPS = [
         route: '/pos/tables',
         plan: 'Manager only',
         summary:
-          'All POS floor configuration in seven tabs: Tables (the grid itself, plus each table\'s guest-menu QR), Ticket Routing (which menu categories print as BOT vs KOT), Quick Notes (kitchen note presets), HSC Codes (per-item codes printed on the tax invoice), Discount Reasons, Delivery Partners, and Reservations (sitting length per party size, the late/seat windows, the WhatsApp confirmation text, and the outlet\'s booking link and QR).',
+          'All POS floor configuration in nine tabs: Tables (the grid itself, plus each table\'s guest-menu QR), Ticket Routing (which menu categories print as BOT vs KOT), Quick Notes (kitchen note presets), HSC Codes (per-item codes printed on the tax invoice), Discount Reasons, Delivery Partners, Reservations (sitting length per party size, the late/seat windows, the WhatsApp confirmation text, and the outlet\'s booking link and QR), Guest Menu (the name, logo and section order guests see), and Weather (S786: the town the outlet\'s weather is read for — the city only; the rainy-day sales figure is Inventory\'s).',
         workflow: [
           'Tables: add one by one or Quick Setup bulk-creates Table 1..N; set capacity (feeds the Covers report\'s seat count and the Reservations capacity strip); cycle status available → reserved → occupied → inactive; print each table\'s QR for the guest menu. Guest Menu tab: the restaurant name and logo guests see (Owner only) and the order of the menu\'s sections (S767).',
           'Reservations: expected sitting length per party size, with the outlet\'s own MEASURED average beside each field and a one-tap "Use measured"; the WhatsApp template; the online-booking toggle, largest party and minimum notice; Copy link / Print QR for the booking page.',
           'Ticket Routing: assign categories to the Bar ticket — everything else goes to the Kitchen. The default split sends Beverage to the bar.',
           'Delivery Partners: name + commission % + phone per partner — the list the Payment window offers as Credit buyers and Customers uses at settlement.',
+          'Weather (S786): pick the nearest town and the Dashboard shows today and the next three days. Weather comes with POS, whatever the Inventory plan. The Owner or any manager can change it (the database refuses anyone else, 20260923130000); it saves through the settings context, so the Dashboard strip picks it up at once, and it is the same picker as the Dashboard\'s Set your city box.',
         ],
         fields: [
           { label: 'HSC codes', desc: 'Per-recipe harmonized codes for the printed tax invoice — data entry here, printing on the bill.' },

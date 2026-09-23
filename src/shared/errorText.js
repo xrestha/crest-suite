@@ -301,6 +301,17 @@ const rules = [
     staff: 'Only the owner can change the restaurant name and logo guests see. Nothing was saved.',
     operator: 'Only the account Owner can change the restaurant name and logo on the guest menu, so nothing was saved. They are what every guest sees at the top of every table’s QR menu.',
   },
+  // S786 (20260923130000): the outlet's weather city, and the Owner's rainy-day sales figure.
+  {
+    test: e => hasCode(e, 'weather_city_rank'),
+    staff: 'Only the owner or a manager can change the weather city. Nothing was saved.',
+    operator: 'Only the Owner or a manager (POS, HR or Inventory) can change the outlet’s weather city, so nothing was saved.',
+  },
+  {
+    test: e => hasCode(e, 'weather_rain_rank'),
+    staff: 'Only the owner can change how rain affects the sales forecast. Nothing was saved.',
+    operator: 'Only the account Owner can change how rain affects the sales forecast, so nothing was saved.',
+  },
   {
     test: e => hasCode(e, 'loyalty_enrol_rank'),
     staff: 'Only the owner or a POS manager can enrol a customer in a loyalty scheme. Nothing was changed.',

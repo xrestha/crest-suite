@@ -1,6 +1,6 @@
 import { nprInt } from '../../../shared/nepalMoney'
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, Navigate } from 'react-router-dom'
+import { useNavigate, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -10,6 +10,8 @@ import { useHrApprovalCounts } from './useHrApprovalCounts'
 import { SSF_DEPOSIT_DAY } from '../payrollConstants'
 import PayrollMonthStatus from '../payroll/PayrollMonthStatus'
 import { ssfDeadline } from '../payroll/monthStatus'
+import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
+import WeatherHeaderSlot from '../../../pages/dashboard/WeatherHeaderSlot'
 
 const fmt = nprInt
 const fmtD = iso => iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
@@ -99,6 +101,11 @@ export default function HrDashboard() {
   const [empMap,      setEmpMap]      = useState({})
   const [typeMap,     setTypeMap]     = useState({})
   const pendingCounts = useHrApprovalCounts() // shared with ClientDashboard.jsx's HR column
+  // The weather strip (S786, owner decision): rain changes how many staff a shift needs, and this is
+  // the page staffing is run from. Same hook and slot as the main Dashboard, without the sales
+  // chart's "×N%" tags, which belong to that chart.
+  const location = useLocation()
+  const weatherStrip = useWeatherStrip({ refreshKey: location.key })
   // Guards against a stale response overwriting the current view — load() had no cancellation
   // check, so switching "view as" client rapidly enough could let a slower response for the
   // PREVIOUS client land last and silently repaint this screen with the wrong tenant's approval
@@ -261,9 +268,13 @@ export default function HrDashboard() {
       {/* Screen-reader-only announcement — the visible loading state is a shimmering skeleton,
           which on its own gives no indication to a screen reader that the page is still loading. */}
       <div role="status" aria-live="polite" className="sr-only">Loading dashboard data…</div>
-      <div className="page-header">
-        <h1 className="page-title">HR Dashboard</h1>
-        <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
+      {/* Both returns carry the weather slot, so the header does not jump when the data lands. */}
+      <div className={weatherStrip.visible ? 'page-header page-header--split' : 'page-header'}>
+        <div>
+          <h1 className="page-title">HR Dashboard</h1>
+          <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
+        </div>
+        <WeatherHeaderSlot strip={weatherStrip} />
       </div>
       {[0, 1, 2].map(row => (
         <div key={row} className="stat-grid dash-section">
@@ -296,9 +307,13 @@ export default function HrDashboard() {
   return (
     <div>
       <div role="status" aria-live="polite" className="sr-only">Dashboard data loaded</div>
-      <div className="page-header">
-        <h1 className="page-title">HR Dashboard</h1>
-        <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
+      {/* Both returns carry the weather slot, so the header does not jump when the data lands. */}
+      <div className={weatherStrip.visible ? 'page-header page-header--split' : 'page-header'}>
+        <div>
+          <h1 className="page-title">HR Dashboard</h1>
+          <p className="page-subtitle">Headcount · Payroll · Approval queues · SSF · Advances at a glance</p>
+        </div>
+        <WeatherHeaderSlot strip={weatherStrip} />
       </div>
 
       {/* A load failure used to be indistinguishable from "this client genuinely has no data" —

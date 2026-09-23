@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient'
 import { startSessionKeepAlive } from '../utils/sessionKeepAlive'
 import { getAccessState, suiteLive } from '../utils/subscription'
 import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
+import { weatherEntitled } from '../modules/dashboard/weatherSettings'
 
 const AuthContext = createContext({})
 
@@ -639,6 +640,14 @@ export function AuthProvider({ children }) {
     return false
   }
 
+  // The weather on the dashboards — the header strip and the city that feeds it (S786, owner
+  // decision): it comes WITH the POS and HR modules, flat like guest ordering, and with IMS through
+  // the Growth key. It is NOT the rain-adjusted sales forecast, which stays
+  // hasFeature('weather_forecast') (IMS Growth or the admin flag): an IMS-Starter client that also
+  // runs POS sees the weather and gets no forecast adjustment. posEnabled/hrEnabled already hold
+  // the admin bypass.
+  const hasWeather = weatherEntitled({ growthWeather: hasFeature('weather_forecast'), posEnabled, hrEnabled })
+
   return (
     <AuthContext.Provider value={{
       session, profile, loading, ready,
@@ -648,7 +657,7 @@ export function AuthProvider({ children }) {
       isTrial, trialPending, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
       accessLocked, accessReason, graceDaysLeft,
       legalReacceptRequired, refreshProfile: () => session?.user?.id && fetchProfile(session.user.id),
-      featureFlags, hasFeature,
+      featureFlags, hasFeature, hasWeather,
       // Multi-outlet. `outlets` is [] for everyone not in a group, so every consumer of these
       // degrades to today's single-outlet behavior without a special case.
       outlets, switchableOutlets, allowedOutletIds, canSwitchOutlet, switchOutlet,

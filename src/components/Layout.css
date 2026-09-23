@@ -3193,6 +3193,38 @@ textarea::placeholder {
 }
 .weather-strip__stale { color: var(--theme-amber-text); }
 
+/* S786 — "Change city" in the line under the days: a quiet in-text control, so it wears the credit
+   links' text2 + underline rather than the accent, and the focus pair every control carries. It is a
+   <button> (it opens a dialog, it does not go anywhere), which print hides app-wide; the strip is
+   no-print anyway. */
+.weather-strip__change {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--theme-text2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.weather-strip__change:hover { color: var(--theme-text1); }
+.weather-strip__change:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+}
+/* The header's "Set your city for the weather" button, before a city exists: centred on the title
+   block beside it rather than hanging from its top edge. */
+.weather-set-city { align-self: center; display: inline-flex; align-items: center; gap: 6px; }
+
+/* WeatherCityPicker (S786): the city box on POS Setup and in the dashboards' dialog. */
+.weather-picker__lead { margin: 0 0 16px; font-size: 13px; color: var(--theme-text2); }
+.weather-picker__hint { font-size: 11px; color: var(--theme-text3); margin-top: 4px; }
+.weather-picker__actions { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+.weather-picker__saved { font-size: 12px; color: var(--theme-green-text); }
+.weather-picker__current { margin: 0 0 4px; font-size: 13px; color: var(--theme-text1); }
+.weather-picker__note { margin: 0; font-size: 13px; color: var(--theme-text3); }
+.weather-picker__note--warn { color: var(--theme-amber-text); }
+
 @media screen and (max-width: 768px) {
   .weather-strip { align-items: stretch; width: 100%; }
   .weather-strip__days {

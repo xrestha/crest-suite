@@ -19,6 +19,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { errorText, errorLine } from '../../../shared/errorText'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import GuestMenuSetup from './GuestMenuSetup'
+import WeatherCityPicker from '../../dashboard/WeatherCityPicker'
 
 const STATUS_CYCLE = ['available', 'reserved', 'occupied', 'inactive']
 // This file used to carry its own byte-identical copy of the status badge/label/colour maps, which
@@ -33,7 +34,7 @@ const ADD_EMPTY = { name: '', section: '', capacity: 4 }
 const DEFAULT_DISCOUNT_REASONS = ['Loyalty customer', 'Promo / coupon code', 'Manager goodwill', 'Bulk / corporate order', 'Price match', 'Other']
 
 export default function PosTableManagement() {
-  const { clientId, hasPosAccess } = useAuth()
+  const { clientId, hasPosAccess, hasWeather } = useAuth()
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
 
@@ -785,7 +786,31 @@ export default function PosTableManagement() {
             onClick={() => setMainTab('guestmenu')}
           >Guest Menu</button>
         </Tip>
+        {hasWeather && (
+          <Tip text="The town the outlet's weather is read for. Today's and the next three days' weather then show at the top of the Dashboard">
+            <button
+              className={`tab-btn${mainTab === 'weather' ? ' tab-btn--active' : ''}`}
+              onClick={() => setMainTab('weather')}
+            >Weather</button>
+          </Tip>
+        )}
       </div>
+
+      {/* ══ WEATHER TAB (S786) ══ — the city only: the rainy-day sales figure moves the Inventory
+          sales chart and lives in Inventory Settings. WeatherCityPicker saves through the settings
+          context (so the Dashboard strip sees the new city at once) and reads the row only once it
+          was read for this client, so a client switch cannot carry one outlet's city into the next.
+          The key remounts it on a switch all the same, like Guest Menu. */}
+      {mainTab === 'weather' && hasWeather && (
+        <div className="card" style={{ maxWidth: 520 }}>
+          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Weather</h3>
+          <p className="weather-picker__lead">
+            Pick the town nearest the outlet, and today&apos;s and the next three days&apos; weather show at the top of the Dashboard:
+            rain, the high and low during opening hours, and a picture. The Owner or a manager can change it.
+          </p>
+          <WeatherCityPicker key={clientId || 'none'} clientId={clientId} idBase="pos-weather" />
+        </div>
+      )}
 
       {/* ══ GUEST MENU TAB (S767) ══ — its own component: it loads and saves on its own, and a
           client switch remounts it through the key, so nothing here can carry the previous client's

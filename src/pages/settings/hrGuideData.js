@@ -50,6 +50,7 @@ export const HR_GUIDE_GROUPS = [
           'Open it daily: each KPI in the approvals row links to the page where that queue is cleared.',
           'The SSF card tracks the statutory deposit deadline — the 25th of the month FOLLOWING the payroll month (25 days after the month ends; it was 15 until the July 2025 amendment) — and shows overdue / due-soon / upcoming state relative to today.',
           'Retiring-soon surfaces employees within 180 days of their retirement date.',
+          'Weather (S786): with a city set, the header shows today and the next three days — the same strip as the main Dashboard, without its sales-forecast tags. Weather comes with HR. HR has no settings page, so the Owner or any manager sets the city from the header (Set your city / Change city); both of the page\'s returns carry it so the header does not jump.',
         ],
         fields: [
           { label: 'Pending swap count', desc: 'Counts only swaps at pending_admin — a swap still waiting on the target coworker\'s consent (pending_target) is not yet HR\'s to action, so it does not inflate the queue.' },

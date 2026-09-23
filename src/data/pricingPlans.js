@@ -118,6 +118,7 @@ export const HR_PRICING = {
     'Advances, Loans & Festival Allowance',
     'Gratuity & Final Settlement',
     'HR Reports & Analytics',
+    'Weather on the Dashboard (today + 3 days)',
   ],
 }
 
@@ -132,6 +133,7 @@ export const POS_PRICING = {
     'Staff PIN Login & Role-Based Access',
     'Sales Reports & Exceptions Tracking',
     'Menu Pricing (works standalone or with IMS Recipe Costing)',
+    'Weather on the Dashboard (today + 3 days)',
   ],
 }
 

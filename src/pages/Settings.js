@@ -16,7 +16,8 @@ import FieldError, { fieldAria } from '../components/FieldError'
 import { fcThresholds, varianceFlagPct } from '../shared/imsFormulas'
 import { fetchAllRows } from '../shared/fetchAllRows'
 import { DEFAULT_SUPPORT_CONTACT, EMERGENCY_CHANNELS, SUPPORT_HOURS, resolveSupportContact, supportPhone } from '../shared/supportContact'
-import { NEPAL_CITIES, cityByKey } from '../shared/nepalCities'
+import { NEPAL_CITIES } from '../shared/nepalCities'
+import { cityPatch } from '../modules/dashboard/weatherSettings'
 import { validateRainPct, RAIN_PCT_MIN, RAIN_PCT_MAX, RAIN_MM, WEATHER_HORIZON_DAYS } from '../modules/dashboard/weatherEffect'
 
 // Lazy so the three module guides' prose (several thousand lines of admin-only strings) lives in
@@ -166,7 +167,7 @@ export default function Settings() {
   const { settings, saveSettings, recipeCategories, platformSupport, savePlatformSupport,
           planPrices, savePlatformPlanPrices, settingsLoadError, platformLoadError, platformLoaded } = useSettings()
   const { ask: askConfirm, confirmEl } = useConfirm()
-  const { clientId, isAdmin, isOwner, adminViewClientName, hasFeature, hasImsAccess } = useAuth()
+  const { clientId, isAdmin, isOwner, adminViewClientName, hasFeature, hasWeather, hasImsAccess } = useAuth()
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const { themeKey, colors, switchPreset, updateColor } = useTheme()
   const ADMIN_TABS = new Set(['Branding', 'Property', 'Weather', 'Support', 'Plan Pricing', 'Theme', 'Data', 'Guides'])
@@ -177,8 +178,10 @@ export default function Settings() {
     if (t === 'Sub-Recipe Codes' && !hasFeature('recipe_costing')) return false
     if (t === 'Recipe Categories' && !hasFeature('recipe_costing')) return false
     // The Owner's call, like the rest of how the business reads its own trade: an IMS manager
-    // reaches this page for thresholds and codes, not for this.
-    if (t === 'Weather' && !(isOwner && hasFeature('weather_forecast'))) return false
+    // reaches this page for thresholds and codes, not for this (they can still change the CITY from
+    // the Dashboard, S786). hasWeather, not the Growth key: a Starter client that also runs POS or
+    // HR has the weather, and gets the city here without the rainy-day figure.
+    if (t === 'Weather' && !(isOwner && hasWeather)) return false
     return true
   })
   // WHOSE row this page is editing, which is not the same question as "is the viewer an admin".
@@ -332,10 +335,10 @@ export default function Settings() {
   }
 
   // The city picker writes the three location columns together, so the name and the coordinates the
-  // weather is read for can never disagree. Blank clears all three: no city, no weather.
+  // weather is read for can never disagree. Blank clears all three: no city, no weather. cityPatch is
+  // the one definition, shared with POS Setup and the dashboards' city box (S786).
   function pickCity(key) {
-    const c = cityByKey(key)
-    setForm(f => ({ ...f, weather_city: c ? c.key : null, weather_lat: c ? c.lat : null, weather_lon: c ? c.lon : null }))
+    setForm(f => ({ ...f, ...cityPatch(key) }))
   }
 
   // A category the recipes still use that is not in the list — removed here, or never added.
@@ -1130,11 +1133,18 @@ export default function Settings() {
             </p>
           ) : (
             <>
-              <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
-                The Dashboard's <strong>Daily Purchases vs Sales</strong> chart can lower (or raise) its sales forecast on the
-                days rain is expected, for the next {WEATHER_HORIZON_DAYS} days. Purchases and the dotted targets never change
-                with the weather. The city also puts today's and the next three days' weather at the top of the Dashboard.
-              </p>
+              {hasFeature('weather_forecast') ? (
+                <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
+                  The Dashboard's <strong>Daily Purchases vs Sales</strong> chart can lower (or raise) its sales forecast on the
+                  days rain is expected, for the next {WEATHER_HORIZON_DAYS} days. Purchases and the dotted targets never change
+                  with the weather. The city also puts today's and the next three days' weather at the top of the Dashboard.
+                </p>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
+                  The city puts today's and the next three days' weather at the top of the Dashboard. A sales forecast that
+                  allows for rain comes with the Growth plan.
+                </p>
+              )}
               <div className="form-grid form-grid-2">
                 <div className="form-field">
                   <label htmlFor="set-weather-city"><Tip text="The weather forecast is read for this city, not your street, which is as close as a forecast gets anyway. Pick the nearest one. Leave it on 'Not set' and the forecast ignores the weather." width={280}>City</Tip></label>
@@ -1144,7 +1154,7 @@ export default function Settings() {
                   </select>
                   <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Weather data from MET Norway.</span>
                 </div>
-                <div className="form-field">
+                {hasFeature('weather_forecast') && <div className="form-field">
                   <label htmlFor="set-rain_sales_pct"><Tip text={`What a rainy day does to your trade, as a share of a normal day. 85 means a rainy day sells about 85% of what that weekday usually sells, so a Friday that usually takes NPR 40,000 is forecast at NPR 34,000 when rain is expected. Above 100 if rain brings you more trade (a delivery kitchen, a cosy café). A day counts as rainy at ${RAIN_MM} mm or more between 5:45 am and 11:45 pm. Blank = the weather does not change the forecast. The Dashboard also shows what your own sales say once it has recorded enough rainy days.`} width={300}>On a rainy day, sales are about</Tip></label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <input id="set-rain_sales_pct" type="number" min={RAIN_PCT_MIN} max={RAIN_PCT_MAX} step="1"
@@ -1154,7 +1164,7 @@ export default function Settings() {
                   </div>
                   <FieldError id="set-rain_sales_pct" message={fieldErr.rain_sales_pct} />
                   <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>From {RAIN_PCT_MIN} to {RAIN_PCT_MAX}. Leave blank for no adjustment.</span>
-                </div>
+                </div>}
               </div>
             </>
           )}

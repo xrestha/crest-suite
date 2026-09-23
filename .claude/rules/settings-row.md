@@ -137,6 +137,20 @@ non-NULL default must join that baseline**; the migration's assertion block chec
 live defaults. A write that screen scopes as a PATCH (the rule above) is what lets a manager save
 one of their tabs without touching an Owner column.
 
+## The weather columns: three editors, one helper, and a rank in the database (S786)
+
+`weather_city` / `weather_lat` / `weather_lon` are written by Settings → Weather (Owner), POS Setup →
+Weather and the dashboards' "Set your city" box. All three go through `cityPatch()` in
+`src/modules/dashboard/weatherSettings.js`, and the last two are one component, `WeatherCityPicker`,
+which saves with `saveSettings(cityPatch(key))` so the context re-reads the row and the dashboard strip
+sees the city at once. POS Setup's other tabs write through raw `supabase.from('settings')`; a weather
+save that did would leave the context stale until a reload. **`settings_guard_staff_roles` fences
+them since `20260923130000`**: the city to the Owner, admin or a manager of any module
+(`weather_city_rank`, never an IMS count PIN), `rain_sales_pct` to the Owner or admin
+(`weather_rain_rank`). `canEditWeatherCity()` is the browser's copy of the city rule and tests the RAW
+role columns, as the guard does. S784 had left all four unguarded; anyone except HR Self-Service could
+PATCH them.
+
 ## The second editor for the same columns is where the fix did not reach (S739)
 
 `Admin → Clients → Manage → Settings` edits the same Branding / Property / consultant columns as the
