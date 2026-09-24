@@ -70,8 +70,8 @@ DEFINER functions did the same (the IMS/HR/POS staff lists, the eligible-user pi
 sibling outlet saw empty staff lists and was refused every staff action there. `callerClientId`
 (`active_client_id || client_id`) in the function and `COALESCE(p.active_client_id, p.client_id)` /
 `my_client_id()` in SQL (`20260914190000`) are the rule. **A new caller check resolves the caller's
-client that way, never from `profiles.client_id` alone.** Legal acceptance deliberately keeps the home
-client. The same migration restored `get_ims_staff_list`'s manager-or-Owner gate, which S737's
+client that way, never from `profiles.client_id` alone.** Legal acceptance included since S789
+(`legal-documents.md`). The same migration restored `get_ims_staff_list`'s manager-or-Owner gate, which S737's
 result-type fix had silently dropped: **re-creating a function to fix one thing re-creates every
 check in it from whatever copy you started from** — diff the live body, not the migration you
 remember.

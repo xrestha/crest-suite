@@ -662,8 +662,9 @@ Deno.serve(async (req) => {
     // being refused as if they belonged to another tenant (S748 open item, closed S750).
     // active_client_id is privilege-bearing and written only by set_active_outlet(), which checks
     // group membership and profile_outlet_access, and a revoke clears it — so trusting it here
-    // grants no reach RLS does not already grant. Legal acceptance deliberately keeps the HOME
-    // client (the contracting party is the account's own company).
+    // grants no reach RLS does not already grant. Legal acceptance follows the same rule (S789):
+    // each outlet is its own clients row carrying its own legal entity, and the gate that asks
+    // for acceptance reads the switched outlet's ledger.
     const callerClientId     = profile?.active_client_id || profile?.client_id
 
     // ── Legal acceptance, recorded server-side ───────────────────────────────
@@ -676,7 +677,7 @@ Deno.serve(async (req) => {
       // Owner only. Staff are not the contracting party -- a waiter with a POS PIN cannot bind the
       // business, and letting them clear the gate would defeat the point of having one.
       if (!isCallerOwner && !isCallerAdmin) return json({ error: 'Forbidden' }, 403)
-      if (!profile?.client_id) return json({ error: 'No client on this account' }, 400)
+      if (!callerClientId) return json({ error: 'No client on this account' }, 400)
 
       const accepted = params?.accepted_legal
       const rows = []
@@ -692,12 +693,16 @@ Deno.serve(async (req) => {
       }
       if (!rows.length) return json({ error: 'Nothing to accept' }, 400)
 
+      // The outlet the Owner is acting for, not the home one. AuthContext reads this client's
+      // ledger to decide the gate, and RLS (my_client_id()) shows the Owner only this client's
+      // rows while switched. Recording against the home client left a grouped Owner at the gate on
+      // a sibling outlet, with each press adding a row to the home client's ledger (S789).
       const { data: clientRow } = await admin
-        .from('clients').select('name').eq('id', profile.client_id).single()
+        .from('clients').select('name').eq('id', callerClientId).single()
 
       const { error: insErr } = await admin.from('legal_acceptances').insert(
         rows.map((r) => ({
-          client_id:      profile.client_id,
+          client_id:      callerClientId,
           client_name:    clientRow?.name || null,
           user_id:        user.id,
           user_email:     user.email || null,

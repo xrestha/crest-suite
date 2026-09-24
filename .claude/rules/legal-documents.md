@@ -88,6 +88,13 @@ only a SELECT grant. Writes go through `admin-user-ops`:
 The browser sends only `{version, sha256}` per document — what the bundle it had loaded actually
 displayed, which is the fact worth recording. IP and user agent are read off the request.
 
+**`record_legal_acceptance` writes against `callerClientId`, the outlet the Owner is acting for,
+never `profile.client_id` (S789).** The gate reads the switched outlet's ledger, and RLS
+(`my_client_id()`) hides every other client's rows, so writing for the home client meant accepting
+could never clear the gate on a sibling outlet. Each press also added another row to the home
+ledger. Each outlet is its own `clients` row with its own legal entity, so it keeps its own record.
+History: docs/rules-archive/legal-documents.md#s789-grouped-owner-held-at-the-gate
+
 ## Three registrations are deliberately skipped
 
 Documented at length in `20260903130000_legal_acceptances.sql`'s header, because each reads as an
