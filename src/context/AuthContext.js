@@ -84,6 +84,23 @@ export const SUITE_KEYS = new Set([
 // though FeatureAccessModal already declared it planSource: 'pos'.
 const POS_MODULE_KEYS = new Set(['guest_ordering', 'loyalty'])
 
+// hasFeature()'s plan rule as a pure function of ONE client's plan and flags. hasFeature() answers
+// for the session and is always true for admin; a screen that must answer for the client being
+// viewed — the setup guide under admin view-as (S790), which must show a Starter client its Starter
+// list — calls this with that client's row instead.
+export function planHasFeature(featureKey, { plan, flags, posEnabled }) {
+  if (flags?.[featureKey] === true) return true  // explicit admin grant for features above plan tier
+  // null / undefined / false → fall back to plan
+  if (STARTER_KEYS.has(featureKey)) return true
+  if (GROWTH_KEYS.has(featureKey) && (plan === 'growth' || plan === 'pro')) return true
+  if (PRO_KEYS.has(featureKey)    && plan === 'pro') return true
+  // POS is flat — its features unlock with the module, not with any plan rank.
+  if (POS_MODULE_KEYS.has(featureKey) && posEnabled) return true
+  // SUITE_KEYS deliberately fall through to false here. SuiteGate owns that decision via
+  // clients.suite_plan; the flag check at the top of this function is their only override.
+  return false
+}
+
 // Returns the SAME array reference when the outlet list hasn't actually changed.
 //
 // This is load-bearing, not a micro-optimisation. `outlets` goes into the context value, so a
@@ -627,17 +644,7 @@ export function AuthProvider({ children }) {
 
   function hasFeature(featureKey) {
     if (isAdmin) return true
-    const flagVal = featureFlags[featureKey]
-    if (flagVal === true) return true  // explicit admin grant for features above plan tier
-    // null / undefined / false → fall back to plan
-    if (STARTER_KEYS.has(featureKey)) return true
-    if (GROWTH_KEYS.has(featureKey) && (plan === 'growth' || plan === 'pro')) return true
-    if (PRO_KEYS.has(featureKey)    && plan === 'pro') return true
-    // POS is flat — its features unlock with the module, not with any plan rank.
-    if (POS_MODULE_KEYS.has(featureKey) && posEnabled) return true
-    // SUITE_KEYS deliberately fall through to false here. SuiteGate owns that decision via
-    // clients.suite_plan; the flag check at the top of this function is their only override.
-    return false
+    return planHasFeature(featureKey, { plan, flags: featureFlags, posEnabled })
   }
 
   // The weather on the dashboards — the header strip and the city that feeds it (S786, owner

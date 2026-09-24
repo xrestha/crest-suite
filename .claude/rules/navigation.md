@@ -45,6 +45,7 @@ copied into all of them?
 ### The top bar wraps between 768 and 1120px, and one page has one name (S776)
 
 - Below 1120px `.topbar-primary` and `.topbar-nav` WRAP (Layout.css, `max-width: 1119px`): account actions top-right, the context on its own line, pills on a second row. At 820 the context had collapsed to 2px and three nav menus sat past the edge of a scrollbar-less row. A new top-bar element must be checked at 820 and 1024 by `scrollWidth`, not by eye.
+- **Help is a labelled button in `.topbar-actions` (S790)**, riding on `.sidebar-search-btn` for its box and touch floor, because a first-time user never opens the account menu and Help is where a hidden setup guide comes back from. The account menu also carries **Setup guide** (→ `/help?section=guide`) for a login `viewerOf` gives a guide to; `viewerOf` lives in `src/shared/onboarding/setupViewer.js` so this eager file never imports the step catalogue. Not yet measured at 820 and 1024 by `scrollWidth` (the rule above) — do that before adding anything else to that row.
 - `/pos/tables` is **POS Setup** (Admin group) and `/pos` is **Till Devices** (owner decision). The tables page had three names and "POS Setup" had meant both pages in the copy. A link or guide names a page by its nav label, and a new page's heading uses the same words.
 
 ### "You are here" is a longest-prefix match, not a prefix match (S763)

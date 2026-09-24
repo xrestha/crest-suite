@@ -217,7 +217,7 @@ export const POS_GUIDE_GROUPS = [
           { label: 'Status ladder', desc: 'Requested (online only) → Booked → Confirmed → Arrived → Seated → Completed; No-show and Cancelled are terminal. Seated MEANS the order exists — the database refuses a seated row with no order_id.' },
           { label: 'Guests expected by hour', desc: 'A booking occupies every hour its sitting touches (7:30 PM for 90 minutes sits in 7 and 8), summed and compared to the room\'s seats. A soft warning, never a block. Next 7 days shows which days have such an hour.' },
           { label: 'Floor chip', desc: 'Grey when quiet, brass when due within the seat window, amber only when the party has ARRIVED and its table is still occupied — the one state waiting on a person.' },
-          { label: 'Booking link / QR', desc: 'Tables → Reservations: toggle "Accept online booking requests", set the largest party and minimum notice, print the QR. The public page shows a two-week calendar (BS day first, AD beside it) and half-hour slots inside opening hours; a guest never chooses a table.' },
+          { label: 'Booking link / QR', desc: 'POS Setup → Reservations: toggle "Accept online booking requests", set the largest party and minimum notice, print the QR. The public page shows a two-week calendar (BS day first, AD beside it) and half-hour slots inside opening hours; a guest never chooses a table.' },
           { label: 'Closed / walk-in / full', desc: 'Closed weekdays, closed dates (Dashain, a private function) and walk-in-only weekdays grey the day out on the public calendar; a slot is greyed as Full when ACCEPTED bookings\' covers in any hour of the sitting plus this party would exceed the room\'s seats. Since S754 an unanswered online request no longer counts toward Full — it used to block the slot for every other guest. All three are refused server-side too (codes closed_day, walk_in, full). A room with no capacity set is never "full" — the host decides at Accept.' },
           { label: 'Double-booked tables', desc: 'A table cannot be held for two bookings whose times overlap (S754, owner decision) — saving names the booking already holding it. Back-to-back is fine: a 6:00–7:30 booking and a 7:30 booking on the same table do not clash. Only live bookings count; a cancelled, no-show or completed one holds nothing.' },
         ],
@@ -232,7 +232,7 @@ export const POS_GUIDE_GROUPS = [
           'A booking seated while the till is offline keeps its status at Arrived: the link needs the server row and is never written from the offline queue. Use ⋯ → Mark done… on it afterwards.',
           'The double-booking check runs on the screen first, naming every clashing table, and again in the database under a lock on each table (S755) — so two devices saving the same table for overlapping times in the same second cannot both succeed: the second is refused and told who holds it. Reviving a no-show or cancelled booking is checked the same way.',
         ],
-        connections: 'Reads pos_customers, pos_orders (credit, visits) at booking time. Writes order_id on seat from Order Taking and completes on bill close. Feeds Covers Report → Reservations, the No-shows column on Customers, and the Dashboard\'s Bookings Tonight tile (tonight\'s live bookings, covers still to come, requests waiting). Settings live on Tables → Reservations.',
+        connections: 'Reads pos_customers, pos_orders (credit, visits) at booking time. Writes order_id on seat from Order Taking and completes on bill close. Feeds Covers Report → Reservations, the No-shows column on Customers, and the Dashboard\'s Bookings Tonight tile (tonight\'s live bookings, covers still to come, requests waiting). Settings live on POS Setup → Reservations.',
       },
       {
         id: 'tables',
@@ -510,7 +510,7 @@ export const POS_GUIDE_GROUPS = [
         summary:
           'Where each till tablet is activated and managed. Activation gives THAT tablet its own key (S754), which is what lets the PIN login screen list staff before anyone is signed in. The Tablets list shows every activated tablet, who activated it, when it was last used, and a Revoke button. Also the jumping-off link to the PIN screen.',
         workflow: [
-          'On each till tablet, a Manager (or the Owner) signs in once at the main login, opens Till Devices, names the tablet ("Front counter", "Bar") and presses Activate. From then on the tablet boots straight to the PIN picker.',
+          'On each till tablet, a Manager (or the Owner) signs in once at the main login, opens Till Devices, names the tablet ("Front counter", "Bar"), presses Activate, then signs out so their own login is not left open on the till. From then on the tablet boots straight to the PIN picker (right after signing out, Staff Login on the sign-in page reaches it). The activation is stored in that tablet\'s browser, which is why it has to be done on the tablet itself.',
           'Lost, sold or broken tablet: press Revoke beside it in the Tablets list. It stops at the PIN screen on its very next sign-in; every other tablet keeps working.',
           'Moving from the old shared key: tablets activated before S754 all share one restaurant-wide key. An amber panel says the shared key is still on and when a tablet last used it. Re-activate each old tablet so it appears in the list, then press "Switch it off" — that cannot be undone.',
           'Deactivate before rebinding a machine to a different outlet — a device bound to another client refuses to simply switch. Deactivating a tablet that has its own key also revokes that key.',
@@ -523,7 +523,7 @@ export const POS_GUIDE_GROUPS = [
         formulas: [],
         gotchas: [
           'A tablet whose key was revoked, or which still holds the shared key after it was switched off, shows a "this tablet needs activating again" screen — never an empty staff list.',
-          'Tablet keys are NOT in a client backup and are not restored: after a restore each tablet is activated again, one tap each. Archiving a client, or clearing its data, revokes every tablet key and switches the shared key off (S755), so after a restore each tablet is activated again from POS Setup.',
+          'Tablet keys are NOT in a client backup and are not restored: after a restore each tablet is activated again, one tap each. Archiving a client, or clearing its data, revokes every tablet key and switches the shared key off (S755), so after a restore each tablet is activated again from Till Devices.',
           'Needs migration 20260916120000 and the new pos-staff-login to be live. Until then tablets keep signing in on the shared key.',
           'An Android tablet or POS terminal added to the home screen now follows the device\'s own rotation (S764). It used to lock to portrait — harmless on a Windows till launched from the kiosk shortcut, which ignores the setting, but a bolted-down landscape screen installed as an app would have been stuck upright.',
         ],

@@ -964,7 +964,13 @@ export default function PayrollRun() {
           // used to answer that by telling an owner to go and add the employees they already have.
           <ReportLoadError error={loadError} />
         ) : !period ? (
-          <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No months yet. Create a period in Periods first — payroll runs one month at a time.</div>
+          <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>
+            {/* Only Crest creates a month from nothing (Periods' '+ New Period' is admin-only), so a
+                client is told who opens it rather than sent to a page where they cannot (S790). */}
+            {isAdmin
+              ? 'No months yet. Create a period in Periods first — payroll runs one month at a time.'
+              : 'No month is open yet — payroll runs one month at a time. Crest opens your first month for you, so contact Crest support if it is missing.'}
+          </div>
         ) : !run ? (
           employees.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>

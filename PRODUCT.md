@@ -36,6 +36,8 @@ Precision over polish: numbers (TDS, SSF, variance, payroll) must read as exact 
 
 Serve two literacy levels on one screen: the same page has to satisfy an operationally-minded owner scanning for a decision and a compliance-minded accountant verifying a figure.
 
+Teach by doing, for someone new to computers (S790): many owners in this market run their lives on a phone and meet a desktop-style app for the first time with Crest. Guidance ticks when the real thing is saved, never when a page was merely opened, because looking at a screen feels like learning without being learning; it is a short list, one part at a time, never a tour that starts by itself; every step can be skipped and the list put away; and the person to call is one tap away, because for a first-time user a human helper beats any screen. English feature names stay exactly as the screen prints them, so owner, staff and support say the same words. The setup guide (`src/shared/onboarding/`) is the worked example.
+
 Bikram Sambat is the native calendar, not a translation layer: periods, payroll months, roster days and every date a user types are BS first, and a day is *named* the way a Nepali operator says it ("1st Bhadra") rather than reduced to an index into a month the screen has stopped showing. AD appears alongside it where a bank, a vendor or the IRD will ask for it — never instead of it.
 
 Modernize the category on Crest's own terms: differentiate from both the dated local-ERP look and the generic AI-template look, rather than drifting toward either by default.

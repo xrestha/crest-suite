@@ -15,6 +15,11 @@
 // point at whoever happened to inherit the id. Stock-count section assignments are half a dozen
 // ticks in Stock Count → Settings and are re-made by the manager after a restore; the alternative
 // is a silently wrong answer to "who counts the bar".
+//
+// `onboarding_progress` is left out for the same reason (S790): every row keys on `user_id`, a
+// profiles id that does not survive a restore. It is personal UI state (which checklist steps one
+// person opened, ticked, skipped or dismissed), so a restored client simply starts its checklist
+// again. It is still exported, since it is in CLIENT_SCOPED_TABLES and harmless to carry.
 import { supabase } from '../../../supabaseClient'
 
 // Reverse of the delete sequence: parents before children, so every FK target exists first.

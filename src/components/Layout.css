@@ -793,6 +793,20 @@ textarea,
 .sidebar-calc-btn {
   padding: 5px 6px;
 }
+/* Help as a labelled button in the top bar (S790) — rides on .sidebar-search-btn for its box,
+   hover, focus ring and coarse-pointer floor, and carries a word, not just an icon: a first-time
+   user does not read a lone "?" as the way to help. Declared after the rule above so its padding
+   wins the tie. */
+.topbar-help-btn {
+  padding: 5px 10px;
+  color: var(--theme-text1);
+  font-size: var(--font-size-nav-item);
+  font-weight: 600;
+  text-decoration: none;
+}
+.topbar-help-btn--active {
+  border-color: var(--theme-accent);
+}
 
 /* Module switcher — horizontal pill row expanded, icon column collapsed (same buttons/data,
    just re-flowed — see Layout.js's moduleTabs). */

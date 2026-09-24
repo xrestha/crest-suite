@@ -4,6 +4,9 @@ paths:
   - "src/modules/dashboard/**"
   - "src/modules/hr/dashboard/**"
   - "src/pages/Dashboard.js"
+  - "src/shared/onboarding/**"
+  - "src/components/SetupGuideCard.jsx"
+  - "src/components/SetupStepStrip.jsx"
 ---
 
 # Dashboards: Client, HR, Owner, Group, Admin overview, and the P&L beside them
@@ -214,15 +217,22 @@ Why: the staff-isolation policies return an empty read, not an error, so an HR-o
 
 History: docs/rules-archive/dashboards.md#s750-module-rank-gate
 
-## The getting-started card
+## The setup guide (S790)
 
-- `src/pages/dashboard/GettingStartedCard.jsx` is the only place a new owner is told what to do first (S697). `ClientDashboard` decides WHETHER it renders (IMS empty, meaning no items and no purchases, or the client is on a trial; it also needs `showIms` and an active period). The card decides WHICH lists (Stock & costing always; Staff & payroll and Billing only while their first step is undone off-trial, and until every step is done on a trial) and removes itself when none remain. Keep both halves.
-- The card reads its four HR/POS head counts itself, only when rendered. Never fold them into ClientDashboard's main load.
-- A failed count withholds that list; `firstError()` does not apply, because this is guidance, not a figure. A list is withheld when any of its counts failed, not only its first step's (S774).
+- `SetupGuideCard` (`src/components/SetupGuideCard.jsx`, surfaces `dashboard` and `help`) replaced GettingStartedCard. The rules are pure data in `src/shared/onboarding/setupSteps.js` (asserted in `setupSteps.test.js`), the reads in `setupSignals.js`, each person's choices in `onboarding_progress` through `useSetupGuide.js`. ClientDashboard renders it unconditionally and the card decides, so POS-only and HR-only clients get it too.
+- A box ticks when the thing exists (a data signal), by hand only for what Crest cannot see (the setup call, the bill details), or on open for a look-only step. Opening a page from the guide is "Started, not saved yet", never a tick (owner decision S790).
+- Every signal counts ALL of the client's months, never only the open one, so a tick cannot vanish when a month starts. A failed or timed-out read is `null`: shown as "couldn't check", counted as neither done nor to-do, and it blocks "all done" and the `finished` write.
+- Signals are read only for the steps the viewer is shown (`signalsNeeded`, the S750 lesson). A manager viewer is an email login with supervisor+ rank in exactly ONE module (`viewerOf`): a second module marker fences the other module's tables to an empty read.
+- Who: the Owner, everything; an email manager, its own module's steps at each page's own guard rank; staff rank, PIN logins and Self-Service, nothing. Admin view-as is read-only, shows the union of the client's logins, and is built from the CLIENT's plan through `planHasFeature`, never admin's `hasFeature`.
+- When: an approved trial, or the first `WINDOW_DAYS` after `trial_approved_at ?? created_at`, or opted in. Existing clients do not suddenly get it (owner decision), but ANY client can start it: Help → Getting Started ("Start the setup guide") or the account menu's "Setup guide". Opted in is card state `reopened` or `hidden`, so an established client who starts it and then hides it keeps the one line; the bar's Continue writes `reopened`, never deletes the row, because for them the row is the opt-in.
+- Several modules: ask what to set up first, one part open at a time; a part's "Next" steps open once its set-up-once steps are done or skipped, and are counted from the start so the total never goes backwards.
+- Card state is per person: hidden is one line, dismissed and finished are gone, reopened brings it back. A saved choice is refused while the progress read has failed. Admin writes nothing: the hook returns early and the table's write policies refuse `is_admin()`.
+- Step keys are stored, so rename a step's label, never its key.
+- Start on a step stores a hand-off in sessionStorage (`setupStrip.js`), and Layout's `SetupStepStrip` shows "Setup step N of M" with the button to press on that step's page only.
 
-Why: the parent's rule stops a paying client seeing the card every month at `purchaseTotal 0`; the card's rule lets a trial keep its checklist after the first item exists.
+Why: the old card covered four IMS steps, needed IMS on and empty, and sent staff to pages they could not open; research on first-time users favours short lists that tick on real work, skip and hide, and a person to call.
 
-History: docs/rules-archive/dashboards.md#s697-getting-started-card
+History: docs/rules-archive/dashboards.md#s790-setup-guide
 
 ## Vertical rhythm and the KPI card
 

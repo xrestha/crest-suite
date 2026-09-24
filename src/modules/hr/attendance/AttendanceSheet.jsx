@@ -77,7 +77,7 @@ function isValidTimeStr(s, lenient) {
 }
 
 export default function AttendanceSheet() {
-  const { clientId, hasHrAccess } = useAuth()
+  const { clientId, hasHrAccess, isAdmin } = useAuth()
   const { scopedFrom, scopedUpsert, scopedDelete } = useScopedDb()
   const [periods,   setPeriods]   = useState([])
   const [period,    setPeriod]    = useState(null)
@@ -896,7 +896,10 @@ export default function AttendanceSheet() {
         </div>
       ) : !period ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>
-          No period found. Create a period in Periods first.
+          {/* Only Crest creates a month from nothing, so a client is told who opens it (S790). */}
+          {isAdmin
+            ? 'No period found. Create a period in Periods first.'
+            : 'No month is open yet. Crest opens your first month for you, so contact Crest support if it is missing.'}
         </div>
       ) : tab === 'mark' ? (
         /* ── MARK ATTENDANCE ── */

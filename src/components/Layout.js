@@ -16,6 +16,8 @@ import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { useGuestOrderAlerts, REPEAT_MS } from '../shared/hooks/useGuestOrderAlerts'
 import ArrivalAlert from './ArrivalAlert'
+import SetupStepStrip from './SetupStepStrip'
+import { viewerOf as setupGuideViewerOf } from '../shared/onboarding/setupViewer'
 import { playGuestAlert } from '../modules/pos/posChime'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS } from '../utils/bsCalendar'
@@ -30,7 +32,7 @@ import {
   FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, LifeBuoy,
   History, Hourglass, IdCardLanyard, Landmark, LayoutDashboard, LayoutGrid, LineChart, ListPlus,
   LogOut, Network, Package, PackageMinus, PackageOpen, PackageX, Palmtree,
-  ListChecks, ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
+  ListChecks, ListTodo, ParkingSquare, PartyPopper, Percent, PieChart, PiggyBank, Printer, QrCode,
   Receipt, ReceiptText, RefreshCw, Scale, ScrollText, Search, Settings, Settings2,
   ShieldCheck, ShoppingCart, Sigma, SlidersHorizontal, Store, Tag, Tags, Target, Timer,
   Trash2, TrendingUp, TriangleAlert, Trophy, Truck, Undo2, UserCheck, Users, Users2,
@@ -1739,6 +1741,11 @@ export default function Layout() {
           </div>
 
           <div className="topbar-actions">
+            {/* A visible, labelled Help (S790). It lived only inside the account menu, which a
+                first-time user never opens — and Help is where a hidden setup guide comes back from. */}
+            <NavLink to="/help" className={({ isActive }) => `sidebar-search-btn topbar-help-btn${isActive ? ' topbar-help-btn--active' : ''}`}>
+              <HelpCircle size={14} strokeWidth={2} aria-hidden="true" />Help
+            </NavLink>
             <button className="sidebar-search-btn" onClick={() => setPaletteOpen(true)} title="Search pages (Ctrl+K)" aria-label="Search pages">
               <Search size={13} strokeWidth={2} aria-hidden="true" />
             </button>
@@ -1791,6 +1798,14 @@ export default function Layout() {
               <NavLink to="/help?section=support" className="sidebar-link">
                 <span className="sidebar-icon"><LifeBuoy size={16} strokeWidth={1.75} /></span>Support
               </NavLink>
+              {/* The setup guide for ANY client, not only new ones (S790): an established client
+                  gets no card pushed at them, so this is how they find it and start it. Only for a
+                  login the guide has steps for — the Owner and email-login managers. */}
+              {!isAdmin && setupGuideViewerOf({ isAdmin, isOwner, profile }) && (
+                <NavLink to="/help?section=guide" className="sidebar-link">
+                  <span className="sidebar-icon"><ListTodo size={16} strokeWidth={1.75} /></span>Setup guide
+                </NavLink>
+              )}
               <button onClick={handleSignOut} className="sidebar-link" style={{
                 width: 'calc(100% - 20px)', border: 'none', background: 'transparent',
                 cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
@@ -2008,6 +2023,10 @@ export default function Layout() {
             navigating away (resetKey = location.pathname) clears it automatically. Wrapping more
             than this would let a Layout render error be swallowed here instead of falling through
             to the app-scope boundary in App.js. */}
+        {/* "Setup step 2 of 5 — press + Add Vendor": the setup guide's hand-off to the page a step
+            opened (S790). Renders nothing unless this page is the one the guide just sent them to. */}
+        <SetupStepStrip />
+
         <AppErrorBoundary resetKey={location.pathname} fullPage={false} route={location.pathname}>
           <Suspense fallback={<RouteFallback />}>
             <Outlet />

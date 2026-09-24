@@ -50,6 +50,8 @@ export const CLIENT_SCOPED_TABLES = [
   'pos_order_item_options',
   // Cross-module
   'monthly_owner_reports',
+  // Each person's own checklist choices per outlet (S790): admin view-as reads it here; exported, never restored.
+  'onboarding_progress',
 ]
 
 // A UUID column can never equal this, so any scoped query built without a real

@@ -46,7 +46,8 @@ import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCou
 import SalesPivot from '../../modules/dashboard/SalesPivot'
 import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
-import GettingStartedCard from './GettingStartedCard'
+import SetupGuideCard from '../../components/SetupGuideCard'
+import SupportContactLine from '../../components/SupportContactLine'
 import WeatherHeaderSlot from './WeatherHeaderSlot'
 const CHART_COLORS = ['#c9a84c', '#34d399', '#60a5fa', '#f87171', '#8b5cf6', '#ea580c', '#22d3ee', '#f472b6']
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
@@ -248,7 +249,7 @@ async function loadForecastHistory(scopedFrom, period) {
 }
 
 export default function ClientDashboard() {
-  const { profile, clientId, isAdmin, isOwner, isTrial, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
+  const { profile, clientId, isAdmin, isOwner, clientModules, hasFeature, hasImsAccess, hasHrAccess, hasPosAccess, posTeam, loading: authLoading, adminViewClientName } = useAuth()
   // 'kitchen'/'bar' pos_team accounts (S431) get kitchen-ops KPIs (open/late tickets, prep time)
   // instead of the front-of-house Revenue/Covers/Avg Check/Tables Occupied cards — they have no
   // more use for revenue figures on their landing dashboard than a POS-only staffer has for IMS's.
@@ -2827,7 +2828,9 @@ export default function ClientDashboard() {
         )
       })()}
 
-      {showIms && !activePeriod && !loading && (
+      {/* Only Crest opens a month from nothing ('+ New Period' is admin-only, S790), so the old
+          "Click here to create one in Periods →" sent every client to a page where they could not. */}
+      {showIms && !activePeriod && !loading && (isAdmin ? (
         <div
           className="card interactive-card dash-row" style={{ cursor: 'pointer', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
           onClick={() => navigate('/periods')} role="button" tabIndex={0}
@@ -2835,25 +2838,22 @@ export default function ClientDashboard() {
         >
           <p style={{ color: 'var(--theme-accent-ink)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert size={15} aria-hidden="true" /> No open period. Click here to create one in Periods →</p>
         </div>
-      )}
+      ) : (
+        <div className="card dash-row" role="status" style={{ borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}>
+          <p style={{ color: 'var(--theme-text1)', margin: 0, fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <TriangleAlert size={15} aria-hidden="true" /> No month is open yet
+          </p>
+          <p style={{ color: 'var(--theme-text2)', margin: '4px 0 0', fontSize: 13 }}>
+            Crest opens your first month for you, and each next month opens when you close the one before. Contact us and we'll open it: <SupportContactLine variant="inline" />
+          </p>
+        </div>
+      ))}
 
-      {/* First run.
-          A brand-new client with a period but no data saw eleven KPI cards reading NPR 0 / — / 0,
-          three charts saying "no data", and a reorder panel saying "No items below par" — which is
-          true and reads as GOOD NEWS when the real state is "you have no items". The per-panel
-          empty strings are individually well written and collectively unreadable as guidance,
-          because they appear in whatever order the data happens to load. This gives the sequence
-          once, at the top, and disappears the moment any step is done. */}
-      {/* On a TRIAL the card stays for the whole trial (S697): a 7-day trial is short enough that
-          "you have items, now record a purchase" is still guidance, not nagging. For everyone else
-          the original rule holds — items exist, the card is gone — because a paying client's every
-          new month starts at purchaseTotal 0 and this must not reappear monthly. Which module
-          lists it shows, and when it removes itself, is decided inside GettingStartedCard. */}
-      {showIms && activePeriod && !loading && stats && ((stats.itemCount === 0 && stats.purchaseTotal === 0) || isTrial) && (
-        // showHr narrowed to supervisor-and-up: an HR staff-rank login cannot read employees (S750),
-        // so its count would come back 0 and tell it to "add your first employee".
-        <GettingStartedCard periodLabel={periodLabel} stats={stats} isTrial={isTrial} showHr={showHr && hasHrAccess('supervisor')} showPos={showPos} />
-      )}
+      {/* First run: the setup guide (S790). It decides for itself whether to render — a new
+          client's Owner or email-login manager, in its first weeks, for whichever modules the client
+          has — so it sits here unconditionally, including for POS-only and HR-only clients, which
+          GettingStartedCard (gated on showIms) never reached. Rules: src/shared/onboarding/. */}
+      <SetupGuideCard surface="dashboard" />
 
       {periodExpired && !loading && (
         <div className="card dash-row" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>

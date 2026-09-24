@@ -425,7 +425,7 @@ export default function PosReservations() {
     return s.length > NOTE_PREVIEW ? s.slice(0, NOTE_PREVIEW - 1).trimEnd() + '…' : s
   }
 
-  const tablesLink = <Link to="/pos/tables" className="btn-linklike">Tables → Reservations</Link>
+  const tablesLink = <Link to="/pos/tables" className="btn-linklike">POS Setup → Reservations</Link>
 
   return (
     <div>

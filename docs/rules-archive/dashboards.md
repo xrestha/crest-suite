@@ -526,3 +526,25 @@ target following the sales curve would have turned every Saturday green and ever
 normal week. The owner chose each metric's own week, and replacing Ashwin's flat line once. The
 snapshot model became per kind, so the purchase snapshot could move to model 3 while the sales
 Target, already correct, stayed frozen.
+
+## S790 setup guide
+
+_Superseded rule statements, word for word, from `.claude/rules/dashboards.md` before S790:_
+
+## The getting-started card (superseded by S790)
+
+- `src/pages/dashboard/GettingStartedCard.jsx` is the only place a new owner is told what to do first (S697). `ClientDashboard` decides WHETHER it renders (IMS empty, meaning no items and no purchases, or the client is on a trial; it also needs `showIms` and an active period). The card decides WHICH lists (Stock & costing always; Staff & payroll and Billing only while their first step is undone off-trial, and until every step is done on a trial) and removes itself when none remain. Keep both halves.
+- The card reads its four HR/POS head counts itself, only when rendered. Never fold them into ClientDashboard's main load.
+- A failed count withholds that list; `firstError()` does not apply, because this is guidance, not a figure. A list is withheld when any of its counts failed, not only its first step's (S774).
+
+Why: the parent's rule stops a paying client seeing the card every month at `purchaseTotal 0`; the card's rule lets a trial keep its checklist after the first item exists.
+
+History: docs/rules-archive/dashboards.md#s697-getting-started-card
+
+S790 replaced the card with the setup guide after research on onboarding first-time users. Asked in plain
+words, the owner chose: a box ticks when the job is really done (not when a page is opened); every step
+can be skipped and the card hidden, remembered on the person's login; a client with several modules is
+asked what to set up first; Owner plus email-login managers see it; new clients only (60 days or a
+trial); every new client is offered a setup call with Viber, and Crest enters their item list for them;
+a bill-details check before the first real customer; English only for now, no videos yet; a visible
+Help button and a "Setup step N of M" strip on the page a step opens.

@@ -1,0 +1,491 @@
+/* The setup guide (S790): the dashboard card, its one-line form, and the "Setup step N of M" strip
+   on the page a step opens. Imported by SetupGuideCard and SetupStepStrip. Tokens only — no hex —
+   and text at readable sizes for a first-time user: step names 15px/600, instructions 14px, and
+   nothing below --theme-text2 for words a person has to act on. */
+
+.setup-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* In Help it sits above the static guide cards, which use a 16px bottom margin. */
+.setup-guide--help {
+  margin-bottom: 16px;
+}
+
+.setup-guide--loading {
+  color: var(--theme-text2);
+  font-size: 14px;
+}
+
+.setup-guide__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.setup-guide__head > * {
+  min-width: 0;
+}
+
+.setup-guide__title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--theme-text1);
+}
+
+.setup-guide__sub {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--theme-text2);
+}
+
+.setup-guide__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.setup-guide__count {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--theme-text1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-guide__admin-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--theme-text2);
+}
+
+/* Progress: a fill squeezed with transform, never an animated width (layout-free). */
+.setup-guide__bar {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--theme-text2) 18%, transparent);
+}
+
+.setup-guide__bar--slim {
+  flex: 1 1 120px;
+  max-width: 240px;
+}
+
+.setup-guide__bar-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--theme-accent);
+  transform-origin: left center;
+  transition: transform var(--motion-slow) var(--ease-entrance);
+}
+
+/* ── One-line form ── */
+.setup-guide--slim {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.setup-guide__slim-text {
+  font-size: 14px;
+  color: var(--theme-text2);
+}
+
+.setup-guide__slim-text strong {
+  color: var(--theme-text1);
+}
+
+.setup-guide__slim-note {
+  color: var(--theme-amber-text);
+}
+
+.setup-guide__slim-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* ── "What do you want to set up first?" ── */
+.setup-guide__choose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setup-guide__choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.setup-guide__choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 88px;
+  padding: 16px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--radius-sm);
+  color: var(--theme-text1);
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+
+.setup-guide__choice:hover {
+  border-color: var(--theme-accent);
+  background: var(--theme-table-hover);
+}
+
+.setup-guide__choice:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+  border-color: var(--theme-accent);
+}
+
+.setup-guide__choice-name {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.setup-guide__choice-hint {
+  font-size: 14px;
+  color: var(--theme-text2);
+  line-height: 1.5;
+}
+
+.setup-guide__choice-count {
+  font-size: 12px;
+  color: var(--theme-text2);
+  margin-top: auto;
+}
+
+/* ── A part (Stock & costing, Till & bills, Staff & payroll, Start here, month-end) ── */
+.setup-guide__group {
+  border-top: 1px solid var(--theme-border);
+  padding-top: 16px;
+}
+
+.setup-guide__group--collapsed {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.setup-guide__group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.setup-guide__group-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--theme-text1);
+}
+
+.setup-guide__group-count {
+  font-size: 13px;
+  color: var(--theme-text2);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-guide__group--collapsed .btn {
+  margin-left: auto;
+}
+
+.setup-guide__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-guide__later {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--theme-text2);
+}
+
+.setup-guide__row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.setup-guide__habits {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--theme-text2);
+}
+
+.setup-guide__habits strong {
+  color: var(--theme-text1);
+}
+
+.setup-guide__foot {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--theme-border);
+  font-size: 13px;
+  color: var(--theme-text2);
+}
+
+.setup-guide__link {
+  color: var(--theme-accent-ink);
+  text-decoration: underline;
+}
+
+/* ── One step ── */
+.setup-step {
+  border: 1px solid transparent;
+}
+
+.setup-step__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--theme-text1);
+}
+
+.setup-step__row:hover {
+  background: var(--theme-table-hover);
+}
+
+.setup-step__row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+
+.setup-step__mark {
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--theme-border);
+  background: var(--theme-input-bg);
+  color: var(--theme-text2);
+  border-radius: var(--radius-xs);
+}
+
+.setup-step--done .setup-step__mark {
+  background: color-mix(in srgb, var(--theme-green) 18%, transparent);
+  border-color: color-mix(in srgb, var(--theme-green) 40%, transparent);
+  color: var(--theme-green-text);
+}
+
+.setup-step--started .setup-step__mark {
+  border-color: var(--theme-accent);
+  color: var(--theme-accent-ink);
+}
+
+.setup-step--unknown .setup-step__mark {
+  border-style: dashed;
+}
+
+.setup-step__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.setup-step--done .setup-step__label,
+.setup-step--skipped .setup-step__label {
+  color: var(--theme-text2);
+  font-weight: 500;
+}
+
+.setup-step__state {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--theme-text2);
+}
+
+.setup-step--done .setup-step__state {
+  color: var(--theme-green-text);
+  font-weight: 600;
+}
+
+.setup-step__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 8px 16px 48px;
+}
+
+.setup-step__hint {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--theme-text1);
+}
+
+.setup-step__where,
+.setup-step__note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--theme-text2);
+}
+
+.setup-step__contact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* SupportContactLine's button row centres itself; inside a step it lines up with the text. */
+.setup-step__contact-buttons {
+  justify-content: flex-start !important;
+}
+
+.setup-step__bill {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setup-step__bill-list {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.setup-step__bill-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) 1fr;
+  gap: 16px;
+}
+
+.setup-step__bill-row dt {
+  color: var(--theme-text2);
+}
+
+.setup-step__bill-row dd {
+  margin: 0;
+  color: var(--theme-text1);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* ── The strip on the page a step opened ── */
+.setup-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--theme-accent) 8%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.setup-strip__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.setup-strip__step {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--theme-text2);
+}
+
+.setup-strip__label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--theme-text1);
+}
+
+.setup-strip__do {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--theme-text1);
+}
+
+.setup-strip__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+@media screen and (max-width: 768px) {
+  .setup-step__body {
+    padding-left: 8px;
+  }
+  .setup-step__bill-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .setup-guide__slim-actions {
+    margin-left: 0;
+  }
+}
+
+/* This file names its own controls, so the app-wide touch floor does not reach them (S678). */
+@media (pointer: coarse) {
+  .setup-step__row,
+  .setup-guide__choice {
+    min-height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-guide__bar-fill,
+  .setup-guide__choice {
+    transition: none;
+  }
+}
+
+@media print {
+  .setup-guide,
+  .setup-strip {
+    display: none !important;
+  }
+}

@@ -265,6 +265,10 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   // but CLAUDE.md step 7 asks for every client-scoped table to be listed explicitly (S737).
   await del(admin.from('ims_count_assignments').delete().eq('client_id', clientId), 'ims_count_assignments')
   await del(admin.from('categories').delete().eq('client_id', clientId), 'categories')
+  // Onboarding checklist state (S790). Nothing references it and both its FKs cascade, but Clear
+  // Client Data and Archive keep the clients row and every login, so without this a wiped client's
+  // checklist would still say its setup steps were done.
+  await del(admin.from('onboarding_progress').delete().eq('client_id', clientId), 'onboarding_progress')
   // Cascades from both profiles and clients, so this is belt-and-braces rather than required —
   // but CLAUDE.md step 7 asks for every client-scoped table to be listed explicitly, and a
   // table that only ever cleans itself up implicitly is the kind that gets missed when the
