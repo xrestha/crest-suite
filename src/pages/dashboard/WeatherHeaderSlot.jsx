@@ -7,7 +7,7 @@
 // The buttons show only to a login that may change the city (canEditWeatherCity — the Owner, admin
 // or a manager of any module, which is what the database enforces); everyone else sees the strip
 // alone, or nothing.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CloudSun } from 'lucide-react'
 import Modal from '../../components/Modal'
 import WeatherStrip from './WeatherStrip'
@@ -15,6 +15,20 @@ import WeatherCityPicker from '../../modules/dashboard/WeatherCityPicker'
 
 export default function WeatherHeaderSlot({ strip, rainTagByAd = null }) {
   const [open, setOpen] = useState(false)
+  // Focus after a save (S786 review). Modal hands focus back to the control that opened it, and a
+  // save removes that control: "Set your city" gives way to the strip, and "Change city" to the
+  // strip's loading state while the new city's weather comes in. Focus would fall to <body>, and a
+  // keyboard user would start again from the top of the page. So after a save it goes to the strip
+  // (a tabIndex -1 section), or back to "Set your city" if the city was cleared.
+  const [refocus, setRefocus] = useState(false)
+  const stripRef = useRef(null)
+  const setCityRef = useRef(null)
+  useEffect(() => {
+    if (!refocus || open) return
+    const target = stripRef.current || setCityRef.current
+    if (target) target.focus()
+    setRefocus(false)
+  }, [refocus, open, strip.stripState])
   if (!strip.visible) return null
 
   return (
@@ -29,9 +43,10 @@ export default function WeatherHeaderSlot({ strip, rainTagByAd = null }) {
           stale={strip.stale}
           rainTagByAd={rainTagByAd}
           onChangeCity={strip.canEditCity ? () => setOpen(true) : null}
+          sectionRef={stripRef}
         />
       ) : (
-        <button type="button" className="btn btn-ghost btn-sm no-print weather-set-city" onClick={() => setOpen(true)}>
+        <button ref={setCityRef} type="button" className="btn btn-ghost btn-sm no-print weather-set-city" onClick={() => setOpen(true)}>
           <CloudSun size={16} strokeWidth={1.75} aria-hidden="true" />
           Set your city for the weather
         </button>
@@ -44,7 +59,7 @@ export default function WeatherHeaderSlot({ strip, rainTagByAd = null }) {
           <WeatherCityPicker
             clientId={strip.clientId}
             idBase="dash-weather"
-            onSaved={() => setOpen(false)}
+            onSaved={() => { setRefocus(true); setOpen(false) }}
             onCancel={() => setOpen(false)}
           />
         </Modal>

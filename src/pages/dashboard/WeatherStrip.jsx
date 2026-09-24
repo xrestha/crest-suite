@@ -78,7 +78,7 @@ export function dayTip({ iso, isToday, w, look, tagPct }) {
 
 // state: 'loading' | 'ready' | 'unavailable'. `onChangeCity` (S786) is set only for a login that
 // may change the city; it puts a "Change city" button in the line under the days.
-export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fetchedAt, stale, rainTagByAd, onChangeCity }) {
+export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fetchedAt, stale, rainTagByAd, onChangeCity, sectionRef }) {
   const dates = datesFrom(todayAd, STRIP_DAYS)
   const label = cityName ? `Weather for ${cityName}` : 'Weather'
   const changeCity = onChangeCity && (
@@ -87,7 +87,7 @@ export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fe
 
   if (state === 'unavailable') {
     return (
-      <section className="weather-strip no-print" aria-label={label}>
+      <section ref={sectionRef} tabIndex={-1} className="weather-strip no-print" aria-label={label}>
         <p className="weather-strip__note">{cityName ? `${cityName} · ` : ''}Weather unavailable right now.{changeCity}</p>
       </section>
     )
@@ -95,7 +95,7 @@ export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fe
 
   if (state === 'loading' || !dates.length) {
     return (
-      <section className="weather-strip no-print" aria-label={label} aria-busy="true">
+      <section ref={sectionRef} tabIndex={-1} className="weather-strip no-print" aria-label={label} aria-busy="true">
         <ul className="weather-strip__days">
           {Array.from({ length: STRIP_DAYS }, (_, i) => (
             <li key={i} className="weather-strip__day">
@@ -113,7 +113,7 @@ export default function WeatherStrip({ state, weatherByAd, todayAd, cityName, fe
   const legendPct = rainTagByAd ? dates.map(iso => rainTagByAd[iso]).find(p => p != null) ?? null : null
 
   return (
-    <section className="weather-strip no-print" aria-label={label}>
+    <section ref={sectionRef} tabIndex={-1} className="weather-strip no-print" aria-label={label}>
       <ul className="weather-strip__days">
         {dates.map((iso, i) => {
           const w = weatherByAd ? weatherByAd[iso] : null

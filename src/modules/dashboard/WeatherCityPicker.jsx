@@ -58,7 +58,18 @@ export default function WeatherCityPicker({ clientId, idBase = 'weather', onSave
     )
   }
 
+  const unchanged = value === stored
+
+  // The button stays pressable in both of its waiting states (DESIGN.md → Buttons): disabling the
+  // button a keyboard user just pressed drops focus to <body>. In flight it wears aria-busy and a
+  // second press does nothing; with nothing to save it wears aria-disabled and a press says why.
   async function save() {
+    if (busy) return
+    if (unchanged) {
+      setSaved(false)
+      setError(stored ? 'Pick a different city first. This one is already saved.' : 'Pick a city first.')
+      return
+    }
     setBusy(true)
     setError(null)
     setSaved(false)
@@ -91,7 +102,7 @@ export default function WeatherCityPicker({ clientId, idBase = 'weather', onSave
       </div>
       <div className="weather-picker__actions">
         <button type="button" className="btn btn-primary btn-sm" onClick={save}
-          disabled={busy || value === stored} aria-busy={busy || undefined}>
+          aria-disabled={(!busy && unchanged) || undefined} aria-busy={busy || undefined}>
           {busy ? 'Saving…' : 'Save city'}
         </button>
         {onCancel && <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>}

@@ -31,8 +31,12 @@ export function useWeatherDays({ clientId, enabled, locationKey, refreshKey }) {
       setError(null)
       return
     }
-    // Another outlet's or another city's rain is never "the last good answer" for this one.
+    // Another outlet's or another city's rain is never "the last good answer" for this one. The
+    // last load's error goes too (S786 review): kept, it read as "Weather unavailable" for the NEW
+    // city until its own reply landed. A failed load sets it again, and a strip that still holds a
+    // good answer does not read it.
     setWeather(prev => (prev && prev.clientId === clientId && prev.locationKey === locationKey ? prev : null))
+    setError(null)
     withTimeout(
       supabase.functions.invoke('weather-forecast', { body: { client_id: clientId } }),
       15000, 'Weather forecast',

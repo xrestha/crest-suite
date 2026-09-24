@@ -28,7 +28,12 @@ DECLARE
   v_src text;
 BEGIN
   SELECT md5(prosrc), prosrc INTO v_md5, v_src FROM pg_proc WHERE oid = 'public.settings_guard_staff_roles()'::regprocedure;
-  IF v_md5 IS DISTINCT FROM '76acb00ff42a6a89b3deb6234de5dac9' AND v_src NOT LIKE '%weather_city_rank%' THEN
+  -- Exactly two bodies may be replaced: the one this was written against, and this file's own
+  -- result (so a re-run is a no-op). The first draft accepted ANY body containing weather_city_rank,
+  -- so re-running this file after a later edit to the guard would have reverted that edit silently
+  -- (S786 review; tightened after apply — the function body below is byte-identical to what ran).
+  IF v_md5 IS DISTINCT FROM '76acb00ff42a6a89b3deb6234de5dac9'
+     AND v_md5 IS DISTINCT FROM 'f7fd4f6a79771ab620e6f2a5c91c38ea' THEN
     RAISE EXCEPTION 'S786: settings_guard_staff_roles changed since this migration was written (md5 %) — rebuild it from the live body', v_md5;
   END IF;
 END;

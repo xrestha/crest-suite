@@ -34,9 +34,29 @@ test('saves only the three city columns', async () => {
   expect(await screen.findByRole('status')).toHaveProperty('textContent', '✓ Saved')
 })
 
-test('Save is off until the city changes', () => {
+test('with nothing changed, Save stays pressable and says why it did nothing', () => {
   render(<WeatherCityPicker clientId={CLIENT} />)
-  expect(screen.getByRole('button', { name: 'Save city' }).disabled).toBe(true)
+  const btn = screen.getByRole('button', { name: 'Save city' })
+  expect(btn.disabled).toBe(false)
+  expect(btn.getAttribute('aria-disabled')).toBe('true')
+  fireEvent.click(btn)
+  expect(mockSettings.saveSettings).not.toHaveBeenCalled()
+  expect(screen.getByRole('alert').textContent).toMatch(/Pick a different city first/)
+})
+
+test('in flight, Save keeps focus (not disabled) and a second press does not save twice', async () => {
+  let release
+  mockSettings.saveSettings = jest.fn(() => new Promise(r => { release = r }))
+  render(<WeatherCityPicker clientId={CLIENT} />)
+  fireEvent.change(screen.getByLabelText(/City/), { target: { value: 'pokhara' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save city' }))
+  const busyBtn = screen.getByRole('button', { name: 'Saving…' })
+  expect(busyBtn.disabled).toBe(false)
+  expect(busyBtn.getAttribute('aria-busy')).toBe('true')
+  fireEvent.click(busyBtn)
+  expect(mockSettings.saveSettings).toHaveBeenCalledTimes(1)
+  release()
+  expect(await screen.findByRole('status')).toHaveProperty('textContent', '✓ Saved')
 })
 
 test('a refused save is said, and the choice stays on screen to retry', async () => {

@@ -1285,7 +1285,10 @@ export default function ClientDashboard() {
   const weatherTodayAd = weather?.today || formatAd(nepalCivilDate(Date.now()))
   // The Nepal date the forecast was fetched: a stale forecast steers only the days it was made for.
   const weatherForecastAd = weather?.fetched_at ? formatAd(nepalCivilDate(weather.fetched_at)) : null
-  const rainAdj = salesForecastInputs && weatherByAd
+  // weatherFeature is not optional here (S786 review): the weather now loads for any client with
+  // POS or HR, so without it an IMS-Starter client carrying an old rain_sales_pct would get the
+  // Growth adjustment (and its ×N% tags) for free.
+  const rainAdj = weatherFeature && salesForecastInputs && weatherByAd
     ? rainFactorForMonth({
         rainPct, weatherByAd, todayAd: weatherTodayAd, forecastAd: weatherForecastAd,
         bsYear: salesForecastInputs.bsYear, bsMonth: salesForecastInputs.bsMonth, monthEndDay: salesForecastInputs.monthEndDay,

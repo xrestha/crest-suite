@@ -3212,6 +3212,16 @@ textarea::placeholder {
   outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
+/* An in-text control is a ~12px-tall target on a tablet. The coarse tier grows its HIT box with
+   padding and gives the space straight back with an equal negative margin, so the line under the
+   days keeps its height and nothing beside it moves. */
+@media (pointer: coarse) {
+  .weather-strip__change { padding: 14px 8px; margin: -14px -8px; }
+}
+/* The strip takes focus after a city is saved (the control that opened the dialog is gone by then);
+   show where it went for a keyboard user, never for a mouse click. */
+.weather-strip:focus { outline: none; }
+.weather-strip:focus-visible { outline: 2px solid var(--theme-focus-outline); outline-offset: 4px; }
 /* The header's "Set your city for the weather" button, before a city exists: centred on the title
    block beside it rather than hanging from its top edge. */
 .weather-set-city { align-self: center; display: inline-flex; align-items: center; gap: 6px; }
