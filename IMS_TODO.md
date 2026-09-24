@@ -145,6 +145,9 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S784 — `weather-forecast`'s signed-in path, unexercised at ship, confirmed live the same day:
   CASA ACAI CAFE set Kathmandu at 50%, and the first dashboard load wrote a `weather_locations` row
   with `last_error` NULL and ten `weather_daily` rows (today incomplete, the nine days ahead complete).
+- ✅ S785 — the header strip's high/low, cloud and thunder, unobserved at push, confirmed live
+  2026-09-24: every Kathmandu and Pokhara row carries them, `last_error` NULL on both, and CASA's
+  strip matched the stored rows (S786 moved the strip to POS and HR too).
 - ⚪ **The Target's weekday averages still count past public holidays.** Demand Forecast
   (`DemandForecast.js`, D21) leaves them out and applies Holiday Calendar multipliers. Here, a
   Dashain Saturday in the 4-week window lifts the Saturday target for the next month, and a big
