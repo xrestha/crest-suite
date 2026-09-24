@@ -640,8 +640,11 @@ three module menus sat past the edge with nothing saying the row scrolls. Below 
 actions stay top-right, tenant and period take their own full-width line, and the pills wrap onto a
 second row: the bar grows (108 → 172px at 820) and nothing is unreachable. From 1280 up it is one row
 each, as before. S790's labelled Help button widened the actions by 74px and the context then ran
-under them from 1120 to ~1260px, so the line moved up. A new top-bar element is checked at 820, 1024
-and just above the wrap line by `scrollWidth`, not by eye.
+under them from 1120 to ~1260px, so the line moved up. Above the line the tenant, month and plan
+shorten with "…" rather than run under the actions, however narrow the row gets (owner decision,
+S790). A new top-bar element is checked at 820, 1024 and just above the wrap line by measurement,
+not by eye — and against the actions' left edge, not only the page's `scrollWidth`, which stays 0
+while the context slides under the buttons.
 (`/legal/*` renders outside the shell and is the exception; see Density above.)
 
 **`.layout-root` owns the scrollport, and that is what makes the bar sticky.** `src/index.css`

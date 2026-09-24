@@ -488,6 +488,26 @@ textarea,
   min-width: 0;
   font-size: var(--font-size-micro);
   color: var(--theme-text3);
+  /* When the row is short, the words shorten with "…" and never draw under the action buttons
+     (S790, owner decision). The S790 measurement found the context running up to 137px under
+     Help/search/account at 1280–1460px (a client with Customization, the Custom panel, a touch
+     pointer), with no page overflow — so it was invisible to a scrollWidth check on the PAGE.
+     The switchers shrink (Dropdown `shrink`), the month and plan take an ellipsis below, and
+     `overflow: hidden` is the last resort for anything still too wide. The 5px padding with
+     matching negative margins keeps the switcher's focus ring (2px + 3px) inside the clip without
+     moving anything. */
+  overflow: hidden;
+  padding: 5px;
+  margin-top: -5px;
+  margin-bottom: -5px;
+  margin-right: -5px;
+}
+.topbar-context .context-bar-period,
+.topbar-context .context-bar-plan {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .topbar-context-trigger {
   display: inline-flex;
@@ -596,8 +616,10 @@ textarea,
   }
   .topbar-context {
     order: 3;
-    flex-basis: 100%;
-    margin-left: 0;
+    /* 100% plus the 5px focus-ring padding each side (S790), offset by the negative margins, so
+       the text still starts at the band's left edge and the line keeps its full width. */
+    flex-basis: calc(100% + 10px);
+    margin-left: -5px;
   }
   .topbar-nav {
     flex-wrap: wrap;

@@ -279,7 +279,7 @@ const pillClass = current => `topbar-pill${current ? ' topbar-pill--current' : '
 // Escape closes and returns focus to the trigger; ArrowDown opens and steps into the panel; a
 // pointer press or a focus landing outside closes. Route changes close it from Layout.
 function Dropdown({ id, isOpen, setOpen, triggerClass, triggerLabel, triggerTitle,
-                    ariaLabel, children, align = 'left', width = 236, disabled = false }) {
+                    ariaLabel, children, align = 'left', width = 236, disabled = false, shrink = false }) {
   const triggerRef = useRef(null)
   const panelRef = useRef(null)
   const [pos, setPos] = useState(null)
@@ -334,8 +334,11 @@ function Dropdown({ id, isOpen, setOpen, triggerClass, triggerLabel, triggerTitl
     }
   }, [isOpen, setOpen])
 
+  // `shrink`: the top bar's client and outlet switchers may give up width, so a long name shortens
+  // with "…" (its trigger's name span already truncates) instead of the row running under the
+  // action buttons (S790). Every other dropdown keeps its full label.
   return (
-    <div style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+    <div style={{ position: 'relative', display: 'inline-flex', flexShrink: shrink ? 1 : 0, minWidth: shrink ? 0 : undefined }}>
       <button
         ref={triggerRef}
         type="button"
@@ -1679,6 +1682,8 @@ export default function Layout() {
                 setOpen={open => setOpenMenu(open ? '__client' : null)}
                 triggerClass="topbar-context-trigger"
                 ariaLabel="Switch client"
+                shrink
+                triggerTitle={allClients.find(c => c.id === adminViewClientId)?.name || 'Crest Admin'}
                 triggerLabel={<>
                   <span className="topbar-context-label">{adminViewClientId ? 'Viewing' : 'Admin View'}</span>
                   <span className="topbar-context-name">
@@ -1698,6 +1703,8 @@ export default function Layout() {
                 setOpen={open => setOpenMenu(open ? '__outlet' : null)}
                 triggerClass="topbar-context-trigger"
                 ariaLabel="Switch outlet"
+                shrink
+                triggerTitle={clientName}
                 disabled={switchingOutlet}
                 triggerLabel={<>
                   <span className="topbar-context-name">{switchingOutlet ? 'Switching…' : clientName}</span>
@@ -1726,7 +1733,7 @@ export default function Layout() {
             {activePeriod && (
               <>
                 <span aria-hidden="true" className="context-bar-sep">·</span>
-                <span className="context-bar-period">{BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year}</span>
+                <span className="context-bar-period" title={`${BS_MONTHS[activePeriod.bs_month - 1]} ${activePeriod.bs_year}`}>{BS_MONTHS[activePeriod.bs_month - 1]} {activePeriod.bs_year}</span>
                 <span className={`badge ${activePeriod.status === 'open' ? 'badge-green' : 'badge-gray'}`}>
                   {activePeriod.status === 'open' ? 'Open' : 'Closed'}
                 </span>
