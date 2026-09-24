@@ -87,20 +87,28 @@ export const STEPS = [
     hint: "Type in a bill you were given today: pick the supplier and the date, then add each item with its quantity and price. Quantities are in each item's own unit (GM, ML, PCS).",
     note: REASSURE,
     strip: 'Press + Add Purchase (bottom right), fill in the bill and save.' },
+  // A client with POS has this step under Till & bills (pos.menu) — except for an IMS manager, who
+  // has no POS menu to reach it from, so theirs stays here under IMS → Costing (S790 review).
   { key: 'ims.menu', group: 'ims', phase: 'next', tick: 'data', signal: 'menuPriced', module: 'ims',
-    when: ctx => !ctx.modules.pos, feature: 'menu_pricing',
+    when: ctx => !ctx.modules.pos || ctx.viewer?.kind === 'manager', feature: 'menu_pricing',
     access: { menuPricing: true }, route: '/menu-pricing', where: 'IMS → Costing → Menu Pricing',
     label: 'Put your dishes and prices on the menu',
     hint: 'Every dish you sell with its price, e.g. Chicken Momo NPR 250. Your daily sales are entered against this list.',
     note: REASSURE,
-    strip: 'Press + Add Item at the top, type the dish and its price, then save.' },
+    strip: 'Press + Add Item at the top, type the dish and its price, then save.',
+    variant: ctx => (ctx.modules.pos ? {
+      hint: "Every dish you sell with its price, e.g. Chicken Momo NPR 250. Keep 'On POS' ticked so it shows on the till.",
+      strip: 'Press + Add Item at the top, type the dish and its price, and keep On POS ticked.',
+    } : {}) },
   { key: 'ims.sales', group: 'ims', phase: 'next', tick: 'data', signal: 'sales', module: 'ims',
     when: ctx => !ctx.modules.pos, feature: 'sales_entry',
     access: { ims: 'staff' }, route: '/sales', where: 'IMS → Operations → Sales Entry',
     label: "Enter one day's sales",
     hint: 'How many of each dish you sold, from your bill book. Every % in Crest is measured against your sales.',
     note: REASSURE,
-    strip: 'Pick the day, type how many of each dish you sold, then press Save Day.' },
+    // The page opens on Bulk Entry (a whole month's total), so the strip names the tab first — one
+    // day typed into the month form would be recorded as the whole period.
+    strip: 'Open the Daily Entry tab, pick the day, type how many of each dish you sold, then press Save Day.' },
   { key: 'ims.recipes', group: 'ims', phase: 'next', tick: 'data', signal: 'recipesCosted', module: 'ims',
     feature: 'recipe_costing',
     access: { ims: 'supervisor' }, route: '/recipes', where: 'IMS → Costing → Recipe Costing',
@@ -111,7 +119,7 @@ export const STEPS = [
 
   // ── Till & bills ──
   { key: 'pos.menu', group: 'pos', phase: 'setup', tick: 'data', signal: 'menuPriced', module: 'pos',
-    feature: 'menu_pricing',
+    when: ctx => ctx.viewer?.kind !== 'manager', feature: 'menu_pricing',
     access: { menuPricing: true }, route: '/menu-pricing', where: 'POS → Menu → Menu Pricing',
     label: 'Put your dishes and prices on the menu',
     hint: "Every dish you sell with its price, e.g. Chicken Momo NPR 250. Keep 'On POS' ticked so it shows on the till.",
@@ -131,14 +139,16 @@ export const STEPS = [
   { key: 'pos.device', group: 'pos', phase: 'setup', tick: 'data', signal: 'devices', module: 'pos',
     access: { pos: 'manager' }, route: '/pos', where: 'POS → Admin → Till Devices',
     label: 'Switch on the till tablet',
-    hint: 'Do this on the tablet or computer you bill from: sign in there with your own email, open Till Devices, give it a name like "Front counter" and press Activate. Then press Open POS Login Screen so staff sign in with their PIN.',
+    // Sign OUT, not "Open POS Login Screen": that button only navigates, so the Owner's own login
+    // stayed live on the till, one Back tap from their whole account (S790 review).
+    hint: 'Do this on the tablet or computer you bill from: sign in there with your own email, open Till Devices, give it a name like "Front counter" and press Activate. Then sign out (the menu under your name → Sign out), so your own login is not left open on the till. From then on the tablet opens on the staff PIN screen; right after signing out, press Staff Login on the sign-in page to reach it.',
     skip: 'Skip — I bill from this computer with my own login',
-    strip: 'On the till tablet: type a name like Front counter, press Activate, then press Open POS Login Screen.' },
+    strip: 'On the till tablet: type a name like Front counter and press Activate. Then sign out, so your own login is not left open here.' },
   { key: 'pos.firstbill', group: 'pos', phase: 'setup', tick: 'data', signal: 'paidBill', module: 'pos',
     access: { pos: 'supervisor' }, route: '/pos/shifts', where: 'POS → Floor → Shifts, then Orders',
     label: 'Bill your first real customer',
     hint: 'First open the shift and count the cash in the drawer. Then go to POS → Floor → Orders: pick a table, add the dishes, send the order, and take the payment. The bill prints.',
-    note: "A real bill can't be deleted. If you make a mistake, a supervisor presses Void.",
+    note: "A printed bill can't be edited or deleted. To correct one, a manager issues a Credit Note (POS → Reports → Credit Notes). Before payment, you can void the order instead.",
     skip: false,
     strip: 'Press Open Shift and count the cash in the drawer. Then go to POS → Floor → Orders.' },
   { key: 'pos.pins', group: 'pos', phase: 'next', tick: 'data', signal: 'posStaff', module: 'pos',
@@ -157,7 +167,7 @@ export const STEPS = [
     access: { pos: 'manager' }, route: '/pos/sales-report', where: 'POS → Reports → Sales Report',
     label: "Check today's sales",
     hint: 'See what sold today and how you were paid — cash, QR or card.',
-    strip: "This is your Sales Report. Today's total and each way you were paid are at the top." },
+    strip: "This is your Sales Report. Today's total is on the Daily tab; press the Payment Summary tab to see cash, QR and card." },
 
   // ── Staff & payroll ──
   { key: 'hr.employees', group: 'hr', phase: 'setup', tick: 'data', signal: 'employees', module: 'hr',
@@ -183,7 +193,7 @@ export const STEPS = [
     label: 'Mark attendance for one day',
     hint: 'Mark who came in today. Payroll pays from this sheet, so an unmarked day pays daily-rate staff nothing.',
     note: REASSURE,
-    strip: 'Pick today, press All Present, change anyone who was off, then press Save Day.' },
+    strip: 'Pick today, press All Present, change anyone who was off, then press Save (it shows how many changes you made).' },
   { key: 'hr.selfservice', group: 'hr', phase: 'next', tick: 'data', signal: 'selfService', module: 'hr',
     access: { hr: 'manager' }, route: '/hr/employees', where: 'HR → People → Employees',
     label: 'Give staff the Crest Staff phone app',
@@ -202,7 +212,13 @@ export const STEPS = [
     hint: 'Once the month has ended, close it. Crest locks its figures and opens the next month for you.',
     note: 'This locks the month. Do the month-end count first.',
     skip: false,
-    strip: "Once the month has ended, a banner at the top of this page offers to close it — press it and confirm Close & Start Next." },
+    strip: "Once the month has ended, a banner at the top of this page offers to close it — press it and confirm Close & Start Next.",
+    // Periods is an IMS menu item, so a POS-only or HR-only Owner has no menu path to it, and no
+    // stock count to do first (S790 review).
+    variant: ctx => (ctx.modules.ims ? {} : {
+      where: 'this guide, in Help → Getting Started',
+      note: 'This locks the month.',
+    }) },
   { key: 'monthend.payroll', group: 'monthend', phase: 'monthend', tick: 'data', signal: 'payrollFinalized', module: 'hr',
     access: { hr: 'manager' }, route: '/hr/payroll', where: 'HR → Payroll → Payroll',
     label: 'Run your first payroll',
@@ -234,12 +250,15 @@ export function canSeeStep(step, viewer) {
 /** Every step this viewer could be shown for this client, month-end included (ignoring the window). */
 export function stepsForViewer({ viewer, modules, hasFeature }) {
   if (!viewer) return []
-  const ctx = { modules }
+  const ctx = { modules, viewer }
   return STEPS.filter(s =>
     (!s.module || modules[s.module]) &&
     (!s.feature || hasFeature(s.feature)) &&
     (!s.when || s.when(ctx)) &&
     canSeeStep(s, viewer))
+    // A step's words can depend on the client (a POS client's menu, a month closed without IMS);
+    // `variant` returns only the fields that differ, so the key and the tick rule never do.
+    .map(s => (s.variant ? { ...s, ...s.variant(ctx) } : s))
 }
 
 /** The signals a set of steps needs read. Only these are ever queried (S750: never read a table the viewer is fenced from). */

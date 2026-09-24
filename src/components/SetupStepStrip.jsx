@@ -17,6 +17,9 @@ export default function SetupStepStrip() {
   if (!payload || payload.route !== location.pathname) return null
 
   const close = () => { clearSetupStrip(); setPayload(null) }
+  // Back to wherever Start was pressed; only the two known places, the dashboard as the fallback
+  // for a hand-off saved before `back` existed.
+  const back = payload.back === '/help?section=guide' ? payload.back : '/dashboard'
 
   return (
     <div className="setup-strip no-print" role="status">
@@ -28,7 +31,7 @@ export default function SetupStepStrip() {
         {payload.strip && <span className="setup-strip__do">{payload.strip}</span>}
       </div>
       <div className="setup-strip__actions">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/dashboard')}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate(back)}>
           Back to setup guide
         </button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={close} aria-label="Close this setup tip" title="Close this setup tip">

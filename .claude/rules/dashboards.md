@@ -228,7 +228,9 @@ History: docs/rules-archive/dashboards.md#s750-module-rank-gate
 - Several modules: ask what to set up first, one part open at a time; a part's "Next" steps open once its set-up-once steps are done or skipped, and are counted from the start so the total never goes backwards.
 - Card state is per person: hidden is one line, dismissed and finished are gone, reopened brings it back. A saved choice is refused while the progress read has failed. Admin writes nothing: the hook returns early and the table's write policies refuse `is_admin()`.
 - Step keys are stored, so rename a step's label, never its key.
-- Start on a step stores a hand-off in sessionStorage (`setupStrip.js`), and Layout's `SetupStepStrip` shows "Setup step N of M" with the button to press on that step's page only.
+- Start on a step stores a hand-off in sessionStorage (`setupStrip.js`), and Layout's `SetupStepStrip` shows "Setup step N of M" with the button to press on that step's page only. Its "Back to setup guide" returns to wherever Start was pressed (`back`: Help or the dashboard), because the dashboard may not show the guide.
+- `useSetupGuide` loads in two phases, and the signals phase cancels itself in its cleanup, never through phase 1's `useLatestRequest`: both effects re-run in one commit on a reload or a client switch, and a shared `begin()` let phase 2 supersede phase 1, so the guide vanished after "Try again" (S790 review).
+- A finished part collapses to "✓ All done" with **Review**, so an "Undo skip" is never unreachable. An action that removes the focused button puts focus back on the step's row or its part's heading.
 
 Why: the old card covered four IMS steps, needed IMS on and empty, and sent staff to pages they could not open; research on first-time users favours short lists that tick on real work, skip and hide, and a person to call.
 

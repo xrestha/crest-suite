@@ -102,6 +102,25 @@ describe('module and plan filtering', () => {
     expect(keys).not.toContain('ims.menu')
     expect(keys).toContain('pos.menu')
   })
+  test('an IMS manager on a client with POS gets the menu step under Stock & costing, not a Till & bills part', () => {
+    const v = { kind: 'manager', module: 'ims', rank: 'manager' }
+    const modules = { ims: true, hr: false, pos: true }
+    const keys = keysOf(stepsForViewer({ viewer: v, modules, hasFeature: growth }))
+    expect(keys).toContain('ims.menu')
+    expect(keys).not.toContain('pos.menu')
+    const g = buildSetupGuide({ viewer: v, modules, hasFeature: growth, signals: {} })
+    expect(g.groups.find(x => x.key === 'pos')).toBeUndefined()
+    const menu = stepsForViewer({ viewer: v, modules, hasFeature: growth }).find(s => s.key === 'ims.menu')
+    expect(menu.hint).toMatch(/On POS/) // the POS wording, since the till reads this menu
+  })
+  test('closing the month names no Periods menu item for a client without IMS', () => {
+    const noIms = stepsForViewer({ viewer: owner, modules: { ims: false, hr: true, pos: false }, hasFeature: growth })
+      .find(s => s.key === 'monthend.close')
+    expect(noIms.where).not.toBe('Periods')
+    expect(noIms.note).not.toMatch(/count/i)
+    const withIms = stepsForViewer({ viewer: owner, modules: ALL, hasFeature: growth }).find(s => s.key === 'monthend.close')
+    expect(withIms.where).toBe('Periods')
+  })
   test('Starter never sends anyone to a Growth page', () => {
     const keys = keysOf(stepsForViewer({ viewer: owner, modules: ALL, hasFeature: starter }))
     expect(keys).not.toContain('ims.recipes')

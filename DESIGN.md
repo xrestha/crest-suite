@@ -633,13 +633,15 @@ within the selected module. Two bands rather than one because those are independ
 strip makes them read as one list. Content padding is 32px on every page and nothing is centred in
 a reading measure — every screen here is a working surface rather than a document.
 
-**Between 768 and 1120px both bands wrap rather than clip (S776).** Measured at 820 — a tablet in
+**Between 768 and 1280px both bands wrap rather than clip (S776; 1120 until S790).** Measured at 820 — a tablet in
 landscape — band 1 held 891px of content in 810, so the tenant and period (which may shrink) collapsed
 to 2px and spilled under the account button, and band 2 held 1,094px behind a hidden scrollbar, so
-three module menus sat past the edge with nothing saying the row scrolls. Below 1120 the account
+three module menus sat past the edge with nothing saying the row scrolls. Below 1280 the account
 actions stay top-right, tenant and period take their own full-width line, and the pills wrap onto a
-second row: the bar grows (108 → 172px at 820) and nothing is unreachable. From 1120 up it is one row
-each, as before. A new top-bar element is checked at 820 and 1024 by `scrollWidth`, not by eye.
+second row: the bar grows (108 → 172px at 820) and nothing is unreachable. From 1280 up it is one row
+each, as before. S790's labelled Help button widened the actions by 74px and the context then ran
+under them from 1120 to ~1260px, so the line moved up. A new top-bar element is checked at 820, 1024
+and just above the wrap line by `scrollWidth`, not by eye.
 (`/legal/*` renders outside the shell and is the exception; see Density above.)
 
 **`.layout-root` owns the scrollport, and that is what makes the bar sticky.** `src/index.css`
@@ -703,7 +705,7 @@ label offset inside each card as well as the outer box, because the outer boxes 
 the state in which the inner drift shows.
 
 **One layout breakpoint: 768px.** No tablet tier and no desktop max-width. (Two narrower rules sit
-beside it and are not tiers: the top bar's 1120px wrap above, and the POS order screen's 700px, where
+beside it and are not tiers: the top bar's 1280px wrap above, and the POS order screen's 700px, where
 the full-screen till puts the menu full width and the cart in a bottom sheet — a width, because a
 320px cart column beside a 390px phone left the menu 70px.) Above 768 the top bar IS the
 navigation and `.sidebar-wrap` is `display: none`; below it the bar goes away and the same

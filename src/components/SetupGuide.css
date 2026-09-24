@@ -38,6 +38,14 @@
   color: var(--theme-text1);
 }
 
+/* Headings take focus when an action removes the button that had it (tabIndex -1), so a keyboard
+   user can see where they landed. */
+.setup-guide__title:focus-visible,
+.setup-guide__group-title:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+}
+
 .setup-guide__sub {
   margin: 0;
   font-size: 14px;
@@ -87,8 +95,11 @@
   transition: transform var(--motion-slow) var(--ease-entrance);
 }
 
-/* ── One-line form ── */
-.setup-guide--slim {
+/* ── One-line form ──
+   Two classes on purpose: this file loads BEFORE Layout.css (Layout imports SetupStepStrip, which
+   imports it, ahead of its own stylesheet), so a single-class rule loses its padding to `.card`'s
+   24px on equal specificity. (0,2,0) wins wherever either file loads (S790 review). */
+.setup-guide.setup-guide--slim {
   flex-direction: row;
   align-items: center;
   flex-wrap: wrap;

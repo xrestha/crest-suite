@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
@@ -43,6 +43,19 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
   // which module part is open (null = the one the guide chose).
   const [openStep, setOpenStep] = useState(null)
   const [openGroup, setOpenGroup] = useState(null)
+  // A finished part collapses to "✓ All done"; Review opens it again, so a skip that finished the
+  // part can still be undone (S790 review).
+  const [reviewGroup, setReviewGroup] = useState(null)
+  // Where keyboard focus goes after an action removes the button that had it — marking a step
+  // done can collapse its whole part, and hiding swaps the card for one line. Without this, focus
+  // fell back to <body> and the next Tab started again at the top of the page (S790 review).
+  const [refocus, setRefocus] = useState(null) // { id, fallback }
+  useEffect(() => {
+    if (!refocus) return
+    const el = document.getElementById(refocus.id) || (refocus.fallback && document.getElementById(refocus.fallback))
+    if (el) el.focus()
+    setRefocus(null)
+  }, [refocus, g.guide, g.mode, g.cardState])
 
   if (!g.viewer) return null
   const { guide, actions, readOnly } = g
@@ -75,7 +88,8 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
             <button type="button" className="btn btn-ghost btn-sm" onClick={actions.reload}>Try again</button>
           ) : (
             <>
-              <button type="button" className="btn btn-primary btn-sm" onClick={actions.unhide}>Continue</button>
+              <button type="button" id={`${titleId}-continue`} className="btn btn-primary btn-sm"
+                onClick={() => { setRefocus({ id: titleId }); actions.unhide() }}>Continue</button>
               <Tip text="Removes it from your dashboard. You can bring it back any time from Help (top right) → Getting Started.">
                 <button type="button" className="btn btn-ghost btn-sm" onClick={actions.dismiss}>Don't show</button>
               </Tip>
@@ -126,15 +140,30 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
   const openModule = key => {
     setOpenGroup(key)
     setOpenStep(null)
+    setRefocus({ id: `${titleId}-${key}` })
     if (!readOnly) actions.chooseFocus(key)
   }
 
   const start = (step, group) => {
     actions.markOpened(step.key)
     if (step.route) {
-      writeSetupStrip({ route: step.route, label: step.label, n: step.number, of: group.total, group: group.title, strip: step.strip })
+      // `back`: the strip's "Back to setup guide" returns to wherever Start was pressed. From Help
+      // that matters — the dashboard may not show the guide at all (S790 review).
+      writeSetupStrip({
+        route: step.route, label: step.label, n: step.number, of: group.total, group: group.title, strip: step.strip,
+        back: surface === 'help' ? '/help?section=guide' : '/dashboard',
+      })
       navigate(step.route)
     }
+  }
+
+  // An action on a step keeps that step open (so its new state, or "Undo skip", is where the
+  // reader left it) and puts focus back on its row — or on the part's heading, if the part closed.
+  const act = (fn, step, group) => {
+    const bodyId = `${titleId}-${step.key.replace(/[^a-z0-9]/gi, '-')}`
+    setOpenStep(step.key)
+    setRefocus({ id: `${bodyId}-row`, fallback: `${titleId}-${group.key}` })
+    fn(step.key)
   }
 
   const renderStep = (step, group) => {
@@ -142,9 +171,15 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
     const bodyId = `${titleId}-${step.key.replace(/[^a-z0-9]/gi, '-')}`
     const status = step.status
     const canSkip = step.skip !== false && ['todo', 'started', 'unknown'].includes(status)
+    // The account step's two hints are claims about the month — neither is true while its check
+    // could not run, so an unknown status shows only the "couldn't check" note (S790 review).
+    const accountNotOpen = step.key === 'start.account' && (status === 'todo' || status === 'started')
+    const hintText = step.key === 'start.account' && status === 'unknown'
+      ? null
+      : accountNotOpen && step.hintWhenNotDone ? step.hintWhenNotDone : step.hint
     return (
       <li key={step.key} className={`setup-step setup-step--${status}`}>
-        <button type="button" className="setup-step__row" aria-expanded={isOpen} aria-controls={bodyId}
+        <button type="button" id={`${bodyId}-row`} className="setup-step__row" aria-expanded={isOpen} aria-controls={bodyId}
           onClick={() => setOpenStep(isOpen ? '' : step.key)}>
           <span className="setup-step__mark" aria-hidden="true">{MARK[status] || step.number}</span>
           <span className="setup-step__label">{step.label}</span>
@@ -152,15 +187,13 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
         </button>
         {isOpen && (
           <div id={bodyId} className="setup-step__body">
-            <p className="setup-step__hint">
-              {step.key === 'start.account' && status !== 'done' && step.hintWhenNotDone ? step.hintWhenNotDone : step.hint}
-            </p>
+            {hintText && <p className="setup-step__hint">{hintText}</p>}
             {status === 'unknown' && (
               <p className="setup-step__note">We couldn't check this just now, so it isn't ticked or counted yet. It will update the next time you open the dashboard.</p>
             )}
             {step.where && <p className="setup-step__where">Where to find it later: {step.where}</p>}
             {step.note && <p className="setup-step__note">{step.note}</p>}
-            {(step.contact || (step.key === 'start.account' && status !== 'done')) && <ContactBlock />}
+            {(step.contact || accountNotOpen) && <ContactBlock />}
             {step.billDetails && <BillDetails />}
             <div className="setup-guide__row-actions">
               {step.route && (
@@ -171,15 +204,15 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
               {step.tick === 'manual' && status !== 'done' && status !== 'skipped' && (
                 readOnly
                   ? <Tip text={READ_ONLY_TIP}><button type="button" className="btn btn-primary" aria-disabled="true">{step.doneLabel}</button></Tip>
-                  : <button type="button" className="btn btn-primary" onClick={() => actions.markDone(step.key)}>{step.doneLabel}</button>
+                  : <button type="button" className="btn btn-primary" onClick={() => act(actions.markDone, step, group)}>{step.doneLabel}</button>
               )}
               {canSkip && (
                 readOnly
                   ? <Tip text={READ_ONLY_TIP}><button type="button" className="btn btn-ghost btn-sm" aria-disabled="true">{typeof step.skip === 'string' ? step.skip : DEFAULT_SKIP}</button></Tip>
-                  : <button type="button" className="btn btn-ghost btn-sm" onClick={() => actions.skip(step.key)}>{typeof step.skip === 'string' ? step.skip : DEFAULT_SKIP}</button>
+                  : <button type="button" className="btn btn-ghost btn-sm" onClick={() => act(actions.skip, step, group)}>{typeof step.skip === 'string' ? step.skip : DEFAULT_SKIP}</button>
               )}
               {status === 'skipped' && !readOnly && (
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => actions.unskip(step.key)}>Undo skip</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => act(actions.unskip, step, group)}>Undo skip</button>
               )}
             </div>
           </div>
@@ -190,36 +223,37 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
 
   const renderGroup = group => {
     const isModule = guide.moduleGroups.some(x => x.key === group.key)
-    const expanded = !isModule || (!showChooser && moduleOpen === group.key) || (readOnly && openGroup === group.key)
+    const reviewing = reviewGroup === group.key
+    const expanded = !isModule || reviewing || (!showChooser && moduleOpen === group.key) || (readOnly && openGroup === group.key)
     const headingId = `${titleId}-${group.key}`
-    if (!expanded) {
-      return (
-        <div key={group.key} className="setup-guide__group setup-guide__group--collapsed">
-          <h3 id={headingId} className="setup-guide__group-title">{group.title}</h3>
-          <span className="setup-guide__group-count">
-            {group.complete ? '✓ All done' : `${group.done} of ${group.total} done`}
-          </span>
-          {!group.complete && !showChooser && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => openModule(group.key)}>
-              {readOnly ? 'Show' : 'Open'}
-            </button>
-          )}
-        </div>
-      )
-    }
-    if (group.key === 'start' && group.complete) {
-      return (
-        <div key={group.key} className="setup-guide__group setup-guide__group--collapsed">
-          <h3 id={headingId} className="setup-guide__group-title">{group.title}</h3>
-          <span className="setup-guide__group-count">✓ All done</span>
-        </div>
-      )
-    }
+    const review = () => { setReviewGroup(group.key); setOpenStep(null); setRefocus({ id: headingId }) }
+    const collapsedRow = (
+      <div key={group.key} className="setup-guide__group setup-guide__group--collapsed">
+        <h3 id={headingId} tabIndex={-1} className="setup-guide__group-title">{group.title}</h3>
+        <span className="setup-guide__group-count">
+          {group.complete ? '✓ All done' : `${group.done} of ${group.total} done`}
+        </span>
+        {group.complete ? (
+          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Review ${group.title}`} onClick={review}>Review</button>
+        ) : !showChooser && (
+          <button type="button" className="btn btn-ghost btn-sm" aria-label={`${readOnly ? 'Show' : 'Open'} ${group.title}`}
+            onClick={() => openModule(group.key)}>
+            {readOnly ? 'Show' : 'Open'}
+          </button>
+        )}
+      </div>
+    )
+    if (!expanded) return collapsedRow
+    if (group.key === 'start' && group.complete && !reviewing) return collapsedRow
     return (
       <div key={group.key} className="setup-guide__group" role="group" aria-labelledby={headingId}>
         <div className="setup-guide__group-head">
-          <h3 id={headingId} className="setup-guide__group-title">{group.title}</h3>
+          <h3 id={headingId} tabIndex={-1} className="setup-guide__group-title">{group.title}</h3>
           <span className="setup-guide__group-count">{group.done} of {group.total} done</span>
+          {reviewing && group.complete && (
+            <button type="button" className="btn btn-ghost btn-sm" aria-label={`Close ${group.title}`}
+              onClick={() => { setReviewGroup(null); setRefocus({ id: headingId }) }}>Close</button>
+          )}
         </div>
         <ol className="setup-guide__steps">{group.steps.map(s => renderStep(s, group))}</ol>
         {group.hiddenNext > 0 && (
@@ -238,7 +272,7 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
     <section className={`card setup-guide ${surface === 'dashboard' ? 'dash-row' : 'setup-guide--help'}`} aria-labelledby={titleId}>
       <div className="setup-guide__head">
         <div>
-          <h2 id={titleId} className="setup-guide__title">Getting started with Crest</h2>
+          <h2 id={titleId} tabIndex={-1} className="setup-guide__title">Getting started with Crest</h2>
           <p className="setup-guide__sub">
             Each box ticks by itself once the job is really done. Skip anything your business doesn't need.
           </p>
@@ -247,7 +281,8 @@ export default function SetupGuideCard({ surface = 'dashboard' }) {
           <span className="setup-guide__count">{guide.done} of {guide.total} done</span>
           {surface === 'dashboard' && !readOnly && (
             <Tip text="Shrinks this to one line on your dashboard. It always stays in Help → Getting Started.">
-              <button type="button" className="btn btn-ghost btn-sm" onClick={actions.hide}>Hide for now</button>
+              <button type="button" className="btn btn-ghost btn-sm"
+                onClick={() => { setRefocus({ id: `${titleId}-continue` }); actions.hide() }}>Hide for now</button>
             </Tip>
           )}
           {surface === 'dashboard' && readOnly && (

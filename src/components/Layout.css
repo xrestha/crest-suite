@@ -580,8 +580,12 @@ textarea,
    scrollbar left Menu & Vendors half-cut and Admin and Settings off the edge with nothing saying the
    row scrolls. A tablet in landscape is exactly this width. So below 1120 the bar WRAPS: the
    account actions stay top-right, the context takes its own full-width line under them, and the
-   pills wrap onto a second row rather than scrolling out of sight. From 1120 up nothing changes. */
-@media (max-width: 1119px) {
+   pills wrap onto a second row rather than scrolling out of sight.
+   S790 moved the line from 1120 to 1280: the labelled Help button widened .topbar-actions by 74px,
+   and the S790 review measured the context running under the actions from 1120 to ~1260px (63px
+   in admin view-as at 1160; a grouped Owner with the outlet switcher already overflowed 29px there
+   before Help). From 1280 up nothing changes. */
+@media (max-width: 1279px) {
   .topbar-primary {
     flex-wrap: wrap;
     row-gap: 4px;

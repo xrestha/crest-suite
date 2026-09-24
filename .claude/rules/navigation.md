@@ -42,10 +42,10 @@ promoting an upsell into the row that answers "where am I" advertises to every u
 forever. Same question for the next add-on: does this belong to a panel, or does it keep having to be
 copied into all of them?
 
-### The top bar wraps between 768 and 1120px, and one page has one name (S776)
+### The top bar wraps between 768 and 1280px, and one page has one name (S776, S790)
 
-- Below 1120px `.topbar-primary` and `.topbar-nav` WRAP (Layout.css, `max-width: 1119px`): account actions top-right, the context on its own line, pills on a second row. At 820 the context had collapsed to 2px and three nav menus sat past the edge of a scrollbar-less row. A new top-bar element must be checked at 820 and 1024 by `scrollWidth`, not by eye.
-- **Help is a labelled button in `.topbar-actions` (S790)**, riding on `.sidebar-search-btn` for its box and touch floor, because a first-time user never opens the account menu and Help is where a hidden setup guide comes back from. The account menu also carries **Setup guide** (→ `/help?section=guide`) for a login `viewerOf` gives a guide to; `viewerOf` lives in `src/shared/onboarding/setupViewer.js` so this eager file never imports the step catalogue. Not yet measured at 820 and 1024 by `scrollWidth` (the rule above) — do that before adding anything else to that row.
+- Below 1280px `.topbar-primary` and `.topbar-nav` WRAP (Layout.css, `max-width: 1279px`; it was 1119px until S790): account actions top-right, the context on its own line, pills on a second row. At 820 the context had collapsed to 2px and three nav menus sat past the edge of a scrollbar-less row. A new top-bar element must be checked at 820, 1024 and just above the wrap line by `scrollWidth`, not by eye.
+- **Help is a labelled button in `.topbar-actions` (S790)**, riding on `.sidebar-search-btn` for its box and touch floor, because a first-time user never opens the account menu and Help is where a hidden setup guide comes back from. Its 74px is why the wrap line moved: the S790 review measured the context running under the actions from 1120 to ~1260px (63px in admin view-as at 1160). The account menu also carries **Setup guide** (→ `/help?section=guide`) for a login `viewerOf` gives a guide to; `viewerOf` lives in `src/shared/onboarding/setupViewer.js` so this eager file never imports the step catalogue.
 - `/pos/tables` is **POS Setup** (Admin group) and `/pos` is **Till Devices** (owner decision). The tables page had three names and "POS Setup" had meant both pages in the copy. A link or guide names a page by its nav label, and a new page's heading uses the same words.
 
 ### "You are here" is a longest-prefix match, not a prefix match (S763)

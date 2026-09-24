@@ -126,16 +126,22 @@ export function useSetupGuide({ surface = 'dashboard' } = {}) {
   const neededKey = useMemo(() => (viewer
     ? [...signalsNeeded(stepsForViewer({ viewer, modules: clientModules, hasFeature: feature }))].sort().join(',')
     : ''), [viewer, clientModules, feature])
+  // Its own cancellation, NOT phase 1's `req` (S790 review). Both effects re-run in one commit on a
+  // reload or a client switch, and this one still sees the previous render's wantSignals — so a
+  // shared begin() here superseded phase 1's claim, phase 1 dropped its result, and the guide never
+  // came back ("Try again" made it vanish). The cleanup also drops a signal load started from that
+  // stale state as soon as phase 1 resets it.
   useEffect(() => {
     if (!wantSignals || !clientId) return
     const needed = new Set(neededKey ? neededKey.split(',') : [])
-    const key = req.begin(`${clientId}:${userId}:${reloadKey}:signals`)
+    let cancelled = false
     ;(async () => {
       const today = getBsToday()
       const out = await loadSetupSignals({ needed, clientId, scopedFrom, today })
-      if (!req.isCurrent(key)) return
+      if (cancelled) return
       setSignalState({ ...out, loaded: true })
     })()
+    return () => { cancelled = true }
   }, [wantSignals, clientId, neededKey, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const monthEndOpen = useMemo(() => monthEndWindow({
