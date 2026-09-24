@@ -56,17 +56,36 @@ export function paymentState(netPay, payments) {
 
 // The whole run: how many of its payslips are settled, who is still to be paid (the ids Mark
 // everyone paid sends), and the money on each side. `payments` is every row for the run.
+//
+// Someone paid in this run who no longer HAS a payslip — the month was reopened and Regenerate left
+// them out, e.g. after their end date moved — is counted too (S788, found by hss-suite porting this
+// file): as an overpayment against a payslip of 0, in `over` and `paidTotal` but not in `owed` or
+// `paid`, since there is no salary of theirs left to settle. `noPayslip` lists them for the page.
+// Walking payslips alone dropped their money from the paid total and flagged nothing, although it
+// had gone out against the month.
 export function runPaymentSummary(payslips, payments) {
   const byEmp = groupByEmployee(payments)
-  const out = { owed: 0, paid: 0, over: 0, toPay: [], dueTotal: 0, paidTotal: 0, byEmployee: new Map() }
-  for (const s of payslips || []) {
+  const out = { owed: 0, paid: 0, over: 0, toPay: [], dueTotal: 0, paidTotal: 0, noPayslip: [], byEmployee: new Map() }
+  const rows = (payslips || []).map(s => ({ s, orphan: false }))
+  const seen = new Set(rows.map(r => r.s.employee_id))
+  for (const id of byEmp.keys()) if (!seen.has(id)) rows.push({ s: { employee_id: id, net_pay: 0 }, orphan: true })
+  for (const { s, orphan } of rows) {
     const st = paymentState(s.net_pay, byEmp.get(s.employee_id))
     out.byEmployee.set(s.employee_id, st)
     out.paidTotal = r2(out.paidTotal + st.paid)
+    // Listed only while money still stands against them: every payment undone leaves nothing to show.
+    if (orphan && st.paid > 0) out.noPayslip.push(s.employee_id)
     if (st.state === 'none') continue
+    if (st.state === 'over') {
+      out.over += 1
+      // Only the no-payslip case stays out of owed/paid. A REAL payslip that nets 0 but was paid is
+      // still a salary of this run, counted as before S788 — excluding it (an S788 draft keyed this
+      // on net > 0) left owed at 0 over an overpayment, and the month strip read "✓ Nothing to pay".
+      if (!orphan) { out.owed += 1; out.paid += 1 }
+      continue
+    }
     out.owed += 1
     if (st.state === 'paid') out.paid += 1
-    else if (st.state === 'over') { out.paid += 1; out.over += 1 }
     else { out.toPay.push(s.employee_id); out.dueTotal = r2(out.dueTotal + st.due) }
   }
   return out

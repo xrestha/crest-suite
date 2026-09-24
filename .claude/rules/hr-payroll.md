@@ -804,6 +804,10 @@ Decided with Aashish (2026-09-23). Migration `20260923100000`; helpers `salaryPa
 - **A failed payments read is its own state** ("not checked", Mark paid hidden), never "not paid",
   and it does not take the register down. The Staff app swallows its read and shows nothing.
 - `run_id` and `employee_id` are NO ACTION, so Danger Zone deletes payments before runs and employees.
+- **`runPaymentSummary()` walks payslips AND payments** (S788). Someone paid and then regenerated out
+  of the month has no payslip; they count in `over` and `paidTotal` (not `owed`/`paid`), are listed in
+  `noPayslip`, and Payroll Run gives them their own row so the Undo stays reachable. Walking payslips
+  alone dropped their money silently. Found by hss-suite porting the file.
 
 ## Year-to-date income is pay earned (S781)
 

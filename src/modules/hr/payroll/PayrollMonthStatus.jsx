@@ -135,8 +135,11 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
     const due = pd && !pd.error ? pd.owed - pd.paid : 0
     steps.push(r.status !== 'finalized' ? { name: 'Staff paid', tone: 'none', mark: '—', text: 'After Finalize — finalizing pays nobody' }
       : !pd || pd.error ? { name: 'Staff paid', tone: 'none', mark: '—', text: 'Could not check', link: payrollLink }
-      : pd.owed === 0 ? { name: 'Staff paid', tone: 'done', mark: '✓', text: 'Nothing to pay' }
+      // Overpaid is tested BEFORE "nothing to pay" (S788): someone paid and then regenerated out of
+      // the month is in `over` but not `owed`, so a run whose remaining payslips all net 0 has owed 0
+      // with money still standing against it — and must not read as done.
       : pd.over > 0 ? { name: 'Staff paid', tone: 'open', mark: '△', text: `${pd.over} paid more than their payslip — check Payroll`, link: payrollLink }
+      : pd.owed === 0 ? { name: 'Staff paid', tone: 'done', mark: '✓', text: 'Nothing to pay' }
       : due === 0 ? { name: 'Staff paid', tone: 'done', mark: '✓', text: `All ${pd.owed} marked paid` }
       : { name: 'Staff paid', tone: 'open', mark: '△', text: `${pd.paid} of ${pd.owed} marked paid — NPR ${nprInt(pd.dueTotal)} still to pay`, link: payrollLink })
 

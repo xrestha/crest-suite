@@ -54,6 +54,29 @@ describe('runPaymentSummary — the whole month', () => {
     const sum = runPaymentSummary([{ employee_id: 'a', net_pay: 30200 }], [{ ...pay(29963), employee_id: 'a' }])
     expect(sum).toMatchObject({ toPay: ['a'], dueTotal: 237 })
   })
+
+  // S788: the month was reopened and Regenerate left a paid person out. Their payment must still be
+  // counted — an overpayment against nothing — never silently dropped from the month it was made in.
+  it('keeps a payment whose payslip no longer exists, as an overpayment', () => {
+    const sum = runPaymentSummary([{ employee_id: 'a', net_pay: 100 }], [
+      { ...pay(100), employee_id: 'a' },
+      { ...pay(500), employee_id: 'gone' },
+    ])
+    expect(sum).toMatchObject({ owed: 1, paid: 1, over: 1, paidTotal: 600, toPay: [], noPayslip: ['gone'] })
+    expect(sum.byEmployee.get('gone')).toMatchObject({ state: 'over', due: -500 })
+  })
+
+  // The S788 review's catch: a REAL payslip that nets 0 but was paid still counts as owed and paid,
+  // as it did before S788, so owed never reads 0 over an overpayment.
+  it('keeps a paid payslip that nets 0 in owed and paid, flagged over', () => {
+    const sum = runPaymentSummary([{ employee_id: 'a', net_pay: 0 }], [{ ...pay(30000), employee_id: 'a' }])
+    expect(sum).toMatchObject({ owed: 1, paid: 1, over: 1, noPayslip: [] })
+  })
+
+  it('does not list someone without a payslip once every payment of theirs is undone', () => {
+    const sum = runPaymentSummary([], [{ ...pay(500, { voided_at: '2026-09-24T00:00:00Z', void_reason: 'wrong run' }), employee_id: 'gone' }])
+    expect(sum).toMatchObject({ owed: 0, over: 0, paidTotal: 0, noPayslip: [] })
+  })
 })
 
 describe('payment methods', () => {

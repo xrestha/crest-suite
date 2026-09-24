@@ -72,6 +72,20 @@ describe('PayrollMonthStatus', () => {
       expect(within(step('Staff paid')).queryByText('✓')).toBeNull()
     })
 
+    // S788: someone paid and then regenerated out of the month is in `over` but not `owed`. When
+    // every payslip still in the run nets 0, owed is 0 — and the strip must still warn, not tick.
+    it('warns about a payment with no payslip even when nothing else is owed', async () => {
+      renderStrip({ employees: [], attendance: [], run: finalized, payslips: [{ employee_id: 'c', net_pay: 0 }],
+        payments: [{ employee_id: 'gone', amount: 5000, paid_on: '2026-09-20', voided_at: null }] })
+      expect(await within(step('Staff paid')).findByText(/1 paid more than their payslip — check Payroll/)).toBeInTheDocument()
+      expect(within(step('Staff paid')).queryByText('✓')).toBeNull()
+    })
+
+    it('still says "Nothing to pay" when no payslip nets anything and nobody was paid', async () => {
+      renderStrip({ employees: [], attendance: [], run: finalized, payslips: [{ employee_id: 'c', net_pay: 0 }], payments: [] })
+      expect(await within(step('Staff paid')).findByText('Nothing to pay')).toBeInTheDocument()
+    })
+
     it('reads the payments itself when the page does not pass them', async () => {
       mockAnswers.hr_salary_payments = () => ({ data: [paid('a'), paid('b')], error: null })
       renderStrip({ employees: [], attendance: [], run: finalized, payslips })

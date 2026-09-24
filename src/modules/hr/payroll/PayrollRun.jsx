@@ -282,7 +282,10 @@ export default function PayrollRun() {
       else {
         slips = slipRes.data || []
         const known = new Set([...inputs.data.employees, ...inputs.data.settled].map(e => e.id))
-        const names = await fetchEmployeesByIds(scopedFrom, slips.map(s => s.employee_id).filter(id => !known.has(id)))
+        // Payments too (S788): someone paid and then regenerated out of the month has no payslip, and
+        // their row must carry a name rather than "(employee record not found)".
+        const wanted = [...new Set([...slips, ...pays].map(r => r.employee_id))]
+        const names = await fetchEmployeesByIds(scopedFrom, wanted.filter(id => !known.has(id)))
         if (names.error) error = names.error
         else extra = names.data || []
       }
@@ -705,8 +708,13 @@ export default function PayrollRun() {
         </>
       )
     } else {
+      // No payslip at all (S788): the month was reopened and Regenerate left this person out after
+      // they had been paid, so the whole amount stands against nothing.
+      const gone = paySummary.noPayslip.includes(s.employee_id)
       body = (
-        <Tip text={`NPR ${fmt(st.paid)} was recorded as paid, but this payslip now comes to NPR ${fmt(st.net)} — the month was reopened and its figures went down. NPR ${fmt(-st.due)} was paid too much; recover it by hand or from next month's pay, or undo a payment that was recorded by mistake.`} width={290}>
+        <Tip text={gone
+          ? `NPR ${fmt(st.paid)} was recorded as paid, but this person no longer has a payslip in ${monthName} — the month was reopened and Regenerate left them out. The whole amount was paid too much; recover it by hand, or undo a payment that was recorded by mistake.`
+          : `NPR ${fmt(st.paid)} was recorded as paid, but this payslip now comes to NPR ${fmt(st.net)} — the month was reopened and its figures went down. NPR ${fmt(-st.due)} was paid too much; recover it by hand or from next month's pay, or undo a payment that was recorded by mistake.`} width={290}>
           <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>△ Overpaid NPR {fmt(-st.due)}</span>
         </Tip>
       )
@@ -1134,6 +1142,28 @@ export default function PayrollRun() {
                           </tr>
                         )}
                         </Fragment>
+                      )
+                    })}
+                    {/* Paid, then regenerated out of the month (S788): no payslip row exists to hang the
+                        payment on, so it gets its own — otherwise the money is on the ledger and in
+                        the strip's "paid more than their payslip" count but nowhere on this page, and
+                        its Undo is unreachable. Only while the Paid column shows, and never on a
+                        failed payments read. */}
+                    {showPaid && !paymentsError && paySummary.noPayslip.map(id => {
+                      const emp = empMap[id] || { id, full_name: nameOf(id) }
+                      return (
+                        <tr key={`no-payslip-${id}`}>
+                          <td />
+                          <td>
+                            <div style={{ fontWeight: 600, color: 'var(--theme-text1)', fontSize: 13 }}>{emp.full_name}</div>
+                            {emp.employee_code && <div style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 2 }}>{emp.employee_code}</div>}
+                          </td>
+                          <td colSpan={9} style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                            No payslip in {monthName} any more — paid, then left out when the month was regenerated.
+                          </td>
+                          <td style={{ textAlign: 'right' }}>{renderPaidCell({ employee_id: id }, emp)}</td>
+                          <td />
+                        </tr>
                       )
                     })}
                   </tbody>
